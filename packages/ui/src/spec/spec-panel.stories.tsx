@@ -17,7 +17,7 @@ import { BUG, MAINTENANCE, MID_PLAN, OLDER_REVISION } from './spec-fixtures.ts'
 const meta = {
   title: 'Blocks/Spec/SpecPanel',
   component: LiveSpecPanel,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (

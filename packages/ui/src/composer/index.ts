@@ -28,6 +28,7 @@ export {
   type AgentModelMenuProps,
   type EffortChoice,
   type ModeChoice,
+  type MenuClassifier,
   type ModelChoice,
   type OfferedAgent,
 } from './agent-model-menu.tsx'

@@ -160,7 +160,7 @@ function Row({
 const meta = {
   title: 'Blocks/Session/MissionPanel',
   component: Row,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: { onFoldChange: fn() },
   argTypes: {

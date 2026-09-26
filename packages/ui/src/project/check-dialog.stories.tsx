@@ -54,7 +54,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Build/CheckDialog',
   component: CheckDialog,
   render: (args) => <Controlled {...args} />,

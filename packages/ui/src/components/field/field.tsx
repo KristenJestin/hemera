@@ -1,7 +1,7 @@
 import { Field } from '@base-ui/react/field'
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode, Ref } from 'react'
 
 import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
 
@@ -31,6 +31,7 @@ const CONTROL =
 interface FieldShellProps {
   /** What the control is called. Required: a control with no label is a control nobody can use. */
   label: string
+  labelTrailing?: ReactNode | undefined
   /** A line under the control saying what is expected, when the label is not enough. */
   description?: string | undefined
   /** What is wrong, said in words. Its presence is what makes the control invalid. */
@@ -41,7 +42,15 @@ interface FieldShellProps {
   children: ReactNode
 }
 
-function FieldShell({ label, description, error, disabled, className, children }: FieldShellProps) {
+function FieldShell({
+  label,
+  labelTrailing,
+  description,
+  error,
+  disabled,
+  className,
+  children,
+}: FieldShellProps) {
   const transition = useTransition(press)
   return (
     <Field.Root
@@ -49,7 +58,14 @@ function FieldShell({ label, description, error, disabled, className, children }
       invalid={error !== undefined}
       className={cn('flex flex-col gap-1', className)}
     >
-      <Field.Label className="text-sm font-medium text-foreground">{label}</Field.Label>
+      {labelTrailing === undefined ? (
+        <Field.Label className="text-sm font-medium text-foreground">{label}</Field.Label>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <Field.Label className="text-sm font-medium text-foreground">{label}</Field.Label>
+          {labelTrailing}
+        </div>
+      )}
       {children}
       {description !== undefined && (
         <Field.Description className="text-xs text-muted-foreground">
@@ -82,6 +98,11 @@ function FieldShell({ label, description, error, disabled, className, children }
 export interface InputProps extends Omit<FieldShellProps, 'children'> {
   /** One icon of the catalogue, drawn inside the control before the text. */
   icon?: ReactNode
+  type?: 'text' | 'password' | undefined
+  inputRef?: Ref<HTMLInputElement> | undefined
+  name?: string | undefined
+  autoComplete?: string | undefined
+  spellCheck?: boolean | undefined
   placeholder?: string | undefined
   defaultValue?: string | undefined
   value?: string | undefined
@@ -102,11 +123,17 @@ export interface InputProps extends Omit<FieldShellProps, 'children'> {
 
 export function Input({
   label,
+  labelTrailing,
   description,
   error,
   disabled,
   className,
   icon,
+  type = 'text',
+  inputRef,
+  name,
+  autoComplete,
+  spellCheck,
   placeholder,
   defaultValue,
   value,
@@ -119,6 +146,7 @@ export function Input({
   return (
     <FieldShell
       label={label}
+      labelTrailing={labelTrailing}
       description={description}
       error={error}
       disabled={disabled}
@@ -132,6 +160,11 @@ export function Input({
             </span>
           )}
           <Field.Control
+            ref={inputRef}
+            type={type}
+            name={name}
+            autoComplete={autoComplete}
+            spellCheck={spellCheck}
             placeholder={placeholder}
             defaultValue={defaultValue}
             value={value}

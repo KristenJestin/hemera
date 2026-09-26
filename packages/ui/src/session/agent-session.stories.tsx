@@ -8,6 +8,10 @@ import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
 import { ToolCallCard } from '../activity/tool-call-card.tsx'
 import { DecisionSummary } from '../approval/decision-summary.tsx'
+import {
+  ClassifierDecision,
+  type ClassifierDecisionState,
+} from '../approval/classifier-decision.tsx'
 import { PermissionRequest } from '../approval/permission-request.tsx'
 import { BlockedBanner } from '../composer/blocked-banner.tsx'
 import {
@@ -349,6 +353,8 @@ interface PageProps {
   openOn?: SessionDetailsTab | undefined
   /** Whether nothing has been written yet: no thread, no turn running, nothing spent. */
   fresh?: boolean | undefined
+  entries?: ScrollerEntry[] | undefined
+  classifier?: Parameters<typeof AgentModelMenu>[0]['classifier']
 }
 
 /**
@@ -366,6 +372,8 @@ function Page({
   context = CONTEXT,
   openOn = 'commands',
   fresh = false,
+  entries = THREAD,
+  classifier,
 }: PageProps): ReactNode {
   // Whether the reader has the details open: the same state the renderer's page holds, and only
   // the head's button sets it.
@@ -419,7 +427,7 @@ function Page({
               <MessageScroller
                 className="flex-1"
                 label="The thread of this Session"
-                entries={THREAD}
+                entries={entries}
               />
             </>
           )}
@@ -475,6 +483,7 @@ function Page({
                   modes={MODES}
                   mode={mode}
                   onModeChange={setMode}
+                  classifier={classifier}
                 />
               }
             />
@@ -496,7 +505,7 @@ function Page({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -740,5 +749,58 @@ export const Empty: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     await expect(canvas.getByRole('button', { name: 'Session details' })).toBeVisible()
+  },
+}
+
+/** The complete Session surface with an effective classifier and one human fallback in its thread. */
+function AutoPermissionPage(): ReactNode {
+  const [state, setState] = useState<ClassifierDecisionState>('unavailable')
+  const entries: ScrollerEntry[] = [
+    ...THREAD.filter((entry) => entry.id !== 'permission' && entry.id !== 'decision'),
+    {
+      id: 'auto-permission',
+      content: (
+        <ClassifierDecision
+          state={state}
+          call="Run command"
+          target="pnpm test --project=repository"
+          reason={
+            state === 'unavailable'
+              ? 'Jev could not be reached. Decide this call yourself.'
+              : 'You allowed this exact call.'
+          }
+          by={state === 'unavailable' ? undefined : 'user'}
+          policyVersion="hemera-auto-v1"
+          model="jev-1.13.0"
+          onDecide={(answer) => setState(answer === 'allow' ? 'allowed' : 'denied')}
+        />
+      ),
+    },
+  ]
+  return (
+    <Page
+      entries={entries}
+      classifier={{ mode: 'hemera-auto', status: 'unavailable', onOpenSettings: fn() }}
+    />
+  )
+}
+
+export const HemeraAutoPermissionJourney: Story = {
+  render: () => <AutoPermissionPage />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const decision = await canvas.findByRole('region', {
+      name: 'Hemera Auto decision for Run command',
+    })
+    expect(within(decision).getByText('Evaluator unavailable')).toBeVisible()
+    expect(within(decision).queryByRole('button', { name: /always/i })).toBeNull()
+    await userEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
+    await waitFor(() => expect(within(decision).getByText('Allowed by you')).toBeVisible())
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() =>
+      expect(
+        within(document.body).getByText('Evaluator unavailable · calls ask you'),
+      ).toBeVisible(),
+    )
   },
 }

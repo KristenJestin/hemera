@@ -15,6 +15,7 @@ import { useTransition } from './motion.ts'
  */
 const meta = {
   title: 'Foundations',
+  tags: ['updated'],
   parameters: { layout: 'padded' },
 } satisfies Meta
 
@@ -102,6 +103,11 @@ export const Icons: Story = {
     expect(getComputedStyle(outlined).stroke).toBe(inherited)
     expect(getComputedStyle(outlined).fill).toBe('none')
     expect(getComputedStyle(filled).fill).toBe(inherited)
+    expect(canvas.getAllByLabelText('IconBrandHemeraAuto')).toHaveLength(3)
+    expect(canvas.getAllByLabelText('IconBrandTypeSafe')).toHaveLength(3)
+    expect(
+      canvas.getAllByLabelText('IconBrandHemeraAuto')[0]?.querySelectorAll('path'),
+    ).toHaveLength(4)
   },
 }
 

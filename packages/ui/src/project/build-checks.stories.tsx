@@ -45,7 +45,7 @@ function Held({ checks, onAdd, onUpdate, onRemove, onAcceptProposed, ...rest }: 
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Build/BuildChecks',
   component: BuildChecks,
   render: (args) => <Held {...args} />,

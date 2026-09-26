@@ -36,3 +36,21 @@ a reproduction, not a redesign: the outline is the one the owner publishes.
   text that a product runs Claude Code and reserve the logo for other uses. Identifying the
   agent by its mark was judged to be that plain statement, made with a picture. Should Anthropic
   ask for its removal, `AgentMark` falls back to the `CC` monogram by deleting one entry.
+
+## Hemera Auto — `IconBrandHemeraAuto`
+
+- **Source**: the SVG supplied by the maintainer in issue #59, D59-12. Its initial artwork is
+  Tabler Outline `shield-lock` from <https://tabler.io/icons/icon/shield-lock> (MIT).
+- **Licence**: MIT, Copyright (c) 2020-2026 Paweł Kuna. The supplied geometry is embedded
+  directly in `src/icons.ts` with `currentColor` and the catalogue's size scale. The icon has
+  its own local definition so Hemera can replace the artwork without changing its consumers.
+
+## TypeSafe AI — `IconBrandTypeSafe`
+
+- **Source**: the symbol supplied by the maintainer in issue #59, D59-13, retraced from
+  TypeSafe AI's published [light](https://mintcdn.com/ts-docs/yUH7wuFx44xePApg/logo/light.png)
+  and [dark](https://mintcdn.com/ts-docs/yUH7wuFx44xePApg/logo/dark.png) logos at
+  <https://docs.typesafe.ai>.
+- **Attribution**: the mark belongs to TypeSafe AI. It identifies its Jev service beside the
+  credential and data disclosure, and does not brand Hemera. Replace the retraced vector if
+  TypeSafe AI publishes an official SVG.

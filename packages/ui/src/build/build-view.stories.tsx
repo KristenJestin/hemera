@@ -26,7 +26,7 @@ import { BuildView } from './build-view.tsx'
 const meta = {
   title: 'Blocks/Build/BuildView',
   component: BuildView,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (

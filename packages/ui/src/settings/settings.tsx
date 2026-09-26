@@ -5,6 +5,7 @@ import { LayoutGroup, motion } from 'motion/react'
 import { type ReactNode, useId } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
+import { ClassifierSection, type ClassifierSectionProps } from './classifier-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
@@ -216,6 +217,8 @@ export interface SettingsProps {
   subtitle: string
   /** What this machine has, and the one thing the reader can do about it (design D5-18). */
   agents: AgentsSectionProps
+  /** Phase-0 stories supply controlled classifier fixtures; application wiring follows the UI gate. */
+  classifier?: ClassifierSectionProps | undefined
   theme: ThemeChoice
   onThemeChange: (theme: ThemeChoice) => void
   facts: ProfileFacts
@@ -233,6 +236,7 @@ export function Settings({
   onOpenFolder,
   onOpenDiagnostic,
   agents,
+  classifier,
   archived,
   onRestore,
 }: SettingsProps): ReactNode {
@@ -249,6 +253,7 @@ export function Settings({
         onOpenDiagnostic={onOpenDiagnostic}
       />
       <AgentsSection {...agents} />
+      {classifier !== undefined && <ClassifierSection {...classifier} />}
       <ArchivedProjects projects={archived} onRestore={onRestore} />
     </div>
   )
