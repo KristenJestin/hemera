@@ -101,6 +101,13 @@ export interface MissionPanelProps {
    * belongs to the caller's head, and a head drawn on the page is drawn without one.
    */
   page?: boolean | undefined
+  /**
+   * Whether the panel arrives rather than being there when its Session is opened (issue #130):
+   * the mission has just begun — a Spec created from the agent's proposal — and the panel opens
+   * from nothing to its unfolded width on the width's own spring, pushing the chat as an unfold
+   * does, rather than standing there from the first frame. It arrives unfolded.
+   */
+  arrives?: boolean | undefined
 }
 
 export function MissionPanel({
@@ -118,8 +125,9 @@ export function MissionPanel({
   folded: asked,
   width: size = 'wide',
   page = false,
+  arrives = false,
 }: MissionPanelProps): ReactNode {
-  const starts = asked ?? defaultFolded
+  const starts = asked ?? (arrives ? false : defaultFolded)
   const [folded, setFolded] = useState(starts)
   // Whether the width is on its way. Folding, what was open stays in the slot until it has closed.
   const [moving, setMoving] = useState(false)
@@ -137,6 +145,8 @@ export function MissionPanel({
   // grown over the chat, from its slot in the row (0) to the whole of it (1).
   const open = useMotionValue(starts ? 0 : 1)
   const whole = useMotionValue(page ? 1 : 0)
+  // How far in the panel has arrived, from nothing (0) to its place in the row (1).
+  const present = useMotionValue(arrives ? 0 : 1)
   const fade = useTransition(crossfade)
 
   function fold(next: boolean, hand: boolean): void {
@@ -190,10 +200,32 @@ export function MissionPanel({
     slot.current?.style.setProperty('--mission-panel-page', String(grown))
   }
 
+  /**
+   * Writes how far in the panel has arrived, which scales the whole of its slot's width: on the row,
+   * as the fold is, so the chat beside it is pushed as the panel arrives.
+   */
+  function place(share: number): void {
+    slot.current?.parentElement?.style.setProperty('--mission-panel-in', String(share))
+  }
+
   // The first frame has no animation to report a width: the resting one is written before it.
   useLayoutEffect(() => {
     pose(open.get())
     poseWhole(whole.get())
+    place(present.get())
+  }, [])
+
+  // Arriving, the slot opens from nothing on `morph`, the spring its fold is played on; told to
+  // move less, it is there at once.
+  useLayoutEffect(() => {
+    if (present.get() === 1) return
+    if (width === instant) {
+      present.jump(1)
+      place(1)
+      return
+    }
+    const travel = animate(present, 1, { ...width, onUpdate: place })
+    return () => travel.stop()
   }, [])
 
   // A fold moves the width on `morph`, from wherever it stands, pushing the chat on every frame.

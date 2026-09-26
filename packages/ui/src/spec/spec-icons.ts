@@ -16,9 +16,11 @@ import {
   IconPlayerPlay,
   type IconProps,
   IconRoute,
+  IconSparkles,
   IconTarget,
+  IconTool,
 } from '../icons.ts'
-import type { PhaseName, SpecTarget } from './model.ts'
+import type { PhaseName, SpecTarget, SpecType } from './model.ts'
 
 /**
  * The glyph of each phase and of each part of a Spec (lot 19, brief revision 4b).
@@ -49,4 +51,14 @@ export const SPEC_PART_ICONS: Record<SpecTarget, FunctionComponent<IconProps>> =
   stories: IconBook,
   tasks: IconListCheck,
   questions: IconMessageQuestion,
+}
+
+/**
+ * A type of Spec, wherever it is chosen or shown (issue #130): something new, something broken,
+ * something kept in shape. The same glyph in the proposal's choice and in the panel's head.
+ */
+export const SPEC_TYPE_ICONS: Record<SpecType, FunctionComponent<IconProps>> = {
+  feature: IconSparkles,
+  bug: IconBug,
+  maintenance: IconTool,
 }

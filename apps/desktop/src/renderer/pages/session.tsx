@@ -1,10 +1,11 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
   CommandRun,
   ConfigOption,
   ContextView as Provided,
+  PlanRepository,
   SectionName,
   Session,
   SessionEntry,
@@ -62,11 +63,12 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry, setChatMinimised, shellState, subscribeToShell } from '../shell-store.ts'
-import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
+import { type DefinedSpec, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
   createSpec,
+  declineSpecProposal,
   discardMine,
   markReady,
   retryBuild,
@@ -80,7 +82,14 @@ import {
   takeOver,
 } from '../spec-store.ts'
 import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
-import { createForSpec, planForSpec } from '../workspaces-store.ts'
+import {
+  closePlanReading,
+  createForSpec,
+  isPlanReadingOpen,
+  openPlanReading,
+  planForSpec,
+  readPlanRepositories,
+} from '../workspaces-store.ts'
 import { planLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
@@ -354,9 +363,11 @@ export function SessionPage({
   const deciding = (decision: Promise<string | null>): void => {
     void decision.then(setRefused)
   }
-  /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
-  const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
+  // proposal just made, and it arrives rather than standing there (issue #130). The page is
+  // keyed by the Session, so this is read once per Session opened.
+  const openedFree = useRef(session.mission === 'free')
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
     defined === null
@@ -385,21 +396,38 @@ export function SessionPage({
     spec?.sections.find((one) => one.name === name)?.version ?? 0
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
+  /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
+  const [workspaceReads, setWorkspaceReads] = useState<readonly PlanRepository[]>([])
   const [intent, setIntent] = useState<'start' | 'only' | null>(null)
-
   /**
    * Prepares a Workspace for this Spec (D8-12): the plan is asked for first — its branches are
-   * named after the Spec (D8-04) — and the dialog opens on it, because it takes its rows as it
-   * opens. Both ways in go through it: the Workspace is named and its branches chosen by the hand
-   * either way, and `start` is the only thing that differs afterwards.
+   * named after the Spec (D8-04) — and the dialog opens on it at once, because it takes its rows
+   * as it opens; each location of the plan is read on its own afterwards, so a repository that
+   * is slow, refused or gone holds back its own row alone (#110). Both ways in go through it:
+   * the Workspace is named and its branches chosen by the hand either way, and `start` is the
+   * only thing that differs afterwards.
    */
   const prepareWorkspace = (start: boolean): void => {
     const held = defined
     if (held === null) return
+    // The opening is taken here, before the plan is asked: this dialog is the one these answers
+    // belong to, and a dialog closed or opened again on another Spec takes the next one (#110).
+    const reading = openPlanReading()
     void planForSpec(session.projectId, held.spec.key, held.spec.slug).then((planned) => {
-      if (planned === null) return
+      if (planned === null || !isPlanReadingOpen(reading)) return
       setWorkspacePlan(planned)
+      setWorkspaceReads([])
       setIntent(start ? 'start' : 'only')
+      void readPlanRepositories(
+        session.projectId,
+        held.spec.key,
+        held.spec.slug,
+        planned.repositories,
+        reading,
+        (read) => {
+          setWorkspaceReads((current) => [...current, read])
+        },
+      )
     })
   }
 
@@ -482,6 +510,17 @@ export function SessionPage({
     if (entry.kind === 'tool_call' && id.startsWith('call:'))
       reported.set(id.slice('call:'.length), entry)
   }
+  // The ids of the current revision's questions, null until the Spec is read.
+  const asked =
+    stored.current?.spec.id === session.specId
+      ? new Set(stored.current.questions.map((one) => one.id))
+      : null
+  /**
+   * What waits for the reader's answer — the agent's proposal, a question of the Spec — drawn
+   * above the composer rather than where it was asked, for as long as it waits (issue #130): the
+   * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
+   */
+  const pinned: { id: string; content: ReactNode }[] = []
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
@@ -502,19 +541,20 @@ export function SessionPage({
         thread,
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
-        asked:
-          stored.current?.spec.id === session.specId
-            ? new Set(stored.current.questions.map((one) => one.id))
-            : null,
-        declined,
+        asked,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
-        onDecline: (entryId) => setDeclined(new Set([...declined, entryId])),
+        onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
-    if (block !== null) byEntry.set(entry.id, { id: entry.id, content: block })
+    if (block === null) continue
+    if (waitsForAnswer(entry, thread, session.specId, asked)) {
+      pinned.push({ id: entry.id, content: block })
+      continue
+    }
+    byEntry.set(entry.id, { id: entry.id, content: block })
   }
 
   const scroller: ScrollerEntry[] = []
@@ -621,6 +661,7 @@ export function SessionPage({
     return (
       <SpecPanel
         spec={spec}
+        arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
         page={page}
         // Checked against the version the edit was opened on, which the panel hands back:
@@ -779,6 +820,7 @@ export function SessionPage({
         }
         running={agent.running}
         onStop={onStop}
+        pinned={pinned}
         blocked={blocked}
       />
     </div>
@@ -949,11 +991,14 @@ export function SessionPage({
         <CreateWorkspaceDialog
           open={intent !== null}
           onOpenChange={(open) => {
-            if (!open) setIntent(null)
+            if (!open) {
+              closePlanReading()
+              setIntent(null)
+            }
           }}
           root={workspacePlan.root}
           defaultName={workspacePlan.name}
-          repositories={planLinesOf(workspacePlan)}
+          repositories={planLinesOf(workspacePlan, workspaceReads)}
           gitMissing={!workspacePlan.gitAvailable}
           // No `branchOf`: the branches follow the Spec, which the plan they came with already
           // names (D8-04), and a name typed here does not rename the Spec.

@@ -63,12 +63,29 @@ export const Draft: Story = {
   },
 }
 
-/** A `bug`: the type is a quiet chip, never a coloured one. */
+/** A `bug`: the type is a quiet chip, never a coloured one, behind the glyph of its type. */
 export const Bug: Story = {
   args: {
     specKey: 'ATL-12',
     title: 'Totals off by a cent on multi-currency invoices',
     type: 'bug',
+  },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByText('bug')
+    await expect(chip.querySelector('.tabler-icon-bug')).not.toBeNull()
+  },
+}
+
+/** A `maintenance` Spec: its own glyph, a wrench, on the chip (issue #130). */
+export const Maintenance: Story = {
+  args: {
+    specKey: 'ATL-14',
+    title: 'Upgrade the CSV library',
+    type: 'maintenance',
+  },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByText('maintenance')
+    await expect(chip.querySelector('.tabler-icon-tool')).not.toBeNull()
   },
 }
 

@@ -80,14 +80,20 @@ const SPECS_MIGRATION = '20260924122302_specs'
 const WORKSPACES_MIGRATION = '20260924223401_workspaces'
 
 /**
- * The migration lot 22 adds, after the Workspaces': the one a profile of lot 20 has never heard
+ * The migration that gives a Session the choices its agent is put back on at every start: the
+ * one a profile that ran the Workspaces' has never heard of (issue #133).
+ */
+const CHOICES_MIGRATION = '20260926132904_session_choices'
+
+/**
+ * The migration lot 22 adds, after the choices': the one a profile of lot 20 has never heard
  * of — the build's phase and approach note on its Session, its tasks, attempts, snapshots, changed
  * files, check results and blockers, the Project's checks, and the `task` lines of the Journal
  * (D10-01, D10-05, D10-06, D10-14).
  */
-const BUILD_MIGRATION = '20260925073422_build'
+const BUILD_MIGRATION = '20260926170340_build'
 /** Lot 5e (issue #117): the stamp a build waits under while the user reviews it. */
-const REVIEW_MIGRATION = '20260926030019_review'
+const REVIEW_MIGRATION = '20260926170412_review'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -513,11 +519,12 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // Behind by this migration and the two after it, the Workspaces' and the build's, and the copy
-    // is named after the first.
+    // Behind by this migration and the ones after it, the Workspaces', the choices' and the
+    // build's, and the copy is named after the first.
     expect(standing.behind).toEqual([
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
+      CHOICES_MIGRATION,
       BUILD_MIGRATION,
       REVIEW_MIGRATION,
     ])
@@ -885,11 +892,12 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
     // Behind by this lot's migration and the ones after it — the Specs', the Workspaces', the
-    // build's, the review's — and the copy taken before them is named after the first.
+    // choices', the build's, the review's — and the copy taken before them is named after the first.
     expect(standing.behind).toEqual([
       TOOLS_MIGRATION,
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
+      CHOICES_MIGRATION,
       BUILD_MIGRATION,
       REVIEW_MIGRATION,
     ])
@@ -1030,7 +1038,12 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(standing.behind).toEqual([
+      WORKSPACES_MIGRATION,
+      CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
     ])
@@ -1335,10 +1348,58 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
   })
 })
 
+describe('A profile that ran the Workspaces gains the choices of its Sessions', () => {
+  test('a Session is kept whole and starts with no choice recorded', async () => {
+    const dataFolder = join(workspace, 'from-workspaces')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(WORKSPACES_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-25T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([CHOICES_MIGRATION, BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return yield* sql<{
+          title: string
+          native_session_id: string | null
+          native_state: string
+          version: number
+          choices: string
+        }>`SELECT title, native_session_id, native_state, version, choices
+          FROM sessions WHERE id = 'session-1'`
+      }),
+    )
+    // Nothing was chosen that this version knows of: the agent is taken back as it was before,
+    // and the next choice made in the Session is the first one written down.
+    expect(kept).toEqual([
+      {
+        title: 'Shape the export',
+        native_session_id: 'native-1',
+        native_state: 'attached',
+        version: 3,
+        choices: '{}',
+      },
+    ])
+  })
+})
+
 describe('A profile of lot 20 is migrated to lot 22', () => {
   test('the build migration keeps the Sessions, their threads, runs and Journal', async () => {
     const dataFolder = join(workspace, 'from-lot-twenty')
-    await on(dataFolder, openProfile(dataFolder, shippedUpTo(WORKSPACES_MIGRATION), '0.4.0'))
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(CHOICES_MIGRATION), '0.4.0'))
 
     // A build Session launched on a Spec, with a message, a run and the launch that started it,
     // and two Journal lines: the two tables this migration rebuilds and every row pointing at them.

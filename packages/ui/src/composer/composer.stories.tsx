@@ -5,6 +5,7 @@ import { type ReactNode, useState } from 'react'
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
+import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
 import { BlockedBanner } from './blocked-banner.tsx'
 import { Composer, type ComposerProps } from './composer.tsx'
 
@@ -381,6 +382,40 @@ export const Blocked: Story = {
   },
 }
 
+/**
+ * What waits for the reader's answer, pinned above the box (issue #130): the agent's proposal of
+ * a Spec, which the agent's words after it would otherwise carry out of sight up the thread. It
+ * is the page that decides what waits; the composer gives it the room, above everything else.
+ */
+export const Pinned: Story = {
+  args: {
+    variant: 'inline',
+    action: 'Send',
+    placeholder: 'Say something to claude…',
+    pinned: [
+      {
+        id: 'proposal',
+        content: (
+          <CreateSpecProposal
+            title="Export the Journal"
+            type="feature"
+            onCreate={fn()}
+            onDecline={fn()}
+          />
+        ),
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('group', { name: 'Create a Spec' })
+    const box = canvas.getByRole('textbox', { name: 'Say something to claude…' })
+    // Above the box, in reading order as on screen.
+    expect(card.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(canvas.getByRole('button', { name: 'Create' })).toBeEnabled()
+  },
+}
+
 /** The other shape: the foot of a Session, where the box gives itself its own two lines. */
 export const InASession: Story = {
   args: { variant: 'inline', action: 'Send', value: 'Ask Marie before turning this into a Spec' },
@@ -702,7 +737,13 @@ export const ShiftEnterBreaksTheLine: Story = {
   },
 }
 
-/** A chip taken back: the header goes with the last of them, and nothing is left behind. */
+/**
+ * A chip taken back: the header goes with the last of them, and nothing is left behind.
+ *
+ * A chip lands on the field small — a `MARK_SCALE` on the `arrival` preset, which is what it
+ * always was, and no longer a name taken from the press: nothing gives by a share of itself since
+ * issue #108.
+ */
 export const Attachments: Story = {
   args: { files: ['sources/api/AGENTS.md'] },
   play: async ({ canvasElement }) => {

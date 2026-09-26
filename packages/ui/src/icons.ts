@@ -151,6 +151,7 @@ import {
   IconTerminal2 as TablerTerminal2,
   IconTimelineEvent as TablerTimelineEvent,
   IconTimelineEventFilled as TablerTimelineEventFilled,
+  IconTool as TablerTool,
   IconTrash as TablerTrash,
   IconTrashFilled as TablerTrashFilled,
   IconUser as TablerUser,
@@ -430,6 +431,12 @@ export const IconPlayerPause = catalogued(
   TablerPlayerPause,
   'IconPlayerPause',
 )
+
+/**
+ * The type of a Spec that is `maintenance`: a wrench, beside the sparkles of a `feature` and the
+ * bug of a `bug` (issue #130). Tabler draws no solid wrench: the outline stands for both weights.
+ */
+export const IconTool = catalogued(TablerTool, TablerTool, 'IconTool')
 
 /**
  * A mark Tabler does not draw, vendored as the one path it is (design D17-11).

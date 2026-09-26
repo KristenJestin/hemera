@@ -292,9 +292,9 @@ describe('The readiness bar says what is left', () => {
     ])
     expect(readiness.checks.map((one) => [one.check, one.passed])).toEqual([
       ['contract', false],
-      ['references', true],
-      ['coverage', true],
-      ['cycle', true],
+      ['references', false],
+      ['coverage', false],
+      ['cycle', false],
       ['questions', false],
       ['phases', false],
       ['attestation', false],
@@ -348,16 +348,55 @@ describe('The readiness bar says what is left', () => {
 
   test('the readiness is the ready gate of the very snapshot on screen', () => {
     // Shaping has just begun: sections of the contract empty, no task, `shape` open, nothing
-    // attested — and no question, no link, no cycle to fail.
+    // attested — and no question, no link, no cycle to fail, which is nothing met either.
     expect(readinessOf(snapshot()).checks.map((one) => [one.check, one.passed])).toEqual([
       ['contract', false],
-      ['references', true],
+      ['references', false],
       ['coverage', false],
-      ['cycle', true],
-      ['questions', true],
+      ['cycle', false],
+      ['questions', false],
       ['phases', false],
       ['attestation', false],
     ])
+  })
+
+  test('the meter is empty on an empty Spec, and a segment fills only for what is written or decided', () => {
+    const task = {
+      id: 'task-1',
+      taskSetId: 'set-1',
+      title: 'Write the export',
+      result: '',
+      type: 'code',
+      executor: 'agent' as const,
+      criteria: '',
+      rank: 'a',
+    }
+    const answered = {
+      id: 'q-1',
+      revisionId: 'rev-1',
+      body: 'Which date?',
+      blocking: true,
+      phase: null,
+      raisedBy: 'agent' as const,
+      options: [],
+      answer: { optionId: null, text: 'The issue date' },
+      resolvedAt: 1,
+    }
+    const met = (change: Partial<SpecSnapshot>) =>
+      readinessOf(snapshot(change), [failure('attestation', 'rev-1')])
+        .checks.filter((one) => one.passed)
+        .map((one) => one.check)
+    expect(met({})).toEqual(['contract', 'phases'])
+    expect(met({ tasks: [task] })).toEqual([
+      'contract',
+      'references',
+      'coverage',
+      'cycle',
+      'phases',
+    ])
+    expect(met({ questions: [answered] })).toEqual(['contract', 'questions', 'phases'])
+    // A gate that passes whole meets every check, whatever the Spec holds.
+    expect(readinessOf(snapshot(), []).checks.every((one) => one.passed)).toBe(true)
   })
 
   test('a frozen revision passed its gate, and is drawn with every check passing', () => {

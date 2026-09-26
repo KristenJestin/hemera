@@ -147,17 +147,27 @@ async function dedicated(key: string, slug: string): Promise<Made> {
         key: keyOf,
         slug: slugOf,
       })
+      const reads = await Promise.all(
+        plan.repositories.map((relativePath) =>
+          window.hemera.invoke('workspaces.planRepository', {
+            projectId: projectOf,
+            key: keyOf,
+            slug: slugOf,
+            relativePath,
+          }),
+        ),
+      )
       const made = await window.hemera.invoke('workspaces.create', {
         projectId: projectOf,
         specId: null,
         name: slugOf,
-        repositories: plan.repositories.flatMap((one) =>
+        repositories: reads.flatMap((one) =>
           one.included && one.base !== null
             ? [{ relativePath: one.relativePath, branch: one.branch, base: one.base }]
             : [],
         ),
       })
-      return { id: made.id, path: made.path, branch: plan.repositories[0]?.branch ?? '' }
+      return { id: made.id, path: made.path, branch: reads[0]?.branch ?? '' }
     },
     project,
     key,

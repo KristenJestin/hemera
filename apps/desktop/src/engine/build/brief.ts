@@ -23,6 +23,7 @@ import {
   type BriefTask,
   composeBuildBrief,
   readySet,
+  type SpecSnapshot,
 } from '@hemera/core'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { Effect } from 'effect'
@@ -57,6 +58,11 @@ export interface BuildDelivery {
   readonly text: string
   /** Whether it is a brief folded in the thread — a phase's first, or a resume — or a line. */
   readonly opens: boolean
+  /**
+   * Whether the brief already stands in the thread: the first `prepare` brief, which the launch
+   * wrote before the agent started (D8-13, D10-02). It is handed over and not written again.
+   */
+  readonly written: boolean
   /**
    * Where it is recorded once the agent took it: the phase's path, the review's own, or the verify
    * a review asked for (issue #117).
@@ -164,6 +170,14 @@ function listed(words: readonly string[]): string {
 }
 
 /**
+ * The `prepare` brief of a build: the frozen Spec and its tasks' labels, which a launch writes in
+ * the Session's thread before the agent starts, and which the first delivery hands over (D10-02).
+ */
+export function prepareBrief(snapshot: SpecSnapshot, labels: ReadonlyMap<string, string>): string {
+  return composeBuildBrief({ kind: 'prepare', snapshot, labels })
+}
+
+/**
  * What waits for a build Session's agent, or null when nothing does: a build that is closed,
  * paused, or has nothing new to hand. `resumeDue` says the agent is to be handed the resume brief —
  * after a Resume or a restart, or because its own session holds no brief (D10-09).
@@ -175,7 +189,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
   const sessionId = rows.session.id
   const stamp = now()
   const labels = new Map(rows.tasks.map((task) => [task.taskId, task.label]))
-  const base = { sessionId, phase, stamp }
+  const base = { sessionId, phase, stamp, written: false }
 
   // A review the user wrote in the chat, which the build went back to work on (issue #117): the
   // agent is told what it is, once, and the review itself is the user's own message.
@@ -206,8 +220,10 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
       kind: 'prepare',
       path: briefPath('prepare'),
       opens: true,
+      // Until the agent took it once, the brief in the thread is the one the launch wrote.
+      written: !rows.briefed.has(briefPath('prepare')),
       said: 'Hemera handed the agent the Spec to prepare its build.',
-      text: composeBuildBrief({ kind: 'prepare', snapshot: rows.snapshot, labels }),
+      text: prepareBrief(rows.snapshot, labels),
       handed: [],
       told: [],
       retold: [],

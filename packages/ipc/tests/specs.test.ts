@@ -262,7 +262,7 @@ describe('The Spec use cases are declared and relayed', () => {
     const declared = Object.keys(ENGINE_REQUESTS).filter((name) => name.startsWith('specs.'))
     const relayed = Object.keys(CHANNELS).filter((name) => name.startsWith('specs.'))
 
-    const withSession = [...names, 'specs.create', 'specs.openSession']
+    const withSession = [...names, 'specs.create', 'specs.declineProposal', 'specs.openSession']
 
     expect(Object.keys(SPEC_REQUESTS).toSorted()).toEqual(names.toSorted())
     expect(declared.toSorted()).toEqual(withSession.toSorted())

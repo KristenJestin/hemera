@@ -72,7 +72,9 @@ const A_FOLD = 30
  * The press on the path sat beside the whole fold and was centred on it, so it slid down the
  * block while the body opened under it. It is on the fold's own line now, the one line that
  * never moves, and pressing it goes to the path without opening the block. Since recette 3 it is
- * the subject itself, where the line is read, and there is no second copy of it at the end.
+ * the subject itself, where the line is read, and there is no second copy of it at the end. The
+ * block is opened from the keyboard in the story: the subject gives under the hand since issue
+ * #108, and a hand on it would be measured with the fold.
  */
 export const AFoldOpening: Story = {
   play: async ({ canvasElement, args }) => {
@@ -96,8 +98,16 @@ export const AFoldOpening: Story = {
       'false',
     )
 
+    // The hand lets go, and the line is read where it rests: since issue #108 a control under the
+    // hand moves, by the same pixels whatever its size. The row is opened from the keyboard, so
+    // the pointer stays away from it and what is measured is the fold and nothing else.
+    await userEvent.unhover(path)
+    await waitFor(() => {
+      expect(path.getBoundingClientRect().width).toBeCloseTo(path.offsetWidth, 0)
+    })
     const closed = path.getBoundingClientRect().top
-    await userEvent.click(row)
+    row.focus()
+    await userEvent.keyboard('{Enter}')
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
     await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block opened').toBe(

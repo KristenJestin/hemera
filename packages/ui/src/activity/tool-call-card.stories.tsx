@@ -88,7 +88,9 @@ const A_FOLD = 30
  *
  * The press on the file sat beside the whole fold and was centred on it, so it slid down the
  * card while the body opened under it. It is on the fold's own line now, the one line that never
- * moves, and pressing it goes to the file without opening the card.
+ * moves, and pressing it goes to the file without opening the card. The card is opened from the
+ * keyboard in the story: the file gives under the hand since issue #108, and a hand on it would be
+ * measured with the fold.
  */
 export const AFoldOpening: Story = {
   play: async ({ canvasElement, args }) => {
@@ -107,8 +109,16 @@ export const AFoldOpening: Story = {
       'false',
     )
 
+    // The hand lets go, and the line is read where it rests: since issue #108 a control under the
+    // hand moves, by the same pixels whatever its size. The row is opened from the keyboard, so
+    // the pointer stays away from it and what is measured is the fold and nothing else.
+    await userEvent.unhover(path)
+    await waitFor(() => {
+      expect(path.getBoundingClientRect().width).toBeCloseTo(path.offsetWidth, 0)
+    })
     const closed = path.getBoundingClientRect().top
-    await userEvent.click(row)
+    row.focus()
+    await userEvent.keyboard('{Enter}')
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
     await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card opened').toBe(

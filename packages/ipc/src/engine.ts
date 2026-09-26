@@ -31,6 +31,7 @@ import {
   contextViewSchema,
 } from './tools.ts'
 import {
+  planRepositorySchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -750,6 +751,17 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ projectId: z.string(), key: z.string().nullable(), slug: z.string() }),
     response: workspacePlanSchema,
   },
+  'workspaces.planRepository': {
+    // One location of that plan, read on its own so that a repository that is slow, refused or
+    // gone holds back its own row alone, and never the dialog (#110).
+    arguments: z.object({
+      projectId: z.string(),
+      key: z.string().nullable(),
+      slug: z.string(),
+      relativePath: z.string(),
+    }),
+    response: planRepositorySchema,
+  },
   'workspaces.create': {
     // Every check runs before anything is written, and one that fails refuses the whole
     // creation, naming it; what comes back is the Workspace `preparing`, nothing on disk (D8-04).
@@ -878,6 +890,12 @@ export const ENGINE_REQUESTS = {
     // turns `define`, in one transaction. A Session already `define` is refused.
     arguments: z.object({ sessionId: z.string(), type: specTypeSchema, title: z.string() }),
     response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
+  'specs.declineProposal': {
+    // The agent's proposal declined: its entry is kept declined, the Session stays free, and the
+    // agent is told at once, in a turn of its own (issue #130).
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
   },
   'specs.openSession': {
     // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec

@@ -50,9 +50,10 @@ export interface PreparationStepLine {
 }
 
 /** One repository of the plan a dedicated Workspace is created from (D8-04). */
-export interface PlanRepositoryLine {
-  /** Relative to the Workspace, as the Project declares it. */
-  readonly path: string
+/**
+ * What Git answered of one location of a plan (D8-04).
+ */
+export interface PlanRepositoryRead {
   /** Whether `main` holds a repository there; one that does not gets no worktree. */
   readonly holdsRepository: boolean
   /** The repository's local branches in `main`, in Git's own order: what its base is chosen from. */
@@ -69,10 +70,24 @@ export interface PlanRepositoryLine {
   /** Whether the repository is in the Workspace unless the user leaves it out. */
   readonly included: boolean
   /**
-   * What Git said when it would not read the location, and null when it answered: the dialog
-   * shows it in place of `no repository in main` (D8-04).
+   * What Git — or the engine — said when the location would not be read, and null when it was:
+   * the dialog shows it in place of `no repository in main` (D8-04).
    */
   readonly reason: string | null
+}
+
+/**
+ * One location of the plan a dedicated Workspace is created from (D8-04).
+ *
+ * The plan names its locations before Git has read any of them, so the dialog opens on the plan
+ * and takes one row per location; each row is filled in as that location is read, one at a time,
+ * and `read` is null until its answer arrives.
+ */
+export interface PlanRepositoryLine {
+  /** Relative to the Workspace, as the Project declares it. */
+  readonly path: string
+  /** What Git answered of it, or null while it is being asked. */
+  readonly read: PlanRepositoryRead | null
 }
 
 /** What the creation dialog hands over: the name, and the included repositories only. */

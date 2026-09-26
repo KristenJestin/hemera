@@ -575,12 +575,17 @@
    as `--mission-panel-page` while the chat is minimised: the panel grows over the chat on that
    value, and the chat is covered rather than resized. Blended and not added, so the two ends of
    the travel are exactly the band and exactly the row, whatever the fold stood at when the chat
-   went away. */
+   went away.
+
+   `--mission-panel-in` scales the band and the fold, from nothing to 1, while a panel whose
+   mission has just begun arrives in the row (issue #130); it is 1 for a panel that was already
+   there. */
 @utility mission-panel-slot {
   width: calc(
     (var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
         var(--mission-panel-open, 0)) *
-      (1 - var(--mission-panel-page, 0)) + 100cqw * var(--mission-panel-page, 0)
+      var(--mission-panel-in, 1) * (1 - var(--mission-panel-page, 0)) + 100cqw *
+      var(--mission-panel-page, 0)
   );
 }
 
@@ -588,12 +593,14 @@
    the band, or the unfolded share. A length asked of the row rather than a share of the chat's own
    box, so the chat's width answers the fold and not the box it happens to be in — which is what
    keeps its text from reflowing when the panel grows over it to the page. It reads
-   `--mission-panel-open` alone: the page moves the panel over the chat, never the chat under it. */
+   `--mission-panel-open` and `--mission-panel-in` alone: the page moves the panel over the chat,
+   never the chat under it, while a panel arriving pushes it as a fold does (issue #130). */
 @utility chat-pinned {
   width: calc(
     100cqw -
       (var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
-        var(--mission-panel-open, 0))
+        var(--mission-panel-open, 0)) *
+      var(--mission-panel-in, 1)
   );
 }
 

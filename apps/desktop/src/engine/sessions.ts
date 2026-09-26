@@ -35,6 +35,7 @@ import {
 } from '@hemera/core'
 import { and, desc, eq, getColumns, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
+import { z } from 'zod'
 
 import { StderrSink } from './agents/supervisor.ts'
 import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
@@ -101,6 +102,12 @@ export interface Written {
 export interface AgentChoice {
   readonly provider: AgentProvider
   readonly model: string | null
+}
+
+/** One option the user put a Session's agent on: the agent's own id for it, and the value. */
+export interface OptionChoice {
+  readonly optionId: string
+  readonly value: string
 }
 
 /** What an agent handed back about its own session, and where it ran (design D5-06). */
@@ -240,23 +247,38 @@ export interface SessionsService {
    * Records what the agent itself handed back: the handle of its native session, the directory
    * it ran in, and how far that handle is still worth anything (design D5-06).
    *
-   * No version is taken, and this is the one write of a Session that does not bump one: the
-   * engine writes it while the agent is working, and a version the agent keeps raising would
+   * No version is taken, and this and `recordChoice` are the writes of a Session that bump none:
+   * the engine writes it while the agent is working, and a version the agent keeps raising would
    * refuse the rename the user is making at that very moment. The fields are the engine's own,
    * and nothing else writes them.
    */
   readonly recordNative: (id: string, native: NativeRecord) => Effect.Effect<Session, Refusal>
   /**
-   * One Session, and what the agent handed back about it (design D5-06).
+   * Records one option the user put the Session's agent on, beside the ones chosen before.
+   *
+   * An agent keeps its model, its effort and its mode for as long as its process lives, and no
+   * longer: what is recorded here is what the next start of the agent is put back on, whatever
+   * ended the last one (issue #133). No version is taken, for the reason `recordNative` takes
+   * none: the choice is made while the agent works and the user may be renaming the Session.
+   */
+  readonly recordChoice: (id: string, choice: OptionChoice) => Effect.Effect<void, Refusal>
+  /**
+   * One Session, what the agent handed back about it (design D5-06), and what its agent was put
+   * on, in the order it was first chosen.
    *
    * The engine reads a Session by its identifier where the window reads a Project's list: a turn
    * names the Session it belongs to, and the handle the agent gave is the engine's own — the
    * window is told how far the Session is still attached, never which conversation the agent is
    * keeping.
    */
-  readonly one: (
-    id: string,
-  ) => Effect.Effect<{ readonly session: Session; readonly native: NativeRecord }, Refusal>
+  readonly one: (id: string) => Effect.Effect<
+    {
+      readonly session: Session
+      readonly native: NativeRecord
+      readonly choices: readonly OptionChoice[]
+    },
+    Refusal
+  >
   /**
    * Writes one entry of the thread the user did not write — what the agent said, called, ran or
    * asked for (design D5-11).
@@ -344,6 +366,22 @@ export const SESSION_ROW = { ...getColumns(sessions), spoken: SPOKEN }
 function workspaceFixedOf(row: { spoken: number; cwd: string | null; nativeState: string }) {
   return row.spoken !== 0 || row.cwd !== null || row.nativeState !== 'none'
 }
+
+/**
+ * What a Session's agent was put on, in the order it was first chosen; nothing when the column
+ * holds something this version cannot read, which starts the agent as a Session never set.
+ */
+function choicesOf(value: string): OptionChoice[] {
+  try {
+    const read = CHOICES.safeParse(JSON.parse(value))
+    if (!read.success) return []
+    return Object.entries(read.data).map(([optionId, chosen]) => ({ optionId, value: chosen }))
+  } catch {
+    return []
+  }
+}
+
+const CHOICES = z.record(z.string(), z.string())
 
 /** A row of `sessions`, as the domain's own Session; the Specs read one they change (D7-07). */
 export function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Session {
@@ -922,6 +960,48 @@ export const sessionsLayer = Layer.effect(
           ),
         ),
 
+      recordChoice: (id, choice) =>
+        withDatabase(
+          mutate('recording a choice of a Session', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* transaction
+                .select({ choices: sessions.choices, projectId: sessions.projectId })
+                .from(sessions)
+                .where(eq(sessions.id, id))
+                .limit(1)
+                .pipe(Effect.mapError(failed('reading the Session')))
+              const row = rows[0]
+              if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+              // A value chosen again keeps its place: a model is put back before the effort it
+              // publishes, whichever of the two was changed last.
+              const held = new Map(
+                choicesOf(row.choices).map((one) => [one.optionId, one.value] as const),
+              )
+              held.set(choice.optionId, choice.value)
+              yield* transaction
+                .update(sessions)
+                .set({ choices: JSON.stringify(Object.fromEntries(held)) })
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('writing the Session')))
+              return {
+                result: undefined,
+                events: [
+                  {
+                    type: 'session.choice_recorded',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: row.projectId,
+                    sessionId: id,
+                    payload: { optionId: choice.optionId, value: choice.value },
+                  },
+                ],
+              } satisfies Mutation<void>
+            }),
+          ),
+        ),
+
       one: (id) =>
         withDatabase(
           Effect.gen(function* () {
@@ -942,6 +1022,7 @@ export const sessionsLayer = Layer.effect(
                 nativeState: row.nativeState as NativeState,
                 cwd: row.cwd,
               },
+              choices: choicesOf(row.choices),
             }
           }),
         ),

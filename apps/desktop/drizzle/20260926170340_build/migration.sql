@@ -127,6 +127,7 @@ CREATE TABLE `__new_sessions` (
 	`native_session_id` text,
 	`native_state` text DEFAULT 'none' NOT NULL,
 	`cwd` text,
+	`choices` text DEFAULT '{}' NOT NULL,
 	`workspace_id` text,
 	`revision_id` text,
 	`mission` text DEFAULT 'free' NOT NULL,
@@ -150,7 +151,7 @@ CREATE TABLE `__new_sessions` (
 	CONSTRAINT "session_build_phase_is_known" CHECK("build_phase" IS NULL OR "build_phase" IN ('prepare', 'execute', 'verify', 'accepted', 'stopped'))
 );
 --> statement-breakpoint
-INSERT INTO `__new_sessions`(`id`, `project_id`, `title`, `title_source`, `provider`, `model`, `native_session_id`, `native_state`, `cwd`, `workspace_id`, `revision_id`, `mission`, `spec_id`, `briefed_at`, `created_at`, `last_written_at`, `archived_at`, `version`) SELECT `id`, `project_id`, `title`, `title_source`, `provider`, `model`, `native_session_id`, `native_state`, `cwd`, `workspace_id`, `revision_id`, `mission`, `spec_id`, `briefed_at`, `created_at`, `last_written_at`, `archived_at`, `version` FROM `sessions`;--> statement-breakpoint
+INSERT INTO `__new_sessions`(`id`, `project_id`, `title`, `title_source`, `provider`, `model`, `native_session_id`, `native_state`, `cwd`, `choices`, `workspace_id`, `revision_id`, `mission`, `spec_id`, `briefed_at`, `created_at`, `last_written_at`, `archived_at`, `version`) SELECT `id`, `project_id`, `title`, `title_source`, `provider`, `model`, `native_session_id`, `native_state`, `cwd`, `choices`, `workspace_id`, `revision_id`, `mission`, `spec_id`, `briefed_at`, `created_at`, `last_written_at`, `archived_at`, `version` FROM `sessions`;--> statement-breakpoint
 DROP TABLE `sessions`;--> statement-breakpoint
 ALTER TABLE `__new_sessions` RENAME TO `sessions`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint

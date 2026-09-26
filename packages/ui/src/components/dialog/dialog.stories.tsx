@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { HOVERED } from '../../motion.ts'
+import { LIFT_EDGE } from '../../motion.ts'
 import { Button } from '../button/button.tsx'
 import { Select } from '../select/select.tsx'
 import { Dialog, DialogClose } from './dialog.tsx'
@@ -261,7 +261,7 @@ export const LongBody: Story = {
     const before = trigger.getBoundingClientRect().width
     await userEvent.hover(trigger)
     await waitFor(() => {
-      expect(trigger.getBoundingClientRect().width).toBeCloseTo(before * HOVERED, 0)
+      expect(trigger.getBoundingClientRect().width).toBeCloseTo(before + 2 * LIFT_EDGE, 0)
     })
     expect(body.scrollWidth).toBe(body.clientWidth)
 

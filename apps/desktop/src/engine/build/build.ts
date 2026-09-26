@@ -61,7 +61,15 @@ import { failed, now, reading, specRow } from '../specs/snapshot.ts'
 import type { ParsedCall } from '../tools/arguments.ts'
 import { mutate } from '../transaction.ts'
 import { describedWorkspace } from '../workspaces/described.ts'
-import { type BuildDelivery, briefTask, deliveryFor, handing, missed, taken } from './brief.ts'
+import {
+  type BuildDelivery,
+  briefTask,
+  deliveryFor,
+  handing,
+  missed,
+  prepareBrief,
+  taken,
+} from './brief.ts'
 import { BuildChecks, type CheckOutcome } from './checks.ts'
 import { changedFiles, snapshotTree } from './snapshots.ts'
 import {
@@ -304,13 +312,24 @@ function working(rows: BuildRows): boolean {
   return rows.phase !== null && ACTIVE.includes(rows.phase)
 }
 
+/** The brief a build opens with, as the launch writes it in the Session's thread (D10-02). */
+export interface OpeningBrief {
+  readonly text: string
+  readonly phase: 'prepare'
+}
+
 export interface BuildsService {
   /**
    * Begins a build on the Session a launch just wrote (D10-01, D10-02): `prepare`, one task row per
    * contractual task of the revision — labelled `T1…Tn` by rank, `waiting` then the first ones
-   * `ready` or `yours` — and their Journal lines.
+   * `ready` or `yours` — and their Journal lines. A Session whose build has begun already is left
+   * as it stands. Answers the `prepare` brief, which the launch writes in the thread before the
+   * agent starts (D8-13).
    */
-  readonly begin: (sessionId: string, snapshot: SpecSnapshot) => Effect.Effect<void, DatabaseError>
+  readonly begin: (
+    sessionId: string,
+    snapshot: SpecSnapshot,
+  ) => Effect.Effect<OpeningBrief, DatabaseError>
   /**
    * Why a Spec already has its one build, in words a refusal ends with, or null when it has
    * none: a build that is not stopped — paused, verifying or accepted included — or a launch that
@@ -1467,6 +1486,13 @@ export const buildsLayer = Layer.effect(
             Effect.gen(function* () {
               const at = now()
               const labels = taskLabels(snapshot.tasks)
+              const opening: OpeningBrief = {
+                text: prepareBrief(snapshot, labels),
+                phase: 'prepare',
+              }
+              // Begun already — a start that failed after it, asked again — it stands as it is.
+              const before = yield* readBuild(transaction, sessionId)
+              if (before !== null && before.phase !== null) return { result: opening, events: [] }
               if (snapshot.tasks.length > 0) {
                 yield* transaction
                   .insert(buildTasks)
@@ -1487,7 +1513,7 @@ export const buildsLayer = Layer.effect(
               const rows = yield* readBuild(transaction, sessionId)
               const followed = yield* follow(transaction, sessionId, at)
               return {
-                result: undefined,
+                result: opening,
                 events: [
                   ...(rows === null
                     ? []

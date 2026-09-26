@@ -93,6 +93,7 @@ export const CHANNELS = {
   'specs.read': ENGINE_REQUESTS['specs.read'],
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
+  'specs.declineProposal': ENGINE_REQUESTS['specs.declineProposal'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
   'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
   'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],
@@ -150,6 +151,7 @@ export const CHANNELS = {
   // relayed the same way: a worktree, a step and a variable are the engine's (D8-01 to D8-06).
   'workspaces.list': ENGINE_REQUESTS['workspaces.list'],
   'workspaces.plan': ENGINE_REQUESTS['workspaces.plan'],
+  'workspaces.planRepository': ENGINE_REQUESTS['workspaces.planRepository'],
   'workspaces.create': ENGINE_REQUESTS['workspaces.create'],
   'workspaces.createOnFolder': ENGINE_REQUESTS['workspaces.createOnFolder'],
   'workspaces.status': ENGINE_REQUESTS['workspaces.status'],

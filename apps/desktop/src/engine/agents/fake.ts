@@ -24,6 +24,7 @@ import {
   type Agent as AcpAgent,
   type ContentBlock,
   type LoadSessionRequest,
+  type LoadSessionResponse,
   type McpServer,
   type NewSessionRequest,
   type NewSessionResponse,
@@ -720,6 +721,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   // What it announces now, which a choice replaces: the protocol answers a choice with the whole
   // set of options as they stand, and this is that set.
   let announced: SessionConfigOption[] = [...(script.configOptions ?? [])]
+  // What a session taken back answers: the options as this process stands, as Claude Code's
+  // adapter answers `session/resume` and `session/load` — on its defaults, whatever the session
+  // was put on before the process that held it ended. Left out when the script named none.
+  const takenBack = (): ResumeSessionResponse =>
+    script.configOptions === undefined ? {} : { configOptions: [...announced] }
   let cancelled = false
   let dead = false
   let connection: AgentSideConnection | null = null
@@ -939,7 +945,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       }
       return { configOptions: [...announced] }
     },
-    loadSession: async (request: LoadSessionRequest): Promise<void> => {
+    loadSession: async (request: LoadSessionRequest): Promise<LoadSessionResponse> => {
       answers.loads += 1
       if (script.refusesLoad === true) throw new Error('this agent refuses to load a session')
       await handed(request)
@@ -948,13 +954,14 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         // oxlint-disable-next-line no-await-in-loop -- a scripted agent replays its history in the order it was written, one message at a time
         await notify(step)
       }
+      return takenBack()
     },
     resumeSession: async (request: ResumeSessionRequest): Promise<ResumeSessionResponse> => {
       answers.resumes += 1
       if (script.refusesResume === true) throw new Error('this agent refuses to resume a session')
       await handed(request)
       sessionId = request.sessionId
-      return {}
+      return takenBack()
     },
     authenticate: () => undefined,
     cancel: () => {

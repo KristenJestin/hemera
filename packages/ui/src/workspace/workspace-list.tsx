@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useId, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
@@ -24,7 +24,8 @@ import type { WorkspaceRow, WorkspaceState } from './model.ts'
  * A row opens in place: its repositories with their Git state, its preparation, its services and
  * its own variables are drawn under it, grown and folded on the `expand` and `collapse` kinds of
  * the preset. What is drawn there is the caller's (`renderDetails`), so the list stays a leaf;
- * one row is open at a time, the one the caller says.
+ * one row is open at a time, the one the caller says. The room follows what it holds as it
+ * arrives, so a row whose details are still being read never stops halfway and never jumps.
  *
  * Two ways to add one. **New Workspace** asks the caller to open the creation dialog of a
  * dedicated Workspace — worktrees and preparation, with no Spec. **Map an existing folder**, in
@@ -177,8 +178,6 @@ function Row({
   onCleanup: () => void
 }): ReactNode {
   const turning = useTransition(arrival)
-  // A dimension has a spring of its own, which never turns round: the room under the row is one.
-  const folding = useTransition(fold)
   const details = useId()
   const state = STATES[workspace.state]
   const { summary } = workspace
@@ -245,20 +244,56 @@ function Row({
       </CardRow>
       {renderDetails !== undefined && (
         <AnimatePresence initial={false}>
-          {open && (
-            <motion.div
-              id={details}
-              className={ROOM}
-              initial={collapse}
-              animate={expand}
-              exit={collapse}
-              transition={folding}
-            >
-              <div className={DETAILS}>{renderDetails(workspace.id)}</div>
-            </motion.div>
-          )}
+          {open && <Room id={details}>{renderDetails(workspace.id)}</Room>}
         </AnimatePresence>
       )}
     </li>
+  )
+}
+
+/**
+ * The room a row's details are given as they open: the height of what is inside it, and every
+ * height it goes on to take.
+ *
+ * The height is a number and not `auto` (issue #108), because a row's details are not finished
+ * when the row opens: a room measured at `auto` keeps the height it had at that instant, and
+ * jumps when the rest lands — while the room, which hides what overflows, had already been given
+ * a height its content no longer fits in. So the room follows what it holds, and a later height
+ * is played on the `fold` kind, like the first one, rather than thrown at the reader.
+ *
+ * What is followed is the details, wrapped here for it, and never the room itself, whose
+ * `overflow-hidden` is the whole point of it.
+ */
+function Room({ id, children }: { id: string; children: ReactNode }): ReactNode {
+  // A dimension has a spring of its own, which never turns round: the room under the row is one.
+  const folding = useTransition(fold)
+  const [height, setHeight] = useState(0)
+  const content = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const node = content.current
+    if (node === null) return
+    const follow = (): void => {
+      setHeight(node.offsetHeight)
+    }
+    follow()
+    const observer = new ResizeObserver(follow)
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+  return (
+    <motion.div
+      id={id}
+      className={ROOM}
+      initial={collapse}
+      animate={{ ...expand, height }}
+      exit={collapse}
+      transition={folding}
+    >
+      <div ref={content} className={DETAILS}>
+        {children}
+      </div>
+    </motion.div>
   )
 }

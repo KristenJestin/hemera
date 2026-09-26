@@ -35,7 +35,7 @@ const CLEAN: Extract<GitState, { ok: true }> = {
 const FRONT: WorkspaceRepositoryLine = { path: './sources/front', git: CLEAN }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/WorkspaceRepositories',
   component: WorkspaceRepositories,
   parameters: { layout: 'padded' },
@@ -110,17 +110,31 @@ export const Cleaned: Story = {
   },
 }
 
-/** Git is being asked: each row says so until it answers. */
+/**
+ * Git is being asked: a row holds the line the answer will come in on and says so — in words
+ * nobody sees, since what is drawn is the bar.
+ *
+ * The height is the point (issue #108): a row being read is exactly as tall as one Git has
+ * answered, so what lands under it moves nothing and the card grows by what arrives.
+ */
 export const Loading: Story = {
   args: {
-    repositories: [
-      { path: './sources/api', git: null },
-      { path: './sources/front', git: null },
-    ],
+    repositories: [API, { path: './sources/front', git: null }],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('Reading Git…')).toHaveLength(2)
+    const rows = canvas.getAllByRole('listitem')
+    await expect(rows).toHaveLength(2)
+
+    // The words are still there for whoever does not see the bar, and the row says it is busy.
+    await expect(within(rows[1]!).getByText('Reading Git…')).toBeVisible()
+    await expect(within(rows[1]!).getByRole('status')).toBeVisible()
+
+    // And the row is already the size of the answer: nothing moves when it lands.
+    await expect(rows[1]!.getBoundingClientRect().height).toBeCloseTo(
+      rows[0]!.getBoundingClientRect().height,
+      0,
+    )
   },
 }
 

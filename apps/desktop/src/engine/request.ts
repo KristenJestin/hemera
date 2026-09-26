@@ -70,7 +70,7 @@ import {
   type WorkspaceFixedError,
   type WorkspaceNotReadyError,
 } from './sessions.ts'
-import { Specs, type SpecRefusal } from './specs/specs.ts'
+import { Specs, type SpecRefusal, declinedNotice } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -420,6 +420,10 @@ export function answer(
       const { projectId, key, slug } = decision.argument
       return yield* workspaces.plan(projectId, key, slug)
     }
+    if (decision.name === 'workspaces.planRepository') {
+      const { projectId, key, slug, relativePath } = decision.argument
+      return yield* workspaces.planRepository(projectId, key, slug, relativePath)
+    }
     if (decision.name === 'workspaces.create') {
       const { projectId, ...draft } = decision.argument
       return yield* workspaces.create(projectId, draft)
@@ -488,10 +492,23 @@ export function answer(
     if (decision.name === 'specs.create') {
       const defining = yield* specs.create(decision.argument)
       // The Session's agent was granted the tools of a free Session: it is let go of — now, or
-      // once the turn it is running ends — and its next turn starts it again, its conversation
-      // resumed, with the tools of a define one (D7-14).
-      yield* runtime.releaseWhenIdle(defining.session.id)
+      // once the turn it is running ends — and started again, its conversation resumed, with the
+      // tools of a define one (D7-14). It is started at once and handed the mission brief in a
+      // turn of its own: the user accepted what it asked, and has nothing to type (issue #130).
+      yield* runtime.briefWhenIdle(defining.session.id)
       return defining
+    }
+    if (decision.name === 'specs.declineProposal') {
+      // Declined: the agent is told so in a turn of its own, instead of waiting for an answer the
+      // user already gave in the card (issue #130).
+      const { sessionId, proposalId } = decision.argument
+      const declined = yield* specs.declineProposal(sessionId, proposalId)
+      yield* runtime.tell(
+        sessionId,
+        declinedNotice(declined),
+        `Hemera told the agent you declined the ${declined.type} Spec “${declined.title}”.`,
+      )
+      return
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {

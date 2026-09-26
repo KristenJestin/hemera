@@ -504,8 +504,8 @@ export const MidPlan: Story = {
     ).toBeVisible()
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
-      within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
-    ).toHaveTextContent('3/7')
+      within(band).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
+    ).toHaveTextContent('1/7')
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
@@ -555,7 +555,7 @@ export const MidPlanQuestionAnswered: Story = {
     await userEvent.keyboard('{Enter}')
     await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 4 of 7 checks pass' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 2 of 7 checks met' })).toBeVisible()
   },
 }
 
@@ -631,7 +631,7 @@ export const LastQuestionAnswered: Story = {
       canvas.getByRole('textbox', { name: 'Something else' }),
       'Negative rows, marked by a type column.{Enter}',
     )
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks pass' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
     await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(
       canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
@@ -745,7 +745,7 @@ export const Conflict: Story = {
     await expect(
       canvas.getByRole('heading', { name: /^Scope ?, your text and the agent's differ/ }),
     ).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
   },
 }
 

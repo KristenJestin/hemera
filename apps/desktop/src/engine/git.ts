@@ -22,12 +22,14 @@ import { Context, Data, Effect, Layer } from 'effect'
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
 /**
- * How long a read may take before Git is taken as refusing it: `rev-parse`, a ref listing and a
- * branch test answer in milliseconds, and a plan waits for several of them per repository. A
- * Windows runner held `workspaces.plan` past a test's half-minute (#101, #102) because nothing
- * bounded a child that never exited: a plan now ends, or fails in Git's words, within seconds.
+ * How long a read may take before Git is taken as refusing it: a ref listing answers in
+ * milliseconds, a plan reads each of its repositories once (#110), and a `git status` of a large
+ * tree is the slowest read here. A Windows runner held `workspaces.plan` past a test's
+ * half-minute (#101, #102) because nothing bounded a child that never exited: a read now ends, or
+ * fails in Git's words, within half a minute. Ten seconds were not enough (#110): a status of a
+ * large repository takes longer, and a read cut is what the plan reported of it.
  */
-const READ_LIMIT = 10_000
+const READ_LIMIT = 30_000
 
 /**
  * How long a command that writes may take: a `worktree add` checks out a whole tree, which is
@@ -85,6 +87,17 @@ export interface GitHead {
   readonly short: string | null
 }
 
+/**
+ * Where a repository stands, read in one go for the base a creation proposes (D8-04, #110): the
+ * branches it has here and what `HEAD` is on, which is everything a base is chosen from.
+ */
+export interface GitBranches {
+  /** The repository's local branches, in Git's own order: what a base is chosen from (D8-04). */
+  readonly branches: readonly string[]
+  /** What `HEAD` is on, or null in a repository with no commit yet: an answer, not a refusal. */
+  readonly head: GitHead | null
+}
+
 type Refusal = GitError | GitUnavailableError
 
 export interface GitService {
@@ -131,14 +144,14 @@ export interface GitService {
   ) => Effect.Effect<boolean, GitUnavailableError>
   readonly status: (cwd: string) => Effect.Effect<GitStatus, Refusal>
   /**
-   * What `HEAD` is on, read for the base the creation dialog proposes: the branch it is on, or
-   * the commit it is on when it is on none (D8-04). A repository with no commit yet answers
-   * null, which is an answer and not a refusal: Git refusing to read `HEAD` at all stays one,
-   * and the plan shows it.
+   * Where a repository stands, read for the base the creation dialog proposes (D8-04): the
+   * branches it has here, in Git's order, and what `HEAD` is on — the branch it is checked out on,
+   * or the commit it is on when it is on none. Both come of one `git branch --format` (#110),
+   * where the plan asked three times per repository and could read none of them before its dialog
+   * opened. A repository with no commit yet answers a null head and no branch, which is an answer
+   * and not a refusal: Git refusing to read the repository at all stays one, and the plan shows it.
    */
-  readonly head: (cwd: string) => Effect.Effect<GitHead | null, Refusal>
-  /** The repository's local branches, in Git's own order: what a base is chosen from (D8-04). */
-  readonly localBranches: (cwd: string) => Effect.Effect<readonly string[], Refusal>
+  readonly headAndBranches: (cwd: string) => Effect.Effect<GitBranches, Refusal>
   /**
    * Whether a folder is the top of a repository: a folder inside another repository — `./docs`
    * in a `main` that is one — holds none of its own.
@@ -195,6 +208,36 @@ export function statusOf(printed: string): GitStatus {
     } else if (line.startsWith('? ')) untracked += 1
   }
   return { branch, commit, staged, unstaged, untracked }
+}
+
+/**
+ * What `git branch --format` printed, read back: the branches a repository has here, in Git's own
+ * order, and where `HEAD` stands (#110).
+ *
+ * The line marked `*` is the branch checked out here, or Git's stand-in for a `HEAD` on no branch
+ * of its own — whose ref is no ref under `refs/heads/`, which is how a detached commit is told
+ * apart without reading a word Git translates (D8-04). A repository with no commit yet has no
+ * branch and no line at all, which is an answer and not a refusal: the plan has nothing to start a
+ * base from, and says so of that repository alone.
+ */
+export function branchesOf(printed: string): GitBranches {
+  const branches: string[] = []
+  let head: GitHead | null = null
+  for (const line of printed.split('\n')) {
+    if (line.trim() === '') continue
+    const [mark = '', refname = '', branch = '', commit = '', abbreviated = ''] = line.split('\0')
+    if (refname.startsWith('refs/heads/')) {
+      branches.push(branch)
+      // The tip of the branch checked out here is where `HEAD` stands, and no abbreviated hash is
+      // read where a branch name stands for it (D8-04).
+      if (mark === '*') head = { branch, commit, short: null }
+      continue
+    }
+    // Git's one line for a `HEAD` on no branch: what it is on is the commit Git stands at, and
+    // the name it prints there is a sentence in the machine's language, which is never read.
+    if (mark === '*') head = { branch: null, commit, short: abbreviated }
+  }
+  return { branches, head }
 }
 
 /**
@@ -263,45 +306,6 @@ export const gitLayer = (program = 'git', spawn: GitSpawn = spawnGit): Layer.Lay
     environment: Record<string, string> = {},
   ) => spawn(program, cwd, args, limit, environment)
 
-  /**
-   * Whether `HEAD` is on a branch that has no ref yet: what a repository with no commit yet is, and
-   * the only thing it is. `rev-parse --verify --quiet HEAD` fails, `symbolic-ref --short HEAD` names
-   * a branch, and that branch is not stored — a read that fails for any other reason fails one of
-   * the three, and is a refusal the plan keeps and retries (#102).
-   */
-  const unbornHead = (cwd: string) =>
-    Effect.gen(function* () {
-      const resolves = yield* run(cwd, [
-        '--no-optional-locks',
-        'rev-parse',
-        '--verify',
-        '--quiet',
-        'HEAD',
-      ]).pipe(
-        Effect.as(true),
-        Effect.catchTag('GitError', () => Effect.succeed(false)),
-      )
-      if (resolves) return false
-      const named = yield* run(cwd, [
-        '--no-optional-locks',
-        'symbolic-ref',
-        '--short',
-        'HEAD',
-      ]).pipe(Effect.catchTag('GitError', () => Effect.succeed(null)))
-      if (named === null || named.trim() === '') return false
-      const stored = yield* run(cwd, [
-        '--no-optional-locks',
-        'show-ref',
-        '--verify',
-        '--quiet',
-        `refs/heads/${named.trim()}`,
-      ]).pipe(
-        Effect.as(true),
-        Effect.catchTag('GitError', () => Effect.succeed(false)),
-      )
-      return !stored
-    })
-
   return Layer.succeed(Git, {
     revParse: (cwd, ref) =>
       run(cwd, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).pipe(
@@ -329,56 +333,19 @@ export const gitLayer = (program = 'git', spawn: GitSpawn = spawnGit): Layer.Lay
       run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch'], WORK_LIMIT).pipe(
         Effect.map(statusOf),
       ),
-    // `--abbrev-ref` answers `HEAD` itself when it is on no branch: a detached commit, which is
-    // an answer here and not a refusal. A repository with no commit yet refuses every read of
-    // `HEAD`, and only the branch a commit will land on is left to name: nothing to start a base
-    // from is an answer, where Git refusing to read `HEAD` at all is a refusal (D8-04).
-    head: (cwd) =>
-      Effect.gen(function* () {
-        const named = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--abbrev-ref', 'HEAD'])
-        const commit = yield* run(cwd, ['--no-optional-locks', 'rev-parse', 'HEAD'])
-        const branch = named.trim()
-        const detached = branch === '' || branch === 'HEAD'
-        // Git's own abbreviation, asked of Git, and only where a hash is shown at all: the length
-        // depends on the repository, and a prefix cut by hand would be a hash that reads like a
-        // name (D8-04).
-        const short = detached
-          ? yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
-          : null
-        return {
-          branch: detached ? null : branch,
-          commit: commit.trim(),
-          short: short === null ? null : short.trim(),
-        } satisfies GitHead
-      }).pipe(
-        // A repository with no commit yet is the one read that fails and is still an answer, and it
-        // is told apart from a refusal by asking Git: a `symbolic-ref` that answers used to be
-        // enough, and it swallowed every other failure of the reads above — a Git at work for a
-        // moment lost the repository from the plan without a word (#102).
-        Effect.catchTag('GitError', (refusal) =>
-          unbornHead(cwd).pipe(
-            Effect.flatMap((unborn): Effect.Effect<GitHead | null, Refusal> =>
-              unborn ? Effect.succeed(null) : Effect.fail(refusal),
-            ),
-          ),
-        ),
-      ),
-    // The refs as they are stored: `branch --list` prints a line naming a detached commit, which
-    // Git writes in the machine's language, and nothing in Hemera reads a sentence Git translates.
-    localBranches: (cwd) =>
+    // One `git branch --format` answers everything a base is chosen from (#110): the branches this
+    // repository has here, and which of them — or, when `HEAD` is on none of its own, which commit
+    // — it is on. `branch.sort` is pinned to `refname` because the order the dialog offers is Git's
+    // own whatever the machine's configuration says, and no sentence Git translates is read: the
+    // line of a `HEAD` on no branch is told apart by its ref, which is no ref under `refs/heads/`.
+    headAndBranches: (cwd) =>
       run(cwd, [
         '--no-optional-locks',
-        'for-each-ref',
-        '--format=%(refname:short)',
-        'refs/heads',
-      ]).pipe(
-        Effect.map((printed) =>
-          printed
-            .split('\n')
-            .map((branch) => branch.trim())
-            .filter((branch) => branch !== ''),
-        ),
-      ),
+        '-c',
+        'branch.sort=refname',
+        'branch',
+        '--format=%(HEAD)%00%(refname)%00%(refname:short)%00%(objectname)%00%(objectname:short)',
+      ]).pipe(Effect.map(branchesOf)),
     // At the top of a repository the prefix is empty; inside one it is the path down to here,
     // and outside any Git refuses — which is an answer here, not a failure.
     isRepository: (path) =>

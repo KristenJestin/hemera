@@ -62,7 +62,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { Launches } from './launches.ts'
+import { Launches, endWaitingLaunches } from './launches.ts'
 import { Variables } from './variables.ts'
 import { UnknownWorkspaceError } from './described.ts'
 import {
@@ -289,6 +289,11 @@ export const recovered = Effect.gen(function* () {
   yield* (yield* Launches).recover()
 })
 
+/**
+ * What the first step that failed said: what a launch waiting on this Workspace is told (D8-13).
+ */
+const causeOf = (steps: readonly WorkspaceStep[]): string =>
+  steps.find((step) => step.state === 'failed')?.message ?? 'a step failed'
 export const preparationLayer = Layer.effect(
   Preparation,
   Effect.gen(function* () {
@@ -630,11 +635,20 @@ export const preparationLayer = Layer.effect(
                 .where(eq(workspaces.id, place.workspace.id))
                 .pipe(Effect.mapError(failed('writing the Workspace')))
             }
+            // A Workspace whose preparation failed will never be ready: the launches waiting on it
+            // are failed, saying what failed, in this very transaction (D8-13).
+            const ended =
+              state === 'failed' && stored !== 'failed'
+                ? yield* endWaitingLaunches(transaction, place.workspace.id, {
+                    state: 'failed',
+                    cause: causeOf(after),
+                  })
+                : []
             const ready =
               state === 'ready' && stored !== 'ready'
                 ? [workspaceEvent(place.workspace, 'workspace.ready', {}, 'hemera')]
                 : []
-            return { result: state, events: [...events, ...ready] }
+            return { result: state, events: [...events, ...ended, ...ready] }
           }),
         ),
       ).pipe(

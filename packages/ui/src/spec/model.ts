@@ -187,6 +187,10 @@ export const GATE_CHECKS: readonly GateCheck[] = [
 
 export interface GateCheckView {
   check: GateCheck
+  /**
+   * Whether the check is met: it passes, on something the Spec holds. A check the gate passes on
+   * nothing — no task, so no broken link — is not met, and its segment stays empty (issue #130).
+   */
   passed: boolean
   /** What fails, named under the pointer: `coverage · S2 has no task`. */
   detail?: string | undefined

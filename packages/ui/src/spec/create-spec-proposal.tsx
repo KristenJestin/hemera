@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
+import { SPEC_TYPE_ICONS } from './spec-icons.ts'
 
 /**
  * The agent proposing a Spec, in the thread of a `free` Session (lot 19, brief revision 2, "No
@@ -24,7 +25,7 @@ const ASK = 'text-sm text-muted-foreground'
 const TYPES = 'flex gap-1.5'
 
 const TYPE =
-  'rounded-sm border px-2 py-0.5 text-xs font-medium outline-none focus-ring hover:border-primary'
+  'flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium outline-none focus-ring hover:border-primary'
 
 const TYPE_ON = 'border-primary bg-primary-muted text-primary-muted-foreground'
 
@@ -84,6 +85,7 @@ export function CreateSpecProposal({
             className={cn(TYPE, one === type ? TYPE_ON : TYPE_OFF)}
             onClick={() => setType(one)}
           >
+            <TypeIcon type={one} />
             {one}
           </button>
         ))}
@@ -102,4 +104,10 @@ export function CreateSpecProposal({
       </div>
     </div>
   )
+}
+
+/** The glyph of a type, beside its word on the chip (issue #130). */
+function TypeIcon({ type }: { type: SpecType }): ReactNode {
+  const Icon = SPEC_TYPE_ICONS[type]
+  return <Icon size="sm" aria-hidden="true" />
 }

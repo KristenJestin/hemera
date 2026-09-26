@@ -251,7 +251,10 @@ export function SpecRail({
   )
 }
 
-/** How many checks pass, out of how many, and the words the measure is named by. */
+/**
+ * How many checks are met, out of how many, and the words the measure is named by. A check is met
+ * when it passes on something written or decided: an empty Spec meets none (issue #130).
+ */
 interface Score {
   passed: number
   total: number
@@ -261,7 +264,7 @@ interface Score {
 function scoreOf(readiness: ReadinessView): Score {
   const passed = readiness.checks.filter((check) => check.passed).length
   const total = readiness.checks.length
-  return { passed, total, name: `Readiness, ${passed} of ${total} checks pass` }
+  return { passed, total, name: `Readiness, ${passed} of ${total} checks met` }
 }
 
 const FOLDED_FOOT = 'shrink-0 py-3 text-center font-mono text-xs text-muted-foreground'
@@ -340,9 +343,10 @@ function MarkReady({
  * How far the Spec is from `ready`, at the foot of the rail (D7-10).
  *
  * Not a list of errors: seven thin segments the width of the rail, one per check of the gate,
- * filled in the success colour where the check passes, and one line under them — `3/7 · 2 things
- * before ready`. The things left open a small popover that lists them, each a link that puts its
- * part on the stage.
+ * filled in the success colour where the check is met — passed on something written or decided,
+ * so an empty Spec shows an empty bar — and under them what it counts, in words: `3 of 7 checks
+ * met`, then `2 things before ready` (issue #130). The things left open a small popover that
+ * lists them, each a link that puts its part on the stage.
  *
  * When every check passes the line becomes `Ready to freeze` and `Mark ready` sits under it. It
  * is never drawn disabled: a button that cannot be pressed is a question it does not answer, and
@@ -379,10 +383,10 @@ function ReadinessFoot({
         ) : full ? (
           <span className={OK}>Ready to freeze</span>
         ) : (
-          // One line, which the rail is as wide as: the count and what is left read together.
-          <span className="whitespace-nowrap">
-            <span className="tabular-nums">{`${passed}/${total}`}</span>
-            <span aria-hidden="true">{' · '}</span>
+          // What the bar counts, said in words, and what is left under it: two lines, because
+          // the count said plainly is as wide as the rail on its own.
+          <span className="flex flex-col items-start gap-0.5">
+            <span className="tabular-nums">{`${passed} of ${total} checks met`}</span>
             <Left readiness={readiness} onGoTo={onGoTo} />
           </span>
         )}

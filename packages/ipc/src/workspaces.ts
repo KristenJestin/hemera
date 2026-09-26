@@ -51,10 +51,29 @@ export const workspaceSchema = z.object({
 export type Workspace = z.infer<typeof workspaceSchema>
 
 /**
+ * One location of a plan, as Git answers of it (D8-04, #110): whether `main` holds a repository
+ * there, the local branches that repository has and the base chosen from them, then the branch
+ * that would be created. A location Git would not read carries its refusal in `reason`, and
+ * nothing else.
+ */
+export const planRepositorySchema = z.object({
+  relativePath: z.string(),
+  holdsRepository: z.boolean(),
+  branches: z.readonly(z.array(z.string())),
+  base: z.string().nullable(),
+  detachedCommit: z.string().nullable(),
+  branch: z.string(),
+  included: z.boolean(),
+  reason: z.string().nullable(),
+})
+
+export type PlanRepository = z.infer<typeof planRepositorySchema>
+
+/**
  * What a dedicated Workspace would be made of, proposed and editable before anything is written
- * (D8-04): per repository of the Project, whether `main` holds one there, the local branches that
- * repository has and the base chosen from them, then the branch that would be created.
- * A location Git would not read carries its refusal in `reason`, and nothing else.
+ * (D8-04), as it is answered before Git has read any repository (#110): the name, the folder, the
+ * branch prefix, and one path per location the Project declares, in the order it declares them.
+ * Each of those locations is read on its own, and answers a `planRepositorySchema`.
  * `gitAvailable` false is a plan with nothing to start from, whose creation is refused by name.
  */
 export const workspacePlanSchema = z.object({
@@ -62,20 +81,7 @@ export const workspacePlanSchema = z.object({
   root: z.string(),
   path: z.string(),
   branchPrefix: z.string(),
-  repositories: z.readonly(
-    z.array(
-      z.object({
-        relativePath: z.string(),
-        holdsRepository: z.boolean(),
-        branches: z.readonly(z.array(z.string())),
-        base: z.string().nullable(),
-        detachedCommit: z.string().nullable(),
-        branch: z.string(),
-        included: z.boolean(),
-        reason: z.string().nullable(),
-      }),
-    ),
-  ),
+  repositories: z.readonly(z.array(z.string())),
   gitAvailable: z.boolean(),
 })
 

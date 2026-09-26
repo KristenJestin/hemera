@@ -74,7 +74,7 @@ import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
-import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
+import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
@@ -260,6 +260,20 @@ export interface AgentRuntimeService {
    * starts it again, its conversation resumed, with the tools of the Session's mission (D7-14).
    */
   readonly releaseWhenIdle: (sessionId: string) => Effect.Effect<void>
+  /**
+   * The agent's proposal accepted (issue #130): lets go of the agent as `releaseWhenIdle` does,
+   * then starts it again at once, its conversation resumed with the tools of a `define` Session,
+   * and hands it the mission brief in a turn of its own. The user has nothing to type for the
+   * agent to go on. Returns at once, never waiting on a turn.
+   */
+  readonly briefWhenIdle: (sessionId: string) => Effect.Effect<void>
+  /**
+   * Hands the agent a word of Hemera's at its next safe point (issue #130): now, in a turn of its
+   * own, when no turn runs — starting the agent if it is not running — once the running one ends
+   * otherwise. `text` is what the agent is handed, as a resource and never as a message of the
+   * user's; `said` is the line the thread shows once it went. Returns at once.
+   */
+  readonly tell: (sessionId: string, text: string, said: string) => Effect.Effect<void>
   /** The Sessions whose agent is running right now. */
   readonly alive: Effect.Effect<readonly string[]>
   /** Whether a turn is running in the Session, from the prompt until it closes. */
@@ -601,6 +615,11 @@ export const runtimeLayer = Layer.effect(
      * and the Session's mission changed under a turn (D7-14).
      */
     const releasing = new Set<string>()
+    /**
+     * The Sessions whose agent is started again as soon as it is let go of, and handed what waits
+     * — the brief of the Spec just created — in a turn of its own (issue #130).
+     */
+    const waking = new Set<string>()
     /**
      * What a load replayed so far, per Session and per message it named.
      *
@@ -1473,7 +1492,10 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined && held.death === null) return held
         if (held !== undefined) live.delete(sessionId)
 
-        const { session, native } = yield* attempt('reading the Session', sessions.one(sessionId))
+        const { session, native, choices } = yield* attempt(
+          'reading the Session',
+          sessions.one(sessionId),
+        )
         const provider: AgentProvider | null = session.provider
         if (provider === null) {
           return yield* Effect.fail(
@@ -1615,14 +1637,29 @@ export const runtimeLayer = Layer.effect(
         const root = yield* workspacePathOf(session)
         watched(sessionId, root)
 
-        // A Session opened for the first time starts on the choices its composer made before it
-        // existed: the model and the mode were picked on the Home's probe, and the session the
-        // agent has just opened knows nothing of them until it is told (D5-17).
-        if (fresh) {
-          for (const [optionId, value] of chosen.get(`${session.projectId}:${provider}`) ?? []) {
-            yield* attempt('choosing an option', connection.setOption(optionId, value)).pipe(
-              // A choice the agent will not take is not a Session that cannot start: it opens on
-              // what the agent is on, and the composer shows what that is.
+        // The agent is put back on what the Session chose, whatever started it this time: an
+        // agent keeps its model, its effort and its mode for as long as its process lives, and a
+        // session it resumes, loads or opens again after an idle release, a define brief, a death
+        // or a restart of the application is on the agent's own defaults (issue #133).
+        //
+        // A Session opened for the first time has chosen nothing yet, and starts on the choices
+        // its composer made before it existed: the model and the mode were picked on the Home's
+        // probe, and the session the agent has just opened knows nothing of them until it is told
+        // (D5-17). Those become the Session's own, so the next start puts them back too.
+        const inherited = fresh && choices.length === 0
+        const put: readonly OptionChoice[] = inherited
+          ? [...(chosen.get(`${session.projectId}:${provider}`) ?? [])].map(
+              ([optionId, value]) => ({ optionId, value }),
+            )
+          : choices
+        for (const choice of put) {
+          const set = yield* Effect.result(
+            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
+          )
+          // A choice the agent will not take is not a Session that cannot start: it opens on
+          // what the agent is on, and the composer shows what that is.
+          if (Result.isSuccess(set) && inherited) {
+            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
               Effect.ignore,
             )
           }
@@ -2114,6 +2151,52 @@ export const runtimeLayer = Layer.effect(
      */
     const results = new Map<string, readonly string[]>()
 
+    /** Hemera's words waiting for a Session's next safe point, oldest first (issue #130). */
+    const words = new Map<string, readonly { readonly text: string; readonly said: string }[]>()
+
+    /**
+     * Hemera's own words to the agent — a proposal the user declined — each a resource and a line
+     * of Hemera's, never a message of the user's. Taken off the queue once the agent took them.
+     */
+    const wordsParcel = (
+      sessionId: string,
+      waiting: readonly { readonly text: string; readonly said: string }[],
+    ): Parcel => {
+      const correlation = crypto.randomUUID()
+      const lines = (turnId: string | null, handed: boolean) =>
+        Effect.forEach(
+          waiting,
+          (one, index) =>
+            deliveryLine(
+              sessionId,
+              `delivery:${correlation}:${index}`,
+              turnId,
+              handed ? one.said : `Not handed over, waiting for the next safe point: ${one.said}`,
+              handed ? null : 'failed',
+              {
+                kind: 'notice',
+                fingerprint: fingerprintOf(one.text),
+                deliveredAt: handed ? new Date().toISOString() : null,
+                reached: 'delivery_prompt',
+              },
+            ),
+          { discard: true },
+        )
+      return {
+        provisions: waiting.map((one) => ({
+          uri: contextUri('notice'),
+          text: one.text,
+          mimeType: 'text/markdown',
+        })),
+        announce: (turnId) => lines(turnId, true),
+        taken: Effect.sync(() => {
+          // Said meanwhile, a later word stays for the next safe point.
+          words.set(sessionId, (words.get(sessionId) ?? []).slice(waiting.length))
+        }),
+        missed: (turnId) => lines(turnId, false),
+      }
+    }
+
     /**
      * A sub-agent's results (D7-14): each a resource said to be internal and a line of Hemera's,
      * never a message of the user's. Taken off the queue only once the agent took them.
@@ -2189,6 +2272,9 @@ export const runtimeLayer = Layer.effect(
           Effect.gen(function* () {
             yield* attempt('handing the build its delivery', builds.handing(delivery))
             if (!delivery.opens) return yield* line(turnId, true)
+            // The first `prepare` brief stands in the thread already: the launch wrote it before
+            // the agent started (D8-13), and one brief is not folded twice.
+            if (delivery.written) return
             yield* write(sessionId, {
               role: 'hemera',
               kind: 'mission_brief',
@@ -2242,6 +2328,8 @@ export const runtimeLayer = Layer.effect(
           'composing the mission brief',
           briefFor(sessionId, held.unbriefed).pipe(Effect.provideService(Database, database)),
         )
+        const said = words.get(sessionId) ?? []
+        if (said.length > 0) parcels.push(wordsParcel(sessionId, said))
         if (spec !== null) parcels.push(specParcel(sessionId, held, spec))
         // A `build` Session is never handed the `define` brief: its own is the build's (D10-02).
         const build = yield* attempt(
@@ -2397,6 +2485,33 @@ export const runtimeLayer = Layer.effect(
       ).catch(() => undefined)
     }
 
+    /**
+     * Starts the Session's agent if it is not running, then hands over what waits in a turn of
+     * its own (issue #130): the user decided something the agent asked about, and the agent goes
+     * on from that decision without a message. A prompt the user sends meanwhile hands it over
+     * itself, before its own text. A start that failed says why in the diagnostic log; the next
+     * prompt hands it over all the same.
+     */
+    const wakeSoon = (sessionId: string) => {
+      runOwned(
+        owned(
+          Effect.gen(function* () {
+            yield* opened(sessionId)
+            yield* deliverWhenSafe(sessionId, false)
+          }),
+        ).pipe(
+          Effect.tapError((error) =>
+            diagnostic.write(
+              `agents: the agent of Session ${sessionId} could not be started to go on: ${error.cause}`,
+            ),
+          ),
+          Effect.tapDefect((defect) =>
+            diagnostic.write(`agents: a delivery for Session ${sessionId} died: ${String(defect)}`),
+          ),
+        ),
+      ).catch(() => undefined)
+    }
+
     const specChanged = (specId: string) =>
       definedBy(specId).pipe(
         Effect.provideService(Database, database),
@@ -2475,6 +2590,12 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
+        // Written down once the agent took it: the next start of this Session's agent is put back
+        // on it, which no agent does by itself (issue #133).
+        yield* attempt(
+          'recording a choice',
+          sessions.recordChoice(sessionId, { optionId, value }),
+        ).pipe(Effect.ignore)
       })
 
     const prompt = (sessionId: string, text: string) =>
@@ -2838,12 +2959,26 @@ export const runtimeLayer = Layer.effect(
         if (turns.has(sessionId) || starting.has(sessionId)) return
         releasing.delete(sessionId)
         yield* release(sessionId)
+        if (waking.delete(sessionId)) wakeSoon(sessionId)
       })
 
     const releaseWhenIdle = (sessionId: string) =>
       Effect.gen(function* () {
         releasing.add(sessionId)
         yield* releasedIfDue(sessionId)
+      })
+
+    const briefWhenIdle = (sessionId: string) =>
+      Effect.gen(function* () {
+        waking.add(sessionId)
+        yield* releaseWhenIdle(sessionId)
+      })
+
+    const tell = (sessionId: string, text: string, said: string) =>
+      Effect.sync(() => {
+        words.set(sessionId, [...(words.get(sessionId) ?? []), { text, said }])
+        // A turn running now hands it over once it ends; otherwise it goes now.
+        if (!turns.has(sessionId) && !starting.has(sessionId)) wakeSoon(sessionId)
       })
 
     /**
@@ -2906,6 +3041,8 @@ export const runtimeLayer = Layer.effect(
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
       releaseWhenIdle: (sessionId) => owned(releaseWhenIdle(sessionId)),
+      briefWhenIdle: (sessionId) => owned(briefWhenIdle(sessionId)),
+      tell,
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,

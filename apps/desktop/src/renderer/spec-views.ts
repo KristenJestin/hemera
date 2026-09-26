@@ -356,11 +356,35 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
 }
 
 /**
+ * Whether a check that passes stands on something written or decided (issue #130).
+ *
+ * The gate passes a check on nothing at all: no task has no broken link and no cycle, no question
+ * leaves none open. A bar that drew those filled was partly green on a Spec where nothing was
+ * written. A segment fills for what the Spec holds: tasks for the links and the cycles, stories or
+ * tasks for the coverage, a question answered for the questions. The contract, the phases and the
+ * attestation pass only on what was written or declared, and stand on it already.
+ */
+function grounded(check: GateCheck, snapshot: SpecSnapshot): boolean {
+  switch (check) {
+    case 'references':
+    case 'cycle':
+      return snapshot.tasks.length > 0
+    case 'coverage':
+      return snapshot.stories.length > 0 || snapshot.tasks.length > 0
+    case 'questions':
+      return snapshot.questions.some((question) => question.answer !== null)
+    default:
+      return true
+  }
+}
+
+/**
  * The readiness of the revision shown (D7-10): the ready gate of `@hemera/core`, run on the very
  * snapshot on screen — so what it says and the content version "Mark ready" is sent with are one
- * reading — check by check, each failing one naming what fails. A frozen revision passed its
- * gate when it was frozen, and is drawn so. `failed` is what the gate answers of the snapshot,
- * handed in by a test that looks at one check.
+ * reading — check by check, each failing one naming what fails. A check the gate passes on
+ * nothing is not drawn as met until the Spec holds what it is about; a gate that passes whole
+ * meets every check. A frozen revision passed its gate when it was frozen, and is drawn so.
+ * `failed` is what the gate answers of the snapshot, handed in by a test that looks at one check.
  */
 export function readinessOf(
   snapshot: SpecSnapshot,
@@ -371,7 +395,7 @@ export function readinessOf(
     checks: GATE_ORDER.map((check) => {
       const failing = failures.filter((failure) => CHECKS[failure.check] === check)
       return failing.length === 0
-        ? { check, passed: true }
+        ? { check, passed: failures.length === 0 || grounded(check, snapshot) }
         : {
             check,
             passed: false,

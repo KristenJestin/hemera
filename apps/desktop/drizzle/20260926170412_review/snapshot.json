@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "9e3fdbe1-cf30-4de1-954f-d8c4a14faa4e",
-  "prevIds": ["11be5fe5-b162-4d85-9168-83dafdd2899c", "ef936879-45ef-4dc6-aa15-3f153f6b632b"],
+  "id": "0e27ebe3-49f4-406f-9f36-88a85bff28e3",
+  "prevIds": ["4057833d-61c4-4479-a017-6b12486d8001"],
   "ddl": [
     {
       "name": "acceptance_criteria",
@@ -2091,6 +2091,16 @@
       "default": null,
       "generated": null,
       "name": "cwd",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "choices",
       "entityType": "columns",
       "table": "sessions"
     },

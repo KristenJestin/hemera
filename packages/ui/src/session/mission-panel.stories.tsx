@@ -85,12 +85,16 @@ function Row({
   defaultFolded,
   onFoldChange,
   width,
+  arrives,
 }: {
   defaultFolded?: boolean | undefined
   onFoldChange: (folded: boolean) => void
   /** How wide it unfolds: the Spec's share of the row. */
   width?: 'wide' | undefined
+  arrives?: boolean | undefined
 }): ReactNode {
+  // Arriving, the panel is not there until the mission begins, which the chat's button does.
+  const [begun, setBegun] = useState(arrives !== true)
   const [following, setFollowing] = useState<string | undefined>(undefined)
   // What the page asks of the fold, once it asks anything: the page keeps it in step with the
   // panel's own answer, as a caller that folds it itself does.
@@ -115,43 +119,47 @@ function Row({
           </p>
           <Button onClick={() => setFollowing('t2')}>Let the agent start the ledger</Button>
           <Button onClick={() => setAsked(true)}>Fold it from the page</Button>
+          {!begun && <Button onClick={() => setBegun(true)}>Begin the build</Button>}
         </div>
-        <MissionPanel
-          label="Build B-3"
-          noun="build"
-          defaultFolded={defaultFolded}
-          folded={asked}
-          width={width}
-          onFoldChange={(folded) => {
-            setAsked(folded)
-            onFoldChange(folded)
-          }}
-          following={following}
-          onFollow={() => setCurrent({ item: following ?? 't2' })}
-          head={(fold) => (
-            <header className="flex items-center gap-2.5 border-b border-border px-5 pt-4 pb-3">
-              <h2 className="text-base font-semibold">B-3 · CSV invoice export</h2>
-              <span className="ml-auto flex">
-                <Tooltip label="Fold the build">
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconChevronRight size="sm" />}
-                    aria-label="Fold the build"
-                    onClick={fold}
-                  />
-                </Tooltip>
-              </span>
-            </header>
-          )}
-          rail={<MissionRail {...rail} />}
-          stage={
-            <div role="region" aria-label="Stage of B-3" className="flex-1 px-10 pt-5 text-sm">
-              {LABELS.get(shown)}
-            </div>
-          }
-          band={<MissionRail {...rail} folded />}
-        />
+        {begun && (
+          <MissionPanel
+            arrives={arrives}
+            label="Build B-3"
+            noun="build"
+            defaultFolded={defaultFolded}
+            folded={asked}
+            width={width}
+            onFoldChange={(folded) => {
+              setAsked(folded)
+              onFoldChange(folded)
+            }}
+            following={following}
+            onFollow={() => setCurrent({ item: following ?? 't2' })}
+            head={(fold) => (
+              <header className="flex items-center gap-2.5 border-b border-border px-5 pt-4 pb-3">
+                <h2 className="text-base font-semibold">B-3 · CSV invoice export</h2>
+                <span className="ml-auto flex">
+                  <Tooltip label="Fold the build">
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={<IconChevronRight size="sm" />}
+                      aria-label="Fold the build"
+                      onClick={fold}
+                    />
+                  </Tooltip>
+                </span>
+              </header>
+            )}
+            rail={<MissionRail {...rail} />}
+            stage={
+              <div role="region" aria-label="Stage of B-3" className="flex-1 px-10 pt-5 text-sm">
+                {LABELS.get(shown)}
+              </div>
+            }
+            band={<MissionRail {...rail} folded />}
+          />
+        )}
       </div>
     </TooltipProvider>
   )
@@ -160,7 +168,7 @@ function Row({
 const meta = {
   title: 'Blocks/Session/MissionPanel',
   component: Row,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   args: { onFoldChange: fn() },
   argTypes: {
@@ -169,6 +177,10 @@ const meta = {
       control: 'inline-radio',
       options: ['wide'],
       description: 'How wide it unfolds: a Spec’s share of the row.',
+    },
+    arrives: {
+      control: 'boolean',
+      description: 'Whether it arrives, opening from nothing, once the mission begins.',
     },
     onFoldChange: { description: 'Told each time the panel folds or unfolds.' },
   },
@@ -330,5 +342,47 @@ export const FoldedByThePage: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the build' }))
     await expect(args.onFoldChange).toHaveBeenLastCalledWith(false)
     await expect(await canvas.findByRole('region', { name: 'Stage of B-3' })).toBeVisible()
+  },
+}
+
+/**
+ * The mission begins while the Session is open — a Spec created from the agent's proposal — and
+ * the panel arrives (issue #130): it opens from nothing to its unfolded width on the fold's own
+ * spring, the chat narrowing on every frame through the widths in between, rather than standing
+ * there at once.
+ */
+export const Arrives: Story = {
+  args: { arrives: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const begin = canvas.getByRole('button', { name: 'Begin the build' })
+    // The chat's column, which is what the panel pushes aside as it comes in.
+    const chat = begin.parentElement!
+    const widths: number[] = [chat.getBoundingClientRect().width]
+    const settled = new Promise<void>((resolve) => {
+      let still = 0
+      const sample = (): void => {
+        const before = widths.at(-1)!
+        widths.push(chat.getBoundingClientRect().width)
+        still = widths.length > 2 && widths.at(-1) === before ? still + 1 : 0
+        if (still < 20) requestAnimationFrame(sample)
+        else resolve()
+      }
+      requestAnimationFrame(sample)
+    })
+    await userEvent.click(begin)
+    await settled
+    const full = widths[0]!
+    const narrowest = widths.at(-1)!
+    const panel = panelOf(canvasElement)
+    const row = panel.parentElement!.getBoundingClientRect().width
+    // It lands unfolded, a share of the row wide, the head and the rail in place.
+    await expect(panel.getBoundingClientRect().width).toBeCloseTo(row * 0.45, 0)
+    await expect(canvas.getByRole('heading', { name: 'B-3 · CSV invoice export' })).toBeVisible()
+    // And it came in on the way: the chat went through widths in between, never back up.
+    await expect(widths).toEqual(widths.toSorted((a, b) => b - a))
+    await expect(
+      widths.filter((width) => width < full && width > narrowest).length,
+    ).toBeGreaterThan(0)
   },
 }
