@@ -697,7 +697,13 @@ export const ShiftEnterBreaksTheLine: Story = {
   },
 }
 
-/** A chip taken back: the header goes with the last of them, and nothing is left behind. */
+/**
+ * A chip taken back: the header goes with the last of them, and nothing is left behind.
+ *
+ * A chip lands on the field small — a `MARK_SCALE` on the `arrival` preset, which is what it
+ * always was, and no longer a name taken from the press: nothing gives by a share of itself since
+ * issue #108.
+ */
 export const Attachments: Story = {
   args: { files: ['sources/api/AGENTS.md'] },
   play: async ({ canvasElement }) => {

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { IconFileText, IconX } from '../icons.ts'
-import { MARK_TRAVEL, PRESSED_COMPACT, arrival, press, useTransition } from '../motion.ts'
+import { MARK_TRAVEL, MARK_SCALE, arrival, press, useTransition } from '../motion.ts'
 import { fileName } from './file-chip.tsx'
 
 /**
@@ -67,9 +67,9 @@ export function ComposerAttachments({
                 layout
                 className={CHIP}
                 title={file}
-                initial={{ opacity: 0, scale: PRESSED_COMPACT, y: MARK_TRAVEL }}
+                initial={{ opacity: 0, scale: MARK_SCALE, y: MARK_TRAVEL }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: PRESSED_COMPACT }}
+                exit={{ opacity: 0, scale: MARK_SCALE }}
                 transition={chip}
               >
                 <IconFileText size="sm" />

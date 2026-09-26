@@ -23,7 +23,7 @@ import {
   IconSparkles,
   IconTerminal,
 } from '../icons.ts'
-import { PRESSED_COMPACT, press, useTransition } from '../motion.ts'
+import { press, useHand, useTransition } from '../motion.ts'
 import {
   REPOSITORY_ICONS,
   type RepositoryDraft,
@@ -113,7 +113,6 @@ function IconPicker({
   value: RepositoryIcon | null
   onValueChange: (icon: RepositoryIcon | null) => void
 }): ReactNode {
-  const transition = useTransition(press)
   const label = useId()
   return (
     <div className="flex flex-col gap-2">
@@ -130,26 +129,34 @@ function IconPicker({
           onValueChange(chosen.value === AUTOMATIC ? null : chosen.value)
         }}
       >
-        {PICKS.map((pick) => {
-          const Glyph = pick.value === AUTOMATIC ? IconSparkles : REPOSITORY_ICON_GLYPHS[pick.value]
-          return (
-            <Tooltip key={pick.value} label={pick.label}>
-              <Radio.Root
-                value={pick.value}
-                nativeButton
-                aria-label={pick.label}
-                className={PICK}
-                render={
-                  <motion.button whileTap={{ scale: PRESSED_COMPACT }} transition={transition} />
-                }
-              >
-                <Glyph size="sm" aria-hidden="true" />
-              </Radio.Root>
-            </Tooltip>
-          )
-        })}
+        {PICKS.map((pick) => (
+          <IconChoice key={pick.value} pick={pick} />
+        ))}
       </RadioGroup>
     </div>
+  )
+}
+
+/**
+ * One icon of the group, with a hand of its own: what a press is a share of is the box it was
+ * given, and every tile of the grid is its own box.
+ */
+function IconChoice({ pick }: { pick: (typeof PICKS)[number] }): ReactNode {
+  const transition = useTransition(press)
+  const hand = useHand()
+  const Glyph = pick.value === AUTOMATIC ? IconSparkles : REPOSITORY_ICON_GLYPHS[pick.value]
+  return (
+    <Tooltip label={pick.label}>
+      <Radio.Root
+        value={pick.value}
+        nativeButton
+        aria-label={pick.label}
+        className={PICK}
+        render={<motion.button ref={hand.element} whileTap={hand.tap} transition={transition} />}
+      >
+        <Glyph size="sm" aria-hidden="true" />
+      </Radio.Root>
+    </Tooltip>
   )
 }
 

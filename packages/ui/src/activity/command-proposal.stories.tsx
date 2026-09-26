@@ -12,7 +12,7 @@ import { COMMAND_TYPES } from './command-type.ts'
  * in the three states; only the answer at the end of its line changes.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/CommandProposal',
   component: CommandProposal,
   parameters: { layout: 'padded' },

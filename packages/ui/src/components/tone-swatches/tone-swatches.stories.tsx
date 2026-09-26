@@ -5,7 +5,12 @@ import { useState } from 'react'
 import { PROJECT_TONES, type ProjectTone } from '../../shell/model.ts'
 import { ToneSwatches } from './tone-swatches.tsx'
 
-/** The five dots a Project is told apart by, and nothing else (design D4-07). */
+/**
+ * The five dots a Project is told apart by, and nothing else (design D4-07).
+ *
+ * A dot gives under the press like every other control of the catalogue, and by the same pixels
+ * whatever its size (issue #108) — the smallest of them included.
+ */
 function Harness({ tone: chosen = 'primary' }: { tone?: ProjectTone }) {
   const [tone, setTone] = useState<ProjectTone>(chosen)
   return (
@@ -17,7 +22,7 @@ function Harness({ tone: chosen = 'primary' }: { tone?: ProjectTone }) {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/ToneSwatches',
   component: Harness,
   parameters: { layout: 'padded' },

@@ -12,6 +12,10 @@ import { ComposerActions } from './composer-actions.tsx'
  * `New Spec` is the Home's and nobody else's since the trial of 22 September 2026: a Spec is
  * made from the question that starts a Session, and a control drawn and disabled in every place
  * it appears says nothing about where it belongs.
+ *
+ * What its menus put on the field arrives and leaves small, on the `arrival` preset: a
+ * `MARK_SCALE`, which is a thing landing on the field — and no longer a press, since nothing in
+ * the catalogue gives by a share of itself (issue #108).
  */
 const meta = {
   title: 'Blocks/Composer/ComposerActions',
