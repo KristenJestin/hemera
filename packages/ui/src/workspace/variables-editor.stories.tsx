@@ -50,7 +50,7 @@ function Kept({ variables, onSet, ...rest }: VariablesEditorProps) {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/VariablesEditor',
   component: VariablesEditor,
   render: (args) => <Kept {...args} />,

@@ -40,7 +40,7 @@ function Controlled({ open, onOpenChange, ...rest }: CleanupDialogProps) {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/CleanupDialog',
   component: CleanupDialog,
   render: (args) => <Controlled {...args} />,

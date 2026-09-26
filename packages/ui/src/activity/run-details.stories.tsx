@@ -24,7 +24,7 @@ const TEST_OUTPUT = [
 const FOLDER = '/home/someone/.hemera/workspaces/atlas/login-form/sources/api'
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/RunDetails',
   component: RunDetails,
   parameters: { layout: 'padded' },
