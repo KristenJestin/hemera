@@ -11,7 +11,7 @@ import { SpecQuestion } from './spec-question.tsx'
 const meta = {
   title: 'Blocks/Spec/SpecQuestion',
   component: SpecQuestion,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: { question: CREDIT_NOTES, onAnswer: fn() },
   argTypes: {
@@ -81,5 +81,40 @@ export const Cancelled: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/the turn was stopped/)).toBeVisible()
     await expect(canvas.queryByRole('button')).toBeNull()
+  },
+}
+
+/** The question as the agent wrote it, in Markdown: bold, code and a list read as the thread's. */
+export const Markdown: Story = {
+  args: {
+    question: {
+      ...CREDIT_NOTES,
+      body: 'Credit notes: **where do they go** in the export?\n\n- `amount` stays signed\n- the `type` column is new',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('where do they go').tagName).toBe('STRONG')
+    await expect(canvas.getByText('amount').tagName).toBe('CODE')
+    const card = canvas.getByRole('group', { name: /^Question/ })
+    await expect(canvas.getByText(/column is new/).tagName).toBe('LI')
+    await expect(card).not.toHaveTextContent('**')
+    await expect(card).not.toHaveTextContent('`')
+  },
+}
+
+/** Answered, the question still reads its Markdown above the answer. */
+export const MarkdownAnswered: Story = {
+  args: {
+    question: {
+      ...CREDIT_NOTES,
+      body: 'Credit notes: **where do they go** in the export?',
+      answer: { optionId: 'negative' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('where do they go').tagName).toBe('STRONG')
+    await expect(canvas.getByText('Negative rows in the same file')).toBeVisible()
   },
 }
