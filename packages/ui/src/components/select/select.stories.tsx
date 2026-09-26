@@ -217,7 +217,9 @@ export const Pressed: Story = {
       const box = trigger.getBoundingClientRect()
       const gone = [(rest.width - box.width) / 2, (rest.height - box.height) / 2]
       if (gone.some((edge) => edge < 1.2)) {
-        throw new Error(`the trigger has gone in by ${gone.map((it) => it.toFixed(2)).join(' / ')}px`)
+        throw new Error(
+          `the trigger has gone in by ${gone.map((it) => it.toFixed(2)).join(' / ')}px`,
+        )
       }
       return box
     })
