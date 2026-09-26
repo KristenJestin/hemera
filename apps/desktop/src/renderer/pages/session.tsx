@@ -14,7 +14,6 @@ import type {
   WorkspacePlan,
 } from '@hemera/ipc'
 import {
-  ActivityRow,
   AgentModelMenu,
   BlockedBanner,
   CommandsPanel,
@@ -29,7 +28,7 @@ import {
   SessionDetails,
   SessionHeader,
   SpecPanel,
-  UsageMeter,
+  TurnLine,
   type MessageLine,
   type MessageState,
   type OfferedAgent,
@@ -675,23 +674,7 @@ export function SessionPage({
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {(activity !== null || usage !== null) && (
-            <div className="flex items-center justify-between gap-3">
-              {activity !== null ? (
-                <ActivityRow
-                  state={activity.state}
-                  detail={activity.detail}
-                  thought={activity.thought}
-                  elapsedMs={activity.elapsedMs}
-                />
-              ) : (
-                <span />
-              )}
-              {usage !== null && (
-                <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
-              )}
-            </div>
-          )}
+          <TurnLine activity={activity} usage={usage} />
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
             not be read, a Workspace changed once the agent had started (D8-08) — said here and
