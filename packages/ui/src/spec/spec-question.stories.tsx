@@ -25,11 +25,15 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Open: the question, `blocking` and its phase, the options, and a field of your own. */
+/**
+ * Open: the question and its phase, the options, and a field of your own. No `blocking` chip,
+ * though this question holds the gate (issue #149).
+ */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('blocking')).toBeVisible()
+    await expect(canvas.getByText('plan')).toBeVisible()
+    await expect(canvas.queryByText('blocking')).toBeNull()
     await expect(canvas.getByRole('list', { name: 'Answers' })).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Other' })).toBeVisible()
   },

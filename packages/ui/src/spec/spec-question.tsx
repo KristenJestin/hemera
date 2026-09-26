@@ -10,10 +10,14 @@ import { type SpecAnswer, type SpecQuestionView, answerText } from './model.ts'
  * the chat").
  *
  * Drawn the way a permission request is — a card the turn is waiting on — because it is the same
- * situation: the agent has stopped and the next move is the reader's. The question, its
- * `blocking` chip and its phase; the answers the agent offers as a list, one of them marked
- * `recommended`; and a last choice of the reader's own, `Other`, with its field, for the answer
- * nobody offered. An option is answered by pressing it; the field by `Answer`.
+ * situation: the agent has stopped and the next move is the reader's. The question and its phase;
+ * the answers the agent offers as a list, one of them marked `recommended`; and a last choice of
+ * the reader's own, `Other`, with its field, for the answer nobody offered. An option is answered
+ * by pressing it; the field by `Answer`.
+ *
+ * No `blocking` chip (recette of 26 September 2026, issue #149): whether the question holds the
+ * gate is the Spec's business, and on the card, where the next move is the reader's anyway, it
+ * said nothing the reader could act on.
  *
  * The choices are Hemera's to label (recette of 26 September 2026, issue #134): each is lettered
  * A, B, C… in the order the agent gave them, the recommended one wears its badge, and `Other` is
@@ -99,7 +103,6 @@ export function SpecQuestion({
   return (
     <div role="group" aria-label={`Question: ${question.body}`} className={CARD}>
       <p className={HEAD}>
-        {question.blocking && <Badge tone="primary">blocking</Badge>}
         <Badge>{question.phase}</Badge>
       </p>
       <div className={BODY}>
