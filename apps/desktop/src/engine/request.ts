@@ -324,10 +324,10 @@ export function answer(
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
-      const { sessionId, text } = decision.argument
+      const { sessionId, text, intent } = decision.argument
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
-      const report = yield* runtime.prompt(sessionId, text)
+      const report = yield* runtime.prompt(sessionId, text, intent)
       return { stopReason: report.stopReason }
     }
     if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)

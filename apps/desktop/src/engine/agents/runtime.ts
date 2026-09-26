@@ -45,7 +45,7 @@ import {
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
-import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
+import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice, type PromptIntent } from '@hemera/ipc'
 
 import {
   type AgentConnection,
@@ -68,6 +68,7 @@ import { HeldWords } from './held.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
+import { provisionsOf } from './spec-request.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
@@ -240,8 +241,17 @@ export interface AgentRuntimeService {
     optionId: string,
     value: string,
   ) => Effect.Effect<void, AgentRuntimeError>
-  /** Sends one turn and answers when the agent is done with it. */
-  readonly prompt: (sessionId: string, text: string) => Effect.Effect<TurnReport, AgentRuntimeError>
+  /**
+   * Sends one turn and answers when the agent is done with it.
+   *
+   * The intent is what the message was sent for: `spec`, the Home's New Spec, asks the agent in
+   * the same turn to propose a Spec from it (issue #128).
+   */
+  readonly prompt: (
+    sessionId: string,
+    text: string,
+    intent?: PromptIntent,
+  ) => Effect.Effect<TurnReport, AgentRuntimeError>
   /** Stops the turn running in this Session, if one is: the user's Stop. */
   readonly stop: (sessionId: string) => Effect.Effect<void>
   /** Answers the question a block was drawn for; null is the end of the question. */
@@ -2515,7 +2525,7 @@ export const runtimeLayer = Layer.effect(
         ).pipe(Effect.ignore)
       })
 
-    const prompt = (sessionId: string, text: string) =>
+    const prompt = (sessionId: string, text: string, intent?: PromptIntent) =>
       Effect.gen(function* () {
         if (turns.has(sessionId) || starting.has(sessionId)) {
           return yield* Effect.fail(
@@ -2537,7 +2547,7 @@ export const runtimeLayer = Layer.effect(
         }
         starting.set(sessionId, turn)
 
-        return yield* announcedTurn(sessionId, text, turn).pipe(
+        return yield* announcedTurn(sessionId, text, turn, intent).pipe(
           Effect.ensuring(
             Effect.sync(() => {
               if (starting.get(sessionId) === turn) starting.delete(sessionId)
@@ -2547,7 +2557,7 @@ export const runtimeLayer = Layer.effect(
       })
 
     /** The turn itself, once it is the one this Session is running. */
-    const announcedTurn = (sessionId: string, text: string, turn: Turn) =>
+    const announcedTurn = (sessionId: string, text: string, turn: Turn, intent?: PromptIntent) =>
       Effect.gen(function* () {
         // The user's own message is written first, and by `append`: the thread shows what was
         // asked before what was answered, and it is what proposes the Session's title. It is
@@ -2586,7 +2596,7 @@ export const runtimeLayer = Layer.effect(
               // Stop pressed meanwhile marks this turn, and it closes as soon as it gets the gate.
               turns.set(sessionId, turn)
               starting.delete(sessionId)
-              return turnBodyOf(sessionId, text, turn, held)
+              return turnBodyOf(sessionId, text, turn, held, intent)
             }),
           )
 
@@ -2599,7 +2609,13 @@ export const runtimeLayer = Layer.effect(
      *
      * Run under the Session's turn gate by `announcedTurn`, once the turn is registered.
      */
-    const turnBodyOf = (sessionId: string, text: string, turn: Turn, held: Live) =>
+    const turnBodyOf = (
+      sessionId: string,
+      text: string,
+      turn: Turn,
+      held: Live,
+      intent?: PromptIntent,
+    ) =>
       Effect.gen(function* () {
         yield* pool.used(sessionId)
         yield* pool.busy(sessionId, true).pipe(Effect.ignore)
@@ -2627,7 +2643,9 @@ export const runtimeLayer = Layer.effect(
         // unless a delivery took it first, and the conversation rebuilt for an agent that lost
         // its own (D5-07).
         const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
-        const provisions = held.provisions
+        // And what the message was sent for, when it was sent for something: the Home's New Spec
+        // asks the agent for a Spec proposal in the same turn (issue #128).
+        const provisions = [...held.provisions, ...provisionsOf(intent)]
         held.context = null
         held.provisions = []
 
@@ -2921,7 +2939,7 @@ export const runtimeLayer = Layer.effect(
       offerSet: (projectId, provider, optionId, value) =>
         owned(offerSet(projectId, provider, optionId, value)),
       setOption: (sessionId, optionId, value) => owned(setOption(sessionId, optionId, value)),
-      prompt: (sessionId, text) => owned(prompt(sessionId, text)),
+      prompt: (sessionId, text, intent) => owned(prompt(sessionId, text, intent)),
       stop: (sessionId) => owned(stop(sessionId)),
       decide: (sessionId, toolCallId, optionId) => owned(decide(sessionId, toolCallId, optionId)),
       resume: (sessionId) => owned(resume(sessionId)),
