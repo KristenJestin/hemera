@@ -47,10 +47,35 @@ export interface AgentSessionState {
    * only the order of the pushes says which that is.
    */
   latest: string | null
+  /**
+   * When this window last heard anything of the Session: an entry pushed, or its turn begun
+   * (issue #131). Null for a Session nothing has been heard of since it was opened.
+   */
+  heardAt: number | null
 }
 
 /** What a Session nothing has happened in yet holds. */
-const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null, latest: null }
+const QUIET: AgentSessionState = {
+  entries: [],
+  running: false,
+  stopReason: null,
+  latest: null,
+  heardAt: null,
+}
+
+/**
+ * Since when a running turn has heard nothing (issue #131): the last push this window heard, or
+ * — for a Session opened while its turn was already running — when the last entry of its thread
+ * was written. Null when neither says anything.
+ */
+export function heardSince(
+  agent: AgentSessionState,
+  thread: readonly SessionEntry[],
+): number | null {
+  const written = thread.at(-1)?.createdAt ?? null
+  if (agent.heardAt === null) return written
+  return written === null ? agent.heardAt : Math.max(agent.heardAt, written)
+}
 
 /**
  * The Sessions whose turn the engine said had begun and has not yet said had ended.
@@ -357,6 +382,7 @@ export function listenToAgents(): () => void {
       changed(event.sessionId, {
         entries: withEntry(held.entries, event.entry),
         latest: event.entry.id,
+        heardAt: Date.now(),
       })
       return
     }
@@ -371,7 +397,7 @@ export function listenToAgents(): () => void {
     // word that comes back (design D5-12).
     if (event.event === 'turn_start') {
       announced.add(event.sessionId)
-      changed(event.sessionId, { running: true })
+      changed(event.sessionId, { running: true, heardAt: Date.now() })
     }
     if (event.event === 'turn') {
       announced.delete(event.sessionId)

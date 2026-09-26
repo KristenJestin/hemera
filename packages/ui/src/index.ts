@@ -384,7 +384,13 @@ export {
 } from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
-export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
+export {
+  ActivityRow,
+  QUIET_AFTER_MS,
+  STUCK_AFTER_MS,
+  type ActivityRowProps,
+  type ActivityState,
+} from './session/activity-row.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,

@@ -563,6 +563,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // #131: how long a running turn may hear nothing before its line says so, and offers more.
+      'QUIET_AFTER_MS',
+      'STUCK_AFTER_MS',
       // Recette 1 of lot 20: the icons a repository may be drawn with.
       'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',

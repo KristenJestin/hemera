@@ -29,6 +29,7 @@ import {
   SessionDetails,
   SessionHeader,
   SpecPanel,
+  STUCK_AFTER_MS,
   UsageMeter,
   type MessageLine,
   type MessageState,
@@ -41,6 +42,7 @@ import {
   activityOf,
   hasEnded,
   hasTrace,
+  heardSince,
   openTrace,
   type Activity,
   type AgentSessionState,
@@ -126,6 +128,25 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
 /** What a turn that has just been asked for is doing, before anything of it has arrived. */
 const THINKING: Activity = { state: 'thinking' }
 
+/** How often a running turn's silence is measured again: the line counts it by fives. */
+const QUIET_TICK_MS = 5_000
+
+/**
+ * The clock a running turn's silence is read on, moving every few seconds while it is asked to
+ * and standing still otherwise: a page that rendered every second for a line that changes every
+ * five would be a thread redrawn for nothing.
+ */
+function useTicking(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return undefined
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), QUIET_TICK_MS)
+    return () => clearInterval(timer)
+  }, [active])
+  return now
+}
+
 /** Whether a Session has a trace to open, asked each time `asking` turns true. */
 function useTrace(sessionId: string, asking: boolean): boolean {
   const [traced, setTraced] = useState(false)
@@ -140,6 +161,41 @@ function useTrace(sessionId: string, asking: boolean): boolean {
     }
   }, [sessionId, asking])
   return traced
+}
+
+/**
+ * The row of a running turn, told how long it has heard nothing (issue #131): past half a minute
+ * its line says so, and past two it offers Stop and, when the settings had it written, the trace
+ * of what the agent and Hemera said. Its own component, so the clock it ticks on redraws the row
+ * and not the thread.
+ */
+function ListeningRow({
+  activity,
+  since,
+  sessionId,
+  onStop,
+}: {
+  activity: Activity
+  since: number | null
+  sessionId: string
+  onStop: () => void
+}): ReactNode {
+  const listening = since !== null && !hasEnded(activity)
+  const now = useTicking(listening)
+  const quietMs = listening ? Math.max(0, now - since) : undefined
+  const stuck = quietMs !== undefined && quietMs >= STUCK_AFTER_MS
+  const traced = useTrace(sessionId, stuck)
+  return (
+    <ActivityRow
+      state={activity.state}
+      detail={activity.detail}
+      thought={activity.thought}
+      elapsedMs={activity.elapsedMs}
+      quietMs={quietMs}
+      onStop={onStop}
+      onOpenTrace={traced ? () => void openTrace(sessionId) : undefined}
+    />
+  )
 }
 
 /** When a run was written, `HH:MM`, in the one reading the whole window uses. */
@@ -687,11 +743,11 @@ export function SessionPage({
           {(activity !== null || usage !== null) && (
             <div className="flex items-center justify-between gap-3">
               {activity !== null ? (
-                <ActivityRow
-                  state={activity.state}
-                  detail={activity.detail}
-                  thought={activity.thought}
-                  elapsedMs={activity.elapsedMs}
+                <ListeningRow
+                  activity={activity}
+                  since={agent.running ? heardSince(agent, thread) : null}
+                  sessionId={session.id}
+                  onStop={onStop}
                 />
               ) : (
                 <span />
