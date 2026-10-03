@@ -5,6 +5,8 @@
   },
   "include": [
     "src/main/**/*.ts",
+    "src/engine/**/*.ts",
+    "src/agents/**/*.ts",
     "src/preload/**/*.ts",
     "src/renderer/bridge.d.ts",
     "bundles.ts",
