@@ -6,7 +6,7 @@
  * own `git`.
  */
 
-import { mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { DEFAULT_BASE_BRANCH } from '@hemera/core/domain'
@@ -19,6 +19,7 @@ import {
   type Project,
   Readable,
   type RepositoryStatus,
+  Unreadable,
   StaleVersion,
   UnknownProject,
   UnknownRemote,
@@ -26,9 +27,10 @@ import {
 } from '@hemera/ipc'
 import { Effect, Fiber, Layer, Match, Stream } from 'effect'
 import type { Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { type GitSpawn, gitLayer, spawnGit } from '../src/engine/git.ts'
+import { type GitProgram, type GitSpawn, gitLayer, spawnGit } from '../src/engine/git.ts'
 import { readEvents } from '../src/engine/journal.ts'
 import { openProfile } from '../src/engine/migrate.ts'
 import {
@@ -65,6 +67,22 @@ beforeEach(async () => {
   await on(data, openProfile(data, SHIPPED, '1.0.0'))
 })
 afterEach(removeFolders)
+
+/** A `git` that never answers: see the fixture. */
+const STUB: GitProgram = {
+  command: process.execPath,
+  leading: [join(import.meta.dirname, 'fixtures', 'git-stub.mjs')],
+}
+
+/** Whether a process of this machine is still there: signal 0 asks without sending anything. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** A program on the data folder, with the machine's Git or the spawn named. */
 const run = <A, E>(
@@ -249,6 +267,32 @@ describe('A repository Git cannot read stays visible with Git’s reason', () =>
       'unreadable',
       'readable',
     ])
+  })
+
+  test('a Git read that hangs is cut at 30 seconds, waited for, and shown as the reason', async () => {
+    const main = checkout('api')
+    const project = await run(atlas(main, ['api']))
+    const api = join(main, 'api')
+    const pidOf = () => {
+      try {
+        return Number(readFileSync(join(api, 'git-stub.pid'), 'utf8'))
+      } catch {
+        return 0
+      }
+    }
+
+    const status = await run(
+      Effect.gen(function* () {
+        const reading = yield* Effect.forkChild(repositoryStatus(project.repositories[0]?.id ?? ''))
+        while (pidOf() === 0) yield* TestClock.withLive(Effect.sleep(10))
+        yield* TestClock.adjust('30 seconds')
+        return yield* Fiber.join(reading)
+      }).pipe(Effect.provide(TestClock.layer())),
+      spawnGit(STUB),
+    )
+
+    expect(status).toEqual(Unreadable.make({ reason: 'Git did not answer within 30 seconds.' }))
+    expect(alive(pidOf())).toBe(false)
   })
 
   test('a missing git is its own refusal, never a repository said unreadable', async () => {

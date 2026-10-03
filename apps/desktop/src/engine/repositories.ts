@@ -6,7 +6,7 @@
  * A repository Git cannot read stays visible with Git's own reason: its status says so, and a
  * change of readability is written to the journal and told to whoever follows it.
  *
- * The up-to-date base: "main" in the design means each repository's base branch, never a branch
+ * The up-to-date base: main, in the design, means each repository's base branch, never a branch
  * named in the code. Up to date means the base fetched from the repository's remote now, into its
  * tracking ref only (no local branch and no checkout of the user's is touched), then the commit
  * of that tracking ref. When the fetch fails (offline, a remote that refuses, credentials it would
