@@ -6,7 +6,8 @@
  * A package under `packages/` is read by every process: the renderer, main, the engine and the
  * agents' processes. One that imports Electron cannot be loaded by a page, and one that imports
  * React drags the interface into a process that has none. The applications import them; never
- * the other way round.
+ * the other way round. The design system, `packages/ui`, is the one package made of React: it is
+ * drawn by the renderer and nothing else, so it may import React and still never Electron.
  *
  * The database is the engine's alone: a second program holding the same file is how a data folder
  * gets two writers. So `node:sqlite`, Drizzle and the Effect SQLite client are imported under
@@ -56,13 +57,21 @@ export function importsOf(source: string): string[] {
   return found.toSorted((left, right) => left.at - right.at).map(({ specifier }) => specifier)
 }
 
+/** The package of React components, which the renderer alone draws. */
+export const DESIGN_SYSTEM = 'packages/ui/'
+
 export function refusalsOf(file: string, source: string): Refusal[] {
+  const forbidden = file.startsWith(DESIGN_SYSTEM)
+    ? FORBIDDEN.filter(({ pattern }) => !pattern.test('react'))
+    : FORBIDDEN
   return importsOf(source).flatMap((specifier) =>
-    FORBIDDEN.filter(({ pattern }) => pattern.test(specifier)).map(({ reason }) => ({
-      file,
-      found: specifier,
-      problem: `a shared package imports ${reason}`,
-    })),
+    forbidden
+      .filter(({ pattern }) => pattern.test(specifier))
+      .map(({ reason }) => ({
+        file,
+        found: specifier,
+        problem: `a shared package imports ${reason}`,
+      })),
   )
 }
 
@@ -112,6 +121,6 @@ if (import.meta.main) {
   for (const { file, found, problem } of refusals) console.error(`${file}: ${found} — ${problem}`)
   if (refusals.length > 0) process.exit(1)
   console.log(
-    'the shared packages import neither Electron nor React, and the storage layer stays in the engine',
+    'the shared packages import no Electron, and no React outside the design system; the storage layer stays in the engine',
   )
 }

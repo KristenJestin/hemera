@@ -35,6 +35,17 @@ describe('The shared packages stay free of Electron', () => {
     expect(refusalsOf('packages/ipc/src/link.ts', source)).toHaveLength(1)
   })
 
+  test('the design system may import React, and still never Electron', () => {
+    expect(refusalsOf('packages/ui/src/components/button/button.tsx', "import 'react'\n")).toEqual(
+      [],
+    )
+    expect(refusalsOf('packages/ui/src/motion.ts', "import 'electron'\n")).toHaveLength(1)
+  })
+
+  test('a package whose folder only starts like the design system is not it', () => {
+    expect(refusalsOf('packages/uikit/src/x.ts', "import 'react'\n")).toHaveLength(1)
+  })
+
   test('a module whose name only starts like Electron is not refused', () => {
     expect(refusalsOf('packages/ipc/src/link.ts', "import x from 'electron-store'\n")).toEqual([])
   })
