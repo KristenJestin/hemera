@@ -148,6 +148,43 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('repositories.changes', log),
       ),
+    // The Workspaces, their recipe and their variables are the engine's alone: forwarded as they are.
+    'workspaces.create': (request) =>
+      engine['workspaces.create'](request).pipe(closedAs(gone), observed('workspaces.create', log)),
+    'workspaces.get': (request) =>
+      engine['workspaces.get'](request).pipe(closedAs(gone), observed('workspaces.get', log)),
+    'workspaces.list': (request) =>
+      engine['workspaces.list'](request).pipe(closedAs(gone), observed('workspaces.list', log)),
+    'workspaces.status': (request) =>
+      engine['workspaces.status'](request).pipe(closedAs(gone), observed('workspaces.status', log)),
+    'workspaces.prepare': (request) =>
+      engine['workspaces.prepare'](request).pipe(
+        closedAs(gone),
+        observed('workspaces.prepare', log),
+      ),
+    'workspaces.resume': (request) =>
+      engine['workspaces.resume'](request).pipe(closedAs(gone), observed('workspaces.resume', log)),
+    'workspaces.remove': (request) =>
+      engine['workspaces.remove'](request).pipe(closedAs(gone), observed('workspaces.remove', log)),
+    'workspaces.changes': () =>
+      engine['workspaces.changes']().pipe(
+        streamClosedAs(gone),
+        observedStream('workspaces.changes', log),
+      ),
+    'recipe.get': (request) =>
+      engine['recipe.get'](request).pipe(closedAs(gone), observed('recipe.get', log)),
+    'recipe.save': (request) =>
+      engine['recipe.save'](request).pipe(closedAs(gone), observed('recipe.save', log)),
+    'recipe.check': (request) =>
+      engine['recipe.check'](request).pipe(closedAs(gone), observed('recipe.check', log)),
+    'variables.list': (request) =>
+      engine['variables.list'](request).pipe(closedAs(gone), observed('variables.list', log)),
+    'variables.set': (request) =>
+      engine['variables.set'](request).pipe(closedAs(gone), observed('variables.set', log)),
+    'variables.remove': (request) =>
+      engine['variables.remove'](request).pipe(closedAs(gone), observed('variables.remove', log)),
+    'variables.reveal': (request) =>
+      engine['variables.reveal'](request).pipe(closedAs(gone), observed('variables.reveal', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
   })

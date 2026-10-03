@@ -24,12 +24,14 @@ import {
   makeServerProtocol,
   NotFetchedSince,
   Preferences,
+  RemovalRefused,
   RestoreRefused,
   StaleVersion,
   StorageFailed,
   streamClosedAs,
   Unreadable,
   UpToDateBase,
+  type Workspace,
 } from '../src/index.ts'
 
 const status: EngineStatus = {
@@ -71,6 +73,68 @@ const projectHandlers = {
   'repositories.changes': () => Stream.die('not asked of this engine'),
 }
 
+/** A Workspace with one worktree, made from an up-to-date base read offline, and not prepared. */
+const workspace: Workspace = {
+  id: 'w1',
+  projectId: 'p1',
+  name: 'login-form',
+  folder: '/workspaces/login-form',
+  branch: 'atlas/login-form',
+  createdAt: '2026-10-03T00:00:00.000Z',
+  preparation: 'pending',
+  preparing: false,
+  repositories: [
+    {
+      repositoryId: 'r1',
+      path: 'api',
+      worktree: '/workspaces/login-form/api',
+      base: {
+        commit: 'abc',
+        ref: 'refs/remotes/origin/dev',
+        freshness: NotFetchedSince.make({ since: '2026-10-03T00:00:00.000Z', reason: 'offline' }),
+      },
+    },
+  ],
+  steps: [
+    {
+      id: 's1',
+      position: 1,
+      kind: 'worktree',
+      base: 'api',
+      path: null,
+      commandId: null,
+      line: null,
+      state: 'pending',
+      failure: null,
+    },
+  ],
+}
+
+/** The Workspaces of an engine that holds one, and refuses to remove it over a file. */
+const workspaceHandlers = {
+  'workspaces.create': unused,
+  'workspaces.get': () => Effect.succeed(workspace),
+  'workspaces.list': unused,
+  'workspaces.status': unused,
+  'workspaces.prepare': unused,
+  'workspaces.resume': unused,
+  'workspaces.remove': () =>
+    Effect.fail(
+      new RemovalRefused({
+        reason: 'api/notes.txt holds work that is not committed',
+        file: 'api/notes.txt',
+      }),
+    ),
+  'workspaces.changes': () => Stream.die('not asked of this engine'),
+  'recipe.get': unused,
+  'recipe.save': unused,
+  'recipe.check': unused,
+  'variables.list': unused,
+  'variables.set': unused,
+  'variables.remove': unused,
+  'variables.reveal': unused,
+}
+
 /** main's view of an engine that answers its status and then never ends the change stream. */
 const engineLink = Effect.gen(function* () {
   const { port1: mainPort, port2: enginePort } = new MessageChannel()
@@ -87,6 +151,7 @@ const engineLink = Effect.gen(function* () {
         'profile.backup': ({ folder }) => Effect.succeed(folder),
         'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
         ...projectHandlers,
+        ...workspaceHandlers,
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -172,6 +237,24 @@ describe('The Projects on the engine link', () => {
     const sent = JSON.parse(JSON.stringify(Schema.encodeSync(codec)(base)))
     expect(Schema.decodeUnknownSync(codec)(sent)).toEqual(base)
   })
+})
+
+describe('The Workspaces on the engine link', () => {
+  test('a Workspace and a refused removal arrive as themselves', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          expect(yield* client['workspaces.get']({ id: 'w1' })).toEqual(workspace)
+          const refused = yield* Effect.flip(client['workspaces.remove']({ id: 'w1' }))
+          expect(refused).toBeInstanceOf(RemovalRefused)
+          expect(refused).toMatchObject({ file: 'api/notes.txt' })
+          expect(refused.message).toBe(
+            'This Workspace was not removed: api/notes.txt holds work that is not committed.',
+          )
+        }),
+      ),
+    ))
 })
 
 describe('Errors that can reach a screen', () => {

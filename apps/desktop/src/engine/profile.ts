@@ -44,8 +44,11 @@ import {
 } from './reconciliation.ts'
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
 import { gitLayer } from './git.ts'
-import { type ProjectServices, repositoryStatusesLayer } from './repositories.ts'
+import { resumeInterrupted } from './preparation.ts'
+import { type RecipeRunner, noRecipeRunner } from './recipe-runner.ts'
+import { repositoryStatusesLayer } from './repositories.ts'
 import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -64,6 +67,8 @@ export interface ProfileParts {
   readonly reconciliationSteps: ReadonlyArray<ReconciliationStep>
   readonly liveMissions?: Layer.Layer<LiveMissions>
   readonly restoreJournal?: Layer.Layer<RestoreJournal>
+  /** What runs a `run` step of a preparation recipe; none runs until the command catalogue. */
+  readonly recipeRunner?: Layer.Layer<RecipeRunner>
 }
 
 export interface ProfileStart {
@@ -78,15 +83,15 @@ export interface StartedProfile {
   /** The gate every automation passes; closed for good when the database was refused. */
   readonly gate: Effect.Effect<void>
   /**
-   * Runs a call on the Projects and their repositories, the data folder's refusal said as a
-   * sentence; refused at once when the database was.
+   * Runs a call on the Projects, their repositories and their Workspaces, the data folder's
+   * refusal said as a sentence; refused at once when the database was.
    */
   readonly use: <A, E>(
-    effect: Effect.Effect<A, E, ProjectServices>,
+    effect: Effect.Effect<A, E, WorkspaceServices>,
   ) => Effect.Effect<A, Exclude<E, DatabaseError> | StorageFailed>
   /** The same, for what is followed for as long as the caller listens. */
   readonly follow: <A, E>(
-    stream: Stream.Stream<A, E, ProjectServices>,
+    stream: Stream.Stream<A, E, WorkspaceServices>,
   ) => Stream.Stream<A, Exclude<E, DatabaseError> | StorageFailed>
 }
 
@@ -142,6 +147,8 @@ export const startProfile = (
       Layer.succeed(ProfileHome, start),
       gitLayer(),
       repositoryStatusesLayer,
+      preparationsLayer(log),
+      parts.recipeRunner ?? noRecipeRunner,
     )
     const opened = yield* Layer.build(layers).pipe(
       Effect.flatMap((context) =>
@@ -208,6 +215,20 @@ export const startProfile = (
         Effect.forkScoped,
       )
     }
+
+    // A preparation a stopped engine interrupted carries on once automations may run.
+    yield* gate.pass.pipe(
+      Effect.andThen(run(resumeInterrupted)),
+      Effect.tap((resumed) =>
+        resumed.length === 0
+          ? Effect.void
+          : Effect.sync(() => log(`resumed the preparation of ${resumed.join(', ')}`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`interrupted preparations were not resumed: ${said(refusal)}`)),
+      ),
+      Effect.forkScoped,
+    )
 
     const storageFailed = <E>(failure: E) => new StorageFailed({ sentence: said(failure) })
 

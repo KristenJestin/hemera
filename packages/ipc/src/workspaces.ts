@@ -330,7 +330,7 @@ export const WorkspacesRpcs = RpcGroup.make(
   Rpc.make('workspaces.remove', {
     payload: workspaceId,
     success: Schema.Void,
-    error: failing(...always, ...git, UnknownWorkspace, RemovalRefused),
+    error: failing(...always, ...git, UnknownProject, UnknownWorkspace, RemovalRefused),
   }),
   Rpc.make('workspaces.changes', {
     success: WorkspaceChange,
@@ -379,7 +379,13 @@ export const VariablesRpcs = RpcGroup.make(
   Rpc.make('variables.set', {
     payload: VariableEdit,
     success: MaskedVariable,
-    error: failing(...always, UnknownProject, UnknownWorkspace, InvalidVariableKey, InvalidTemplate),
+    error: failing(
+      ...always,
+      UnknownProject,
+      UnknownWorkspace,
+      InvalidVariableKey,
+      InvalidTemplate,
+    ),
   }),
   Rpc.make('variables.remove', {
     payload: VariableKey,
