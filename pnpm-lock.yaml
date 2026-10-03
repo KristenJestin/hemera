@@ -209,6 +209,9 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@hemera/ipc':
+        specifier: workspace:*
+        version: link:../../packages/ipc
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -236,6 +239,9 @@ importers:
       '@wdio/spec-reporter':
         specifier: 9.32.0
         version: 9.32.0
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
       electron:
         specifier: 44.5.1
         version: 44.5.1(supports-color@8.1.1)
