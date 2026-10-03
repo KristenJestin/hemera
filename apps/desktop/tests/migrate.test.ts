@@ -64,7 +64,7 @@ function fingerprint(folder: string): Map<string, string> {
 }
 
 describe('A fresh data folder gets the 1.0 schema', () => {
-  test('in hemera-1.sqlite, with the three tables and a profile.created event', async () => {
+  test('in hemera-1.sqlite, with the tables of the schema and a profile.created event', async () => {
     const data = temporaryFolder('fresh')
     const opened = await on(data, openProfile(data, SHIPPED, '1.0.0'))
 
@@ -74,7 +74,14 @@ describe('A fresh data folder gets the 1.0 schema', () => {
     expect(opened.backedUp).toBeNull()
 
     const tables = (await on(data, tablesOf)).map((line) => line.split(':')[0])
-    expect(tables).toEqual(['app_preferences', 'domain_events', 'event_by_entity', 'profile'])
+    expect(tables).toEqual([
+      'app_preferences',
+      'domain_events',
+      'event_by_entity',
+      'profile',
+      'project_repositories',
+      'projects',
+    ])
     expect(await on(data, typesOf)).toEqual([
       'profile.created',
       'profile.migrated',

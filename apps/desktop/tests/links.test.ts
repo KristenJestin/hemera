@@ -3,6 +3,8 @@
  * main's two ends, and the engine's. What Electron's own ports do is the end-to-end suite's.
  */
 
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import {
@@ -16,6 +18,7 @@ import {
   type EnvironmentReport,
   type Preferences,
   RestoreRefused,
+  StaleVersion,
   WindowRpcs,
 } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from 'effect'
@@ -216,6 +219,39 @@ describe('The window reaches the engine through main', () => {
         expect(relaunches()).toBe(0)
         yield* window['profile.restore']({ folder: written })
         expect(relaunches()).toBe(1)
+      }),
+    ))
+
+  test('a Project made from the window is read, changed and followed through main', () =>
+    run(
+      Effect.gen(function* () {
+        const { window } = yield* chain
+        const main = temporaryFolder('atlas')
+        mkdirSync(join(main, 'api', '.git'), { recursive: true })
+        const found = yield* window['projects.detectRepositories']({ folder: main })
+        expect(found).toEqual(['api'])
+        const made = yield* window['projects.create']({
+          name: 'Atlas',
+          mainCheckout: main,
+          repositories: found,
+        })
+        const heard = yield* Effect.forkChild(Stream.runHead(window['projects.changes']()))
+        yield* Effect.sleep(20)
+        const renamed = yield* window['projects.update']({
+          id: made.id,
+          version: made.version,
+          name: 'Atlas II',
+        })
+        expect(yield* Fiber.join(heard)).toEqual(Option.some(renamed))
+        expect(yield* window['projects.list']()).toEqual([renamed])
+        const stale = yield* Effect.flip(
+          window['projects.update']({ id: made.id, version: made.version, name: 'Atlas III' }),
+        )
+        expect(stale).toBeInstanceOf(StaleVersion)
+        const status = yield* window['repositories.status']({
+          id: renamed.repositories[0]?.id ?? '',
+        })
+        expect(status).toMatchObject({ reason: expect.stringMatching(/^fatal: /) })
       }),
     ))
 })

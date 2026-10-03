@@ -48,3 +48,17 @@ export class RestoreRefused extends Schema.TaggedError<RestoreRefused>()('Restor
     return this.sentence
   }
 }
+
+/**
+ * The change was made against a version of the record that is no longer the current one.
+ * Refused rather than merged: the second writer would lose a change nobody was told about.
+ */
+export class StaleVersion extends Schema.TaggedError<StaleVersion>()('StaleVersion', {
+  entity: Schema.String,
+  id: Schema.String,
+  expected: Schema.Number,
+}) {
+  override get message(): string {
+    return `This ${this.entity} changed elsewhere; reopen it and try again.`
+  }
+}

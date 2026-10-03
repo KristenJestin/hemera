@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   AgentsProcessGone,
+  BaseUnavailable,
   closedAs,
   DatabaseOpen,
   DEFAULT_PREFERENCES,
@@ -14,13 +15,21 @@ import {
   EngineStart,
   type EngineStatus,
   fromMessagePort,
+  GitCut,
+  GitFailed,
+  GitMissing,
+  InvalidProjectName,
   LaunchFailed,
   makeClientProtocol,
   makeServerProtocol,
+  NotFetchedSince,
   Preferences,
   RestoreRefused,
+  StaleVersion,
   StorageFailed,
   streamClosedAs,
+  Unreadable,
+  UpToDateBase,
 } from '../src/index.ts'
 
 const status: EngineStatus = {
@@ -34,6 +43,32 @@ const status: EngineStatus = {
     backups: { count: 0, latest: null },
     reconciliation: 'none',
   }),
+}
+
+const unused = () => Effect.die('not asked of this engine')
+
+/** The Projects of an engine that refuses a name and cannot read a repository. */
+const projectHandlers = {
+  'projects.list': unused,
+  'projects.get': unused,
+  'projects.create': ({ name }: { readonly name: string }) =>
+    Effect.fail(new InvalidProjectName({ name, reason: 'it is empty' })),
+  'projects.update': unused,
+  'projects.detectRepositories': unused,
+  'projects.setWorkspacesRoot': unused,
+  'projects.setBranchPrefix': unused,
+  'projects.changes': () => Stream.die('not asked of this engine'),
+  'repositories.add': unused,
+  'repositories.remove': unused,
+  'repositories.update': unused,
+  'repositories.status': () =>
+    Effect.succeed(Unreadable.make({ reason: 'fatal: not a git repository: /nowhere' })),
+  'repositories.remotes': unused,
+  'repositories.setRemote': unused,
+  'repositories.setBaseBranch': unused,
+  'repositories.upToDateBase': () =>
+    Effect.fail(new BaseUnavailable({ remote: 'origin', branch: 'dev', reason: 'offline' })),
+  'repositories.changes': () => Stream.die('not asked of this engine'),
 }
 
 /** main's view of an engine that answers its status and then never ends the change stream. */
@@ -51,6 +86,7 @@ const engineLink = Effect.gen(function* () {
         'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
         'profile.backup': ({ folder }) => Effect.succeed(folder),
         'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
+        ...projectHandlers,
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -105,6 +141,39 @@ describe('The engine link', () => {
   })
 })
 
+describe('The Projects on the engine link', () => {
+  test('a refusal and an unreadable repository arrive as themselves', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          const refused = yield* Effect.flip(
+            client['projects.create']({ name: ' ', mainCheckout: '/atlas', repositories: [] }),
+          )
+          expect(refused).toBeInstanceOf(InvalidProjectName)
+          expect(refused.message).toBe('This Project name is refused: it is empty.')
+          expect(yield* client['repositories.status']({ id: 'r1' })).toEqual(
+            Unreadable.make({ reason: 'fatal: not a git repository: /nowhere' }),
+          )
+          const unavailable = yield* Effect.flip(client['repositories.upToDateBase']({ id: 'r1' }))
+          expect(unavailable).toBeInstanceOf(BaseUnavailable)
+          expect(unavailable).toMatchObject({ remote: 'origin', branch: 'dev' })
+        }),
+      ),
+    ))
+
+  test('an up-to-date base crosses the JSON codec with its freshness', () => {
+    const codec = Schema.toCodecJson(UpToDateBase)
+    const base = {
+      commit: 'abc',
+      ref: 'refs/remotes/origin/dev',
+      freshness: NotFetchedSince.make({ since: '2026-10-03T00:00:00.000Z', reason: 'offline' }),
+    }
+    const sent = JSON.parse(JSON.stringify(Schema.encodeSync(codec)(base)))
+    expect(Schema.decodeUnknownSync(codec)(sent)).toEqual(base)
+  })
+})
+
 describe('Errors that can reach a screen', () => {
   test.each([
     [new EngineGone(), 'Hemera’s engine stopped.'],
@@ -120,6 +189,23 @@ describe('Errors that can reach a screen', () => {
     [
       new RestoreRefused({ sentence: 'This folder is not a backup of Hemera.' }),
       'This folder is not a backup of Hemera.',
+    ],
+    [
+      new GitFailed({ args: ['status'], folder: '/r', stderr: 'fatal: not a git repository\n' }),
+      'fatal: not a git repository',
+    ],
+    [new GitMissing({ program: 'git' }), 'Git was not found: git is not on the PATH.'],
+    [
+      new GitCut({ args: ['status'], folder: '/r', limit: 'time', seconds: 30 }),
+      'Git did not answer within 30 seconds.',
+    ],
+    [
+      new StaleVersion({ entity: 'Project', id: 'p1', expected: 1 }),
+      'This Project changed elsewhere; reopen it and try again.',
+    ],
+    [
+      new BaseUnavailable({ remote: 'origin', branch: 'dev', reason: 'offline' }),
+      'origin/dev was never fetched and cannot be now: offline',
     ],
   ])('%s says what happened in a sentence', (error, sentence) => {
     expect(error.message).toBe(sentence)
