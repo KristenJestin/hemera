@@ -11,7 +11,12 @@ import type { Scope } from 'effect'
 import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { fromMessagePort, isConnectionClosed, makeClientProtocol, makeServerProtocol } from '../src/index.ts'
+import {
+  fromMessagePort,
+  isConnectionClosed,
+  makeClientProtocol,
+  makeServerProtocol,
+} from '../src/index.ts'
 
 class Refused extends Schema.TaggedError<Refused>()('Refused', { reason: Schema.String }) {}
 
@@ -39,7 +44,9 @@ const setup = Effect.gen(function* () {
   }
   const handlers = ServerGroup.toLayer({
     Greet: ({ name }) =>
-      name === '' ? Effect.fail(new Refused({ reason: 'empty name' })) : Effect.succeed(`hello ${name}`),
+      name === ''
+        ? Effect.fail(new Refused({ reason: 'empty name' }))
+        : Effect.succeed(`hello ${name}`),
     Count: ({ upTo }) => Stream.range(1, upTo),
     Hold: () =>
       Deferred.succeed(probes.holdStarted, undefined).pipe(
@@ -159,10 +166,14 @@ describe('A link over a MessagePort', () => {
       }),
     ))
 
-  test('a call that runs longer than 5 seconds completes normally', () =>
-    run(({ client }) =>
-      Effect.gen(function* () {
-        expect(yield* client.Slow({ millis: 6_000 })).toBe('done')
-      }),
-    ), 15_000)
+  test(
+    'a call that runs longer than 5 seconds completes normally',
+    () =>
+      run(({ client }) =>
+        Effect.gen(function* () {
+          expect(yield* client.Slow({ millis: 6_000 })).toBe('done')
+        }),
+      ),
+    15_000,
+  )
 })
