@@ -21,7 +21,7 @@ import {
   RestoreRefused,
   StorageFailed,
 } from '@hemera/ipc'
-import { Context, Effect, Layer, Predicate, Result, SubscriptionRef } from 'effect'
+import { Context, Effect, Layer, Predicate, Result, Stream, SubscriptionRef } from 'effect'
 import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
@@ -43,7 +43,9 @@ import {
   type ReconciliationStep,
 } from './reconciliation.ts'
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
-import { databaseLayer, refusedWhile } from './storage/database.ts'
+import { gitLayer } from './git.ts'
+import { type ProjectServices, repositoryStatusesLayer } from './repositories.ts'
+import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -75,6 +77,17 @@ export interface StartedProfile {
   readonly database: SubscriptionRef.SubscriptionRef<DatabaseStatus>
   /** The gate every automation passes; closed for good when the database was refused. */
   readonly gate: Effect.Effect<void>
+  /**
+   * Runs a call on the Projects and their repositories, the data folder's refusal said as a
+   * sentence; refused at once when the database was.
+   */
+  readonly use: <A, E>(
+    effect: Effect.Effect<A, E, ProjectServices>,
+  ) => Effect.Effect<A, Exclude<E, DatabaseError> | StorageFailed>
+  /** The same, for what is followed for as long as the caller listens. */
+  readonly follow: <A, E>(
+    stream: Stream.Stream<A, E, ProjectServices>,
+  ) => Stream.Stream<A, Exclude<E, DatabaseError> | StorageFailed>
 }
 
 const said = <E>(failure: E): string =>
@@ -93,6 +106,8 @@ const refusedProfile = (sentence: string): Effect.Effect<StartedProfile, never, 
       },
       database: yield* SubscriptionRef.make<DatabaseStatus>(DatabaseRefused.make({ sentence })),
       gate: Effect.never,
+      use: () => failed,
+      follow: () => Stream.fail(new StorageFailed({ sentence })),
     }
   })
 
@@ -125,6 +140,8 @@ export const startProfile = (
       parts.liveMissions ?? noLiveMissions,
       parts.restoreJournal ?? noRestoreJournal,
       Layer.succeed(ProfileHome, start),
+      gitLayer(),
+      repositoryStatusesLayer,
     )
     const opened = yield* Layer.build(layers).pipe(
       Effect.flatMap((context) =>
@@ -211,5 +228,18 @@ export const startProfile = (
           Effect.ensuring(publish()),
         ),
     }
-    return { calls, database, gate: gate.pass }
+
+    /** The data folder's refusal as a sentence; any other refusal as itself. */
+    const sentenced = <E>(failure: E): Exclude<E, DatabaseError> | StorageFailed => {
+      if (failure instanceof DatabaseError) return storageFailed(failure)
+      // SAFETY: the line above took every DatabaseError; what is left is the rest of E.
+      return failure as Exclude<E, DatabaseError>
+    }
+    return {
+      calls,
+      database,
+      gate: gate.pass,
+      use: (effect) => Effect.mapError(run(effect), sentenced),
+      follow: (stream) => Stream.mapError(Stream.provideContext(stream, context), sentenced),
+    }
   })

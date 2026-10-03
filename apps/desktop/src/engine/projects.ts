@@ -373,7 +373,8 @@ export const createProject = (asked: NewProject) =>
         }
       }),
     )
-    return yield* getProject(id)
+    // Written a moment ago: a Project that is not there now is a defect, not a refusal.
+    return yield* getProject(id).pipe(Effect.catchTag('UnknownProject', Effect.die))
   })
 
 export const updateProject = (edit: ProjectEdit) =>

@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import {
   BaseUnavailable,
   FetchedNow,
+  type GitMissing,
   LocalBranch,
   NotFetchedSince,
   Readable,
@@ -95,7 +96,7 @@ export const repositoryStatus = (
   id: string,
 ): Effect.Effect<
   RepositoryStatus,
-  DatabaseError | UnknownRepository | GitRefusal,
+  DatabaseError | UnknownRepository | GitMissing,
   ProjectServices
 > =>
   Effect.gen(function* () {

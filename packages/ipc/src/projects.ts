@@ -8,6 +8,10 @@
 
 import { InvalidBranchName, InvalidProjectName, InvalidRepositoryPath } from '@hemera/core/domain'
 import { Schema } from 'effect'
+import { Rpc, RpcGroup } from 'effect/rpc'
+
+import { EngineGone } from './gone.ts'
+import { StaleVersion, StorageFailed } from './profile.ts'
 
 export { InvalidBranchName, InvalidProjectName, InvalidRepositoryPath }
 
@@ -244,3 +248,109 @@ export class BaseUnavailable extends Schema.TaggedError<BaseUnavailable>()('Base
       : `${this.remote}/${this.branch} was never fetched and cannot be now: ${this.reason}`
   }
 }
+
+/** What every call on the Profile may fail with: the data folder, or an engine gone. */
+const always = [StorageFailed, EngineGone] as const
+/** What every edit may fail with besides: the record moved on, or is gone. */
+const edited = [...always, StaleVersion, UnknownProject] as const
+/** What a call that runs Git may fail with besides. */
+const git = [GitFailed, GitMissing, GitCut] as const
+
+const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Errors) =>
+  Schema.Union(errors)
+
+const projectId = { id: Schema.String }
+
+/**
+ * The Projects: their records, and the repositories a folder proposes. `changes` is each Project
+ * as a committed change left it, for as long as the caller listens.
+ */
+export const ProjectsRpcs = RpcGroup.make(
+  Rpc.make('projects.list', { success: Schema.Array(Project), error: failing(...always) }),
+  Rpc.make('projects.get', {
+    payload: projectId,
+    success: Project,
+    error: failing(...always, UnknownProject),
+  }),
+  Rpc.make('projects.create', {
+    payload: NewProject,
+    success: Project,
+    error: failing(...always, InvalidProjectName, InvalidFolder, InvalidRepositoryPath),
+  }),
+  Rpc.make('projects.update', {
+    payload: ProjectEdit,
+    success: Project,
+    error: failing(...edited, InvalidProjectName, InvalidFolder),
+  }),
+  /** The repositories at a folder and in its direct subfolders, relative to it. */
+  Rpc.make('projects.detectRepositories', {
+    payload: { folder: Schema.String },
+    success: Schema.Array(Schema.String),
+    error: failing(...always, InvalidFolder),
+  }),
+  Rpc.make('projects.setWorkspacesRoot', {
+    payload: WorkspacesRootEdit,
+    success: Project,
+    error: failing(...edited, InvalidFolder),
+  }),
+  Rpc.make('projects.setBranchPrefix', {
+    payload: BranchPrefixEdit,
+    success: Project,
+    error: failing(...edited, InvalidBranchName),
+  }),
+  Rpc.make('projects.changes', { success: Project, error: failing(...always), stream: true }),
+)
+
+/**
+ * The repositories of the Projects: their records, edited at their Project's version, and what Git
+ * says of them now. `changes` is each change of a repository's readability.
+ */
+export const RepositoriesRpcs = RpcGroup.make(
+  Rpc.make('repositories.add', {
+    payload: NewRepository,
+    success: Project,
+    error: failing(...edited, InvalidRepositoryPath),
+  }),
+  Rpc.make('repositories.remove', {
+    payload: RepositoryRemoval,
+    success: Project,
+    error: failing(...edited, UnknownRepository),
+  }),
+  Rpc.make('repositories.update', {
+    payload: RepositoryEdit,
+    success: Project,
+    error: failing(...edited, UnknownRepository, InvalidRepositoryPath),
+  }),
+  /** Readable or not, with Git's reason; a missing Git is refused as itself. */
+  Rpc.make('repositories.status', {
+    payload: projectId,
+    success: RepositoryStatus,
+    error: failing(...always, UnknownRepository, GitMissing),
+  }),
+  Rpc.make('repositories.remotes', {
+    payload: projectId,
+    success: Schema.Array(Remote),
+    error: failing(...always, UnknownRepository, ...git),
+  }),
+  Rpc.make('repositories.setRemote', {
+    payload: RemoteEdit,
+    success: Project,
+    error: failing(...edited, UnknownRepository, UnknownRemote, ...git),
+  }),
+  Rpc.make('repositories.setBaseBranch', {
+    payload: BaseBranchEdit,
+    success: Project,
+    error: failing(...edited, UnknownRepository, InvalidBranchName),
+  }),
+  /** The commit a piece of work starts from; the caller records it. */
+  Rpc.make('repositories.upToDateBase', {
+    payload: projectId,
+    success: UpToDateBase,
+    error: failing(...always, UnknownRepository, BaseUnavailable, ...git),
+  }),
+  Rpc.make('repositories.changes', {
+    success: RepositoryStatusChange,
+    error: failing(...always),
+    stream: true,
+  }),
+)

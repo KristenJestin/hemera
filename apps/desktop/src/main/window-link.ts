@@ -77,6 +77,77 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
     // A restore takes effect at the next start: once the engine has staged it, Hemera relaunches.
     'profile.restore': ({ folder }) =>
       restoreProfile(engine, application)(folder).pipe(observed('profile.restore', log)),
+    // The Projects and their repositories are the engine's alone: forwarded as they are.
+    'projects.list': () =>
+      engine['projects.list']().pipe(closedAs(gone), observed('projects.list', log)),
+    'projects.get': (request) =>
+      engine['projects.get'](request).pipe(closedAs(gone), observed('projects.get', log)),
+    'projects.create': (request) =>
+      engine['projects.create'](request).pipe(closedAs(gone), observed('projects.create', log)),
+    'projects.update': (request) =>
+      engine['projects.update'](request).pipe(closedAs(gone), observed('projects.update', log)),
+    'projects.detectRepositories': (request) =>
+      engine['projects.detectRepositories'](request).pipe(
+        closedAs(gone),
+        observed('projects.detectRepositories', log),
+      ),
+    'projects.setWorkspacesRoot': (request) =>
+      engine['projects.setWorkspacesRoot'](request).pipe(
+        closedAs(gone),
+        observed('projects.setWorkspacesRoot', log),
+      ),
+    'projects.setBranchPrefix': (request) =>
+      engine['projects.setBranchPrefix'](request).pipe(
+        closedAs(gone),
+        observed('projects.setBranchPrefix', log),
+      ),
+    'repositories.add': (request) =>
+      engine['repositories.add'](request).pipe(closedAs(gone), observed('repositories.add', log)),
+    'repositories.remove': (request) =>
+      engine['repositories.remove'](request).pipe(
+        closedAs(gone),
+        observed('repositories.remove', log),
+      ),
+    'repositories.update': (request) =>
+      engine['repositories.update'](request).pipe(
+        closedAs(gone),
+        observed('repositories.update', log),
+      ),
+    'repositories.status': (request) =>
+      engine['repositories.status'](request).pipe(
+        closedAs(gone),
+        observed('repositories.status', log),
+      ),
+    'repositories.remotes': (request) =>
+      engine['repositories.remotes'](request).pipe(
+        closedAs(gone),
+        observed('repositories.remotes', log),
+      ),
+    'repositories.setRemote': (request) =>
+      engine['repositories.setRemote'](request).pipe(
+        closedAs(gone),
+        observed('repositories.setRemote', log),
+      ),
+    'repositories.setBaseBranch': (request) =>
+      engine['repositories.setBaseBranch'](request).pipe(
+        closedAs(gone),
+        observed('repositories.setBaseBranch', log),
+      ),
+    'repositories.upToDateBase': (request) =>
+      engine['repositories.upToDateBase'](request).pipe(
+        closedAs(gone),
+        observed('repositories.upToDateBase', log),
+      ),
+    'projects.changes': () =>
+      engine['projects.changes']().pipe(
+        streamClosedAs(gone),
+        observedStream('projects.changes', log),
+      ),
+    'repositories.changes': () =>
+      engine['repositories.changes']().pipe(
+        streamClosedAs(gone),
+        observedStream('repositories.changes', log),
+      ),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
   })

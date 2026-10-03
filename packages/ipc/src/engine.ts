@@ -1,12 +1,13 @@
 /**
- * The engine's domain: its start, its status, the error every call waiting on it fails with once
- * it is gone, and the calls on the Profile it holds. Served by the engine to main, and by main to
- * the window, which forwards.
+ * The engine's domain: its start, its status, and the calls on the Profile it holds, the Projects
+ * and their repositories included. Served by the engine to main, and by main to the window, which
+ * forwards.
  */
 
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { EngineGone } from './gone.ts'
 import {
   AutomaticBackups,
   Preferences,
@@ -14,6 +15,7 @@ import {
   RestoreRefused,
   StorageFailed,
 } from './profile.ts'
+import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -63,13 +65,6 @@ export const EngineStatus = Schema.Struct({
 })
 export type EngineStatus = typeof EngineStatus.Type
 
-/** The engine is no longer there: every call that waited on it fails with this, at once. */
-export class EngineGone extends Schema.TaggedError<EngineGone>()('EngineGone', {}) {
-  override get message(): string {
-    return 'Hemera’s engine stopped.'
-  }
-}
-
 const ProfileFailed = Schema.Union([StorageFailed, EngineGone])
 
 export const EngineRpcs = RpcGroup.make(
@@ -97,4 +92,4 @@ export const EngineRpcs = RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([StorageFailed, RestoreRefused, EngineGone]),
   }),
-)
+).merge(ProjectsRpcs, RepositoriesRpcs)

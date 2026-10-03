@@ -48,6 +48,29 @@ const report: EnvironmentReport = {
   producedAt: '2026-10-03T00:00:00.000Z',
 }
 
+const unused = () => Effect.die('the window’s link is not asked for Projects here')
+
+/** The Projects, which no test of the window's link asks for. */
+const noProjects = {
+  'projects.list': unused,
+  'projects.get': unused,
+  'projects.create': unused,
+  'projects.update': unused,
+  'projects.detectRepositories': unused,
+  'projects.setWorkspacesRoot': unused,
+  'projects.setBranchPrefix': unused,
+  'projects.changes': () => Stream.die('the window’s link is not asked for Projects here'),
+  'repositories.add': unused,
+  'repositories.remove': unused,
+  'repositories.update': unused,
+  'repositories.status': unused,
+  'repositories.remotes': unused,
+  'repositories.setRemote': unused,
+  'repositories.setBaseBranch': unused,
+  'repositories.upToDateBase': unused,
+  'repositories.changes': () => Stream.die('the window’s link is not asked for Projects here'),
+}
+
 /** A main that answers as told, and says when the window stopped listening. */
 const main = async (engine: 'answers' | 'gone') => {
   const stopped = Deferred.makeUnsafe<void>()
@@ -68,6 +91,7 @@ const main = async (engine: 'answers' | 'gone') => {
     'profile.restore': () => Effect.void,
     'environment.report': () => Effect.succeed(report),
     'application.relaunch': () => Effect.void,
+    ...noProjects,
   })
   const program = Effect.gen(function* () {
     const server = yield* makeServerProtocol

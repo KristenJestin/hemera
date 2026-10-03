@@ -18,6 +18,7 @@ export {
   type ServerProtocol,
 } from './protocol.ts'
 export * from './engine.ts'
+export * from './gone.ts'
 export * from './profile.ts'
 export * from './application.ts'
 export * from './agents.ts'
