@@ -14,7 +14,7 @@ import { Effect } from 'effect'
 import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, nativeTheme, screen } from 'electron/main'
 
-import { openDiagnosticLog } from './diagnostic.ts'
+import { openDiagnosticLog, type Log } from './diagnostic.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
 import { applicationOrigin } from './origin.ts'
@@ -40,7 +40,7 @@ function isWebUrl(url: string): boolean {
   }
 }
 
-async function openWindow(): Promise<BrowserWindow> {
+async function openWindow(log: Log): Promise<BrowserWindow> {
   const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow(windowOptions(main, OPENING_COLORS[theme], process.env))
   const source = rendererSource()
@@ -50,6 +50,9 @@ async function openWindow(): Promise<BrowserWindow> {
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isWebUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
+  })
+  window.webContents.on('render-process-gone', (_, { reason, exitCode }) => {
+    log(`the page's process is gone (${reason}, code ${String(exitCode)})`)
   })
   window.webContents.on('will-navigate', (event) => {
     event.preventDefault()
@@ -87,7 +90,7 @@ const run = Effect.gen(function* () {
     log,
   )
   if (engine.probe !== undefined) yield* installProbe(engine.probe, engine.process, windows)
-  yield* Effect.promise(openWindow)
+  yield* Effect.promise(() => openWindow(log))
 
   if (process.argv.includes(REPORT_FLAG)) {
     process.stdout.write(`${JSON.stringify(yield* report)}\n`)
