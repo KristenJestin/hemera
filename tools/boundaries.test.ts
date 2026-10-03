@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { analyze, importsOf, refusalsOf } from './boundaries.ts'
+import { analyze, importsOf, refusalsOf, storageRefusalsOf } from './boundaries.ts'
 
 const repository = resolve(import.meta.dirname, '..')
 
@@ -37,5 +37,30 @@ describe('The shared packages stay free of Electron', () => {
 
   test('a module whose name only starts like Electron is not refused', () => {
     expect(refusalsOf('packages/ipc/src/link.ts', "import x from 'electron-store'\n")).toEqual([])
+  })
+})
+
+describe('The storage layer stays in the engine', () => {
+  test.each([
+    ['node:sqlite', "import { DatabaseSync } from 'node:sqlite'\n"],
+    ['Drizzle', "import { eq } from 'drizzle-orm'\n"],
+    [
+      'Drizzle, through one of its entry points',
+      "import { migrate } from 'drizzle-orm/migrator'\n",
+    ],
+    ['the Effect SQLite client', "import { SqliteClient } from '@effect/sql-sqlite-node'\n"],
+  ])('a file outside the engine that imports %s is refused', (_, source) => {
+    expect(storageRefusalsOf('apps/desktop/src/main/index.ts', source)).toHaveLength(1)
+    expect(storageRefusalsOf('packages/ipc/src/engine.ts', source)).toHaveLength(1)
+  })
+
+  test('the engine itself may import it', () => {
+    const source = "import { eq } from 'drizzle-orm'\nimport 'node:sqlite'\n"
+    expect(storageRefusalsOf('apps/desktop/src/engine/storage/database.ts', source)).toEqual([])
+  })
+
+  test('a folder that only starts like the engine is not the engine', () => {
+    const source = "import { eq } from 'drizzle-orm'\n"
+    expect(storageRefusalsOf('apps/desktop/src/engine-old/x.ts', source)).toHaveLength(1)
   })
 })
