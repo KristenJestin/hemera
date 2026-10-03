@@ -94,12 +94,13 @@ const withRecipe = (steps: (project: Project) => ReadonlyArray<RecipeStepDraft>)
 describe('A copy never overwrites an existing file', () => {
   test('a file the worktree already has is kept; one it lacks is copied from the main checkout', async () => {
     const api = join(main, 'api')
-    writeFileSync(join(api, 'settings.json'), 'committed\n')
+    // No line ending: a checkout that converts them on Windows keeps the same text.
+    writeFileSync(join(api, 'settings.json'), 'committed')
     git(api, 'add', 'settings.json')
     git(api, 'commit', '-q', '-m', 'settings')
     git(api, 'push', '-q', 'origin', DEFAULT_BASE_BRANCH)
     // The user's own checkout has changed it since: the Workspace keeps what Git gave it.
-    writeFileSync(join(api, 'settings.json'), 'local\n')
+    writeFileSync(join(api, 'settings.json'), 'local')
     mkdirSync(join(api, 'config'), { recursive: true })
     writeFileSync(join(api, 'config', 'local.json'), '{}\n')
 
@@ -116,7 +117,7 @@ describe('A copy never overwrites an existing file', () => {
 
     expect(workspace.preparation).toBe('ready')
     expect(readFileSync(join(workspace.folder, '.env'), 'utf8')).toBe('FROM_MAIN=1\n')
-    expect(readFileSync(join(workspace.folder, 'api', 'settings.json'), 'utf8')).toBe('committed\n')
+    expect(readFileSync(join(workspace.folder, 'api', 'settings.json'), 'utf8')).toBe('committed')
     expect(existsSync(join(workspace.folder, 'api', 'config', 'local.json'))).toBe(true)
   })
 })
