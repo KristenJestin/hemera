@@ -61,7 +61,7 @@ import { mutate } from './transaction.ts'
 const now = (): string => new Date().toISOString()
 
 /** A folder as the disk spells it: links followed, and on Windows the case it was made with. */
-function canonical(path: string): string {
+export function canonical(path: string): string {
   try {
     return realpathSync.native(path)
   } catch {
@@ -83,7 +83,7 @@ function whereItLeads(path: string): string {
 }
 
 /** Whether `path` is `folder` or below it. */
-function within(folder: string, path: string): boolean {
+export function within(folder: string, path: string): boolean {
   const below = relative(folder, path)
   return below === '' || !(below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below))
 }
@@ -243,7 +243,12 @@ type RepositoryChange = Partial<
  * Takes a Project to its next version, and refuses an edit made from an older one. The comparison
  * is the write itself: `WHERE id = ? AND version = ?` changes a row or does not.
  */
-const bump = (transaction: EngineTransaction, id: string, version: number, change: ProjectChange) =>
+export const bump = (
+  transaction: EngineTransaction,
+  id: string,
+  version: number,
+  change: ProjectChange,
+) =>
   Effect.gen(function* () {
     const written = yield* transaction
       .update(projects)

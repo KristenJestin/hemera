@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "5988af8f-e488-48b2-bfa6-c616576ac275",
-  "prevIds": [
-    "72f64e51-e88e-4de6-bc48-ac09ed4df74a"
-  ],
+  "prevIds": ["72f64e51-e88e-4de6-bc48-ac09ed4df74a"],
   "ddl": [
     {
       "name": "app_preferences",
@@ -757,13 +755,9 @@
       "table": "workspaces"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -772,13 +766,9 @@
       "table": "environment_variables"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -787,13 +777,9 @@
       "table": "environment_variables"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -802,13 +788,9 @@
       "table": "project_preparation_steps"
     },
     {
-      "columns": [
-        "repository_id"
-      ],
+      "columns": ["repository_id"],
       "tableTo": "project_repositories",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -817,13 +799,9 @@
       "table": "project_preparation_steps"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -832,13 +810,9 @@
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -847,13 +821,9 @@
       "table": "workspace_repositories"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -862,13 +832,9 @@
       "table": "workspace_steps"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -877,90 +843,70 @@
       "table": "workspaces"
     },
     {
-      "columns": [
-        "key"
-      ],
+      "columns": ["key"],
       "nameExplicit": false,
       "name": "app_preferences_pk",
       "table": "app_preferences",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "domain_events_pk",
       "table": "domain_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "environment_variables_pk",
       "table": "environment_variables",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "row"
-      ],
+      "columns": ["row"],
       "nameExplicit": false,
       "name": "profile_pk",
       "table": "profile",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_preparation_steps_pk",
       "table": "project_preparation_steps",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_repositories_pk",
       "table": "project_repositories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "projects_pk",
       "table": "projects",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspace_repositories_pk",
       "table": "workspace_repositories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspace_steps_pk",
       "table": "workspace_steps",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspaces_pk",
       "table": "workspaces",
@@ -1007,40 +953,28 @@
       "table": "environment_variables"
     },
     {
-      "columns": [
-        "project_id",
-        "path"
-      ],
+      "columns": ["project_id", "path"],
       "nameExplicit": true,
       "name": "repository_once_in_project",
       "entityType": "uniques",
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "workspace_id",
-        "repository_id"
-      ],
+      "columns": ["workspace_id", "repository_id"],
       "nameExplicit": true,
       "name": "repository_once_in_workspace",
       "entityType": "uniques",
       "table": "workspace_repositories"
     },
     {
-      "columns": [
-        "workspace_id",
-        "position"
-      ],
+      "columns": ["workspace_id", "position"],
       "nameExplicit": true,
       "name": "step_once_in_workspace",
       "entityType": "uniques",
       "table": "workspace_steps"
     },
     {
-      "columns": [
-        "project_id",
-        "name"
-      ],
+      "columns": ["project_id", "name"],
       "nameExplicit": true,
       "name": "workspace_name_once_in_project",
       "entityType": "uniques",
