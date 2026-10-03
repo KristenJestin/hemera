@@ -113,16 +113,18 @@ describe('The engine speaks to a program through an agents’ process main start
       }),
     ))
 
-  test('a killed agents’ process ends its stream with AgentsProcessGone', () =>
+  test('a killed agents’ process ends its stream with AgentsProcessGone once its exit is seen', () =>
     run(
       Effect.gen(function* () {
-        const { launch, kill } = yield* setup
+        const { launch, kill, engineLines } = yield* setup
         const agents = yield* launch(ECHO, [])
         const read = yield* Effect.forkChild(Stream.runDrain(agents.output))
         yield* agents.write('hello')
         yield* Effect.sleep(50)
         kill()
         expect(yield* Effect.flip(Fiber.join(read))).toBeInstanceOf(AgentsProcessGone)
+        // Seen before the stream ended, not after.
+        expect(engineLines).toContain(`agents' process for ${ECHO} exited with code 137`)
         expect(yield* agents.exited).toBe(137)
       }),
     ))

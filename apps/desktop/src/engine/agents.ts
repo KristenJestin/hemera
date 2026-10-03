@@ -3,7 +3,7 @@
  * port main hands over for that launch, and speaks to the program over it.
  *
  * The engine never forks anything itself. A process that ends, for whatever reason, ends its
- * streams with `AgentsProcessGone` and its exit code is written down.
+ * output with `AgentsProcessGone` once its exit code is known and written down.
  */
 
 import {
@@ -84,6 +84,8 @@ export const agentsLauncher = <P>(
         ),
         closedAs(() => new LaunchFailed({ reason: 'main closed the link' })),
         Effect.catch((failed) => Deferred.fail(started, failed)),
+        // A launch whose stream ends without an exit (main went away) has no code to give.
+        Effect.ensuring(Deferred.succeed(exited, -1)),
         Effect.forkScoped,
       )
 
@@ -100,7 +102,13 @@ export const agentsLauncher = <P>(
       )
       return {
         pid,
-        output: client['agent.output']().pipe(streamClosedAs(gone)),
+        // The stream ends once the exit is known, so whoever reads it to its end has seen it.
+        output: client['agent.output']().pipe(
+          streamClosedAs(gone),
+          Stream.catch((failed) =>
+            Stream.unwrap(Effect.as(Deferred.await(exited), Stream.fail(failed))),
+          ),
+        ),
         write: (line) => client['agent.write']({ line }).pipe(closedAs(gone)),
         end: client['agent.end']().pipe(closedAs(gone)),
         exited: Deferred.await(exited),
