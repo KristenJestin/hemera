@@ -50,7 +50,7 @@ const report: EnvironmentReport = {
 
 const unused = () => Effect.die('the window’s link is not asked for Projects here')
 
-/** The Projects, which no test of the window's link asks for. */
+/** The Projects and their Workspaces, which no test of the window's link asks for. */
 const noProjects = {
   'projects.list': unused,
   'projects.get': unused,
@@ -69,6 +69,21 @@ const noProjects = {
   'repositories.setBaseBranch': unused,
   'repositories.upToDateBase': unused,
   'repositories.changes': () => Stream.die('the window’s link is not asked for Projects here'),
+  'workspaces.create': unused,
+  'workspaces.get': unused,
+  'workspaces.list': unused,
+  'workspaces.status': unused,
+  'workspaces.prepare': unused,
+  'workspaces.resume': unused,
+  'workspaces.remove': unused,
+  'workspaces.changes': () => Stream.die('the window’s link is not asked for Projects here'),
+  'recipe.get': unused,
+  'recipe.save': unused,
+  'recipe.check': unused,
+  'variables.list': unused,
+  'variables.set': unused,
+  'variables.remove': unused,
+  'variables.reveal': unused,
 }
 
 /** A main that answers as told, and says when the window stopped listening. */

@@ -3,3 +3,4 @@
  * refused when it may not.
  */
 export * from './project.ts'
+export * from './workspace.ts'

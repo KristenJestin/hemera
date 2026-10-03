@@ -1,7 +1,7 @@
 /**
  * What the engine answers: its status (which version and channel, on which data folder, and
  * where the Profile's database stands), every change of it, and the calls on the Profile, its
- * Projects and their repositories included.
+ * Projects, their repositories and their Workspaces included.
  */
 
 import { EngineRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
@@ -31,6 +31,17 @@ import {
   repositoryStatus,
   upToDateBase,
 } from './repositories.ts'
+import { beginPreparation } from './preparation.ts'
+import { checkRecipe, getRecipe, saveRecipe } from './recipe.ts'
+import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
+import {
+  createWorkspace,
+  getWorkspace,
+  listWorkspaces,
+  removeWorkspace,
+  workspaceChanges,
+  workspaceStatus,
+} from './workspaces.ts'
 
 export const engineHandlers = (start: EngineStart, profile: StartedProfile, log: Log) => {
   const { dataFolder, channel, version } = start
@@ -88,5 +99,30 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(upToDateBase(id)).pipe(observed('repositories.upToDateBase', log)),
     'repositories.changes': () =>
       follow(repositoryChanges).pipe(observedStream('repositories.changes', log)),
+    'workspaces.create': (asked) =>
+      use(createWorkspace(asked)).pipe(observed('workspaces.create', log)),
+    'workspaces.get': ({ id }) => use(getWorkspace(id)).pipe(observed('workspaces.get', log)),
+    'workspaces.list': ({ projectId }) =>
+      use(listWorkspaces(projectId)).pipe(observed('workspaces.list', log)),
+    'workspaces.status': ({ projectId, workspaceId }) =>
+      use(workspaceStatus(projectId, workspaceId)).pipe(observed('workspaces.status', log)),
+    'workspaces.prepare': ({ id }) =>
+      use(beginPreparation(id, false)).pipe(observed('workspaces.prepare', log)),
+    'workspaces.resume': ({ id }) =>
+      use(beginPreparation(id, true)).pipe(observed('workspaces.resume', log)),
+    'workspaces.remove': ({ id }) =>
+      use(removeWorkspace(id)).pipe(observed('workspaces.remove', log)),
+    'workspaces.changes': () =>
+      follow(workspaceChanges).pipe(observedStream('workspaces.changes', log)),
+    'recipe.get': ({ projectId }) => use(getRecipe(projectId)).pipe(observed('recipe.get', log)),
+    'recipe.save': (edit) => use(saveRecipe(edit)).pipe(observed('recipe.save', log)),
+    'recipe.check': ({ projectId, steps }) =>
+      use(checkRecipe(projectId, steps)).pipe(observed('recipe.check', log)),
+    'variables.list': (scope) => use(listVariables(scope)).pipe(observed('variables.list', log)),
+    'variables.set': (edit) => use(setVariable(edit)).pipe(observed('variables.set', log)),
+    'variables.remove': (asked) =>
+      use(removeVariable(asked)).pipe(observed('variables.remove', log)),
+    'variables.reveal': (asked) =>
+      use(revealVariable(asked)).pipe(observed('variables.reveal', log)),
   })
 }
