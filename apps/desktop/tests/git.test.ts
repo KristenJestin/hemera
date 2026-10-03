@@ -153,6 +153,10 @@ describe('Every Git call declares its class, and its class sets its limit', () =
     ['worktreeAttach', 'work', (one: GitService) => one.worktreeAttach('/r', 'b', '/w')],
     ['worktreeRemove', 'work', (one: GitService) => one.worktreeRemove('/r', '/w')],
     ['worktreePrune', 'work', (one: GitService) => one.worktreePrune('/r')],
+    ['worktreeDetach', 'work', (one: GitService) => one.worktreeDetach('/r', '/w', 'abc')],
+    ['worktrees', 'read', (one: GitService) => one.worktrees('/r')],
+    ['changedFiles', 'read', (one: GitService) => one.changedFiles('/r')],
+    ['aheadBehind', 'read', (one: GitService) => one.aheadBehind('/r', 'abc')],
   ] as const)('%s runs as a %s', async (_, kind, call) => {
     expect(await classesOf((one: GitService) => Effect.asVoid(call(one)))).toEqual([kind])
   })
@@ -290,5 +294,48 @@ describe('A worktree is added, attached and removed with the machine’s git', (
     expect(seen.kept).toContain('atlas/login')
     expect(seen.attached.branch).toBe('atlas/login')
     expect(seen.listed).not.toContain('trees')
+  })
+})
+
+describe('A Workspace’s worktrees are read with the machine’s git', () => {
+  test('a detached worktree is at the commit asked, and listed until it is removed', async () => {
+    const api = repository(join(folder, 'api'))
+    const first = git(api, 'rev-parse', 'HEAD')
+    git(api, 'commit', '-q', '--allow-empty', '-m', 'second')
+    const tree = join(folder, 'probe', 'api')
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        yield* one.worktreeDetach(api, tree, first)
+        const status = yield* one.status(tree)
+        const listed = yield* one.worktrees(api)
+        yield* one.worktreeRemove(api, tree)
+        return { status, listed, after: yield* one.worktrees(api) }
+      }),
+    )
+    expect(seen.status).toEqual({ branch: null, commit: first, dirty: false })
+    expect(seen.listed).toHaveLength(2)
+    expect(seen.listed.some((path) => path.endsWith('api') && path.includes('probe'))).toBe(true)
+    expect(seen.after).toHaveLength(1)
+  })
+
+  test('the files changed are named, tracked and untracked', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    git(api, 'add', 'tracked.txt')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    writeFileSync(join(api, 'tracked.txt'), 'two\n')
+    writeFileSync(join(api, 'new file.txt'), 'new\n')
+    const changed = await asked(Git.use((one) => one.changedFiles(api)))
+    expect([...changed].toSorted()).toEqual(['new file.txt', 'tracked.txt'])
+  })
+
+  test('ahead and behind are counted against the base commit', async () => {
+    const api = repository(join(folder, 'api'))
+    const base = git(api, 'rev-parse', 'HEAD')
+    git(api, 'commit', '-q', '--allow-empty', '-m', 'mine')
+    git(api, 'commit', '-q', '--allow-empty', '-m', 'mine again')
+    const counted = await asked(Git.use((one) => one.aheadBehind(api, base)))
+    expect(counted).toEqual({ ahead: 2, behind: 0 })
   })
 })

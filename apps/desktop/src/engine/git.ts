@@ -175,6 +175,12 @@ export interface GitBranches {
   readonly head: { readonly branch: string | null; readonly commit: string } | null
 }
 
+/** How far a worktree's HEAD has moved from the commit it was made from. */
+export interface AheadBehind {
+  readonly ahead: number
+  readonly behind: number
+}
+
 export interface GitRemote {
   readonly name: string
   readonly fetchUrl: string
@@ -216,6 +222,18 @@ export interface GitService {
   readonly worktreeRemove: (folder: string, path: string) => Effect.Effect<void, GitRefusal>
   /** Forgets the worktrees whose folder is gone. */
   readonly worktreePrune: (folder: string) => Effect.Effect<void, GitRefusal>
+  /** A worktree at `path` on a detached HEAD at `commit`: no branch is made. */
+  readonly worktreeDetach: (
+    folder: string,
+    path: string,
+    commit: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /** The folders of a repository's worktrees, its own first, as Git lists them. */
+  readonly worktrees: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
+  /** The files a removal would lose: changed, staged, unmerged or untracked, relative to it. */
+  readonly changedFiles: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
+  /** How many commits HEAD has that `base` has not, and the other way round. */
+  readonly aheadBehind: (folder: string, base: string) => Effect.Effect<AheadBehind, GitRefusal>
 }
 
 export class Git extends Context.Service<Git, GitService>()('Git') {}
@@ -274,6 +292,34 @@ export function remotesOf(printed: string): ReadonlyArray<GitRemote> {
   return [...found].map(([name, { fetchUrl, pushUrl }]) => ({ name, fetchUrl, pushUrl }))
 }
 
+/** What `git worktree list --porcelain -z` printed: the folder of each worktree, in Git's order. */
+export function worktreesOf(printed: string): ReadonlyArray<string> {
+  return printed
+    .split('\0')
+    .filter((field) => field.startsWith('worktree '))
+    .map((field) => field.slice('worktree '.length))
+}
+
+/**
+ * What `git status --porcelain=v1 -z` printed: one entry per file, its two status letters, a
+ * space and its path. With `--no-renames` no entry carries a second path.
+ */
+export function changedFilesOf(printed: string): ReadonlyArray<string> {
+  return printed
+    .split('\0')
+    .filter((entry) => entry.length > 3)
+    .map((entry) => entry.slice(3))
+}
+
+/** What `git rev-list --left-right --count <base>...HEAD` printed: behind, then ahead. */
+export function aheadBehindOf(printed: string): AheadBehind {
+  const [behind = 0, ahead = 0] = printed
+    .trim()
+    .split(/\s+/)
+    .map((count) => Number(count) || 0)
+  return { ahead, behind }
+}
+
 /** Git through a spawn: the machine's own `git` unless a test hands another. */
 export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git> =>
   Layer.succeed(Git, {
@@ -329,4 +375,22 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
     worktreeRemove: (folder, path) =>
       run(folder, ['worktree', 'remove', path], 'work').pipe(Effect.asVoid),
     worktreePrune: (folder) => run(folder, ['worktree', 'prune'], 'work').pipe(Effect.asVoid),
+    worktreeDetach: (folder, path, commit) =>
+      run(folder, ['worktree', 'add', '--quiet', '--detach', path, commit], 'work').pipe(
+        Effect.asVoid,
+      ),
+    worktrees: (folder) =>
+      run(folder, ['worktree', 'list', '--porcelain', '-z'], 'read').pipe(Effect.map(worktreesOf)),
+    changedFiles: (folder) =>
+      run(
+        folder,
+        ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--no-renames'],
+        'read',
+      ).pipe(Effect.map(changedFilesOf)),
+    aheadBehind: (folder, base) =>
+      run(
+        folder,
+        ['rev-list', '--left-right', '--count', '--end-of-options', `${base}...HEAD`],
+        'read',
+      ).pipe(Effect.map(aheadBehindOf)),
   })
