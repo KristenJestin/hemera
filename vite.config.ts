@@ -4,6 +4,7 @@ import { defineConfig } from 'vite-plus'
 const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**', '**/dist/**']
 /** Vendored lint rules keep their upstream style so a resync stays a readable diff. */
 const VENDORED = ['tools/oxlint/**']
+const ZOD = 'No zod in Hemera: validate with Effect `Schema` (`import { Schema } from "effect"`).'
 
 export default defineConfig({
   lint: {
@@ -32,6 +33,15 @@ export default defineConfig({
       'typescript/no-explicit-any': 'error',
       'typescript/consistent-type-imports': 'error',
       'import/no-cycle': 'error',
+      // Effect `Schema` validates every value: one schema decodes and encodes, its errors and
+      // classes cross processes, and JSON Schemas, forms and property tests derive from it.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'zod', message: ZOD }],
+          patterns: [{ group: ['zod/*'], message: ZOD }],
+        },
+      ],
       'shadcn/no-raw-colors': 'error',
       'shadcn/no-arbitrary-values': 'error',
       'shadcn/no-inline-styles': 'error',
