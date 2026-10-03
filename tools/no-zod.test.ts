@@ -22,7 +22,12 @@ describe('zod is forbidden', () => {
         expect(result.status).not.toBe(0)
         expect(output).toContain('deliberate-zod-import.ts')
         expect(output).toContain('no-restricted-imports')
-        expect(output).toContain('Effect `Schema`')
+        // The report format chosen on CI drops the help line; the JSON report always carries it.
+        const report = spawnSync(
+          `pnpm exec vp lint --format json ${folder}/deliberate-zod-import.ts`,
+          { cwd: repository, encoding: 'utf8', shell: true },
+        )
+        expect(report.stdout).toContain('"help": "No zod in Hemera: validate with Effect `Schema`')
       } finally {
         rmSync(path, { force: true })
       }
