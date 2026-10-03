@@ -10,6 +10,7 @@
  * transaction is rolled back rather than held open on the world.
  */
 
+import { StaleVersion } from '@hemera/ipc'
 import { Context, Effect, Predicate, Schema, Semaphore } from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
@@ -21,19 +22,8 @@ import {
   refusedWhile,
 } from './storage/database.ts'
 
-/**
- * The change was made against a version of the record that is no longer the current one.
- * Refused rather than merged: the second writer would lose a change nobody was told about.
- */
-export class StaleVersion extends Schema.TaggedError<StaleVersion>()('StaleVersion', {
-  entity: Schema.String,
-  id: Schema.String,
-  expected: Schema.Number,
-}) {
-  override get message(): string {
-    return `This ${this.entity} changed elsewhere; reopen it and try again.`
-  }
-}
+/** Defined with the links, so a refused edit reaches a screen as itself. */
+export { StaleVersion }
 
 /** Something that leaves the database was asked for while a transaction was open. */
 export class SideEffectInTransaction extends Schema.TaggedError<SideEffectInTransaction>()(
