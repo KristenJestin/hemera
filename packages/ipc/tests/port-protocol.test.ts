@@ -166,6 +166,26 @@ describe('A link over a MessagePort', () => {
       }),
     ))
 
+  test('interrupting a stream whose items are still arriving holds back no other answer', () =>
+    run(({ client }) =>
+      Effect.gen(function* () {
+        // The smallest interleaving the property test below found: a stream of more items than
+        // the caller buffers, interrupted while the calls beside it wait for their answers.
+        const interrupted = yield* Effect.forkChild(Stream.runCollect(client.Count({ upTo: 17 })))
+        yield* Effect.yieldNow
+        const beside = yield* Effect.forkChild(Stream.runCollect(client.Count({ upTo: 1 })))
+        yield* Effect.yieldNow
+        const first = yield* Effect.forkChild(client.Greet({ name: 'first' }))
+        yield* Effect.yieldNow
+        const second = yield* Effect.forkChild(client.Greet({ name: 'second' }))
+        yield* Effect.yieldNow
+        yield* Fiber.interrupt(interrupted)
+        expect(yield* within(Fiber.join(beside), 'the stream beside it')).toEqual([1])
+        expect(yield* within(Fiber.join(first), 'the first call')).toBe('hello first')
+        expect(yield* within(Fiber.join(second), 'the second call')).toBe('hello second')
+      }),
+    ))
+
   test(
     'a call that runs longer than 5 seconds completes normally',
     () =>
