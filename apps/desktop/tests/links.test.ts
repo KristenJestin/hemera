@@ -13,6 +13,7 @@ import {
   makeServerProtocol,
   type EngineStart,
   type EnvironmentReport,
+  WindowRpcs,
 } from '@hemera/ipc'
 import { Effect, Fiber, Option, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -20,7 +21,7 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { engineHandlers } from '../src/engine/serve.ts'
-import { WindowRpcs, windowHandlers } from '../src/main/window-link.ts'
+import { windowHandlers } from '../src/main/window-link.ts'
 
 const start: EngineStart = { dataFolder: '/data', channel: 'dev', version: '1.0.0' }
 

@@ -20,3 +20,4 @@ export {
 export * from './engine.ts'
 export * from './application.ts'
 export * from './agents.ts'
+export * from './window.ts'
