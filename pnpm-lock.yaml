@@ -212,6 +212,9 @@ importers:
       '@effect/sql-sqlite-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@hemera/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@hemera/ipc':
         specifier: workspace:*
         version: link:../../packages/ipc
@@ -269,6 +272,9 @@ importers:
 
   packages/ipc:
     dependencies:
+      '@hemera/core':
+        specifier: workspace:*
+        version: link:../core
       effect:
         specifier: 4.0.0
         version: 4.0.0

@@ -1,0 +1,332 @@
+/**
+ * The machine's `git`, and what Hemera asks of it.
+ *
+ * No library: the user's own `git` is the one whose configuration, hooks and credentials they
+ * already trust, and only it makes a worktree. It is spawned with its arguments and never through
+ * a shell, always with `-C <folder>` rather than in that folder, so a folder that is not there is
+ * refused by Git in its own words and a spawn failing with `ENOENT` can only mean that the program
+ * is not on the PATH.
+ *
+ * Git never blocks the application:
+ * - every call declares its class, and its class sets its limit: a read is given 30 seconds, work
+ *   (a worktree made, removed or pruned, anything that walks the whole tree) 30 minutes;
+ * - a command cut at its limit, or abandoned, is killed and waited for until it has exited: on
+ *   Windows a folder a live process stands in cannot be removed (EPERM);
+ * - what it prints is read up to 32 MB;
+ * - nothing waits on a prompt: `GIT_TERMINAL_PROMPT=0`, so a fetch that would ask for credentials
+ *   fails at once;
+ * - never inside a database transaction.
+ */
+
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+
+import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
+import { Context, Effect, Layer, Option } from 'effect'
+
+import { outsideTransaction } from './transaction.ts'
+
+/** A read (status, rev-parse, remote, the fetch of one branch, log), or work on the tree. */
+export type CallClass = 'read' | 'work'
+
+/** How long each class of call may run before Hemera stops it, in milliseconds. */
+export const LIMITS: Readonly<Record<CallClass, number>> = {
+  read: 30_000,
+  work: 30 * 60_000,
+}
+
+/** How much of what a command prints is read before it is cut: a long status, not an endless one. */
+export const OUTPUT_LIMIT = 32 * 1024 * 1024
+
+export type GitRefusal = GitFailed | GitMissing | GitCut
+
+/** The program run as Git, and what goes before its arguments. */
+export interface GitProgram {
+  readonly command: string
+  readonly leading: ReadonlyArray<string>
+}
+
+/** The machine's own `git`, found on the PATH. */
+export const SYSTEM_GIT: GitProgram = { command: 'git', leading: [] }
+
+/** Runs one command in `folder` and answers what it printed. */
+export type GitSpawn = (
+  folder: string,
+  args: ReadonlyArray<string>,
+  kind: CallClass,
+) => Effect.Effect<string, GitRefusal>
+
+/**
+ * Stops a command and everything it started: `git fetch` runs a transport (ssh, a remote
+ * helper) that would otherwise outlive it, holding the folder. On Windows the tree is ended by
+ * `taskkill`; elsewhere the command leads a process group of its own, and the group is ended.
+ */
+function end(child: ChildProcess): void {
+  if (child.pid === undefined) return
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+    return
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch {
+    child.kill('SIGKILL')
+  }
+}
+
+const exited = (child: ChildProcess): boolean =>
+  child.pid === undefined || child.exitCode !== null || child.signalCode !== null
+
+/**
+ * The machine's spawn: a child with its arguments and no shell. Abandoned (interrupted, or cut at
+ * its limit), it is ended, and the interruption returns once it has exited, not once it was told
+ * to go.
+ */
+export const spawnGit =
+  (program: GitProgram): GitSpawn =>
+  (folder, args, kind) => {
+    const run = Effect.callback<string, GitRefusal>((resume) => {
+      const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+      })
+      const out: Buffer[] = []
+      const err: Buffer[] = []
+      let printed = 0
+      let settled = false
+      const settle = (answer: Effect.Effect<string, GitRefusal>) => {
+        if (settled) return
+        settled = true
+        resume(answer)
+      }
+      child.stdout.on('data', (chunk: Buffer) => {
+        printed += chunk.length
+        if (printed > OUTPUT_LIMIT) {
+          end(child)
+          settle(
+            Effect.fail(
+              new GitCut({
+                args: [...args],
+                folder,
+                limit: 'output',
+                seconds: LIMITS[kind] / 1000,
+              }),
+            ),
+          )
+          return
+        }
+        out.push(chunk)
+      })
+      child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
+      child.once('error', (failure: NodeJS.ErrnoException) =>
+        settle(
+          failure.code === 'ENOENT'
+            ? Effect.fail(new GitMissing({ program: program.command }))
+            : Effect.fail(new GitFailed({ args: [...args], folder, stderr: failure.message })),
+        ),
+      )
+      child.once('close', (code) =>
+        settle(
+          code === 0
+            ? Effect.succeed(Buffer.concat(out).toString('utf8'))
+            : Effect.fail(
+                new GitFailed({
+                  args: [...args],
+                  folder,
+                  stderr: Buffer.concat(err).toString('utf8'),
+                }),
+              ),
+        ),
+      )
+      return Effect.callback<void>((gone) => {
+        if (exited(child)) return gone(Effect.void)
+        child.once('exit', () => gone(Effect.void))
+        end(child)
+      })
+    })
+    return outsideTransaction(`run git ${args.join(' ')}`, run).pipe(
+      Effect.catchTag('SideEffectInTransaction', (refused) => Effect.die(refused)),
+      Effect.timeoutOrElse({
+        duration: LIMITS[kind],
+        orElse: () =>
+          Effect.fail(
+            new GitCut({ args: [...args], folder, limit: 'time', seconds: LIMITS[kind] / 1000 }),
+          ),
+      }),
+    )
+  }
+
+/** A repository as `git status` reads it. */
+export interface GitStatus {
+  /** The branch checked out, or null when HEAD is detached. */
+  readonly branch: string | null
+  /** The commit checked out, or null in a repository with no commit yet. */
+  readonly commit: string | null
+  /** Whether anything is staged, changed, unmerged or untracked. */
+  readonly dirty: boolean
+}
+
+/** The local branches of a repository, and what HEAD is on. */
+export interface GitBranches {
+  /** In Git's order of their names. */
+  readonly branches: ReadonlyArray<string>
+  /** The branch checked out (null when detached) and its commit; null with no commit yet. */
+  readonly head: { readonly branch: string | null; readonly commit: string } | null
+}
+
+export interface GitRemote {
+  readonly name: string
+  readonly fetchUrl: string
+  readonly pushUrl: string
+}
+
+export interface GitService {
+  readonly status: (folder: string) => Effect.Effect<GitStatus, GitRefusal>
+  readonly branches: (folder: string) => Effect.Effect<GitBranches, GitRefusal>
+  readonly remotes: (folder: string) => Effect.Effect<ReadonlyArray<GitRemote>, GitRefusal>
+  /**
+   * Fetches one branch of a remote into its tracking ref, `refs/remotes/<remote>/<branch>`, and
+   * nothing else: no local branch and no checkout is touched.
+   */
+  readonly fetchBranch: (
+    folder: string,
+    remote: string,
+    branch: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /** The commit a full ref points at, or none when the ref does not exist. */
+  readonly commitOf: (
+    folder: string,
+    ref: string,
+  ) => Effect.Effect<Option.Option<string>, GitRefusal>
+  /** A worktree at `path` on a new branch made from `base`. */
+  readonly worktreeAdd: (
+    folder: string,
+    branch: string,
+    path: string,
+    base: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /** A worktree at `path` on a branch that already exists. */
+  readonly worktreeAttach: (
+    folder: string,
+    branch: string,
+    path: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /** Removes a worktree, never with `--force`: uncommitted changes stop it, in Git's words. */
+  readonly worktreeRemove: (folder: string, path: string) => Effect.Effect<void, GitRefusal>
+  /** Forgets the worktrees whose folder is gone. */
+  readonly worktreePrune: (folder: string) => Effect.Effect<void, GitRefusal>
+}
+
+export class Git extends Context.Service<Git, GitService>()('Git') {}
+
+/**
+ * What `git status --porcelain=v2 --branch` printed. Any line that is not a header is an entry,
+ * and an entry is a change: staged, changed, unmerged or untracked.
+ */
+export function statusOf(printed: string): GitStatus {
+  let branch: string | null = null
+  let commit: string | null = null
+  let dirty = false
+  for (const line of printed.split('\n')) {
+    if (line.startsWith('# branch.head ')) {
+      const head = line.slice('# branch.head '.length)
+      branch = head === '(detached)' ? null : head
+    } else if (line.startsWith('# branch.oid ')) {
+      const oid = line.slice('# branch.oid '.length)
+      commit = oid === '(initial)' ? null : oid
+    } else if (line !== '' && !line.startsWith('#')) dirty = true
+  }
+  return { branch, commit, dirty }
+}
+
+/**
+ * What `git branch --format` printed, one line per branch: the HEAD mark, the full ref, the
+ * short name and the commit, separated by NUL. Git's line for a detached HEAD is told apart by its
+ * ref, which is none under `refs/heads/`; the sentence it prints there is translated and never read.
+ */
+export function branchesOf(printed: string): GitBranches {
+  const branches: string[] = []
+  let head: GitBranches['head'] = null
+  for (const line of printed.split('\n')) {
+    if (line.trim() === '') continue
+    const [mark = '', ref = '', name = '', commit = ''] = line.split('\0')
+    if (ref.startsWith('refs/heads/')) {
+      branches.push(name)
+      if (mark === '*') head = { branch: name, commit }
+    } else if (mark === '*') head = { branch: null, commit }
+  }
+  return { branches, head }
+}
+
+/** What `git remote -v` printed: a fetch line and a push line per remote, in Git's order. */
+export function remotesOf(printed: string): ReadonlyArray<GitRemote> {
+  const found = new Map<string, { fetchUrl: string; pushUrl: string }>()
+  for (const line of printed.split('\n')) {
+    const match = /^(\S+)\t(.*) \((fetch|push)\)$/.exec(line.trimEnd())
+    if (match === null) continue
+    const [, name = '', url = '', direction] = match
+    const remote = found.get(name) ?? { fetchUrl: url, pushUrl: url }
+    if (direction === 'fetch') remote.fetchUrl = url
+    else remote.pushUrl = url
+    found.set(name, remote)
+  }
+  return [...found].map(([name, { fetchUrl, pushUrl }]) => ({ name, fetchUrl, pushUrl }))
+}
+
+/** Git through a spawn: the machine's own `git` unless a test hands another. */
+export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git> =>
+  Layer.succeed(Git, {
+    status: (folder) =>
+      run(folder, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch'], 'read').pipe(
+        Effect.map(statusOf),
+      ),
+    // `branch.sort` is pinned so the order is Git's own whatever the user's configuration says.
+    branches: (folder) =>
+      run(
+        folder,
+        [
+          '--no-optional-locks',
+          '-c',
+          'branch.sort=refname',
+          'branch',
+          '--format=%(HEAD)%00%(refname)%00%(refname:short)%00%(objectname)',
+        ],
+        'read',
+      ).pipe(Effect.map(branchesOf)),
+    remotes: (folder) => run(folder, ['remote', '-v'], 'read').pipe(Effect.map(remotesOf)),
+    fetchBranch: (folder, remote, branch) =>
+      run(
+        folder,
+        [
+          'fetch',
+          '--quiet',
+          '--no-tags',
+          '--end-of-options',
+          remote,
+          `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+        ],
+        'read',
+      ).pipe(Effect.asVoid),
+    // `--quiet` answers a ref that does not exist with nothing and a failure, which is an answer.
+    commitOf: (folder, ref) =>
+      run(
+        folder,
+        ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`],
+        'read',
+      ).pipe(
+        Effect.map((printed) => Option.some(printed.trim())),
+        Effect.catchTag('GitFailed', (refused) =>
+          refused.stderr.trim() === '' ? Effect.succeed(Option.none()) : Effect.fail(refused),
+        ),
+      ),
+    worktreeAdd: (folder, branch, path, base) =>
+      run(folder, ['worktree', 'add', '--quiet', '-b', branch, path, base], 'work').pipe(
+        Effect.asVoid,
+      ),
+    worktreeAttach: (folder, branch, path) =>
+      run(folder, ['worktree', 'add', '--quiet', path, branch], 'work').pipe(Effect.asVoid),
+    worktreeRemove: (folder, path) =>
+      run(folder, ['worktree', 'remove', path], 'work').pipe(Effect.asVoid),
+    worktreePrune: (folder) => run(folder, ['worktree', 'prune'], 'work').pipe(Effect.asVoid),
+  })
