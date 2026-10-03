@@ -43,7 +43,7 @@ import {
   type ReconciliationStep,
 } from './reconciliation.ts'
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
-import { databaseLayer } from './storage/database.ts'
+import { databaseLayer, refusedWhile } from './storage/database.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -133,6 +133,9 @@ export const startProfile = (
           Effect.map((standing) => ({ context, standing })),
         ),
       ),
+      // Whatever the database or the driver throws is a data folder that was not opened, said as
+      // such, rather than an engine that dies before it serves anything.
+      Effect.catchDefect((defect) => Effect.fail(refusedWhile('opening it')(defect))),
       Effect.result,
     )
     if (Result.isFailure(opened)) {

@@ -28,6 +28,14 @@ import { serveWindows } from './window-ports.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
+/**
+ * The migrations this build carries, beside its bundles. Resolved from this file rather than from
+ * `app.getAppPath()`: both agree in a package and in a development run, and only this one is
+ * still right when Electron is pointed straight at the built entry point, as the end-to-end
+ * suite does.
+ */
+const MIGRATIONS = join(main, '..', '..', 'drizzle')
+
 /** Asked for on the command line: start as usual, say what this machine is, and leave. */
 const REPORT_FLAG = '--report'
 
@@ -78,8 +86,12 @@ const run = Effect.gen(function* () {
   nativeTheme.themeSource = readSidecar(dataFolder)?.theme ?? 'system'
 
   const underSuite = headless(process.env)
-  const migrations = join(app.getAppPath(), 'drizzle')
-  const engine = yield* startEngine(main, { dataFolder, migrations, ...identity }, log, underSuite)
+  const engine = yield* startEngine(
+    main,
+    { dataFolder, migrations: MIGRATIONS, ...identity },
+    log,
+    underSuite,
+  )
 
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
   const application: Application = {

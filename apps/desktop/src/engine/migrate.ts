@@ -76,6 +76,18 @@ export function carriedMigrations(migrationsFolder: string): ReadonlyArray<Migra
   return readMigrationFiles({ migrationsFolder }).map(({ name, hash }) => ({ name, hash }))
 }
 
+/** The same, as an effect: a build that cannot read its own migrations opens nothing. */
+const readCarried = (migrationsFolder: string) =>
+  Effect.try({
+    try: () => carriedMigrations(migrationsFolder),
+    catch: (cause) =>
+      new MigrationFailed({
+        migrations: [],
+        backup: null,
+        reason: `the migrations of this build could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      }),
+  })
+
 /**
  * Where a Profile stands, compared by hash rather than by name: a migration renamed is the same
  * migration, and one edited after it was applied is not.
@@ -194,7 +206,7 @@ const recordOpening = (version: string, opened: Opened, existing: { id: string }
  */
 export const openProfile = (dataFolder: string, migrationsFolder: string, version: string) =>
   Effect.gen(function* () {
-    const carried = carriedMigrations(migrationsFolder)
+    const carried = yield* readCarried(migrationsFolder)
     const applied = yield* appliedMigrations
     const standing = standingOf(carried, applied)
 
