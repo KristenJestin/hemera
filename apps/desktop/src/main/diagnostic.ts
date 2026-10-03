@@ -10,6 +10,8 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { Cause, Effect, Exit, Option, Stream } from 'effect'
+
 /** Where a line goes. */
 export type Log = (line: string) => void
 
@@ -29,4 +31,39 @@ export function openDiagnosticLog(directory: string, source: DiagnosticSource): 
   return (line) => {
     appendFileSync(file, `${new Date().toISOString()} [${source}] ${line}\n`)
   }
+}
+
+/** What a line says about a failure: its sentence, never a stack or a JSON dump. */
+const said = <E>(failure: E): string =>
+  failure instanceof Error && failure.message !== '' ? failure.message : String(failure)
+
+/**
+ * A call on a link, with its failure or its interruption written down under the RPC's name. A
+ * call that is interrupted is not a failure, but it is the proof that the interruption reached
+ * the handler, which is what a window that reloads is owed.
+ */
+export const observed =
+  (rpc: string, log: Log) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.onExit(self, (exit) => Effect.sync(() => logExit(rpc, log, exit)))
+
+/**
+ * `observed`, for a stream, whose end is written down too. A stream served over a link sees the
+ * caller who stops listening as its own end rather than as an interruption (Effect 4.0.0), so
+ * for a stream that never ends by itself, `ended` is the caller leaving.
+ */
+export const observedStream =
+  (rpc: string, log: Log) =>
+  <A, E, R>(self: Stream.Stream<A, E, R>): Stream.Stream<A, E, R> =>
+    Stream.onExit(self, (exit) =>
+      Effect.sync(() => (Exit.isSuccess(exit) ? log(`${rpc}: ended`) : logExit(rpc, log, exit))),
+    )
+
+const logExit = <A, E>(rpc: string, log: Log, exit: Exit.Exit<A, E>): void => {
+  if (Exit.isSuccess(exit)) return
+  if (Cause.hasInterruptsOnly(exit.cause)) return log(`${rpc}: interrupted`)
+  const failure = Cause.findErrorOption(exit.cause)
+  log(
+    `${rpc}: failed: ${Option.isSome(failure) ? said(failure.value) : Cause.pretty(exit.cause).split('\n')[0]}`,
+  )
 }

@@ -41,7 +41,7 @@ describe('The diagnostic log', () => {
     expect(lines).toEqual(['engine.status: failed: Hemera’s engine stopped.'])
   })
 
-  test('an interrupted stream is written down; a successful call is not', async () => {
+  test('an interrupted stream and the end of one are written down; a successful call is not', async () => {
     const lines: string[] = []
     const log = (line: string) => lines.push(line)
     await Effect.runPromise(
@@ -52,8 +52,9 @@ describe('The diagnostic log', () => {
         )
         yield* Effect.sleep(10)
         yield* Fiber.interrupt(fiber)
+        yield* Stream.runDrain(Stream.make(1).pipe(observedStream('engine.statusChanges', log)))
       }),
     )
-    expect(lines).toEqual(['engine.statusChanges: interrupted'])
+    expect(lines).toEqual(['engine.statusChanges: interrupted', 'engine.statusChanges: ended'])
   })
 })

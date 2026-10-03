@@ -14,7 +14,7 @@ import {
   type EngineStart,
   type EnvironmentReport,
 } from '@hemera/ipc'
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Option, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -108,7 +108,7 @@ describe('The window reaches the engine through main', () => {
         const { window } = yield* chain
         expect(yield* window['engine.status']()).toEqual({ ready: true, ...start })
         const first = yield* Stream.runHead(window['engine.statusChanges']())
-        expect(first).toMatchObject({ _tag: 'Some', value: { ready: true } })
+        expect(first).toEqual(Option.some({ ready: true, ...start }))
       }),
     ))
 
@@ -120,7 +120,8 @@ describe('The window reaches the engine through main', () => {
         yield* Effect.sleep(50)
         windowEnd.close()
         yield* eventually(
-          () => engineLines.includes('engine.statusChanges: interrupted'),
+          () =>
+            engineLines.some((line) => /^engine\.statusChanges: (ended|interrupted)$/.test(line)),
           'the engine’s handler interrupted',
         )
       }),
