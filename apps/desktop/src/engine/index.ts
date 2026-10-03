@@ -1,6 +1,6 @@
 /**
- * The engine: the utility process that will hold the database, the agents and every business
- * rule. For now it serves its links and nothing else.
+ * The engine: the utility process that holds the database, and will hold the agents and every
+ * business rule.
  *
  * Main posts one start message on this process's port before anything else: the start itself,
  * typed and decoded, with the ports of the engine's links. The engine serves its own group on the
@@ -28,7 +28,15 @@ import { headless } from '../main/window-options.ts'
 import { agentsLauncher } from './agents.ts'
 import { portHandovers } from './handovers.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
+import { startProfile } from './profile.ts'
 import { engineHandlers } from './serve.ts'
+
+/**
+ * The folders of the data folder a backup carries, relative to it: each ticket that creates one
+ * adds it here. And the steps that reconcile a restored Profile with the world, in their order.
+ */
+const BACKUP_FOLDERS: ReadonlyArray<string> = []
+const RECONCILIATION_STEPS = [] as const
 
 const readStart = Schema.decodeUnknownOption(Schema.toCodecJson(EngineStart))
 const readHandover = Schema.decodeUnknownOption(AgentsPortHandover)
@@ -60,8 +68,15 @@ const engine = (
       }
     })
 
+    // The Profile first: its database is opened, migrated and reconciled before anything is served.
+    const profile = yield* startProfile(
+      start,
+      { backupFolders: BACKUP_FOLDERS, reconciliationSteps: RECONCILIATION_STEPS },
+      log,
+    )
+
     yield* RpcServer.make(EngineRpcs, { disableFatalDefects: true }).pipe(
-      Effect.provide(engineHandlers(start, log)),
+      Effect.provide(engineHandlers(start, profile, log)),
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),
       Effect.forkScoped,
     )

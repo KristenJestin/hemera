@@ -7,7 +7,7 @@
  * the environment report once the window has loaded, and quits.
  */
 
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { Effect } from 'effect'
@@ -15,17 +15,26 @@ import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, nativeTheme, screen } from 'electron/main'
 
 import { openDiagnosticLog, type Log } from './diagnostic.ts'
+import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
 import { applicationOrigin } from './origin.ts'
 import { installProbe } from './probe.ts'
 import { rendererSource } from './renderer-source.ts'
 import { collectReport } from './report.ts'
-import { windowHandlers } from './window-link.ts'
+import { refreshDisplay, windowHandlers, type Application } from './window-link.ts'
 import { OPENING_COLORS, headless, windowOptions } from './window-options.ts'
 import { serveWindows } from './window-ports.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * The migrations this build carries, beside its bundles. Resolved from this file rather than from
+ * `app.getAppPath()`: both agree in a package and in a development run, and only this one is
+ * still right when Electron is pointed straight at the built entry point, as the end-to-end
+ * suite does.
+ */
+const MIGRATIONS = join(main, '..', '..', 'drizzle')
 
 /** Asked for on the command line: start as usual, say what this machine is, and leave. */
 const REPORT_FLAG = '--report'
@@ -72,24 +81,41 @@ const run = Effect.gen(function* () {
   const identity = identityOf(app.getAppPath(), app.getVersion())
   log(`starting ${identity.version} on channel ${identity.channel}, data folder ${dataFolder}`)
 
+  // The theme the user chose, worn from the first frame: the engine's answer comes later, and
+  // corrects the hint if it was missing or out of date.
+  nativeTheme.themeSource = readSidecar(dataFolder)?.theme ?? 'system'
+
   const underSuite = headless(process.env)
-  const engine = yield* startEngine(main, { dataFolder, ...identity }, log, underSuite)
+  const engine = yield* startEngine(
+    main,
+    { dataFolder, migrations: MIGRATIONS, ...identity },
+    log,
+    underSuite,
+  )
 
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
-  const application = {
+  const application: Application = {
     report,
     relaunch: Effect.sync(() => {
       app.relaunch()
       app.exit(0)
     }),
+    display: (preferences) =>
+      Effect.sync(() => {
+        nativeTheme.themeSource = preferences.theme
+        writeSidecar(dataFolder, preferences, log)
+      }),
   }
+  yield* refreshDisplay(engine.client, application).pipe(Effect.ignore, Effect.forkScoped)
   // Served before the page loads: the first thing the page does is hand over its port.
   const windows = yield* serveWindows(
     windowHandlers(engine.client, application, log),
     applicationOrigin(rendererSource()),
     log,
   )
-  if (engine.probe !== undefined) yield* installProbe(engine.probe, engine.process, windows)
+  if (engine.probe !== undefined) {
+    yield* installProbe(engine.probe, engine.process, windows, engine.client, application)
+  }
   yield* Effect.promise(() => openWindow(log))
 
   if (process.argv.includes(REPORT_FLAG)) {

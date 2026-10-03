@@ -1,8 +1,13 @@
+import { DatabaseRefused } from '@hemera/ipc'
+import { Schema } from 'effect'
+
 import type { EngineState } from './engine-start.ts'
+
+const isRefused = Schema.is(DatabaseRefused)
 
 /**
  * The empty shell: a drag zone where the title bar is, the name of the application, and a
- * sentence when the engine is late or has stopped.
+ * sentence when the engine is late, has stopped, or could not open the data folder.
  */
 export function Shell({ engine, onRelaunch }: { engine: EngineState; onRelaunch: () => void }) {
   return (
@@ -15,6 +20,9 @@ export function Shell({ engine, onRelaunch }: { engine: EngineState; onRelaunch:
             Hemera’s engine has not started.
             {engine.dataFolder !== null && ` Its diagnostic is in ${engine.dataFolder}.`}
           </p>
+        )}
+        {engine.kind === 'ready' && isRefused(engine.status.database) && (
+          <p role="alert">{engine.status.database.sentence}</p>
         )}
         {engine.kind === 'stopped' && (
           <>

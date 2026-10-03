@@ -7,6 +7,8 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   AgentsProcessGone,
   closedAs,
+  DatabaseOpen,
+  DEFAULT_PREFERENCES,
   EngineGone,
   EngineRpcs,
   EngineStart,
@@ -15,6 +17,9 @@ import {
   LaunchFailed,
   makeClientProtocol,
   makeServerProtocol,
+  Preferences,
+  RestoreRefused,
+  StorageFailed,
   streamClosedAs,
 } from '../src/index.ts'
 
@@ -23,6 +28,12 @@ const status: EngineStatus = {
   version: '1.0.0',
   channel: 'dev',
   dataFolder: '/data',
+  database: DatabaseOpen.make({
+    lastMigration: '20261003184739_profile',
+    writtenByVersion: '1.0.0',
+    backups: { count: 0, latest: null },
+    reconciliation: 'none',
+  }),
 }
 
 /** main's view of an engine that answers its status and then never ends the change stream. */
@@ -35,6 +46,11 @@ const engineLink = Effect.gen(function* () {
       EngineRpcs.toLayer({
         'engine.status': () => Effect.succeed(status),
         'engine.statusChanges': () => Stream.concat(Stream.make(status), Stream.never),
+        'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
+        'preferences.write': () => Effect.void,
+        'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
+        'profile.backup': ({ folder }) => Effect.succeed(folder),
+        'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -77,7 +93,12 @@ describe('The engine link', () => {
 
   test('the start message crosses the link through the JSON codec and back', () => {
     const codec = Schema.toCodecJson(EngineStart)
-    const start = { dataFolder: '/data', channel: 'beta' as const, version: '1.0.0-beta.1' }
+    const start = {
+      dataFolder: '/data',
+      channel: 'beta' as const,
+      version: '1.0.0-beta.1',
+      migrations: '/app/drizzle',
+    }
     const sent = JSON.parse(JSON.stringify(Schema.encodeSync(codec)(start)))
     expect(Schema.decodeUnknownSync(codec)(sent)).toEqual(start)
     expect(() => Schema.decodeUnknownSync(codec)({ ...sent, channel: 'nightly' })).toThrow()
@@ -92,8 +113,36 @@ describe('Errors that can reach a screen', () => {
       new LaunchFailed({ reason: 'the program is missing' }),
       'An agent’s process could not be started: the program is missing',
     ],
+    [
+      new StorageFailed({ sentence: 'The data folder refused while writing the preferences.' }),
+      'The data folder refused while writing the preferences.',
+    ],
+    [
+      new RestoreRefused({ sentence: 'This folder is not a backup of Hemera.' }),
+      'This folder is not a backup of Hemera.',
+    ],
   ])('%s says what happened in a sentence', (error, sentence) => {
     expect(error.message).toBe(sentence)
     expect(error.message).not.toMatch(/[{}]|\n\s+at /)
   })
+})
+
+describe('The preferences', () => {
+  test('the theme is the system’s, light or dark, and nothing else', () => {
+    const decode = Schema.decodeUnknownSync(Preferences)
+    for (const theme of ['system', 'light', 'dark']) expect(decode({ theme })).toEqual({ theme })
+    expect(() => decode({ theme: 'sepia' })).toThrow()
+  })
+
+  test('a refused restore reaches the caller as itself', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          const refused = yield* Effect.flip(client['profile.restore']({ folder: '/backup' }))
+          expect(refused).toBeInstanceOf(RestoreRefused)
+          expect(refused.message).toBe('Not this one.')
+        }),
+      ),
+    ))
 })

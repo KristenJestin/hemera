@@ -4,7 +4,7 @@
  * `browser.electron.execute`; each method answers a promise of plain values.
  */
 
-import { fromMessagePortMain, makeClientProtocol } from '@hemera/ipc'
+import { closedAs, EngineGone, fromMessagePortMain, makeClientProtocol } from '@hemera/ipc'
 import { Cause, Effect, Exit, Option, Predicate, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -13,12 +13,22 @@ import type { MessagePortMain, UtilityProcess } from 'electron/main'
 
 import { ProbeRpcs } from '../engine/probe.ts'
 import type { HemeraProbe, LoadMeasure } from './probe-types.ts'
+import {
+  changePreferences,
+  restoreProfile,
+  type Application,
+  type EngineClient,
+} from './window-link.ts'
 import type { WindowPorts } from './window-ports.ts'
+
+const gone = () => new EngineGone()
 
 export const installProbe = (
   port: MessagePortMain,
   engine: UtilityProcess,
   windows: WindowPorts,
+  engineClient: EngineClient,
+  application: Application,
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.gen(function* () {
     const client = yield* RpcClient.make(ProbeRpcs).pipe(
@@ -32,6 +42,11 @@ export const installProbe = (
 
     const probe: HemeraProbe = {
       enginePid: () => engine.pid,
+      changeTheme: (theme) =>
+        Effect.runPromise(changePreferences(engineClient, application)({ theme })),
+      backUp: (folder) =>
+        Effect.runPromise(closedAs(gone)(engineClient['profile.backup']({ folder }))),
+      restore: (folder) => Effect.runPromise(restoreProfile(engineClient, application)(folder)),
       closeWindowLinks: () => windows.closeAll(),
       crashEngine: () => {
         Effect.runFork(client['probe.crash']())

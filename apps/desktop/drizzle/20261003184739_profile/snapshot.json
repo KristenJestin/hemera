@@ -1,0 +1,230 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "c8063721-73a2-458e-b90a-00d2e69a2f9c",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
+  "ddl": [
+    {
+      "name": "app_preferences",
+      "entityType": "tables"
+    },
+    {
+      "name": "domain_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "profile",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
+      "entityType": "columns",
+      "table": "app_preferences"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value",
+      "entityType": "columns",
+      "table": "app_preferences"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "type",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "entity_kind",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "entity_id",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "author",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "occurred_at",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload",
+      "entityType": "columns",
+      "table": "domain_events"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "row",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_by_version",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_opened_by_version",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_opened_at",
+      "entityType": "columns",
+      "table": "profile"
+    },
+    {
+      "columns": ["key"],
+      "nameExplicit": false,
+      "name": "app_preferences_pk",
+      "table": "app_preferences",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["sequence"],
+      "nameExplicit": false,
+      "name": "domain_events_pk",
+      "table": "domain_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["row"],
+      "nameExplicit": false,
+      "name": "profile_pk",
+      "table": "profile",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "entity_kind",
+          "isExpression": false
+        },
+        {
+          "value": "entity_id",
+          "isExpression": false
+        },
+        {
+          "value": "sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "event_by_entity",
+      "entityType": "indexes",
+      "table": "domain_events"
+    },
+    {
+      "value": "\"row\" = 1",
+      "name": "profile_is_one_row",
+      "entityType": "checks",
+      "table": "profile"
+    }
+  ],
+  "renames": []
+}
