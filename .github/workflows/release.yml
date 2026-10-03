@@ -1,0 +1,164 @@
+# The version of an installed Hemera, decided by what was merged.
+#
+# `package.json` stays at 0.0.0 and nobody edits a version by hand: the tag semantic-release
+# puts on a branch is the version, and the packages that carry it are built from that tag. No
+# plugin here writes a commit — not a changelog, not a manifest — so the history of a branch is
+# what was merged into it and nothing the pipeline added afterwards.
+#
+# One version line for both branches: `dev` publishes the next version as a pre-release,
+# `vX.Y.Z-beta.N`, built as the beta; merging into `main` publishes `vX.Y.Z`, built as prod.
+# The repository starts with no tag, so the first version published is 1.0.0 (its first beta
+# 1.0.0-beta.1). Breaking changes move the minor: a 2.0 is a decision, not something a commit
+# message brings about.
+#
+# A tag already published is built again by hand with `workflow_dispatch` and its `tag`, which
+# attaches its packages to its release again and updates its AUR package.
+
+name: release
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The published tag to build again, vX.Y.Z or vX.Y.Z-beta.N
+        required: true
+        type: string
+
+# One release at a time per branch, in the order of the pushes: two tags are never computed
+# from the same history.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tag what was merged, and write the release notes
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release
+
+      # What is built, told to the jobs below: the version tag semantic-release just put on the
+      # commit this run is for, or the tag asked for by hand. No tag, nothing is built; the tag
+      # alone says the channel and the AUR package (tools/release-tag.ts).
+      - name: Read the tag to build
+        id: tag
+        env:
+          ASKED: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            git rev-parse -q --verify "refs/tags/${ASKED}" >/dev/null || { echo "::error::no tag ${ASKED}"; exit 1; }
+            tag="$ASKED"
+          else
+            # A beta on dev, a release on main: only this branch's kind of tag is this run's.
+            [ "$GITHUB_REF_NAME" = dev ] && kind='-beta\.[0-9]+$' || kind='^v[0-9]+\.[0-9]+\.[0-9]+$'
+            tag="$(git tag --points-at "$GITHUB_SHA" --list 'v*' | grep -E -e "$kind" || true)"
+          fi
+          if [ -z "$tag" ]; then
+            echo "no version was published by this push"
+            echo "name=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$(printf '%s\n' "$tag" | wc -l)" -eq 1 ] || { echo "::error::more than one version tag: ${tag}"; exit 1; }
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          node tools/release-tag.ts "$tag" >> "$GITHUB_OUTPUT"
+    outputs:
+      tag: ${{ steps.tag.outputs.name }}
+      channel: ${{ steps.tag.outputs.channel }}
+      aur: ${{ steps.tag.outputs.aur }}
+
+  # The packages of that version, built on each target from the tag itself, as the channel the
+  # tag says, and attached to its release. The version they carry is the tag's, `0.5.0-beta.1`
+  # in the app and in the file names, since `git describe` on the tagged commit is the tag.
+  package:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        run: corepack enable
+
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: apps/desktop
+        run: pnpm exec install-electron
+
+      # `CI` is set by GitHub, and it is what the packaging refuses to build prod or beta without.
+      - run: pnpm package --channel ${{ needs.release.outputs.channel }}
+
+      - name: Attach the packages to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          gh release upload "${{ needs.release.outputs.tag }}" dist/package/*.zip dist/package/*.AppImage dist/package/*.deb --clobber
+
+  # The AUR package of that version, once its deb is attached to the release it downloads
+  # (packaging/aur/): `hemera-bin` for a release, `hemera-beta-bin` for a beta. The tool and the
+  # PKGBUILD are this run's, not the tag's, so an older tag is published the way it is today.
+  # One at a time per package, so two tags close together reach the AUR in their order; without
+  # the `AUR_SSH_KEY` secret, the step says so and succeeds.
+  aur:
+    needs: [release, package]
+    if: needs.release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: aur-${{ needs.release.outputs.aur }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: Publish ${{ needs.release.outputs.aur }} to the AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: node tools/aur-publish.ts '${{ needs.release.outputs.aur }}' '${{ needs.release.outputs.tag }}' --push

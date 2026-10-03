@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/renderer/bridge.d.ts",
+    "bundles.ts",
+    "build.ts",
+    "dev.ts"
+  ]
+}

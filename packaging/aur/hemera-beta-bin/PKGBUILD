@@ -1,0 +1,57 @@
+# Maintainer: Kristen Jestin <kristen.jestin@pm.me>
+#
+# The latest beta of Hemera, the `vX.Y.Z-beta.N` pre-release semantic-release tags on `dev`.
+# It installs where `hemera-bin` does — /opt/hemera, /usr/bin/hemera, hemera.desktop and the
+# hemera icon — and conflicts with it, so installing one replaces the other: the two share one
+# data folder.
+pkgname=hemera-beta-bin
+_app=hemera
+# What the beta's deb names its folder, its executable, its entry and its icon.
+_deb=hemera-beta
+_product='Hemera Beta'
+_asset=Hemera.Beta
+_version=0.5.0-beta.1
+pkgver=0.5.0beta1
+pkgrel=1
+pkgdesc='Desktop cockpit for ACP agents (beta)'
+arch=('x86_64')
+url='https://github.com/KristenJestin/hemera'
+license=('LicenseRef-UNLICENSED')
+# What the Electron binary links against, as namcap finds it, and what it loads at run time:
+# libsecret for the cookie encryption key, xdg-utils to open a link in the browser.
+depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
+  'hicolor-icon-theme' 'libcups' 'libgcc' 'libsecret' 'libx11' 'libxcb' 'libxcomposite'
+  'libxdamage' 'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr' 'mesa' 'nspr' 'nss' 'pango'
+  'systemd-libs' 'xdg-utils')
+provides=("$_app")
+conflicts=("$_app")
+options=('!strip' '!debug')
+source=("$_deb-$_version.deb::$url/releases/download/v$_version/$_asset-$_version.deb")
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf data.tar.xz -C "$srcdir"
+
+  install -d "$pkgdir/opt"
+  cp -a "$srcdir/opt/$_product" "$pkgdir/opt/$_app"
+  # The Chromium sandbox helper runs setuid where user namespaces are off (linux-hardened).
+  chmod 4755 "$pkgdir/opt/$_app/chrome-sandbox"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_app/$_deb" "$pkgdir/usr/bin/$_app"
+
+  install -Dm644 "$srcdir/usr/share/applications/$_deb.desktop" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
+  sed -i -e "s|^Exec=.*|Exec=/usr/bin/$_app %U|" -e "s|^Icon=.*|Icon=$_app|" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
+
+  local icon size
+  for icon in "$srcdir"/usr/share/icons/hicolor/*/apps/"$_deb".*; do
+    size=${icon#"$srcdir/usr/share/icons/hicolor/"}
+    size=${size%%/*}
+    install -Dm644 "$icon" "$pkgdir/usr/share/icons/hicolor/$size/apps/$_app.${icon##*.}"
+  done
+
+  install -Dm644 "$pkgdir/opt/$_app/LICENSES.chromium.html" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
+}

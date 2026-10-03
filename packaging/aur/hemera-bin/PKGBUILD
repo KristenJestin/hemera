@@ -1,0 +1,48 @@
+# Maintainer: Kristen Jestin <kristen.jestin@pm.me>
+#
+# Hemera as released: the version semantic-release tags on `main`, from the deb attached to its
+# GitHub release. `hemera-beta-bin` installs to the same place and conflicts with it, so
+# installing one replaces the other: the two share one data folder.
+pkgname=hemera-bin
+_app=hemera
+_product=Hemera
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='Desktop cockpit for ACP agents'
+arch=('x86_64')
+url='https://github.com/KristenJestin/hemera'
+license=('LicenseRef-UNLICENSED')
+# What the Electron binary links against, as namcap finds it, and what it loads at run time:
+# libsecret for the cookie encryption key, xdg-utils to open a link in the browser.
+depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
+  'hicolor-icon-theme' 'libcups' 'libgcc' 'libsecret' 'libx11' 'libxcb' 'libxcomposite'
+  'libxdamage' 'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr' 'mesa' 'nspr' 'nss' 'pango'
+  'systemd-libs' 'xdg-utils')
+provides=("$_app")
+conflicts=("$_app")
+options=('!strip' '!debug')
+source=("$_app-$pkgver.deb::$url/releases/download/v$pkgver/$_product-$pkgver.deb")
+sha256sums=('31e84ee186ab84c527c56e6c1da805e5bd3f8323fb3cdab0edc70f5a47c72168')
+
+package() {
+  bsdtar -xf data.tar.xz -C "$srcdir"
+
+  install -d "$pkgdir/opt"
+  cp -a "$srcdir/opt/$_product" "$pkgdir/opt/$_app"
+  # The Chromium sandbox helper runs setuid where user namespaces are off (linux-hardened).
+  chmod 4755 "$pkgdir/opt/$_app/chrome-sandbox"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_app/$_app" "$pkgdir/usr/bin/$_app"
+
+  install -Dm644 "$srcdir/usr/share/applications/$_app.desktop" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
+  sed -i -e "s|^Exec=.*|Exec=/usr/bin/$_app %U|" -e "s|^Icon=.*|Icon=$_app|" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
+
+  install -d "$pkgdir/usr/share/icons"
+  cp -a "$srcdir/usr/share/icons/hicolor" "$pkgdir/usr/share/icons/hicolor"
+
+  install -Dm644 "$pkgdir/opt/$_app/LICENSES.chromium.html" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
+}

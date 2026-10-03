@@ -1,0 +1,87 @@
+# The AUR packages, built as the AUR builds them before anything is published (packaging/aur/).
+#
+# Each package is updated by the same tool the release uses, to the latest release it follows,
+# then built by makepkg in an Arch Linux container as a user that is not root, and read by namcap.
+# The .SRCINFO the tool writes and the one committed are both compared with what makepkg prints:
+# a PKGBUILD changed without its .SRCINFO is caught here rather than refused by the AUR.
+# Nothing here publishes anything.
+
+name: aur
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/aur/**'
+      - 'tools/aur-publish.ts'
+      - 'tools/release-tag.ts'
+      - '.github/workflows/aur.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [hemera-bin, hemera-beta-bin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      # The releases answer the newest first. The release is the newest `vX.Y.Z` with a deb
+      # attached, the beta the newest `vX.Y.Z-beta.N` with one: a release whose packages are not
+      # built yet has nothing to download. Until the first beta of the line is published, there
+      # is nothing to build it from, and only its committed .SRCINFO is checked.
+      - name: Update the package to the latest release it follows
+        id: update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ '${{ matrix.package }}' = hemera-bin ]; then
+            kind='^v[0-9]+\\.[0-9]+\\.[0-9]+$'
+          else
+            kind='^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$'
+          fi
+          tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            -q "[.[] | select(.draft | not) | select(.tag_name | test(\"$kind\")) | select(any(.assets[]; .name | endswith(\".deb\")))][0].tag_name // empty")"
+          echo "latest release for ${{ matrix.package }}: ${tag:-none}"
+          if [ -z "$tag" ]; then
+            echo "::notice::no ${{ matrix.package }} release with a deb yet: only its committed .SRCINFO is checked"
+            mkdir -p "$RUNNER_TEMP/updated"
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node tools/aur-publish.ts '${{ matrix.package }}' "$tag" --out "$RUNNER_TEMP/updated"
+          echo "built=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build it with makepkg and read it with namcap
+        run: |
+          docker run --rm \
+            -e BUILT='${{ steps.update.outputs.built }}' \
+            -v "$RUNNER_TEMP/updated:/updated:ro" \
+            -v "$GITHUB_WORKSPACE/packaging/aur/${{ matrix.package }}:/committed:ro" \
+            archlinux:latest bash -euo pipefail -c '
+              pacman -Syu --noconfirm --needed base-devel namcap >/dev/null
+              useradd -m builder
+              cp -r /updated /home/builder/updated
+              cp -r /committed /home/builder/committed
+              chown -R builder: /home/builder
+              echo "::group::the committed .SRCINFO against makepkg"
+              su builder -c "cd ~/committed && makepkg --printsrcinfo | diff -u .SRCINFO -"
+              echo "::endgroup::"
+              [ "$BUILT" = true ] || exit 0
+              echo "::group::the updated .SRCINFO against makepkg"
+              su builder -c "cd ~/updated && makepkg --printsrcinfo | diff -u .SRCINFO -"
+              echo "::endgroup::"
+              pacman -S --noconfirm --needed $(source /updated/PKGBUILD && echo "${depends[@]}") >/dev/null
+              echo "::group::makepkg"
+              su builder -c "cd ~/updated && makepkg --noconfirm"
+              echo "::endgroup::"
+              echo "::group::namcap"
+              su builder -c "cd ~/updated && namcap PKGBUILD && namcap *.pkg.tar.zst"
+              echo "::endgroup::"
+            '

@@ -1,0 +1,60 @@
+# Packaging of the application.
+#
+# One portable package per target: an archive on Windows, an AppImage and a deb on Linux.
+# Nothing here signs, notarises, publishes or updates. Nothing downloads at start either: what
+# the package needs, the package carries.
+
+appId: dev.hemera.app
+productName: Hemera
+copyright: Hemera
+
+directories:
+  output: ../../dist/package
+  buildResources: build
+
+# Only what was built and the manifest that names its entry point. The sources and every
+# development dependency stay out by not being named. electron-builder collects the production
+# `node_modules` of its own accord, whatever this list says; the bundles carry their own
+# JavaScript and import nothing but `node:` and `electron`, so a package needs no `node_modules`.
+files:
+  - dist/**
+  - package.json
+  - '!node_modules/**/*'
+
+# The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
+# The folder is emptied through this option and never by hand: an empty locales folder is a
+# crash at start, not a smaller package.
+electronLanguages:
+  - en-US
+
+compression: normal
+
+# What the runtime is allowed to be talked into. `RunAsNode` and the inspect arguments turn a
+# packaged application into a Node interpreter for whoever sets an environment variable.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
+
+win:
+  # An archive, not an installer: the package is extracted wherever the user wants and started
+  # from there.
+  target:
+    - zip
+
+linux:
+  category: Development
+  # Named after the product and not the package: `@hemera/desktop` would put the deb under a
+  # folder called `@hemera` that nothing creates, and fpm stops there.
+  artifactName: '${productName}-${version}.${ext}'
+  target:
+    - AppImage
+    - deb
+
+deb:
+  # Ubuntu 24.04 restricts user namespaces, which is what the Chromium sandbox is built on.
+  # The profile ships with the package so the sandbox stays on without a single flag.
+  appArmorProfile: build/hemera.apparmor

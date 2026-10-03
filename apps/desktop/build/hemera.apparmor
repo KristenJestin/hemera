@@ -1,0 +1,16 @@
+# AppArmor profile for the packaged application on distributions that restrict user
+# namespaces (Ubuntu 24.04 and later).
+#
+# Chromium builds its sandbox on unprivileged user namespaces. Where those are restricted, an
+# application that does not declare this is refused them and falls back — which is what
+# `--no-sandbox` is usually added for. This profile grants the namespace instead, so the
+# sandbox stays on and no flag is ever passed.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile hemera /opt/Hemera/hemera flags=(unconfined) {
+  userns,
+
+  include if exists <local/hemera>
+}
