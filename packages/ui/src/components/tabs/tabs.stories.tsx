@@ -72,13 +72,14 @@ export const Selected: Story = {
     expect(chosen).toHaveAttribute('aria-selected', 'true')
     expect(canvas.getByText('Every branch of every repository.')).toBeInTheDocument()
     const mark = canvasElement.querySelector<HTMLElement>('[data-sliding-mark]')!
+    // motion writes the mark's box on its own frame, after the list has said which tab it is on.
     await waitFor(() => {
       expect(mark.dataset['slidingMark']).toBe('branches')
+      const tab = chosen.getBoundingClientRect()
+      const box = mark.getBoundingClientRect()
+      expect(box.left).toBeCloseTo(tab.left, 0)
+      expect(box.width).toBeCloseTo(tab.width, 0)
     })
-    const tab = chosen.getBoundingClientRect()
-    const box = mark.getBoundingClientRect()
-    expect(box.left).toBeCloseTo(tab.left, 0)
-    expect(box.width).toBeCloseTo(tab.width, 0)
   },
 }
 
