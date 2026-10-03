@@ -47,11 +47,23 @@ const TONES: Record<MarkState, string> = {
 
 const SVG = 'size-5 stroke-current'
 
-/** The arc turns while the task runs: the loading indicator's own turn. */
-const TURNING = 'size-5 stroke-current motion-safe:animate-turn'
+/** What holds the strokes still. */
+const STILL = 'flex'
+
+/**
+ * The arc turns while the task runs: the loading indicator's own turn. The box around the svg
+ * turns and not the svg, because a box is given a layer of its own and an svg is redrawn.
+ */
+const TURNING = 'flex motion-safe:animate-turn'
 
 /** The ring leaving the dot of what waits for the user, the dot's own tone. */
 const PING = 'absolute inset-1 rounded-full bg-warning motion-reduce:hidden'
+
+/**
+ * How small the dot of what waits is while it is not there: it grows from half its size as it
+ * fades in, and never from nothing, which reads as a dot appearing from nowhere.
+ */
+const DOT_FROM = 0.5
 
 /** How much of the ring the arc covers while it turns. */
 const ARC = 0.28
@@ -92,76 +104,78 @@ export function StatusMark({ state, legend = false }: StatusMarkProps): ReactNod
           transition={beat}
         />
       )}
-      <svg
-        viewBox="0 0 20 20"
-        aria-hidden="true"
-        fill="none"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={state === 'running' ? TURNING : SVG}
-      >
-        <motion.circle
-          cx="10"
-          cy="10"
-          r="7.25"
-          strokeDasharray="2 2.55"
-          data-figure="dashed"
-          initial={false}
-          animate={{ opacity: dashed ? 1 : 0 }}
-          transition={ringing}
-        />
-        <g transform="rotate(-90 10 10)">
+      <span className={state === 'running' ? TURNING : STILL} data-figure="turn">
+        <svg
+          viewBox="0 0 20 20"
+          aria-hidden="true"
+          fill="none"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={SVG}
+        >
           <motion.circle
             cx="10"
             cy="10"
             r="7.25"
-            data-figure="ring"
+            strokeDasharray="2 2.55"
+            data-figure="dashed"
             initial={false}
-            animate={{ pathLength: ring, opacity: ring === 0 ? 0 : 1 }}
+            animate={{ opacity: dashed ? 1 : 0 }}
             transition={ringing}
           />
-        </g>
-        <motion.path
-          d="M6.6 10.3l2.3 2.3l4.5 -4.7"
-          data-figure="check"
-          initial={false}
-          animate={drawn(state === 'done')}
-          transition={drawing}
-        />
-        <motion.path
-          d="M7.6 7.6l4.8 4.8M12.4 7.6l-4.8 4.8"
-          data-figure="cross"
-          initial={false}
-          animate={drawn(state === 'failed')}
-          transition={drawing}
-        />
-        <motion.path
-          d="M7 10h6"
-          data-figure="bar"
-          initial={false}
-          animate={drawn(state === 'blocked')}
-          transition={drawing}
-        />
-        <motion.path
-          d="M6.5 13.5l7 -7"
-          data-figure="strike"
-          initial={false}
-          animate={drawn(state === 'skipped')}
-          transition={drawing}
-        />
-        <motion.circle
-          cx="10"
-          cy="10"
-          r="2.25"
-          className="fill-current"
-          stroke="none"
-          data-figure="dot"
-          initial={false}
-          animate={{ scale: waiting ? 1 : 0, opacity: waiting ? 1 : 0 }}
-          transition={ringing}
-        />
-      </svg>
+          <g transform="rotate(-90 10 10)">
+            <motion.circle
+              cx="10"
+              cy="10"
+              r="7.25"
+              data-figure="ring"
+              initial={false}
+              animate={{ pathLength: ring, opacity: ring === 0 ? 0 : 1 }}
+              transition={ringing}
+            />
+          </g>
+          <motion.path
+            d="M6.6 10.3l2.3 2.3l4.5 -4.7"
+            data-figure="check"
+            initial={false}
+            animate={drawn(state === 'done')}
+            transition={drawing}
+          />
+          <motion.path
+            d="M7.6 7.6l4.8 4.8M12.4 7.6l-4.8 4.8"
+            data-figure="cross"
+            initial={false}
+            animate={drawn(state === 'failed')}
+            transition={drawing}
+          />
+          <motion.path
+            d="M7 10h6"
+            data-figure="bar"
+            initial={false}
+            animate={drawn(state === 'blocked')}
+            transition={drawing}
+          />
+          <motion.path
+            d="M6.5 13.5l7 -7"
+            data-figure="strike"
+            initial={false}
+            animate={drawn(state === 'skipped')}
+            transition={drawing}
+          />
+          <motion.circle
+            cx="10"
+            cy="10"
+            r="2.25"
+            className="fill-current"
+            stroke="none"
+            data-figure="dot"
+            initial={false}
+            animate={{ scale: waiting ? 1 : DOT_FROM, opacity: waiting ? 1 : 0 }}
+            transition={ringing}
+          />
+        </svg>
+      </span>
     </span>
   )
   if (!legend) return mark

@@ -332,6 +332,9 @@
    individual properties, and a transition naming `transform` never sees them. A popup comes down
    from its trigger and folds back up into it rather than growing out of a corner. */
 @utility popup-motion {
+  /* Grown from the side of its trigger, which Base UI names; a dialog, which has no trigger to
+     grow from, keeps its middle. */
+  transform-origin: var(--transform-origin, center);
   transition-property: opacity, translate, scale;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);

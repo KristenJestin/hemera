@@ -168,7 +168,12 @@ export const CROSSFADE = {
  */
 export const PING_REACH = 2.6
 export const PING_OPACITY = 0.45
-export const ping: TargetAndTransition = { scale: [1, PING_REACH], opacity: [PING_OPACITY, 0] }
+export const ping: TargetAndTransition = {
+  // A whole transform rather than `scale`: the shorthand is played on the main thread, frame by
+  // frame, where a transform is handed to the compositor and keeps its beat under load.
+  transform: ['scale(1)', `scale(${String(PING_REACH)})`],
+  opacity: [PING_OPACITY, 0],
+}
 export const pinging: Transition = {
   duration: durations.turn,
   ease: easing,
@@ -195,10 +200,11 @@ export const check = {
  * The `wipe` kind: a tint crossing something once, from its left edge out through its right — a
  * live chip saying how its run ended. `WIPE.before` is the tint wholly out on the left,
  * `WIPE.past` wholly out on the right, so nothing tinted stays. A tween on the `slow` beat rather
- * than a spring, whose long settle would leave a sliver of tint standing on the right edge.
+ * than a spring, whose long settle would leave a sliver of tint standing on the right edge. A
+ * whole transform and not `x`, for the reason `ping` gives.
  */
 export const WIPE = {
-  before: { x: '-100%' },
-  past: { x: '100%' },
+  before: { transform: 'translateX(-100%)' },
+  past: { transform: 'translateX(100%)' },
 } as const
 export const wipe: Transition = { duration: durations.slow, ease: [0.65, 0, 0.35, 1] }
