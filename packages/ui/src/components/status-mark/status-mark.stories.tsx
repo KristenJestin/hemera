@@ -53,7 +53,8 @@ function posed(state: MarkState): Story {
   return {
     args: { state },
     play: async ({ canvasElement }) => {
-      const mark = within(canvasElement).getByRole('img', { name: legend })
+      const glyph = within(canvasElement).getByRole('img', { name: legend })
+      const mark = glyph.querySelector<HTMLElement>('[data-mark]')!
       expect(getComputedStyle(mark).color).toBe(colourOf(canvasElement, tone))
       expect(mark.getBoundingClientRect().width).toBe(20)
       await waitFor(() => {

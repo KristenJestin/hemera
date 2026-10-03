@@ -42,7 +42,7 @@ export const Single: Story = {
  */
 export const Collision: Story = {
   render: () => {
-    const set = ['Reviewer', 'Researcher', 'Rover', 'Documenter']
+    const set = ['Reviewer', 'Researcher', 'Scout', 'Documenter']
     return (
       <div className="flex items-center gap-2">
         {set.map((name) => (
@@ -55,7 +55,7 @@ export const Collision: Story = {
     const worn = [...canvasElement.querySelectorAll('[data-avatar]')].map(
       (avatar) => avatar.textContent,
     )
-    expect(worn).toEqual(['RV', 'RS', 'RO', 'D'])
+    expect(worn).toEqual(['RV', 'RS', 'S', 'D'])
   },
 }
 

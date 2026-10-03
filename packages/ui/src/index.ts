@@ -31,7 +31,20 @@ export {
   NESTED_RADIUS,
   type FrameProps,
 } from './components/frame/frame.tsx'
+export {
+  HELPER_LEGENDS,
+  HelperChip,
+  type HelperChipProps,
+} from './components/helper-chip/helper-chip.tsx'
 export { Kbd, type KbdProps } from './components/kbd/kbd.tsx'
+export {
+  LETTER_TONES,
+  LetterAvatar,
+  initialsOf,
+  letterToneOf,
+  type LetterAvatarProps,
+  type LetterTone,
+} from './components/letter-avatar/letter-avatar.tsx'
 export {
   List,
   ListItem,
@@ -47,6 +60,14 @@ export {
   type SkeletonProps,
   type SkeletonShape,
 } from './components/loading/loading.tsx'
+export {
+  LIVE_WORDS,
+  LiveChip,
+  STUCK_AFTER,
+  durationOf,
+  type LiveChipProps,
+  type LiveState,
+} from './components/live-chip/live-chip.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {
@@ -65,7 +86,14 @@ export {
   type StatusDotProps,
   type StatusTone,
 } from './components/status-dot/status-dot.tsx'
+export {
+  MARK_LEGENDS,
+  StatusMark,
+  type MarkState,
+  type StatusMarkProps,
+} from './components/status-mark/status-mark.tsx'
 export { Tabs, type TabsItem, type TabsProps } from './components/tabs/tabs.tsx'
+export { Legend, type LegendProps } from './components/tooltip/legend.tsx'
 export {
   Tooltip,
   TooltipProvider,
