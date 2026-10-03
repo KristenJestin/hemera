@@ -1,5 +1,5 @@
 /**
- * Development run: the renderer is served, the two Node bundles are rebuilt on change, and
+ * Development run: the renderer is served, the Node bundles are rebuilt on change, and
  * Electron is started once on the address the server picked.
  *
  * Electron is started last and on purpose: the main process reads the address from its
@@ -19,12 +19,12 @@ import { fileURLToPath } from 'node:url'
 
 import { build, createServer } from 'vite-plus'
 
-import { mainBundle, preloadBundle, rendererBundle } from './bundles.ts'
+import { agentsBundle, engineBundle, mainBundle, preloadBundle, rendererBundle } from './bundles.ts'
 import { RENDERER_URL_VARIABLE } from './src/main/renderer-source.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
-const NODE_BUNDLES = [mainBundle, preloadBundle]
+const NODE_BUNDLES = [mainBundle, engineBundle, agentsBundle, preloadBundle]
 
 /**
  * A build in watch mode answers with its watcher before its first build is written, and the

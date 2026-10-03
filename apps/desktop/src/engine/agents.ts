@@ -45,7 +45,7 @@ export interface AgentsProcess {
 const gone = () => new AgentsProcessGone()
 
 /** Starts agents' processes through main, numbering each launch so its port finds it. */
-export const makeAgentsLauncher = <P>(
+export const agentsLauncher = <P>(
   host: HostClient,
   handovers: Handovers<P>,
   toPort: (port: P) => Port,

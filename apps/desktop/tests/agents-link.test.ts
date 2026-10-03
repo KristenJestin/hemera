@@ -21,8 +21,8 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { runProgram } from '../src/agents/program.ts'
-import { makeAgentsLauncher } from '../src/engine/agents.ts'
-import { makeHandovers } from '../src/engine/handovers.ts'
+import { agentsLauncher } from '../src/engine/agents.ts'
+import { portHandovers } from '../src/engine/handovers.ts'
 import { launchHandlers, type Forked, type Launcher } from '../src/main/launches.ts'
 
 const ECHO = join(import.meta.dirname, 'fixtures', 'echo.mjs')
@@ -30,7 +30,7 @@ const ECHO = join(import.meta.dirname, 'fixtures', 'echo.mjs')
 const setup = Effect.gen(function* () {
   const runFork = yield* FiberSet.makeRuntime<never, void, never>()
   const engineLines: string[] = []
-  const handovers = makeHandovers<MessagePort>()
+  const handovers = portHandovers<MessagePort>()
   const killers: Array<() => void> = []
   let nextPid = 100
 
@@ -87,9 +87,7 @@ const setup = Effect.gen(function* () {
   const host = yield* RpcClient.make(HostRpcs).pipe(
     Effect.provideService(RpcClient.Protocol, protocol),
   )
-  const launch = makeAgentsLauncher(host, handovers, fromMessagePort, (line) =>
-    engineLines.push(line),
-  )
+  const launch = agentsLauncher(host, handovers, fromMessagePort, (line) => engineLines.push(line))
   return { launch, engineLines, kill: () => killers[0]?.() }
 })
 

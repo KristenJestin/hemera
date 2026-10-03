@@ -15,7 +15,7 @@ export interface Handovers<P> {
   readonly take: (launch: number) => Effect.Effect<P>
 }
 
-export function makeHandovers<P>(): Handovers<P> {
+export function portHandovers<P>(): Handovers<P> {
   const waiting = new Map<number, Deferred.Deferred<P>>()
   const slot = (launch: number): Deferred.Deferred<P> => {
     const existing = waiting.get(launch)

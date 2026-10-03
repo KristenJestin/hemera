@@ -23,7 +23,7 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { launchHandlers, type Forked, type Launcher } from '../src/main/launches.ts'
-import { makeHandovers } from '../src/engine/handovers.ts'
+import { portHandovers } from '../src/engine/handovers.ts'
 
 /** A forked process that does what the test tells it to, and remembers what it was given. */
 interface StandIn extends Forked<string> {
@@ -166,7 +166,7 @@ describe('The engine matches each port it is handed to its launch', () => {
   test('ports handed over in any order reach the launch they belong to', () =>
     run(
       Effect.gen(function* () {
-        const handovers = makeHandovers<string>()
+        const handovers = portHandovers<string>()
         const first = yield* Effect.forkChild(handovers.take(1))
         const second = yield* Effect.forkChild(handovers.take(2))
         handovers.receive(2, 'port of 2')
@@ -179,7 +179,7 @@ describe('The engine matches each port it is handed to its launch', () => {
   test('a port handed over before the launch asks for it waits for it', () =>
     run(
       Effect.gen(function* () {
-        const handovers = makeHandovers<string>()
+        const handovers = portHandovers<string>()
         handovers.receive(3, 'early port')
         expect(yield* handovers.take(3)).toBe('early port')
       }),
@@ -188,7 +188,7 @@ describe('The engine matches each port it is handed to its launch', () => {
   test('a port is taken once', () =>
     run(
       Effect.gen(function* () {
-        const handovers = makeHandovers<string>()
+        const handovers = portHandovers<string>()
         handovers.receive(4, 'only port')
         yield* handovers.take(4)
         const again = yield* Effect.forkChild(handovers.take(4))
