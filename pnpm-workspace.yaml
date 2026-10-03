@@ -12,3 +12,9 @@ allowBuilds:
   esbuild: true
   geckodriver: false
   msgpackr-extract: false
+
+# No package of this repository installs zod (see AGENTS.md, Effect). chromium-bidi brings it in
+# under puppeteer-core, which loads it only for WebDriver BiDi; the end-to-end suite drives
+# Electron over CDP and never reaches it.
+overrides:
+  chromium-bidi: '-'
