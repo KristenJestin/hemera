@@ -11,6 +11,8 @@ export interface LoadMeasure {
 
 export interface HemeraProbe {
   readonly enginePid: () => number | undefined
+  /** Changes the theme preference the way the window does: written by the engine, worn by main. */
+  readonly changeTheme: (theme: 'system' | 'light' | 'dark') => Promise<void>
   /** Closes every window's port from main's side. */
   readonly closeWindowLinks: () => void
   /** `process.crash()` inside the engine. */

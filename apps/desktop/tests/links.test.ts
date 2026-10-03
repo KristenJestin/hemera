@@ -6,6 +6,7 @@
 import { MessageChannel } from 'node:worker_threads'
 
 import {
+  DatabaseOpen,
   EngineGone,
   EngineRpcs,
   fromMessagePort,
@@ -13,17 +14,30 @@ import {
   makeServerProtocol,
   type EngineStart,
   type EnvironmentReport,
+  type Preferences,
+  RestoreRefused,
   WindowRpcs,
 } from '@hemera/ipc'
-import { Deferred, Effect, Fiber, Option, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Option, Schema, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
-import { describe, expect, test } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { startProfile } from '../src/engine/profile.ts'
 import { engineHandlers } from '../src/engine/serve.ts'
 import { windowHandlers } from '../src/main/window-link.ts'
+import { SHIPPED, removeFolders, temporaryFolder } from './storage.ts'
 
-const start: EngineStart = { dataFolder: '/data', channel: 'dev', version: '1.0.0' }
+let start: EngineStart
+beforeEach(() => {
+  start = {
+    dataFolder: temporaryFolder('links'),
+    channel: 'dev',
+    version: '1.0.0',
+    migrations: SHIPPED,
+  }
+})
+afterEach(removeFolders)
 
 const report: EnvironmentReport = {
   version: '1.0.0',
@@ -43,12 +57,21 @@ const chain = Effect.gen(function* () {
   const engineLines: string[] = []
   const mainLines: string[] = []
   let relaunched = 0
+  const displayed: Preferences[] = []
 
   const { port1: mainToEngine, port2: engineEnd } = new MessageChannel()
   const engineServer = yield* makeServerProtocol
   engineServer.accept(fromMessagePort(engineEnd))
+  const engineLog = (line: string) => {
+    engineLines.push(line)
+  }
+  const profile = yield* startProfile(
+    start,
+    { backupFolders: [], reconciliationSteps: [] },
+    engineLog,
+  )
   yield* RpcServer.make(EngineRpcs, { disableFatalDefects: true }).pipe(
-    Effect.provide(engineHandlers(start, (line) => engineLines.push(line))),
+    Effect.provide(engineHandlers(start, profile, engineLog)),
     Effect.provideService(RpcServer.Protocol, engineServer.protocol),
     Effect.forkScoped,
   )
@@ -69,6 +92,10 @@ const chain = Effect.gen(function* () {
           relaunch: Effect.sync(() => {
             relaunched += 1
           }),
+          display: (preferences) =>
+            Effect.sync(() => {
+              displayed.push(preferences)
+            }),
         },
         (line) => mainLines.push(line),
       ),
@@ -87,6 +114,7 @@ const chain = Effect.gen(function* () {
     engineLines,
     mainLines,
     relaunches: () => relaunched,
+    displayed,
   }
 })
 
@@ -107,9 +135,13 @@ describe('The window reaches the engine through main', () => {
     run(
       Effect.gen(function* () {
         const { window } = yield* chain
-        expect(yield* window['engine.status']()).toEqual({ ready: true, ...start })
+        const { migrations: _, ...started } = start
+        const status = yield* window['engine.status']()
+        expect(status).toMatchObject({ ready: true, ...started })
+        expect(Schema.is(DatabaseOpen)(status.database)).toBe(true)
+        expect(status.database).toMatchObject({ writtenByVersion: '1.0.0', reconciliation: 'none' })
         const first = yield* Stream.runHead(window['engine.statusChanges']())
-        expect(first).toEqual(Option.some({ ready: true, ...start }))
+        expect(first).toEqual(Option.some(status))
       }),
     ))
 
@@ -157,6 +189,32 @@ describe('The window reaches the engine through main', () => {
         const { window, relaunches } = yield* chain
         expect(yield* window['environment.report']()).toEqual(report)
         yield* window['application.relaunch']()
+        expect(relaunches()).toBe(1)
+      }),
+    ))
+
+  test('a preference the window writes is stored by the engine and worn by main', () =>
+    run(
+      Effect.gen(function* () {
+        const { window, displayed } = yield* chain
+        yield* window['preferences.write']({ theme: 'dark' })
+        expect(yield* window['preferences.read']()).toEqual({ theme: 'dark' })
+        expect(displayed).toEqual([{ theme: 'dark' }, { theme: 'dark' }])
+      }),
+    ))
+
+  test('a backup is written where the window asks, and a refused restore relaunches nothing', () =>
+    run(
+      Effect.gen(function* () {
+        const { window, relaunches } = yield* chain
+        const written = yield* window['profile.backup']({ folder: temporaryFolder('chosen') })
+        expect(written).toMatch(/hemera-backup-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\dZ$/)
+        const refused = yield* Effect.flip(
+          window['profile.restore']({ folder: temporaryFolder('not-a-backup') }),
+        )
+        expect(refused).toBeInstanceOf(RestoreRefused)
+        expect(relaunches()).toBe(0)
+        yield* window['profile.restore']({ folder: written })
         expect(relaunches()).toBe(1)
       }),
     ))

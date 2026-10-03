@@ -12,12 +12,14 @@ directories:
   output: ../../dist/package
   buildResources: build
 
-# Only what was built and the manifest that names its entry point. The sources and every
-# development dependency stay out by not being named. electron-builder collects the production
-# `node_modules` of its own accord, whatever this list says; the bundles carry their own
-# JavaScript and import nothing but `node:` and `electron`, so a package needs no `node_modules`.
+# Only what was built, the migrations the engine applies at start, and the manifest that names
+# its entry point. The sources and every development dependency stay out by not being named.
+# electron-builder collects the production `node_modules` of its own accord, whatever this list
+# says; the bundles carry their own JavaScript and import nothing but `node:` and `electron`, so
+# a package needs no `node_modules`.
 files:
   - dist/**
+  - drizzle/**
   - package.json
   - '!node_modules/**/*'
 

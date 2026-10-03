@@ -13,12 +13,15 @@ import type { MessagePortMain, UtilityProcess } from 'electron/main'
 
 import { ProbeRpcs } from '../engine/probe.ts'
 import type { HemeraProbe, LoadMeasure } from './probe-types.ts'
+import { changePreferences, type Application, type EngineClient } from './window-link.ts'
 import type { WindowPorts } from './window-ports.ts'
 
 export const installProbe = (
   port: MessagePortMain,
   engine: UtilityProcess,
   windows: WindowPorts,
+  engineClient: EngineClient,
+  application: Application,
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.gen(function* () {
     const client = yield* RpcClient.make(ProbeRpcs).pipe(
@@ -32,6 +35,8 @@ export const installProbe = (
 
     const probe: HemeraProbe = {
       enginePid: () => engine.pid,
+      changeTheme: (theme) =>
+        Effect.runPromise(changePreferences(engineClient, application)({ theme })),
       closeWindowLinks: () => windows.closeAll(),
       crashEngine: () => {
         Effect.runFork(client['probe.crash']())

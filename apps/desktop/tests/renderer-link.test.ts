@@ -6,6 +6,8 @@
 import { MessageChannel } from 'node:worker_threads'
 
 import {
+  DatabaseOpen,
+  DEFAULT_PREFERENCES,
   EngineGone,
   fromMessagePort,
   makeServerProtocol,
@@ -20,7 +22,18 @@ import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 import { ENGINE_START_LIMIT, watchEngine, type EngineState } from '../src/renderer/engine-start.ts'
 import { linkOver, type Link } from '../src/renderer/link.ts'
 
-const status: EngineStatus = { ready: true, version: '1.0.0', channel: 'dev', dataFolder: '/data' }
+const status: EngineStatus = {
+  ready: true,
+  version: '1.0.0',
+  channel: 'dev',
+  dataFolder: '/data',
+  database: DatabaseOpen.make({
+    lastMigration: null,
+    writtenByVersion: '1.0.0',
+    backups: { count: 0, latest: null },
+    reconciliation: 'none',
+  }),
+}
 const report: EnvironmentReport = {
   version: '1.0.0',
   channel: 'dev',
@@ -48,6 +61,11 @@ const main = async (engine: 'answers' | 'gone') => {
             Stream.ensuring(Deferred.succeed(stopped, undefined)),
           )
         : Stream.fail(new EngineGone()),
+    'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
+    'preferences.write': () => Effect.void,
+    'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
+    'profile.backup': ({ folder }) => Effect.succeed(folder),
+    'profile.restore': () => Effect.void,
     'environment.report': () => Effect.succeed(report),
     'application.relaunch': () => Effect.void,
   })
