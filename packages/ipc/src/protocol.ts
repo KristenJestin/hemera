@@ -19,8 +19,8 @@
  * Nothing here waits on a clock: a long call is a call in flight that can be interrupted.
  */
 
-import { Data, Effect, FiberSet, Match, Option, Predicate, Queue, Schema } from 'effect'
-import type { Scope } from 'effect'
+import { Data, Effect, Exit, FiberSet, Match, Option, Predicate, Queue, Schema } from 'effect'
+import type { Fiber, Scope } from 'effect'
 import { RpcClient, RpcClientError, RpcServer } from 'effect/rpc'
 import type { RpcMessage, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
@@ -117,6 +117,15 @@ const FromServer = Schema.Union([
 
 /** What the reader of a client handles: a server's message, or the news that the link closed. */
 type Incoming = typeof FromServer.Type | RpcMessage.ClientProtocolError
+
+/** What reaches one request: its stream items, then its exit. */
+type Response = RpcMessage.ResponseChunkEncoded | RpcMessage.ResponseExitEncoded
+type Mailbox = Queue.Queue<Response>
+
+interface Delivery {
+  readonly mailbox: Mailbox
+  readonly fiber: Fiber.Fiber<void>
+}
 
 /** The two messages this protocol writes itself, as plain objects that clone onto a port. */
 const { Interrupt: interrupt, ClientProtocolError: linkClosed } = Data.taggedEnum<
@@ -224,9 +233,10 @@ export const makeClientProtocol = (
 ): Effect.Effect<RpcClient.Protocol['Service'], never, Scope.Scope> =>
   RpcClient.Protocol.make(
     Effect.fnUntraced(function* (writeResponse, clientIds) {
+      const scope = yield* Effect.scope
       const inbox = yield* Queue.unbounded<Incoming>()
-      /** Which client of this protocol each request in flight belongs to. */
-      const owners = new Map<string | number, number>()
+      /** The requests in flight, each delivered in order by a fiber of its own. */
+      const deliveries = new Map<string | number, Delivery>()
       let closed: RpcClientError.RpcClientError | undefined
 
       const everyClient = (message: RpcMessage.FromServerEncoded) =>
@@ -234,37 +244,48 @@ export const makeClientProtocol = (
           discard: true,
         })
 
-      /** Hands a response to the client that asked; an exit is the last one of its request. */
-      const answer = (
+      /**
+       * Hands one request's responses to the client that asked, in order, until its exit.
+       *
+       * One fiber per request rather than the reader itself: RpcClient waits for room in a
+       * stream's buffer, and a stream nobody reads (or one the caller has just interrupted) must
+       * not hold back the answers of every other request on the link.
+       */
+      const deliver = (requestId: string | number, clientId: number, mailbox: Mailbox) =>
+        Effect.gen(function* () {
+          while (true) {
+            const message = yield* Queue.take(mailbox)
+            const delivered = yield* Effect.exit(writeResponse(clientId, message))
+            // Effect-TS/effect#8610: RpcClient has already ended this call locally when it
+            // re-raises. The other requests go on, and the server is told to stop this one.
+            if (Exit.isFailure(delivered)) return port.post(interrupt({ requestId }))
+            if (Predicate.isTagged(message, 'Exit')) return
+          }
+        }).pipe(Effect.ensuring(Effect.sync(() => deliveries.delete(requestId))))
+
+      const toItsRequest = (
         message: RpcMessage.ResponseChunkEncoded | RpcMessage.ResponseExitEncoded,
-        last: boolean,
-      ): Effect.Effect<void> => {
-        const requestId = message.requestId
-        const clientId = owners.get(requestId)
-        if (clientId === undefined) return Effect.void
-        if (last) owners.delete(requestId)
-        return writeResponse(clientId, message).pipe(
-          // Effect-TS/effect#8610: RpcClient has already ended this call locally when it
-          // re-raises. The reader goes on, and the server is told to stop the call.
-          Effect.catchCause(() =>
-            Effect.sync(() => {
-              owners.delete(requestId)
-              port.post(interrupt({ requestId }))
-            }),
-          ),
-        )
-      }
+      ): Effect.Effect<void> =>
+        Effect.sync(() => {
+          const delivery = deliveries.get(message.requestId)
+          if (delivery !== undefined) Queue.offerUnsafe(delivery.mailbox, message)
+        })
 
       const handle = (message: Incoming): Effect.Effect<void> =>
         Match.value(message).pipe(
           Match.tagsExhaustive({
-            Chunk: (chunk) => answer(chunk, false),
-            Exit: (exit) => answer(exit, true),
+            Chunk: toItsRequest,
+            Exit: toItsRequest,
             Defect: everyClient,
             ClientProtocolError: everyClient,
             Pong: () => Effect.void,
           }),
         )
+
+      const abandon = (requestId: string | number): void => {
+        deliveries.get(requestId)?.fiber.interruptUnsafe()
+        deliveries.delete(requestId)
+      }
 
       port.start(
         (data) => {
@@ -273,7 +294,7 @@ export const makeClientProtocol = (
         },
         () => {
           closed ??= connectionClosed(peer)
-          owners.clear()
+          for (const requestId of [...deliveries.keys()]) abandon(requestId)
           Queue.offerUnsafe(inbox, linkClosed({ error: closed }))
         },
       )
@@ -281,21 +302,30 @@ export const makeClientProtocol = (
       yield* Effect.forkScoped(Effect.forever(Effect.flatMap(Queue.take(inbox), handle)))
       yield* Effect.addFinalizer(() => Effect.sync(() => port.close()))
 
-      return {
-        send: (clientId: number, message: RpcMessage.FromClientEncoded) => {
-          if (closed !== undefined) return Effect.fail(closed)
-          if (Predicate.isTagged(message, 'Request')) owners.set(message.id, clientId)
-          return Effect.try({
-            try: () => port.post(message),
-            catch: (cause) =>
-              new RpcClientError.RpcClientError({
-                reason: new RpcClientError.RpcClientDefect({
-                  message: 'An RPC message could not be posted on its port',
-                  cause,
-                }),
+      const post = (message: RpcMessage.FromClientEncoded) =>
+        Effect.try({
+          try: () => port.post(message),
+          catch: (cause) =>
+            new RpcClientError.RpcClientError({
+              reason: new RpcClientError.RpcClientDefect({
+                message: 'An RPC message could not be posted on its port',
+                cause,
               }),
-          })
-        },
+            }),
+        })
+
+      return {
+        send: (clientId: number, message: RpcMessage.FromClientEncoded) =>
+          Effect.gen(function* () {
+            if (closed !== undefined) return yield* Effect.fail(closed)
+            if (Predicate.isTagged(message, 'Request')) {
+              const mailbox = yield* Queue.unbounded<Response>()
+              const fiber = yield* Effect.forkIn(deliver(message.id, clientId, mailbox), scope)
+              deliveries.set(message.id, { mailbox, fiber })
+            }
+            if (Predicate.isTagged(message, 'Interrupt')) abandon(message.requestId)
+            return yield* post(message)
+          }),
         supportsAck: true,
         supportsTransferables: false,
         codecFor,
