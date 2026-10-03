@@ -193,13 +193,17 @@ describe('A repository without a remote takes its local base branch', () => {
 })
 
 describe('The code names no base branch but its one default', () => {
-  /** Every source file of the packages and of the engine, relative to the repository's root. */
+  /**
+   * Every source file of the packages and of the engine, relative to the repository's root. The
+   * stories of the design system are left out: they are example data, and a repository of the
+   * catalogue is on `main` as a real one would be.
+   */
   const ROOT = join(import.meta.dirname, '..', '..', '..')
   const sources = (folder: string): string[] =>
     readdirSync(folder).flatMap((entry) => {
       const path = join(folder, entry)
       if (statSync(path).isDirectory()) return entry === 'node_modules' ? [] : sources(path)
-      return /\.tsx?$/.test(entry) ? [path] : []
+      return /\.tsx?$/.test(entry) && !entry.endsWith('.stories.tsx') ? [path] : []
     })
 
   test('no quoted “main” outside the constant, but the engine’s name for the main process', () => {
