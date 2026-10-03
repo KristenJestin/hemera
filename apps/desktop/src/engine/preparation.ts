@@ -153,6 +153,8 @@ const worktreeStep = (place: Place, workspace: Workspace, step: PreparationStep)
       }
     })()
     if (parents !== null) return failed(doing, parents)
+    // Made already: a stopped engine ran `git worktree add` without writing that it had.
+    if (existsSync(join(worktree, '.git'))) return done
     return yield* git.worktreePrune(source).pipe(
       Effect.andThen(
         branch === null

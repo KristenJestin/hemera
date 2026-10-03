@@ -15,8 +15,8 @@ import { Result, Schema } from 'effect'
 import { InvalidBranchName, branchNameRefusal } from './project.ts'
 
 /**
- * The name the main checkout answers to where a Workspace's name is asked for: `{workspace}` in
- * the main checkout, as the 0.x `main` Workspace was named.
+ * The name the main checkout answers to where a Workspace's name is asked for: what
+ * `{workspace}` is filled with in the main checkout.
  */
 export const MAIN_CHECKOUT_NAME = 'main'
 

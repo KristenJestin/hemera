@@ -252,19 +252,20 @@ export interface Place {
   readonly branch: string | null
 }
 
+/** The main checkout as a place: read-only, its repositories as they are. */
+export const mainCheckoutPlace = (project: Project): Place => ({
+  project,
+  workspace: null,
+  name: MAIN_CHECKOUT_NAME,
+  folder: project.mainCheckout,
+  branch: null,
+})
+
 /** The Workspace asked for, or the main checkout for null, as a place things run in. */
 export const placeOf = (projectId: string, workspaceId: string | null) =>
   Effect.gen(function* () {
     const project = yield* getProject(projectId)
-    if (workspaceId === null) {
-      return {
-        project,
-        workspace: null,
-        name: MAIN_CHECKOUT_NAME,
-        folder: project.mainCheckout,
-        branch: null,
-      } satisfies Place
-    }
+    if (workspaceId === null) return mainCheckoutPlace(project)
     const workspace = yield* getWorkspace(workspaceId)
     if (workspace.projectId !== projectId) return yield* new UnknownWorkspace({ id: workspaceId })
     return {
