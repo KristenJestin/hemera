@@ -37,7 +37,7 @@ import { Context, Effect, Layer, Match, Option, Ref, Result, Schema, Stream } fr
 import { DomainEvents } from './domain-events.ts'
 import { Git, type GitRefusal } from './git.ts'
 import type { DomainEvent } from './journal.ts'
-import { locateRepository } from './projects.ts'
+import { getRepository } from './projects.ts'
 import { type Database, type DatabaseError, refusedWhile } from './storage/database.ts'
 import { projectRepositories } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
@@ -61,7 +61,7 @@ export const repositoryStatusesLayer = Layer.effect(
 export type ProjectServices = Database | DomainEvents | Git | RepositoryStatuses
 
 const located = (id: string) =>
-  Effect.map(locateRepository(id), ({ project, repository }) => ({
+  Effect.map(getRepository(id), ({ project, repository }) => ({
     project,
     repository,
     folder: join(project.mainCheckout, repository.path),

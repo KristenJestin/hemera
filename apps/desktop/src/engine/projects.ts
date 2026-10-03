@@ -26,9 +26,7 @@ import {
 import {
   type BaseBranchEdit,
   type BranchPrefixEdit,
-  type InvalidBranchName,
   InvalidFolder,
-  type InvalidProjectName,
   InvalidRepositoryPath,
   type NewProject,
   type NewRepository,
@@ -48,7 +46,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect, Option, Result, Stream } from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
-import { Git, type GitRefusal } from './git.ts'
+import { Git } from './git.ts'
 import type { DomainEvent, EventPayload, NewEvent } from './journal.ts'
 import {
   Database,
@@ -216,7 +214,7 @@ export const getProject = (
   )
 
 /** A repository, with the Project it belongs to. */
-const getRepository = (id: string) =>
+export const getRepository = (id: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     const [row] = yield* database
@@ -231,13 +229,6 @@ const getRepository = (id: string) =>
     return { repository: repositoryOf(row), project }
   })
 
-/** The Project a repository belongs to, and the repository, as `repositories.ts` reads them. */
-export const locateRepository = getRepository
-
-/**
- * Takes a Project to its next version, and refuses an edit made from an older one. The comparison
- * is the write itself: `WHERE id = ? AND version = ?` changes a row or does not.
- */
 /** What an edit of a Project may change of its row. */
 type ProjectChange = Partial<
   Pick<ProjectRow, 'name' | 'mainCheckout' | 'workspacesRoot' | 'branchPrefix'>
@@ -248,6 +239,10 @@ type RepositoryChange = Partial<
   Pick<RepositoryRow, 'path' | 'includedByDefault' | 'remote' | 'baseBranch'>
 >
 
+/**
+ * Takes a Project to its next version, and refuses an edit made from an older one. The comparison
+ * is the write itself: `WHERE id = ? AND version = ?` changes a row or does not.
+ */
 const bump = (transaction: EngineTransaction, id: string, version: number, change: ProjectChange) =>
   Effect.gen(function* () {
     const written = yield* transaction
@@ -569,15 +564,3 @@ export const projectChanges: Stream.Stream<Project, DatabaseError, Database | Do
         ),
     ),
   )
-
-/** What a Project call may be refused with, besides the data folder. */
-export type ProjectRefusal =
-  | InvalidProjectName
-  | InvalidRepositoryPath
-  | InvalidBranchName
-  | InvalidFolder
-  | StaleVersion
-  | UnknownProject
-  | UnknownRepository
-  | UnknownRemote
-  | GitRefusal
