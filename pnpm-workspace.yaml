@@ -5,9 +5,10 @@ packages:
 # A dependency only runs an install script if it is allowed here. esbuild links the binary the
 # end-to-end runner transpiles with; two of the refused ones download a browser driver and one
 # builds a Squirrel installer, and this repository drives Electron and ships a zip, an AppImage
-# and a deb.
+# and a deb. msgpackr-extract is Effect's optional native accelerator: Effect works without it.
 allowBuilds:
   edgedriver: false
   electron-winstaller: false
   esbuild: true
   geckodriver: false
+  msgpackr-extract: false
