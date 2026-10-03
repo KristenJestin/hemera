@@ -23,6 +23,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@effect/sql-sqlite-node": "4.0.0",
     "@hemera/ipc": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -33,6 +34,8 @@
     "@wdio/local-runner": "9.32.0",
     "@wdio/mocha-framework": "9.32.0",
     "@wdio/spec-reporter": "9.32.0",
+    "drizzle-kit": "1.0.0-rc.5-5935859",
+    "drizzle-orm": "1.0.0-rc.5-5935859",
     "effect": "4.0.0",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
