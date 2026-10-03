@@ -57,7 +57,9 @@ export const probeHandlers = (launch: Launch) =>
         }),
       ),
     'probe.load': ({ count, size }) =>
+      // One item per chunk, as an agent's turn arrives: one acknowledgement per item.
       Stream.range(1, count).pipe(
         Stream.map((index) => Item.make({ index, text: 'x'.repeat(size) })),
+        Stream.rechunk(1),
       ),
   })
