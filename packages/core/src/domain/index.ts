@@ -4,3 +4,4 @@
  */
 export * from './project.ts'
 export * from './workspace.ts'
+export * from './commands.ts'
