@@ -59,9 +59,12 @@ packages/core     @hemera/core     The schemas shared by the processes and their
                                    (Effect Schema): `@hemera/core/schema`.
 packages/ipc      @hemera/ipc      The links between the processes: Effect RPC over MessagePorts
                                    and one RPC group per domain. No Electron, no React.
+packages/ui       @hemera/ui       The design system: the theme, the motion kinds, the icons and
+                                   the components, each with its stories. React, never Electron.
 tools/            —                commit-message, branch-guard, install-hooks, window-options,
-                                   boundaries, package-desktop, release-tag, aur-publish, and the
-                                   vendored lint rules. TypeScript run by Node, tested by Vitest.
+                                   boundaries, motion-presets, scales, text-measure,
+                                   package-desktop, release-tag, aur-publish, and the vendored
+                                   lint rules. TypeScript run by Node, tested by Vitest.
 packaging/aur     —                the AUR packages hemera-bin and hemera-beta-bin, updated by
                                    tools/aur-publish.ts on each release and beta.
 ```
@@ -76,13 +79,15 @@ workspace here; say so when a product concept shares the word.
 pnpm install --frozen-lockfile   # once, at the root; no per-package lockfiles
 pnpm dev                         # the desktop application, main + preload + renderer
 pnpm typecheck                   # tsc per package, through Vite+ task running
-pnpm lint                        # oxlint, then the window options check
+pnpm lint                        # oxlint, then the window options, boundaries, motion, scale
+                                 # and text-measure checks
 pnpm fmt                         # oxfmt (fmt:check in CI)
 pnpm test                        # vitest (in a terminal: `pnpm exec vp test run`, no watching)
 pnpm build                       # the bundles of the application
 pnpm package                     # portable package of this target, channel dev
 pnpm package --channel beta      # refused outside CI: prod and beta are the pipeline's to build
 pnpm check                       # typecheck, lint, fmt:check and test, in that order
+pnpm storybook                   # the catalogue of the design system, on port 6006
 
 pnpm --filter @hemera/desktop e2e:headless   # the built application, driven by wdio, no window on screen
 ```
@@ -93,7 +98,11 @@ socket) and never opens a window on the desktop. `N passed, M total` from wdio c
 files × capabilities.
 
 Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and
-`test` blocks. Three rule sets run on oxlint beside the built-in ones:
+`test` blocks. `pnpm test` runs three projects: `repository` on Node, and `storybook-light` and
+`storybook-dark`, every story of the design system played in a headless Chromium once per theme
+(`vp test run --project storybook-light`). The Chromium is Playwright's:
+`pnpm --filter @hemera/ui exec playwright install chromium` once per machine. Three rule sets
+run on oxlint beside the built-in ones:
 
 - `@shadcn/lint`, the design-system contract: no raw colour, no arbitrary Tailwind value, no
   inline style, no class built at run time, no restyling of a component through `className`.
@@ -119,9 +128,11 @@ profile.
 - For Effect code, read `node_modules/effect/AGENTS.md` and its `ai-docs/` first.
 - Effect is pinned exactly; an upgrade is its own pull request.
 - No zod: the lint refuses its import. Effect `Schema` replaces it everywhere.
-- No Effect inside React components: the renderer uses schemas and the generated RPC clients
-  only. Schema types, decoders and the form helper (`toFormSchema`) are allowed in the
-  interface; no `Effect`, `Layer`, `Stream` or fiber in a component or a hook.
+- Components stay plain React: they receive values and call functions. A thin layer of hooks
+  between the components and the engine may use Effect (RPC calls, streams, interruption, and
+  possibly Effect's Atom for interface state). No `Effect`, `Layer`, `Stream` or fiber inside a
+  component. Schema types, decoders and the form helper (`toFormSchema`) are allowed anywhere
+  in the interface.
 - The conventions of `@hemera/core/schema`, each proven by a test: a value crosses a process
   link through `Schema.toCodecJson` (bytes as base64, dates as ISO strings); an MCP tool takes
   its input schema from `toToolInputSchema` only; a parse error reaches a person only through
@@ -187,15 +198,60 @@ downloaded or installed while the application runs.
 
 ## UI rules
 
-- Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,
-  no inline styles outside the token files.** Until the design system is back, the empty shell
-  wears the system colours (`Canvas`, `CanvasText`).
-- Motion lives in one file of the design system as a short, closed set of named kinds; no
-  component writes its own spring, duration, curve or keyframe. Every movement answers the
-  reduced-motion preference with its end state.
+- Every visual value comes from the design system's CSS tokens, `packages/ui/src/theme.css`.
+  **No hex colors, no px sizes, no inline styles outside the token files.** Sizes, radii and
+  durations are steps of the theme's scales (`node tools/scales.ts`), and nothing sizes a zone by
+  measuring text (`node tools/text-measure.ts`). Until the window wears the design system, the
+  empty shell wears the system colours (`Canvas`, `CanvasText`).
+- Motion lives in `packages/ui/src/motion.ts` as a short, closed set of named kinds (`press`,
+  `arrival`, `morph`, `instant`, `expand` and `collapse` on `fold`, `crossfade`, `ping`, `check`,
+  `wipe`); no component writes its own spring, duration, curve or keyframe, and
+  `node tools/motion-presets.ts` refuses one that does. Components read a kind through
+  `useTransition(kind)`, which answers the reduced-motion preference with the end state for
+  every property; the CSS transitions of the theme stop under `prefers-reduced-motion: reduce`.
+  A movement the set has no kind for is added there, named and explained.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - A component is designed in Storybook first, one story per state, named after the state
   (`Empty`, `Loading`, `Error`, `Filled`), in both themes, before it is wired.
+- Storybook sidebar, five roots in this order, and a sixth last: **Foundations** (tokens, icons,
+  motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the composed pieces
+  that are not a screen, grouped by family, the families listed by the design tickets;
+  **Surfaces**, one entry per screen, never one per variant; **Shell**, the window frame; and
+  **Explorations**, a design question under way drawn in several variants, deleted once the
+  variant chosen is built. A story file sits next to its component, `<name>.stories.tsx`; the
+  order is forced by `storySort` in `packages/ui/.storybook/preview.tsx`.
+- Storybook badges: a story file the branch **created** shows `new`, one whose own file or
+  component the branch **changed** shows `updated`. Git decides when Storybook indexes the
+  stories (`packages/ui/.storybook/badges.ts`), comparing with `origin/feature/1.0`, or with the
+  ref `HEMERA_STORYBOOK_BASE` names. A story file never writes a badge itself: its only tag is
+  `autodocs`, and `pnpm test` refuses any other.
+
+### Interface conventions (1.0)
+
+- Never the engine's vocabulary on screen (revision, snapshot, attempt, stale, attestation):
+  plain words. A repository modified outside Hemera is "Changed outside Hemera".
+- States as icons and dots, not word badges or explanatory sentences. Each mark's legend is a
+  tooltip on the glyph (`Legend`), never a panel.
+- What appears or disappears pushes the content smoothly (the container animates its size), and
+  nothing that should stay still moves. This is checked with Playwright image sequences of the
+  catalogue (`pnpm --filter @hemera/ui frames`), because the story tests only play the
+  reduced-motion path.
+- Errors in words. A silent turn says so. Agents' errors and unanswered requests are shown. A
+  start has a maximum delay.
+- Skeletons for rows whose shape is known; a spinner only for what has none.
+- A reading measure of 70 to 80 characters for prose (the Spec page, the Chat, Discuss); code,
+  tables and command output may be wider.
+- Designs at 1920×1080 and 1366×768, light and dark.
+- Design on real cases, never on placeholder data. Stories in this public repository use neutral
+  examples: a Project "Acme" with repositories `api`, `web` and `shared`, or Hemera itself.
+- No Effect inside React components (see Effect).
+- The Spec is never edited by hand: the agent writes, the user reads and answers.
+- The frozen state is said once, by the stage chip in the header: no padlock per section, no
+  completeness bar.
+- Navigation in a mission: a base (the current stage's page) that keeps its state, and views
+  opened over it with one contract (title and icon, width, header actions, body) and a
+  breadcrumb. Going back finds the base intact.
+- The model picker and the mention field follow their own rules, written with those components.
 
 ## When done
 
