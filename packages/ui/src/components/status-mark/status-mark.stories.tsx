@@ -100,8 +100,9 @@ export const Running: Story = {
   ...posed('running'),
   play: async (context) => {
     await posed('running').play?.(context)
-    const svg = context.canvasElement.querySelector('svg')!
-    expect(getComputedStyle(svg).animationName).toBe(
+    // The wrapper turns, never the svg itself: a transform on an svg is not given its own layer.
+    const turning = context.canvasElement.querySelector('[data-figure="turn"]')!
+    expect(getComputedStyle(turning).animationName).toBe(
       globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'turn',
     )
   },
