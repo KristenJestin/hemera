@@ -4,5 +4,11 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node", "@wdio/globals/types", "@wdio/electron-service", "@wdio/mocha-framework"]
   },
-  "include": ["e2e/**/*.ts", "wdio.conf.ts", "wdio.headless.conf.ts", "src/renderer/bridge.d.ts"]
+  "include": [
+    "e2e/**/*.ts",
+    "wdio.conf.ts",
+    "wdio.headless.conf.ts",
+    "src/renderer/bridge.d.ts",
+    "src/main/probe-types.ts"
+  ]
 }

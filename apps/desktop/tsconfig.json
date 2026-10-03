@@ -1,10 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
     "types": ["node"]
   },
   "include": [
     "src/main/**/*.ts",
+    "src/engine/**/*.ts",
+    "src/agents/**/*.ts",
     "src/preload/**/*.ts",
     "src/renderer/bridge.d.ts",
     "bundles.ts",

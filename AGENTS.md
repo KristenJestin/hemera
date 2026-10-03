@@ -57,9 +57,11 @@ apps/desktop      @hemera/desktop  Electron application: main process (ESM), pre
                                    (CommonJS, sandboxed), renderer (React 19 served by Vite).
 packages/core     @hemera/core     The schemas shared by the processes and their conventions
                                    (Effect Schema): `@hemera/core/schema`.
+packages/ipc      @hemera/ipc      The links between the processes: Effect RPC over MessagePorts
+                                   and one RPC group per domain. No Electron, no React.
 tools/            —                commit-message, branch-guard, install-hooks, window-options,
-                                   package-desktop, release-tag, aur-publish, and the vendored
-                                   lint rules. TypeScript run by Node, tested by Vitest.
+                                   boundaries, package-desktop, release-tag, aur-publish, and the
+                                   vendored lint rules. TypeScript run by Node, tested by Vitest.
 packaging/aur     —                the AUR packages hemera-bin and hemera-beta-bin, updated by
                                    tools/aur-publish.ts on each release and beta.
 ```

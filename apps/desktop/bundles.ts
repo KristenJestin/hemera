@@ -1,7 +1,8 @@
 /**
- * The three bundles of the application, declared once and used by the build and by the
- * development run: an ESM main process on Node, a preload that a sandboxed renderer can only
- * load as CommonJS, and a renderer that is a web page.
+ * The bundles of the application, declared once and used by the build and by the development
+ * run: an ESM main process on Node, the engine and the agents' process (two utility processes
+ * main forks, ESM on Node too), a preload that a sandboxed renderer can only load as CommonJS,
+ * and a renderer that is a web page.
  */
 
 import { dirname, resolve } from 'node:path'
@@ -18,22 +19,31 @@ export const OUTPUT = resolve(application, 'dist')
 /** Electron and everything Node provides stays outside the bundles: the runtime carries it. */
 const PROVIDED_BY_ELECTRON = [/^node:/, /^electron(\/.*)?$/]
 
-export const mainBundle: InlineConfig = {
+/** A program that runs on Node in a process of its own, built from `src/<name>/index.ts`. */
+const nodeProgram = (name: string): InlineConfig => ({
   root: application,
   configFile: false,
   build: {
-    outDir: resolve(OUTPUT, 'main'),
+    outDir: resolve(OUTPUT, name),
     emptyOutDir: true,
     target: 'node24',
     minify: false,
     lib: {
-      entry: resolve(application, 'src/main/index.ts'),
+      entry: resolve(application, `src/${name}/index.ts`),
       formats: ['es'],
       fileName: () => 'index.js',
     },
     rollupOptions: { external: PROVIDED_BY_ELECTRON },
   },
-}
+})
+
+export const mainBundle = nodeProgram('main')
+
+/** The engine, forked by main once Electron is ready. */
+export const engineBundle = nodeProgram('engine')
+
+/** The agents' process, forked by main for each program the engine asks for. */
+export const agentsBundle = nodeProgram('agents')
 
 export const preloadBundle: InlineConfig = {
   root: application,

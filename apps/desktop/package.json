@@ -23,6 +23,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@hemera/ipc": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
@@ -32,6 +33,7 @@
     "@wdio/local-runner": "9.32.0",
     "@wdio/mocha-framework": "9.32.0",
     "@wdio/spec-reporter": "9.32.0",
+    "effect": "4.0.0",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
     "vite-plus": "1.0.0"
