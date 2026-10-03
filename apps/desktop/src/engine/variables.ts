@@ -22,16 +22,32 @@ import {
   type VariableScope,
 } from '@hemera/ipc'
 import { and, asc, eq, isNull } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { Cause, Effect, Predicate } from 'effect'
 
 import type { NewEvent } from './journal.ts'
-import { Database, refusedWhile } from './storage/database.ts'
+import { Database, DatabaseError, refusedWhile } from './storage/database.ts'
 import { environmentVariables } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 import { type Place, placeOf, templateValuesOf } from './workspaces.ts'
 
 /** What a list shows in place of every value, the same whatever the value's length. */
 export const MASK = '••••••••'
+
+/**
+ * A failure of the driver on a query that carries a value, said without the value: the query
+ * builder's message prints every parameter, so only what the database itself said is kept.
+ */
+const refusedWithoutValues =
+  (doing: string) =>
+  <E>(failure: E): DatabaseError => {
+    if (!Predicate.isTagged(failure, 'EffectDrizzleQueryError')) return refusedWhile(doing)(failure)
+    const inner = Predicate.hasProperty(failure, 'cause') ? failure.cause : null
+    let said = Cause.isCause(inner) ? Cause.squash(inner) : inner
+    while (Predicate.hasProperty(said, 'cause') && said.cause instanceof Error) said = said.cause
+    return said instanceof Error && said.message !== ''
+      ? new DatabaseError({ doing, reason: said.message })
+      : new DatabaseError({ doing, reason: 'the database refused the query' })
+  }
 
 /** The rows of one scope: a Project's own, or one Workspace's. */
 const scopeOf = (projectId: string, workspaceId: string | null) =>
@@ -50,7 +66,7 @@ const rowsOf = (projectId: string, workspaceId: string | null) =>
       .from(environmentVariables)
       .where(scopeOf(projectId, workspaceId))
       .orderBy(asc(environmentVariables.key))
-      .pipe(Effect.mapError(refusedWhile('reading the variables')))
+      .pipe(Effect.mapError(refusedWithoutValues('reading the variables')))
   })
 
 /** The event a change of a variable writes: its name and where, never its value. */
@@ -90,7 +106,7 @@ export const setVariable = (edit: VariableEdit) =>
           .select({ id: environmentVariables.id })
           .from(environmentVariables)
           .where(and(scopeOf(edit.projectId, edit.workspaceId), eq(environmentVariables.key, key)))
-          .pipe(Effect.mapError(refusedWhile('reading the variables')))
+          .pipe(Effect.mapError(refusedWithoutValues('reading the variables')))
         const [found] = existing
         yield* (
           found === undefined
@@ -105,7 +121,7 @@ export const setVariable = (edit: VariableEdit) =>
                 .update(environmentVariables)
                 .set({ value })
                 .where(eq(environmentVariables.id, found.id))
-        ).pipe(Effect.mapError(refusedWhile('writing the variable')))
+        ).pipe(Effect.mapError(refusedWithoutValues('writing the variable')))
         return { result: undefined, events: [changed('variable.set', edit, key)] }
       }),
     )
@@ -126,7 +142,7 @@ export const removeVariable = (asked: VariableKey) =>
             ),
           )
           .returning({ id: environmentVariables.id })
-          .pipe(Effect.mapError(refusedWhile('removing the variable')))
+          .pipe(Effect.mapError(refusedWithoutValues('removing the variable')))
         if (removed.length === 0) return yield* new UnknownVariable({ key: asked.key })
         return { result: undefined, events: [changed('variable.removed', asked, asked.key)] }
       }),
