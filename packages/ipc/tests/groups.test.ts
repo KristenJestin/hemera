@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 
-import { Effect, Fiber, Schema, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -54,12 +54,16 @@ describe('The engine link', () => {
         Effect.gen(function* () {
           const { client, enginePort } = yield* engineLink
           expect(yield* client['engine.status']()).toEqual(status)
+          const heard = yield* Deferred.make<void>()
           const changes = yield* Effect.forkChild(
             Stream.runCollect(
-              client['engine.statusChanges']().pipe(streamClosedAs(() => new EngineGone())),
+              client['engine.statusChanges']().pipe(
+                streamClosedAs(() => new EngineGone()),
+                Stream.tap(() => Deferred.succeed(heard, undefined)),
+              ),
             ),
           )
-          yield* Effect.sleep(20)
+          yield* Deferred.await(heard)
           enginePort.close()
           const pending = yield* Effect.flip(Fiber.join(changes))
           expect(pending).toBeInstanceOf(EngineGone)

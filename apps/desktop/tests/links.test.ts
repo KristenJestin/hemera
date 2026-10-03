@@ -15,7 +15,7 @@ import {
   type EnvironmentReport,
   WindowRpcs,
 } from '@hemera/ipc'
-import { Effect, Fiber, Option, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Option, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -117,8 +117,13 @@ describe('The window reaches the engine through main', () => {
     run(
       Effect.gen(function* () {
         const { window, windowEnd, engineLines } = yield* chain
-        yield* Effect.forkChild(Stream.runDrain(window['engine.statusChanges']()))
-        yield* Effect.sleep(50)
+        const heard = yield* Deferred.make<void>()
+        yield* Effect.forkChild(
+          Stream.runDrain(
+            Stream.tap(window['engine.statusChanges'](), () => Deferred.succeed(heard, undefined)),
+          ),
+        )
+        yield* Deferred.await(heard)
         windowEnd.close()
         yield* eventually(
           () =>
@@ -132,8 +137,13 @@ describe('The window reaches the engine through main', () => {
     run(
       Effect.gen(function* () {
         const { window, engineEnd, mainLines } = yield* chain
-        const changes = yield* Effect.forkChild(Stream.runDrain(window['engine.statusChanges']()))
-        yield* Effect.sleep(50)
+        const heard = yield* Deferred.make<void>()
+        const changes = yield* Effect.forkChild(
+          Stream.runDrain(
+            Stream.tap(window['engine.statusChanges'](), () => Deferred.succeed(heard, undefined)),
+          ),
+        )
+        yield* Deferred.await(heard)
         engineEnd.close()
         expect(yield* Effect.flip(Fiber.join(changes))).toBeInstanceOf(EngineGone)
         expect(yield* Effect.flip(window['engine.status']())).toBeInstanceOf(EngineGone)

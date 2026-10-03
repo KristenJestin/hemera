@@ -17,7 +17,7 @@ import {
   Output,
   streamClosedAs,
 } from '@hemera/ipc'
-import { Effect, Fiber, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -92,9 +92,12 @@ describe('The agents’ process', () => {
     run(
       Effect.gen(function* () {
         const { output, write, agentsPort } = yield* echo
-        const read = yield* Effect.forkChild(Stream.runCollect(output))
+        const heard = yield* Deferred.make<void>()
+        const read = yield* Effect.forkChild(
+          Stream.runDrain(Stream.tap(output, () => Deferred.succeed(heard, undefined))),
+        )
         yield* write('hello')
-        yield* Effect.sleep(50)
+        yield* Deferred.await(heard)
         agentsPort.close()
         expect(yield* Effect.flip(Fiber.join(read))).toBeInstanceOf(AgentsProcessGone)
       }),

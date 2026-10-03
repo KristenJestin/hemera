@@ -15,7 +15,7 @@ import {
   makeServerProtocol,
   Output,
 } from '@hemera/ipc'
-import { Effect, Fiber, FiberSet, Stream } from 'effect'
+import { Deferred, Effect, Fiber, FiberSet, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -118,9 +118,12 @@ describe('The engine speaks to a program through an agents’ process main start
       Effect.gen(function* () {
         const { launch, kill, engineLines } = yield* setup
         const agents = yield* launch(ECHO, [])
-        const read = yield* Effect.forkChild(Stream.runDrain(agents.output))
+        const heard = yield* Deferred.make<void>()
+        const read = yield* Effect.forkChild(
+          Stream.runDrain(Stream.tap(agents.output, () => Deferred.succeed(heard, undefined))),
+        )
         yield* agents.write('hello')
-        yield* Effect.sleep(50)
+        yield* Deferred.await(heard)
         kill()
         expect(yield* Effect.flip(Fiber.join(read))).toBeInstanceOf(AgentsProcessGone)
         // Seen before the stream ended, not after.

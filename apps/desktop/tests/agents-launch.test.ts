@@ -90,6 +90,12 @@ const host = (forks: Array<StandIn | Error>) =>
     return { client, handedToEngine, asked, lines }
   })
 
+/** Waits until main has forked as many processes as asked, however busy the machine is. */
+const forked = (asked: ReadonlyArray<unknown>, count: number) =>
+  Effect.gen(function* () {
+    while (asked.length < count) yield* Effect.sleep(5)
+  })
+
 const run = <A, E>(body: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Effect.scoped(body))
 
 describe('Main launches an agents’ process for the engine', () => {
@@ -103,9 +109,8 @@ describe('Main launches an agents’ process for the engine', () => {
             client['agents.launch']({ launch: 7, program: '/echo.mjs', args: ['-v'] }),
           ),
         )
-        yield* Effect.sleep(10)
+        yield* forked(asked, 1)
         child.spawn()
-        yield* Effect.sleep(10)
         child.exit(3)
         expect(yield* Fiber.join(events)).toEqual<LaunchEvent[]>([
           Started.make({ pid: 4242 }),
@@ -119,13 +124,12 @@ describe('Main launches an agents’ process for the engine', () => {
     run(
       Effect.gen(function* () {
         const child = standIn(1)
-        const { client, handedToEngine } = yield* host([child])
+        const { client, handedToEngine, asked } = yield* host([child])
         yield* Effect.forkChild(
           Stream.runDrain(client['agents.launch']({ launch: 9, program: '/p', args: [] })),
         )
-        yield* Effect.sleep(10)
+        yield* forked(asked, 1)
         child.spawn()
-        yield* Effect.sleep(10)
         expect(child.given).toEqual(['process end 1'])
         expect(handedToEngine).toEqual([{ launch: 9, port: 'engine end 1' }])
       }),
@@ -148,16 +152,14 @@ describe('Main launches an agents’ process for the engine', () => {
     run(
       Effect.gen(function* () {
         const child = standIn(5)
-        const { client } = yield* host([child])
+        const { client, asked } = yield* host([child])
         const events = yield* Effect.forkChild(
           Stream.runDrain(client['agents.launch']({ launch: 2, program: '/p', args: [] })),
         )
-        yield* Effect.sleep(10)
+        yield* forked(asked, 1)
         child.spawn()
-        yield* Effect.sleep(10)
         yield* Fiber.interrupt(events)
-        yield* Effect.sleep(20)
-        expect(child.killed).toBe(true)
+        while (!child.killed) yield* Effect.sleep(5)
       }),
     ))
 })
