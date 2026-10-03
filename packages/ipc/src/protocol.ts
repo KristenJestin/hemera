@@ -19,7 +19,18 @@
  * Nothing here waits on a clock: a long call is a call in flight that can be interrupted.
  */
 
-import { Data, Effect, Exit, FiberSet, Match, Option, Predicate, Queue, Schema } from 'effect'
+import {
+  Data,
+  Effect,
+  Exit,
+  FiberSet,
+  Match,
+  Option,
+  Predicate,
+  Queue,
+  Schema,
+  Stream,
+} from 'effect'
 import type { Fiber, Scope } from 'effect'
 import { RpcClient, RpcClientError, RpcServer } from 'effect/rpc'
 import type { RpcMessage, RpcSerialization } from 'effect/rpc'
@@ -332,3 +343,39 @@ export const makeClientProtocol = (
       }
     }),
   )
+
+const isClientError = <E>(
+  error: E | RpcClientError.RpcClientError,
+): error is RpcClientError.RpcClientError => error instanceof RpcClientError.RpcClientError
+
+/**
+ * A call on a link as its caller sees it: a closed link becomes the link's own typed error
+ * (`EngineGone`, `AgentsProcessGone`), and any other failure of the client itself, which is a
+ * fault in Hemera rather than an answer, becomes a defect.
+ */
+export const closedAs =
+  <G>(gone: () => G) =>
+  <A, E, R>(
+    self: Effect.Effect<A, E | RpcClientError.RpcClientError, R>,
+  ): Effect.Effect<A, Exclude<E, RpcClientError.RpcClientError> | G, R> =>
+    Effect.catchIf(
+      self,
+      isClientError,
+      (error): Effect.Effect<never, G> =>
+        isConnectionClosed(error) ? Effect.fail(gone()) : Effect.die(error),
+      (other) => Effect.fail(other),
+    )
+
+/** `closedAs`, for a stream. */
+export const streamClosedAs =
+  <G>(gone: () => G) =>
+  <A, E, R>(
+    self: Stream.Stream<A, E | RpcClientError.RpcClientError, R>,
+  ): Stream.Stream<A, Exclude<E, RpcClientError.RpcClientError> | G, R> =>
+    Stream.catchIf(
+      self,
+      isClientError,
+      (error): Stream.Stream<never, G> =>
+        isConnectionClosed(error) ? Stream.fail(gone()) : Stream.die(error),
+      (other) => Stream.fail(other),
+    )
