@@ -77,10 +77,16 @@ describe('A fresh data folder gets the 1.0 schema', () => {
     expect(tables).toEqual([
       'app_preferences',
       'domain_events',
+      'environment_variables',
       'event_by_entity',
       'profile',
+      'project_preparation_steps',
       'project_repositories',
       'projects',
+      'variables_by_scope',
+      'workspace_repositories',
+      'workspace_steps',
+      'workspaces',
     ])
     expect(await on(data, typesOf)).toEqual([
       'profile.created',

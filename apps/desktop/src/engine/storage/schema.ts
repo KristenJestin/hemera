@@ -106,3 +106,111 @@ export const projectRepositories = sqliteTable(
   },
   (table) => [unique('repository_once_in_project').on(table.projectId, table.path)],
 )
+
+/**
+ * The Workspaces: a Project's isolated folders, one worktree per chosen repository. `branch` is
+ * the branch its worktrees were made on, or null for worktrees on a detached HEAD. A removed
+ * Workspace's row goes with its folder; the journal keeps that it was.
+ */
+export const workspaces = sqliteTable(
+  'workspaces',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    folder: text('folder').notNull(),
+    branch: text('branch'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [unique('workspace_name_once_in_project').on(table.projectId, table.name)],
+)
+
+/**
+ * The worktrees of a Workspace, one per repository it took, as they were made: the repository's
+ * path then, the worktree's folder, and the base it was made from. `base_ref` and
+ * `base_freshness` (the JSON of the up-to-date base's freshness) are null for a worktree made at
+ * a commit it was given.
+ */
+export const workspaceRepositories = sqliteTable(
+  'workspace_repositories',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    path: text('path').notNull(),
+    worktree: text('worktree').notNull(),
+    position: integer('position').notNull(),
+    baseCommit: text('base_commit').notNull(),
+    baseRef: text('base_ref'),
+    baseFreshness: text('base_freshness'),
+  },
+  (table) => [unique('repository_once_in_workspace').on(table.workspaceId, table.repositoryId)],
+)
+
+/**
+ * A Project's preparation recipe, in its order: a copy or a link of `path` under its repository
+ * (null for the main checkout's root), or a run of a catalogue command or of a line of its own,
+ * in `path` under its repository.
+ */
+export const projectPreparationSteps = sqliteTable('project_preparation_steps', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  kind: text('kind').notNull(),
+  repositoryId: text('repository_id').references(() => projectRepositories.id, {
+    onDelete: 'cascade',
+  }),
+  path: text('path'),
+  commandId: text('command_id'),
+  line: text('line'),
+})
+
+/**
+ * The steps of a Workspace's preparation: its worktrees, then the recipe as it was when the
+ * Workspace was made, each with its state written as it changes. `base` is the repository's path
+ * a step applies under, null for the root; a failed step keeps what it did and the end of what
+ * it printed.
+ */
+export const workspaceSteps = sqliteTable(
+  'workspace_steps',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    kind: text('kind').notNull(),
+    base: text('base'),
+    path: text('path'),
+    commandId: text('command_id'),
+    line: text('line'),
+    state: text('state').notNull(),
+    failedDoing: text('failed_doing'),
+    failedOutput: text('failed_output'),
+  },
+  (table) => [unique('step_once_in_workspace').on(table.workspaceId, table.position)],
+)
+
+/**
+ * The environment variables of a Project (`workspace_id` null) and of its Workspaces, set over
+ * the Project's. A value is never written anywhere else: not in an event, not in the diagnostic.
+ */
+export const environmentVariables = sqliteTable(
+  'environment_variables',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    value: text('value').notNull(),
+  },
+  (table) => [index('variables_by_scope').on(table.projectId, table.workspaceId)],
+)
