@@ -90,8 +90,7 @@ const host = (forks: Array<StandIn | Error>) =>
     return { client, handedToEngine, asked, lines }
   })
 
-const run = <A, E>(body: Effect.Effect<A, E, Scope.Scope>) =>
-  Effect.runPromise(Effect.scoped(body))
+const run = <A, E>(body: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Effect.scoped(body))
 
 describe('Main launches an agents’ process for the engine', () => {
   test('it reports the pid once started, then the exit code, and the launch ends', () =>
@@ -100,7 +99,9 @@ describe('Main launches an agents’ process for the engine', () => {
         const child = standIn(4242)
         const { client, asked } = yield* host([child])
         const events = yield* Effect.forkChild(
-          Stream.runCollect(client['agents.launch']({ launch: 7, program: '/echo.mjs', args: ['-v'] })),
+          Stream.runCollect(
+            client['agents.launch']({ launch: 7, program: '/echo.mjs', args: ['-v'] }),
+          ),
         )
         yield* Effect.sleep(10)
         child.spawn()
@@ -119,7 +120,9 @@ describe('Main launches an agents’ process for the engine', () => {
       Effect.gen(function* () {
         const child = standIn(1)
         const { client, handedToEngine } = yield* host([child])
-        yield* Effect.forkChild(Stream.runDrain(client['agents.launch']({ launch: 9, program: '/p', args: [] })))
+        yield* Effect.forkChild(
+          Stream.runDrain(client['agents.launch']({ launch: 9, program: '/p', args: [] })),
+        )
         yield* Effect.sleep(10)
         child.spawn()
         yield* Effect.sleep(10)

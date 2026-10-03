@@ -4,6 +4,7 @@
  */
 export {
   closedAs,
+  closesWith,
   connectionClosed,
   fromMessagePort,
   fromMessagePortMain,

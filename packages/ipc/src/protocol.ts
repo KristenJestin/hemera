@@ -83,6 +83,24 @@ export const fromMessagePortMain = (port: MessagePortMainLike): Port => ({
   close: () => port.close(),
 })
 
+/**
+ * A port that also counts as closed when something else says so: the process at the other end
+ * exited, which a port does not always report. `register` is handed the way to close it.
+ */
+export const closesWith = (port: Port, register: (close: () => void) => void): Port => ({
+  ...port,
+  start: (onMessage, onClose) => {
+    let closed = false
+    const closeOnce = (): void => {
+      if (closed) return
+      closed = true
+      onClose()
+    }
+    port.start(onMessage, closeOnce)
+    register(closeOnce)
+  },
+})
+
 // The envelopes are read with a schema on arrival. What they carry (payloads, items, exits) is
 // decoded by RpcServer and RpcClient against the schemas of each RPC.
 const RequestId = Schema.Union([Schema.String, Schema.Number])
