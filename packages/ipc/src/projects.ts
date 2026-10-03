@@ -44,6 +44,63 @@ export const Project = Schema.Struct({
 })
 export type Project = typeof Project.Type
 
+/** A Project to create: its name, its main checkout, and the repositories it starts with. */
+export const NewProject = Schema.Struct({
+  name: Schema.String,
+  mainCheckout: Schema.String,
+  /** Paths relative to the main checkout, as `projects.detectRepositories` proposes them. */
+  repositories: Schema.Array(Schema.String),
+})
+export type NewProject = typeof NewProject.Type
+
+/** Every edit names the version of the Project it was made from. */
+const edit = { id: Schema.String, version: Schema.Number }
+
+/** A change of a Project's name or main checkout: only what it names changes. */
+export const ProjectEdit = Schema.Struct({
+  ...edit,
+  name: Schema.optionalKey(Schema.String),
+  mainCheckout: Schema.optionalKey(Schema.String),
+})
+export type ProjectEdit = typeof ProjectEdit.Type
+
+/** The Workspaces folder chosen, or null for Hemera's own. */
+export const WorkspacesRootEdit = Schema.Struct({ ...edit, path: Schema.NullOr(Schema.String) })
+export type WorkspacesRootEdit = typeof WorkspacesRootEdit.Type
+
+/** The branch prefix chosen, or null for the Project's name as a slug. */
+export const BranchPrefixEdit = Schema.Struct({ ...edit, prefix: Schema.NullOr(Schema.String) })
+export type BranchPrefixEdit = typeof BranchPrefixEdit.Type
+
+/** A repository added to a Project, at the version of the Project it was added to. */
+export const NewRepository = Schema.Struct({
+  projectId: Schema.String,
+  version: Schema.Number,
+  path: Schema.String,
+})
+export type NewRepository = typeof NewRepository.Type
+
+/**
+ * An edit of a repository: `id` is the repository's, `version` its Project's, since a repository
+ * is part of its Project's record.
+ */
+export const RepositoryEdit = Schema.Struct({
+  ...edit,
+  path: Schema.optionalKey(Schema.String),
+  includedByDefault: Schema.optionalKey(Schema.Boolean),
+})
+export type RepositoryEdit = typeof RepositoryEdit.Type
+
+export const RepositoryRemoval = Schema.Struct(edit)
+export type RepositoryRemoval = typeof RepositoryRemoval.Type
+
+/** The remote chosen for a repository, or null for none. */
+export const RemoteEdit = Schema.Struct({ ...edit, remote: Schema.NullOr(Schema.String) })
+export type RemoteEdit = typeof RemoteEdit.Type
+
+export const BaseBranchEdit = Schema.Struct({ ...edit, branch: Schema.String })
+export type BaseBranchEdit = typeof BaseBranchEdit.Type
+
 /** A remote of a repository, as `git remote -v` lists it. */
 export const Remote = Schema.Struct({
   name: Schema.String,

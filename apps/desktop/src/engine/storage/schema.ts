@@ -10,7 +10,7 @@
  */
 
 import { sql } from 'drizzle-orm'
-import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 
 /**
  * The Profile itself, in one row: its identifier, the version of Hemera that created it, and the
@@ -64,4 +64,45 @@ export const domainEvents = sqliteTable(
     payload: text('payload').notNull(),
   },
   (table) => [index('event_by_entity').on(table.entityKind, table.entityId, table.sequence)],
+)
+
+/**
+ * The Projects: a name, the main checkout (the folder of the user's own clones), and where and
+ * under which branch prefix its Workspaces are made, null meaning the default for both. The
+ * identifier is internal and never changes; the name changes freely. `version` is what an edit
+ * must have read: an edit of an older one is refused.
+ */
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  mainCheckout: text('main_checkout').notNull(),
+  workspacesRoot: text('workspaces_root'),
+  branchPrefix: text('branch_prefix'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  version: integer('version').notNull(),
+})
+
+/**
+ * The repositories of a Project, each at a path relative to its main checkout, once per Project,
+ * in the order they were added. `remote` is the remote its base is fetched from (null when it has
+ * none) and `base_branch` the branch its work starts from and is delivered to. `last_fetched_at`
+ * is the last fetch of that base that succeeded. A repository is part of its Project's record: an
+ * edit of it takes the Project's version.
+ */
+export const projectRepositories = sqliteTable(
+  'project_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    position: integer('position').notNull(),
+    includedByDefault: integer('included_by_default', { mode: 'boolean' }).notNull(),
+    remote: text('remote'),
+    baseBranch: text('base_branch').notNull(),
+    lastFetchedAt: text('last_fetched_at'),
+  },
+  (table) => [unique('repository_once_in_project').on(table.projectId, table.path)],
 )
