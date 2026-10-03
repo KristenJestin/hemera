@@ -47,8 +47,8 @@ export const serveWindows = (
         port.close()
         return
       }
-      const link = fromMessagePortMain(port)
       open.add(port)
+      const link = fromMessagePortMain(port)
       server.accept({
         ...link,
         start: (onMessage, onClose) =>

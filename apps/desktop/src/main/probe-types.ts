@@ -17,6 +17,8 @@ export interface HemeraProbe {
   readonly crashEngine: () => void
   /** Has the engine start an agents' process for `program`, write `input` to it, and read it. */
   readonly startAgents: (program: string, input: ReadonlyArray<string>) => Promise<number>
+  /** The lines the agents' process delivered so far. */
+  readonly agentsLines: () => ReadonlyArray<string>
   /** How the agents' process's stream ended (the sentence of its error), and its lines. */
   readonly agentsOutcome: () => Promise<{ readonly ended: string; readonly lines: string[] }>
   /** Streams `count` items of `size` characters from the engine, one acknowledgement each. */

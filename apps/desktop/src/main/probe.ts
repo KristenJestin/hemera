@@ -51,6 +51,7 @@ export const installProbe = (
             return said
           })
         }),
+      agentsLines: () => [...lines],
       agentsOutcome: async () => ({ ended: await outcome, lines }),
       load: (count, size) => {
         const metrics = () =>
