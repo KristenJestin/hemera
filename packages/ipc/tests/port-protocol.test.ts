@@ -12,6 +12,7 @@ import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  closesWith,
   fromMessagePort,
   isConnectionClosed,
   makeClientProtocol,
@@ -70,11 +71,18 @@ const setup = Effect.gen(function* () {
     Effect.provideService(RpcServer.Protocol, server.protocol),
     Effect.forkScoped,
   )
-  const protocol = yield* makeClientProtocol(fromMessagePort(callerPort), 'the test server')
+  /** What the process at the other end does when it exits, whatever its port says. */
+  let processExits = (): void => undefined
+  const protocol = yield* makeClientProtocol(
+    closesWith(fromMessagePort(callerPort), (close) => {
+      processExits = close
+    }),
+    'the test server',
+  )
   const client = yield* RpcClient.make(ClientGroup).pipe(
     Effect.provideService(RpcClient.Protocol, protocol),
   )
-  return { client, probes, callerPort, serverPort }
+  return { client, probes, callerPort, serverPort, processExits: () => processExits() }
 })
 
 type Link = Effect.Success<typeof setup>
@@ -150,6 +158,17 @@ describe('A link over a MessagePort', () => {
         expect(isConnectionClosed(pending)).toBe(true)
         const later = yield* within(Effect.flip(client.Greet({ name: 'x' })), 'a later call')
         expect(isConnectionClosed(later)).toBe(true)
+      }),
+    ))
+
+  test('a process that exits fails the pending call even if its port never says so', () =>
+    run(({ client, probes, processExits }) =>
+      Effect.gen(function* () {
+        const call = yield* Effect.forkChild(client.Hold())
+        yield* within(Deferred.await(probes.holdStarted), 'the handler to start')
+        processExits()
+        const pending = yield* within(Effect.flip(Fiber.join(call)), 'the pending call to fail')
+        expect(isConnectionClosed(pending)).toBe(true)
       }),
     ))
 
