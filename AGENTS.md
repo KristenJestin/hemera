@@ -55,6 +55,8 @@ pull requests and the interface.
 ```
 apps/desktop      @hemera/desktop  Electron application: main process (ESM), preload
                                    (CommonJS, sandboxed), renderer (React 19 served by Vite).
+packages/core     @hemera/core     The schemas shared by the processes and their conventions
+                                   (Effect Schema): `@hemera/core/schema`.
 tools/            —                commit-message, branch-guard, install-hooks, window-options,
                                    package-desktop, release-tag, aur-publish, and the vendored
                                    lint rules. TypeScript run by Node, tested by Vitest.
@@ -62,7 +64,7 @@ packaging/aur     —                the AUR packages hemera-bin and hemera-beta
                                    tools/aur-publish.ts on each release and beta.
 ```
 
-`packages/*` is part of the pnpm workspace and holds nothing yet. Import another package only
+`packages/*` is part of the pnpm workspace. Import another package only
 through its `exports`; never reach into another package's `src`. "Workspace" means a pnpm
 workspace here; say so when a product concept shares the word.
 
@@ -111,10 +113,17 @@ profile.
 ## Effect
 
 - Effect 4 stable in the engine: Schema for every value that crosses a boundary, RPC between
-  the processes. The version is pinned exactly.
-- No zod.
-- No Effect in React components.
-- For Effect code, read `node_modules/effect/AGENTS.md` first.
+  the processes.
+- For Effect code, read `node_modules/effect/AGENTS.md` and its `ai-docs/` first.
+- Effect is pinned exactly; an upgrade is its own pull request.
+- No zod: the lint refuses its import. Effect `Schema` replaces it everywhere.
+- No Effect inside React components: the renderer uses schemas and the generated RPC clients
+  only. Schema types, decoders and the form helper (`toFormSchema`) are allowed in the
+  interface; no `Effect`, `Layer`, `Stream` or fiber in a component or a hook.
+- The conventions of `@hemera/core/schema`, each proven by a test: a value crosses a process
+  link through `Schema.toCodecJson` (bytes as base64, dates as ISO strings); an MCP tool takes
+  its input schema from `toToolInputSchema` only; a parse error reaches a person only through
+  `formatSchemaError` or `toFormSchema`, never as Schema's raw message.
 
 ## Git rules (non-negotiable)
 
