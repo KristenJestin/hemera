@@ -68,6 +68,18 @@ jobs:
         run: pnpm lint
       - working-directory: source
         run: pnpm fmt:check
+      # The stories run as tests in a headless Chromium that Playwright downloads on demand; it
+      # is cached like the Electron binary so no run fetches a browser twice.
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+      - name: Fetch the Playwright browser
+        working-directory: source/packages/ui
+        run: pnpm exec playwright install chromium ${{ runner.os == 'Linux' && '--with-deps' || '' }}
       # A Windows runner's temporary folder is on C:, the system disk, which saturates at a few
       # hundred writes a second. The suites write their repositories, worktrees and databases
       # there, and every `git` and `node` a test starts is read from that same disk. Measured:
@@ -87,11 +99,28 @@ jobs:
 
       # The suites that need a window are not run here: a runner has no display server and no
       # GPU, and what is proved about a window is proved on a real target with
-      # `pnpm --filter @hemera/desktop e2e:headless`.
+      # `pnpm --filter @hemera/desktop e2e:headless`. The stories run headless, which is a page
+      # and not a window.
       #
       # The step is capped: a suite that hangs fails this in twenty minutes rather than in the
       # fifty a Windows job once sat for, and the suites' own timeouts catch what really stalls.
       - name: Test
+        if: runner.os != 'Windows'
         working-directory: source
         timeout-minutes: 20
         run: pnpm test
+      # A Windows runner has two cores. There, the stories' two Chromiums beside the repository
+      # suites hold the processors at full load, and a `git` a suite starts takes seconds instead
+      # of milliseconds. So Windows runs the two one after the other, and the stories run even
+      # when the suites failed, so one run reports both.
+      - name: Test the repository suites
+        id: repository
+        if: runner.os == 'Windows'
+        working-directory: source
+        timeout-minutes: 15
+        run: pnpm test --project repository
+      - name: Test the stories
+        if: runner.os == 'Windows' && (success() || steps.repository.conclusion == 'failure')
+        working-directory: source
+        timeout-minutes: 15
+        run: pnpm test --project storybook-light --project storybook-dark
