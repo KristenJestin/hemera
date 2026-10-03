@@ -46,7 +46,7 @@ const CHIP =
 
 /** What says it works: the whole background, a faint tint breathing. */
 const BREATH =
-  'pointer-events-none absolute inset-0 -z-10 bg-warning-muted opacity-50 motion-safe:animate-breathe'
+  'pointer-events-none absolute inset-0 -z-10 bg-warning-muted motion-safe:animate-breathe'
 
 const SWEPT: Record<'finished' | 'failed', string> = {
   finished: 'pointer-events-none absolute inset-0 -z-10 bg-success-muted',
