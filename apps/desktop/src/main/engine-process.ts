@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import {
   AgentsPortHandover,
   closesWith,
-  EngineRpcs,
+  EngineMainRpcs,
   EngineStart,
   fromMessagePortMain,
   HostRpcs,
@@ -123,7 +123,7 @@ export const startEngine = (
       Effect.forkScoped,
     )
 
-    const client = yield* RpcClient.make(EngineRpcs).pipe(
+    const client = yield* RpcClient.make(EngineMainRpcs).pipe(
       Effect.provideServiceEffect(
         RpcClient.Protocol,
         makeClientProtocol(linkTo(child, calls.port1), 'the engine'),

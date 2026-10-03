@@ -10,7 +10,7 @@ import { MessageChannel } from 'node:worker_threads'
 import {
   DatabaseOpen,
   EngineGone,
-  EngineRpcs,
+  EngineMainRpcs,
   fromMessagePort,
   makeClientProtocol,
   makeServerProtocol,
@@ -73,13 +73,13 @@ const chain = Effect.gen(function* () {
     { backupFolders: [], reconciliationSteps: [] },
     engineLog,
   )
-  yield* RpcServer.make(EngineRpcs, { disableFatalDefects: true }).pipe(
+  yield* RpcServer.make(EngineMainRpcs, { disableFatalDefects: true }).pipe(
     Effect.provide(engineHandlers(start, profile, engineLog)),
     Effect.provideService(RpcServer.Protocol, engineServer.protocol),
     Effect.forkScoped,
   )
   const engineProtocol = yield* makeClientProtocol(fromMessagePort(mainToEngine), 'the engine')
-  const engine = yield* RpcClient.make(EngineRpcs).pipe(
+  const engine = yield* RpcClient.make(EngineMainRpcs).pipe(
     Effect.provideService(RpcClient.Protocol, engineProtocol),
   )
 

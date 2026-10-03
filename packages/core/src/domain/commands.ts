@@ -253,7 +253,9 @@ export function portOf(url: string): number | null {
 }
 
 /** The Portless name a command is saved with: null for none, otherwise one word. */
-export function portlessName(candidate: string | null): Result.Result<string | null, InvalidCommand> {
+export function portlessName(
+  candidate: string | null,
+): Result.Result<string | null, InvalidCommand> {
   const name = candidate?.trim() ?? ''
   if (name === '') return Result.succeed(null)
   if (/[\s"']/.test(name)) {

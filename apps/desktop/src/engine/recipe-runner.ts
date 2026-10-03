@@ -7,7 +7,7 @@
  * a recipe step is Hemera's own action, by a rule the user recorded.
  */
 
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, type Effect, Schema } from 'effect'
 
 /** One `run` step, as it is handed over: what it runs, where, and with which variables. */
 export interface RecipeRun {
@@ -44,9 +44,3 @@ export class RecipeRunner extends Context.Service<
     readonly run: (run: RecipeRun) => Effect.Effect<RecipeRunOutcome, RecipeRunRefused>
   }
 >()('RecipeRunner') {}
-
-/** The runner until the command catalogue brings the real one: every run step is refused. */
-export const noRecipeRunner = Layer.succeed(RecipeRunner, {
-  run: () =>
-    Effect.fail(new RecipeRunRefused({ reason: 'this version of Hemera runs no command yet' })),
-})

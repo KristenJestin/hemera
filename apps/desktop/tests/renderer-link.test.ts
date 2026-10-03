@@ -84,6 +84,16 @@ const noProjects = {
   'variables.set': unused,
   'variables.remove': unused,
   'variables.reveal': unused,
+  'catalogue.list': unused,
+  'catalogue.save': unused,
+  'catalogue.remove': unused,
+  'catalogue.checkLine': unused,
+  'runs.list': unused,
+  'runs.start': unused,
+  'runs.stop': unused,
+  'runs.restart': unused,
+  'runs.output': unused,
+  'runs.changes': () => Stream.die('the window’s link is not asked for Projects here'),
 }
 
 /** A main that answers as told, and says when the window stopped listening. */

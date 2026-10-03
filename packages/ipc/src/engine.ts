@@ -1,7 +1,7 @@
 /**
- * The engine's domain: its start, its status, and the calls on the Profile it holds, the Projects
- * and their repositories included. Served by the engine to main, and by main to the window, which
- * forwards.
+ * The engine's domain: its start, its status, and the calls on the Profile it holds, the Projects,
+ * their repositories, their Workspaces and their commands included. Served by the engine to main,
+ * and by main to the window, which forwards.
  */
 
 import { Schema } from 'effect'
@@ -15,6 +15,7 @@ import {
   RestoreRefused,
   StorageFailed,
 } from './profile.ts'
+import { CatalogueRpcs, RunsRpcs } from './commands.ts'
 import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 
@@ -93,4 +94,21 @@ export const EngineRpcs = RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([StorageFailed, RestoreRefused, EngineGone]),
   }),
-).merge(ProjectsRpcs, RepositoriesRpcs, WorkspacesRpcs, RecipeRpcs, VariablesRpcs)
+).merge(
+  ProjectsRpcs,
+  RepositoriesRpcs,
+  WorkspacesRpcs,
+  RecipeRpcs,
+  VariablesRpcs,
+  CatalogueRpcs,
+  RunsRpcs,
+)
+
+/**
+ * What the engine serves main: everything the window may ask, which main forwards, and what main
+ * alone tells it. The window is shown: what waits for the window before it runs (the commands run
+ * at each opening) may start now; the engine answers at once and runs them in the background.
+ */
+export const EngineMainRpcs = EngineRpcs.merge(
+  RpcGroup.make(Rpc.make('engine.windowShown', { success: Schema.Void, error: EngineGone })),
+)

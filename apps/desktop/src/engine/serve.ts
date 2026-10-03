@@ -1,10 +1,11 @@
 /**
  * What the engine answers: its status (which version and channel, on which data folder, and
  * where the Profile's database stands), every change of it, and the calls on the Profile, its
- * Projects, their repositories and their Workspaces included.
+ * Projects, their repositories, their Workspaces and their commands included; and, from main
+ * alone, that the window is shown.
  */
 
-import { EngineRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
+import { EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
 import { Stream, SubscriptionRef } from 'effect'
 import { Effect } from 'effect'
 
@@ -31,8 +32,10 @@ import {
   repositoryStatus,
   upToDateBase,
 } from './repositories.ts'
+import { checkLine, listCommands, removeCommand, saveCommand } from './catalogue.ts'
 import { beginPreparation } from './preparation.ts'
 import { checkRecipe, getRecipe, saveRecipe } from './recipe.ts'
+import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from './runs.ts'
 import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
 import {
   createWorkspace,
@@ -53,7 +56,7 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     database,
   })
   const { calls, use, follow } = profile
-  return EngineRpcs.toLayer({
+  return EngineMainRpcs.toLayer({
     'engine.status': () =>
       SubscriptionRef.get(profile.database).pipe(
         Effect.map(statusOf),
@@ -124,5 +127,23 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(removeVariable(asked)).pipe(observed('variables.remove', log)),
     'variables.reveal': (asked) =>
       use(revealVariable(asked)).pipe(observed('variables.reveal', log)),
+    'catalogue.list': ({ projectId }) =>
+      use(listCommands(projectId)).pipe(observed('catalogue.list', log)),
+    'catalogue.save': (save) => use(saveCommand(save)).pipe(observed('catalogue.save', log)),
+    'catalogue.remove': ({ projectId, id }) =>
+      use(removeCommand(projectId, id)).pipe(observed('catalogue.remove', log)),
+    'catalogue.checkLine': ({ line }) => checkLine(line).pipe(observed('catalogue.checkLine', log)),
+    'runs.list': ({ projectId, workspaceId }) =>
+      use(listRuns(projectId, workspaceId)).pipe(observed('runs.list', log)),
+    // Started from the window: the user starts it.
+    'runs.start': (asked) =>
+      use(startRun({ ...asked, startedBy: 'user', sessionId: null })).pipe(
+        observed('runs.start', log),
+      ),
+    'runs.stop': ({ id }) => use(stopRun(id)).pipe(observed('runs.stop', log)),
+    'runs.restart': ({ id }) => use(restartRun(id)).pipe(observed('runs.restart', log)),
+    'runs.output': ({ id }) => use(runOutput(id)).pipe(observed('runs.output', log)),
+    'runs.changes': () => follow(runChanges).pipe(observedStream('runs.changes', log)),
+    'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   })
 }
