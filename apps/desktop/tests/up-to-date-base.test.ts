@@ -217,6 +217,7 @@ describe('The code names no base branch but its one default', () => {
 
     expect(found).toEqual([
       "packages/core/src/domain/project.ts: export const DEFAULT_BASE_BRANCH = 'main'",
+      "packages/core/src/domain/workspace.ts: export const MAIN_CHECKOUT_NAME = 'main'",
       "apps/desktop/src/engine/index.ts: makeClientProtocol(fromMessagePortMain(hostPort), 'main'),",
     ])
   })
