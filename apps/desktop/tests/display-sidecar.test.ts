@@ -39,6 +39,6 @@ describe('The display hint', () => {
       lines.push(line),
     )
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatch(/^display\.json: the hint of the next start could not be written/)
+    expect(lines[0]).toMatch(/^display-1\.json: the hint of the next start could not be written/)
   })
 })

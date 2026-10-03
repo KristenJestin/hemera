@@ -16,8 +16,11 @@ import { Option, Schema } from 'effect'
 
 import type { Log } from './diagnostic.ts'
 
-/** The file the hint lives in, inside the data folder. */
-export const SIDECAR_FILE = 'display.json'
+/**
+ * The file the hint lives in, inside the data folder. Named for 1.0: a 0.x build keeps a
+ * `display.json` of another shape in the same folder, and it is not this build's to rewrite.
+ */
+export const SIDECAR_FILE = 'display-1.json'
 
 const Sidecar = Schema.fromJsonString(Schema.toCodecJson(Preferences))
 const readHint = Schema.decodeUnknownOption(Sidecar)
