@@ -40,7 +40,7 @@ describe('The status of the Profile at start', () => {
     const { database, lines } = await started(data, SHIPPED)
     expect(database).toEqual(
       DatabaseOpen.make({
-        lastMigration: carriedMigrations(SHIPPED).at(-1)?.name,
+        lastMigration: carriedMigrations(SHIPPED).at(-1)?.name ?? null,
         writtenByVersion: '1.0.0',
         backups: { count: 0, latest: null },
         reconciliation: 'none',

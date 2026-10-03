@@ -52,6 +52,11 @@ export const changePreferences =
       Effect.asVoid,
     )
 
+/** A restore staged by the engine, then the relaunch that applies it. */
+export const restoreProfile =
+  (engine: EngineClient, application: Application) => (folder: string) =>
+    engine['profile.restore']({ folder }).pipe(closedAs(gone), Effect.andThen(application.relaunch))
+
 export const windowHandlers = (engine: EngineClient, application: Application, log: Log) =>
   WindowRpcs.toLayer({
     'engine.status': () =>
@@ -70,12 +75,8 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
     'profile.backup': (request) =>
       engine['profile.backup'](request).pipe(closedAs(gone), observed('profile.backup', log)),
     // A restore takes effect at the next start: once the engine has staged it, Hemera relaunches.
-    'profile.restore': (request) =>
-      engine['profile.restore'](request).pipe(
-        closedAs(gone),
-        Effect.andThen(application.relaunch),
-        observed('profile.restore', log),
-      ),
+    'profile.restore': ({ folder }) =>
+      restoreProfile(engine, application)(folder).pipe(observed('profile.restore', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
   })
