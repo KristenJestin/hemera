@@ -7,19 +7,17 @@
  */
 
 import {
-  ApplicationRpcs,
   closedAs,
   EngineGone,
-  EngineRpcs,
   streamClosedAs,
+  WindowRpcs,
+  type EngineRpcs,
   type EnvironmentReport,
 } from '@hemera/ipc'
 import type { Effect } from 'effect'
 import type { RpcClient, RpcClientError, RpcGroup } from 'effect/rpc'
 
 import { observed, observedStream, type Log } from './diagnostic.ts'
-
-export const WindowRpcs = EngineRpcs.merge(ApplicationRpcs)
 
 export type EngineClient = RpcClient.RpcClient<
   RpcGroup.Rpcs<typeof EngineRpcs>,
