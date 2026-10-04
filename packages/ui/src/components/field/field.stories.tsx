@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconSearch } from '../../icons.ts'
+import { Kbd } from '../kbd/kbd.tsx'
 import { Input, Textarea } from './field.tsx'
 
 const meta = {
@@ -16,6 +17,8 @@ const meta = {
     placeholder: { control: 'text' },
     disabled: { control: 'boolean' },
     icon: { table: { disable: true } },
+    trailing: { table: { disable: true } },
+    size: { control: 'inline-radio', options: ['sm', 'md'] },
     action: { table: { disable: true } },
     className: { table: { disable: true } },
   },
@@ -55,6 +58,75 @@ export const Filled: Story = {
 /** With an icon drawn inside the box, before the text. */
 export const WithIcon: Story = {
   args: { label: 'Search', icon: <IconSearch size="sm" />, placeholder: 'Find a repository' },
+  play: async ({ canvasElement }) => {
+    const { box, input, leading } = partsOf(canvasElement, 'Search')
+    // Inset from the edge, and a gap before the text: never glued to either.
+    expect(leading!.left - box.left).toBeGreaterThanOrEqual(8)
+    expect(input.left - leading!.right).toBeGreaterThanOrEqual(8)
+  },
+}
+
+/** Where the parts of a field's box stand: the box, the text, and what leads and trails it. */
+function partsOf(
+  canvasElement: HTMLElement,
+  label: string,
+): { box: DOMRect; input: DOMRect; leading: DOMRect | null; trailing: DOMRect | null } {
+  const control = within(canvasElement).getByLabelText(label)
+  const box = control.closest<HTMLElement>('[data-input-box]')!
+  const rectOf = (slot: string): DOMRect | null =>
+    box.querySelector(`[data-slot="${slot}"]`)?.getBoundingClientRect() ?? null
+  return {
+    box: box.getBoundingClientRect(),
+    input: control.getBoundingClientRect(),
+    leading: rectOf('leading'),
+    trailing: rectOf('trailing'),
+  }
+}
+
+/** A hint at the end of the box — the keystroke that reaches it — inside the box, never beside. */
+export const WithKbd: Story = {
+  args: { label: 'Search', placeholder: 'Find a repository', trailing: <Kbd keys="Ctrl K" /> },
+  play: async ({ canvasElement }) => {
+    const { box, input, trailing } = partsOf(canvasElement, 'Search')
+    expect(trailing!.right).toBeLessThanOrEqual(box.right - 4)
+    expect(trailing!.top).toBeGreaterThanOrEqual(box.top)
+    expect(trailing!.bottom).toBeLessThanOrEqual(box.bottom)
+    expect(trailing!.left - input.right).toBeGreaterThanOrEqual(8)
+  },
+}
+
+/** Both: the icon before the text, the keystroke after it, in the same box. */
+export const WithIconAndKbd: Story = {
+  args: {
+    label: 'Search',
+    icon: <IconSearch size="sm" />,
+    placeholder: 'Find a repository',
+    trailing: <Kbd keys="Ctrl K" />,
+  },
+  play: async ({ canvasElement }) => {
+    const { box, input, leading, trailing } = partsOf(canvasElement, 'Search')
+    expect(leading!.left - box.left).toBeGreaterThanOrEqual(8)
+    expect(input.left - leading!.right).toBeGreaterThanOrEqual(8)
+    expect(trailing!.left - input.right).toBeGreaterThanOrEqual(8)
+    expect(trailing!.right).toBeLessThanOrEqual(box.right - 4)
+  },
+}
+
+/** Small, beside small controls: the same slots, the same insets, a step shorter. */
+export const Small: Story = {
+  args: {
+    label: 'Search',
+    size: 'sm',
+    icon: <IconSearch size="sm" />,
+    placeholder: 'Find a repository',
+    trailing: <Kbd keys="Ctrl K" />,
+  },
+  play: async ({ canvasElement }) => {
+    const { box, input, leading } = partsOf(canvasElement, 'Search')
+    expect(box.height).toBe(28)
+    expect(leading!.left - box.left).toBeGreaterThanOrEqual(8)
+    expect(input.left - leading!.right).toBeGreaterThanOrEqual(8)
+  },
 }
 
 /** Wrong: the box turns invalid and points at the message, said in words. */
@@ -69,9 +141,18 @@ export const Error: Story = {
 
 /** Refused: shown, and not editable. */
 export const Disabled: Story = {
-  args: { label: 'Remote', defaultValue: 'origin', disabled: true },
+  args: {
+    label: 'Remote',
+    defaultValue: 'origin',
+    disabled: true,
+    icon: <IconSearch size="sm" />,
+    trailing: <Kbd keys="Ctrl K" />,
+  },
   play: async ({ canvasElement }) => {
-    expect(within(canvasElement).getByLabelText('Remote')).toBeDisabled()
+    const remote = within(canvasElement).getByLabelText('Remote')
+    expect(remote).toBeDisabled()
+    // The whole box goes quiet, its icon and its hint with it.
+    expect(getComputedStyle(remote.closest('[data-input-box]')!).opacity).toBe('0.5')
   },
 }
 
