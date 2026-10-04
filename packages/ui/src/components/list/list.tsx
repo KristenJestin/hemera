@@ -15,7 +15,7 @@ import { Skeleton } from '../loading/loading.tsx'
  * the row.
  *
  * While the rows are on their way, the list shows their shape and not a spinner: the same square,
- * the same two lines, the same rule, in the muted surface (`ListItemSkeleton`). The page does not
+ * the same two lines, the same rule, in the skeleton's fill (`ListItemSkeleton`). The page does not
  * move when the rows arrive, because they arrive where their shape already was.
  */
 const ROW = 'flex w-full items-center gap-3 px-4 py-3 text-left'

@@ -79,24 +79,29 @@ export const WithAction: Story = {
  */
 export const Loading: Story = {
   render: (args) => (
-    <div className="flex flex-col gap-6">
+    <div className="relative flex flex-col">
       <List label="Repositories of Acme" busy>
         <ListItemSkeleton />
         <ListItemSkeleton />
         <ListItemSkeleton />
       </List>
-      <List label="Arrived">
-        <ListItem {...args} />
-      </List>
+      {/* The row that replaces them, laid over them and never seen: only its height is read. */}
+      <div aria-hidden="true" className="invisible absolute inset-x-0 top-0">
+        <List label="Arrived">
+          <ListItem {...args} />
+        </List>
+      </div>
     </div>
   ),
   play: async ({ canvasElement }) => {
+    // Nothing of the content shows while it is on its way: no word over a grey bar.
+    expect(canvasElement.innerText.trim()).toBe('')
     const canvas = within(canvasElement)
     const busy = canvas.getByRole('list', { name: 'Repositories of Acme' })
     expect(busy).toHaveAttribute('aria-busy', 'true')
     // The last of each, so neither carries the rule that parts a row from the next.
     const skeleton = busy.lastElementChild!
-    const row = canvas.getByRole('list', { name: 'Arrived' }).firstElementChild!
+    const row = canvasElement.querySelector('[aria-hidden="true"] li')!
     expect(skeleton.getBoundingClientRect().height).toBe(row.getBoundingClientRect().height)
   },
 }

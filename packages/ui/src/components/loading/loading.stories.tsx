@@ -52,8 +52,8 @@ export const Spinner: Story = {
 }
 
 /**
- * The skeleton, for what has a shape: a title, a line, a square, each exactly the size of what
- * replaces it, hidden from a screen reader.
+ * The skeleton, for what has a shape: a title, a line, a square, each exactly the height of the
+ * line of type that replaces it, and nothing of the content itself: no word shows through.
  */
 export const Skeletons: Story = {
   render: () => (
@@ -63,18 +63,16 @@ export const Skeletons: Story = {
         <Skeleton shape="title" />
         <Skeleton shape="line" />
       </div>
-      <div className="flex flex-col">
-        <span className="text-base font-semibold">api</span>
-        <span className="text-sm">main</span>
-      </div>
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const title = within(canvasElement).getByText('api')
-    const line = within(canvasElement).getByText('main')
+    expect(canvasElement.textContent?.trim()).toBe('')
     const skeletons = [...canvasElement.querySelectorAll<HTMLElement>('[aria-hidden="true"]')]
     expect(skeletons).toHaveLength(3)
-    expect(skeletons[1]!.getBoundingClientRect().height).toBe(title.getBoundingClientRect().height)
-    expect(skeletons[2]!.getBoundingClientRect().height).toBe(line.getBoundingClientRect().height)
+    for (const line of skeletons.slice(1)) {
+      expect(`${String(line.getBoundingClientRect().height)}px`).toBe(
+        getComputedStyle(line).lineHeight,
+      )
+    }
   },
 }

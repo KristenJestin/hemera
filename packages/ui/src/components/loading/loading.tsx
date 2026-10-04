@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
  * What stands in for something on its way, in two forms, chosen by what is known of its shape.
  *
  * - `Skeleton`: what is coming has a shape the page already knows — a row, a title, a line — so
- *   that shape is drawn now, in the muted surface, breathing. When the content arrives it takes
+ *   that shape is drawn now, in the skeleton's own fill, breathing. When the content arrives it takes
  *   the skeleton's place exactly, and nothing around it moves.
  * - `Loading`: what is coming has no shape to draw — a button working, a panel whose size
  *   depends on its answer. Three dots going round, in `currentColor`.
@@ -60,12 +60,12 @@ export type SkeletonShape = 'title' | 'line' | 'square'
 const HOLDER: Record<SkeletonShape, string> = {
   title: 'relative block text-base font-semibold',
   line: 'relative block text-sm',
-  square: 'block size-control-md shrink-0 rounded-md bg-muted motion-safe:animate-breathe',
+  square: 'block size-control-md shrink-0 rounded-md bg-skeleton motion-safe:animate-breathe',
 }
 
 const BLOCK: Record<Exclude<SkeletonShape, 'square'>, string> = {
-  title: 'absolute inset-y-1 left-0 w-20 rounded-sm bg-muted motion-safe:animate-breathe',
-  line: 'absolute inset-y-1 left-0 w-24 rounded-sm bg-muted motion-safe:animate-breathe',
+  title: 'absolute inset-y-1 left-0 w-20 rounded-sm bg-skeleton motion-safe:animate-breathe',
+  line: 'absolute inset-y-1 left-0 w-24 rounded-sm bg-skeleton motion-safe:animate-breathe',
 }
 
 export interface SkeletonProps {
