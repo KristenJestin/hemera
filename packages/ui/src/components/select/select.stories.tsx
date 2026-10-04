@@ -70,6 +70,10 @@ export const Open: Story = {
     const list = await waitFor(() => within(document.body).getByRole('listbox'))
     expect(within(list).getByText('Acme')).toBeInTheDocument()
     expect(within(list).getByText('Shared')).toBeInTheDocument()
+    for (const option of within(list).getAllByRole('option')) {
+      expect(getComputedStyle(option).cursor).toBe('pointer')
+    }
+    expect(getComputedStyle(trigger).cursor).toBe('pointer')
     const popup = list.getBoundingClientRect()
     expect(popup.top).toBeGreaterThanOrEqual(trigger.getBoundingClientRect().top)
     expect(popup.width).toBeGreaterThanOrEqual(trigger.offsetWidth - 1)

@@ -50,6 +50,13 @@ export const Open: Story = {
     const menu = await waitFor(() => within(document.body).getByRole('menu'))
     const inside = within(menu)
     expect(inside.getByText('Ctrl')).toBeInTheDocument()
+    // A hand over what can be chosen, and a refusal over what cannot.
+    expect(getComputedStyle(inside.getByRole('menuitem', { name: /rename/i })).cursor).toBe(
+      'pointer',
+    )
+    expect(getComputedStyle(inside.getByRole('menuitem', { name: /delete/i })).cursor).toBe(
+      'not-allowed',
+    )
     expect(menu.querySelector('[role="separator"]')).not.toBeNull()
     expect(inside.getByRole('menuitem', { name: /delete/i })).toHaveAttribute(
       'aria-disabled',

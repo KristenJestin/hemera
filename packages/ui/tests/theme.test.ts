@@ -143,6 +143,18 @@ describe('What answers the hand', () => {
   })
 })
 
+describe('The hand over what can be pressed', () => {
+  test('every role that is chosen or pressed shows a hand, and no component overrides it', () => {
+    for (const role of ['button', 'menuitem', 'option', 'tab', 'checkbox', 'combobox']) {
+      expect(theme, `the ${role} role shows a hand`).toContain(`[role='${role}']`)
+    }
+    const overriding = componentSources
+      .filter(({ source }) => /\bcursor-(?:default|auto)\b/.test(source))
+      .map(({ file }) => file)
+    expect(overriding).toEqual([])
+  })
+})
+
 describe('The density of the interface', () => {
   test('the base is fourteen, and ordinary text is the base', () => {
     expect(tokenIn(theme, 'text-base')).toBe('0.875rem')
