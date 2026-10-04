@@ -26,7 +26,7 @@ const TAB =
 /** What a tab says, drawn over the mark whichever tab the mark is crossing. */
 const CONTENT = 'inline-flex items-center gap-1.5'
 
-const MARK = 'absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-primary'
+const MARK = 'absolute inset-x-2 bottom-0 h-0.5 rounded-full primary-fill'
 
 export interface TabsItem<Value extends string> {
   value: Value

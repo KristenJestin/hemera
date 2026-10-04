@@ -52,12 +52,18 @@
   --accent-foreground: #111118;
 
   /* The prototype's fuchsia is #d946ef, but white on it is 3.45:1: the solid fills take the next
-     shade down, which reads at 4.7:1; the ring keeps the lighter one. */
+     shade down, which reads at 4.7:1. */
   --primary: #c026d3;
   --primary-foreground: #ffffff;
   --primary-strong: #a21caf;
   --primary-muted: #fdf4ff;
   --primary-muted-foreground: #a21caf;
+  /* The primary as it fills a surface: lit from above, a shade deeper at the bottom, a highlight
+     along its top edge and a soft shadow under it. White reads at 4.7:1 or more over all of it;
+     the strong one is what it turns to under the hand. */
+  --primary-gradient: linear-gradient(180deg, #c026d3 0%, #a21caf 100%);
+  --primary-gradient-strong: linear-gradient(180deg, #a21caf 0%, #86198f 100%);
+  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(134, 25, 143, 0.35);
 
   /* The tones: a solid colour for a dot or a glyph, and a tinted pair — a muted fill and its own
      ink — that passes AA in both themes. */
@@ -80,7 +86,9 @@
 
   --border: #e2e2e8;
   --input: #d3d3db;
-  --ring: rgba(217, 70, 239, 0.25);
+  /* The focus ring is the primary itself, opaque: a pale ring on a pale field is a ring nobody
+     sees. It stands out from every surface at 3:1 or more. */
+  --ring: #c026d3;
   --overlay: rgba(16, 16, 24, 0.2);
 
   /* What dragging across a text leaves behind: opaque, with a foreground of its own, so it
@@ -119,6 +127,10 @@
   --primary-strong: #d946ef;
   --primary-muted: rgba(232, 121, 249, 0.1);
   --primary-muted-foreground: #f0abfc;
+  /* Lit from above in the dark too; the page's own dark reads at 5.9:1 or more over all of it. */
+  --primary-gradient: linear-gradient(180deg, #f0abfc 0%, #d946ef 100%);
+  --primary-gradient-strong: linear-gradient(180deg, #e879f9 0%, #d946ef 100%);
+  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.5);
 
   --success: #4ade80;
   --success-muted: rgba(74, 222, 128, 0.1);
@@ -139,7 +151,7 @@
 
   --border: #27272f;
   --input: #363640;
-  --ring: rgba(232, 121, 249, 0.3);
+  --ring: #e879f9;
   --overlay: rgba(0, 0, 0, 0.5);
 
   --selection: #6b1f7a;
@@ -314,6 +326,17 @@
   &:has(:focus-visible)::after {
     opacity: 1;
   }
+}
+
+/* What the primary fills a surface with: its gradient and its raise, never the flat colour. The
+   strong one is the same surface under the hand. */
+@utility primary-fill {
+  background-image: var(--primary-gradient);
+  box-shadow: var(--primary-raise);
+}
+
+@utility primary-fill-strong {
+  background-image: var(--primary-gradient-strong);
 }
 
 /* The veil behind a dialog fades, and fades only: a blur in transition is computed again over the

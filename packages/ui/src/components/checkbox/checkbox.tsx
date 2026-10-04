@@ -26,7 +26,7 @@ const ROW = 'flex w-fit items-start gap-2 text-sm text-foreground'
 const ROW_DISABLED = 'text-muted-foreground'
 
 const BOX =
-  'flex size-icon-md shrink-0 items-center justify-center rounded-sm border border-input bg-background text-primary-foreground outline-none focus-ring check-motion data-checked:border-primary data-checked:bg-primary data-disabled:opacity-50'
+  'flex size-icon-md shrink-0 items-center justify-center rounded-sm border border-input bg-background text-primary-foreground outline-none focus-ring check-motion data-checked:border-primary-strong data-checked:primary-fill data-disabled:opacity-50'
 
 const WORDS = 'flex min-w-0 flex-col gap-0.5'
 

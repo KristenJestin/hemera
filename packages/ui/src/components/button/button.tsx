@@ -29,7 +29,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          'border-primary bg-primary text-primary-foreground hover:border-primary-strong hover:bg-primary-strong',
+          'border-primary-strong primary-fill text-primary-foreground hover:primary-fill-strong',
         secondary: 'border-input bg-card text-foreground hover:bg-muted',
         // A ghost that is the current place draws no fill under the hand: it is drawn over its
         // list's mark, which is its fill already.
