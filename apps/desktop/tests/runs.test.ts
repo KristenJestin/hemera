@@ -41,7 +41,7 @@ import {
   script,
   until,
 } from './commands-engine.ts'
-import { on, removeFolders, temporaryFolder } from './storage.ts'
+import { endChild, on, removeFolders, temporaryFolder } from './storage.ts'
 import { atlas, atlasOnDisk, opened } from './workspace-engine.ts'
 
 let data: string
@@ -56,10 +56,8 @@ beforeEach(async () => {
   await opened(data)
 })
 
-afterEach(() => {
-  for (const stray of strays.splice(0)) {
-    if (stray.pid !== undefined && alive(stray.pid)) stray.kill('SIGKILL')
-  }
+afterEach(async () => {
+  await Promise.all(strays.splice(0).map(endChild))
   removeFolders()
 })
 

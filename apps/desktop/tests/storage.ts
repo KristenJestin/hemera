@@ -3,6 +3,8 @@
  * layers, and removed afterwards. No test opens the Profile of this machine.
  */
 
+import type { ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,10 +32,19 @@ export function temporaryFolder(name: string): string {
   return folder
 }
 export function removeFolders(): void {
-  // On Windows a tree just ended still holds its folders for a moment: the removal is retried.
-  for (const folder of made.splice(0)) {
-    rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  }
+  for (const folder of made.splice(0)) rmSync(folder, { recursive: true, force: true })
+}
+
+/**
+ * Ends a child a test started and answers once it is gone. Windows will not remove a folder a
+ * process still stands in, and a kill only asks: the folders are removed after this, not after
+ * the kill.
+ */
+export async function endChild(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+  const gone = once(child, 'exit')
+  child.kill('SIGKILL')
+  await gone
 }
 
 export type Storage = Database | SqliteClient | DomainEvents
