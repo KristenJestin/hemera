@@ -214,3 +214,92 @@ export const environmentVariables = sqliteTable(
   },
   (table) => [index('variables_by_scope').on(table.projectId, table.workspaceId)],
 )
+
+/**
+ * A Project's command catalogue: each command once by name, run in `folder` under its repository
+ * (null for the main checkout's root, or the Workspace's). A line of its own for Windows or Linux
+ * runs there instead of `line`. `scope` and the Portless fields mean something for a `serve`
+ * only. The roles are flags; `write_globs` is the JSON of an array of globs relative to its folder.
+ */
+export const projectCommands = sqliteTable(
+  'project_commands',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    line: text('line').notNull(),
+    lineWindows: text('line_windows'),
+    lineLinux: text('line_linux'),
+    repositoryId: text('repository_id').references(() => projectRepositories.id, {
+      onDelete: 'cascade',
+    }),
+    folder: text('folder'),
+    scope: text('scope').notNull(),
+    portless: integer('portless', { mode: 'boolean' }).notNull(),
+    portlessName: text('portless_name'),
+    check: integer('check', { mode: 'boolean' }).notNull(),
+    atOpen: integer('at_open', { mode: 'boolean' }).notNull(),
+    askBeforeRunning: integer('ask_before_running', { mode: 'boolean' }).notNull(),
+    readOnly: integer('read_only', { mode: 'boolean' }).notNull(),
+    writeGlobs: text('write_globs').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [unique('command_name_once_in_project').on(table.projectId, table.name)],
+)
+
+/**
+ * The runs of a Project's commands and lines, in a Workspace or in the main checkout
+ * (`workspace_id` null): who started it, the line as it ran, its folder, its state and exit, the
+ * address it published, and the last of what it printed. `command_id` is kept as it was, even
+ * once the command is removed from the catalogue. A free line keeps the line and the folder it
+ * was asked with (`asked_line`, `asked_folder`, before its template names were filled), which is
+ * what a restart runs again.
+ */
+export const commandRuns = sqliteTable(
+  'command_runs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    commandId: text('command_id'),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    line: text('line').notNull(),
+    folder: text('folder').notNull(),
+    askedLine: text('asked_line'),
+    askedFolder: text('asked_folder'),
+    startedBy: text('started_by').notNull(),
+    sessionId: text('session_id'),
+    state: text('state').notNull(),
+    exitCode: integer('exit_code'),
+    url: text('url'),
+    portConflict: text('port_conflict'),
+    output: text('output').notNull(),
+    dropped: integer('dropped').notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [index('runs_by_place').on(table.projectId, table.workspaceId, table.startedAt)],
+)
+
+/**
+ * The root processes the supervisor started, while they run: the pid, the program and its
+ * arguments (the JSON of an array), what owns it (a run, or later an agent's session), and the
+ * engine that started it. A row left by an engine that stopped is a process to end at the next
+ * start, if it is still there and still the same program.
+ */
+export const supervisedProcesses = sqliteTable('supervised_processes', {
+  id: text('id').primaryKey(),
+  pid: integer('pid').notNull(),
+  program: text('program').notNull(),
+  args: text('args').notNull(),
+  ownerKind: text('owner_kind').notNull(),
+  ownerId: text('owner_id').notNull(),
+  engine: text('engine').notNull(),
+  startedAt: text('started_at').notNull(),
+})

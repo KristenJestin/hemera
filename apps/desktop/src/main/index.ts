@@ -117,6 +117,13 @@ const run = Effect.gen(function* () {
     yield* installProbe(engine.probe, engine.process, windows, engine.client, application)
   }
   yield* Effect.promise(() => openWindow(log))
+  // Only now may what waits for the window run: the commands run at each opening.
+  yield* engine.client['engine.windowShown']().pipe(
+    Effect.catch((failure) =>
+      Effect.sync(() => log(`the engine was not told the window is shown: ${failure.message}`)),
+    ),
+    Effect.forkScoped,
+  )
 
   if (process.argv.includes(REPORT_FLAG)) {
     process.stdout.write(`${JSON.stringify(yield* report)}\n`)

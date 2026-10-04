@@ -30,7 +30,10 @@ export function temporaryFolder(name: string): string {
   return folder
 }
 export function removeFolders(): void {
-  for (const folder of made.splice(0)) rmSync(folder, { recursive: true, force: true })
+  // On Windows a tree just ended still holds its folders for a moment: the removal is retried.
+  for (const folder of made.splice(0)) {
+    rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  }
 }
 
 export type Storage = Database | SqliteClient | DomainEvents

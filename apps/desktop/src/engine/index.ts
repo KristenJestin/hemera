@@ -11,7 +11,7 @@
 
 import {
   AgentsPortHandover,
-  EngineRpcs,
+  EngineMainRpcs,
   EngineStart,
   fromMessagePortMain,
   HostRpcs,
@@ -75,7 +75,7 @@ const engine = (
       log,
     )
 
-    yield* RpcServer.make(EngineRpcs, { disableFatalDefects: true }).pipe(
+    yield* RpcServer.make(EngineMainRpcs, { disableFatalDefects: true }).pipe(
       Effect.provide(engineHandlers(start, profile, log)),
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),
       Effect.forkScoped,

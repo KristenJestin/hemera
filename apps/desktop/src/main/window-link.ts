@@ -14,7 +14,7 @@ import {
   EngineGone,
   streamClosedAs,
   WindowRpcs,
-  type EngineRpcs,
+  type EngineMainRpcs,
   type EnvironmentReport,
   type Preferences,
   type PreferencesChange,
@@ -25,7 +25,7 @@ import type { RpcClient, RpcClientError, RpcGroup } from 'effect/rpc'
 import { observed, observedStream, type Log } from './diagnostic.ts'
 
 export type EngineClient = RpcClient.RpcClient<
-  RpcGroup.Rpcs<typeof EngineRpcs>,
+  RpcGroup.Rpcs<typeof EngineMainRpcs>,
   RpcClientError.RpcClientError
 >
 
@@ -185,6 +185,30 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['variables.remove'](request).pipe(closedAs(gone), observed('variables.remove', log)),
     'variables.reveal': (request) =>
       engine['variables.reveal'](request).pipe(closedAs(gone), observed('variables.reveal', log)),
+    // The commands and their runs are the engine's alone: forwarded as they are.
+    'catalogue.list': (request) =>
+      engine['catalogue.list'](request).pipe(closedAs(gone), observed('catalogue.list', log)),
+    'catalogue.save': (request) =>
+      engine['catalogue.save'](request).pipe(closedAs(gone), observed('catalogue.save', log)),
+    'catalogue.remove': (request) =>
+      engine['catalogue.remove'](request).pipe(closedAs(gone), observed('catalogue.remove', log)),
+    'catalogue.checkLine': (request) =>
+      engine['catalogue.checkLine'](request).pipe(
+        closedAs(gone),
+        observed('catalogue.checkLine', log),
+      ),
+    'runs.list': (request) =>
+      engine['runs.list'](request).pipe(closedAs(gone), observed('runs.list', log)),
+    'runs.start': (request) =>
+      engine['runs.start'](request).pipe(closedAs(gone), observed('runs.start', log)),
+    'runs.stop': (request) =>
+      engine['runs.stop'](request).pipe(closedAs(gone), observed('runs.stop', log)),
+    'runs.restart': (request) =>
+      engine['runs.restart'](request).pipe(closedAs(gone), observed('runs.restart', log)),
+    'runs.output': (request) =>
+      engine['runs.output'](request).pipe(closedAs(gone), observed('runs.output', log)),
+    'runs.changes': () =>
+      engine['runs.changes']().pipe(streamClosedAs(gone), observedStream('runs.changes', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
   })

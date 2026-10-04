@@ -26,6 +26,8 @@ import {
   Preferences,
   RemovalRefused,
   RestoreRefused,
+  type Run,
+  ShellSyntax,
   StaleVersion,
   StorageFailed,
   streamClosedAs,
@@ -135,6 +137,40 @@ const workspaceHandlers = {
   'variables.reveal': unused,
 }
 
+/** A service of the main checkout, ready on its address. */
+const run: Run = {
+  id: 'run1',
+  projectId: 'p1',
+  workspaceId: null,
+  commandId: 'c1',
+  name: 'web',
+  type: 'serve',
+  line: 'pnpm dev',
+  folder: '/atlas',
+  startedBy: 'user',
+  sessionId: null,
+  state: 'ready',
+  exitCode: null,
+  url: 'http://localhost:5173/',
+  portConflict: null,
+  startedAt: '2026-10-03T00:00:00.000Z',
+  endedAt: null,
+}
+
+/** The commands of an engine that refuses shell syntax and holds one service. */
+const commandHandlers = {
+  'catalogue.list': unused,
+  'catalogue.save': () => Effect.fail(new ShellSyntax({ token: '&&' })),
+  'catalogue.remove': unused,
+  'catalogue.checkLine': () => Effect.succeed({ problem: new ShellSyntax({ token: '|' }).message }),
+  'runs.list': unused,
+  'runs.start': () => Effect.fail(new ShellSyntax({ token: '>' })),
+  'runs.stop': unused,
+  'runs.restart': unused,
+  'runs.output': unused,
+  'runs.changes': () => Stream.concat(Stream.make(run), Stream.never),
+}
+
 /** main's view of an engine that answers its status and then never ends the change stream. */
 const engineLink = Effect.gen(function* () {
   const { port1: mainPort, port2: enginePort } = new MessageChannel()
@@ -152,6 +188,7 @@ const engineLink = Effect.gen(function* () {
         'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
         ...projectHandlers,
         ...workspaceHandlers,
+        ...commandHandlers,
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -257,6 +294,31 @@ describe('The Workspaces on the engine link', () => {
     ))
 })
 
+describe('The commands on the engine link', () => {
+  test('a line with shell syntax is refused with its token, and a run arrives as itself', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          const refused = yield* Effect.flip(
+            client['runs.start']({
+              projectId: 'p1',
+              workspaceId: null,
+              commandId: null,
+              line: 'echo hi > out.txt',
+              folder: null,
+            }),
+          )
+          expect(refused).toBeInstanceOf(ShellSyntax)
+          expect(refused).toMatchObject({ token: '>' })
+          expect((yield* client['catalogue.checkLine']({ line: 'a | b' })).problem).toContain('“|”')
+          const [first] = yield* Stream.runCollect(Stream.take(client['runs.changes'](), 1))
+          expect(first).toEqual(run)
+        }),
+      ),
+    ))
+})
+
 describe('Errors that can reach a screen', () => {
   test.each([
     [new EngineGone(), 'Hemera’s engine stopped.'],
@@ -289,6 +351,10 @@ describe('Errors that can reach a screen', () => {
     [
       new BaseUnavailable({ remote: 'origin', branch: 'dev', reason: 'offline' }),
       'origin/dev was never fetched and cannot be now: offline',
+    ],
+    [
+      new ShellSyntax({ token: '&&' }),
+      'Hemera runs a command without a shell, and “&&” is shell syntax: put it in a script of the repository and run the script.',
     ],
   ])('%s says what happened in a sentence', (error, sentence) => {
     expect(error.message).toBe(sentence)

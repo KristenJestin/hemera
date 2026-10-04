@@ -43,11 +43,21 @@ import {
   type ReconciliationStep,
 } from './reconciliation.ts'
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
+import { type AskBeforeRunning, nobodyToAskLayer } from './ask-before-running.ts'
+import { runAtOpen } from './at-open.ts'
 import { gitLayer } from './git.ts'
 import { resumeInterrupted } from './preparation.ts'
-import { type RecipeRunner, noRecipeRunner } from './recipe-runner.ts'
 import { repositoryStatusesLayer } from './repositories.ts'
+import {
+  type RunServices,
+  type RunsSettings,
+  recoverRuns,
+  runsEndWithEngine,
+  runsLayer,
+  runsRecipeRunnerLayer,
+} from './runs.ts'
 import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import { supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
@@ -67,9 +77,14 @@ export interface ProfileParts {
   readonly reconciliationSteps: ReadonlyArray<ReconciliationStep>
   readonly liveMissions?: Layer.Layer<LiveMissions>
   readonly restoreJournal?: Layer.Layer<RestoreJournal>
-  /** What runs a `run` step of a preparation recipe; none runs until the command catalogue. */
-  readonly recipeRunner?: Layer.Layer<RecipeRunner>
+  /** Who is asked before a command marked so runs; until the permission needs exist, no one. */
+  readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
+  /** How runs wait for an address and give a process its grace; the defaults otherwise. */
+  readonly runs?: Partial<RunsSettings>
 }
+
+/** What the calls on the Profile stand on: the Projects, their Workspaces and their runs. */
+export type EngineServices = WorkspaceServices | RunServices
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -87,12 +102,17 @@ export interface StartedProfile {
    * refusal said as a sentence; refused at once when the database was.
    */
   readonly use: <A, E>(
-    effect: Effect.Effect<A, E, WorkspaceServices>,
+    effect: Effect.Effect<A, E, EngineServices>,
   ) => Effect.Effect<A, Exclude<E, DatabaseError> | StorageFailed>
   /** The same, for what is followed for as long as the caller listens. */
   readonly follow: <A, E>(
-    stream: Stream.Stream<A, E, WorkspaceServices>,
+    stream: Stream.Stream<A, E, EngineServices>,
   ) => Stream.Stream<A, Exclude<E, DatabaseError> | StorageFailed>
+  /**
+   * The window is shown: the commands marked "at open" run, once per engine, in the background,
+   * once automations may run. Answers at once.
+   */
+  readonly windowShown: Effect.Effect<void>
 }
 
 const said = <E>(failure: E): string =>
@@ -113,6 +133,7 @@ const refusedProfile = (sentence: string): Effect.Effect<StartedProfile, never, 
       gate: Effect.never,
       use: () => failed,
       follow: () => Stream.fail(new StorageFailed({ sentence })),
+      windowShown: Effect.void,
     }
   })
 
@@ -136,7 +157,7 @@ export const startProfile = (
     }
     if (restored !== null) log(`restored the backup taken at ${restored.takenAt}`)
 
-    const layers = Layer.mergeAll(
+    const profileLayers = Layer.mergeAll(
       databaseLayer(file),
       domainEventsLayer,
       automationGateLayer,
@@ -148,7 +169,18 @@ export const startProfile = (
       gitLayer(),
       repositoryStatusesLayer,
       preparationsLayer(log),
-      parts.recipeRunner ?? noRecipeRunner,
+    )
+    // The commands: the supervisor (its registry in the database, its children's standard error
+    // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
+    const layers = runsRecipeRunnerLayer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          supervisorLayer(log),
+          runsLayer(log, parts.runs),
+          parts.askBeforeRunning ?? nobodyToAskLayer(log),
+        ),
+      ),
+      Layer.provideMerge(profileLayers),
     )
     const opened = yield* Layer.build(layers).pipe(
       Effect.flatMap((context) =>
@@ -216,6 +248,20 @@ export const startProfile = (
       )
     }
 
+    // What a stopped engine left running is ended and marked interrupted before anything starts;
+    // what is still going when this engine ends is written stopped.
+    yield* run(recoverRuns).pipe(
+      Effect.tap((interrupted) =>
+        interrupted.length === 0
+          ? Effect.void
+          : Effect.sync(() => log(`interrupted the runs ${interrupted.join(', ')}`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the runs a stopped engine left were not ended: ${said(refusal)}`)),
+      ),
+    )
+    yield* Effect.addFinalizer(() => run(runsEndWithEngine))
+
     // A preparation a stopped engine interrupted carries on once automations may run.
     yield* gate.pass.pipe(
       Effect.andThen(run(resumeInterrupted)),
@@ -256,11 +302,29 @@ export const startProfile = (
       // SAFETY: the line above took every DatabaseError; what is left is the rest of E.
       return failure as Exclude<E, DatabaseError>
     }
+    const scope = yield* Effect.scope
+    let shown = false
+    const windowShown = Effect.suspend(() => {
+      if (shown) return Effect.void
+      shown = true
+      return gate.pass.pipe(
+        Effect.andThen(run(runAtOpen)),
+        Effect.tap((started) =>
+          Effect.sync(() => log(`ran ${String(started.length)} command(s) at open`)),
+        ),
+        Effect.catch((refusal) =>
+          Effect.sync(() => log(`the commands at open were not run: ${said(refusal)}`)),
+        ),
+        Effect.forkIn(scope),
+        Effect.asVoid,
+      )
+    })
     return {
       calls,
       database,
       gate: gate.pass,
       use: (effect) => Effect.mapError(run(effect), sentenced),
       follow: (stream) => Stream.mapError(Stream.provideContext(stream, context), sentenced),
+      windowShown,
     }
   })
