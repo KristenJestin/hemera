@@ -255,6 +255,11 @@
   --spacing-icon-md: 1.125rem;
   --spacing-icon-lg: 1.375rem;
 
+  /* How big the face is drawn as the subject of a page: an empty page, before anything runs. Past
+     the largest step of the scale, so it reads as what the page is about rather than as an icon
+     grown up. */
+  --spacing-face-hero: 8rem;
+
   /* How tall a control is drawn, one step per size of the components; a change of density is
      these lines rather than a search through the catalogue. */
   --spacing-control-sm: 2rem;
