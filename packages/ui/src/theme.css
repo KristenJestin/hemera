@@ -266,10 +266,11 @@
   --spacing-face-hero: 8rem;
 
   /* How tall a control is drawn, one step per size of the components; a change of density is
-     these lines rather than a search through the catalogue. */
-  --spacing-control-sm: 2rem;
-  --spacing-control-md: 2.25rem;
-  --spacing-control-lg: 2.75rem;
+     these lines rather than a search through the catalogue. shadcn's own steps: 28, 32 and 36
+     pixels, so a control reads as part of the line it sits on rather than as a slab. */
+  --spacing-control-sm: 1.75rem;
+  --spacing-control-md: 2rem;
+  --spacing-control-lg: 2.25rem;
 
   /* How tall a control is drawn when it is a link, which is text and not a surface: one line of
      the base size. It has to stay equal to the line height of `text-base`. */
