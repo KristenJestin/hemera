@@ -76,6 +76,12 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export {
+  SheetStack,
+  type SheetStackProps,
+  type SheetView,
+  type SheetWidth,
+} from './components/sheet/sheet.tsx'
+export {
   OVER_MARK,
   SlidingMark,
   type SlidingMarkProps,
@@ -154,11 +160,6 @@ export {
   type ProjectSettingsProps,
   type SettingsSection,
 } from './surfaces/project-settings/project-settings.tsx'
-export {
-  SettingsSheet,
-  type SettingsSheetContent,
-  type SettingsSheetProps,
-} from './surfaces/project-settings/settings-sheet.tsx'
 export {
   AddProject,
   type AddProjectProps,

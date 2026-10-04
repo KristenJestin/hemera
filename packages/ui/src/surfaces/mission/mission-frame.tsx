@@ -1,20 +1,8 @@
-import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
-import { IconButton } from '../../components/button/button.tsx'
 import { Menu } from '../../components/menu/menu.tsx'
-import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import {
-  IconArrowsMaximize,
-  IconArrowsMinimize,
-  IconBan,
-  IconDots,
-  IconFileText,
-  IconGitBranch,
-  IconX,
-} from '../../icons.ts'
-import { CROSSFADE, SHEET, crossfade, sheet, useTransition } from '../../motion.ts'
+import { type SheetView, type SheetWidth, SheetStack } from '../../components/sheet/sheet.tsx'
+import { IconBan, IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
 import { type Ball, BallMark } from '../../blocks/ball/ball-mark.tsx'
 
 /**
@@ -50,17 +38,11 @@ import { type Ball, BallMark } from '../../blocks/ball/ball-mark.tsx'
  * The focus goes to the view's title as it opens and back to where it was as the last one
  * closes. Asked for less movement, a view is there at once.
  */
-export type ViewWidth = 'narrow' | 'wide'
+/** How wide a view's sheet is: the design system's sheet widths. */
+export type ViewWidth = SheetWidth
 
-export interface MissionView {
-  id: string
-  title: string
-  icon: ReactNode
-  width: ViewWidth
-  /** What the view adds to its head while it is shown. */
-  actions?: ReactNode
-  body: ReactNode
-}
+/** A view over the base: a sheet of the design system's stack. */
+export type MissionView = SheetView
 
 /** The tone of a stage, which its chip's dot wears. */
 export type StageTone = 'info' | 'build' | 'warning' | 'primary' | 'success' | 'muted'
@@ -143,34 +125,6 @@ const BODY = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
 
 const BASE = 'flex min-h-0 flex-1 flex-col overflow-auto'
 
-/**
- * The scrim over the base while a sheet stands over it: the theme's overlay, as behind a dialog.
- * Under a sheet that covers the base too: it dims what the sheet is settling over, so the two are
- * never read at once.
- */
-const SCRIM = 'absolute inset-0 bg-overlay'
-
-/**
- * A sheet: a solid surface of its own over the base, its own line and shadow on the edge it came
- * from. Its width grows and folds on the theme's `sheet-motion`, a transition of the width itself.
- */
-const SHEET_BOX =
-  'absolute inset-y-0 right-0 flex w-full flex-col border-l border-border bg-surface-content shadow-lg sheet-motion'
-
-/** How wide a sheet is at rest, by what it asked for; grown, the frame's whole width. */
-const SHEET_WIDTH: Record<ViewWidth, string> = {
-  narrow: 'max-w-view-narrow',
-  wide: 'max-w-view-wide',
-}
-
-const GROWN = 'max-w-full'
-
-const PANEL_HEAD = 'flex h-control-lg shrink-0 items-center gap-2 border-b border-border px-4'
-
-const PANEL_TITLE = 'flex min-w-0 items-center gap-2 text-base font-semibold outline-none'
-
-const PANEL_BODY = 'flex min-h-0 flex-1 flex-col overflow-auto outline-none focus-ring'
-
 export function MissionFrame({
   missionKey,
   title,
@@ -190,50 +144,6 @@ export function MissionFrame({
   onShow,
   onClose,
 }: MissionFrameProps): ReactNode {
-  const sliding = useTransition(sheet)
-  const fading = useTransition(crossfade)
-  const prefix = useId()
-  // The sheets grown to the frame's width, by view: the hand's doing, and nothing else's.
-  const [grown, setGrown] = useState<ReadonlySet<string>>(() => new Set())
-  const grow = (id: string, on: boolean): void =>
-    setGrown((before) => {
-      const next = new Set(before)
-      if (on) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  const byId = new Map(views.map((view) => [view.id, view]))
-  const opened = open.flatMap((id) => {
-    const view = byId.get(id)
-    return view === undefined ? [] : [view]
-  })
-  const current = shown === null ? null : (byId.get(shown) ?? null)
-
-  // Where the focus was when the first view opened, to put it back when the last one closes.
-  const before = useRef<HTMLElement | null>(null)
-  const titles = useRef(new Map<string, HTMLElement>())
-  const wasShown = useRef<string | null>(null)
-  useEffect(() => {
-    if (shown === wasShown.current) return
-    if (wasShown.current === null && shown !== null) {
-      before.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    }
-    wasShown.current = shown
-    // Without scrolling: the sheet is still past the edge when its title takes the focus.
-    if (shown !== null) titles.current.get(shown)?.focus({ preventScroll: true })
-    else {
-      before.current?.focus({ preventScroll: true })
-      before.current = null
-    }
-  }, [shown])
-
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === 'Escape' && shown !== null) {
-      event.stopPropagation()
-      onClose(shown)
-    }
-  }
-
   const groups = [
     more.map((item) => ({ label: item.label, icon: item.icon, onSelect: item.onSelect })),
     // Cancel cannot be undone: the destructive item of the menu, with its ban.
@@ -282,7 +192,7 @@ export function MissionFrame({
         )}
       </div>
 
-      <div className={BODY} onKeyDown={onKeyDown}>
+      <div className={BODY}>
         <div
           className={BASE}
           data-base=""
@@ -291,88 +201,14 @@ export function MissionFrame({
         >
           {base}
         </div>
-        <AnimatePresence>
-          {current !== null && (
-            <motion.button
-              key="scrim"
-              type="button"
-              aria-label="Back to the page"
-              tabIndex={-1}
-              className={SCRIM}
-              data-scrim=""
-              initial={CROSSFADE.from}
-              animate={CROSSFADE.to}
-              exit={CROSSFADE.from}
-              transition={fading}
-              onClick={() => onShow(null)}
-            />
-          )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {opened.map((view) => (
-            <motion.section
-              key={view.id}
-              aria-labelledby={`${prefix}${view.id}`}
-              className={cn(SHEET_BOX, grown.has(view.id) ? GROWN : SHEET_WIDTH[view.width])}
-              data-view={view.id}
-              data-grown={grown.has(view.id)}
-              // Out of sight while another stands over it; a sheet on its way out stays in
-              // sight, or its leaving would be a cut.
-              hidden={open.includes(view.id) && shown !== view.id}
-              initial={SHEET.from}
-              animate={SHEET.to}
-              exit={SHEET.from}
-              transition={sliding}
-            >
-              <div className={PANEL_HEAD}>
-                <h2
-                  id={`${prefix}${view.id}`}
-                  tabIndex={-1}
-                  ref={(node) => {
-                    if (node === null) titles.current.delete(view.id)
-                    else titles.current.set(view.id, node)
-                  }}
-                  className={PANEL_TITLE}
-                >
-                  <span className="flex text-muted-foreground">{view.icon}</span>
-                  <span className="truncate">{view.title}</span>
-                </h2>
-                <div className={END}>
-                  {view.actions}
-                  <Tooltip label={grown.has(view.id) ? 'Collapse' : 'Expand'}>
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      icon={
-                        grown.has(view.id) ? (
-                          <IconArrowsMinimize size="md" />
-                        ) : (
-                          <IconArrowsMaximize size="md" />
-                        )
-                      }
-                      aria-label={`${grown.has(view.id) ? 'Collapse' : 'Expand'} ${view.title}`}
-                      aria-pressed={grown.has(view.id)}
-                      onClick={() => grow(view.id, !grown.has(view.id))}
-                    />
-                  </Tooltip>
-                  <Tooltip label="Close" keys="Esc">
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      icon={<IconX size="md" />}
-                      aria-label={`Close ${view.title}`}
-                      onClick={() => onClose(view.id)}
-                    />
-                  </Tooltip>
-                </div>
-              </div>
-              {/* A scroller the keyboard can take: its wheel is the arrows, once it has the focus. */}
-              <div className={PANEL_BODY} tabIndex={0}>
-                {view.body}
-              </div>
-            </motion.section>
-          ))}
-        </AnimatePresence>
+        <SheetStack
+          views={views}
+          open={open}
+          shown={shown}
+          onShow={onShow}
+          onClose={onClose}
+          scrimLabel="Back to the page"
+        />
       </div>
     </div>
   )

@@ -3,14 +3,15 @@ import type { ReactNode } from 'react'
 
 import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
+import { type SheetView, SheetStack } from '../../components/sheet/sheet.tsx'
 import { OVER_MARK, SlidingMark } from '../../components/sliding-mark/sliding-mark.tsx'
 import { IconAlertTriangle, IconFolder } from '../../icons.ts'
 import { Page, PageHeader } from '../page.tsx'
-import { SettingsSheet, type SettingsSheetContent } from './settings-sheet.tsx'
 
 /**
  * A Project's settings: one page, the list of its sections down the left, the section chosen
- * beside it, and a sheet over both where one thing of a section is written.
+ * beside it, and a sheet over both where one thing of a section is written — the design system's sheet,
+ * as a mission's views are.
  *
  * The header is the Project's own, as on its page — its letter and its name — and under them the
  * folder of its main checkout, the one fact of a Project no section owns. The sections are a list
@@ -42,8 +43,8 @@ export interface ProjectSettingsProps {
   /** Why the Project could not be read, in words. */
   error?: string | undefined
   onRetry: () => void
-  /** The sheet standing over the page, or null. */
-  sheet?: SettingsSheetContent | null | undefined
+  /** The sheet standing over the page, or null: the design system's sheet, holding a form. */
+  sheet?: SheetView | null | undefined
   onCloseSheet: () => void
   /** The section chosen. */
   children: ReactNode
@@ -149,7 +150,14 @@ export function ProjectSettings({
           </div>
         </Page>
       </div>
-      <SettingsSheet content={sheet} onClose={onCloseSheet} />
+      <SheetStack
+        views={sheet === null ? [] : [sheet]}
+        open={sheet === null ? [] : [sheet.id]}
+        shown={sheet === null ? null : sheet.id}
+        onShow={onCloseSheet}
+        onClose={onCloseSheet}
+        scrimLabel="Back to the settings"
+      />
     </div>
   )
 }

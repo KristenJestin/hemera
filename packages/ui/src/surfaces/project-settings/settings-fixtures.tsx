@@ -66,10 +66,10 @@ import {
   IconVariable,
 } from '../../icons.ts'
 import { FrameFooter } from '../../components/frame/frame.tsx'
+import type { SheetView } from '../../components/sheet/sheet.tsx'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
 import { ProjectSettings, type SettingsSection } from './project-settings.tsx'
-import type { SettingsSheetContent } from './settings-sheet.tsx'
 
 /**
  * A small machine around the settings of Acme, so a story walks what a user walks: a section
@@ -363,7 +363,7 @@ export function SettingsFixture({
     close()
   }
 
-  const content = ((): SettingsSheetContent | null => {
+  const content = ((): SheetView | null => {
     if (sheet === null) return null
     const foot = (what: string | null): ReactNode => (
       <SheetFoot
@@ -379,6 +379,9 @@ export function SettingsFixture({
       case 'repository': {
         const repository = repositories.find((one) => one.id === sheet.id)
         return {
+          id: 'sheet',
+          width: 'narrow',
+          form: true,
           title: sheet.id === null ? 'New repository' : (repository?.path ?? sheet.draft.path),
           icon: <IconGitBranch size="sm" />,
           body: (
@@ -397,6 +400,9 @@ export function SettingsFixture({
       }
       case 'command':
         return {
+          id: 'sheet',
+          width: 'narrow',
+          form: true,
           title: sheet.id === null ? 'New command' : sheet.draft.name,
           icon: typeIcon(sheet.draft.type),
           body: (
@@ -415,6 +421,9 @@ export function SettingsFixture({
         const position = steps.findIndex((one) => one.id === sheet.id) + 1
         const step = steps.find((one) => one.id === sheet.id)
         return {
+          id: 'sheet',
+          width: 'narrow',
+          form: true,
           title: sheet.id === null ? 'New step' : `Step ${String(position)}`,
           icon: <IconListNumbers size="sm" />,
           body: (
@@ -438,6 +447,9 @@ export function SettingsFixture({
       }
       case 'variable':
         return {
+          id: 'sheet',
+          width: 'narrow',
+          form: true,
           title: sheet.key ?? 'New variable',
           icon: <IconVariable size="sm" />,
           body: (

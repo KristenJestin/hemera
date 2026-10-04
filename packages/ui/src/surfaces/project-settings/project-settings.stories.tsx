@@ -102,7 +102,7 @@ export const Unreadable: Story = {
     const row = canvasElement.querySelector('[data-repository="billing"]')
     expect(row).toHaveTextContent('fatal: not a git repository')
     await userEvent.click(canvas.getByRole('button', { name: /^billing/ }))
-    const sheet = await canvas.findByRole('dialog', { name: 'billing' })
+    const sheet = await canvas.findByRole('region', { name: 'billing' })
     expect(within(sheet).getByRole('alert')).toHaveTextContent('not a git repository')
   },
 }
@@ -137,7 +137,7 @@ export const CommandOpen: Story = {
   args: { section: 'commands', sheet: { kind: 'command', id: 'test' } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const sheet = await canvas.findByRole('dialog', { name: 'test' })
+    const sheet = await canvas.findByRole('region', { name: 'test' })
     expect(canvasElement.querySelector('[data-settings-page]')).toHaveAttribute('inert')
     const line = within(sheet).getByRole('textbox', { name: 'Line' })
     await userEvent.type(line, ' && pnpm lint')
@@ -151,12 +151,12 @@ export const CommandNew: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
-    const sheet = await canvas.findByRole('dialog', { name: 'New command' })
+    const sheet = await canvas.findByRole('region', { name: 'New command' })
     await userEvent.type(within(sheet).getByRole('textbox', { name: 'Name' }), 'storybook')
     await userEvent.type(within(sheet).getByRole('textbox', { name: 'Line' }), 'pnpm storybook')
     await userEvent.click(within(sheet).getByRole('button', { name: 'Add' }))
     await waitFor(() => {
-      expect(canvas.queryByRole('dialog')).toBeNull()
+      expect(canvasElement.querySelector('[data-view]')).toBeNull()
     })
     expect(
       within(canvas.getByRole('list', { name: 'Commands' })).getAllByRole('listitem'),
@@ -207,7 +207,7 @@ export const RefusedSave: Story = {
   args: { refuse: true, sheet: { kind: 'repository', id: 'api' } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const sheet = await canvas.findByRole('dialog', { name: 'api' })
+    const sheet = await canvas.findByRole('region', { name: 'api' })
     const branch = within(sheet).getByRole('textbox', { name: 'Base branch' })
     await userEvent.clear(branch)
     await userEvent.type(branch, 'develop')
@@ -267,13 +267,13 @@ export const Focused: Story = {
     const build = await canvas.findByRole('button', { name: /^build\b.*Build/ })
     build.focus()
     await userEvent.keyboard('{Enter}')
-    const sheet = await canvas.findByRole('dialog', { name: 'build' })
+    const sheet = await canvas.findByRole('region', { name: 'build' })
     await waitFor(() => {
       expect(within(sheet).getByRole('heading', { name: 'build' })).toHaveFocus()
     })
     await userEvent.keyboard('{Escape}')
     await waitFor(() => {
-      expect(canvas.queryByRole('dialog')).toBeNull()
+      expect(canvasElement.querySelector('[data-view]')).toBeNull()
     })
     expect(build).toHaveFocus()
   },
@@ -288,7 +288,7 @@ export const ReducedMotion: Story = {
     </MotionConfig>
   ),
   play: async ({ canvasElement }) => {
-    const sheet = within(canvasElement).getByRole('dialog', { name: 'build' })
+    const sheet = within(canvasElement).getByRole('region', { name: 'build' })
     expect(getComputedStyle(sheet).transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/)
   },
 }
