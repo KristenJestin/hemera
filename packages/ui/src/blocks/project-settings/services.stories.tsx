@@ -47,7 +47,12 @@ const byId = (id: string): SettingsRun => RUNS.find((run) => run.id === id)!
 /** Opens a chip's glance, and gives the glance back. */
 async function glance(canvasElement: HTMLElement, name: RegExp): Promise<HTMLElement> {
   await userEvent.click(within(canvasElement).getByRole('button', { name }))
-  return waitFor(() => within(document.body).getByRole('dialog'))
+  // Once it has arrived: a loaded runner paints the popup's entrance over several frames.
+  return waitFor(() => {
+    const panel = within(document.body).getByRole('dialog')
+    expect(panel).toBeVisible()
+    return panel
+  })
 }
 
 /** Two services live, one done, one not running, one waiting for you. */
@@ -70,7 +75,9 @@ export const Starting: Story = {
     const panel = await glance(canvasElement, /^mock-api, running/)
     expect(panel).toHaveTextContent('loading 214 fixtures…')
     expect(within(panel).queryByRole('button', { name: 'Copy the address' })).toBeNull()
-    expect(within(panel).getByRole('button', { name: 'Stop' })).toBeVisible()
+    await waitFor(() => {
+      expect(within(panel).getByRole('button', { name: 'Stop' })).toBeVisible()
+    })
   },
 }
 
