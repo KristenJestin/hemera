@@ -38,7 +38,7 @@ const buttonVariants = cva(
         // else. A control that is a place to go rather than a thing to press reads as text.
         link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',
         destructive:
-          'border-destructive bg-destructive text-destructive-foreground hover:brightness-95',
+          'border-destructive-fill bg-destructive-fill text-destructive-foreground hover:brightness-95',
       },
       /**
        * The radius, which is a shape and not a size: a control that floats over what it is

@@ -122,6 +122,18 @@ describe('The primary and the focus', () => {
     }
   })
 
+  test('a filled destructive is the same in both themes, its white label at 4.5:1 or more', () => {
+    for (const role of ['destructive-fill', 'destructive-foreground']) {
+      expect(roleIn(theme, role, 'dark')).toBe(roleIn(theme, role, 'light'))
+    }
+    expect(
+      contrastOf(
+        roleIn(theme, 'destructive-foreground', 'dark'),
+        roleIn(theme, 'destructive-fill', 'dark'),
+      ),
+    ).toBeGreaterThanOrEqual(4.5)
+  })
+
   test('no component fills a surface with the flat primary', () => {
     const flat = componentSources
       .filter(({ source }) => /(?<![\w-])(?:[\w-]+:)*bg-primary(?![\w-])/.test(source))
