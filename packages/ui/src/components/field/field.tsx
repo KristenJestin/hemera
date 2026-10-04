@@ -26,7 +26,7 @@ import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
  * eye misses. It is on the `press` preset, because it answers what was just typed.
  */
 const CONTROL =
-  'w-full rounded-md border border-input bg-muted text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
+  'w-full rounded-md border border-input bg-input-fill text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
 
 /**
  * The box of a one-line input: the recessed surface, its edge and its ring are the box's, and the
@@ -35,8 +35,8 @@ const CONTROL =
  * the whole box.
  */
 const BOX: Record<'sm' | 'md', string> = {
-  sm: 'relative flex h-control-sm min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-muted px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
-  md: 'relative flex h-control-md min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-muted px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
+  sm: 'relative flex h-control-sm min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-input-fill px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
+  md: 'relative flex h-control-md min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-input-fill px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
 }
 
 /** The text itself, borderless inside its box: the box is what is seen. */

@@ -52,6 +52,10 @@
   /* What a shape on its way is drawn in: a step darker than any surface it stands on, so it is
      seen on a card as on the page. */
   --skeleton: #e2e2e8;
+  /* What a field is filled with: the muted surface at a little over half its strength, so the box
+     reads as somewhere to type and a key drawn inside it, on the full muted surface with its
+     edge, stands out of it. */
+  --input-fill: color-mix(in srgb, var(--muted) 60%, transparent);
   /* The tint of what is running, breathing on a live chip: a clear blue, apart from the amber a
      stuck chip is swept in, and light enough that the chip's text keeps its contrast over it. */
   --running-muted: #dbeafe;
@@ -129,6 +133,7 @@
   --muted-foreground: #9a9aab;
   --accent: #121217;
   --skeleton: #27272f;
+  --input-fill: color-mix(in srgb, var(--muted) 60%, transparent);
   --running-muted: rgba(59, 130, 246, 0.22);
   --hover: rgba(255, 255, 255, 0.05);
   --hover-destructive: rgba(248, 113, 113, 0.12);
@@ -219,6 +224,7 @@
 
   --color-border: var(--border);
   --color-skeleton: var(--skeleton);
+  --color-input-fill: var(--input-fill);
   --color-running-muted: var(--running-muted);
   --color-input: var(--input);
   --color-ring: var(--ring);
