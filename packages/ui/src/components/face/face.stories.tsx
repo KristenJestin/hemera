@@ -196,7 +196,7 @@ export const Sizes: Story = {
 }
 
 /**
- * The face inside a line of text, at the size of an icon. Small, it is drawn larger than its box
+ * The face inside a line of text, at the size of an icon, set there by `inline` and no class of the caller. Small, it is drawn larger than its box
  * and past it, and the box is set in the line rather than added to it: the line keeps the height
  * it has without a face, and the face still reads.
  */
@@ -205,8 +205,8 @@ export const InText: Story = {
   render: () => (
     <div className="flex max-w-sm flex-col gap-3 text-sm">
       <p>
-        <Face state="writing" size="icon" seed={2} className="-my-1 mx-0.5 align-middle" /> Writing
-        the migration of the api repository of Acme, then running its tests.
+        <Face state="writing" size="icon" seed={2} inline /> Writing the migration of the api
+        repository of Acme, then running its tests.
       </p>
       <p>Writing the migration of the api repository of Acme, then running its tests.</p>
     </div>
