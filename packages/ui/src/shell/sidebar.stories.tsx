@@ -112,6 +112,35 @@ export const Filled: Story = {
   },
 }
 
+/**
+ * A Project added while the window is open: its row grows in after the others and pushes Add a
+ * Project down, rather than appearing in one frame. Add a Project plays it here.
+ */
+export const Arriving: Story = {
+  args: { projects: [PROJECTS[0]!] },
+  render: (args) => {
+    const [projects, setProjects] = useState(args.projects)
+    return (
+      <div className="flex h-screen bg-surface-page">
+        <Sidebar
+          {...args}
+          projects={projects}
+          onAddProject={() => {
+            setProjects(projects.length === 1 ? PROJECTS : [PROJECTS[0]!])
+            args.onAddProject()
+          }}
+        />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('button', { name: 'Hemera' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a Project' }))
+    expect(await canvas.findByRole('button', { name: 'Hemera' })).toBeVisible()
+  },
+}
+
 /** No Project at all, and nothing waiting: Home without a count, and the way to add one. */
 export const Empty: Story = {
   args: { projects: [], waiting: 0 },

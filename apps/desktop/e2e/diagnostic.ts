@@ -31,6 +31,11 @@ export async function waitForLines(spec: string, pattern: RegExp, count: number)
   })
 }
 
+/** What the window says of the engine: starting, late, ready or stopped. */
+export async function engineOfPage(): Promise<string | null> {
+  return browser.$('#root > [data-engine]').getAttribute('data-engine')
+}
+
 /** Marks the page that is loaded now, so a wait can tell it from the next one. */
 export async function markPage(): Promise<void> {
   await browser.execute(() => Object.assign(window, { hemeraPreviousPage: true }))
@@ -41,15 +46,15 @@ export async function waitForNewPage(): Promise<void> {
   await browser.waitUntil(
     async () =>
       (await browser.execute(() => !Reflect.has(window, 'hemeraPreviousPage'))) &&
-      (await browser.$('main').getAttribute('data-engine')) === 'ready',
+      (await engineOfPage()) === 'ready',
     { timeout: 30_000, timeoutMsg: 'no new page heard from the engine' },
   )
 }
 
 /** Waits for the window to say the engine answered. */
 export async function waitForEngine(): Promise<void> {
-  await browser.waitUntil(
-    async () => (await browser.$('main').getAttribute('data-engine')) === 'ready',
-    { timeout: 30_000, timeoutMsg: 'the window never heard from the engine' },
-  )
+  await browser.waitUntil(async () => (await engineOfPage()) === 'ready', {
+    timeout: 30_000,
+    timeoutMsg: 'the window never heard from the engine',
+  })
 }

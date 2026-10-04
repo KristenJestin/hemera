@@ -12,10 +12,12 @@ import {
   fromMessagePort,
   makeClientProtocol,
   EngineGone,
+  StorageFailed,
   WindowRpcs,
   type EngineStatus,
   type EnvironmentReport,
   type Port,
+  type Project,
 } from '@hemera/ipc'
 import { Cause, Effect, Exit, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -31,6 +33,17 @@ export interface Link {
   readonly environmentReport: () => Promise<EnvironmentReport>
   /** Starts Hemera again, from scratch. */
   readonly relaunch: () => Promise<void>
+  /** Shows the diagnostic log in the system's file manager. */
+  readonly showLog: () => Promise<void>
+  /** The Projects, in the order they were added. */
+  readonly projects: () => Promise<ReadonlyArray<Project>>
+  /** Rejects with `UnknownProject` when it no longer exists. */
+  readonly project: (id: string) => Promise<Project>
+  /** Each Project as a change left it, for as long as the listener listens. */
+  readonly onProjectChanges: (
+    listener: (project: Project) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   readonly close: () => void
 }
 
@@ -55,31 +68,56 @@ export function linkOver(port: Port): Link {
       .then((ready) => Effect.runPromiseExit(ask(ready)))
       .then((exit) => (Exit.isSuccess(exit) ? exit.value : Promise.reject(failureOf(exit.cause))))
 
+  /**
+   * Follows a stream until the listener stops: each value to `listener`, and the typed error it
+   * failed with, if `ends` recognises it, to `onEnd`. An interruption is not an end anyone hears.
+   */
+  const follow = <A, E, F extends E>(
+    open: (client: Client) => Stream.Stream<A, E>,
+    listener: (value: A) => void,
+    ends: (error: E) => error is F,
+    onEnd: (error: F) => void,
+  ): (() => void) => {
+    let stopped = false
+    let stop = (): void => {
+      stopped = true
+    }
+    void client.then((ready) => {
+      if (stopped) return
+      const fiber = Effect.runFork(
+        Stream.runForEach(open(ready), (value) => Effect.sync(() => listener(value))),
+      )
+      fiber.addObserver((exit) => {
+        if (Exit.isSuccess(exit)) return
+        const failure = Cause.findErrorOption(exit.cause)
+        if (Option.isSome(failure) && ends(failure.value)) onEnd(failure.value)
+      })
+      stop = () => fiber.interruptUnsafe()
+    })
+    return () => stop()
+  }
+
   return {
     engineStatus: () => call((ready) => ready['engine.status']()),
-    onEngineStatus: (listener, onEnd) => {
-      let stopped = false
-      let stop = (): void => {
-        stopped = true
-      }
-      void client.then((ready) => {
-        if (stopped) return
-        const fiber = Effect.runFork(
-          Stream.runForEach(ready['engine.statusChanges'](), (status) =>
-            Effect.sync(() => listener(status)),
-          ),
-        )
-        fiber.addObserver((exit) => {
-          if (Exit.isSuccess(exit)) return
-          const failure = Cause.findErrorOption(exit.cause)
-          if (Option.isSome(failure) && failure.value instanceof EngineGone) onEnd(failure.value)
-        })
-        stop = () => fiber.interruptUnsafe()
-      })
-      return () => stop()
-    },
+    onEngineStatus: (listener, onEnd) =>
+      follow(
+        (ready) => ready['engine.statusChanges'](),
+        listener,
+        (error) => error instanceof EngineGone,
+        onEnd,
+      ),
     environmentReport: () => call((ready) => ready['environment.report']()),
     relaunch: () => call((ready) => ready['application.relaunch']()),
+    showLog: () => call((ready) => ready['application.showLog']()),
+    projects: () => call((ready) => ready['projects.list']()),
+    project: (id) => call((ready) => ready['projects.get']({ id })),
+    onProjectChanges: (listener, onEnd) =>
+      follow(
+        (ready) => ready['projects.changes'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))
     },

@@ -1,0 +1,7 @@
+/*
+ * The window's stylesheet: the design system's theme, and the classes of the renderer's own few
+ * frames, which Tailwind finds beside this file.
+ */
+@import '@hemera/ui/theme.css';
+
+@source '.';

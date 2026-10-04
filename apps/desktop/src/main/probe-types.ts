@@ -13,6 +13,8 @@ export interface HemeraProbe {
   readonly enginePid: () => number | undefined
   /** Changes the theme preference the way the window does: written by the engine, worn by main. */
   readonly changeTheme: (theme: 'system' | 'light' | 'dark') => Promise<void>
+  /** Creates a Project through the engine, as the window will; answers its id. */
+  readonly createProject: (name: string, folder: string) => Promise<string>
   /** Writes a backup of the Profile into `folder`; answers the backup folder written. */
   readonly backUp: (folder: string) => Promise<string>
   /** Restores the backup folder `folder` the way the window does, relaunch included. */

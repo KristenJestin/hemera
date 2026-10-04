@@ -27,6 +27,9 @@ import { collapse, expand, fold, useTransition } from '../motion.ts'
  * edge rather than wrapped, so nothing jumps. The missions under a Project grow and fold away on
  * the `fold` kind, pushing what stands under them.
  *
+ * A Project added or removed while the window is open grows into the list or folds out of it on
+ * the same `fold` kind, pushing what stands after it.
+ *
  * Every place is a button in the tab order, Home first and Settings last. The current one says so
  * (`aria-current`). Nothing here knows where a place leads: it says which was chosen.
  */
@@ -86,6 +89,12 @@ const CHEVRON =
  * a row raised inside it would still be under the mark drawn after the list.
  */
 const UNDER = 'relative z-1 flex flex-col gap-0.5 overflow-hidden pl-2'
+
+/**
+ * A Project's place and what stands under it, clipped while it grows in or folds out, and over the
+ * mark as a whole, for the reason `UNDER` gives: the fade it travels on is a filter.
+ */
+const PROJECT = 'relative z-1 flex shrink-0 flex-col gap-0.5 overflow-hidden'
 
 const ROW =
   'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm whitespace-nowrap text-muted-foreground outline-none select-none hover:bg-accent hover:text-foreground focus-ring hover-motion aria-[current=page]:text-foreground'
@@ -199,52 +208,61 @@ export function Sidebar({
             {error}
           </p>
         )}
-        {projects.map((project) => {
-          const open = opened.has(project.id) && !folded
-          return (
-            <div key={project.id} className="flex flex-col gap-0.5">
-              <Place
-                folded={folded}
-                mark={`project:${project.id}`}
-                current={current.kind === 'project' && current.id === project.id}
-                name={project.name}
-                icon={<LetterAvatar name={project.name} others={names} />}
-                onPress={() => onProject(project.id)}
-                control={
-                  project.under === undefined ? undefined : (
-                    <button
-                      type="button"
-                      className={CHEVRON}
-                      aria-expanded={open}
-                      aria-label={`${open ? 'Fold' : 'Open'} the missions of ${project.name}`}
-                      tabIndex={folded ? -1 : 0}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onOpen(project.id, !open)
-                      }}
+        <AnimatePresence initial={false}>
+          {projects.map((project) => {
+            const open = opened.has(project.id) && !folded
+            return (
+              <motion.div
+                key={project.id}
+                className={PROJECT}
+                initial={collapse}
+                animate={expand}
+                exit={collapse}
+                transition={folding}
+              >
+                <Place
+                  folded={folded}
+                  mark={`project:${project.id}`}
+                  current={current.kind === 'project' && current.id === project.id}
+                  name={project.name}
+                  icon={<LetterAvatar name={project.name} others={names} />}
+                  onPress={() => onProject(project.id)}
+                  control={
+                    project.under === undefined ? undefined : (
+                      <button
+                        type="button"
+                        className={CHEVRON}
+                        aria-expanded={open}
+                        aria-label={`${open ? 'Fold' : 'Open'} the missions of ${project.name}`}
+                        tabIndex={folded ? -1 : 0}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onOpen(project.id, !open)
+                        }}
+                      >
+                        <IconChevronRight size="sm" />
+                      </button>
+                    )
+                  }
+                />
+                <AnimatePresence initial={false}>
+                  {open && project.under !== undefined && (
+                    <motion.div
+                      key="under"
+                      className={UNDER}
+                      initial={collapse}
+                      animate={expand}
+                      exit={collapse}
+                      transition={folding}
                     >
-                      <IconChevronRight size="sm" />
-                    </button>
-                  )
-                }
-              />
-              <AnimatePresence initial={false}>
-                {open && project.under !== undefined && (
-                  <motion.div
-                    key="under"
-                    className={UNDER}
-                    initial={collapse}
-                    animate={expand}
-                    exit={collapse}
-                    transition={folding}
-                  >
-                    {project.under}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )
-        })}
+                      {project.under}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )
+          })}
+        </AnimatePresence>
         {!loading && error === undefined && (
           <Place
             folded={folded}

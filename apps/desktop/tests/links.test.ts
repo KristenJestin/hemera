@@ -60,6 +60,7 @@ const chain = Effect.gen(function* () {
   const engineLines: string[] = []
   const mainLines: string[] = []
   let relaunched = 0
+  let logsShown = 0
   const displayed: Preferences[] = []
 
   const { port1: mainToEngine, port2: engineEnd } = new MessageChannel()
@@ -95,6 +96,9 @@ const chain = Effect.gen(function* () {
           relaunch: Effect.sync(() => {
             relaunched += 1
           }),
+          showLog: Effect.sync(() => {
+            logsShown += 1
+          }),
           display: (preferences) =>
             Effect.sync(() => {
               displayed.push(preferences)
@@ -117,6 +121,7 @@ const chain = Effect.gen(function* () {
     engineLines,
     mainLines,
     relaunches: () => relaunched,
+    logsShown: () => logsShown,
     displayed,
   }
 })
@@ -193,6 +198,15 @@ describe('The window reaches the engine through main', () => {
         expect(yield* window['environment.report']()).toEqual(report)
         yield* window['application.relaunch']()
         expect(relaunches()).toBe(1)
+      }),
+    ))
+
+  test('main shows the diagnostic log when the window asks', () =>
+    run(
+      Effect.gen(function* () {
+        const { window, logsShown } = yield* chain
+        yield* window['application.showLog']()
+        expect(logsShown()).toBe(1)
       }),
     ))
 

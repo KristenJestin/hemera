@@ -44,6 +44,12 @@ export const installProbe = (
       enginePid: () => engine.pid,
       changeTheme: (theme) =>
         Effect.runPromise(changePreferences(engineClient, application)({ theme })),
+      createProject: (name, folder) =>
+        Effect.runPromise(
+          closedAs(gone)(
+            engineClient['projects.create']({ name, mainCheckout: folder, repositories: [] }),
+          ).pipe(Effect.map((project) => project.id)),
+        ),
       backUp: (folder) =>
         Effect.runPromise(closedAs(gone)(engineClient['profile.backup']({ folder }))),
       restore: (folder) => Effect.runPromise(restoreProfile(engineClient, application)(folder)),

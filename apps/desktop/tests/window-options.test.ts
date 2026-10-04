@@ -1,11 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+import { roleIn } from '@hemera/ui/tokens'
 import { describe, expect, test } from 'vite-plus/test'
 
-import {
-  HEADLESS_VARIABLE,
-  OFF_SCREEN,
-  OPENING_COLORS,
-  windowOptions,
-} from '../src/main/window-options.ts'
+import { OPENING_COLORS } from '../src/main/opening-colors.ts'
+import { HEADLESS_VARIABLE, OFF_SCREEN, windowOptions } from '../src/main/window-options.ts'
+
+const theme = readFileSync(fileURLToPath(import.meta.resolve('@hemera/ui/theme.css')), 'utf8')
 
 const main = '/application/dist/main'
 
@@ -28,9 +30,19 @@ describe('The window opens sandboxed, on the opening colour of the theme', () =>
     expect(options.titleBarStyle).toBe('hidden')
     expect(options.backgroundColor).toBe(OPENING_COLORS.dark.background)
     expect(options.titleBarOverlay).toMatchObject({
-      color: OPENING_COLORS.dark.background,
+      color: OPENING_COLORS.dark.sheet,
       symbolColor: OPENING_COLORS.dark.foreground,
     })
+  })
+
+  test('the colours it opens on are the theme’s: the chrome under the page, the sheet under the buttons', () => {
+    for (const name of ['light', 'dark'] as const) {
+      expect(OPENING_COLORS[name]).toEqual({
+        background: roleIn(theme, 'surface-page', name),
+        sheet: roleIn(theme, 'surface-content', name),
+        foreground: roleIn(theme, 'foreground', name),
+      })
+    }
   })
 
   test('under the headless suite the window opens off screen, out of the taskbar and the focus', () => {

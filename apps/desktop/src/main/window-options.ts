@@ -28,18 +28,12 @@ export const TITLE_BAR_HEIGHT = 36
 
 /** The colours the window is painted with before the page has drawn anything. */
 export interface WindowColors {
+  /** Under the whole window: the page's own colour, the sidebar's. */
   background: string
+  /** Under the system's buttons, which stand at the end of the sheet's header. */
+  sheet: string
+  /** The buttons' glyphs. */
   foreground: string
-}
-
-/**
- * The opening colours of each theme, so a cold start never shows a pale frame around a dark
- * page. They match the system colours the page itself starts on (`Canvas`, `CanvasText`), and
- * give way to the design system's theme when it arrives.
- */
-export const OPENING_COLORS: Record<'light' | 'dark', WindowColors> = {
-  light: { background: '#ffffff', foreground: '#000000' },
-  dark: { background: '#121212', foreground: '#ffffff' },
 }
 
 /** Whether this start runs under the end-to-end suite with no window on screen. */
@@ -62,7 +56,7 @@ export function windowOptions(
     backgroundColor: opening.background,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: opening.background,
+      color: opening.sheet,
       symbolColor: opening.foreground,
       height: TITLE_BAR_HEIGHT,
     },
