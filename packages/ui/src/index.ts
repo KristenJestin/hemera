@@ -42,14 +42,7 @@ export {
   type LetterAvatarProps,
   type LetterTone,
 } from './components/letter-avatar/letter-avatar.tsx'
-export {
-  List,
-  ListItem,
-  ListItemSkeleton,
-  type ListItemProps,
-  type ListItemSkeletonProps,
-  type ListProps,
-} from './components/list/list.tsx'
+export { List, ListItem, type ListItemProps, type ListProps } from './components/list/list.tsx'
 export {
   Loading,
   Skeleton,

@@ -14,9 +14,10 @@ import { Skeleton } from '../loading/loading.tsx'
  * its own control — a `Restore` at the end of an archived Project is the thing to press, not
  * the row.
  *
- * While the rows are on their way, the list shows their shape and not a spinner: the same square,
- * the same two lines, the same rule, in the skeleton's fill (`ListItemSkeleton`). The page does not
- * move when the rows arrive, because they arrive where their shape already was.
+ * While the rows are on their way, the list shows the rows themselves in their loading mode, not a
+ * spinner and not a generic block: the same square, the same lines at the length of what they will
+ * say, the same thing at the end, in the skeleton's fill. The page does not move when the rows
+ * arrive, because every part of them arrives where its skeleton already was.
  */
 const ROW = 'flex w-full items-center gap-3 px-4 py-3 text-left'
 
@@ -28,6 +29,14 @@ const RULE = 'border-b border-border last:border-b-0'
 /** The square of icon at the start of a row: the page's quieter surface, one step rounder. */
 const SQUARE =
   'flex size-control-md shrink-0 items-center justify-center rounded-md bg-accent text-muted-foreground'
+
+/** The same square on its way: the skeleton's fill, breathing, and its icon not shown. */
+const SQUARE_LOADING =
+  'flex size-control-md shrink-0 items-center justify-center rounded-md bg-skeleton text-transparent motion-safe:animate-breathe'
+
+const TITLE = 'truncate text-base font-semibold'
+const DESCRIPTION = 'truncate text-sm text-muted-foreground'
+const TRAILING = 'flex shrink-0 items-center gap-2 text-sm text-muted-foreground'
 
 export interface ListProps {
   /** What the list is called to a screen reader. */
@@ -55,6 +64,12 @@ export interface ListItemProps {
   trailing?: ReactNode
   /** Where choosing the row goes; a row with none is a row whose control is at its end. */
   onSelect?: (() => void) | undefined
+  /**
+   * Whether the row is on its way: it is then drawn in its loading mode, each part a skeleton of
+   * itself — give it the text it will most likely hold, so its lines have that length. Hidden from
+   * a screen reader and not pressable; the list says it is busy.
+   */
+  loading?: boolean | undefined
 }
 
 export function ListItem({
@@ -63,23 +78,42 @@ export function ListItem({
   description,
   trailing,
   onSelect,
+  loading = false,
 }: ListItemProps): ReactNode {
+  /** A part as it is, or as its skeleton while the row is on its way. */
+  const held = (part: ReactNode, shape: 'text' | 'block' = 'text'): ReactNode =>
+    loading ? <Skeleton shape={shape}>{part}</Skeleton> : part
   const inside = (
     <>
-      {icon !== undefined && <span className={SQUARE}>{icon}</span>}
+      {icon !== undefined && (
+        <span className={loading ? SQUARE_LOADING : SQUARE} data-part="icon">
+          {icon}
+        </span>
+      )}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-base font-semibold">{title}</span>
+        <span className={TITLE} data-part="title">
+          {held(title)}
+        </span>
         {description !== undefined && (
-          <span className="truncate text-sm text-muted-foreground">{description}</span>
+          <span className={DESCRIPTION} data-part="description">
+            {held(description)}
+          </span>
         )}
       </span>
       {trailing !== undefined && (
-        <span className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
-          {trailing}
+        <span className={TRAILING} data-part="trailing">
+          {held(trailing, typeof trailing === 'string' ? 'text' : 'block')}
         </span>
       )}
     </>
   )
+  if (loading) {
+    return (
+      <li aria-hidden="true" className={RULE} data-loading="">
+        <div className={ROW}>{inside}</div>
+      </li>
+    )
+  }
   return (
     <li className={RULE}>
       {onSelect === undefined ? (
@@ -89,35 +123,6 @@ export function ListItem({
           {inside}
         </button>
       )}
-    </li>
-  )
-}
-
-export interface ListItemSkeletonProps {
-  /** Whether the rows it stands for have a square of icon. */
-  icon?: boolean | undefined
-  /** Whether the rows it stands for have a line under their title. */
-  description?: boolean | undefined
-}
-
-/**
- * A row whose shape is known and whose content is not there yet: the row's own box, rule and
- * height, with its square and its lines drawn as skeletons. Hidden from a screen reader: the list
- * that holds it says it is busy, once.
- */
-export function ListItemSkeleton({
-  icon = true,
-  description = true,
-}: ListItemSkeletonProps): ReactNode {
-  return (
-    <li aria-hidden="true" className={RULE} data-skeleton="">
-      <div className={ROW}>
-        {icon && <Skeleton shape="square" />}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <Skeleton shape="title" />
-          {description && <Skeleton shape="line" />}
-        </span>
-      </div>
     </li>
   )
 }

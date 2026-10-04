@@ -51,34 +51,42 @@ export function Loading({ size = 'md', label = 'Loading', className }: LoadingPr
 }
 
 /**
- * The shapes a skeleton is drawn in. A line of text is held in a line of the very type it stands
- * for, so a skeleton is exactly as tall as what replaces it; the block is drawn inside it, a
- * little shorter, and shorter than the line is long.
+ * What a skeleton is drawn over: a line of text, or a block — a control, an icon's square.
  */
-export type SkeletonShape = 'title' | 'line' | 'square'
+export type SkeletonShape = 'text' | 'block'
 
-const HOLDER: Record<SkeletonShape, string> = {
-  title: 'relative block text-base font-semibold',
-  line: 'relative block text-sm',
-  square: 'block size-control-md shrink-0 rounded-md bg-skeleton motion-safe:animate-breathe',
+/** What it holds, kept in its place and never shown, so the skeleton is exactly its size. */
+const HELD: Record<SkeletonShape, string> = {
+  text: 'relative inline-block max-w-full truncate align-top',
+  block: 'relative inline-flex max-w-full',
 }
 
-const BLOCK: Record<Exclude<SkeletonShape, 'square'>, string> = {
-  title: 'absolute inset-y-1 left-0 w-20 rounded-sm bg-skeleton motion-safe:animate-breathe',
-  line: 'absolute inset-y-1 left-0 w-24 rounded-sm bg-skeleton motion-safe:animate-breathe',
+/**
+ * The fill drawn over it: a little shorter than a line of text, so it reads as a word rather than
+ * as a box; the whole of a block.
+ */
+const FILL: Record<SkeletonShape, string> = {
+  text: 'absolute inset-x-0 inset-y-1 rounded-sm bg-skeleton motion-safe:animate-breathe',
+  block: 'absolute inset-0 rounded-md bg-skeleton motion-safe:animate-breathe',
 }
 
 export interface SkeletonProps {
-  shape: SkeletonShape
+  /** What it stands for: the very text or control it will be, at the length it will have. */
+  children: ReactNode
+  shape?: SkeletonShape | undefined
 }
 
-/** One piece of a shape on its way. Decoration: what holds it says it is busy. */
-export function Skeleton({ shape }: SkeletonProps): ReactNode {
-  if (shape === 'square') return <span aria-hidden="true" className={HOLDER.square} />
+/**
+ * One part of a component on its way, drawn by the component itself in its loading mode: what it
+ * will show is laid out and hidden, and the skeleton's fill is drawn over exactly that room. A
+ * skeleton is therefore the size of what replaces it by construction, and nothing of the content
+ * is ever seen. Decoration: what holds it says it is busy.
+ */
+export function Skeleton({ children, shape = 'text' }: SkeletonProps): ReactNode {
   return (
-    <span aria-hidden="true" className={HOLDER[shape]}>
-      {' '}
-      <span className={BLOCK[shape]} />
+    <span aria-hidden="true" className={HELD[shape]} data-skeleton="">
+      <span className="invisible">{children}</span>
+      <span className={FILL[shape]} />
     </span>
   )
 }
