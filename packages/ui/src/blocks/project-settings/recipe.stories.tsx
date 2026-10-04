@@ -53,6 +53,18 @@ function Held(args: RecipeSectionProps) {
   )
 }
 
+/**
+ * The steps as given, held nowhere: a step added to them grows into the list, pushing the steps
+ * under it (watched in an image sequence, the story's steps changed while it shows).
+ */
+export const Arriving: Story = {
+  render: (args) => <RecipeSection {...args} />,
+  play: async ({ canvasElement }) => {
+    const steps = within(canvasElement).getByRole('list', { name: 'Steps' })
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(5)
+  },
+}
+
 /** Five steps, the second one's source not in the main checkout. */
 export const Filled: Story = {
   play: async ({ canvasElement, args }) => {
