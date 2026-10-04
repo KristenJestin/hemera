@@ -16,6 +16,9 @@ import { fileURLToPath } from 'node:url'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
+/** What a spec file is named after to run on the profile another one left: Hemera started again. */
+const RESTARTED = /\.restarted$/
+
 /**
  * The Electron profile one spec file runs on, made for it and thrown away after the run.
  *
@@ -23,9 +26,12 @@ const application = dirname(fileURLToPath(import.meta.url))
  * test is allowed to do. The path is spelled out rather than drawn from `mkdtemp`, because this
  * file is evaluated once by the launcher and once again inside every worker: a folder made on
  * evaluation would be a different folder in each of them.
+ *
+ * `<name>.restarted.e2e.ts` runs on the profile of `<name>.e2e.ts`, which it follows in the run:
+ * it is the application started again on the data folder the first one left.
  */
 export function e2eProfileOf(spec: string): string {
-  return join(tmpdir(), `hemera-e2e-${basename(spec, '.e2e.ts')}`)
+  return join(tmpdir(), `hemera-e2e-${basename(spec, '.e2e.ts').replace(RESTARTED, '')}`)
 }
 
 /** Every spec file of the suite, which is one capability and one profile each. */

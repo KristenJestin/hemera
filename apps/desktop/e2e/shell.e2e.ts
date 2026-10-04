@@ -52,7 +52,8 @@ describe('The shell', () => {
 
   it('goes to the Project’s settings, and back by the trail', async () => {
     await $('button[aria-label="Settings of Acme"]').click()
-    await expect(heading()).toHaveText('Settings of Acme')
+    await expect($('nav[aria-label="Settings of the Project"]')).toBeDisplayed()
+    await expect(heading()).toHaveText('Acme', { containing: true })
     await expect(trail()).toHaveText(/Acme\s*Settings/)
     await trail().$('button*=Acme').click()
     await expect(heading()).toHaveText('Acme', { containing: true })
