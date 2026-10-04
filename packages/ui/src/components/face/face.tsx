@@ -57,6 +57,12 @@ export function detailOf(size: FaceSize): DetailName {
 
 const FRAME = 'inline-block shrink-0'
 
+/**
+ * A face set in a line of text: on the line's middle, a little room either side, and drawn into
+ * the line's own leading rather than adding to it, so the line keeps the height it has without it.
+ */
+const INLINE = 'inline-block shrink-0 -my-1 mx-0.5 align-middle'
+
 export interface FaceProps {
   /** What the agent is doing. */
   state: FaceState
@@ -73,6 +79,8 @@ export interface FaceProps {
   mouth?: boolean | undefined
   /** Whether the state in words is a tooltip on the face, reached by the hand and the keyboard. */
   legend?: boolean | undefined
+  /** Whether it is set inside a line of text, which keeps its height. */
+  inline?: boolean | undefined
   /** Where the face sits; never how it looks. */
   className?: string | undefined
 }
@@ -84,6 +92,7 @@ export function Face({
   label,
   mouth = true,
   legend = false,
+  inline = false,
   className,
 }: FaceProps): ReactNode {
   const reduced = useTransition(crossfade) === instant
@@ -164,7 +173,7 @@ export function Face({
       role={legend ? undefined : 'img'}
       aria-label={legend ? undefined : words}
       data-state={state}
-      className={cn(FRAME, SIZE_CLASSES[size], className)}
+      className={cn(inline ? INLINE : FRAME, SIZE_CLASSES[size], className)}
     >
       <FaceFigure detail={detail} painter={painter} />
     </span>
