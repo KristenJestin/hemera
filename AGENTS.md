@@ -211,20 +211,8 @@ downloaded or installed while the application runs.
   every property; the CSS transitions of the theme stop under `prefers-reduced-motion: reduce`.
   A movement the set has no kind for is added there, named and explained.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
-- A component is designed in Storybook first, one story per state, named after the state
-  (`Empty`, `Loading`, `Error`, `Filled`), in both themes, before it is wired.
-- Storybook sidebar, five roots in this order, and a sixth last: **Foundations** (tokens, icons,
-  motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the composed pieces
-  that are not a screen, grouped by family, the families listed by the design tickets;
-  **Surfaces**, one entry per screen, never one per variant; **Shell**, the window frame; and
-  **Explorations**, a design question under way drawn in several variants, deleted once the
-  variant chosen is built. A story file sits next to its component, `<name>.stories.tsx`; the
-  order is forced by `storySort` in `packages/ui/.storybook/preview.tsx`.
-- Storybook badges: a story file the branch **created** shows `new`, one whose own file or
-  component the branch **changed** shows `updated`. Git decides when Storybook indexes the
-  stories (`packages/ui/.storybook/badges.ts`), comparing with `origin/feature/1.0`, or with the
-  ref `HEMERA_STORYBOOK_BASE` names. A story file never writes a badge itself: its only tag is
-  `autodocs`, and `pnpm test` refuses any other.
+- Before creating or changing any component, story, token or motion kind in `packages/ui`, read
+  `.agents/skills/storybook/SKILL.md`.
 
 ### Interface conventions (1.0)
 
