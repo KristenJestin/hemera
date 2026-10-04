@@ -37,7 +37,7 @@ function colourOf(room: HTMLElement, className: string): string {
 /** The figures a state draws, and the tone it draws them in. */
 const POSES: Record<MarkState, { figures: string[]; tone: string; legend: string }> = {
   todo: { figures: ['dashed'], tone: 'text-muted-foreground', legend: 'To do' },
-  running: { figures: ['ring'], tone: 'text-warning', legend: 'Running' },
+  running: { figures: ['ring'], tone: 'text-info', legend: 'Running' },
   done: { figures: ['ring', 'check'], tone: 'text-success', legend: 'Done' },
   failed: { figures: ['ring', 'cross'], tone: 'text-destructive', legend: 'Failed' },
   waiting: { figures: ['ring', 'dot'], tone: 'text-warning', legend: 'Waiting for you' },
@@ -146,5 +146,27 @@ export const Unlabelled: Story = {
   play: async ({ canvasElement }) => {
     expect(within(canvasElement).queryByRole('img')).toBeNull()
     expect(canvasElement.querySelector('[data-mark="done"]')).toHaveAttribute('aria-hidden', 'true')
+  },
+}
+
+/**
+ * Compact, where a dot used to stand: in a row of text, beside a name. The same strokes at the
+ * small step of the icon scale, every state still told apart by its shape.
+ */
+export const Compact: Story = {
+  args: { state: 'running', size: 'sm' },
+  render: (args) => (
+    <div className="flex items-center gap-2 text-sm">
+      {(['todo', 'running', 'done', 'failed', 'waiting', 'blocked', 'skipped'] as const).map(
+        (state) => (
+          <StatusMark key={state} {...args} state={state} />
+        ),
+      )}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const marks = [...canvasElement.querySelectorAll<HTMLElement>('[data-mark]')]
+    expect(marks).toHaveLength(7)
+    for (const mark of marks) expect(mark.getBoundingClientRect().width).toBe(16)
   },
 }

@@ -32,7 +32,7 @@ type Story = StoryObj<typeof meta>
 function bare(canvasElement: HTMLElement): HTMLElement {
   const chip = canvasElement.querySelector<HTMLElement>('[data-helper-chip]')!
   expect(chip).toHaveTextContent(/^R\s*Reviewer$/)
-  expect(chip.querySelector('[data-status-dot]')).toBeNull()
+  expect(chip.querySelectorAll('[role="img"]')).toHaveLength(1)
   expect(within(canvasElement).queryByRole('button')).toBeNull()
   expect(chip).not.toHaveTextContent('×')
   return chip
