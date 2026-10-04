@@ -29,7 +29,7 @@ import { Section, TemplateMenu } from './parts.tsx'
  * pointer or with the arrows of the keyboard once the handle has the focus, and the steps around it
  * make room on `arrival`. A copy or a link whose source is not in the main checkout says so on its
  * line, in words, in the destructive tone: the preparation would stop there. Pressing a step opens
- * its sheet.
+ * its form.
  */
 export type StepKind = 'copy' | 'link' | 'run'
 
@@ -273,7 +273,7 @@ export function RecipeSection({
   )
 }
 
-/** What the sheet of a step writes. */
+/** What the form of a step writes. */
 export type StepDraft = Omit<SettingsStep, 'id' | 'problem'>
 
 export const NEW_STEP: StepDraft = { kind: 'copy', place: '.', path: '', command: null, line: null }
@@ -292,7 +292,7 @@ export interface StepFormProps {
 
 const LABEL = 'text-sm font-medium'
 
-/** The sheet of a step: what it does, where, and to what. */
+/** The form of a step: what it does, where, and to what. */
 export function StepForm({
   draft,
   onChange,

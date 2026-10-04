@@ -228,7 +228,13 @@ export const Loading: Story = {
   args: { projects: [], loading: true },
   play: async ({ canvasElement }) => {
     expect(canvasElement.querySelector('[aria-busy="true"]')).not.toBeNull()
-    expect(canvasElement.querySelectorAll('[data-project-skeleton]')).toHaveLength(2)
+    const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-project-skeleton]')]
+    expect(rows).toHaveLength(3)
+    // Each is a row of the sidebar's own height, never a block stretched down the list.
+    const home = within(canvasElement).getByRole('button', { name: /^Home/ })
+    for (const row of rows) {
+      expect(row.getBoundingClientRect().height).toBe(home.getBoundingClientRect().height)
+    }
   },
 }
 

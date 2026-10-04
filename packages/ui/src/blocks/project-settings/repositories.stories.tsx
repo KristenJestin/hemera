@@ -20,7 +20,7 @@ import {
 /**
  * The repositories of a Project, in its settings: the box that puts each in new Workspaces, its
  * path, its base — remote and branch — and when that base was last fetched; Git's own words for
- * one it cannot read. A line opens the repository's sheet, drawn here as its form.
+ * one it cannot read. A line opens the repository's form, in its dialog.
  */
 const meta = {
   tags: ['autodocs'],
@@ -152,8 +152,8 @@ export const Focused: Story = {
   },
 }
 
-/** The form of a repository's sheet, holding its draft as the sheet does. */
-function Sheet(
+/** The form of a repository, holding its draft as its dialog does. */
+function Form(
   props: Omit<RepositoryFormProps, 'draft' | 'onChange' | 'branchError'> & {
     draft: RepositoryDraft
   },
@@ -178,10 +178,10 @@ const API: RepositoryDraft = {
   baseBranch: 'main',
 }
 
-/** The sheet of `api`: its path, its inclusion, the remote chosen among its own, its base. */
-export const SheetEdit: Story = {
+/** The form of `api`: its path, its inclusion, the remote chosen among its own, its base. */
+export const FormEdit: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={API}
       remotes={REMOTES.get('api')}
       freshness={{ kind: 'fetched', when: '09:02' }}
@@ -199,9 +199,9 @@ export const SheetEdit: Story = {
 }
 
 /** A base branch Git would refuse: said under the field, in Git's rules, as it is typed. */
-export const SheetBranchRefused: Story = {
+export const FormBranchRefused: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={API}
       remotes={REMOTES.get('api')}
       freshness={{ kind: 'fetched', when: '09:02' }}
@@ -220,10 +220,10 @@ export const SheetBranchRefused: Story = {
   },
 }
 
-/** The sheet of a base not fetched since Monday: when, and Git's reason. */
-export const SheetNotFetched: Story = {
+/** The form of a base not fetched since Monday: when, and Git's reason. */
+export const FormNotFetched: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={{ ...API, path: 'shared' }}
       remotes={REMOTES.get('shared')}
       freshness={{
@@ -241,10 +241,10 @@ export const SheetNotFetched: Story = {
   },
 }
 
-/** The sheet of a repository Git cannot read: Git's words whole, at its head. */
-export const SheetUnreadable: Story = {
+/** The form of a repository Git cannot read: Git's words whole, at its head. */
+export const FormUnreadable: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={{ ...API, path: 'billing' }}
       remotes={REMOTES.get('billing')}
       freshness={{ kind: 'never' }}
@@ -260,9 +260,9 @@ export const SheetUnreadable: Story = {
 }
 
 /** A repository being added: its path, typed or chosen, and whether Workspaces take it. */
-export const SheetNew: Story = {
+export const FormNew: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={{ path: '', includedByDefault: true, remote: null, baseBranch: 'main' }}
       onChooseFolder={() => {}}
     />
@@ -274,10 +274,10 @@ export const SheetNew: Story = {
   },
 }
 
-/** The icon a repository wears, chosen in its sheet among the short set; a folder until it is. */
-export const SheetIcon: Story = {
+/** The icon a repository wears, chosen in its form among the short set; a folder until it is. */
+export const FormIcon: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={API}
       remotes={REMOTES.get('api')}
       freshness={{ kind: 'fetched', when: '09:02' }}

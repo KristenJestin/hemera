@@ -1,17 +1,17 @@
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
-import { type SheetView, SheetStack } from '../../components/sheet/sheet.tsx'
+import { Dialog } from '../../components/dialog/dialog.tsx'
 import { OVER_MARK, SlidingMark } from '../../components/sliding-mark/sliding-mark.tsx'
 import { IconAlertTriangle, IconFolder } from '../../icons.ts'
 import { Page, PageHeader } from '../page.tsx'
 
 /**
  * A Project's settings: one page, the list of its sections down the left, the section chosen
- * beside it, and a sheet over both where one thing of a section is written — the design system's sheet,
- * as a mission's views are.
+ * beside it, and a dialog over both where one thing of a section is written: a form opens in the
+ * design system's dialog, centred, its buttons at its foot — a dialog is for reading, not writing.
  *
  * The header is the Project's own, as on its page — its letter and its name — and under them the
  * folder of its main checkout, the one fact of a Project no section owns. The sections are a list
@@ -32,6 +32,17 @@ export interface SettingsSection {
   problem?: string | undefined
 }
 
+/** A form of a section, as its dialog shows it. */
+export interface SettingsForm {
+  /** What the form writes: `api`, `New command`. */
+  title: string
+  /** What stands before the title: the icon of what is written. */
+  icon: ReactNode
+  body: ReactNode
+  /** Its buttons — Remove at the start, Cancel and Save at the end — and a refusal above them. */
+  footer: ReactNode
+}
+
 export interface ProjectSettingsProps {
   name: string
   /** What the user chose to mark it with; nothing chosen is its letter. */
@@ -45,14 +56,14 @@ export interface ProjectSettingsProps {
   /** Why the Project could not be read, in words. */
   error?: string | undefined
   onRetry: () => void
-  /** The sheet standing over the page, or null: the design system's sheet, holding a form. */
-  sheet?: SheetView | null | undefined
-  onCloseSheet: () => void
+  /** The form open over the page, in a dialog, or null. */
+  form?: SettingsForm | null | undefined
+  onCloseForm: () => void
   /** The section chosen. */
   children: ReactNode
 }
 
-/** The room the page and its sheet share: the sheet is placed against it. */
+/** The room the page takes under the window's header. */
 const ROOM = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
 
 const SCROLL = 'flex min-h-0 flex-1 flex-col overflow-auto'
@@ -66,16 +77,15 @@ const NAV = 'sticky top-0 isolate flex w-settings-nav shrink-0 flex-col gap-0.5'
 
 /**
  * A section's entry: faint under the hand — a tint and the text's own colour — and, chosen, clearly
- * apart: the primary's quiet fill under it, a bar of the primary on its edge, its words in the
- * primary's ink and heavier.
+ * apart: the primary's quiet fill under it, its words in the primary's ink and heavier.
  */
 const ITEM =
   'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground outline-none select-none hover:tinted hover:text-foreground focus-ring hover-motion aria-[current=page]:font-medium aria-[current=page]:text-primary-muted-foreground aria-[current=page]:hover:shadow-none'
 
 const ITEM_ICON = 'flex size-icon-md shrink-0 items-center justify-center'
 
-/** The mark under the chosen entry: the primary's quiet fill, and its bar on the leading edge. */
-const MARK = 'absolute inset-0 rounded-md border-l-2 border-primary bg-primary-muted'
+/** The mark under the chosen entry: the primary's quiet fill. */
+const MARK = 'absolute inset-0 rounded-md bg-primary-muted'
 
 const PROBLEM = 'ml-auto flex shrink-0 text-destructive'
 
@@ -90,19 +100,16 @@ export function ProjectSettings({
   onSection,
   error,
   onRetry,
-  sheet = null,
-  onCloseSheet,
+  form = null,
+  onCloseForm,
   children,
 }: ProjectSettingsProps): ReactNode {
-  const covered = sheet !== null
+  // What the dialog showed last, kept while it closes: its content leaves with it, not before.
+  const [shown, setShown] = useState<SettingsForm | null>(form)
+  if (form !== null && form !== shown) setShown(form)
   return (
     <div className={ROOM}>
-      <div
-        className={SCROLL}
-        data-settings-page=""
-        inert={covered ? true : undefined}
-        aria-hidden={covered ? true : undefined}
-      >
+      <div className={SCROLL} data-settings-page="">
         <Page>
           <PageHeader
             lead={<ProjectMark name={name} identity={identity} />}
@@ -159,14 +166,17 @@ export function ProjectSettings({
           </div>
         </Page>
       </div>
-      <SheetStack
-        views={sheet === null ? [] : [sheet]}
-        open={sheet === null ? [] : [sheet.id]}
-        shown={sheet === null ? null : sheet.id}
-        onShow={onCloseSheet}
-        onClose={onCloseSheet}
-        scrimLabel="Back to the settings"
-      />
+      <Dialog
+        title={shown?.title ?? ''}
+        lead={<span className="flex text-muted-foreground">{shown?.icon}</span>}
+        open={form !== null}
+        onOpenChange={(open) => {
+          if (!open) onCloseForm()
+        }}
+        actions={shown?.footer}
+      >
+        <div className="flex flex-col gap-5">{shown?.body}</div>
+      </Dialog>
     </div>
   )
 }

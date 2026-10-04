@@ -14,7 +14,7 @@ import {
 
 /**
  * A Project's variables: each name and its value, masked; the eye shows one value and hides it
- * again. The `…` holds Edit and Remove. A variable's sheet, drawn here as its form, offers the
+ * again. The `…` holds Edit and Remove. A variable's form, in its dialog, offers the
  * names Hemera fills in its value.
  */
 const meta = {
@@ -162,8 +162,8 @@ export const Focused: Story = {
   },
 }
 
-/** The form of a variable's sheet, holding its draft. */
-function Sheet({ draft: first }: { draft: VariableDraft }) {
+/** The form of a variable, holding its draft. */
+function Form({ draft: first }: { draft: VariableDraft }) {
   const [draft, setDraft] = useState(first)
   return (
     <div className="mx-auto flex w-full max-w-view-narrow flex-col gap-5 p-4">
@@ -173,8 +173,8 @@ function Sheet({ draft: first }: { draft: VariableDraft }) {
 }
 
 /** A new variable whose value takes a name Hemera fills, offered at the end of its field. */
-export const SheetNew: Story = {
-  render: () => <Sheet draft={{ key: 'REDIS_URL', value: 'redis://localhost:6379/' }} />,
+export const FormNew: Story = {
+  render: () => <Form draft={{ key: 'REDIS_URL', value: 'redis://localhost:6379/' }} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Insert a name in Value' }))

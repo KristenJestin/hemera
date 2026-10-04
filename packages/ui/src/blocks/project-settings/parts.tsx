@@ -6,7 +6,7 @@ import { Menu } from '../../components/menu/menu.tsx'
 import { IconBraces, IconTrash } from '../../icons.ts'
 
 /**
- * What the sections of a Project's settings share: the head of a section, the foot of the sheet a
+ * What the sections of a Project's settings share: the head of a section, the foot of the dialog a
  * section writes in, and the menu that offers the names Hemera fills in a line or a value.
  */
 
@@ -62,10 +62,10 @@ export function TemplateMenu({ field, onInsert }: TemplateMenuProps): ReactNode 
 
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
 
-export interface SheetFootProps {
+export interface FormFootProps {
   /** Why the last save was refused, in words; it stands above the buttons until the next save. */
   refused?: string | undefined
-  /** What the destructive button says — `Remove api` — when what the sheet writes can be removed. */
+  /** What the destructive button says — `Remove api` — when what the dialog writes can be removed. */
   remove?: string | undefined
   onRemove?: (() => void) | undefined
   /** What the save button says: `Save`, `Add`. */
@@ -76,10 +76,10 @@ export interface SheetFootProps {
 }
 
 /**
- * The foot of a sheet: the refusal of the last save in words, then the buttons — what removes the
+ * The foot of a form's dialog: the refusal of the last save in words, then the buttons — what removes the
  * thing at the start, in the destructive tone with its bin, and Cancel and Save at the end.
  */
-export function SheetFoot({
+export function FormFoot({
   refused,
   remove,
   onRemove,
@@ -87,9 +87,9 @@ export function SheetFoot({
   saving = false,
   onSave,
   onCancel,
-}: SheetFootProps): ReactNode {
+}: FormFootProps): ReactNode {
   return (
-    <>
+    <div className="flex w-full flex-col gap-3">
       {refused !== undefined && (
         <p role="alert" className={REFUSAL}>
           {refused}
@@ -111,7 +111,7 @@ export function SheetFoot({
           </Button>
         </span>
       </div>
-    </>
+    </div>
   )
 }
 

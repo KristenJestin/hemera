@@ -37,7 +37,7 @@ import { Section } from './parts.tsx'
  * have leaves its column empty. The columns are named once, at their head, by their glyphs, each
  * with its legend; a line says its roles in words to a screen reader.
  *
- * Pressing a line opens its sheet. There, a line holding shell syntax is refused as it is typed,
+ * Pressing a line opens its form. There, a line holding shell syntax is refused as it is typed,
  * the token named: Hemera runs a command without a shell.
  */
 export { COMMAND_TYPES, TYPE_WORDS, typeIcon }
@@ -318,7 +318,7 @@ export function CommandsSection({
   )
 }
 
-/** What the sheet of a command writes. */
+/** What the form of a command writes. */
 export type CommandDraft = Omit<SettingsCommand, 'id'>
 
 /** A command not written yet: a script, at the root, with no role. */
@@ -353,7 +353,7 @@ const GROUP = 'flex flex-col gap-3'
 
 const GROUP_TITLE = 'text-sm font-medium'
 
-/** The sheet of a command: everything it is and may do. */
+/** The form of a command: everything it is and may do. */
 export function CommandForm({
   draft,
   onChange,

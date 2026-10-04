@@ -8,7 +8,7 @@ import { COMMANDS, DENSE_COMMANDS, LONG_LINE, shellRefusal } from './project-set
 /**
  * A Project's command catalogue: one line per command — its type, its name, its line, where it
  * runs — and its roles read down the columns, each named by its glyph at the head. A line opens
- * the command's sheet, drawn here as its form, where shell syntax is refused as it is typed.
+ * the command's form, in its dialog, where shell syntax is refused as it is typed.
  */
 const meta = {
   tags: ['autodocs'],
@@ -131,8 +131,8 @@ export const Focused: Story = {
   },
 }
 
-/** The form of a command's sheet, holding its draft and checking its lines as the engine would. */
-function Sheet({ draft: first }: { draft: CommandDraft }) {
+/** The form of a command, holding its draft and checking its lines as the engine would. */
+function Form({ draft: first }: { draft: CommandDraft }) {
   const [draft, setDraft] = useState(first)
   return (
     <div className="mx-auto flex w-full max-w-view-narrow flex-col gap-5 p-4">
@@ -150,9 +150,9 @@ const { id: _test, ...TEST } = COMMANDS[3]!
 const { id: _build, ...BUILD } = COMMANDS[6]!
 const { id: _db, ...DB } = COMMANDS[2]!
 
-/** The sheet of `test`: its type, its line, where it runs, its roles, the files it may write. */
-export const SheetEdit: Story = {
-  render: () => <Sheet draft={TEST} />,
+/** The form of `test`: its type, its line, where it runs, its roles, the files it may write. */
+export const FormEdit: Story = {
+  render: () => <Form draft={TEST} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('textbox', { name: 'Line' })).toHaveValue('pnpm --filter api test')
@@ -162,8 +162,8 @@ export const SheetEdit: Story = {
 }
 
 /** Shell syntax typed in a line: refused at once, the token named; the line is kept as typed. */
-export const SheetShellSyntax: Story = {
-  render: () => <Sheet draft={TEST} />,
+export const FormShellSyntax: Story = {
+  render: () => <Form draft={TEST} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const line = canvas.getByRole('textbox', { name: 'Line' })
@@ -178,8 +178,8 @@ export const SheetShellSyntax: Story = {
 }
 
 /** A line of its own for Windows: the fold opens on it, the common line as each one's placeholder. */
-export const SheetPerSystem: Story = {
-  render: () => <Sheet draft={BUILD} />,
+export const FormPerSystem: Story = {
+  render: () => <Form draft={BUILD} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('button', { name: 'Lines for Linux and Windows' })).toHaveAttribute(
@@ -197,8 +197,8 @@ export const SheetPerSystem: Story = {
 }
 
 /** A service: where it runs once — per Workspace, or in the main checkout — and its roles. */
-export const SheetService: Story = {
-  render: () => <Sheet draft={DB} />,
+export const FormService: Story = {
+  render: () => <Form draft={DB} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('combobox', { name: 'Runs' })).toHaveTextContent(
@@ -209,9 +209,9 @@ export const SheetService: Story = {
 }
 
 /** The names Hemera fills, offered by the braces at the end of a line. */
-export const SheetTemplateNames: Story = {
+export const FormTemplateNames: Story = {
   render: () => (
-    <Sheet draft={{ ...NEW_COMMAND, name: 'reset-db', line: 'pnpm db:reset --name acme_' }} />
+    <Form draft={{ ...NEW_COMMAND, name: 'reset-db', line: 'pnpm db:reset --name acme_' }} />
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -228,8 +228,8 @@ export const SheetTemplateNames: Story = {
 }
 
 /** A command not written yet. */
-export const SheetNew: Story = {
-  render: () => <Sheet draft={NEW_COMMAND} />,
+export const FormNew: Story = {
+  render: () => <Form draft={NEW_COMMAND} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('textbox', { name: 'Name' })).toHaveValue('')

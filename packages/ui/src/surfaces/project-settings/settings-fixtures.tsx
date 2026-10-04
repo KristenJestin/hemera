@@ -8,7 +8,7 @@ import {
   type SettingsCommand,
   typeIcon,
 } from '../../blocks/project-settings/commands.tsx'
-import { Section, SheetFoot } from '../../blocks/project-settings/parts.tsx'
+import { FormFoot, Section } from '../../blocks/project-settings/parts.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import {
   NEW_STEP,
@@ -63,14 +63,13 @@ import {
   IconTerminal,
   IconVariable,
 } from '../../icons.ts'
-import type { SheetView } from '../../components/sheet/sheet.tsx'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
-import { ProjectSettings, type SettingsSection } from './project-settings.tsx'
+import { ProjectSettings, type SettingsForm, type SettingsSection } from './project-settings.tsx'
 
 /**
  * A small machine around the settings of Acme, so a story walks what a user walks: a section
- * chosen, a sheet opened from a line, a draft written, saved or refused. Nothing here is an
+ * chosen, a dialog opened from a line, a draft written, saved or refused. Nothing here is an
  * engine: a story holds the state the renderer's hooks will hold.
  */
 export type SectionId =
@@ -100,15 +99,15 @@ export const LATER_SECTIONS: readonly SettingsSection[] = [
   { id: 'never', label: 'Never run', icon: <IconSettings size="sm" /> },
 ]
 
-/** What a sheet is writing, and the draft it holds. */
-export type SheetState =
+/** What a dialog is writing, and the draft it holds. */
+export type FormState =
   | { readonly kind: 'repository'; readonly id: string | null; readonly draft: RepositoryDraft }
   | { readonly kind: 'command'; readonly id: string | null; readonly draft: CommandDraft }
   | { readonly kind: 'step'; readonly id: string | null; readonly draft: StepDraft }
   | { readonly kind: 'variable'; readonly key: string | null; readonly draft: VariableDraft }
 
-/** How a story opens a sheet as it starts: what it writes, by id, or a new one. */
-export type SheetOpener = {
+/** How a story opens a dialog as it starts: what it writes, by id, or a new one. */
+export type FormOpener = {
   readonly kind: 'repository' | 'command' | 'step' | 'variable'
   readonly id: string | null
 }
@@ -125,8 +124,8 @@ export interface SettingsFixtureProps {
   error?: string | undefined
   /** A long path and a long line in every field that holds one. */
   long?: boolean | undefined
-  /** A sheet open as the story starts. */
-  sheet?: SheetOpener | undefined
+  /** A dialog open as the story starts. */
+  form?: FormOpener | undefined
   /** Whether every save is refused, as one meeting a newer version is. */
   refuse?: boolean | undefined
   /** What runs in the main checkout, when the story says. */
@@ -160,7 +159,7 @@ export function SettingsFixture({
   loading = false,
   error,
   long = false,
-  sheet: opener,
+  form: opener,
   refuse = false,
   runs: givenRuns,
   project = 'acme',
@@ -226,12 +225,12 @@ export function SettingsFixture({
           : [...RUNS],
   )
   const [refused, setRefused] = useState<string | undefined>(undefined)
-  const [sheet, setSheet] = useState<SheetState | null>(() => {
+  const [dialog, setForm] = useState<FormState | null>(() => {
     if (opener === undefined) return null
-    return openerToSheet(opener)
+    return openerToForm(opener)
   })
 
-  function openerToSheet(open: SheetOpener): SheetState | null {
+  function openerToForm(open: FormOpener): FormState | null {
     switch (open.kind) {
       case 'repository': {
         const repository = firstRepositories().find((one) => one.id === open.id)
@@ -269,82 +268,85 @@ export function SettingsFixture({
     }
   }
 
-  const open = (next: SheetState): void => {
+  const open = (next: FormState): void => {
     setRefused(undefined)
-    setSheet(next)
+    setForm(next)
   }
   const close = (): void => {
     setRefused(undefined)
-    setSheet(null)
+    setForm(null)
   }
   const places = repositories.map((one) => one.path).filter((path) => path !== '.')
 
-  /** Saves the sheet's draft, or says why the save is refused. */
+  /** Saves the dialog's draft, or says why the save is refused. */
   const save = (): void => {
-    if (sheet === null) return
+    if (dialog === null) return
     if (refuse) {
       setRefused(STALE)
       return
     }
-    if (sheet.kind === 'command') {
-      if (shellRefusal(sheet.draft.line) !== undefined) return
+    if (dialog.kind === 'command') {
+      if (shellRefusal(dialog.draft.line) !== undefined) return
       const saved: SettingsCommand = {
-        ...sheet.draft,
-        id: sheet.id ?? `c${String(commands.length + 1)}`,
+        ...dialog.draft,
+        id: dialog.id ?? `c${String(commands.length + 1)}`,
       }
       setCommands((before) =>
-        sheet.id === null
+        dialog.id === null
           ? [...before, saved]
-          : before.map((one) => (one.id === sheet.id ? saved : one)),
+          : before.map((one) => (one.id === dialog.id ? saved : one)),
       )
     }
-    if (sheet.kind === 'repository') {
-      if (branchRefusal(sheet.draft.baseBranch) !== undefined) return
-      const draft = sheet.draft
+    if (dialog.kind === 'repository') {
+      if (branchRefusal(dialog.draft.baseBranch) !== undefined) return
+      const draft = dialog.draft
       setRepositories((before) =>
-        sheet.id === null
+        dialog.id === null
           ? [...before, { id: draft.path, ...draft, freshness: { kind: 'never' } }]
-          : before.map((one) => (one.id === sheet.id ? { ...one, ...draft } : one)),
+          : before.map((one) => (one.id === dialog.id ? { ...one, ...draft } : one)),
       )
     }
-    if (sheet.kind === 'step') {
-      const saved: SettingsStep = { ...sheet.draft, id: sheet.id ?? `s${String(steps.length + 1)}` }
+    if (dialog.kind === 'step') {
+      const saved: SettingsStep = {
+        ...dialog.draft,
+        id: dialog.id ?? `s${String(steps.length + 1)}`,
+      }
       setSteps((before) =>
-        sheet.id === null
+        dialog.id === null
           ? [...before, saved]
-          : before.map((one) => (one.id === sheet.id ? saved : one)),
+          : before.map((one) => (one.id === dialog.id ? saved : one)),
       )
     }
-    if (sheet.kind === 'variable') {
-      const draft = sheet.draft
+    if (dialog.kind === 'variable') {
+      const draft = dialog.draft
       setVariables((before) =>
-        sheet.key === null
+        dialog.key === null
           ? [...before, { key: draft.key }]
-          : before.map((one) => (one.key === sheet.key ? { key: draft.key } : one)),
+          : before.map((one) => (one.key === dialog.key ? { key: draft.key } : one)),
       )
     }
     close()
   }
 
-  /** Removes what the sheet writes. */
+  /** Removes what the dialog writes. */
   const remove = (): void => {
-    if (sheet === null) return
-    if (sheet.kind === 'command')
-      setCommands((before) => before.filter((one) => one.id !== sheet.id))
-    if (sheet.kind === 'repository') {
-      setRepositories((before) => before.filter((one) => one.id !== sheet.id))
+    if (dialog === null) return
+    if (dialog.kind === 'command')
+      setCommands((before) => before.filter((one) => one.id !== dialog.id))
+    if (dialog.kind === 'repository') {
+      setRepositories((before) => before.filter((one) => one.id !== dialog.id))
     }
-    if (sheet.kind === 'step') setSteps((before) => before.filter((one) => one.id !== sheet.id))
-    if (sheet.kind === 'variable') {
-      setVariables((before) => before.filter((one) => one.key !== sheet.key))
+    if (dialog.kind === 'step') setSteps((before) => before.filter((one) => one.id !== dialog.id))
+    if (dialog.kind === 'variable') {
+      setVariables((before) => before.filter((one) => one.key !== dialog.key))
     }
     close()
   }
 
-  const content = ((): SheetView | null => {
-    if (sheet === null) return null
+  const content = ((): SettingsForm | null => {
+    if (dialog === null) return null
     const foot = (what: string | null): ReactNode => (
-      <SheetFoot
+      <FormFoot
         refused={refused}
         remove={what === null ? undefined : `Remove ${what}`}
         onRemove={remove}
@@ -353,59 +355,50 @@ export function SettingsFixture({
         onCancel={close}
       />
     )
-    switch (sheet.kind) {
+    switch (dialog.kind) {
       case 'repository': {
-        const repository = repositories.find((one) => one.id === sheet.id)
+        const repository = repositories.find((one) => one.id === dialog.id)
         return {
-          id: 'sheet',
-          width: 'narrow',
-          form: true,
-          title: sheet.id === null ? 'New repository' : (repository?.path ?? sheet.draft.path),
+          title: dialog.id === null ? 'New repository' : (repository?.path ?? dialog.draft.path),
           icon: <IconGitBranch size="sm" />,
           body: (
             <RepositoryForm
-              draft={sheet.draft}
-              onChange={(draft) => setSheet({ ...sheet, draft })}
-              remotes={sheet.id === null ? undefined : (REMOTES.get(sheet.id) ?? [])}
+              draft={dialog.draft}
+              onChange={(draft) => setForm({ ...dialog, draft })}
+              remotes={dialog.id === null ? undefined : (REMOTES.get(dialog.id) ?? [])}
               freshness={repository?.freshness}
               unreadable={repository?.unreadable}
-              branchError={branchRefusal(sheet.draft.baseBranch)}
+              branchError={branchRefusal(dialog.draft.baseBranch)}
               onChooseFolder={() => {}}
             />
           ),
-          footer: foot(sheet.id === null ? null : (repository?.path ?? null)),
+          footer: foot(dialog.id === null ? null : (repository?.path ?? null)),
         }
       }
       case 'command':
         return {
-          id: 'sheet',
-          width: 'narrow',
-          form: true,
-          title: sheet.id === null ? 'New command' : sheet.draft.name,
-          icon: typeIcon(sheet.draft.type),
+          title: dialog.id === null ? 'New command' : dialog.draft.name,
+          icon: typeIcon(dialog.draft.type),
           body: (
             <CommandForm
-              draft={sheet.draft}
-              onChange={(draft) => setSheet({ ...sheet, draft })}
+              draft={dialog.draft}
+              onChange={(draft) => setForm({ ...dialog, draft })}
               places={places}
               refusalOf={shellRefusal}
             />
           ),
-          footer: foot(sheet.id === null ? null : sheet.draft.name),
+          footer: foot(dialog.id === null ? null : dialog.draft.name),
         }
       case 'step': {
-        const position = steps.findIndex((one) => one.id === sheet.id) + 1
-        const step = steps.find((one) => one.id === sheet.id)
+        const position = steps.findIndex((one) => one.id === dialog.id) + 1
+        const step = steps.find((one) => one.id === dialog.id)
         return {
-          id: 'sheet',
-          width: 'narrow',
-          form: true,
-          title: sheet.id === null ? 'New step' : `Step ${String(position)}`,
+          title: dialog.id === null ? 'New step' : `Step ${String(position)}`,
           icon: <IconListNumbers size="sm" />,
           body: (
             <StepForm
-              draft={sheet.draft}
-              onChange={(draft) => setSheet({ ...sheet, draft })}
+              draft={dialog.draft}
+              onChange={(draft) => setForm({ ...dialog, draft })}
               places={places}
               commands={commands.map((one) => ({
                 id: one.id,
@@ -415,28 +408,28 @@ export function SettingsFixture({
               }))}
               pathError={
                 step?.problem !== undefined &&
-                step.path === sheet.draft.path &&
-                step.place === sheet.draft.place
+                step.path === dialog.draft.path &&
+                step.place === dialog.draft.place
                   ? `${placeOfStep(step)}/${whatOf(step)} is ${step.problem}.`
                   : undefined
               }
               refusalOf={shellRefusal}
             />
           ),
-          footer: foot(sheet.id === null ? null : `step ${String(position)}`),
+          footer: foot(dialog.id === null ? null : `step ${String(position)}`),
         }
       }
       case 'variable':
         return {
-          id: 'sheet',
-          width: 'narrow',
-          form: true,
-          title: sheet.key ?? 'New variable',
+          title: dialog.key ?? 'New variable',
           icon: <IconVariable size="sm" />,
           body: (
-            <VariableForm draft={sheet.draft} onChange={(draft) => setSheet({ ...sheet, draft })} />
+            <VariableForm
+              draft={dialog.draft}
+              onChange={(draft) => setForm({ ...dialog, draft })}
+            />
           ),
-          footer: foot(sheet.key),
+          footer: foot(dialog.key),
         }
     }
   })()
@@ -633,8 +626,8 @@ export function SettingsFixture({
         onSection={setCurrent}
         error={error}
         onRetry={() => {}}
-        sheet={content}
-        onCloseSheet={close}
+        form={content}
+        onCloseForm={close}
       >
         {body}
       </ProjectSettings>

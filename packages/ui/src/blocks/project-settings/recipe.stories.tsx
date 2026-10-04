@@ -15,7 +15,7 @@ import { COMMANDS, STEPS, shellRefusal } from './project-settings-fixtures.ts'
 /**
  * A Project's preparation recipe: what is done in a new Workspace, in order — copy, link, run.
  * Each step carries its number; its handle moves it, by the pointer or by the arrows. A source
- * missing from the main checkout is said on its line. A line opens the step's sheet, drawn here as
+ * missing from the main checkout is said on its line. A line opens the step's dialog, drawn here as
  * its form.
  */
 const meta = {
@@ -122,8 +122,8 @@ export const LongText: Story = {
   },
 }
 
-/** The form of a step's sheet, holding its draft. */
-function Sheet({ draft: first, pathError }: { draft: StepDraft; pathError?: string }) {
+/** The form of a step, holding its draft. */
+function Form({ draft: first, pathError }: { draft: StepDraft; pathError?: string }) {
   const [draft, setDraft] = useState(first)
   return (
     <div className="mx-auto flex w-full max-w-view-narrow flex-col gap-5 p-4">
@@ -145,9 +145,9 @@ function Sheet({ draft: first, pathError }: { draft: StepDraft; pathError?: stri
 }
 
 /** A copy whose source is not in the main checkout: said under its field. */
-export const SheetMissingSource: Story = {
+export const FormMissingSource: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={{ kind: 'copy', place: 'web', path: '.env.local', command: null, line: null }}
       pathError="web/.env.local is not in the main checkout."
     />
@@ -163,9 +163,9 @@ export const SheetMissingSource: Story = {
  * A run of a line of its own: the same field as the catalogue's, the line, the names Hemera fills,
  * the lines for each system, and shell syntax refused as it is typed.
  */
-export const SheetOwnLine: Story = {
+export const FormOwnLine: Story = {
   render: () => (
-    <Sheet
+    <Form
       draft={{
         kind: 'run',
         place: 'api',
@@ -197,9 +197,9 @@ export const SheetOwnLine: Story = {
 }
 
 /** A run of a command of the catalogue: chosen by its name, its line under it, no line to write. */
-export const SheetCommand: Story = {
+export const FormCommand: Story = {
   render: () => (
-    <Sheet draft={{ kind: 'run', place: '.', path: null, command: 'install', line: null }} />
+    <Form draft={{ kind: 'run', place: '.', path: null, command: 'install', line: null }} />
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -219,8 +219,8 @@ export const SheetCommand: Story = {
 }
 
 /** A step not written yet: a copy, at the root. */
-export const SheetNew: Story = {
-  render: () => <Sheet draft={NEW_STEP} />,
+export const FormNew: Story = {
+  render: () => <Form draft={NEW_STEP} />,
   play: async ({ canvasElement }) => {
     expect(within(canvasElement).getByRole('combobox', { name: 'Step' })).toHaveTextContent('Copy')
   },

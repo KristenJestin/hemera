@@ -33,10 +33,10 @@ import { Section } from './parts.tsx'
  * what the user chose for it.
  *
  * A line is the box that says whether new Workspaces take the repository, its icon — chosen in
- * its sheet, a folder until it is — and its path in the main checkout in the mono face, and what its work starts from — the remote and the base branch,
+ * its form, a folder until it is — and its path in the main checkout in the mono face, and what its work starts from — the remote and the base branch,
  * `origin/main` — with when that base was last fetched. A base not fetched for a while says so in
  * the warning tone; a repository Git cannot read says Git's own reason where its base would be,
- * in the destructive tone. Pressing the line opens its sheet, where all of it is written.
+ * in the destructive tone. Pressing the line opens its form, where all of it is written.
  *
  * The box is beside the line and not in it: it is a control of its own, and the line is the other
  * one. Rows on their way are the row's own shape.
@@ -64,7 +64,7 @@ export interface SettingsRepository {
   freshness: BaseFreshness
   /** Git's own words when the repository cannot be read. */
   unreadable?: string | undefined
-  /** The icon it wears before its path, chosen in its sheet; a folder until one is. */
+  /** The icon it wears before its path, chosen in its form; a folder until one is. */
   icon?: MarkIcon | undefined
 }
 
@@ -98,7 +98,7 @@ const ROW = 'flex min-w-0 items-center gap-3 pl-4'
 
 const RULE = 'border-b border-border last:border-b-0'
 
-/** The line itself, the part that opens the repository's sheet. */
+/** The line itself, the part that opens the repository's dialog. */
 const OPEN =
   'flex min-h-control-lg min-w-0 flex-1 items-center gap-4 rounded-md py-2 pr-3 pl-1 text-left text-sm outline-none hover:tinted focus-ring hover-motion'
 
@@ -158,7 +158,7 @@ export interface RepositoryRowProps {
   onOpen: () => void
 }
 
-/** One repository, on one line: the box, then the line that opens its sheet. */
+/** One repository, on one line: the box, then the line that opens its form. */
 export function RepositoryRow({ repository, onInclude, onOpen }: RepositoryRowProps): ReactNode {
   const { path, freshness, unreadable } = repository
   return (
@@ -296,14 +296,14 @@ export function RepositoriesSection({
   )
 }
 
-/** A remote of a repository, as its sheet offers it. */
+/** A remote of a repository, as its form offers it. */
 export interface RemoteChoice {
   name: string
   /** Where it is fetched from. */
   url: string
 }
 
-/** What the sheet of a repository writes. */
+/** What the form of a repository writes. */
 export interface RepositoryDraft {
   path: string
   icon?: MarkIcon | undefined
@@ -342,7 +342,7 @@ const GIT_SAYS =
 
 const QUIET = 'flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'
 
-/** The sheet of a repository: where its path, its inclusion, its remote and its base are written. */
+/** The form of a repository: where its path, its inclusion, its remote and its base are written. */
 export function RepositoryForm({
   draft,
   onChange,

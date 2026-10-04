@@ -158,6 +158,7 @@ export {
 export {
   ProjectSettings,
   type ProjectSettingsProps,
+  type SettingsForm,
   type SettingsSection,
 } from './surfaces/project-settings/project-settings.tsx'
 export {
@@ -200,7 +201,7 @@ export {
   type RunnableCommand,
   type SettingsRun,
 } from './blocks/project-settings/services.tsx'
-export { SheetFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
+export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
   MARK_ICONS,

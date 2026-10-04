@@ -6,9 +6,9 @@ import { FAILED_RUN, RUNS, STALE } from '../../blocks/project-settings/project-s
 import { SettingsFixture } from './settings-fixtures.tsx'
 
 /**
- * A Project's settings: its sections listed down the left, the one chosen beside them, and a
- * sheet slid in from the right where one thing of a section is written. Under the sheet's header,
- * which carries the trail `Acme › Settings`. Each story is the page full-bleed; the toolbar's
+ * A Project's settings: its sections listed down the left, the one chosen beside them, and the
+ * design system's dialog, centred, where one thing of a section is written. Under the window's
+ * header, which carries the trail `Acme › Settings`. Each story is the page full-bleed; the toolbar's
  * viewports give its two sizes.
  */
 const meta = {
@@ -102,8 +102,8 @@ export const Unreadable: Story = {
     const row = canvasElement.querySelector('[data-repository="billing"]')
     expect(row).toHaveTextContent('fatal: not a git repository')
     await userEvent.click(canvas.getByRole('button', { name: /^billing/ }))
-    const sheet = await canvas.findByRole('region', { name: 'billing' })
-    expect(within(sheet).getByRole('alert')).toHaveTextContent('not a git repository')
+    const dialog = await within(document.body).findByRole('dialog', { name: 'billing' })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('not a git repository')
   },
 }
 
@@ -139,16 +139,14 @@ export const Commands: Story = {
   },
 }
 
-/** A command's sheet: a line typed with shell syntax is refused as it is typed, the token named. */
+/** A command's dialog: a line typed with shell syntax is refused as it is typed, the token named. */
 export const CommandOpen: Story = {
-  args: { section: 'commands', sheet: { kind: 'command', id: 'test' } },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const sheet = await canvas.findByRole('region', { name: 'test' })
-    expect(canvasElement.querySelector('[data-settings-page]')).toHaveAttribute('inert')
-    const line = within(sheet).getByRole('textbox', { name: 'Line' })
+  args: { section: 'commands', form: { kind: 'command', id: 'test' } },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'test' })
+    const line = within(dialog).getByRole('textbox', { name: 'Line' })
     await userEvent.type(line, ' && pnpm lint')
-    expect(await within(sheet).findByText(/“&&” is shell syntax/)).toBeVisible()
+    expect(await within(dialog).findByText(/“&&” is shell syntax/)).toBeVisible()
   },
 }
 
@@ -158,12 +156,12 @@ export const CommandNew: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
-    const sheet = await canvas.findByRole('region', { name: 'New command' })
-    await userEvent.type(within(sheet).getByRole('textbox', { name: 'Name' }), 'storybook')
-    await userEvent.type(within(sheet).getByRole('textbox', { name: 'Line' }), 'pnpm storybook')
-    await userEvent.click(within(sheet).getByRole('button', { name: 'Add' }))
+    const dialog = await within(document.body).findByRole('dialog', { name: 'New command' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'storybook')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Line' }), 'pnpm storybook')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
     await waitFor(() => {
-      expect(canvasElement.querySelector('[data-view]')).toBeNull()
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(
       within(canvas.getByRole('list', { name: 'Commands' })).getAllByRole('listitem'),
@@ -211,15 +209,14 @@ export const Services: Story = {
 
 /** A save that meets a newer version of the Project: refused, in the engine's words, the draft kept. */
 export const RefusedSave: Story = {
-  args: { refuse: true, sheet: { kind: 'repository', id: 'api' } },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const sheet = await canvas.findByRole('region', { name: 'api' })
-    const branch = within(sheet).getByRole('textbox', { name: 'Base branch' })
+  args: { refuse: true, form: { kind: 'repository', id: 'api' } },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'api' })
+    const branch = within(dialog).getByRole('textbox', { name: 'Base branch' })
     await userEvent.clear(branch)
     await userEvent.type(branch, 'develop')
-    await userEvent.click(within(sheet).getByRole('button', { name: 'Save' }))
-    expect(await within(sheet).findByRole('alert')).toHaveTextContent(STALE)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(STALE)
     expect(branch).toHaveValue('develop')
   },
 }
@@ -251,8 +248,8 @@ export const Hemera: Story = {
 }
 
 /**
- * From the keyboard: the list of sections, Enter on one; into its lines, Enter opens a sheet whose
- * title takes the focus; Escape closes it and the focus is back on the line.
+ * From the keyboard: the list of sections, Enter on one; into its lines, Enter opens its form in a dialog
+ * which takes the focus; Escape closes it and the focus is back on the line.
  */
 export const Focused: Story = {
   play: async ({ canvasElement }) => {
@@ -274,28 +271,28 @@ export const Focused: Story = {
     const build = await canvas.findByRole('button', { name: /^build\b.*Build/ })
     build.focus()
     await userEvent.keyboard('{Enter}')
-    const sheet = await canvas.findByRole('region', { name: 'build' })
+    const dialog = await within(document.body).findByRole('dialog', { name: 'build' })
     await waitFor(() => {
-      expect(within(sheet).getByRole('heading', { name: 'build' })).toHaveFocus()
+      expect(dialog.contains(document.activeElement)).toBe(true)
     })
     await userEvent.keyboard('{Escape}')
     await waitFor(() => {
-      expect(canvasElement.querySelector('[data-view]')).toBeNull()
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(build).toHaveFocus()
   },
 }
 
-/** Asked for less movement: the sheet is there at once, and the list's mark does not travel. */
+/** Asked for less movement: the form's dialog is there at once, and the list's mark does not travel. */
 export const ReducedMotion: Story = {
-  args: { section: 'commands', sheet: { kind: 'command', id: 'build' } },
+  args: { section: 'commands', form: { kind: 'command', id: 'build' } },
   render: (args) => (
     <MotionConfig reducedMotion="always">
       <SettingsFixture {...args} />
     </MotionConfig>
   ),
-  play: async ({ canvasElement }) => {
-    const sheet = within(canvasElement).getByRole('region', { name: 'build' })
-    expect(getComputedStyle(sheet).transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/)
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'build' })
+    expect(dialog).toBeVisible()
   },
 }

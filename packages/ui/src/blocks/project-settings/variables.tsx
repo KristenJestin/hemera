@@ -17,7 +17,7 @@ import { Section, TemplateMenu } from './parts.tsx'
  * A line is the variable's name in the mono face and its value, masked: eight dots, whatever its
  * length, so a mask says nothing of what it hides. The eye at the end shows that one value, and
  * hides it again; nothing else ever shows it. The `…` holds Edit and Remove, Remove in the
- * destructive tone. In the sheet, the value may hold the names Hemera fills — `{workspace}` and
+ * destructive tone. In its form, the value may hold the names Hemera fills — `{workspace}` and
  * the others — offered by the braces at the end of its field.
  */
 export interface SettingsVariable {
@@ -191,7 +191,7 @@ export function VariablesSection({
   )
 }
 
-/** What the sheet of a variable writes. */
+/** What the form of a variable writes. */
 export interface VariableDraft {
   key: string
   value: string
@@ -206,7 +206,7 @@ export interface VariableFormProps {
   valueError?: string | undefined
 }
 
-/** The sheet of a variable: its name, and its value, which may hold the names Hemera fills. */
+/** The form of a variable: its name, and its value, which may hold the names Hemera fills. */
 export function VariableForm({
   draft,
   onChange,
