@@ -22,7 +22,15 @@ import { Legend } from '../tooltip/legend.tsx'
  * decoration beside a line that already says the state.
  */
 
-export type MarkState = 'todo' | 'running' | 'done' | 'failed' | 'waiting' | 'blocked' | 'skipped'
+export type MarkState =
+  | 'todo'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'waiting'
+  | 'blocked'
+  | 'skipped'
+  | 'idle'
 
 /** What each state means, in words: the legend, and what a screen reader says. */
 export const MARK_LEGENDS: Record<MarkState, string> = {
@@ -33,6 +41,7 @@ export const MARK_LEGENDS: Record<MarkState, string> = {
   waiting: 'Waiting for you',
   blocked: 'Blocked',
   skipped: 'Skipped',
+  idle: 'Idle',
 }
 
 const TONES: Record<MarkState, string> = {
@@ -43,6 +52,9 @@ const TONES: Record<MarkState, string> = {
   waiting: 'relative inline-flex shrink-0 text-warning',
   blocked: 'relative inline-flex shrink-0 text-destructive',
   skipped: 'relative inline-flex shrink-0 text-muted-foreground',
+  // Quieter than every other state: nothing runs and nothing waits, so the mark is the line of
+  // the window and nothing more.
+  idle: 'relative inline-flex shrink-0 text-border',
 }
 
 /** The two steps a mark is drawn at: beside a task's line, and compact in a row of text. */
@@ -76,7 +88,7 @@ const ARC = 0.28
 
 /** How much of the ring each pose closes. */
 function ringOf(state: MarkState): number {
-  if (state === 'todo' || state === 'skipped') return 0
+  if (state === 'todo' || state === 'skipped' || state === 'idle') return 0
   if (state === 'running') return ARC
   return 1
 }
@@ -98,7 +110,7 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const beat = useTransition(pinging)
-  const dashed = state === 'todo' || state === 'skipped'
+  const dashed = state === 'todo' || state === 'skipped' || state === 'idle'
   const ring = ringOf(state)
   const waiting = state === 'waiting'
   const mark = (

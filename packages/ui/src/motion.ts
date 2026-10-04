@@ -332,3 +332,35 @@ export function faceCarry(k: number): number {
   const q = Math.min(1, Math.max(0, k))
   return q * (1 - q) * (1 - q)
 }
+
+/**
+ * How far a view opened over a mission's base, or a notification arriving in the window's corner,
+ * travels in from under the edge it comes from, in pixels. Short on purpose: what arrives is read
+ * as having been there, a step away, and not as having crossed the window.
+ */
+export const VIEW_TRAVEL = 16
+
+/**
+ * The `leave` kind: what goes away for good at the hand's word — a notification dismissed, or
+ * pressed and gone where it led. Opacity alone, on the `fast` beat: a departure is the answer to
+ * a press and snaps, where an arrival is watched; and shorter than any arrival on purpose, so what
+ * is left behind closes the gap at once rather than waiting on a fade. The gap itself closes on
+ * `morph`, played as a layout change, so the rest of the stack moves together and arrives without
+ * turning round.
+ */
+export const leave: Transition = { duration: durations.fast, ease: easing }
+
+/**
+ * The `sheet` kind: a view's sheet sliding in over a mission's base from the right edge, and
+ * back out the same way, on the `base` beat and the theme's curve — a tween and not a spring,
+ * because a surface that overshoots its edge shows a sliver of base behind it. `SHEET` is where
+ * it starts and where it lands: wholly past the edge, then in place. The sheet growing to the
+ * frame's width and back travels on the same beat and curve as the theme's `sheet-motion`, a
+ * transition of its width and not a transform: a surface scaled to its new width stretches what
+ * it holds on the way. The scrim under it fades on `crossfade`.
+ */
+export const sheet: Transition = { duration: durations.base, ease: easing }
+export const SHEET = {
+  from: { x: '100%' },
+  to: { x: 0 },
+} as const

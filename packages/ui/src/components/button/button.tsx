@@ -85,7 +85,17 @@ export interface ButtonProps
   className?: string | undefined
 }
 
-export function Button({
+export function Button(props: ButtonProps) {
+  return <Pressable {...props} follows />
+}
+
+/**
+ * The button under both buttons. `follows` is whether its width follows what it shows, as a
+ * layout animation: a button with a label does, a square icon button never, and a button that
+ * is a layout node for nothing is still one — inside a card that slides, motion draws it at its
+ * destination before the card has arrived.
+ */
+function Pressable({
   variant,
   shape,
   size,
@@ -93,8 +103,9 @@ export function Button({
   disabled = false,
   children,
   className,
+  follows,
   ...rest
-}: ButtonProps) {
+}: ButtonProps & { follows: boolean }) {
   const transition = useTransition(press)
   const hand = useHand()
   const working = state === 'loading'
@@ -113,7 +124,7 @@ export function Button({
           // Its size and nothing else: what is animated is the width following what
           // it says. A button carried to wherever its row put it replayed its old place each time
           // it was drawn again after something beside it changed, and popped where it stood.
-          layout="size"
+          layout={follows ? 'size' : false}
           whileHover={hand.hover}
           whileTap={hand.tap}
           // Going quiet is a change like any other: it fades rather than switching off, which
@@ -137,14 +148,15 @@ export interface IconButtonProps extends Omit<ButtonProps, 'children'> {
 
 export function IconButton({ variant, size = 'md', icon, className, ...rest }: IconButtonProps) {
   return (
-    <Button
+    <Pressable
       {...rest}
       variant={variant}
       size={size}
       className={cn(ICON_ONLY[size ?? 'md'], className)}
+      follows={false}
     >
       {icon}
-    </Button>
+    </Pressable>
   )
 }
 

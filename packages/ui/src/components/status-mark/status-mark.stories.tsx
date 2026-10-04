@@ -43,6 +43,7 @@ const POSES: Record<MarkState, { figures: string[]; tone: string; legend: string
   waiting: { figures: ['ring', 'dot'], tone: 'text-warning', legend: 'Waiting for you' },
   blocked: { figures: ['ring', 'bar'], tone: 'text-destructive', legend: 'Blocked' },
   skipped: { figures: ['dashed', 'strike'], tone: 'text-muted-foreground', legend: 'Skipped' },
+  idle: { figures: ['dashed'], tone: 'text-border', legend: 'Idle' },
 }
 
 const ALL_FIGURES = ['dashed', 'ring', 'check', 'cross', 'dot', 'bar', 'strike']
@@ -123,6 +124,9 @@ export const Blocked: Story = posed('blocked')
 /** Skipped: the dotted ring, struck through. */
 export const Skipped: Story = posed('skipped')
 
+/** Idle: nothing runs and nothing waits; the dotted ring in the quietest tone. */
+export const Idle: Story = posed('idle')
+
 /** The legend is a tooltip on the mark itself, reached by the hand and by the keyboard alike. */
 export const Focused: Story = {
   args: { state: 'blocked' },
@@ -157,16 +161,16 @@ export const Compact: Story = {
   args: { state: 'running', size: 'sm' },
   render: (args) => (
     <div className="flex items-center gap-2 text-sm">
-      {(['todo', 'running', 'done', 'failed', 'waiting', 'blocked', 'skipped'] as const).map(
-        (state) => (
-          <StatusMark key={state} {...args} state={state} />
-        ),
-      )}
+      {(
+        ['todo', 'running', 'done', 'failed', 'waiting', 'blocked', 'skipped', 'idle'] as const
+      ).map((state) => (
+        <StatusMark key={state} {...args} state={state} />
+      ))}
     </div>
   ),
   play: async ({ canvasElement }) => {
     const marks = [...canvasElement.querySelectorAll<HTMLElement>('[data-mark]')]
-    expect(marks).toHaveLength(7)
+    expect(marks).toHaveLength(8)
     for (const mark of marks) expect(mark.getBoundingClientRect().width).toBe(16)
   },
 }

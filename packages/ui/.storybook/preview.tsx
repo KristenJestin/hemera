@@ -90,6 +90,21 @@ const preview: Preview = {
   },
   parameters: {
     layout: 'centered',
+    /** The two sizes every screen is designed at; a story of a screen opens at the laptop's. */
+    viewport: {
+      options: {
+        desktop: {
+          name: 'Desktop 1920×1080',
+          styles: { width: '1920px', height: '1080px' },
+          type: 'desktop',
+        },
+        laptop: {
+          name: 'Laptop 1366×768',
+          styles: { width: '1366px', height: '768px' },
+          type: 'desktop',
+        },
+      },
+    },
     a11y: {
       test: 'error',
       // Base UI's focus guards (`aria-hidden` with `tabindex="0"`, by construction) trip
