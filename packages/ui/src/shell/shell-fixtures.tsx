@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import type { Ball } from '../blocks/ball/ball-mark.tsx'
 import { BallMark } from '../blocks/ball/ball-mark.tsx'
 import { Button } from '../components/button/button.tsx'
+import { ACME_LOGO } from '../components/project-mark/project-mark-fixtures.ts'
 import { IconButton } from '../components/button/button.tsx'
 import {
   IconBook2,
@@ -63,6 +64,15 @@ export const MANY_PROJECTS: readonly SidebarProject[] = [
   { id: 'p10', name: 'Gateway and public API documentation site' },
   { id: 'p11', name: 'Helpdesk' },
   { id: 'p12', name: 'Infrastructure as code' },
+]
+
+/** Projects marked as their users chose: an icon in a tone, a logo, and letters. */
+export const MARKED_PROJECTS: readonly SidebarProject[] = [
+  ACME,
+  { ...HEMERA, identity: { tone: 'primary', icon: 'rocket' } },
+  { id: 'p4', name: 'Billing', identity: { image: ACME_LOGO } },
+  { id: 'p6', name: 'Data pipeline', identity: { tone: 'build', icon: 'database' } },
+  { id: 'p7', name: 'Design system', identity: { tone: 'warning' } },
 ]
 
 export const MISSION = {

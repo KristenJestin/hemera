@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 
 import { Face } from '../components/face/face.tsx'
 import { LetterAvatar } from '../components/letter-avatar/letter-avatar.tsx'
+import { type Identity, ProjectMark } from '../components/project-mark/project-mark.tsx'
 import { Skeleton } from '../components/loading/loading.tsx'
 import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
@@ -112,6 +113,8 @@ export type SidebarPlace =
 export interface SidebarProject {
   id: string
   name: string
+  /** What the user chose to mark it with; nothing chosen is its letter. */
+  identity?: Identity | undefined
   /** What stands under the Project when it is open: its missions by stage, its Chats. */
   under?: ReactNode
 }
@@ -199,8 +202,9 @@ export function Sidebar({
         </h2>
         {loading && (
           <>
-            <ProjectSkeleton />
-            <ProjectSkeleton />
+            <ProjectSkeleton name="Acme" />
+            <ProjectSkeleton name="Hemera" />
+            <ProjectSkeleton name="Data pipeline" />
           </>
         )}
         {error !== undefined && !folded && (
@@ -225,7 +229,9 @@ export function Sidebar({
                   mark={`project:${project.id}`}
                   current={current.kind === 'project' && current.id === project.id}
                   name={project.name}
-                  icon={<LetterAvatar name={project.name} others={names} />}
+                  icon={
+                    <ProjectMark name={project.name} others={names} identity={project.identity} />
+                  }
                   onPress={() => onProject(project.id)}
                   control={
                     project.under === undefined ? undefined : (
@@ -398,17 +404,22 @@ export function SidebarRow({
   )
 }
 
-/** The shape of a Project's row while the Projects are on their way. */
-function ProjectSkeleton(): ReactNode {
+/**
+ * The shape of a Project's row while the Projects are on their way: the row itself in its loading
+ * mode — its height, the room of its mark, a bar for its name — and nothing that grows beyond it.
+ */
+const SKELETON_ROW = 'flex h-control-sm w-full min-w-0 shrink-0 items-center gap-2 rounded-md px-2'
+
+function ProjectSkeleton({ name }: { name: string }): ReactNode {
   return (
-    <span aria-hidden="true" className={cn(PLACE_ROW, PLACE)} data-project-skeleton="">
+    <span aria-hidden="true" className={SKELETON_ROW} data-project-skeleton="">
       <span className={ICON_ROOM}>
         <Skeleton shape="block">
           <LetterAvatar name="A" />
         </Skeleton>
       </span>
-      <span className={NAME}>
-        <Skeleton>A Project</Skeleton>
+      <span className="min-w-0 text-base">
+        <Skeleton>{name}</Skeleton>
       </span>
     </span>
   )

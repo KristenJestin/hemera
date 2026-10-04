@@ -8,10 +8,11 @@ import { Empty } from '../../components/empty/empty.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Kbd } from '../../components/kbd/kbd.tsx'
-import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
+import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconChevronRight, IconInbox, IconSearch, IconSettings } from '../../icons.ts'
+import { IconInbox, IconSearch, IconSettings } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { Page, PageHeader } from '../page.tsx'
 
@@ -56,6 +57,8 @@ export interface ProjectStageGroup {
 
 export interface ProjectPageProps {
   name: string
+  /** What the user chose to mark it with; nothing chosen is its letter. */
+  identity?: Identity | undefined
   repositories: readonly ProjectRepository[]
   groups: readonly ProjectStageGroup[]
   loading?: boolean | undefined
@@ -70,18 +73,7 @@ const REPOSITORIES = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
 
 const DOT = 'text-border'
 
-const GROUP = 'flex flex-col gap-2'
-
-const STAGE =
-  'flex h-control-text items-center gap-2 px-1 text-sm font-medium text-muted-foreground'
-
-/** The header of a group that folds: the same line, pressable, the chevron at its end. */
-const STAGE_BUTTON =
-  'flex h-control-text items-center gap-2 rounded-md px-1 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion'
-
-const COUNT = 'text-xs text-muted-foreground tabular-nums'
-
-const CHEVRON = 'flex shrink-0 chevron-motion aria-expanded:rotate-90'
+const GROUP = 'flex flex-col gap-3'
 
 /** The body of a group that folds: clipped while it grows, its room above it held inside. */
 const FOLDING = 'overflow-hidden'
@@ -123,20 +115,11 @@ function FoldingGroup({
   const [open, setOpen] = useState(group.fold === 'open')
   return (
     <section className="flex flex-col">
-      <h2 className="flex">
-        <button
-          type="button"
-          className={STAGE_BUTTON}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {group.stage}
-          <span className={COUNT}>{group.rows.length}</span>
-          <span className={CHEVRON} aria-expanded={open} aria-hidden="true">
-            <IconChevronRight size="sm" />
-          </span>
-        </button>
-      </h2>
+      <SectionHead
+        title={group.stage}
+        count={group.rows.length}
+        fold={{ open, onToggle: () => setOpen(!open) }}
+      />
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -147,7 +130,7 @@ function FoldingGroup({
             exit={collapse}
             transition={folding}
           >
-            <div className="pt-2">
+            <div className="pt-3">
               <StageRows group={group} onOpenMission={onOpenMission} />
             </div>
           </motion.div>
@@ -159,6 +142,7 @@ function FoldingGroup({
 
 export function ProjectPage({
   name,
+  identity,
   repositories,
   groups,
   loading = false,
@@ -173,7 +157,7 @@ export function ProjectPage({
   return (
     <Page>
       <PageHeader
-        lead={<LetterAvatar name={name} />}
+        lead={<ProjectMark name={name} identity={identity} />}
         title={name}
         about={
           <span className={REPOSITORIES}>
@@ -219,7 +203,7 @@ export function ProjectPage({
       )}
       {loading && (
         <div className={GROUP}>
-          <h2 className={STAGE}>Missions</h2>
+          <SectionHead title="Missions" />
           <Frame>
             <ul aria-label="Missions" aria-busy="true" className="flex flex-col">
               <MissionRowSkeleton />
@@ -241,10 +225,7 @@ export function ProjectPage({
         .map((group) =>
           group.fold === undefined ? (
             <section key={group.stage} className={GROUP}>
-              <h2 className={STAGE}>
-                {group.stage}
-                <span className={COUNT}>{group.rows.length}</span>
-              </h2>
+              <SectionHead title={group.stage} count={group.rows.length} />
               <StageRows group={group} onOpenMission={onOpenMission} />
             </section>
           ) : (

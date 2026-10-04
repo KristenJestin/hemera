@@ -67,6 +67,35 @@ import {
   IconTrashFilled as TablerTrashFilled,
   IconX as TablerX,
   IconXFilled as TablerXFilled,
+  IconAdjustments as TablerAdjustments,
+  IconAlertCircle as TablerAlertCircle,
+  IconBraces as TablerBraces,
+  IconBrowserCheck as TablerBrowserCheck,
+  IconBug as TablerBug,
+  IconCloudDownload as TablerCloudDownload,
+  IconDeviceDesktop as TablerDeviceDesktop,
+  IconEye as TablerEye,
+  IconEyeOff as TablerEyeOff,
+  IconFolderOpen as TablerFolderOpen,
+  IconGripVertical as TablerGripVertical,
+  IconHandStop as TablerHandStop,
+  IconHammer as TablerHammer,
+  IconLink as TablerLink,
+  IconLock as TablerLock,
+  IconScript as TablerScript,
+  IconServer as TablerServer,
+  IconTestPipe as TablerTestPipe,
+  IconVariable as TablerVariable,
+  IconWorld as TablerWorld,
+  IconBolt as TablerBolt,
+  IconChecklist as TablerChecklist,
+  IconListNumbers as TablerListNumbers,
+  IconStack2 as TablerStack2,
+  IconDatabase as TablerDatabase,
+  IconDeviceMobile as TablerDeviceMobile,
+  IconRocket as TablerRocket,
+  IconPhoto as TablerPhoto,
+  IconPalette as TablerPalette,
   type IconProps as TablerIconProps,
   type TablerIcon,
 } from '@tabler/icons-react'
@@ -189,3 +218,52 @@ export const IconArrowsMinimize = catalogued(
   TablerArrowsMinimize,
   'IconArrowsMinimize',
 )
+export const IconAdjustments = catalogued(TablerAdjustments, TablerAdjustments, 'IconAdjustments')
+export const IconAlertCircle = catalogued(TablerAlertCircle, TablerAlertCircle, 'IconAlertCircle')
+export const IconBraces = catalogued(TablerBraces, TablerBraces, 'IconBraces')
+export const IconBrowserCheck = catalogued(
+  TablerBrowserCheck,
+  TablerBrowserCheck,
+  'IconBrowserCheck',
+)
+export const IconBug = catalogued(TablerBug, TablerBug, 'IconBug')
+export const IconCloudDownload = catalogued(
+  TablerCloudDownload,
+  TablerCloudDownload,
+  'IconCloudDownload',
+)
+export const IconDeviceDesktop = catalogued(
+  TablerDeviceDesktop,
+  TablerDeviceDesktop,
+  'IconDeviceDesktop',
+)
+export const IconEye = catalogued(TablerEye, TablerEye, 'IconEye')
+export const IconEyeOff = catalogued(TablerEyeOff, TablerEyeOff, 'IconEyeOff')
+export const IconFolderOpen = catalogued(TablerFolderOpen, TablerFolderOpen, 'IconFolderOpen')
+export const IconGripVertical = catalogued(
+  TablerGripVertical,
+  TablerGripVertical,
+  'IconGripVertical',
+)
+export const IconHandStop = catalogued(TablerHandStop, TablerHandStop, 'IconHandStop')
+export const IconHammer = catalogued(TablerHammer, TablerHammer, 'IconHammer')
+export const IconLink = catalogued(TablerLink, TablerLink, 'IconLink')
+export const IconLock = catalogued(TablerLock, TablerLock, 'IconLock')
+export const IconScript = catalogued(TablerScript, TablerScript, 'IconScript')
+export const IconServer = catalogued(TablerServer, TablerServer, 'IconServer')
+export const IconTestPipe = catalogued(TablerTestPipe, TablerTestPipe, 'IconTestPipe')
+export const IconVariable = catalogued(TablerVariable, TablerVariable, 'IconVariable')
+export const IconWorld = catalogued(TablerWorld, TablerWorld, 'IconWorld')
+export const IconBolt = catalogued(TablerBolt, TablerBolt, 'IconBolt')
+export const IconChecklist = catalogued(TablerChecklist, TablerChecklist, 'IconChecklist')
+export const IconListNumbers = catalogued(TablerListNumbers, TablerListNumbers, 'IconListNumbers')
+export const IconStack2 = catalogued(TablerStack2, TablerStack2, 'IconStack2')
+export const IconDatabase = catalogued(TablerDatabase, TablerDatabase, 'IconDatabase')
+export const IconDeviceMobile = catalogued(
+  TablerDeviceMobile,
+  TablerDeviceMobile,
+  'IconDeviceMobile',
+)
+export const IconRocket = catalogued(TablerRocket, TablerRocket, 'IconRocket')
+export const IconPhoto = catalogued(TablerPhoto, TablerPhoto, 'IconPhoto')
+export const IconPalette = catalogued(TablerPalette, TablerPalette, 'IconPalette')

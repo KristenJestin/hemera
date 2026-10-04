@@ -76,6 +76,12 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export {
+  SheetStack,
+  type SheetStackProps,
+  type SheetView,
+  type SheetWidth,
+} from './components/sheet/sheet.tsx'
+export {
   OVER_MARK,
   SlidingMark,
   type SlidingMarkProps,
@@ -149,3 +155,64 @@ export {
   type ProjectRepository,
   type ProjectStageGroup,
 } from './surfaces/project/project-page.tsx'
+export {
+  ProjectSettings,
+  type ProjectSettingsProps,
+  type SettingsForm,
+  type SettingsSection,
+} from './surfaces/project-settings/project-settings.tsx'
+export {
+  AddProject,
+  type AddProjectProps,
+  type FoundRepository,
+} from './surfaces/add-project/add-project.tsx'
+export {
+  RepositoriesSection,
+  RepositoryForm,
+  type BaseFreshness,
+  type RemoteChoice,
+  type RepositoryDraft,
+  type SettingsRepository,
+} from './blocks/project-settings/repositories.tsx'
+export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
+export {
+  COMMAND_TYPES,
+  CommandForm,
+  CommandsSection,
+  type CommandDraft,
+  type CommandType,
+  type SettingsCommand,
+} from './blocks/project-settings/commands.tsx'
+export {
+  RecipeSection,
+  StepForm,
+  type SettingsStep,
+  type StepDraft,
+  type StepKind,
+} from './blocks/project-settings/recipe.tsx'
+export {
+  VariableForm,
+  VariablesSection,
+  type SettingsVariable,
+  type VariableDraft,
+} from './blocks/project-settings/variables.tsx'
+export {
+  ServicesSection,
+  type RunnableCommand,
+  type SettingsRun,
+} from './blocks/project-settings/services.tsx'
+export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
+export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
+export {
+  MARK_ICONS,
+  ProjectMark,
+  type Identity,
+  type MarkIcon,
+  type ProjectMarkProps,
+} from './components/project-mark/project-mark.tsx'
+export {
+  CommandLineField,
+  type CatalogueChoice,
+  type CommandLineValue,
+} from './blocks/project-settings/command-line.tsx'
+export { IdentityField, type IdentityFieldProps } from './surfaces/add-project/identity-field.tsx'
