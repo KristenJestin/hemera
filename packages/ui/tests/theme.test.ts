@@ -128,6 +128,19 @@ describe('What answers the hand', () => {
     const motion = readFileSync(join(import.meta.dirname, '..', 'src', 'motion.ts'), 'utf8')
     expect(motion).toMatch(/^export const hover\b/m)
   })
+
+  test('what the hand rests on is tinted, faintly, never filled with a grey slab', () => {
+    for (const side of ['light', 'dark'] as const) {
+      const tint = roleIn(theme, 'hover', side)
+      const alpha = /rgba\([^)]*,\s*([\d.]+)\)$/.exec(tint)
+      expect(alpha, `--hover in ${side} is a tint`).not.toBeNull()
+      expect(Number(alpha![1])).toBeLessThanOrEqual(0.06)
+    }
+    const slabs = componentSources
+      .filter(({ source }) => /(?:hover|data-highlighted):bg-(?:accent|muted)\b/.test(source))
+      .map(({ file }) => file)
+    expect(slabs).toEqual([])
+  })
 })
 
 describe('The density of the interface', () => {
