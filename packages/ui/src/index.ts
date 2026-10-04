@@ -24,6 +24,8 @@ export {
   type DialogSize,
 } from './components/dialog/dialog.tsx'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
+export { Empty, type EmptyProps } from './components/empty/empty.tsx'
+export { ErrorState, type ErrorStateProps } from './components/error-state/error-state.tsx'
 export { FACE_SIZES, Face, type FaceProps, type FaceSize } from './components/face/face.tsx'
 export { FACE_STATES, type FaceState } from './components/face/states.ts'
 export {

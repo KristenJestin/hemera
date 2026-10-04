@@ -24,7 +24,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="flex h-dvh w-full" data-area="">
+      <div className="flex h-screen w-full" data-area="">
         <Story />
       </div>
     ),
