@@ -31,11 +31,7 @@ export {
   NESTED_RADIUS,
   type FrameProps,
 } from './components/frame/frame.tsx'
-export {
-  HELPER_LEGENDS,
-  HelperChip,
-  type HelperChipProps,
-} from './components/helper-chip/helper-chip.tsx'
+export { HelperChip, type HelperChipProps } from './components/helper-chip/helper-chip.tsx'
 export { Kbd, type KbdProps } from './components/kbd/kbd.tsx'
 export {
   LETTER_TONES,
@@ -82,13 +78,9 @@ export {
   type SlidingMarkProps,
 } from './components/sliding-mark/sliding-mark.tsx'
 export {
-  StatusDot,
-  type StatusDotProps,
-  type StatusTone,
-} from './components/status-dot/status-dot.tsx'
-export {
   MARK_LEGENDS,
   StatusMark,
+  type MarkSize,
   type MarkState,
   type StatusMarkProps,
 } from './components/status-mark/status-mark.tsx'

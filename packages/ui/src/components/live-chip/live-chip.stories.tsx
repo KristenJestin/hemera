@@ -255,11 +255,11 @@ function Change({ to, ...args }: LiveChipProps & { to: LiveState }): ReactNode {
   useEffect(() => {
     setState('running')
     setEndedAt(null)
-    const change = setTimeout(() => {
+    const later = setTimeout(() => {
       setState(to)
       if (to !== 'stuck') setEndedAt(Date.now())
     }, 1200)
-    return () => clearTimeout(change)
+    return () => clearTimeout(later)
   }, [to, round])
   return (
     <div className="flex items-center gap-3">

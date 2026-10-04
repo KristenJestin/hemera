@@ -10,10 +10,10 @@ import { Legend } from '../tooltip/legend.tsx'
  * for another.
  *
  * - `todo` · a dotted ring, quiet: nothing has started.
- * - `running` · an arc of the ring, turning.
+ * - `running` · an arc of the ring, turning, in the running tone.
  * - `done` · the ring closes and a ✓ draws itself in it; `failed`, a ✕.
  * - `waiting` · the ring closes around a dot that waits for the user, a ring leaving it on the
- *   running dot's beat (`ping`).
+ *   beat of the theme's `ping`.
  * - `blocked` · the ring closes around a bar: the way is shut.
  * - `skipped` · the dotted ring, a stroke across it.
  *
@@ -37,7 +37,7 @@ export const MARK_LEGENDS: Record<MarkState, string> = {
 
 const TONES: Record<MarkState, string> = {
   todo: 'relative inline-flex shrink-0 text-muted-foreground',
-  running: 'relative inline-flex shrink-0 text-warning',
+  running: 'relative inline-flex shrink-0 text-info',
   done: 'relative inline-flex shrink-0 text-success',
   failed: 'relative inline-flex shrink-0 text-destructive',
   waiting: 'relative inline-flex shrink-0 text-warning',
@@ -45,7 +45,13 @@ const TONES: Record<MarkState, string> = {
   skipped: 'relative inline-flex shrink-0 text-muted-foreground',
 }
 
-const SVG = 'size-5 stroke-current'
+/** The two steps a mark is drawn at: beside a task's line, and compact in a row of text. */
+export type MarkSize = 'sm' | 'md'
+
+const SVG: Record<MarkSize, string> = {
+  sm: 'size-icon-sm stroke-current',
+  md: 'size-5 stroke-current',
+}
 
 /** What holds the strokes still. */
 const STILL = 'flex'
@@ -84,9 +90,11 @@ export interface StatusMarkProps {
   state: MarkState
   /** Whether its state is said in a tooltip on the mark; left out, it is decoration. */
   legend?: boolean | undefined
+  /** Compact (`sm`) where a dot would stand, in a row of text; `md` beside a task's line. */
+  size?: MarkSize | undefined
 }
 
-export function StatusMark({ state, legend = false }: StatusMarkProps): ReactNode {
+export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkProps): ReactNode {
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const beat = useTransition(pinging)
@@ -112,7 +120,7 @@ export function StatusMark({ state, legend = false }: StatusMarkProps): ReactNod
           strokeWidth="1.75"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={SVG}
+          className={SVG[size]}
         >
           <motion.circle
             cx="10"

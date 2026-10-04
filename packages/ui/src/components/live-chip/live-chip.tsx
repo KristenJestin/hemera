@@ -2,23 +2,26 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { IconCheck, IconClockPause, IconPlayerStop, IconX } from '../../icons.ts'
-import { CROSSFADE, WIPE, crossfade, instant, useTransition, wipe } from '../../motion.ts'
+import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
 import { Tooltip } from '../tooltip/tooltip.tsx'
+import { type LiveState, LiveTint, useSweep } from './tint.tsx'
 
 /**
- * What goes on, as one chip: a run, a helper and a Probe are the same chip, and differ only by
- * what fills its icon slot — a command's type icon, a helper's letter avatar.
+ * What goes on, as one chip: a run, a helper and a Probe are the same chip, and differ only by what
+ * fills its icon slot — the type of what runs: a command's type icon, a helper's letter avatar.
  *
  * - Neutral: the chip's own surface, edge and text, and no dot.
  * - Its duration in seconds and nothing else (`84s`), in fixed-width digits and in a room kept
  *   for three of them, so the chip does not grow as a digit arrives; the seconds are never cut,
  *   a long name ends in "…" instead.
- * - Working, a faint tint breathes across its background.
- * - Stuck — no event for five minutes in the middle of a turn — the breath stops, the seconds go
- *   on, and its icon gives way to a paused clock in the warning tone.
- * - Ending while it is watched, one sweep crosses it in the tint it ended on, and the chip is
- *   neutral again: nothing tinted lasts. Its icon gives way to ✓ or ✕, the only thing coloured;
- *   stopped, a quiet stop glyph. The icon keeps its room, so nothing on the line moves.
+ * - Working, a tint of the running tone breathes across its background (`LiveTint`).
+ * - Every change from working plays one sweep in the colour of the state it changes to — stuck
+ *   in the warning tone, done in the success tone, failed in the destructive one, stopped in the
+ *   neutral accent — and the chip is neutral again: nothing tinted lasts. Its icon gives way to
+ *   that state's glyph as the sweep sets off: a paused clock, ✓, ✕, a quiet stop. The icon keeps
+ *   its room, so nothing on the line moves.
+ * - Stuck — no event for five minutes in the middle of a turn — the breath stops and the seconds
+ *   go on.
  * - Its legend — the whole name and the state in words — is its tooltip.
  *
  * There is no × on the chip: nobody stops a helper or a Probe by hand, and a run's ×, which stops
@@ -27,7 +30,7 @@ import { Tooltip } from '../tooltip/tooltip.tsx'
  * Asked for less movement, there is no breath and no sweep: the end is there at once.
  */
 
-export type LiveState = 'running' | 'stuck' | 'finished' | 'failed' | 'stopped'
+export type { LiveState } from './tint.tsx'
 
 /** How each state is said to a screen reader, after the name. */
 export const LIVE_WORDS: Record<LiveState, string> = {
@@ -43,15 +46,6 @@ export const STUCK_AFTER = '5 minutes'
 
 const CHIP =
   'relative isolate inline-flex h-control-sm max-w-chip min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring'
-
-/** What says it works: the whole background, a faint tint breathing. */
-const BREATH =
-  'pointer-events-none absolute inset-0 -z-10 bg-warning-muted motion-safe:animate-breathe'
-
-const SWEPT: Record<'finished' | 'failed', string> = {
-  finished: 'pointer-events-none absolute inset-0 -z-10 bg-success-muted',
-  failed: 'pointer-events-none absolute inset-0 -z-10 bg-destructive-muted',
-}
 
 /** The icon's room, held by the chip's own icon whether it shows or not. */
 const MARK = 'relative flex shrink-0'
@@ -160,24 +154,9 @@ export function LiveChip({
   endedAt,
   onPress,
 }: LiveChipProps): ReactNode {
-  const crossing = useTransition(wipe)
   const now = useNow(endedAt === null)
-
-  // Ended while it was watched, it is swept once in the tint it ended on. Decided as the state
-  // changes, during the render, so the end's glyph never shows for a frame before the sweep.
-  const [seen, setSeen] = useState(state)
-  const [sweeping, setSweeping] = useState(false)
-  if (seen !== state) {
-    setSeen(state)
-    setSweeping(
-      (seen === 'running' || seen === 'stuck') &&
-        (state === 'finished' || state === 'failed') &&
-        crossing !== instant,
-    )
-  }
-
+  const sweep = useSweep(state)
   const time = durationOf((endedAt ?? now) - startedAt)
-  const shown = sweeping ? 'running' : state
 
   return (
     <Tooltip label={`${name} · ${legendOf(state, time)}`}>
@@ -186,26 +165,11 @@ export function LiveChip({
         className={CHIP}
         aria-label={`${name}, ${LIVE_WORDS[state]}`}
         data-state={state}
+        data-sweep-tone={sweep.swept ?? undefined}
         onClick={() => onPress?.()}
       >
-        {state === 'running' && <span aria-hidden="true" className={BREATH} data-breath="" />}
-        {/* A presence of its own: on a line whose presence skips what is there at first, the
-            sweep would otherwise start where it ends, and never cross. */}
-        <AnimatePresence>
-          {sweeping && (state === 'finished' || state === 'failed') && (
-            <motion.span
-              key="sweep"
-              aria-hidden="true"
-              className={SWEPT[state]}
-              data-sweep=""
-              initial={WIPE.before}
-              animate={WIPE.past}
-              transition={crossing}
-              onAnimationComplete={() => setSweeping(false)}
-            />
-          )}
-        </AnimatePresence>
-        <Mark icon={icon} shown={shown} />
+        <LiveTint state={state} sweep={sweep} />
+        <Mark icon={icon} shown={state} />
         <span className={NAME}>{name}</span>
         <span className={TIME}>{time}</span>
       </button>
