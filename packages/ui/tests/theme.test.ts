@@ -117,6 +117,19 @@ describe('The primary and the focus', () => {
   })
 })
 
+describe('What answers the hand', () => {
+  test('whatever changes colour under the hand or the keyboard does so on the hover kind', () => {
+    const abrupt = componentSources
+      .filter(({ source }) => /\b(?:hover|data-highlighted):/.test(source))
+      .filter(({ source }) => !source.includes('hover-motion'))
+      .map(({ file }) => file)
+    expect(abrupt).toEqual([])
+    expect(theme).toContain('@utility hover-motion {')
+    const motion = readFileSync(join(import.meta.dirname, '..', 'src', 'motion.ts'), 'utf8')
+    expect(motion).toMatch(/^export const hover\b/m)
+  })
+})
+
 describe('The density of the interface', () => {
   test('the base is fourteen, and ordinary text is the base', () => {
     expect(tokenIn(theme, 'text-base')).toBe('0.875rem')
