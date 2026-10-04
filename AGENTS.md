@@ -205,8 +205,9 @@ downloaded or installed while the application runs.
   empty shell wears the system colours (`Canvas`, `CanvasText`).
 - Motion lives in `packages/ui/src/motion.ts` as a short, closed set of named kinds (`press`,
   `arrival`, `morph`, `instant`, `expand` and `collapse` on `fold`, `crossfade`, `ping`, `check`,
-  `wipe`, and `face`, the beats the face's own player eases its strokes on); no component writes its own spring, duration, curve or keyframe, and
-  `node tools/motion-presets.ts` refuses one that does. Components read a kind through
+  `wipe`, and `face`, the beats the face's own player eases its strokes on); no component
+  writes its own spring, duration, curve or keyframe, and `node tools/motion-presets.ts` refuses
+  one that does. Components read a kind through
   `useTransition(kind)`, which answers the reduced-motion preference with the end state for
   every property; the CSS transitions of the theme stop under `prefers-reduced-motion: reduce`.
   A movement the set has no kind for is added there, named and explained.
