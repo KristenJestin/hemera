@@ -315,6 +315,13 @@
   --spacing-view-narrow: 28rem;
   --spacing-view-wide: 46rem;
 
+  /* How wide the list of a settings page's sections is drawn beside the section it shows: the
+     longest name of a section on one line, and no wider, so the section keeps the page. */
+  --spacing-settings-nav: 12rem;
+  /* How wide the name of a thing is drawn in a settings list — a repository's path, a command's
+     name, a variable's key — so the lines under it start their next part on the same column. */
+  --spacing-settings-name: 10rem;
+
   /* How wide a notification is drawn in the window's corner. */
   --spacing-notice: 22rem;
 
