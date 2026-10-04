@@ -76,6 +76,10 @@ export const Error: Story = {
 - **Every state the design asks for**, including the awkward ones: empty, loading (skeletons),
   error in words, dense (many items), and long text in every field (a long name, a long path, a
   long command line).
+- **Sizes are Storybook's viewports**: a screen is rendered full-bleed in the canvas
+  (`layout: 'fullscreen'`), and the 1920×1080 and 1366×768 viewports of the toolbar give its two
+  sizes. Never draw a size frame or a size control inside a story; sizes are Storybook's
+  viewports.
 - **Both themes**: the story tests play every story once in light and once in dark; check both
   by eye at 1920×1080 and 1366×768.
 - **Neutral data only**: this repository is public. Use a Project "Acme" with repositories

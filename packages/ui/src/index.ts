@@ -96,3 +96,56 @@ export {
   type TooltipSide,
 } from './components/tooltip/tooltip.tsx'
 export { OverlayContainerProvider, type OverlayContainer } from './overlay.ts'
+export { BALL_LEGENDS, BallMark, type Ball, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export { EngineVeil, type EngineState, type EngineVeilProps } from './shell/engine-veil.tsx'
+export {
+  NoticeStack,
+  type NoticeItem,
+  type NoticeStackProps,
+  type NoticeTone,
+} from './shell/notice.tsx'
+export {
+  Sidebar,
+  SidebarRow,
+  type SidebarPlace,
+  type SidebarProject,
+  type SidebarProps,
+  type SidebarRowProps,
+} from './shell/sidebar.tsx'
+export { WindowShell, type WindowShellProps } from './shell/window-shell.tsx'
+export { ContentHeader, type ContentHeaderProps, type Crumb } from './shell/content-header.tsx'
+export {
+  HomePage,
+  type HomePageProps,
+  type HomeRow,
+  type HomeSection,
+} from './surfaces/home/home-page.tsx'
+export {
+  MissionFrame,
+  type MissionFrameProps,
+  type MissionStage,
+  type MissionView,
+  type StageTone,
+  type ViewWidth,
+} from './surfaces/mission/mission-frame.tsx'
+export {
+  AT_BASE,
+  closeView,
+  openView,
+  showView,
+  type MissionFrameState,
+} from './surfaces/mission/navigation.ts'
+export {
+  Page,
+  PageError,
+  PageHeader,
+  type PageHeaderProps,
+  type PageProps,
+} from './surfaces/page.tsx'
+export {
+  ProjectPage,
+  type ProjectMissionRow,
+  type ProjectPageProps,
+  type ProjectRepository,
+  type ProjectStageGroup,
+} from './surfaces/project/project-page.tsx'

@@ -474,6 +474,17 @@
   -webkit-app-region: no-drag;
 }
 
+/* What the rail cannot show fading out as the sidebar folds, and back as it opens: opacity alone,
+   on the fast beat, so the names are gone before the width has finished travelling. */
+@utility fade-motion {
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 /* The sidebar folding to its rail and opening again: its width travels on the theme's curve, and
    what it holds is cut at its edge on the way rather than wrapped. */
 @utility sidebar-motion {

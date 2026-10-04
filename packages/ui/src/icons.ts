@@ -14,6 +14,8 @@ import {
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
   IconArrowLeft as TablerArrowLeft,
+  IconArrowsMaximize as TablerArrowsMaximize,
+  IconArrowsMinimize as TablerArrowsMinimize,
   IconBan as TablerBan,
   IconBook2 as TablerBook2,
   IconCheck as TablerCheck,
@@ -177,3 +179,13 @@ export const IconMessages = catalogued(TablerMessages, TablerMessages, 'IconMess
 export const IconMinus = catalogued(TablerMinus, TablerMinus, 'IconMinus')
 export const IconPackage = catalogued(TablerPackage, TablerPackage, 'IconPackage')
 export const IconSquare = catalogued(TablerSquare, TablerSquare, 'IconSquare')
+export const IconArrowsMaximize = catalogued(
+  TablerArrowsMaximize,
+  TablerArrowsMaximize,
+  'IconArrowsMaximize',
+)
+export const IconArrowsMinimize = catalogued(
+  TablerArrowsMinimize,
+  TablerArrowsMinimize,
+  'IconArrowsMinimize',
+)

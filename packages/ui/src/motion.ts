@@ -339,3 +339,17 @@ export function faceCarry(k: number): number {
  * as having been there, a step away, and not as having crossed the window.
  */
 export const VIEW_TRAVEL = 16
+
+/**
+ * The `sheet` kind: a view's sheet sliding in over a mission's base from the right edge, and
+ * back out the same way, on the `base` beat and the theme's curve — a tween and not a spring,
+ * because a surface that overshoots its edge shows a sliver of base behind it. `SHEET` is where
+ * it starts and where it lands: wholly past the edge, then in place. The same beat carries the
+ * sheet growing to the frame's width and back, which motion plays as a layout change. The scrim
+ * under it fades on `crossfade`.
+ */
+export const sheet: Transition = { duration: durations.base, ease: easing }
+export const SHEET = {
+  from: { x: '100%' },
+  to: { x: 0 },
+} as const
