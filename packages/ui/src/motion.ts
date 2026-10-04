@@ -332,3 +332,10 @@ export function faceCarry(k: number): number {
   const q = Math.min(1, Math.max(0, k))
   return q * (1 - q) * (1 - q)
 }
+
+/**
+ * How far a view opened over a mission's base, or a notification arriving in the window's corner,
+ * travels in from under the edge it comes from, in pixels. Short on purpose: what arrives is read
+ * as having been there, a step away, and not as having crossed the window.
+ */
+export const VIEW_TRAVEL = 16

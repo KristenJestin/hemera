@@ -300,6 +300,29 @@
      of the window, because it is the window it has to leave a margin in. */
   --spacing-dialog: 70vh;
 
+  /* The window's own bands. The title bar is as tall as a control, so what sits in it — the
+     sidebar's fold, the system's buttons — is a control and not a smaller thing; the room the
+     system's controls take at its end is theirs, drawn by the window and never by the page. */
+  --spacing-titlebar: 2.25rem;
+  --spacing-window-controls: 8.625rem;
+
+  /* The sidebar, open and folded to a rail of its icons. */
+  --spacing-sidebar: 15rem;
+  --spacing-rail: 3rem;
+
+  /* How wide a view opened over a mission's base is drawn, for the two widths a view may ask
+     for: a task or a round beside the base, a diff or the Spec over most of it. */
+  --spacing-view-narrow: 28rem;
+  --spacing-view-wide: 46rem;
+
+  /* How wide a notification is drawn in the window's corner. */
+  --spacing-notice: 22rem;
+
+  /* How wide a page's content may grow before its margins do, and the reading measure of prose
+     inside it: seventy-odd characters, which is what an eye crosses without losing the line. */
+  --spacing-page: 72rem;
+  --spacing-measure: 72ch;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the springs, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -435,6 +458,27 @@
 @utility chevron-motion {
   transition-property: rotate;
   transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The two regions of a frameless window: what drags it, and what does not — a control drawn
+   inside the drag zone has to say so, or the press moves the window instead of pressing it. */
+@utility drag-zone {
+  -webkit-app-region: drag;
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* The sidebar folding to its rail and opening again: its width travels on the theme's curve, and
+   what it holds is cut at its edge on the way rather than wrapped. */
+@utility sidebar-motion {
+  transition-property: width;
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;

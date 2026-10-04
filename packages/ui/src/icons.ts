@@ -13,11 +13,14 @@
 import {
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
+  IconArrowLeft as TablerArrowLeft,
   IconBan as TablerBan,
+  IconBook2 as TablerBook2,
   IconCheck as TablerCheck,
   IconCheckFilled as TablerCheckFilled,
   IconChevronDown as TablerChevronDown,
   IconChevronDownFilled as TablerChevronDownFilled,
+  IconChevronRight as TablerChevronRight,
   IconClockPause as TablerClockPause,
   IconCopy as TablerCopy,
   IconCopyFilled as TablerCopyFilled,
@@ -25,11 +28,24 @@ import {
   IconDotsFilled as TablerDotsFilled,
   IconExternalLink as TablerExternalLink,
   IconExternalLinkFilled as TablerExternalLinkFilled,
+  IconFileText as TablerFileText,
   IconFolder as TablerFolder,
   IconFolderFilled as TablerFolderFilled,
   IconGitBranch as TablerGitBranch,
+  IconGitCompare as TablerGitCompare,
+  IconHome as TablerHome,
+  IconHomeFilled as TablerHomeFilled,
+  IconInbox as TablerInbox,
   IconInfoCircle as TablerInfoCircle,
   IconInfoCircleFilled as TablerInfoCircleFilled,
+  IconLayoutSidebarLeftCollapse as TablerLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftCollapseFilled as TablerLayoutSidebarLeftCollapseFilled,
+  IconLayoutSidebarLeftExpand as TablerLayoutSidebarLeftExpand,
+  IconLayoutSidebarLeftExpandFilled as TablerLayoutSidebarLeftExpandFilled,
+  IconListCheck as TablerListCheck,
+  IconMessages as TablerMessages,
+  IconMinus as TablerMinus,
+  IconPackage as TablerPackage,
   IconPencil as TablerPencil,
   IconPencilFilled as TablerPencilFilled,
   IconPlayerPlay as TablerPlayerPlay,
@@ -43,6 +59,7 @@ import {
   IconSearchFilled as TablerSearchFilled,
   IconSettings as TablerSettings,
   IconSettingsFilled as TablerSettingsFilled,
+  IconSquare as TablerSquare,
   IconTerminal as TablerTerminal,
   IconTrash as TablerTrash,
   IconTrashFilled as TablerTrashFilled,
@@ -134,3 +151,29 @@ export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'Ic
 export const IconTerminal = catalogued(TablerTerminal, TablerTerminal, 'IconTerminal')
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')
+export const IconArrowLeft = catalogued(TablerArrowLeft, TablerArrowLeft, 'IconArrowLeft')
+export const IconBook2 = catalogued(TablerBook2, TablerBook2, 'IconBook2')
+export const IconChevronRight = catalogued(
+  TablerChevronRight,
+  TablerChevronRight,
+  'IconChevronRight',
+)
+export const IconFileText = catalogued(TablerFileText, TablerFileText, 'IconFileText')
+export const IconGitCompare = catalogued(TablerGitCompare, TablerGitCompare, 'IconGitCompare')
+export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
+export const IconInbox = catalogued(TablerInbox, TablerInbox, 'IconInbox')
+export const IconLayoutSidebarLeftCollapse = catalogued(
+  TablerLayoutSidebarLeftCollapseFilled,
+  TablerLayoutSidebarLeftCollapse,
+  'IconLayoutSidebarLeftCollapse',
+)
+export const IconLayoutSidebarLeftExpand = catalogued(
+  TablerLayoutSidebarLeftExpandFilled,
+  TablerLayoutSidebarLeftExpand,
+  'IconLayoutSidebarLeftExpand',
+)
+export const IconListCheck = catalogued(TablerListCheck, TablerListCheck, 'IconListCheck')
+export const IconMessages = catalogued(TablerMessages, TablerMessages, 'IconMessages')
+export const IconMinus = catalogued(TablerMinus, TablerMinus, 'IconMinus')
+export const IconPackage = catalogued(TablerPackage, TablerPackage, 'IconPackage')
+export const IconSquare = catalogued(TablerSquare, TablerSquare, 'IconSquare')
