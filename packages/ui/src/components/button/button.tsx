@@ -29,11 +29,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary: 'border-primary-strong primary-fill text-primary-foreground hover:brightness-95',
-        secondary: 'border-input bg-card text-foreground hover:bg-muted',
+        secondary: 'border-input bg-card text-foreground hover:tinted',
         // A ghost that is the current place draws no fill under the hand: it is drawn over its
         // list's mark, which is its fill already.
         ghost:
-          'border-transparent bg-transparent text-foreground hover:bg-accent aria-[current=true]:hover:bg-transparent',
+          'border-transparent bg-transparent text-foreground hover:tinted aria-[current=true]:hover:shadow-none',
         // What a frame's header and a panel's corner offer: the accent colour and nothing
         // else. A control that is a place to go rather than a thing to press reads as text.
         link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',

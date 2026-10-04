@@ -30,7 +30,7 @@ const POPUP =
   'max-h-64 min-w-(--anchor-width) overflow-auto rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
 const ITEM =
-  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:bg-accent data-disabled:opacity-50'
+  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:tinted data-disabled:opacity-50'
 
 /**
  * The trigger reads as a control: it is one, and the only thing it adds is a wide label.

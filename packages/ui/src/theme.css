@@ -55,6 +55,9 @@
   /* The tint of what is running, breathing on a live chip: a clear blue, apart from the amber a
      stuck chip is swept in, and light enough that the chip's text keeps its contrast over it. */
   --running-muted: #dbeafe;
+  /* What the hand rests on: a faint tint laid over whatever the surface is, never a fill of its
+     own — a row, an item, a button reads as touched, not as a grey slab. */
+  --hover: rgba(16, 16, 24, 0.04);
   --accent-foreground: #111118;
 
   /* The prototype's fuchsia is #d946ef, but white on it is 3.45:1: the solid fills take the next
@@ -125,6 +128,7 @@
   --accent: #121217;
   --skeleton: #27272f;
   --running-muted: rgba(59, 130, 246, 0.22);
+  --hover: rgba(255, 255, 255, 0.05);
   --accent-foreground: #ececf1;
 
   /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
@@ -352,12 +356,20 @@
    `hover` kind: a quick fade of its colours, never a jump. Fast and calm, because it is seen tens
    of times a minute; and nothing but colour, so nothing moves. */
 @utility hover-motion {
-  transition-property: color, background-color, border-color, filter;
+  transition-property: color, background-color, border-color, filter, box-shadow;
   transition-duration: var(--duration-fast);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;
   }
+}
+
+/* The tint of what the hand or the keyboard rests on, laid over the surface rather than replacing
+   it, inside the element's own radius: a card stays a card, a row stays the page, each a shade
+   touched. Worn through a variant — `hover:tinted`, `data-highlighted:tinted` — on the `hover`
+   kind. A shadow and not a background, because a shadow layers over the fill and fades. */
+@utility tinted {
+  box-shadow: inset 0 0 0 100vmax var(--hover);
 }
 
 /* The veil behind a dialog fades, and fades only: a blur in transition is computed again over the
