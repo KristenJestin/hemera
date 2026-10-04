@@ -514,8 +514,10 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
                   if (chosen === null || project === null) return
                   const path = inMainCheckout(project.mainCheckout, chosen)
                   // The picker answers later: the draft is the one written meanwhile.
-                  setWriting((now) =>
-                    now?.kind === 'repository' ? { ...now, draft: { ...now.draft, path } } : now,
+                  setWriting((shown) =>
+                    shown?.kind === 'repository'
+                      ? { ...shown, draft: { ...shown.draft, path } }
+                      : shown,
                   )
                 })
               }}

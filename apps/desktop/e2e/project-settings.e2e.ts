@@ -9,7 +9,7 @@
 
 import { $, browser, expect } from '@wdio/globals'
 
-import { ACME, makeAcme } from './acme.ts'
+import { ACME, writeAcme } from './acme.ts'
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
 import { choose, designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
 
@@ -21,7 +21,7 @@ describe('A Project added and set up from its settings', () => {
   })
 
   it('adds Acme from its folder: the repositories found, and one added by hand', async () => {
-    makeAcme()
+    writeAcme()
     await waitForEngine()
     await designSize()
     await $('nav[aria-label="Places"]').$('button*=Add a Project').click()
@@ -42,9 +42,11 @@ describe('A Project added and set up from its settings', () => {
 
   it('lists the three repositories in the Project’s settings', async () => {
     await settingsOf('acme')
-    for (const path of ['api', 'web', 'services/billing']) {
-      await expect($(`[data-repository="${path}"]`)).toBeDisplayed()
-    }
+    await Promise.all(
+      ['api', 'web', 'services/billing'].map((path) =>
+        expect($(`[data-repository="${path}"]`)).toBeDisplayed(),
+      ),
+    )
   })
 
   it('sets the base branch of api to dev, fetched from its remote', async () => {

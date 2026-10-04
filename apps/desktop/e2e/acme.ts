@@ -47,7 +47,7 @@ const GREETING = `console.log('Hello from Acme')
 `
 
 /** Makes Acme once; the suite that starts Hemera again finds it as the first one left it. */
-export function makeAcme(): void {
+export function writeAcme(): void {
   if (existsSync(ACME)) return
   const api = join(ACME, 'api')
   repository(api)

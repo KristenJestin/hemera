@@ -21,9 +21,11 @@ describe('Acme, found again after Hemera started anew', () => {
     await designSize()
     await $('nav[aria-label="Places"]').$('button*=acme').click()
     await settingsOf('acme')
-    for (const path of ['api', 'web', 'services/billing']) {
-      await expect($(`[data-repository="${path}"]`)).toBeDisplayed()
-    }
+    await Promise.all(
+      ['api', 'web', 'services/billing'].map((path) =>
+        expect($(`[data-repository="${path}"]`)).toBeDisplayed(),
+      ),
+    )
     await expect($('[data-repository="api"]')).toHaveText(expect.stringContaining('origin/dev'))
   })
 
