@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { type ReactNode, useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconFolder } from '../../icons.ts'
 import { Button } from '../button/button.tsx'
-import { List, ListItem, ListItemSkeleton } from './list.tsx'
+import { List, ListItem } from './list.tsx'
 
 /**
  * Rows of things that have a name: a square of icon, a title, a line under it, and something at
@@ -73,36 +74,90 @@ export const WithAction: Story = {
   },
 }
 
+/** The repositories of Acme, as the rows draw them once they are there. */
+const REPOSITORIES = [
+  { title: 'api', description: 'main · up to date', trailing: '2 min ago' },
+  { title: 'web', description: 'main · 2 commits behind', trailing: '1 h ago' },
+  { title: 'shared', description: 'release · up to date', trailing: 'yesterday' },
+] as const
+
+/** Every text of a part of the page that a reader could see. */
+function seenWords(room: HTMLElement): string[] {
+  const walker = document.createTreeWalker(room, NodeFilter.SHOW_TEXT)
+  const seen: string[] = []
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node.textContent?.trim() ?? ''
+    const holder = node.parentElement!
+    if (text !== '' && getComputedStyle(holder).visibility !== 'hidden') seen.push(text)
+  }
+  return seen
+}
+
+/** Where every part of every row stands, to the pixel. */
+function layoutOf(list: HTMLElement): string[] {
+  return [...list.querySelectorAll<HTMLElement>('li, li [data-part]')].map((part) => {
+    const box = part.getBoundingClientRect()
+    return `${part.dataset.part ?? 'row'} ${String(box.left)},${String(box.top)} ${String(box.width)}×${String(box.height)}`
+  })
+}
+
 /**
- * Rows on their way: the shape of a row, drawn now. The list says it is busy once, and a row on
- * its way is exactly as tall as the row that replaces it, so nothing moves when they arrive.
+ * Rows on their way: the very rows, in their loading mode — the same square, the same lines at
+ * the length of what they will say, the same thing at the end, each drawn in the skeleton's fill
+ * and nothing of the words showing. The list says it is busy, once.
  */
 export const Loading: Story = {
   render: (args) => (
-    <div className="relative flex flex-col">
-      <List label="Repositories of Acme" busy>
-        <ListItemSkeleton />
-        <ListItemSkeleton />
-        <ListItemSkeleton />
-      </List>
-      {/* The row that replaces them, laid over them and never seen: only its height is read. */}
-      <div aria-hidden="true" className="invisible absolute inset-x-0 top-0">
-        <List label="Arrived">
-          <ListItem {...args} />
-        </List>
-      </div>
-    </div>
+    <List label="Repositories of Acme" busy>
+      {REPOSITORIES.map((repository) => (
+        <ListItem key={repository.title} {...args} {...repository} loading />
+      ))}
+    </List>
   ),
   play: async ({ canvasElement }) => {
-    // Nothing of the content shows while it is on its way: no word over a grey bar.
-    expect(canvasElement.innerText.trim()).toBe('')
+    const list = within(canvasElement).getByRole('list', { name: 'Repositories of Acme' })
+    expect(list).toHaveAttribute('aria-busy', 'true')
+    expect(seenWords(canvasElement)).toEqual([])
+    expect(within(canvasElement).queryByRole('button')).toBeNull()
+  },
+}
+
+/** The rows of `Arriving`, loading or there, and the control that turns one into the other. */
+function Arriving(args: Parameters<typeof ListItem>[0]): ReactNode {
+  const [loading, setLoading] = useState(true)
+  return (
+    <div className="flex flex-col gap-4">
+      <Button variant="secondary" size="sm" onClick={() => setLoading((was) => !was)}>
+        {loading ? 'Show the rows' : 'Load again'}
+      </Button>
+      <List label="Repositories of Acme" busy={loading}>
+        {REPOSITORIES.map((repository) => (
+          <ListItem key={repository.title} {...args} {...repository} loading={loading} />
+        ))}
+      </List>
+    </div>
+  )
+}
+
+/**
+ * Loading, then there, then loading again: every row and every part of it stands exactly where
+ * its skeleton stood, so nothing on the page moves when the rows arrive.
+ */
+export const LoadingToFilled: Story = {
+  render: (args) => <Arriving {...args} />,
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const busy = canvas.getByRole('list', { name: 'Repositories of Acme' })
-    expect(busy).toHaveAttribute('aria-busy', 'true')
-    // The last of each, so neither carries the rule that parts a row from the next.
-    const skeleton = busy.lastElementChild!
-    const row = canvasElement.querySelector('[aria-hidden="true"] li')!
-    expect(skeleton.getBoundingClientRect().height).toBe(row.getBoundingClientRect().height)
+    const list = canvas.getByRole('list', { name: 'Repositories of Acme' })
+    const before = layoutOf(list)
+    expect(before.length).toBeGreaterThan(REPOSITORIES.length)
+    await userEvent.click(canvas.getByRole('button', { name: 'Show the rows' }))
+    await waitFor(() => {
+      expect(list).toHaveAttribute('aria-busy', 'false')
+    })
+    expect(layoutOf(list)).toEqual(before)
+    expect(canvas.getByRole('button', { name: /^web/ })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Load again' }))
+    expect(layoutOf(list)).toEqual(before)
   },
 }
 
