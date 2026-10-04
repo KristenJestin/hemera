@@ -33,7 +33,7 @@ import {
   workspaceStatus,
 } from '../src/engine/workspaces.ts'
 import { commitOnRemote, git } from './repositories.ts'
-import { removeFolders, temporaryFolder } from './storage.ts'
+import { endChild, removeFolders, temporaryFolder } from './storage.ts'
 import {
   REPOSITORIES,
   atlas,
@@ -345,7 +345,7 @@ describe('A removed Workspace is gone from the disk and from Git', () => {
           })
           yield* Effect.sleep('300 millis')
           const refusal = yield* Effect.flip(removeWorkspace(id)).pipe(
-            Effect.ensuring(Effect.sync(() => holder.kill())),
+            Effect.ensuring(Effect.promise(() => endChild(holder))),
           )
           return [refusal, prepared.workspace] as const
         }),

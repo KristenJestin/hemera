@@ -23,6 +23,7 @@ import {
   Data,
   Effect,
   Exit,
+  Fiber,
   FiberSet,
   Match,
   Option,
@@ -31,7 +32,7 @@ import {
   Schema,
   Stream,
 } from 'effect'
-import type { Fiber, Scope } from 'effect'
+import type { Cause, Scope } from 'effect'
 import { RpcClient, RpcClientError, RpcServer } from 'effect/rpc'
 import type { RpcMessage, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
@@ -147,9 +148,9 @@ const FromServer = Schema.Union([
 /** What the reader of a client handles: a server's message, or the news that the link closed. */
 type Incoming = typeof FromServer.Type | RpcMessage.ClientProtocolError
 
-/** What reaches one request: its stream items, then its exit. */
+/** What reaches one request: its stream items, then its exit; ended when the link closes. */
 type Response = RpcMessage.ResponseChunkEncoded | RpcMessage.ResponseExitEncoded
-type Mailbox = Queue.Queue<Response>
+type Mailbox = Queue.Queue<Response, Cause.Done>
 
 interface Delivery {
   readonly mailbox: Mailbox
@@ -274,7 +275,8 @@ export const makeClientProtocol = (
         })
 
       /**
-       * Hands one request's responses to the client that asked, in order, until its exit.
+       * Hands one request's responses to the client that asked, in order, until its exit, or
+       * until what arrived before the link closed has all been handed over.
        *
        * One fiber per request rather than the reader itself: RpcClient waits for room in a
        * stream's buffer, and a stream nobody reads (or one the caller has just interrupted) must
@@ -290,7 +292,10 @@ export const makeClientProtocol = (
             if (Exit.isFailure(delivered)) return port.post(interrupt({ requestId }))
             if (Predicate.isTagged(message, 'Exit')) return
           }
-        }).pipe(Effect.ensuring(Effect.sync(() => deliveries.delete(requestId))))
+        }).pipe(
+          Effect.catch(() => Effect.void),
+          Effect.ensuring(Effect.sync(() => deliveries.delete(requestId))),
+        )
 
       const toItsRequest = (
         message: RpcMessage.ResponseChunkEncoded | RpcMessage.ResponseExitEncoded,
@@ -300,13 +305,26 @@ export const makeClientProtocol = (
           if (delivery !== undefined) Queue.offerUnsafe(delivery.mailbox, message)
         })
 
+      /**
+       * The link closed. It is read here, after every message that arrived before it: a server
+       * that answers and exits at once (a program ending on the line it was sent) has its answer
+       * handed over, and the last items of a stream are read, before the calls still waiting fail.
+       */
+      const closeLink = (message: RpcMessage.ClientProtocolError): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const pending = [...deliveries.values()]
+          for (const { mailbox } of pending) Queue.endUnsafe(mailbox)
+          yield* Fiber.awaitAll(pending.map(({ fiber }) => fiber))
+          yield* everyClient(message)
+        })
+
       const handle = (message: Incoming): Effect.Effect<void> =>
         Match.value(message).pipe(
           Match.tagsExhaustive({
             Chunk: toItsRequest,
             Exit: toItsRequest,
             Defect: everyClient,
-            ClientProtocolError: everyClient,
+            ClientProtocolError: closeLink,
             Pong: () => Effect.void,
           }),
         )
@@ -323,7 +341,6 @@ export const makeClientProtocol = (
         },
         () => {
           closed ??= connectionClosed(peer)
-          for (const requestId of [...deliveries.keys()]) abandon(requestId)
           Queue.offerUnsafe(inbox, linkClosed({ error: closed }))
         },
       )
@@ -346,13 +363,15 @@ export const makeClientProtocol = (
       return {
         send: (clientId: number, message: RpcMessage.FromClientEncoded) =>
           Effect.gen(function* () {
+            // Before the closed link refuses it: a call given up after the close must not hold
+            // back the failure of the others while its stream waits to be read.
+            if (Predicate.isTagged(message, 'Interrupt')) abandon(message.requestId)
             if (closed !== undefined) return yield* Effect.fail(closed)
             if (Predicate.isTagged(message, 'Request')) {
-              const mailbox = yield* Queue.unbounded<Response>()
+              const mailbox = yield* Queue.unbounded<Response, Cause.Done>()
               const fiber = yield* Effect.forkIn(deliver(message.id, clientId, mailbox), scope)
               deliveries.set(message.id, { mailbox, fiber })
             }
-            if (Predicate.isTagged(message, 'Interrupt')) abandon(message.requestId)
             return yield* post(message)
           }),
         supportsAck: true,

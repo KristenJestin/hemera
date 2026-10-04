@@ -26,7 +26,7 @@ import {
   processSupervisorLayer,
   stillRuns,
 } from '../src/engine/supervisor.ts'
-import { type Storage, on, removeFolders, temporaryFolder } from './storage.ts'
+import { type Storage, endChild, on, removeFolders, temporaryFolder } from './storage.ts'
 import { opened } from './workspace-engine.ts'
 
 const onWindows = process.platform === 'win32'
@@ -44,11 +44,12 @@ beforeEach(async () => {
   await opened(data)
 })
 
-afterEach(() => {
-  for (const stray of strays.splice(0)) {
-    if (stray.pid !== undefined && alive(stray.pid)) stray.kill('SIGKILL')
-  }
-  for (const pid of strayPids.splice(0)) if (alive(pid)) process.kill(pid, 'SIGKILL')
+afterEach(async () => {
+  await Promise.all(strays.splice(0).map(endChild))
+  const left = strayPids.splice(0).filter(alive)
+  for (const pid of left) process.kill(pid, 'SIGKILL')
+  // Not children of this process: gone is what the system says.
+  await allGone(left)
   removeFolders()
 })
 
