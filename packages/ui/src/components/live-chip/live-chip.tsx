@@ -45,7 +45,7 @@ export const LIVE_WORDS: Record<LiveState, string> = {
 export const STUCK_AFTER = '5 minutes'
 
 const CHIP =
-  'relative isolate inline-flex h-control-sm max-w-chip min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring'
+  'relative isolate inline-flex h-control-sm max-w-chip min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring hover-motion'
 
 /** The icon's room, held by the chip's own icon whether it shows or not. */
 const MARK = 'relative flex shrink-0'

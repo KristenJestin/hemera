@@ -103,7 +103,7 @@ describe('The primary and the focus', () => {
   test('the primary fills a surface with its gradient, which both themes declare', () => {
     for (const side of ['light', 'dark'] as const) {
       expect(rolesIn(theme, side)).toEqual(
-        expect.arrayContaining(['primary-gradient', 'primary-gradient-strong', 'primary-raise']),
+        expect.arrayContaining(['primary-gradient', 'primary-raise']),
       )
     }
     expect(theme).toContain('@utility primary-fill {')

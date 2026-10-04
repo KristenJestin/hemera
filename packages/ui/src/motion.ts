@@ -78,6 +78,13 @@ export const durations = { fast: 0.16, base: 0.26, slow: 0.4, turn: 1.2 } as con
 export const easing: Easing = [0.25, 0.8, 0.25, 1]
 
 /**
+ * The `hover` kind: what changes colour under the hand or the keyboard — a row, an item, a button —
+ * fades on the `fast` beat rather than jumping. In CSS it is the theme's `hover-motion` utility,
+ * which components wear; this is the same beat for what motion drives.
+ */
+export const hover: Transition = { duration: durations.fast, ease: easing }
+
+/**
  * The transition to animate with, which is the kind asked for unless less movement was.
  *
  * motion's own `reducedMotion` jumps a transform to its target and keeps animating opacity and

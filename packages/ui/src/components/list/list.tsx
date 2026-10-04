@@ -21,7 +21,7 @@ import { Skeleton } from '../loading/loading.tsx'
 const ROW = 'flex w-full items-center gap-3 px-4 py-3 text-left'
 
 /** Rows that go somewhere answer the hand the way every control does. */
-const PRESSABLE = 'hover:bg-muted focus-ring'
+const PRESSABLE = 'hover:bg-muted focus-ring hover-motion'
 
 const RULE = 'border-b border-border last:border-b-0'
 

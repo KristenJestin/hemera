@@ -24,12 +24,11 @@ import { Loading } from '../loading/loading.tsx'
  * stops the keyboard from falling back to the top of the page under the user's hands.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 overflow-hidden border font-medium whitespace-nowrap outline-none focus-ring',
+  'inline-flex items-center justify-center gap-1.5 overflow-hidden border font-medium whitespace-nowrap outline-none focus-ring hover-motion',
   {
     variants: {
       variant: {
-        primary:
-          'border-primary-strong primary-fill text-primary-foreground hover:primary-fill-strong',
+        primary: 'border-primary-strong primary-fill text-primary-foreground hover:brightness-95',
         secondary: 'border-input bg-card text-foreground hover:bg-muted',
         // A ghost that is the current place draws no fill under the hand: it is drawn over its
         // list's mark, which is its fill already.

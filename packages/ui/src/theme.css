@@ -65,10 +65,8 @@
   --primary-muted: #fdf4ff;
   --primary-muted-foreground: #a21caf;
   /* The primary as it fills a surface: lit from above, a shade deeper at the bottom, a highlight
-     along its top edge and a soft shadow under it. White reads at 4.7:1 or more over all of it;
-     the strong one is what it turns to under the hand. */
+     along its top edge and a soft shadow under it. White reads at 4.7:1 or more over all of it. */
   --primary-gradient: linear-gradient(180deg, #c026d3 0%, #a21caf 100%);
-  --primary-gradient-strong: linear-gradient(180deg, #a21caf 0%, #86198f 100%);
   --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(134, 25, 143, 0.35);
 
   /* The tones: a solid colour for a dot or a glyph, and a tinted pair — a muted fill and its own
@@ -137,7 +135,6 @@
   --primary-muted-foreground: #f0abfc;
   /* Lit from above in the dark too; the page's own dark reads at 5.9:1 or more over all of it. */
   --primary-gradient: linear-gradient(180deg, #f0abfc 0%, #d946ef 100%);
-  --primary-gradient-strong: linear-gradient(180deg, #e879f9 0%, #d946ef 100%);
   --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.5);
 
   --success: #4ade80;
@@ -344,15 +341,23 @@
   }
 }
 
-/* What the primary fills a surface with: its gradient and its raise, never the flat colour. The
-   strong one is the same surface under the hand. */
+/* What the primary fills a surface with: its gradient and its raise, never the flat colour. Under
+   the hand it dims a shade (a filter, which the `hover` kind fades: a gradient cannot). */
 @utility primary-fill {
   background-image: var(--primary-gradient);
   box-shadow: var(--primary-raise);
 }
 
-@utility primary-fill-strong {
-  background-image: var(--primary-gradient-strong);
+/* What changes colour under the hand or the keyboard — a row, an item, a button — does so on the
+   `hover` kind: a quick fade of its colours, never a jump. Fast and calm, because it is seen tens
+   of times a minute; and nothing but colour, so nothing moves. */
+@utility hover-motion {
+  transition-property: color, background-color, border-color, filter;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
 }
 
 /* The veil behind a dialog fades, and fades only: a blur in transition is computed again over the

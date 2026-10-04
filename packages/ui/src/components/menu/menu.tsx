@@ -30,12 +30,12 @@ const POPUP =
  * pointer and the keyboard the way a ghost button does, and takes no size of its own.
  */
 const BARE =
-  'flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none focus-ring hover:bg-accent data-popup-open:bg-accent'
+  'flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none focus-ring hover-motion hover:bg-accent data-popup-open:bg-accent'
 
 const DETAIL = 'ml-auto pl-3 text-muted-foreground'
 
 const ITEM =
-  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent data-disabled:opacity-50'
+  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:bg-accent data-disabled:opacity-50'
 
 export interface MenuItem {
   label: string

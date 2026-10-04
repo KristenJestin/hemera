@@ -122,8 +122,8 @@ export const Error: Story = {
   inline style, no class built at run time (`@shadcn/lint` enforces it; `node tools/scales.ts`
   and `node tools/text-measure.ts` hold the scales). A value the theme lacks is added to the
   theme, named, in both themes (`tests/theme.test.ts` refuses a role declared in one theme
-  only). The primary fills a surface with its gradient (`primary-fill`, `primary-fill-strong`
-  under the hand), never the flat colour; focus is the theme's `focus-ring`.
+  only). The primary fills a surface with its gradient (`primary-fill`), never the flat colour;
+  focus is the theme's `focus-ring`; whatever changes colour under the hand wears `hover-motion`.
 - **Motion kinds only**: read a kind through `useTransition(kind)` from `motion.ts`; never your
   own spring, duration, curve or keyframe (`node tools/motion-presets.ts` refuses it). A movement
   with no kind is added to `motion.ts`, named and explained.
