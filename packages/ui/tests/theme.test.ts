@@ -2,7 +2,7 @@
  * What the theme claims about itself, read straight out of the file the application loads.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -63,6 +63,57 @@ describe('The theme is the only visual source', () => {
       expect(rolesIn(theme, 'light')).toContain(`${tone}-muted`)
       expect(rolesIn(theme, 'light')).toContain(`${tone}-muted-foreground`)
     }
+  })
+})
+
+/** The relative luminance of a colour written `#rrggbb`, as WCAG computes it. */
+function luminanceOf(hex: string): number {
+  const channels = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255)
+  const [r = 0, g = 0, b = 0] = channels.map((c) =>
+    c <= 0.039_28 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+  )
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** How two colours written `#rrggbb` stand apart, from 1 to 21. */
+function contrastOf(one: string, other: string): number {
+  const [light, dark] = [luminanceOf(one), luminanceOf(other)].toSorted((a, b) => b - a)
+  return (light! + 0.05) / (dark! + 0.05)
+}
+
+/** Every component's own source, stories left out. */
+const COMPONENTS = join(import.meta.dirname, '..', 'src', 'components')
+const componentSources = readdirSync(COMPONENTS).flatMap((folder) =>
+  readdirSync(join(COMPONENTS, folder))
+    .filter((file) => file.endsWith('.tsx') && !file.endsWith('.stories.tsx'))
+    .map((file) => ({ file, source: readFileSync(join(COMPONENTS, folder, file), 'utf8') })),
+)
+
+describe('The primary and the focus', () => {
+  test('the focus ring is opaque, and stands out from every surface at 3:1 or more', () => {
+    for (const side of ['light', 'dark'] as const) {
+      const ring = roleIn(theme, 'ring', side)
+      expect(ring).toMatch(/^#[\da-f]{6}$/)
+      for (const surface of ['background', 'surface-content', 'card', 'muted']) {
+        expect(contrastOf(ring, roleIn(theme, surface, side))).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
+
+  test('the primary fills a surface with its gradient, which both themes declare', () => {
+    for (const side of ['light', 'dark'] as const) {
+      expect(rolesIn(theme, side)).toEqual(
+        expect.arrayContaining(['primary-gradient', 'primary-gradient-strong', 'primary-raise']),
+      )
+    }
+    expect(theme).toContain('@utility primary-fill {')
+  })
+
+  test('no component fills a surface with the flat primary', () => {
+    const flat = componentSources
+      .filter(({ source }) => /(?<![\w-])(?:[\w-]+:)*bg-primary(?![\w-])/.test(source))
+      .map(({ file }) => file)
+    expect(flat).toEqual([])
   })
 })
 
