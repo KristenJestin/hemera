@@ -117,7 +117,9 @@ export const Loading: Story = {
     expect(working).toHaveAttribute('aria-disabled', 'true')
     working.focus()
     expect(document.activeElement).toBe(working)
-    expect(within(canvasElement).getByRole('status')).toBeInTheDocument()
+    const indicator = within(canvasElement).getByRole('status')
+    // What a working button shows is Hemera's face, loading: the one spinner of the catalogue.
+    expect(indicator.querySelector('[data-state="loading"]')).not.toBeNull()
     expect(getComputedStyle(working).cursor).toBe('not-allowed')
   },
 }

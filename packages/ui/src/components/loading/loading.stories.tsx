@@ -24,11 +24,10 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * The spinner, for what has no shape to draw: three dots a third of a turn apart, in the colour
- * of the text around them, at the three steps of the icon scale. Asked for less movement — as the
- * runner of these stories asks — the ring stands still.
+ * What has no shape to draw: Hemera's face in its loading state — three dots going round, in the
+ * colour of the text around them — at three steps. There is no other spinner in the catalogue.
  */
-export const Spinner: Story = {
+export const Indicator: Story = {
   render: (args) => (
     <div className="flex items-center gap-4 text-primary">
       <Loading {...args} size="sm" label="Loading, small" />
@@ -37,18 +36,21 @@ export const Spinner: Story = {
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const spinners = within(canvasElement).getAllByRole('status')
-    expect(spinners.map((one) => getComputedStyle(one).width)).toEqual(['16px', '18px', '22px'])
-    for (const spinner of spinners) {
-      const ring = spinner.firstElementChild!
-      const dots = [...ring.children]
-      expect(dots).toHaveLength(3)
-      expect(getComputedStyle(dots[0]!).backgroundColor).toBe(getComputedStyle(spinner).color)
-      expect(new Set(dots.map((dot) => getComputedStyle(dot).transform)).size).toBe(3)
-      expect(getComputedStyle(ring).animationName).toBe(
-        globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'turn',
-      )
+    const indicators = within(canvasElement).getAllByRole('status')
+    expect(indicators.map((one) => one.getAttribute('aria-label'))).toEqual([
+      'Loading, small',
+      'Loading',
+      'Loading, large',
+    ])
+    for (const indicator of indicators) {
+      const face = indicator.querySelector<HTMLElement>('[data-state="loading"]')
+      expect(face, 'the face, loading').not.toBeNull()
+      expect(face!.querySelector('svg')).not.toBeNull()
+      expect(indicator.querySelector('.orbit-0')).toBeNull()
     }
+    const widths = indicators.map((one) => one.getBoundingClientRect().width)
+    expect(widths[0]).toBeLessThan(widths[1]!)
+    expect(widths[1]).toBeLessThan(widths[2]!)
   },
 }
 

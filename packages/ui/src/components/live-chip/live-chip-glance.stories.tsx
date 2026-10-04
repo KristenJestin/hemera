@@ -59,6 +59,11 @@ function offered(glance: HTMLElement): string[] {
     .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '')
 }
 
+/** The lines of output a glance shows, top to bottom. */
+function tail(glance: HTMLElement): HTMLElement[] {
+  return [...glance.querySelectorAll<HTMLElement>('[data-output] > *')]
+}
+
 /** A chip and its glance. */
 function glanced(
   props: Omit<LiveChipProps, 'glance'>,
@@ -85,10 +90,33 @@ export const RunRunning: Story = glanced(
     startedAt: NOW - 84_000,
     endedAt: null,
   },
-  { kind: 'run', type: 'Command · pnpm test', step: 'Running 128 of 342 tests', ...actions() },
+  {
+    kind: 'run',
+    type: 'Command · pnpm test',
+    output: [
+      ' ✓ tests/invoices.test.ts (24 tests) 412ms',
+      ' ✓ tests/customers.test.ts (18 tests) 207ms',
+      ' ✓ tests/payments.test.ts (31 tests) 640ms',
+      ' ❯ tests/invoices-export.test.ts (12 tests) running',
+      '   ✓ exports one invoice as a row of the sheet with its tax lines and its due date',
+      '   ✓ exports three invoices',
+    ],
+    ...actions(),
+  },
   (glance) => {
     expect(glance).toHaveTextContent(/Running for \d+s/)
-    expect(glance).toHaveTextContent('Running 128 of 342 tests')
+    const lines = tail(glance)
+    // A short tail, the newest at the bottom, one line each, never wrapped.
+    expect(lines.map((line) => line.textContent)).toEqual([
+      ' ✓ tests/customers.test.ts (18 tests) 207ms',
+      ' ✓ tests/payments.test.ts (31 tests) 640ms',
+      ' ❯ tests/invoices-export.test.ts (12 tests) running',
+      '   ✓ exports one invoice as a row of the sheet with its tax lines and its due date',
+      '   ✓ exports three invoices',
+    ])
+    const height = lines[0]!.getBoundingClientRect().height
+    for (const line of lines) expect(line.getBoundingClientRect().height).toBe(height)
+    expect(getComputedStyle(lines[0]!).fontFamily).toMatch(/mono|Fira/i)
     expect(offered(glance)).toEqual(['Restart', 'Stop', 'Details'])
   },
 )
@@ -129,9 +157,21 @@ export const RunFinished: Story = glanced(
     startedAt: NOW - 84_000,
     endedAt: NOW,
   },
-  { kind: 'run', type: 'Command · pnpm build', output: ['✓ built in 4.2s'], ...actions() },
+  {
+    kind: 'run',
+    type: 'Command · pnpm build',
+    output: [
+      'vite v7.1.4 building for production...',
+      '✓ 1284 modules transformed.',
+      'dist/index.html                   0.41 kB',
+      'dist/assets/index-4f2a.js       361.20 kB',
+      '✓ built in 4.2s',
+    ],
+    ...actions(),
+  },
   (glance) => {
     expect(glance).toHaveTextContent('Done in 84s')
+    expect(tail(glance).length).toBeGreaterThanOrEqual(3)
     expect(offered(glance)).toEqual(['Run again', 'Details'])
   },
 )
@@ -145,9 +185,20 @@ export const ServiceRunning: Story = glanced(
     startedAt: NOW - 412_000,
     endedAt: null,
   },
-  { kind: 'service', type: 'Service · pnpm dev', url: 'http://localhost:5173', ...actions() },
+  {
+    kind: 'service',
+    type: 'Service · pnpm dev',
+    url: 'http://localhost:5173',
+    output: [
+      '  VITE v7.1.4  ready in 412 ms',
+      '  ➜  Local:   http://localhost:5173/',
+      '12:04:31 [vite] page reload src/invoices/export.ts',
+    ],
+    ...actions(),
+  },
   async (glance) => {
     expect(glance).toHaveTextContent('http://localhost:5173')
+    expect(tail(glance)).toHaveLength(3)
     expect(offered(glance)).toEqual([
       'Copy the address',
       'Open the address',
@@ -189,7 +240,12 @@ export const ServiceStopped: Story = glanced(
     startedAt: NOW - 3_000,
     endedAt: NOW,
   },
-  { kind: 'service', type: 'Service · pnpm dev', ...actions() },
+  {
+    kind: 'service',
+    type: 'Service · pnpm dev',
+    output: ['  VITE v7.1.4  ready in 412 ms', '  ➜  Local:   http://localhost:5173/', 'Stopped.'],
+    ...actions(),
+  },
   (glance) => {
     expect(glance).toHaveTextContent('Stopped after 3s')
     expect(offered(glance)).toEqual(['Restart', 'Details'])
@@ -207,7 +263,9 @@ export const HelperRunning: Story = glanced(
   },
   { kind: 'helper', type: 'Helper', step: 'Reading the changes of api', ...actions() },
   (glance) => {
+    // A helper says the step it is on, not lines of output.
     expect(glance).toHaveTextContent('Reading the changes of api')
+    expect(tail(glance)).toHaveLength(0)
     expect(offered(glance)).toEqual(['Details'])
   },
 )
@@ -241,8 +299,14 @@ export const ProbeRunning: Story = glanced(
     startedAt: NOW - 9_000,
     endedAt: null,
   },
-  { kind: 'probe', type: 'Probe · invoices export', step: 'Comparing 3 invoices', ...actions() },
+  {
+    kind: 'probe',
+    type: 'Probe · invoices export',
+    output: ['Exporting 3 invoices of Acme', 'invoice 40: 6 rows', 'invoice 41: 4 rows'],
+    ...actions(),
+  },
   (glance) => {
+    expect(tail(glance)).toHaveLength(3)
     expect(offered(glance)).toEqual(['Details'])
   },
 )
@@ -259,7 +323,7 @@ export const ProbeFailed: Story = glanced(
   {
     kind: 'probe',
     type: 'Probe · invoices export',
-    output: ['2 of 3 invoices exported'],
+    output: ['invoice 40: 6 rows', 'invoice 41: 4 rows', 'invoice 42: expected 3 rows, received 2'],
     ...actions(),
   },
   (glance) => {
