@@ -6,6 +6,7 @@
     "dev": "vp run --filter !hemera --parallel dev",
     "typecheck": "vp run --filter !hemera typecheck",
     "lint": "vp lint && node tools/window-options.ts && node tools/boundaries.ts && node tools/motion-presets.ts && node tools/scales.ts && node tools/text-measure.ts",
+    "doctor": "react-doctor --no-telemetry --yes",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "test": "vp test",
@@ -22,6 +23,7 @@
     "@semantic-release/release-notes-generator": "14.1.1",
     "@shadcn/lint": "0.2.0",
     "@types/node": "24.19.1",
+    "react-doctor": "0.9.14",
     "semantic-release": "25.0.9",
     "typescript": "7.0.2",
     "vite-plus": "1.0.0"

@@ -4,7 +4,7 @@
 made directly on them; run `node tools/install-hooks.ts` once after cloning to enable it.
 
 On GitHub, the same rule is a ruleset on `main` and `dev`: no direct push, no deletion, no
-force push, a pull request and the `commit-messages` and `verify` checks required.
+force push, a pull request and the `commit-messages`, `doctor` and `verify` checks required.
 
 ## Merge method (to set on the repository)
 

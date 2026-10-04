@@ -82,6 +82,8 @@ pnpm typecheck                   # tsc per package, through Vite+ task running
 pnpm lint                        # oxlint, then the window options, boundaries, motion, scale
                                  # and text-measure checks
 pnpm fmt                         # oxfmt (fmt:check in CI)
+pnpm run doctor                  # React Doctor on packages/ui and the renderer; fails on an
+                                 # error-level finding (`run`: `pnpm doctor` is pnpm's own)
 pnpm test                        # vitest (in a terminal: `pnpm exec vp test run`, no watching)
 pnpm build                       # the bundles of the application
 pnpm package                     # portable package of this target, channel dev
@@ -248,5 +250,5 @@ downloaded or installed while the application runs.
 
 ## When done
 
-Run `pnpm check`, `pnpm build` and, when the window changed, the headless end-to-end suite,
-and report the real output. If something fails, say so; don't claim green.
+Run `pnpm check`, `pnpm run doctor`, `pnpm build` and, when the window changed, the headless
+end-to-end suite, and report the real output. If something fails, say so; don't claim green.

@@ -27,6 +27,43 @@ jobs:
             node tools/commit-message.ts --range "$base..$head"
           fi
 
+  # React Doctor, the React-specific check: on a pull request it reads only the files the change
+  # touches and fails on a finding at error level it brings in; on a push it reads everything. It
+  # posts nothing anywhere: the log and the job summary hold the report.
+  doctor:
+    runs-on: ubuntu-latest
+    env:
+      REACT_DOCTOR_NO_TELEMETRY: '1'
+      NO_COLOR: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Scan the React code
+        shell: bash
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -n "$base" ]; then
+            set -- --scope changed --base "$base"
+          fi
+          set +e
+          pnpm run doctor "$@" 2>&1 | tee "$RUNNER_TEMP/doctor.log"
+          status=${PIPESTATUS[0]}
+          {
+            echo '## React Doctor'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/doctor.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
   verify:
     strategy:
       fail-fast: false
