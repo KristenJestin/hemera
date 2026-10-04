@@ -11,7 +11,6 @@ export default defineConfig({
     plugins: ['typescript', 'oxc', 'import'],
     // The design-system rules: no colour outside the theme, no arbitrary Tailwind value, no
     // inline style, no class built at run time, no restyling of a component through className.
-    // The design system itself comes back with its own ticket; the rules stand now.
     jsPlugins: [
       '@shadcn/lint',
       { name: 'anti-slop', specifier: './tools/oxlint/anti-slop/index.ts' },
@@ -20,7 +19,7 @@ export default defineConfig({
     settings: {
       shadcn: {
         ui: '@hemera/ui',
-        note: 'Every visual value comes from the design system theme; see AGENTS.md, UI rules.',
+        note: 'Every visual value comes from packages/ui/src/theme.css; see AGENTS.md, UI rules.',
       },
     },
     categories: {
@@ -71,6 +70,11 @@ export default defineConfig({
       'anti-slop-effect/no-service-constructor-imports': 'error',
       'anti-slop-effect/prefer-effect-match': 'error',
     },
+    // A component is the one place a class of its own is not a restyling: inside it, a colour and
+    // a padding are the design decision. Everywhere else, passing one is taking it back.
+    overrides: [
+      { files: ['packages/ui/src/components/**'], rules: { 'shadcn/no-restyle': 'off' } },
+    ],
     ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED],
   },
   fmt: {
@@ -96,6 +100,9 @@ export default defineConfig({
           testTimeout: 30_000,
         },
       },
+      // Every story of the design system, played in a headless Chromium once per theme.
+      './packages/ui/vitest.config.ts',
+      './packages/ui/vitest.dark.config.ts',
     ],
   },
 })

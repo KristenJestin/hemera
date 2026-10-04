@@ -1,0 +1,484 @@
+/*
+ * The theme of Hemera: the one place a colour, a size, a radius, a shadow or a duration is
+ * written down. Tailwind reads it and the renderer loads it.
+ *
+ * Two layers, and the order matters. The first declares the roles as plain custom properties,
+ * once per theme, so that swapping a class on `<html>` swaps every value at once. The second
+ * hands those roles to Tailwind with `@theme inline`, which keeps the `var()` in the generated
+ * utility instead of freezing the value it had at build time: without `inline` the dark theme
+ * would compile away.
+ *
+ * None of Tailwind's own palette survives: `--color-*: initial` clears it, so a class like
+ * `bg-red-500` cannot be generated and the lint has something real to refuse.
+ */
+
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/fira-code';
+
+/* The classes of the design system live beside this file, not in whatever loads it: an
+   application's own build looks under its own root and would never find them. Everything beside
+   this file, and not a list of folders somebody has to remember to add to. */
+@source '.';
+
+/* The dark theme is a class on `<html>`, not a media query: the page follows the system by
+   putting the class there, and the user can take it off without the system changing. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Roles, light ---- */
+:root {
+  color-scheme: light;
+
+  --background: #ededf0;
+  --foreground: #111118;
+  --card: #ffffff;
+  --card-foreground: #111118;
+
+  /* The four surfaces, from the furthest back to what is being looked at. What is read all day
+     is the content, so the content is the strongest colour of the theme and the chrome around it
+     is the quiet one; a frame on the content lifts again, its rim a step off it and its body a
+     step off the rim. In a light theme there is nothing above white, so a body on white is told
+     apart by its rim and its line rather than by its fill. */
+  --surface-page: #ededf0;
+  --surface-content: #ffffff;
+  --surface-rim: #f2f2f5;
+  --surface-body: #ffffff;
+
+  --muted: #f6f6f8;
+  /* A shade under the prototype's dim grey, which landed half a point short of what small text
+     needs on the light background. */
+  --muted-foreground: #63636f;
+  --accent: #e9e9ee;
+  /* What a shape on its way is drawn in: a step darker than any surface it stands on, so it is
+     seen on a card as on the page. */
+  --skeleton: #e2e2e8;
+  /* What a field is filled with: the muted surface at a little over half its strength, so the box
+     reads as somewhere to type and a key drawn inside it, on the full muted surface with its
+     edge, stands out of it. */
+  --input-fill: color-mix(in srgb, var(--muted) 60%, transparent);
+  /* The tint of what is running, breathing on a live chip: a clear blue, apart from the amber a
+     stuck chip is swept in, and light enough that the chip's text keeps its contrast over it. */
+  --running-muted: #dbeafe;
+  /* What the hand rests on: a faint tint laid over whatever the surface is, never a fill of its
+     own — a row, an item, a button reads as touched, not as a grey slab. */
+  --hover: rgba(16, 16, 24, 0.04);
+  /* The same touch on a command that cannot be undone: as faint, in the destructive tone. */
+  --hover-destructive: rgba(220, 38, 38, 0.08);
+  --accent-foreground: #111118;
+
+  /* The prototype's fuchsia is #d946ef, but white on it is 3.45:1: the solid fills take the next
+     shade down, which reads at 4.7:1. */
+  --primary: #c026d3;
+  --primary-foreground: #ffffff;
+  --primary-strong: #a21caf;
+  --primary-muted: #fdf4ff;
+  --primary-muted-foreground: #a21caf;
+  /* The primary as it fills a surface: lit from above, a shade deeper at the bottom, a highlight
+     along its top edge and a soft shadow under it. White reads at 4.7:1 or more over all of it. */
+  --primary-gradient: linear-gradient(180deg, #c026d3 0%, #a21caf 100%);
+  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(134, 25, 143, 0.35);
+
+  /* The tones: a solid colour for a dot or a glyph, and a tinted pair — a muted fill and its own
+     ink — that passes AA in both themes. */
+  --success: #16a34a;
+  --success-muted: #ecfdf3;
+  --success-muted-foreground: #157a3a;
+  --warning: #d97706;
+  --warning-muted: #fffbeb;
+  --warning-muted-foreground: #b45309;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --destructive-muted: #fef2f2;
+  --destructive-muted-foreground: #b91c1c;
+  --info: #2563eb;
+  --info-muted: #eff6ff;
+  --info-muted-foreground: #1d4ed8;
+  --build: #0891b2;
+  --build-muted: #ecfeff;
+  --build-muted-foreground: #0e7490;
+
+  --border: #e2e2e8;
+  --input: #d3d3db;
+  /* The focus ring is the primary itself, opaque: a pale ring on a pale field is a ring nobody
+     sees. It stands out from every surface at 3:1 or more. */
+  --ring: #c026d3;
+  --overlay: rgba(16, 16, 24, 0.2);
+
+  /* What dragging across a text leaves behind: opaque, with a foreground of its own, so it
+     answers for its own contrast whatever the text was before it was selected. */
+  --selection: #f0abfc;
+  --selection-foreground: #111118;
+
+  --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
+  --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+}
+
+/* ---- Roles, dark ---- */
+.dark {
+  color-scheme: dark;
+
+  --background: #040406;
+  --foreground: #ececf1;
+  --card: #18181e;
+  --card-foreground: #ececf1;
+
+  /* The same four, and here they all fit: the chrome is the page's own black, the content one
+     step up, a frame's rim another and its body another still. */
+  --surface-page: #040406;
+  --surface-content: #0e0e12;
+  --surface-rim: #121217;
+  --surface-body: #18181e;
+
+  --muted: #0e0e12;
+  --muted-foreground: #9a9aab;
+  --accent: #121217;
+  --skeleton: #27272f;
+  --input-fill: color-mix(in srgb, var(--muted) 60%, transparent);
+  --running-muted: rgba(59, 130, 246, 0.22);
+  --hover: rgba(255, 255, 255, 0.05);
+  --hover-destructive: rgba(248, 113, 113, 0.12);
+  --accent-foreground: #ececf1;
+
+  /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
+  --primary: #e879f9;
+  --primary-foreground: #040406;
+  --primary-strong: #d946ef;
+  --primary-muted: rgba(232, 121, 249, 0.1);
+  --primary-muted-foreground: #f0abfc;
+  /* Lit from above in the dark too; the page's own dark reads at 5.9:1 or more over all of it. */
+  --primary-gradient: linear-gradient(180deg, #f0abfc 0%, #d946ef 100%);
+  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.5);
+
+  --success: #4ade80;
+  --success-muted: rgba(74, 222, 128, 0.1);
+  --success-muted-foreground: #4ade80;
+  --warning: #fbbf24;
+  --warning-muted: rgba(251, 191, 36, 0.1);
+  --warning-muted-foreground: #fbbf24;
+  --destructive: #f87171;
+  --destructive-foreground: #040406;
+  --destructive-muted: rgba(248, 113, 113, 0.1);
+  --destructive-muted-foreground: #f87171;
+  --info: #60a5fa;
+  --info-muted: rgba(96, 165, 250, 0.1);
+  --info-muted-foreground: #60a5fa;
+  --build: #22d3ee;
+  --build-muted: rgba(34, 211, 238, 0.1);
+  --build-muted-foreground: #22d3ee;
+
+  --border: #27272f;
+  --input: #363640;
+  --ring: #e879f9;
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  --selection: #6b1f7a;
+  --selection-foreground: #ececf1;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- The Tailwind theme reads the roles, never the raw values ---- */
+@theme inline {
+  --color-*: initial;
+
+  /* The two colours that are not values: what is behind, and whatever the text already is. */
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-surface-page: var(--surface-page);
+  --color-surface-content: var(--surface-content);
+  --color-surface-rim: var(--surface-rim);
+  --color-surface-body: var(--surface-body);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-muted: var(--primary-muted);
+  --color-primary-muted-foreground: var(--primary-muted-foreground);
+
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-success-muted-foreground: var(--success-muted-foreground);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-warning-muted-foreground: var(--warning-muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-muted: var(--destructive-muted);
+  --color-destructive-muted-foreground: var(--destructive-muted-foreground);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+  --color-info-muted-foreground: var(--info-muted-foreground);
+  --color-build: var(--build);
+  --color-build-muted: var(--build-muted);
+  --color-build-muted-foreground: var(--build-muted-foreground);
+
+  --color-border: var(--border);
+  --color-skeleton: var(--skeleton);
+  --color-input-fill: var(--input-fill);
+  --color-running-muted: var(--running-muted);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
+
+  --shadow-sm: var(--shadow);
+  --shadow-lg: var(--shadow-raised);
+}
+
+/* ---- The scales, the same under both themes ---- */
+@theme {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'Fira Code Variable', ui-monospace, monospace;
+
+  /* The base is fourteen, and ordinary text is the base. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.25rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.375rem;
+  --text-2xl--line-height: 2rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Named steps of the spacing scale, so an icon or a control is sized by the scale and not by a
+     number: `size-icon-md` is a spacing utility like any other, and the scale check can close the
+     list. */
+
+  /* Icons at sixteen, eighteen and twenty-two: an icon beside a word has to weigh as much as the
+     word. */
+  --spacing-icon-sm: 1rem;
+  --spacing-icon-md: 1.125rem;
+  --spacing-icon-lg: 1.375rem;
+
+  /* How big the face is drawn as the subject of a page: an empty page, before anything runs. Past
+     the largest step of the scale, so it reads as what the page is about rather than as an icon
+     grown up. */
+  --spacing-face-hero: 8rem;
+
+  /* How tall a control is drawn, one step per size of the components; a change of density is
+     these lines rather than a search through the catalogue. shadcn's own steps: 28, 32 and 36
+     pixels, so a control reads as part of the line it sits on rather than as a slab. */
+  --spacing-control-sm: 1.75rem;
+  --spacing-control-md: 2rem;
+  --spacing-control-lg: 2.25rem;
+
+  /* How tall a control is drawn when it is a link, which is text and not a surface: one line of
+     the base size. It has to stay equal to the line height of `text-base`. */
+  --spacing-control-text: 1.25rem;
+
+  /* How wide a live chip may grow before its name ends in an ellipsis: wide enough for a name to
+     be read, narrow enough for a line of chips to stay a line. */
+  --spacing-chip: 11.5rem;
+  /* The least a live chip's name is given, however narrow the line: a few words, never a few
+     letters. The chip does not shrink below its name's least and its seconds whole. */
+  --spacing-chip-name: 4rem;
+  /* How wide a live chip's glance is: a long command, an address and three lines of output read
+     without wrapping every other word. */
+  --spacing-glance: 20rem;
+
+  /* How tall a dialog may be drawn, whatever it holds: past that only its body scrolls. A share
+     of the window, because it is the window it has to leave a margin in. */
+  --spacing-dialog: 70vh;
+
+  /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
+     gives the springs, for the transitions Base UI drives through data attributes. */
+  --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --duration-fast: 160ms;
+  --duration-base: 260ms;
+  --duration-slow: 400ms;
+
+  /* One turn of the loading indicator. Linear on purpose: a spin that eases is a spin that looks
+     like it keeps stopping. */
+  --duration-turn: 1200ms;
+  --animate-turn: turn var(--duration-turn) linear infinite;
+
+  /* The breath of what is running: one turn long, because a dot and a spinner are read side by
+     side, and two rhythms beating against each other make a page look nervous. It moves nothing
+     but the opacity. */
+  --animate-breathe: breathe var(--duration-turn) var(--ease-calm) infinite;
+
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes breathe {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* A focus ring that arrives instead of snapping on. The ring is a shadow drawn once on a layer of
+   its own, and what moves is that layer's opacity. It is drawn inside the control rather than
+   around it, because a control that hides its overflow would clip a ring sitting outside it. */
+@utility focus-ring {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px var(--color-ring);
+    opacity: 0;
+    pointer-events: none;
+    transition-property: opacity;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-calm);
+    @media (prefers-reduced-motion: reduce) {
+      transition-property: none;
+    }
+  }
+
+  &:focus-visible::after,
+  /* A control that cannot carry the ring itself wears it through the box around it: an input is a
+     replaced element, and a replaced element renders no pseudo-element at all. */
+  &:has(:focus-visible)::after {
+    opacity: 1;
+  }
+}
+
+/* What the primary fills a surface with: its gradient and its raise, never the flat colour. Under
+   the hand it dims a shade (a filter, which the `hover` kind fades: a gradient cannot). */
+@utility primary-fill {
+  background-image: var(--primary-gradient);
+  box-shadow: var(--primary-raise);
+}
+
+/* What changes colour under the hand or the keyboard — a row, an item, a button — does so on the
+   `hover` kind: a quick fade of its colours, never a jump. Fast and calm, because it is seen tens
+   of times a minute; and nothing but colour, so nothing moves. */
+@utility hover-motion {
+  transition-property: color, background-color, border-color, filter, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The tint of what the hand or the keyboard rests on, laid over the surface rather than replacing
+   it, inside the element's own radius: a card stays a card, a row stays the page, each a shade
+   touched. Worn through a variant — `hover:tinted`, `data-highlighted:tinted` — on the `hover`
+   kind. A shadow and not a background, because a shadow layers over the fill and fades. */
+@utility tinted {
+  box-shadow: inset 0 0 0 100vmax var(--hover);
+}
+
+/* The tint of a destructive command under the hand: the same touch, in its own tone. */
+@utility tinted-destructive {
+  box-shadow: inset 0 0 0 100vmax var(--hover-destructive);
+}
+
+/* The veil behind a dialog fades, and fades only: a blur in transition is computed again over the
+   whole window on every frame, which is the frame the page behind it is seen to jump on. */
+@utility backdrop-motion {
+  transition-property: opacity;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The properties a popup enters and leaves on, named once so that no component writes the list.
+   `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as the
+   individual properties, and a transition naming `transform` never sees them. A popup comes down
+   from its trigger and folds back up into it rather than growing out of a corner. */
+@utility popup-motion {
+  /* Grown from the side of its trigger, which Base UI names; a dialog, which has no trigger to
+     grow from, keeps its middle. */
+  transform-origin: var(--transform-origin, center);
+  transition-property: opacity, translate, scale;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What the box of a checkbox does as it is checked: its fill and its edge fade on the beat its
+   tick draws on, so a tick undrawing is still drawn on the fill it is the colour of. */
+@utility check-motion {
+  transition-property: background-color, border-color;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What a chevron does while the list it opens is open: it turns over, so the control says which
+   way it is facing. */
+@utility chevron-motion {
+  transition-property: rotate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A hand means "this does something", everywhere something is pressed, and nowhere something
+     refuses to be. */
+  button:not(:disabled, [aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true'], [data-disabled]),
+  [role='option']:not([aria-disabled='true'], [data-disabled]),
+  [role='tab']:not([aria-disabled='true'], [data-disabled]),
+  [role='checkbox']:not([aria-disabled='true'], [data-disabled]),
+  [role='combobox']:not([aria-disabled='true'], [data-disabled]),
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'],
+  [role='menuitem'][data-disabled],
+  [role='option'][data-disabled] {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background-color: var(--color-selection);
+    color: var(--color-selection-foreground);
+  }
+}

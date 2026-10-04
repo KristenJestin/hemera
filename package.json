@@ -5,12 +5,13 @@
   "scripts": {
     "dev": "vp run --filter !hemera --parallel dev",
     "typecheck": "vp run --filter !hemera typecheck",
-    "lint": "vp lint && node tools/window-options.ts && node tools/boundaries.ts",
+    "lint": "vp lint && node tools/window-options.ts && node tools/boundaries.ts && node tools/motion-presets.ts && node tools/scales.ts && node tools/text-measure.ts",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "test": "vp test",
     "build": "vp run --filter !hemera build",
     "package": "node tools/package-desktop.ts",
+    "storybook": "pnpm --filter @hemera/ui storybook",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {
