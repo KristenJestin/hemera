@@ -124,10 +124,10 @@ describe('The density of the interface', () => {
     expect(theme).toContain('font-size: var(--text-base);')
   })
 
-  test('a control is thirty-two, thirty-six or forty-four pixels tall', () => {
-    expect(tokenIn(theme, 'spacing-control-sm')).toBe('2rem')
-    expect(tokenIn(theme, 'spacing-control-md')).toBe('2.25rem')
-    expect(tokenIn(theme, 'spacing-control-lg')).toBe('2.75rem')
+  test('a control is twenty-eight, thirty-two or thirty-six pixels tall, as shadcn draws them', () => {
+    expect(tokenIn(theme, 'spacing-control-sm')).toBe('1.75rem')
+    expect(tokenIn(theme, 'spacing-control-md')).toBe('2rem')
+    expect(tokenIn(theme, 'spacing-control-lg')).toBe('2.25rem')
   })
 
   test('a link is one line of the base size tall', () => {

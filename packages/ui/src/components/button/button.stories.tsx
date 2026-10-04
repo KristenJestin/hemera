@@ -27,7 +27,10 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** What a page asks for once: three sizes, each a step of the scale and not a number. */
+/**
+ * What a page asks for once: three sizes, each a step of the scale and not a number — 28, 32 and
+ * 36 pixels, shadcn's own small, default and large.
+ */
 export const Primary: Story = {
   args: { variant: 'primary' },
   render: (args) => (
@@ -47,7 +50,12 @@ export const Primary: Story = {
     const heights = within(canvasElement)
       .getAllByRole('button')
       .map((button) => getComputedStyle(button).height)
-    expect(heights).toEqual(['32px', '36px', '44px'])
+    expect(heights).toEqual(['28px', '32px', '36px'])
+    // The same room either side of the label at every size, as shadcn gives it.
+    const paddings = within(canvasElement)
+      .getAllByRole('button')
+      .map((button) => getComputedStyle(button).paddingLeft)
+    expect(new Set(paddings).size).toBe(1)
   },
 }
 
