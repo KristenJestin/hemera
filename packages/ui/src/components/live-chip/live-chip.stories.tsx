@@ -100,7 +100,9 @@ export const Running: Story = {
     const chip = within(canvasElement).getByRole('button', { name: 'test, running' })
     const breath = chip.querySelector('[data-breath]')
     expect(breath).not.toBeNull()
-    expect(getComputedStyle(breath!).backgroundColor).toBe(fillOf(canvasElement, 'bg-info-muted'))
+    expect(getComputedStyle(breath!).backgroundColor).toBe(
+      fillOf(canvasElement, 'bg-running-muted'),
+    )
     expect(getComputedStyle(breath!).backgroundColor).not.toBe(
       fillOf(canvasElement, 'bg-warning-muted'),
     )

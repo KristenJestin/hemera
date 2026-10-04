@@ -1,19 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { HelperChip } from './helper-chip.tsx'
 
 /**
- * A helper, and only the helper: its letter avatar and its name. No dot: its state is the chip's
- * own background, as on the live chip — a tint breathing while it works, one sweep in the colour
- * of the state it changes to. Nothing to press on it and no ×: nobody stops a helper by hand. The
- * state in words is a tooltip on the avatar.
+ * A helper's chip is a live chip: the same chip, breath and sweeps, whose icon slot holds the
+ * helper's letter avatar and which shows no seconds — only the helper, its avatar and its name.
+ * Its tooltip says the helper's name and its state. No ×: nobody stops a helper by hand.
  */
 const meta = {
   tags: ['autodocs'],
   title: 'Components/HelperChip',
   component: HelperChip,
-  args: { name: 'Reviewer', state: 'running' },
+  args: { name: 'Reviewer', state: 'running', onPress: fn() },
   argTypes: {
     name: { control: 'text' },
     state: {
@@ -23,61 +22,74 @@ const meta = {
     others: { table: { disable: true } },
     tone: { table: { disable: true } },
   },
+  decorators: [
+    (Story) => (
+      <div className="p-12">
+        <Story />
+      </div>
+    ),
+  ],
 } satisfies Meta<typeof HelperChip>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The chip of a helper, its avatar and its name and nothing else: no dot, no button, no ×. */
-function bare(canvasElement: HTMLElement): HTMLElement {
-  const chip = canvasElement.querySelector<HTMLElement>('[data-helper-chip]')!
-  expect(chip).toHaveTextContent(/^R\s*Reviewer$/)
-  expect(chip.querySelectorAll('[role="img"]')).toHaveLength(1)
-  expect(within(canvasElement).queryByRole('button')).toBeNull()
+/** The live chip of a helper: its avatar in the slot, its name, no seconds and no ×. */
+function chipOf(canvasElement: HTMLElement, words: string): HTMLElement {
+  const chip = within(canvasElement).getByRole('button', { name: `Reviewer, ${words}` })
+  expect(chip.dataset.liveChip).toBe('')
+  expect(chip.querySelector('[data-avatar]')).not.toBeNull()
+  expect(chip).not.toHaveTextContent(/\d+s/)
   expect(chip).not.toHaveTextContent('×')
   return chip
 }
 
-/** At work: its background breathes, and the avatar's legend says so. */
+/** Hovers the chip and reads its legend. */
+async function legendOf(chip: HTMLElement): Promise<string> {
+  await userEvent.hover(chip)
+  const tip = await waitFor(() => within(document.body).getByRole('tooltip'))
+  const said = tip.textContent ?? ''
+  await userEvent.unhover(chip)
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('tooltip')).toBeNull()
+  })
+  return said
+}
+
+/** At work: the live chip's breath, in the running tone. */
 export const Running: Story = {
   play: async ({ canvasElement }) => {
-    const chip = bare(canvasElement)
+    const chip = chipOf(canvasElement, 'running')
     expect(chip.querySelector('[data-breath]')).not.toBeNull()
-    const avatar = within(canvasElement).getByRole('img', { name: 'Reviewer, running' })
-    await userEvent.tab()
-    expect(avatar).toHaveFocus()
-    await waitFor(() => {
-      expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Reviewer, running')
-    })
-    await userEvent.tab()
+    expect(await legendOf(chip)).toBe('Reviewer · running')
   },
 }
 
-/** No activity for five minutes: the breath stops. */
+/** No activity for five minutes: the breath stops, the paused clock takes the avatar's place. */
 export const Stuck: Story = {
   args: { state: 'stuck' },
   play: async ({ canvasElement }) => {
-    const chip = bare(canvasElement)
+    const chip = chipOf(canvasElement, 'no activity')
     expect(chip.querySelector('[data-breath]')).toBeNull()
-    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, no activity' })).toBeVisible()
+    expect(chip.querySelector('[data-end="stuck"]')).not.toBeNull()
   },
 }
 
-/** Done: neutral again. */
+/** Done: neutral again, a ✓ in the avatar's place. */
 export const Finished: Story = {
   args: { state: 'finished' },
   play: async ({ canvasElement }) => {
-    expect(bare(canvasElement).querySelector('[data-breath]')).toBeNull()
-    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, done' })).toBeVisible()
+    const chip = chipOf(canvasElement, 'done')
+    expect(chip.querySelector('[data-end="finished"]')).not.toBeNull()
+    expect(await legendOf(chip)).toBe('Reviewer · done')
   },
 }
 
-/** Failed. */
+/** Failed: a ✕ in the avatar's place. */
 export const Failed: Story = {
   args: { state: 'failed' },
   play: async ({ canvasElement }) => {
-    bare(canvasElement)
-    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, failed' })).toBeVisible()
+    expect(chipOf(canvasElement, 'failed').querySelector('[data-end="failed"]')).not.toBeNull()
   },
 }
 
@@ -85,8 +97,7 @@ export const Failed: Story = {
 export const Stopped: Story = {
   args: { state: 'stopped' },
   play: async ({ canvasElement }) => {
-    bare(canvasElement)
-    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, stopped' })).toBeVisible()
+    expect(chipOf(canvasElement, 'stopped').querySelector('[data-end="stopped"]')).not.toBeNull()
   },
 }
 
