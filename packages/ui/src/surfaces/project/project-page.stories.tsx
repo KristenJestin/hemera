@@ -126,6 +126,8 @@ export const Focused: Story = {
     await userEvent.tab()
     const field = canvas.getByRole('textbox', { name: 'Start a mission in Acme' })
     expect(field).toHaveFocus()
+    // The keystroke that reaches the field is inside its box, after the text.
+    expect(field.closest('[data-input-box]')).toContainElement(canvas.getByText('Ctrl'))
     await userEvent.keyboard('Export the audit log{Enter}')
     expect(args.onStart).toHaveBeenCalledWith('Export the audit log')
   },

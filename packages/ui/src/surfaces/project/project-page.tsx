@@ -126,7 +126,7 @@ export function ProjectPage({
           event.preventDefault()
           onStart(text.trim())
         }}
-        action={<Kbd keys="Ctrl+K" />}
+        trailing={<Kbd keys="Ctrl+K" />}
       />
       {error !== undefined && (
         <ErrorState title={`Hemera could not read ${name}`} description={error} onRetry={onRetry} />
