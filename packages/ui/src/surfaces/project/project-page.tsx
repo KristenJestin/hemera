@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import type { Ball } from '../../blocks/ball/ball-mark.tsx'
@@ -10,7 +11,8 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { Kbd } from '../../components/kbd/kbd.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconInbox, IconSearch, IconSettings } from '../../icons.ts'
+import { IconChevronRight, IconInbox, IconSearch, IconSettings } from '../../icons.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { Page, PageHeader } from '../page.tsx'
 
 /**
@@ -24,7 +26,9 @@ import { Page, PageHeader } from '../page.tsx'
  * at its end. Its content — tickets, ideas, what it finds — is a later slice; here it is the field.
  *
  * Then the missions, grouped by stage, each group a heading and its rows, the row a mission is
- * everywhere; `Done` is folded away at the end. A Project with no mission says so once, in the
+ * everywhere. A group that starts folded — `Done`, at the end — is a real fold: its header is a
+ * button with a chevron, and pressing it opens the same framed list on the `fold` kind, and folds
+ * it back. A Project with no mission says so once, in the
  * middle of the room the missions will take.
  */
 export interface ProjectRepository {
@@ -43,14 +47,17 @@ export interface ProjectStageGroup {
   /** The stage's name, in the words of the product: `Planning`, `Building`… */
   stage: string
   rows: readonly ProjectMissionRow[]
+  /**
+   * Whether the group folds, and how it starts: `folded` or `open`. A group without it is always
+   * open and has no chevron.
+   */
+  fold?: 'folded' | 'open' | undefined
 }
 
 export interface ProjectPageProps {
   name: string
   repositories: readonly ProjectRepository[]
   groups: readonly ProjectStageGroup[]
-  /** How many missions are done or cancelled, folded away at the end. */
-  done: number
   loading?: boolean | undefined
   error?: string | undefined
   onStart: (text: string) => void
@@ -68,13 +75,92 @@ const GROUP = 'flex flex-col gap-2'
 const STAGE =
   'flex h-control-text items-center gap-2 px-1 text-sm font-medium text-muted-foreground'
 
+/** The header of a group that folds: the same line, pressable, the chevron at its end. */
+const STAGE_BUTTON =
+  'flex h-control-text items-center gap-2 rounded-md px-1 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion'
+
 const COUNT = 'text-xs text-muted-foreground tabular-nums'
+
+const CHEVRON = 'flex shrink-0 chevron-motion aria-expanded:rotate-90'
+
+/** The body of a group that folds: clipped while it grows, its room above it held inside. */
+const FOLDING = 'overflow-hidden'
+
+function StageRows({
+  group,
+  onOpenMission,
+}: {
+  group: ProjectStageGroup
+  onOpenMission: (missionKey: string) => void
+}): ReactNode {
+  return (
+    <Frame>
+      <ul aria-label={`${group.stage} missions`} className="flex flex-col">
+        {group.rows.map((row) => (
+          <MissionRow
+            key={row.missionKey}
+            missionKey={row.missionKey}
+            title={row.title}
+            when={row.when}
+            ball={row.ball}
+            onOpen={() => onOpenMission(row.missionKey)}
+          />
+        ))}
+      </ul>
+    </Frame>
+  )
+}
+
+/** A group whose rows fold away under its header, and come back on the `fold` kind. */
+function FoldingGroup({
+  group,
+  onOpenMission,
+}: {
+  group: ProjectStageGroup
+  onOpenMission: (missionKey: string) => void
+}): ReactNode {
+  const folding = useTransition(fold)
+  const [open, setOpen] = useState(group.fold === 'open')
+  return (
+    <section className="flex flex-col">
+      <h2 className="flex">
+        <button
+          type="button"
+          className={STAGE_BUTTON}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {group.stage}
+          <span className={COUNT}>{group.rows.length}</span>
+          <span className={CHEVRON} aria-expanded={open} aria-hidden="true">
+            <IconChevronRight size="sm" />
+          </span>
+        </button>
+      </h2>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="rows"
+            className={FOLDING}
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <div className="pt-2">
+              <StageRows group={group} onOpenMission={onOpenMission} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
+  )
+}
 
 export function ProjectPage({
   name,
   repositories,
   groups,
-  done,
   loading = false,
   error,
   onStart,
@@ -152,34 +238,19 @@ export function ProjectPage({
       )}
       {groups
         .filter((group) => group.rows.length > 0)
-        .map((group) => (
-          <section key={group.stage} className={GROUP}>
-            <h2 className={STAGE}>
-              {group.stage}
-              <span className={COUNT}>{group.rows.length}</span>
-            </h2>
-            <Frame>
-              <ul aria-label={`${group.stage} missions`} className="flex flex-col">
-                {group.rows.map((row) => (
-                  <MissionRow
-                    key={row.missionKey}
-                    missionKey={row.missionKey}
-                    title={row.title}
-                    when={row.when}
-                    ball={row.ball}
-                    onOpen={() => onOpenMission(row.missionKey)}
-                  />
-                ))}
-              </ul>
-            </Frame>
-          </section>
-        ))}
-      {done > 0 && !loading && (
-        <p className={STAGE}>
-          Done
-          <span className={COUNT}>{done}</span>
-        </p>
-      )}
+        .map((group) =>
+          group.fold === undefined ? (
+            <section key={group.stage} className={GROUP}>
+              <h2 className={STAGE}>
+                {group.stage}
+                <span className={COUNT}>{group.rows.length}</span>
+              </h2>
+              <StageRows group={group} onOpenMission={onOpenMission} />
+            </section>
+          ) : (
+            <FoldingGroup key={group.stage} group={group} onOpenMission={onOpenMission} />
+          ),
+        )}
     </Page>
   )
 }

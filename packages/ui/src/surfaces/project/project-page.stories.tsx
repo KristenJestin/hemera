@@ -1,7 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_NAME, LONG_TITLE, REPOSITORIES, STAGE_GROUPS } from '../../shell/shell-fixtures.tsx'
+import {
+  DONE_GROUP,
+  LONG_NAME,
+  LONG_TITLE,
+  REPOSITORIES,
+  STAGE_GROUPS,
+} from '../../shell/shell-fixtures.tsx'
 import { ProjectPage } from './project-page.tsx'
 
 /**
@@ -17,7 +23,6 @@ const meta = {
     name: 'Acme',
     repositories: REPOSITORIES,
     groups: STAGE_GROUPS,
-    done: 4,
     onStart: fn(),
     onOpenMission: fn(),
     onOpenSettings: fn(),
@@ -25,7 +30,6 @@ const meta = {
   },
   argTypes: {
     name: { control: 'text' },
-    done: { control: 'number' },
     loading: { control: 'boolean' },
     error: { control: 'text' },
     repositories: { table: { disable: true } },
@@ -45,7 +49,7 @@ type Story = StoryObj<typeof meta>
 
 /** A Project with no mission yet: the header, the field, and the empty state in the room below. */
 export const Empty: Story = {
-  args: { groups: [], done: 0 },
+  args: { groups: [] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByText('No mission yet')).toBeVisible()
@@ -53,7 +57,7 @@ export const Empty: Story = {
   },
 }
 
-/** Four stages, one mission each, four done: the page as a Project is lived in. */
+/** Four stages, one mission each, four done folded away: the page as a Project is lived in. */
 export const Filled: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -86,14 +90,65 @@ export const Dense: Story = {
           ball: 'agent' as const,
         })),
       },
+      {
+        stage: 'Done',
+        fold: 'folded',
+        rows: Array.from({ length: 128 }, (_, index) => ({
+          missionKey: `ACME-${String(index + 1)}`,
+          title: LONG_TITLE,
+          when: 'last week',
+          ball: 'idle' as const,
+        })),
+      },
     ],
-    done: 128,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const title = canvas.getByRole('heading', { level: 1 })
     expect(getComputedStyle(title).textOverflow).toBe('ellipsis')
     expect(canvas.getAllByRole('listitem')).toHaveLength(12)
+  },
+}
+
+/** Done folded, as the page opens: its header says how many, and the chevron opens them. */
+export const DoneFolded: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const header = canvas.getByRole('button', { name: /^Done/ })
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull()
+    await userEvent.click(header)
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    const list = await canvas.findByRole('list', { name: 'Done missions' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+    await userEvent.click(header)
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull())
+  },
+}
+
+/** Done open: its four missions in the same framed list as every stage; the keyboard folds it. */
+export const DoneOpen: Story = {
+  args: {
+    groups: [
+      ...STAGE_GROUPS.filter((group) => group !== DONE_GROUP),
+      { ...DONE_GROUP, fold: 'open' },
+    ],
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Done missions' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+    await userEvent.click(within(list).getByRole('button', { name: /ACME-9/ }))
+    expect(args.onOpenMission).toHaveBeenCalledWith('ACME-9')
+    const header = canvas.getByRole('button', { name: /^Done/ })
+    header.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull())
+    await userEvent.keyboard(' ')
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    expect(await canvas.findByRole('list', { name: 'Done missions' })).toBeVisible()
   },
 }
 

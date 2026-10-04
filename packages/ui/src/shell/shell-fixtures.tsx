@@ -163,6 +163,18 @@ export function denseRows(count: number, waiting = false): HomeRow[] {
   }))
 }
 
+/** The missions done in Acme, folded away at the end of its page. */
+export const DONE_GROUP: ProjectStageGroup = {
+  stage: 'Done',
+  fold: 'folded',
+  rows: [
+    { missionKey: 'ACME-9', title: 'Export the movements', when: 'yesterday', ball: 'idle' },
+    { missionKey: 'ACME-8', title: 'Sort invoices by due date', when: 'Monday', ball: 'idle' },
+    { missionKey: 'ACME-7', title: 'A filter on the customer', when: 'Monday', ball: 'idle' },
+    { missionKey: 'ACME-5', title: 'Rename the billing tab', when: 'last week', ball: 'idle' },
+  ],
+}
+
 export const STAGE_GROUPS: readonly ProjectStageGroup[] = [
   {
     stage: 'Review',
@@ -201,6 +213,7 @@ export const STAGE_GROUPS: readonly ProjectStageGroup[] = [
       },
     ],
   },
+  DONE_GROUP,
 ]
 
 /** A minute and a half ago, for the services that run. */
@@ -730,7 +743,6 @@ export function AppFixture({
           name={projectName(page.id)}
           repositories={REPOSITORIES}
           groups={page.id === ACME.id || page.id === 'p3' ? STAGE_GROUPS : []}
-          done={page.id === ACME.id ? 4 : 0}
           onStart={() => {}}
           onOpenMission={goMission}
           onOpenSettings={() => {}}
