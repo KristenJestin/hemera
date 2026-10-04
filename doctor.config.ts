@@ -18,7 +18,7 @@ export default {
   },
   ignore: {
     overrides: [
-      // A dialog body grows with what it holds on `morph`, by design (AGENTS.md, interface rules).
+      // A dialog body grows with what it holds on `morph`, by design (packages/ui/AGENTS.md, interface conventions).
       {
         files: ['src/components/dialog/dialog.tsx'],
         rules: ['react-doctor/no-layout-property-animation'],
