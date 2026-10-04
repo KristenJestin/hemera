@@ -367,3 +367,27 @@ export const RunningToFailed: Story = change('failed')
 
 /** Working, then stopped: one quiet sweep in the neutral accent, and the stop glyph. */
 export const RunningToStopped: Story = change('stopped')
+
+/**
+ * Squeezed by a line too narrow for it: the chip keeps its minimum width, so its name stays
+ * readable and its seconds whole, and the line scrolls or wraps rather than the chip giving way.
+ */
+export const Squeezed: Story = {
+  args: { name: 'pnpm --filter @acme/api exec vitest run', ...lasted(112), state: 'finished' },
+  render: (args) => (
+    <div className="flex w-16">
+      <LiveChip {...args} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', { name: /, done$/ })
+    const time = within(chip).getByText('112s')
+    const name = chip.querySelector<HTMLElement>('[data-name]')!
+    expect(time.scrollWidth).toBeLessThanOrEqual(time.clientWidth)
+    expect(time.getBoundingClientRect().right).toBeLessThanOrEqual(
+      chip.getBoundingClientRect().right,
+    )
+    // Room for a few words, not a few letters.
+    expect(name.getBoundingClientRect().width).toBeGreaterThanOrEqual(64)
+  },
+}
