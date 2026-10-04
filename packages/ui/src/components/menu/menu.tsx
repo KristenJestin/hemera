@@ -37,6 +37,13 @@ const DETAIL = 'ml-auto pl-3 text-muted-foreground'
 const ITEM =
   'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:tinted data-disabled:opacity-50'
 
+/**
+ * A command that cannot be undone: its words and its icon in the destructive tone — the icon is
+ * drawn in `currentColor` — and the hand's tint faintly in that tone too.
+ */
+const DESTRUCTIVE_ITEM =
+  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-destructive outline-none select-none hover-motion data-highlighted:tinted-destructive data-disabled:opacity-50'
+
 export interface MenuItem {
   label: string
   /** One icon of the catalogue, before the label. */
@@ -46,6 +53,8 @@ export interface MenuItem {
   /** The keystroke that does the same thing, shown but not bound here. */
   shortcut?: string | undefined
   disabled?: boolean | undefined
+  /** Whether it cannot be undone: said in the destructive tone, icon and tint included. */
+  destructive?: boolean | undefined
   onSelect?: (() => void) | undefined
 }
 
@@ -135,7 +144,8 @@ export function Menu({
                     key={item.label}
                     disabled={item.disabled === true}
                     onClick={() => item.onSelect?.()}
-                    className={ITEM}
+                    className={item.destructive === true ? DESTRUCTIVE_ITEM : ITEM}
+                    data-tone={item.destructive === true ? 'destructive' : undefined}
                   >
                     {item.icon}
                     {item.label}
