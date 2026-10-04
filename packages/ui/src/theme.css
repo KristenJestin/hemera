@@ -87,6 +87,8 @@
   --warning-muted: #fffbeb;
   --warning-muted-foreground: #b45309;
   --destructive: #dc2626;
+  /* A filled destructive: the same red in both themes, its white label at 4.8:1. */
+  --destructive-fill: #dc2626;
   --destructive-foreground: #ffffff;
   --destructive-muted: #fef2f2;
   --destructive-muted-foreground: #b91c1c;
@@ -157,8 +159,12 @@
   --warning: #fbbf24;
   --warning-muted: rgba(251, 191, 36, 0.1);
   --warning-muted-foreground: #fbbf24;
+  /* The dark destructive is a light red where it must read on the page: text, icons, an error's
+     glyph, an invalid field's edge. A filled destructive is the light theme's own, white label
+     and all. */
   --destructive: #f87171;
-  --destructive-foreground: #040406;
+  --destructive-fill: #dc2626;
+  --destructive-foreground: #ffffff;
   --destructive-muted: rgba(248, 113, 113, 0.1);
   --destructive-muted-foreground: #f87171;
   --info: #60a5fa;
@@ -214,6 +220,7 @@
   --color-warning-muted: var(--warning-muted);
   --color-warning-muted-foreground: var(--warning-muted-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-fill: var(--destructive-fill);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-muted: var(--destructive-muted);
   --color-destructive-muted-foreground: var(--destructive-muted-foreground);
