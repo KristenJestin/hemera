@@ -13,7 +13,10 @@ import {
   makeServerProtocol,
   WindowRpcs,
   UnknownProject,
+  ShellSyntax,
+  type CommandDraft,
   type EngineStatus,
+  type Run,
   type EnvironmentReport,
   type Project,
 } from '@hemera/ipc'
@@ -23,6 +26,7 @@ import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { ENGINE_START_LIMIT, watchEngine, type EngineState } from '../src/renderer/engine-start.ts'
 import { linkOver, type Link } from '../src/renderer/link.ts'
+import { SILENT_LINK } from './fake-link.ts'
 
 const status: EngineStatus = {
   ready: true,
@@ -60,6 +64,43 @@ const acme: Project = {
   createdAt: '2026-10-04T08:00:00.000Z',
   updatedAt: '2026-10-04T08:00:00.000Z',
   repositories: [],
+}
+
+const COMMAND: CommandDraft = {
+  name: 'web',
+  type: 'serve',
+  line: 'pnpm dev && open',
+  lineWindows: null,
+  lineLinux: null,
+  repositoryId: null,
+  folder: null,
+  scope: 'project',
+  portless: false,
+  portlessName: null,
+  check: false,
+  atOpen: false,
+  askBeforeRunning: false,
+  readOnly: false,
+  writeGlobs: [],
+}
+
+const SERVICE: Run = {
+  id: 'run-1',
+  projectId: 'acme',
+  workspaceId: null,
+  commandId: 'web',
+  name: 'web',
+  type: 'serve',
+  line: 'pnpm dev',
+  folder: '/work/acme',
+  startedBy: 'user',
+  sessionId: null,
+  state: 'ready',
+  exitCode: null,
+  url: 'http://localhost:5173',
+  portConflict: null,
+  startedAt: '2026-10-04T08:00:00.000Z',
+  endedAt: null,
 }
 
 const unused = () => Effect.die('the window’s link is not asked for Projects here')
@@ -135,7 +176,11 @@ const main = async (engine: 'answers' | 'gone') => {
       Effect.sync(() => {
         logsShown += 1
       }),
+    'application.chooseFolder': () => Effect.succeed('/work/acme'),
     ...noProjects,
+    'catalogue.save': () => Effect.fail(new ShellSyntax({ token: '&&' })),
+    'variables.reveal': ({ key }) => Effect.succeed(`value of ${key}`),
+    'runs.changes': () => Stream.concat(Stream.make(SERVICE), Stream.never),
     'projects.list': () => Effect.succeed([acme]),
     'projects.get': ({ id }) =>
       id === acme.id ? Effect.succeed(acme) : Effect.fail(new UnknownProject({ id })),
@@ -190,6 +235,38 @@ describe('The window’s link, for components and hooks', () => {
     expect(changed.name).toBe('Acme Corp')
   })
 
+  test('the window asks main for the system’s folder picker, and hears the folder chosen', async () => {
+    const { link } = await main('answers')
+    await expect(link.chooseFolder()).resolves.toBe('/work/acme')
+  })
+
+  test('a save the engine refuses rejects with its typed refusal, its sentence intact', async () => {
+    const { link } = await main('answers')
+    const refusal = await link.saveCommand({ projectId: 'acme', id: null, command: COMMAND }).then(
+      () => new Error('the save was not refused'),
+      (error: Error) => error,
+    )
+    expect(refusal).toBeInstanceOf(ShellSyntax)
+    expect(refusal.message).toContain('“&&” is shell syntax')
+  })
+
+  test('a variable’s value is read on request, and the runs are followed as they change', async () => {
+    const { link } = await main('answers')
+    await expect(
+      link.revealVariable({ projectId: 'acme', workspaceId: null, key: 'TOKEN' }),
+    ).resolves.toBe('value of TOKEN')
+    const heard = await new Promise<Run>((resolve) => {
+      const stop = link.onRunChanges(
+        (run) => {
+          stop()
+          resolve(run)
+        },
+        () => undefined,
+      )
+    })
+    expect(heard).toEqual(SERVICE)
+  })
+
   test('the window asks main to show the diagnostic log', async () => {
     const { link, logsShown } = await main('answers')
     await link.showLog()
@@ -230,18 +307,14 @@ const scripted = () => {
   let answer: ((status: EngineStatus) => void) | undefined
   let end: ((error: EngineGone) => void) | undefined
   const link: Link = {
+    ...SILENT_LINK,
     engineStatus: () => new Promise((resolve) => (answer = resolve)),
     onEngineStatus: (_, onEnd) => {
       end = onEnd
       return () => undefined
     },
     environmentReport: async () => report,
-    relaunch: async () => undefined,
-    showLog: async () => undefined,
     projects: async () => [],
-    project: () => new Promise(() => undefined),
-    onProjectChanges: () => () => undefined,
-    close: () => undefined,
   }
   return {
     link,

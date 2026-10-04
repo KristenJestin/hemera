@@ -1,0 +1,52 @@
+/**
+ * A window's link that answers nothing unless a test says what: every call stays on its way, and
+ * every stream hears nothing. A test spreads what it plays over it.
+ */
+
+import type { Link } from '../src/renderer/link.ts'
+
+const never = <A>(): Promise<A> => new Promise<A>(() => undefined)
+const silent = () => () => undefined
+
+export const SILENT_LINK: Link = {
+  engineStatus: never,
+  onEngineStatus: silent,
+  environmentReport: never,
+  relaunch: never,
+  showLog: never,
+  chooseFolder: never,
+  projects: never,
+  project: never,
+  onProjectChanges: silent,
+  detectRepositories: never,
+  createProject: never,
+  setWorkspacesRoot: never,
+  setBranchPrefix: never,
+  addRepository: never,
+  removeRepository: never,
+  updateRepository: never,
+  repositoryStatus: never,
+  remotes: never,
+  setRemote: never,
+  setBaseBranch: never,
+  upToDateBase: never,
+  onRepositoryChanges: silent,
+  recipe: never,
+  saveRecipe: never,
+  checkRecipe: never,
+  variables: never,
+  setVariable: never,
+  removeVariable: never,
+  revealVariable: never,
+  catalogue: never,
+  saveCommand: never,
+  removeCommand: never,
+  checkLine: never,
+  runs: never,
+  startRun: never,
+  stopRun: never,
+  restartRun: never,
+  runOutput: never,
+  onRunChanges: silent,
+  close: () => undefined,
+}
