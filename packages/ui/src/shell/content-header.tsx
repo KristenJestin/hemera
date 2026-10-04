@@ -9,7 +9,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
 } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
+import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 
 /**
  * The line across the top of the sheet: the sidebar's fold, where you are, and what the page
@@ -18,8 +18,9 @@ import { arrival, useTransition } from '../motion.ts'
  * Where you are is one breadcrumb for the whole window — `Acme › ACME-12 › Review · round 1 ›
  * Spec` — the Project, the mission, its stage, and the views opened over it when the mission
  * navigates as a stack. Every crumb but the last goes back to what it names; the last is where
- * you are. A crumb arriving or leaving does so by its own width, pushing what stands after it,
- * so the trail grows and shrinks rather than redrawing.
+ * you are. A crumb arrives whole, at its own width, fading in on `crossfade`, and leaves at once:
+ * a crumb with room is never clipped nor cut short while it moves, so its width is never what
+ * animates.
  *
  * The line is the window's drag zone, as is the sidebar's head beside it: a frameless window
  * is moved by its top edge, and the two heads are that edge. The system's own controls are drawn
@@ -38,12 +39,8 @@ const HERE =
 
 const SEPARATOR = 'flex shrink-0 text-muted-foreground'
 
-/** A crumb arriving and leaving by its own width, pushing what stands after it. */
-const SLOT = 'flex shrink-0 items-center overflow-hidden'
-
-const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
-
-const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
+/** A crumb: whole from its first frame, cut short only when the line truly lacks room. */
+const SLOT = 'flex min-w-0 items-center'
 
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-1 no-drag'
 
@@ -77,7 +74,7 @@ export function ContentHeader({
   actions,
   controls,
 }: ContentHeaderProps): ReactNode {
-  const arriving = useTransition(arrival)
+  const fading = useTransition(crossfade)
   const last = crumbs.at(-1)
   return (
     <header className={HEADER}>
@@ -104,15 +101,16 @@ export function ContentHeader({
         </Tooltip>
       </span>
       <nav aria-label="Where you are" className={CRUMBS}>
+        {/* No exit: a crumb that leaves goes at once, so the one taking its place never waits
+            beside it for room. */}
         <AnimatePresence initial={false}>
           {crumbs.map((crumb, index) => (
             <motion.span
               key={crumb.id}
               className={SLOT}
-              initial={HIDDEN}
-              animate={SHOWN}
-              exit={HIDDEN}
-              transition={arriving}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fading}
             >
               {index > 0 && (
                 <span className={SEPARATOR} aria-hidden="true">
