@@ -6,7 +6,7 @@
 
 import { MessageChannel } from 'node:worker_threads'
 
-import { Deferred, Effect, Exit, Fiber, Schema, Stream } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Predicate, Schema, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -64,8 +64,17 @@ const setup = Effect.gen(function* () {
         Stream.ensuring(Deferred.succeed(probes.badStopped, undefined)),
       ),
   })
+  /** When set, the serving port closes right after the next answer it posts. */
+  let closeAfterAnswer = false
+  const serving = fromMessagePort(serverPort)
   const server = yield* makeServerProtocol
-  server.accept(fromMessagePort(serverPort))
+  server.accept({
+    ...serving,
+    post: (message) => {
+      serving.post(message)
+      if (closeAfterAnswer && Predicate.isTagged(message, 'Exit')) serverPort.close()
+    },
+  })
   yield* RpcServer.make(ServerGroup, { disableFatalDefects: true }).pipe(
     Effect.provide(handlers),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -82,7 +91,16 @@ const setup = Effect.gen(function* () {
   const client = yield* RpcClient.make(ClientGroup).pipe(
     Effect.provideService(RpcClient.Protocol, protocol),
   )
-  return { client, probes, callerPort, serverPort, processExits: () => processExits() }
+  return {
+    client,
+    probes,
+    callerPort,
+    serverPort,
+    processExits: () => processExits(),
+    closeAfterAnswer: () => {
+      closeAfterAnswer = true
+    },
+  }
 })
 
 type Link = Effect.Success<typeof setup>
@@ -158,6 +176,27 @@ describe('A link over a MessagePort', () => {
         expect(isConnectionClosed(pending)).toBe(true)
         const later = yield* within(Effect.flip(client.Greet({ name: 'x' })), 'a later call')
         expect(isConnectionClosed(later)).toBe(true)
+      }),
+    ))
+
+  test('an answer that arrived before the serving port closed still reaches its call', () =>
+    run(({ client, closeAfterAnswer }) =>
+      Effect.gen(function* () {
+        // A program that exits on the line it was just sent: its answer and the close arrive
+        // together, and the close must not overtake what came before it.
+        closeAfterAnswer()
+        expect(yield* within(client.Greet({ name: 'last' }), 'the last answer')).toBe('hello last')
+        const later = yield* within(Effect.flip(client.Greet({ name: 'x' })), 'a later call')
+        expect(isConnectionClosed(later)).toBe(true)
+      }),
+    ))
+
+  test('the items of a stream that arrived before the serving port closed are all read', () =>
+    run(({ client, closeAfterAnswer }) =>
+      Effect.gen(function* () {
+        closeAfterAnswer()
+        const values = yield* within(Stream.runCollect(client.Count({ upTo: 40 })), 'Count')
+        expect(values).toEqual(Array.from({ length: 40 }, (_, index) => index + 1))
       }),
     ))
 
