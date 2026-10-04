@@ -12,8 +12,10 @@ import {
   fromMessagePort,
   makeServerProtocol,
   WindowRpcs,
+  UnknownProject,
   type EngineStatus,
   type EnvironmentReport,
+  type Project,
 } from '@hemera/ipc'
 import { Deferred, Effect, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -46,6 +48,18 @@ const report: EnvironmentReport = {
   dataFolder: '/data',
   notVerified: [],
   producedAt: '2026-10-03T00:00:00.000Z',
+}
+
+const acme: Project = {
+  id: 'acme',
+  name: 'Acme',
+  mainCheckout: '/work/acme',
+  workspacesRoot: null,
+  branchPrefix: null,
+  version: 1,
+  createdAt: '2026-10-04T08:00:00.000Z',
+  updatedAt: '2026-10-04T08:00:00.000Z',
+  repositories: [],
 }
 
 const unused = () => Effect.die('the window’s link is not asked for Projects here')
@@ -99,6 +113,7 @@ const noProjects = {
 /** A main that answers as told, and says when the window stopped listening. */
 const main = async (engine: 'answers' | 'gone') => {
   const stopped = Deferred.makeUnsafe<void>()
+  let logsShown = 0
   const { port1: windowPort, port2: mainPort } = new MessageChannel()
   const handlers = WindowRpcs.toLayer({
     'engine.status': () =>
@@ -116,7 +131,16 @@ const main = async (engine: 'answers' | 'gone') => {
     'profile.restore': () => Effect.void,
     'environment.report': () => Effect.succeed(report),
     'application.relaunch': () => Effect.void,
+    'application.showLog': () =>
+      Effect.sync(() => {
+        logsShown += 1
+      }),
     ...noProjects,
+    'projects.list': () => Effect.succeed([acme]),
+    'projects.get': ({ id }) =>
+      id === acme.id ? Effect.succeed(acme) : Effect.fail(new UnknownProject({ id })),
+    'projects.changes': () =>
+      Stream.concat(Stream.make({ ...acme, name: 'Acme Corp', version: 2 }), Stream.never),
   })
   const program = Effect.gen(function* () {
     const server = yield* makeServerProtocol
@@ -134,7 +158,11 @@ const main = async (engine: 'answers' | 'gone') => {
     link.close()
     fiber.interruptUnsafe()
   })
-  return { link, stopped: Effect.runPromise(Deferred.await(stopped)) }
+  return {
+    link,
+    stopped: Effect.runPromise(Deferred.await(stopped)),
+    logsShown: () => logsShown,
+  }
 }
 
 const cleanups: Array<() => void> = []
@@ -144,6 +172,30 @@ afterEach(() => {
 })
 
 describe('The window’s link, for components and hooks', () => {
+  test('the Projects are listed, read one by one and followed', async () => {
+    const { link } = await main('answers')
+    await expect(link.projects()).resolves.toEqual([acme])
+    await expect(link.project('acme')).resolves.toEqual(acme)
+    const failure = await link.project('gone').catch((error: Error) => error)
+    expect(failure).toBeInstanceOf(UnknownProject)
+    const changed = await new Promise<Project>((resolve) => {
+      const stop = link.onProjectChanges(
+        (project) => {
+          stop()
+          resolve(project)
+        },
+        () => undefined,
+      )
+    })
+    expect(changed.name).toBe('Acme Corp')
+  })
+
+  test('the window asks main to show the diagnostic log', async () => {
+    const { link, logsShown } = await main('answers')
+    await link.showLog()
+    expect(logsShown()).toBe(1)
+  })
+
   test('a call resolves with its value', async () => {
     const { link } = await main('answers')
     await expect(link.engineStatus()).resolves.toEqual(status)
@@ -185,6 +237,10 @@ const scripted = () => {
     },
     environmentReport: async () => report,
     relaunch: async () => undefined,
+    showLog: async () => undefined,
+    projects: async () => [],
+    project: () => new Promise(() => undefined),
+    onProjectChanges: () => () => undefined,
     close: () => undefined,
   }
   return {

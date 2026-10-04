@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hemera</title>
+    <!-- The theme main chose, worn before the first paint: see theme.ts. -->
+    <script>
+      document.documentElement.classList.toggle(
+        'dark',
+        matchMedia('(prefers-color-scheme: dark)').matches,
+      )
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,6 +1,6 @@
 /**
- * The smoke test of the empty application: it starts, its one window opens on the shell, and it
- * runs on the profile the suite gave it rather than on the one of the machine.
+ * The smoke test of the application: it starts, its one window opens on the shell, and it runs on
+ * the profile the suite gave it rather than on the one of the machine.
  */
 
 import { tmpdir } from 'node:os'
@@ -16,10 +16,12 @@ describe('The application opens its window', () => {
     expect(windows).toBe(1)
   })
 
-  it('mounts the shell, which says Hemera and nothing else', async () => {
-    const heading = $('h1')
-    await expect(heading).toBeDisplayed()
-    await expect(heading).toHaveText('Hemera')
+  it('mounts the shell: Hemera’s name at the head of the sidebar, Home and Settings', async () => {
+    const places = $('nav[aria-label="Places"]')
+    await expect(places).toBeDisplayed()
+    await expect(places).toHaveText('Hemera', { containing: true })
+    await expect(places.$('button=Home')).toBeDisplayed()
+    await expect(places.$('button=Settings')).toBeDisplayed()
   })
 
   it('runs on the throwaway profile the suite gave it', async () => {

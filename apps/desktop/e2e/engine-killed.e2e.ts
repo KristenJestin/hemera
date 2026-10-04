@@ -16,7 +16,8 @@ describe('An engine killed from outside', () => {
       const pid = globalThis.hemeraProbe?.enginePid()
       if (pid !== undefined) process.kill(pid)
     })
-    await expect($('[role="alert"]')).toHaveText('Hemera’s engine stopped.')
+    await expect($('[role="alert"]')).toHaveText('Hemera stopped', { containing: true })
+    await expect($('[role="alert"]')).toHaveText('Hemera’s engine stopped.', { containing: true })
     await expect($('button=Restart Hemera')).toBeDisplayed()
     await waitForLines(SPEC, /\[main\] the engine stopped with code/, 1)
     await waitForLines(

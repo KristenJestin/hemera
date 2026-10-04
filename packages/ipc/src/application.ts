@@ -1,6 +1,7 @@
 /**
- * What main itself answers the window: the environment report (`--report` prints the same one)
- * and the relaunch of the whole application.
+ * What main itself answers the window: the environment report (`--report` prints the same one),
+ * the relaunch of the whole application, and the diagnostic log shown in the system's file
+ * manager.
  */
 
 import { Schema } from 'effect'
@@ -43,4 +44,6 @@ export type EnvironmentReport = typeof EnvironmentReport.Type
 export const ApplicationRpcs = RpcGroup.make(
   Rpc.make('environment.report', { success: EnvironmentReport }),
   Rpc.make('application.relaunch', { success: Schema.Void }),
+  /** Shows `diagnostic.log` of the data folder in the system's file manager. */
+  Rpc.make('application.showLog', { success: Schema.Void }),
 )

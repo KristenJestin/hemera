@@ -14,7 +14,7 @@ import { Effect } from 'effect'
 import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, nativeTheme, screen } from 'electron/main'
 
-import { openDiagnosticLog, type Log } from './diagnostic.ts'
+import { DIAGNOSTIC_FILE, openDiagnosticLog, type Log } from './diagnostic.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
@@ -23,7 +23,8 @@ import { installProbe } from './probe.ts'
 import { rendererSource } from './renderer-source.ts'
 import { collectReport } from './report.ts'
 import { refreshDisplay, windowHandlers, type Application } from './window-link.ts'
-import { OPENING_COLORS, headless, windowOptions } from './window-options.ts'
+import { OPENING_COLORS } from './opening-colors.ts'
+import { headless, windowOptions } from './window-options.ts'
 import { serveWindows } from './window-ports.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
@@ -49,9 +50,21 @@ function isWebUrl(url: string): boolean {
   }
 }
 
+/** The opening colours of the theme the window wears now. */
+const wornColors = () => OPENING_COLORS[nativeTheme.shouldUseDarkColors ? 'dark' : 'light']
+
+/**
+ * Paints the frame of an open window in the theme worn now: what shows before the page draws (a
+ * reload) and the system's buttons, which the page cannot paint.
+ */
+function repaint(window: BrowserWindow): void {
+  const colors = wornColors()
+  window.setBackgroundColor(colors.background)
+  window.setTitleBarOverlay({ color: colors.sheet, symbolColor: colors.foreground })
+}
+
 async function openWindow(log: Log): Promise<BrowserWindow> {
-  const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-  const window = new BrowserWindow(windowOptions(main, OPENING_COLORS[theme], process.env))
+  const window = new BrowserWindow(windowOptions(main, wornColors(), process.env))
   const source = rendererSource()
 
   // A `window.open()` is always denied and a navigation away from the page is prevented; a web
@@ -100,6 +113,7 @@ const run = Effect.gen(function* () {
       app.relaunch()
       app.exit(0)
     }),
+    showLog: Effect.sync(() => shell.showItemInFolder(join(dataFolder, DIAGNOSTIC_FILE))),
     display: (preferences) =>
       Effect.sync(() => {
         nativeTheme.themeSource = preferences.theme
@@ -117,6 +131,10 @@ const run = Effect.gen(function* () {
     yield* installProbe(engine.probe, engine.process, windows, engine.client, application)
   }
   yield* Effect.promise(() => openWindow(log))
+  // The theme changes under the window — chosen in Hemera, or the system's when it follows it.
+  nativeTheme.on('updated', () => {
+    for (const window of BrowserWindow.getAllWindows()) repaint(window)
+  })
   // Only now may what waits for the window run: the commands run at each opening.
   yield* engine.client['engine.windowShown']().pipe(
     Effect.catch((failure) =>

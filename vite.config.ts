@@ -98,6 +98,9 @@ export default defineConfig({
           // Some of these start a process — git and its hooks, tsc — and on a runner that has
           // just been created that takes seconds, not the five a test is given by default.
           testTimeout: 30_000,
+          // A stylesheet imported as its text (`theme.css?raw`, the window's opening colours) is
+          // that text, as in the build; without this every stylesheet is empty under test.
+          css: true,
         },
       },
       // Every story of the design system, played in a headless Chromium once per theme.

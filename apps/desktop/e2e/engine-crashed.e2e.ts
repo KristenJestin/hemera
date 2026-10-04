@@ -10,7 +10,8 @@ describe('An engine that crashes', () => {
   it('fails the window’s pending call and shows the sentence and the restart', async () => {
     await waitForEngine()
     await browser.electron.execute(() => globalThis.hemeraProbe?.crashEngine())
-    await expect($('[role="alert"]')).toHaveText('Hemera’s engine stopped.')
+    await expect($('[role="alert"]')).toHaveText('Hemera stopped', { containing: true })
+    await expect($('[role="alert"]')).toHaveText('Hemera’s engine stopped.', { containing: true })
     await expect($('button=Restart Hemera')).toBeDisplayed()
     await waitForLines(SPEC, /\[main\] the engine stopped with code/, 1)
   })

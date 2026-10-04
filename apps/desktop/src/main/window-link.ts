@@ -33,6 +33,8 @@ export type EngineClient = RpcClient.RpcClient<
 export interface Application {
   readonly report: Effect.Effect<EnvironmentReport>
   readonly relaunch: Effect.Effect<void>
+  /** Shows the diagnostic log in the system's file manager. */
+  readonly showLog: Effect.Effect<void>
   /** The preferences the engine answered: worn now, and kept for the next start's first frame. */
   readonly display: (preferences: Preferences) => Effect.Effect<void>
 }
@@ -211,4 +213,5 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['runs.changes']().pipe(streamClosedAs(gone), observedStream('runs.changes', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
+    'application.showLog': () => application.showLog.pipe(observed('application.showLog', log)),
   })
