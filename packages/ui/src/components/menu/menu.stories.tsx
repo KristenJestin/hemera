@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { IconDots, IconFolder, IconPencil, IconPlus, IconTrash } from '../../icons.ts'
+import { IconBan, IconDots, IconFolder, IconPencil, IconPlus, IconTrash } from '../../icons.ts'
 import type { MenuItem } from './menu.tsx'
 import { Menu } from './menu.tsx'
 
@@ -131,5 +131,71 @@ export const Focused: Story = {
       expect(within(document.body).queryByRole('menu')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/** Reads the colour a theme class resolves to on this page, off a probe. */
+function colourOf(className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  document.body.append(probe)
+  const colour = getComputedStyle(probe).color
+  probe.remove()
+  return colour
+}
+
+/** The commands of a mission, the last one destructive, with or without its icon. */
+function mission(icon: boolean): MenuItem[][] {
+  return [
+    [
+      { label: 'Rename', icon: <IconPencil size="sm" />, onSelect: fn() },
+      { label: 'Duplicate', icon: <IconPlus size="sm" />, onSelect: fn() },
+    ],
+    [
+      {
+        label: 'Cancel mission…',
+        icon: icon ? <IconBan size="sm" /> : undefined,
+        destructive: true,
+        onSelect: fn(),
+      },
+    ],
+  ]
+}
+
+/** Opens the menu and gives back its destructive item, highlighted under the keyboard. */
+async function destructiveItem(canvasElement: HTMLElement): Promise<HTMLElement> {
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'ACME-12' }))
+  const menu = await waitFor(() => within(document.body).getByRole('menu'))
+  const item = within(menu).getByRole('menuitem', { name: 'Cancel mission…' })
+  // Said in the destructive tone, and touched in it: a faint tint of its own, not the neutral one.
+  expect(getComputedStyle(item).color).toBe(colourOf('text-destructive'))
+  await userEvent.hover(item)
+  await waitFor(() => {
+    expect(item).toHaveAttribute('data-highlighted')
+  })
+  expect(getComputedStyle(item).boxShadow).toContain('inset')
+  expect(item.dataset.tone).toBe('destructive')
+  return item
+}
+
+/**
+ * A command that cannot be undone, in the destructive tone: its words and its icon in red, and
+ * the hand's tint faintly red as well.
+ */
+export const DestructiveItem: Story = {
+  args: { label: 'ACME-12', groups: mission(true) },
+  play: async ({ canvasElement }) => {
+    const item = await destructiveItem(canvasElement)
+    const icon = item.querySelector('svg')!
+    expect(getComputedStyle(icon).color).toBe(colourOf('text-destructive'))
+  },
+}
+
+/** The same command without an icon: the tone alone says it. */
+export const DestructiveItemWithoutIcon: Story = {
+  args: { label: 'ACME-12', groups: mission(false) },
+  play: async ({ canvasElement }) => {
+    const item = await destructiveItem(canvasElement)
+    expect(item.querySelector('svg')).toBeNull()
   },
 }

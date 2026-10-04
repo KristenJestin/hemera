@@ -13,6 +13,7 @@
 import {
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
+  IconBan as TablerBan,
   IconCheck as TablerCheck,
   IconCheckFilled as TablerCheckFilled,
   IconChevronDown as TablerChevronDown,
@@ -105,6 +106,7 @@ export const IconAlertTriangle = catalogued(
   TablerAlertTriangle,
   'IconAlertTriangle',
 )
+export const IconBan = catalogued(TablerBan, TablerBan, 'IconBan')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')
 export const IconChevronDown = catalogued(
   TablerChevronDownFilled,
