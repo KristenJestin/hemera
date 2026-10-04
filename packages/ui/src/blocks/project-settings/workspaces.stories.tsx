@@ -74,12 +74,12 @@ export const Defaults: Story = {
     expect(folder).toHaveAttribute('placeholder', DEFAULT_FOLDER)
     expect(canvas.getByRole('textbox', { name: 'Branch prefix' })).toHaveAttribute(
       'placeholder',
-      'hemera/',
+      'acme/',
     )
     expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
       '~/hemera-workspaces/acme/ACME-12',
     )
-    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('hemera/ACME-12')
+    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('acme/ACME-12')
     expect(canvas.queryByRole('button', { name: /^Back to the default/ })).toBeNull()
   },
 }

@@ -14,7 +14,7 @@ export const MAIN_CHECKOUT = '~/work/acme'
 
 export const DEFAULT_FOLDER = '~/hemera-workspaces/acme'
 
-export const DEFAULT_PREFIX = 'hemera/'
+export const DEFAULT_PREFIX = 'acme/'
 
 /** A long path in every field: what a real disk can hold. */
 export const LONG_PATH =
@@ -118,7 +118,6 @@ function command(
 ): SettingsCommand {
   return {
     lineLinux: null,
-    lineMac: null,
     lineWindows: null,
     folder: null,
     scope: 'workspace',

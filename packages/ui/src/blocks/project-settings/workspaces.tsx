@@ -13,11 +13,11 @@ import { FieldSkeleton, Section } from './parts.tsx'
  * its own in the settings.
  *
  * Two fields, each empty until the user writes in it: an empty field is the default, and the
- * default is what the field shows in its quiet tone — Hemera's folder for the Project, `hemera/` —
+ * default is what the field shows in its quiet tone — Hemera's folder for the Project, its name and a slash, `acme/` —
  * so what applies is always read in the field. A field the user wrote in carries an × inside its
  * end that empties it, back to the default. Under them, what they make for one mission, as values:
  * the folder its Workspace is created in and the branch it is on — `…/acme/ACME-12` on
- * `hemera/ACME-12` — following what is typed. A prefix Git would refuse is said under its field,
+ * `acme/ACME-12` — following what is typed. A prefix Git would refuse is said under its field,
  * in Git's rules.
  */
 export interface WorkspacesSectionProps {

@@ -45,7 +45,6 @@ export interface SettingsStep {
   /** The line a run of its own runs, and the lines of its own for each system. */
   line: string | null
   lineLinux?: string | null | undefined
-  lineMac?: string | null | undefined
   lineWindows?: string | null | undefined
   /** What is wrong with the step, in words: a source missing from the main checkout. */
   problem?: string | undefined
@@ -346,7 +345,6 @@ export function StepForm({
             command: draft.command,
             line: draft.line ?? '',
             lineLinux: draft.lineLinux ?? null,
-            lineMac: draft.lineMac ?? null,
             lineWindows: draft.lineWindows ?? null,
           }}
           onChange={(value) => set(value)}

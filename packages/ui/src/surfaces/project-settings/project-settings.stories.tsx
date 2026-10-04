@@ -116,8 +116,8 @@ export const Workspaces: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const prefix = canvas.getByRole('textbox', { name: 'Branch prefix' })
-    expect(prefix).toHaveAttribute('placeholder', 'hemera/')
-    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('hemera/ACME-12')
+    expect(prefix).toHaveAttribute('placeholder', 'acme/')
+    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('acme/ACME-12')
     expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
       '~/hemera-workspaces/acme/ACME-12',
     )

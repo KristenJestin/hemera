@@ -102,7 +102,7 @@ export const Legends: Story = {
       'Runs at each opening',
       'Asks before running',
       'What it may write',
-      'Its own line on Linux, macOS or Windows',
+      'Its own line on Linux or Windows',
     ]) {
       expect(canvas.getByRole('img', { name: legend })).toBeInTheDocument()
     }
@@ -182,15 +182,12 @@ export const SheetPerSystem: Story = {
   render: () => <Sheet draft={BUILD} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(
-      canvas.getByRole('button', { name: 'Lines for Linux, macOS and Windows' }),
-    ).toHaveAttribute('aria-expanded', 'true')
+    expect(canvas.getByRole('button', { name: 'Lines for Linux and Windows' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     expect(canvas.getByRole('textbox', { name: 'Line on Windows' })).toHaveValue(
       'pnpm build:windows',
-    )
-    expect(canvas.getByRole('textbox', { name: 'Line on macOS' })).toHaveAttribute(
-      'placeholder',
-      'pnpm build',
     )
     expect(canvas.getByRole('textbox', { name: 'Line on Linux' })).toHaveAttribute(
       'placeholder',

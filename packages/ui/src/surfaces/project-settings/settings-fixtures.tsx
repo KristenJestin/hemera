@@ -501,7 +501,7 @@ export function SettingsFixture({
             onFolder={setFolder}
             onChooseFolder={() => {}}
             prefix={prefix}
-            defaultPrefix={DEFAULT_PREFIX}
+            defaultPrefix={project === 'hemera' ? 'hemera/' : DEFAULT_PREFIX}
             onPrefix={setPrefix}
             example={project === 'hemera' ? 'HEM-58' : 'ACME-12'}
             prefixError={prefix === null ? undefined : branchRefusal(`${prefix}ACME-12`)}

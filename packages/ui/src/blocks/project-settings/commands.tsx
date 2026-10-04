@@ -53,7 +53,6 @@ export interface SettingsCommand {
   /** The line every system runs, unless it has its own. */
   line: string
   lineLinux: string | null
-  lineMac: string | null
   lineWindows: string | null
   /** The repository it runs under, by path; `.` for the main checkout's root. */
   place: string
@@ -164,8 +163,7 @@ export interface CommandRowProps {
 /** One command on one line. */
 export function CommandRow({ command, onOpen }: CommandRowProps): ReactNode {
   const roles = rolesOf(command)
-  const ownLines =
-    command.lineLinux !== null || command.lineMac !== null || command.lineWindows !== null
+  const ownLines = command.lineLinux !== null || command.lineWindows !== null
   return (
     <li className={RULE} data-command={command.name}>
       <button type="button" className={LINE} onClick={onOpen}>
@@ -241,7 +239,7 @@ function ColumnsHead(): ReactNode {
       <span className={cn(NAME, HEAD_WORD, 'font-normal')}>Name</span>
       <span className={cn('min-w-0 flex-1', HEAD_WORD)}>Line</span>
       <span className={ROOM}>
-        <Legend label="Its own line on Linux, macOS or Windows">
+        <Legend label="Its own line on Linux or Windows">
           <span className="flex text-muted-foreground">
             <IconDeviceDesktop size="sm" />
           </span>
@@ -329,7 +327,6 @@ export const NEW_COMMAND: CommandDraft = {
   type: 'script',
   line: '',
   lineLinux: null,
-  lineMac: null,
   lineWindows: null,
   place: '.',
   folder: null,
@@ -396,12 +393,9 @@ export function CommandForm({
           command: null,
           line: draft.line,
           lineLinux: draft.lineLinux,
-          lineMac: draft.lineMac,
           lineWindows: draft.lineWindows,
         }}
-        onChange={({ line, lineLinux, lineMac, lineWindows }) =>
-          set({ line, lineLinux, lineMac, lineWindows })
-        }
+        onChange={({ line, lineLinux, lineWindows }) => set({ line, lineLinux, lineWindows })}
         refusalOf={refusalOf}
       />
       <div className="flex items-start gap-3">

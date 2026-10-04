@@ -191,10 +191,8 @@ export const SheetOwnLine: Story = {
     expect(line).toHaveValue('pnpm db:migrate --database acme_{workspace}')
     await userEvent.type(line, ' && pnpm seed')
     expect(await canvas.findByText(/“&&” is shell syntax/)).toBeVisible()
-    await userEvent.click(
-      canvas.getByRole('button', { name: 'Lines for Linux, macOS and Windows' }),
-    )
-    expect(await canvas.findByRole('textbox', { name: 'Line on macOS' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Lines for Linux and Windows' }))
+    expect(await canvas.findByRole('textbox', { name: 'Line on Windows' })).toBeVisible()
   },
 }
 

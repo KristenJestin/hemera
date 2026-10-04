@@ -17,7 +17,7 @@ import { TemplateMenu } from './parts.tsx'
  * line shown under it, in the quiet tone — or a line of its own. Where a command of the catalogue
  * is being written, the line alone. The line is one field that every system runs, with the names
  * Hemera fills offered by the braces at its end; under it, a fold opens a line of its own for
- * Linux, macOS and Windows, each showing the common line in its quiet tone until one is written.
+ * Linux and Windows, each showing the common line in its quiet tone until one is written.
  * A line holding shell syntax is refused as it is typed, the token named, under the line it is in:
  * Hemera runs a command without a shell.
  */
@@ -27,7 +27,6 @@ export interface CommandLineValue {
   /** The line every system runs, unless it has its own. */
   line: string
   lineLinux: string | null
-  lineMac: string | null
   lineWindows: string | null
 }
 
@@ -56,14 +55,12 @@ export const EMPTY_LINE: CommandLineValue = {
   command: null,
   line: '',
   lineLinux: null,
-  lineMac: null,
   lineWindows: null,
 }
 
 /** The systems a line of its own may be written for, in the order the fold shows them. */
 const SYSTEMS = [
   { key: 'lineLinux', label: 'Line on Linux' },
-  { key: 'lineMac', label: 'Line on macOS' },
   { key: 'lineWindows', label: 'Line on Windows' },
 ] as const
 
@@ -107,9 +104,7 @@ function LineInput({
 /** The line every system runs, and the fold with a line of its own for each system. */
 function Lines({ value, onChange, refusalOf }: Omit<CommandLineFieldProps, 'commands'>): ReactNode {
   const folding = useTransition(fold)
-  const [systems, setSystems] = useState(
-    value.lineLinux !== null || value.lineMac !== null || value.lineWindows !== null,
-  )
+  const [systems, setSystems] = useState(value.lineLinux !== null || value.lineWindows !== null)
   return (
     <div className="flex flex-col gap-2">
       <LineInput
@@ -127,7 +122,7 @@ function Lines({ value, onChange, refusalOf }: Omit<CommandLineFieldProps, 'comm
         <span className={DISCLOSURE_CHEVRON} aria-expanded={systems} aria-hidden="true">
           <IconChevronRight size="sm" />
         </span>
-        Lines for Linux, macOS and Windows
+        Lines for Linux and Windows
       </button>
       <AnimatePresence initial={false}>
         {systems && (
