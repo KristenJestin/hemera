@@ -473,6 +473,12 @@
 
 /* The two regions of a frameless window: what drags it, and what does not — a control drawn
    inside the drag zone has to say so, or the press moves the window instead of pressing it. */
+/* The room of a scrollbar kept whether one is drawn or not: what a scroller holds never moves
+   sideways when its bar comes or goes. */
+@utility scrollbar-stable {
+  scrollbar-gutter: stable;
+}
+
 @utility drag-zone {
   -webkit-app-region: drag;
 }
