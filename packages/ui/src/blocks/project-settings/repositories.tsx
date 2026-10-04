@@ -329,6 +329,8 @@ export interface RepositoryFormProps {
   /** What is wrong with the base branch, in Git's rules. */
   branchError?: string | undefined
   onChooseFolder: () => void
+  /** Whether an icon may be chosen; false hides the field where it cannot be kept yet. */
+  icons?: boolean | undefined
 }
 
 /** The value the icon select holds for the folder every repository wears until one is chosen. */
@@ -352,6 +354,7 @@ export function RepositoryForm({
   pathError,
   branchError,
   onChooseFolder,
+  icons = true,
 }: RepositoryFormProps): ReactNode {
   const chosen = remotes?.find((remote) => remote.name === draft.remote)
   return (
@@ -376,32 +379,34 @@ export function RepositoryForm({
           </Button>
         }
       />
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium" aria-hidden="true">
-          Icon
-        </span>
-        <Select<MarkIcon | typeof FOLDER>
-          label="Icon"
-          className="w-full"
-          value={draft.icon ?? FOLDER}
-          mark={<span className="flex text-muted-foreground">{iconOf(draft.icon)}</span>}
-          onValueChange={(value) =>
-            onChange({ ...draft, icon: value === FOLDER ? undefined : value })
-          }
-          items={[
-            {
-              value: FOLDER,
-              label: 'Folder',
-              icon: <span className="flex text-muted-foreground">{iconOf(undefined)}</span>,
-            },
-            ...MARK_ICONS.map((icon) => ({
-              value: icon,
-              label: MARK_ICON_WORDS[icon],
-              icon: <span className="flex text-muted-foreground">{markIcon(icon)}</span>,
-            })),
-          ]}
-        />
-      </div>
+      {icons && (
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium" aria-hidden="true">
+            Icon
+          </span>
+          <Select<MarkIcon | typeof FOLDER>
+            label="Icon"
+            className="w-full"
+            value={draft.icon ?? FOLDER}
+            mark={<span className="flex text-muted-foreground">{iconOf(draft.icon)}</span>}
+            onValueChange={(value) =>
+              onChange({ ...draft, icon: value === FOLDER ? undefined : value })
+            }
+            items={[
+              {
+                value: FOLDER,
+                label: 'Folder',
+                icon: <span className="flex text-muted-foreground">{iconOf(undefined)}</span>,
+              },
+              ...MARK_ICONS.map((icon) => ({
+                value: icon,
+                label: MARK_ICON_WORDS[icon],
+                icon: <span className="flex text-muted-foreground">{markIcon(icon)}</span>,
+              })),
+            ]}
+          />
+        </div>
+      )}
       <Checkbox
         checked={draft.includedByDefault}
         onCheckedChange={(includedByDefault) => onChange({ ...draft, includedByDefault })}

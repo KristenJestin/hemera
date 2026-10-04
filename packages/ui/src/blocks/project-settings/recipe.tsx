@@ -1,5 +1,5 @@
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { Reorder, useDragControls } from 'motion/react'
+import { AnimatePresence, Reorder, useDragControls } from 'motion/react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -17,7 +17,7 @@ import {
   IconPlus,
   IconTerminal,
 } from '../../icons.ts'
-import { arrival, useTransition } from '../../motion.ts'
+import { arrival, collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CatalogueChoice, CommandLineField } from './command-line.tsx'
 import { Section, TemplateMenu } from './parts.tsx'
 
@@ -29,7 +29,8 @@ import { Section, TemplateMenu } from './parts.tsx'
  * pointer or with the arrows of the keyboard once the handle has the focus, and the steps around it
  * make room on `arrival`. A copy or a link whose source is not in the main checkout says so on its
  * line, in words, in the destructive tone: the preparation would stop there. Pressing a step opens
- * its form.
+ * its form. A step added grows into the list on `fold`, pushing what stands under it; one removed
+ * folds out the same way.
  */
 export type StepKind = 'copy' | 'link' | 'run'
 
@@ -71,6 +72,9 @@ export function placeOfStep(step: Pick<SettingsStep, 'place'>): string {
 
 const ITEM = 'border-b border-border bg-surface-body last:border-b-0'
 
+/** A step as it grows in or folds out: clipped to the height it travels through. */
+const ARRIVING = 'overflow-hidden border-b border-border bg-surface-body last:border-b-0'
+
 const ROW = 'flex min-w-0 items-center gap-1 pl-2'
 
 const HANDLE =
@@ -109,6 +113,9 @@ export interface StepRowProps {
 export function StepRow({ step, position, count, onOpen, onMove }: StepRowProps): ReactNode {
   const controls = useDragControls()
   const travel = useTransition(arrival)
+  const folding = useTransition(fold)
+  // A step grows in and folds out on `fold`, and makes room for another on `arrival`.
+  const moving = { ...folding, layout: travel }
   const what = whatOf(step)
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     if (event.key === 'ArrowUp' && position > 1) {
@@ -126,8 +133,11 @@ export function StepRow({ step, position, count, onOpen, onMove }: StepRowProps)
       dragListener={false}
       dragControls={controls}
       layout="position"
-      transition={travel}
-      className={ITEM}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={moving}
+      className={ARRIVING}
       data-step={position}
     >
       <div className={ROW}>
@@ -256,16 +266,18 @@ export function RecipeSection({
             aria-label="Steps"
             className="flex flex-col overflow-hidden rounded-lg"
           >
-            {steps.map((step, index) => (
-              <StepRow
-                key={step.id}
-                step={step}
-                position={index + 1}
-                count={steps.length}
-                onOpen={() => onOpen(step.id)}
-                onMove={(by) => move(step.id, by)}
-              />
-            ))}
+            <AnimatePresence initial={false}>
+              {steps.map((step, index) => (
+                <StepRow
+                  key={step.id}
+                  step={step}
+                  position={index + 1}
+                  count={steps.length}
+                  onOpen={() => onOpen(step.id)}
+                  onMove={(by) => move(step.id, by)}
+                />
+              ))}
+            </AnimatePresence>
           </Reorder.Group>
         )}
       </Frame>
@@ -288,6 +300,8 @@ export interface StepFormProps {
   pathError?: string | undefined
   /** What the engine refuses in a line, in words, the token named; undefined for nothing. */
   refusalOf: (line: string) => string | undefined
+  /** Whether a run may have a line of its own for Linux and Windows; false hides the fold. */
+  systems?: boolean | undefined
 }
 
 const LABEL = 'text-sm font-medium'
@@ -300,6 +314,7 @@ export function StepForm({
   commands,
   pathError,
   refusalOf,
+  systems = true,
 }: StepFormProps): ReactNode {
   const set = (part: Partial<StepDraft>): void => onChange({ ...draft, ...part })
   return (
@@ -349,6 +364,7 @@ export function StepForm({
           }}
           onChange={(value) => set(value)}
           refusalOf={refusalOf}
+          systems={systems}
         />
       ) : (
         <Input

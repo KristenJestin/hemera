@@ -1,4 +1,5 @@
 import { SectionHead } from '../../components/section-head/section-head.tsx'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -11,6 +12,7 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { Menu } from '../../components/menu/menu.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconPlayerPlay } from '../../icons.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CommandType, typeIcon } from './command-types.tsx'
 import { Section } from './parts.tsx'
 
@@ -25,7 +27,8 @@ import { Section } from './parts.tsx'
  *
  * Two lines are not live, and each carries its one action: a service of the main checkout that is
  * not running, with Start; and a command marked to run at each opening and to ask first, which
- * waits for the user — the waiting mark, Not now, and Run.
+ * waits for the user — the waiting mark, Not now, and Run. Run is hidden where nothing can allow
+ * it yet. A line that appears grows into the table on `fold`, pushing the lines under it.
  */
 export type SettingsRun =
   | {
@@ -70,6 +73,28 @@ export interface RunnableCommand {
 }
 
 const RULE = 'border-b border-border last:border-b-0'
+
+/** A line as it grows in or folds out: clipped to the height it travels through. */
+const ARRIVING = 'overflow-hidden border-b border-border last:border-b-0'
+
+/** A line of the table, growing in when it appears and folding out when it goes. */
+function Line({ run, children }: { run: SettingsRun; children: ReactNode }): ReactNode {
+  const folding = useTransition(fold)
+  return (
+    <motion.li
+      className={ARRIVING}
+      data-run={run.name}
+      data-run-kind={run.kind}
+      data-state={run.kind === 'live' ? run.state : undefined}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
+      {children}
+    </motion.li>
+  )
+}
 
 /** A line of the table that opens its glance: the whole line is the control. */
 const OPEN =
@@ -118,13 +143,15 @@ function useNow(ticking: boolean): number {
 export interface RunRowProps {
   run: SettingsRun
   onStart: () => void
-  onAllow: () => void
+  /** Lets a waiting command run; left out where nothing can allow it yet, and Run is hidden. */
+  onAllow?: (() => void) | undefined
   onDecline: () => void
   onRestart: () => void
   onStop: () => void
   onCopyUrl: () => void
   onOpenUrl: () => void
-  onDetails: () => void
+  /** Opens the whole of a run; left out where there is no such view yet. */
+  onDetails?: (() => void) | undefined
 }
 
 /** A live line: the whole line opens its glance. */
@@ -142,7 +169,7 @@ function LiveRow({
   const time = durationOf((run.endedAt ?? now) - run.startedAt)
   const service = run.type === 'serve'
   return (
-    <li className={RULE} data-run={run.name} data-run-kind="live" data-state={run.state}>
+    <Line run={run}>
       <Popover
         label={run.name}
         align="start"
@@ -181,7 +208,7 @@ function LiveRow({
           }}
         />
       </Popover>
-    </li>
+    </Line>
   )
 }
 
@@ -193,7 +220,7 @@ function placeWord(place: string): string {
 export function RunRow({ run, onStart, onAllow, onDecline, ...live }: RunRowProps): ReactNode {
   if (run.kind === 'live') return <LiveRow run={run} {...live} />
   return (
-    <li className={RULE} data-run={run.name} data-run-kind={run.kind}>
+    <Line run={run}>
       <div className={ROW}>
         <span className={MARK}>
           <StatusMark
@@ -210,10 +237,12 @@ export function RunRow({ run, onStart, onAllow, onDecline, ...live }: RunRowProp
             <Button variant="ghost" size="sm" onClick={onDecline}>
               Not now
             </Button>
-            <Button variant="primary" size="sm" onClick={onAllow}>
-              <IconPlayerPlay size="sm" />
-              Run {run.name}
-            </Button>
+            {onAllow !== undefined && (
+              <Button variant="primary" size="sm" onClick={onAllow}>
+                <IconPlayerPlay size="sm" />
+                Run {run.name}
+              </Button>
+            )}
           </span>
         ) : (
           <span className={END}>
@@ -224,7 +253,7 @@ export function RunRow({ run, onStart, onAllow, onDecline, ...live }: RunRowProp
           </span>
         )}
       </div>
-    </li>
+    </Line>
   )
 }
 
@@ -275,13 +304,15 @@ export interface ServicesSectionProps {
   loading?: boolean | undefined
   onRun: (commandId: string) => void
   onStart: (id: string) => void
-  onAllow: (id: string) => void
+  /** Lets a waiting command run; left out where nothing can allow it yet. */
+  onAllow?: ((id: string) => void) | undefined
   onDecline: (id: string) => void
   onRestart: (id: string) => void
   onStop: (id: string) => void
   onCopyUrl: (id: string) => void
   onOpenUrl: (id: string) => void
-  onDetails: (id: string) => void
+  /** Opens the whole of a run; left out where there is no such view yet. */
+  onDetails?: ((id: string) => void) | undefined
 }
 
 export function ServicesSection({
@@ -333,20 +364,22 @@ export function ServicesSection({
                   <RunRowSkeleton />
                 </>
               ) : (
-                runs.map((one) => (
-                  <RunRow
-                    key={one.id}
-                    run={one}
-                    onStart={() => onStart(one.id)}
-                    onAllow={() => onAllow(one.id)}
-                    onDecline={() => onDecline(one.id)}
-                    onRestart={() => onRestart(one.id)}
-                    onStop={() => onStop(one.id)}
-                    onCopyUrl={() => onCopyUrl(one.id)}
-                    onOpenUrl={() => onOpenUrl(one.id)}
-                    onDetails={() => onDetails(one.id)}
-                  />
-                ))
+                <AnimatePresence initial={false}>
+                  {runs.map((one) => (
+                    <RunRow
+                      key={one.id}
+                      run={one}
+                      onStart={() => onStart(one.id)}
+                      onAllow={onAllow === undefined ? undefined : () => onAllow(one.id)}
+                      onDecline={() => onDecline(one.id)}
+                      onRestart={() => onRestart(one.id)}
+                      onStop={() => onStop(one.id)}
+                      onCopyUrl={() => onCopyUrl(one.id)}
+                      onOpenUrl={() => onOpenUrl(one.id)}
+                      onDetails={onDetails === undefined ? undefined : () => onDetails(one.id)}
+                    />
+                  ))}
+                </AnimatePresence>
               )}
             </ul>
           </>

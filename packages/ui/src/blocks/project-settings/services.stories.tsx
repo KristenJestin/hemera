@@ -118,6 +118,22 @@ export const WaitingForPermission: Story = {
   },
 }
 
+/**
+ * A command waiting at opening where nothing can allow it yet: the waiting mark and Not now, and
+ * no Run.
+ */
+export const WaitingUnanswerable: Story = {
+  args: { runs: [byId('db')] },
+  render: (args) => <ServicesSection {...args} onAllow={undefined} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('img', { name: 'Waiting for you' })).toBeInTheDocument()
+    expect(canvas.queryByRole('button', { name: 'Run db' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Not now' }))
+    expect(args.onDecline).toHaveBeenCalledWith('db')
+  },
+}
+
 /** A service of the main checkout that is not running: Start. */
 export const NotRunning: Story = {
   args: { runs: [byId('admin')] },

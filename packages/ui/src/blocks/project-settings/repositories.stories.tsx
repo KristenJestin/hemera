@@ -274,6 +274,24 @@ export const FormNew: Story = {
   },
 }
 
+/** Where an icon cannot be kept yet: the form has no icon field. */
+export const FormWithoutIcon: Story = {
+  render: () => (
+    <Form
+      draft={API}
+      remotes={REMOTES.get('api')}
+      freshness={{ kind: 'fetched', when: '09:02' }}
+      onChooseFolder={() => {}}
+      icons={false}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('combobox', { name: 'Icon' })).toBeNull()
+    expect(canvas.getByRole('textbox', { name: 'Base branch' })).toHaveValue('main')
+  },
+}
+
 /** The icon a repository wears, chosen in its form among the short set; a folder until it is. */
 export const FormIcon: Story = {
   render: () => (

@@ -84,16 +84,19 @@ export const Defaults: Story = {
   },
 }
 
-/** Both chosen: each field carries the × that takes it back to the default. */
+/**
+ * Both chosen: each field carries the × that takes it back to the default. A prefix is joined to the
+ * mission by a slash, as the engine makes the branch.
+ */
 export const Chosen: Story = {
-  args: { folder: '/mnt/fast/acme-workspaces', prefix: 'team/acme-' },
+  args: { folder: '/mnt/fast/acme-workspaces', prefix: 'team/acme' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
       '/mnt/fast/acme-workspaces/ACME-12',
     )
     expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent(
-      'team/acme-ACME-12',
+      'team/acme/ACME-12',
     )
     await userEvent.click(canvas.getByRole('button', { name: 'Back to the default folder' }))
     expect(args.onFolder).toHaveBeenCalledWith(null)
