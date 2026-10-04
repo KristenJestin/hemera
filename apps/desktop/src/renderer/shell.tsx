@@ -45,6 +45,8 @@ export interface ShellProps {
   projectSettings?: ReactNode
   /** The dialog that adds a Project, over the window. */
   addProject?: ReactNode
+  /** What the application's Settings page holds under its title. */
+  appSettings?: ReactNode
   actions: ShellActions
 }
 
@@ -76,10 +78,11 @@ function repositoryName(project: Project, path: string): string {
 }
 
 /** A page's frame with its title, for the page whose sections later tickets add. */
-function TitledPage({ title }: { title: string }): ReactNode {
+function TitledPage({ title, children }: { title: string; children?: ReactNode }): ReactNode {
   return (
-    <div className="px-8 py-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+    <div className="flex flex-col gap-6 py-6">
+      <h1 className="px-8 text-2xl font-semibold tracking-tight">{title}</h1>
+      {children}
     </div>
   )
 }
@@ -121,6 +124,7 @@ interface RoutePageProps {
   nameOf: (id: string) => string | undefined
   today: string
   projectSettings: ReactNode
+  appSettings: ReactNode
   actions: ShellActions
 }
 
@@ -132,6 +136,7 @@ function RoutePage({
   nameOf,
   today,
   projectSettings,
+  appSettings,
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
@@ -164,7 +169,7 @@ function RoutePage({
     case 'projectSettings':
       return projectSettings
     case 'settings':
-      return <TitledPage title="Settings" />
+      return <TitledPage title="Settings">{appSettings}</TitledPage>
     case 'mission':
       return null
   }
@@ -184,6 +189,7 @@ export function Shell({
   today,
   projectSettings,
   addProject,
+  appSettings,
   actions,
 }: ShellProps): ReactNode {
   const listed = projects.kind === 'ready' ? projects.projects : []
@@ -243,6 +249,7 @@ export function Shell({
             nameOf={nameOf}
             today={today}
             projectSettings={projectSettings}
+            appSettings={appSettings}
             actions={actions}
           />
         )}

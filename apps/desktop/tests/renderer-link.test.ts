@@ -15,6 +15,7 @@ import {
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
+  type PreferencesChange,
   type EngineStatus,
   type Run,
   type EnvironmentReport,
@@ -155,6 +156,7 @@ const noProjects = {
 const main = async (engine: 'answers' | 'gone') => {
   const stopped = Deferred.makeUnsafe<void>()
   let logsShown = 0
+  const written: PreferencesChange[] = []
   const { port1: windowPort, port2: mainPort } = new MessageChannel()
   const handlers = WindowRpcs.toLayer({
     'engine.status': () =>
@@ -166,7 +168,10 @@ const main = async (engine: 'answers' | 'gone') => {
           )
         : Stream.fail(new EngineGone()),
     'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
-    'preferences.write': () => Effect.void,
+    'preferences.write': (change) =>
+      Effect.sync(() => {
+        written.push(change)
+      }),
     'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
     'profile.backup': ({ folder }) => Effect.succeed(folder),
     'profile.restore': () => Effect.void,
@@ -207,6 +212,7 @@ const main = async (engine: 'answers' | 'gone') => {
     link,
     stopped: Effect.runPromise(Deferred.await(stopped)),
     logsShown: () => logsShown,
+    written,
   }
 }
 
@@ -265,6 +271,13 @@ describe('The window’s link, for components and hooks', () => {
       )
     })
     expect(heard).toEqual(SERVICE)
+  })
+
+  test('the preferences are read, and a theme chosen is written', async () => {
+    const { link, written } = await main('answers')
+    await expect(link.preferences()).resolves.toEqual(DEFAULT_PREFERENCES)
+    await link.writePreferences({ theme: 'dark' })
+    expect(written).toEqual([{ theme: 'dark' }])
   })
 
   test('the window asks main to show the diagnostic log', async () => {

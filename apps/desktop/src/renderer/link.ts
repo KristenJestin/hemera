@@ -23,6 +23,8 @@ import {
   type LineCheck,
   type MaskedVariable,
   type NewProject,
+  type Preferences,
+  type PreferencesChange,
   type NewRepository,
   type Port,
   type Project,
@@ -62,6 +64,9 @@ export interface Link {
   readonly showLog: () => Promise<void>
   /** The system's own folder picker: the folder chosen, or null when none was. */
   readonly chooseFolder: () => Promise<string | null>
+  readonly preferences: () => Promise<Preferences>
+  /** Writes the preferences the change names; main wears a theme written at once. */
+  readonly writePreferences: (change: PreferencesChange) => Promise<void>
   /** The Projects, in the order they were added. */
   readonly projects: () => Promise<ReadonlyArray<Project>>
   /** Rejects with `UnknownProject` when it no longer exists. */
@@ -183,6 +188,8 @@ export function linkOver(port: Port): Link {
     relaunch: () => call((ready) => ready['application.relaunch']()),
     showLog: () => call((ready) => ready['application.showLog']()),
     chooseFolder: () => call((ready) => ready['application.chooseFolder']()),
+    preferences: () => call((ready) => ready['preferences.read']()),
+    writePreferences: (change) => call((ready) => ready['preferences.write'](change)),
     projects: () => call((ready) => ready['projects.list']()),
     project: (id) => call((ready) => ready['projects.get']({ id })),
     onProjectChanges: (listener, onEnd) =>

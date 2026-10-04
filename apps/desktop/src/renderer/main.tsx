@@ -1,3 +1,4 @@
+import type { ThemePreference } from '@hemera/ipc'
 import { TooltipProvider } from '@hemera/ui'
 import { MotionConfig } from 'motion/react'
 import { StrictMode, useEffect, useMemo, useState } from 'react'
@@ -6,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 // oxlint-disable-next-line import/no-unassigned-import
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
+import { AppSettings } from './app-settings.tsx'
 import { connect } from './link.ts'
 import { START, go, show, type Navigation } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
@@ -62,6 +64,14 @@ function Application() {
   const [projects, retryProjects] = useProjects(link, ready)
   const [project, retryProject] = useProject(link, ready, shownProject)
   const [adding, setAdding] = useState(false)
+  const [theme, setTheme] = useState<ThemePreference | null>(null)
+  useEffect(() => {
+    if (!ready) return
+    link.preferences().then(
+      (preferences) => setTheme(preferences.theme),
+      () => undefined,
+    )
+  }, [ready])
   const settingsOf = route.kind === 'projectSettings' ? route.id : null
   const [settingsData, settings] = useSettings(link, ready, settingsOf)
   const dataFolder = engine.kind === 'ready' ? engine.status.dataFolder : ''
@@ -89,6 +99,15 @@ function Application() {
         settingsOf === null ? null : (
           <SettingsPage key={settingsOf} data={settingsData} settings={settings} tools={tools} />
         )
+      }
+      appSettings={
+        <AppSettings
+          theme={theme}
+          onTheme={(chosen) => {
+            setTheme(chosen)
+            void link.writePreferences({ theme: chosen }).catch(() => undefined)
+          }}
+        />
       }
       addProject={
         <AddProjectDialog

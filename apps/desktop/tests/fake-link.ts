@@ -15,6 +15,8 @@ export const SILENT_LINK: Link = {
   relaunch: never,
   showLog: never,
   chooseFolder: never,
+  preferences: never,
+  writePreferences: never,
   projects: never,
   project: never,
   onProjectChanges: silent,
