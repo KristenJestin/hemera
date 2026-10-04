@@ -79,10 +79,9 @@ export function durationOf(ms: number): string {
   return `${String(Math.max(0, Math.floor(ms / 1000)))}s`
 }
 
-/** What the chip's legend says after its name; without seconds, the state alone. */
-function legendOf(state: LiveState, time: string | null): string {
+/** What the chip's legend says after its name. */
+function legendOf(state: LiveState, time: string): string {
   if (state === 'stuck') return `no activity for ${STUCK_AFTER}`
-  if (time === null) return LIVE_WORDS[state]
   if (state === 'finished') return `done in ${time}`
   if (state === 'failed') return `failed after ${time}`
   return LIVE_WORDS[state]
@@ -106,13 +105,10 @@ export interface LiveChipProps {
   /** The slot: a command's type icon, a helper's letter avatar. */
   icon: ReactNode
   state: LiveState
-  /**
-   * When it started, in milliseconds since the epoch. Left out, the chip shows no seconds: a
-   * helper's chip shows the helper and nothing else.
-   */
-  startedAt?: number | undefined
-  /** When it ended; null or left out while it works or is stuck, and the seconds tick. */
-  endedAt?: number | null | undefined
+  /** When it started, in milliseconds since the epoch. */
+  startedAt: number
+  /** When it ended; null while it works or is stuck, and the seconds tick. */
+  endedAt: number | null
   /** What pressing the chip does: open what it stands for. */
   onPress?: (() => void) | undefined
 }
@@ -158,9 +154,9 @@ export function LiveChip({
   endedAt,
   onPress,
 }: LiveChipProps): ReactNode {
-  const now = useNow(startedAt !== undefined && (endedAt ?? null) === null)
+  const now = useNow(endedAt === null)
   const sweep = useSweep(state)
-  const time = startedAt === undefined ? null : durationOf((endedAt ?? now) - startedAt)
+  const time = durationOf((endedAt ?? now) - startedAt)
 
   return (
     <Tooltip label={`${name} · ${legendOf(state, time)}`}>
@@ -176,7 +172,7 @@ export function LiveChip({
         <LiveTint state={state} sweep={sweep} />
         <Mark icon={icon} shown={state} />
         <span className={NAME}>{name}</span>
-        {time !== null && <span className={TIME}>{time}</span>}
+        <span className={TIME}>{time}</span>
       </button>
     </Tooltip>
   )

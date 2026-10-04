@@ -33,7 +33,6 @@ export {
   NESTED_RADIUS,
   type FrameProps,
 } from './components/frame/frame.tsx'
-export { HelperChip, type HelperChipProps } from './components/helper-chip/helper-chip.tsx'
 export { Kbd, type KbdProps } from './components/kbd/kbd.tsx'
 export {
   LETTER_TONES,

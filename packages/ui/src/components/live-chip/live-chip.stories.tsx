@@ -169,10 +169,48 @@ export const Stopped: Story = {
   },
 }
 
+/** A helper's chip: a live chip whose icon slot holds the helper's letter avatar. */
+function helper(state: LiveState, words: string, seconds: number | null): Story {
+  return {
+    args: {
+      name: 'Reviewer',
+      icon: <LetterAvatar name="Reviewer" />,
+      state,
+      ...(seconds === null ? { startedAt: AGO, endedAt: null } : lasted(seconds)),
+    },
+    play: async ({ canvasElement }) => {
+      const chip = within(canvasElement).getByRole('button', { name: `Reviewer, ${words}` })
+      // The avatar while it works, the state's glyph in its room once it does not.
+      expect(chip.querySelector('[data-avatar]')).not.toBeNull()
+      expect(chip).toHaveTextContent(/\d+s$/)
+      expect(within(canvasElement).getAllByRole('button')).toHaveLength(1)
+      expect(chip).not.toHaveTextContent('×')
+      if (state === 'running') expect(chip.querySelector('[data-breath]')).not.toBeNull()
+      else expect(chip.querySelector(`[data-end="${state}"]`)).not.toBeNull()
+    },
+  }
+}
+
 /**
- * A helper's chip: its letter avatar in the slot, and no × anywhere — nobody stops a helper by
- * hand. Its chip is the same height as a run's.
+ * A helper at work: the same chip as a run, its letter avatar in the icon slot, its seconds
+ * ticking, the running tint breathing. No × anywhere: nobody stops a helper by hand. Pressed,
+ * it opens the helper rather than a command's output: the only other difference from a run.
  */
+export const HelperRunning: Story = helper('running', 'running', null)
+
+/** A helper with no activity for five minutes: the paused clock in its avatar's room. */
+export const HelperStuck: Story = helper('stuck', 'no activity', null)
+
+/** A helper done: the ✓ in its avatar's room, its seconds standing. */
+export const HelperFinished: Story = helper('finished', 'done', 84)
+
+/** A helper that failed: the ✕ in its avatar's room. */
+export const HelperFailed: Story = helper('failed', 'failed', 12)
+
+/** A helper stopped: the quiet stop glyph. */
+export const HelperStopped: Story = helper('stopped', 'stopped', 3)
+
+/** A run's chip and a helper's side by side: the same height, the same seconds, no ×. */
 export const Helper: Story = {
   render: (args) => (
     <div className="flex items-center gap-1.5">
@@ -183,10 +221,35 @@ export const Helper: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const run = canvas.getByRole('button', { name: 'dev, running' })
-    const helper = canvas.getByRole('button', { name: 'Reviewer, running' })
-    expect(helper.getBoundingClientRect().height).toBe(run.getBoundingClientRect().height)
+    const one = canvas.getByRole('button', { name: 'Reviewer, running' })
+    expect(one.getBoundingClientRect().height).toBe(run.getBoundingClientRect().height)
+    expect(one).toHaveTextContent(/\d+s$/)
     expect(canvas.queryByRole('button', { name: /stop/i })).toBeNull()
-    expect(helper).not.toHaveTextContent('×')
+  },
+}
+
+/** Among helpers whose first letters collide: two letters each, as the avatar decides. */
+export const HelperCollision: Story = {
+  render: (args) => {
+    const set = ['Reviewer', 'Researcher']
+    return (
+      <div className="flex items-center gap-1.5">
+        {set.map((name) => (
+          <LiveChip
+            {...args}
+            key={name}
+            name={name}
+            icon={<LetterAvatar name={name} others={set.filter((other) => other !== name)} />}
+          />
+        ))}
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const worn = [...canvasElement.querySelectorAll('[data-avatar]')].map(
+      (avatar) => avatar.textContent,
+    )
+    expect(worn).toEqual(['RV', 'RS'])
   },
 }
 

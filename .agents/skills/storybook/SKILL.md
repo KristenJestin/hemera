@@ -129,7 +129,7 @@ export const Error: Story = {
   with no kind is added to `motion.ts`, named and explained.
 - **States as glyphs**: icons and small marks, never word badges or explanatory sentences. A
   task's state is a `StatusMark` (compact, `size="sm"`, where a dot would stand: there is no
-  separate status dot); what goes on is a `LiveChip` or a `HelperChip`, whose state is their
+  separate status dot); what goes on is a `LiveChip` (a helper's holds its letter avatar), whose state is its
   background (a breath while running, one sweep in the colour of the state they change to);
   who it is, a `LetterAvatar`; Hemera itself, its `Face`. A mark's legend is a tooltip on the
   glyph (`Legend`), never a panel.
