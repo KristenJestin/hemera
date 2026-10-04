@@ -373,7 +373,10 @@ if (cluster.isPrimary) {
         }),
       ),
     )
-    expect(outcome.ready?.url, outcome.output.output).toMatch(/^http:\/\/localhost:\d+$/)
+    // What it printed is part of what a failure says: a shim that did not run says why there.
+    expect({ ...outcome.ready, output: outcome.output.output }).toMatchObject({
+      url: expect.stringMatching(/^http:\/\/localhost:\d+$/),
+    })
     expect(outcome.written).toHaveLength(3)
     expect(outcome.stopped.state).toBe('stopped')
     const left = await Effect.runPromise(
