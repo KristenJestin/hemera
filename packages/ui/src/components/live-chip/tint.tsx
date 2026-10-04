@@ -4,8 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { WIPE, instant, useTransition, wipe } from '../../motion.ts'
 
 /**
- * The background of what goes on, shared by the live chip and the helper chip: it is how they say
- * their state, without a dot.
+ * The background of a live chip: how it says its state, without a dot.
  *
  * - Working, a tint of the running tone breathes across the whole background.
  * - Every change from working — or from stuck — to another state plays one sweep across it, in
@@ -21,7 +20,7 @@ type Swept = Exclude<LiveState, 'running'>
 
 /** The running tone breathing: its own, apart from the warning a stuck chip is swept in. */
 const BREATH =
-  'pointer-events-none absolute inset-0 -z-10 bg-info-muted motion-safe:animate-breathe'
+  'pointer-events-none absolute inset-0 -z-10 bg-running-muted motion-safe:animate-breathe'
 
 const SWEPT: Record<Swept, string> = {
   stuck: 'pointer-events-none absolute inset-0 -z-10 bg-warning-muted',

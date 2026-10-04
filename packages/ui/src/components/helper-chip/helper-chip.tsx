@@ -1,23 +1,13 @@
 import type { ReactNode } from 'react'
 
 import { LetterAvatar, type LetterTone } from '../letter-avatar/letter-avatar.tsx'
-import { LIVE_WORDS } from '../live-chip/live-chip.tsx'
-import { type LiveState, LiveTint, useSweep } from '../live-chip/tint.tsx'
-import { Legend } from '../tooltip/legend.tsx'
+import { LiveChip, type LiveState } from '../live-chip/live-chip.tsx'
 
 /**
- * A helper, and only the helper: its letter avatar and its name.
- *
- * No dot: its state is its background, as on the live chip — a tint of the running tone
- * breathing while it works, one sweep in the colour of the state it changes to. Nothing on it is
- * pressed and there is no ×: nobody stops a helper by hand. The state in words is a tooltip on
- * the avatar, the one glyph of the chip.
+ * A helper, as a live chip: its letter avatar in the icon slot, its name, and no seconds. The
+ * breath, the sweeps, the glyph of each state and the tooltip — the helper's name and its state —
+ * are the live chip's own. There is no ×: nobody stops a helper by hand.
  */
-const CHIP =
-  'relative isolate inline-flex h-control-sm max-w-chip min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs'
-
-const NAME = 'min-w-0 truncate font-medium'
-
 export interface HelperChipProps {
   name: string
   /** Where the helper stands. */
@@ -26,22 +16,17 @@ export interface HelperChipProps {
   others?: readonly string[] | undefined
   /** The tone its definition gives its avatar. */
   tone?: LetterTone | undefined
+  /** What pressing the chip does: open the helper. */
+  onPress?: (() => void) | undefined
 }
 
-export function HelperChip({ name, state, others, tone }: HelperChipProps): ReactNode {
-  const sweep = useSweep(state)
+export function HelperChip({ name, state, others, tone, onPress }: HelperChipProps): ReactNode {
   return (
-    <span
-      className={CHIP}
-      data-helper-chip=""
-      data-state={state}
-      data-sweep-tone={sweep.swept ?? undefined}
-    >
-      <LiveTint state={state} sweep={sweep} />
-      <Legend label={`${name}, ${LIVE_WORDS[state]}`}>
-        <LetterAvatar name={name} others={others} tone={tone} />
-      </Legend>
-      <span className={NAME}>{name}</span>
-    </span>
+    <LiveChip
+      name={name}
+      icon={<LetterAvatar name={name} others={others} tone={tone} />}
+      state={state}
+      onPress={onPress}
+    />
   )
 }

@@ -52,6 +52,9 @@
   /* What a shape on its way is drawn in: a step darker than any surface it stands on, so it is
      seen on a card as on the page. */
   --skeleton: #e2e2e8;
+  /* The tint of what is running, breathing on a live chip: a clear blue, apart from the amber a
+     stuck chip is swept in, and light enough that the chip's text keeps its contrast over it. */
+  --running-muted: #dbeafe;
   --accent-foreground: #111118;
 
   /* The prototype's fuchsia is #d946ef, but white on it is 3.45:1: the solid fills take the next
@@ -123,6 +126,7 @@
   --muted-foreground: #9a9aab;
   --accent: #121217;
   --skeleton: #27272f;
+  --running-muted: rgba(59, 130, 246, 0.22);
   --accent-foreground: #ececf1;
 
   /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
@@ -211,6 +215,7 @@
 
   --color-border: var(--border);
   --color-skeleton: var(--skeleton);
+  --color-running-muted: var(--running-muted);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-overlay: var(--overlay);
