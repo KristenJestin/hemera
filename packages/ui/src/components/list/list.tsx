@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type ReactNode, isValidElement } from 'react'
 
 import { Skeleton } from '../loading/loading.tsx'
 
@@ -102,7 +102,7 @@ export function ListItem({
       </span>
       {trailing !== undefined && (
         <span className={TRAILING} data-part="trailing">
-          {held(trailing, typeof trailing === 'string' ? 'text' : 'block')}
+          {held(trailing, isValidElement(trailing) ? 'block' : 'text')}
         </span>
       )}
     </>
