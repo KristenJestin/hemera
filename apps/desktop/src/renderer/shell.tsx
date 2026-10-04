@@ -28,6 +28,8 @@ export interface ShellActions {
   retryProject: () => void
   relaunch: () => void
   showLog: () => void
+  /** Opens the dialog that adds a Project. */
+  addProject: () => void
 }
 
 export interface ShellProps {
@@ -39,6 +41,10 @@ export interface ShellProps {
   folded: boolean
   /** Today, as Home's header says it. */
   today: string
+  /** The settings page of the Project the route shows, drawn by its own hooks. */
+  projectSettings?: ReactNode
+  /** The dialog that adds a Project, over the window. */
+  addProject?: ReactNode
   actions: ShellActions
 }
 
@@ -69,7 +75,7 @@ function repositoryName(project: Project, path: string): string {
   return folder.split(/[\\/]/).findLast((part) => part !== '') ?? folder
 }
 
-/** A page's frame with its title, for the pages whose sections later tickets add. */
+/** A page's frame with its title, for the page whose sections later tickets add. */
 function TitledPage({ title }: { title: string }): ReactNode {
   return (
     <div className="px-8 py-6">
@@ -114,6 +120,7 @@ interface RoutePageProps {
   project: ProjectState
   nameOf: (id: string) => string | undefined
   today: string
+  projectSettings: ReactNode
   actions: ShellActions
 }
 
@@ -124,6 +131,7 @@ function RoutePage({
   project,
   nameOf,
   today,
+  projectSettings,
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
@@ -139,7 +147,7 @@ function RoutePage({
           loading={projects.kind === 'loading'}
           error={projects.kind === 'failed' ? projects.sentence : undefined}
           onOpen={() => undefined}
-          onAddProject={() => undefined}
+          onAddProject={actions.addProject}
           onRetry={actions.retryProjects}
         />
       )
@@ -154,7 +162,7 @@ function RoutePage({
         />
       )
     case 'projectSettings':
-      return <TitledPage title={`Settings of ${nameOf(route.id) ?? 'this Project'}`} />
+      return projectSettings
     case 'settings':
       return <TitledPage title="Settings" />
     case 'mission':
@@ -174,6 +182,8 @@ export function Shell({
   navigation,
   folded,
   today,
+  projectSettings,
+  addProject,
   actions,
 }: ShellProps): ReactNode {
   const listed = projects.kind === 'ready' ? projects.projects : []
@@ -208,7 +218,7 @@ export function Shell({
             current={placeOf(route)}
             onHome={() => actions.go({ kind: 'home' })}
             onProject={(id) => actions.go({ kind: 'project', id })}
-            onAddProject={() => undefined}
+            onAddProject={actions.addProject}
             onSettings={() => actions.go({ kind: 'settings' })}
           />
         }
@@ -232,10 +242,12 @@ export function Shell({
             project={project}
             nameOf={nameOf}
             today={today}
+            projectSettings={projectSettings}
             actions={actions}
           />
         )}
       </WindowShell>
+      {veil === null && addProject}
     </div>
   )
 }
