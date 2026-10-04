@@ -9,15 +9,17 @@ import { TONE_CLASSES } from './pose.ts'
 import { EXPRESSIONS, FACE_STATES, type FaceState } from './states.ts'
 
 /**
- * Hemera's face: a small mascot whose expression, motion and colour say what an agent is doing.
+ * Hemera's face: a small mascot whose expression says what an agent is doing.
  *
- * Two eyes and a mouth, each one stroke of three points; every state a way of placing them, of
- * moving the head and of blinking. Inside a state the face lives on dice drawn from its seed, so
- * it never loops and the same seed tells the same story. Between two states it never cuts: every
- * change is a motion from wherever the face is — eyes, mouth, head and colour together.
+ * Two eyes and a mouth, each one stroke of three points; every state a way of placing them. The
+ * face is calm: it holds still in its state, in a neutral tone for ordinary work, and moves only
+ * when its state changes — one short movement from wherever the face is, eyes, mouth, head and
+ * colour together, and still again. Only the states that wait for the reader (a question, a
+ * permission, a blocker) keep a loop, a slow blink at a long interval; loading is the loading
+ * indicator and goes on turning.
  *
  * The runner of these stories asks for less movement, so each story is played on the still
- * expression a reader asking for that sees. The life and the changes are checked one frame at a
+ * expression a reader asking for that sees. The blink and the changes are checked one frame at a
  * time by the face's own tests, and watched here in the catalogue.
  */
 const meta = {
@@ -96,15 +98,17 @@ function frames(count: number): Promise<void> {
 
 /**
  * What every state's story checks: the face says the state in its own words, wears that state's
- * tone and no other, and holds still.
+ * tone and no other, says whether it waits for the reader — the states that do, and only they,
+ * keep their slow blink — and holds still.
  */
 function posed(state: FaceState): Story {
-  const { label, tone } = EXPRESSIONS[state]
+  const { label, tone, waits } = EXPRESSIONS[state]
   return {
     args: { state },
     play: async ({ canvasElement }) => {
       const face = within(canvasElement).getByRole('img', { name: label })
       expect(face).toHaveAttribute('data-state', state)
+      expect(face).toHaveAttribute('data-waiting', String(waits))
       await waitFor(() => {
         expect(tonesOf(face)).toEqual([TONE_CLASSES[tone]])
       })
@@ -122,42 +126,45 @@ function posed(state: FaceState): Story {
  */
 export const Loading: Story = posed('loading')
 
-/** Thinking: heavy-lidded, looking up and away, working something out. */
+/** Thinking: heavy-lidded, looking up and away, working something out. Still. */
 export const Thinking: Story = posed('thinking')
 
-/** Reading: eyes flattened on the page, a line at a time. */
+/** Reading: eyes flattened on the page. Still. */
 export const Reading: Story = posed('reading')
 
-/** Writing: flattened and lidded, looking down, following the caret. */
+/** Writing: flattened and lidded, looking down at what it writes. Still. */
 export const Writing: Story = posed('writing')
 
-/** Running a command: two terminal cursors on the output, watching it scroll. */
+/** Running a command: two terminal cursors on the output. Still. */
 export const Running: Story = posed('running')
 
-/** Checking what was built: one eye narrowed on the work, going down the list. */
+/** Checking what was built: one eye narrowed on the work. Still. */
 export const Checking: Story = posed('checking')
 
-/** Waiting for an answer: two cursors stood up, straight at you. */
+/** Waiting for an answer: two cursors stood up, straight at you, and a slow blink now and then. */
 export const Question: Story = posed('question')
 
-/** Waiting for a permission: eyes wide open, looking up from under a lowered head. */
+/**
+ * Waiting for a permission: eyes wide open, looking up from under a lowered head, and a slow
+ * blink now and then.
+ */
 export const Permission: Story = posed('permission')
 
-/** Blocked: `>_<`, eyes screwed shut against what will not give. */
+/** Blocked: `>_<`, eyes screwed shut against what will not give, and a slow blink now and then. */
 export const Blocked: Story = posed('blocked')
 
-/** Done: creased, smiling, nodding now and then. */
+/** Done: creased and smiling. Still. */
 export const Done: Story = posed('done')
 
-/** Something went wrong: a glare and a frown, and it does not blink. */
+/** Something went wrong: a glare and a frown, after one flinch. Still. */
 export const Error: Story = posed('error')
 
-/** Nothing running: eyes closed, breathing, yawning now and then. */
+/** Nothing running: eyes closed, in the muted tone. Still. */
 export const Asleep: Story = posed('asleep')
 
 /**
  * Every size, from an icon button to the hero of a page, and an icon without its mouth. Small,
- * the face simplifies rather than blurs: heavier strokes, gestures that travel further.
+ * the face simplifies rather than blurs: heavier strokes, movements that travel further.
  */
 export const Sizes: Story = {
   parameters: { controls: { disable: true } },
@@ -318,8 +325,8 @@ function Replay({ from, to }: { from: FaceState; to: FaceState }): ReactNode {
 
 /**
  * Every change between two states, played in a grid: the row is where the face comes from, the
- * column where it goes. Each cell holds the first state, changes, holds the second, and starts
- * over. The diagonal is the state itself.
+ * column where it goes. Each cell holds the first state, changes in one short movement, holds the
+ * second still, and starts over. The diagonal is the state itself.
  */
 export const Transitions: Story = {
   parameters: { controls: { disable: true } },

@@ -1,8 +1,9 @@
 /**
- * Hemera's face, asked what it promises: one expression per state an agent can be in, a life inside each state that never loops and always tells the same story for the
- * same seed, a change between any two states that is a motion and never a cut — taken from
- * wherever the face is when it arrives half-way through another — sizes that simplify rather
- * than blur, and still expressions for a reader asking for less movement.
+ * Hemera's face, asked what it promises: one expression per state an agent can be in, held still
+ * — but for the slow blink of a state waiting for the reader, and the loading's orbit — a change
+ * between any two states that is one short motion and never a cut, taken from wherever the face
+ * is when it arrives half-way through another, sizes that simplify rather than blur, and still
+ * expressions for a reader asking for less movement.
  *
  * The face is a function of time, so every one of these is asked one frame at a time, far faster
  * than a screen draws them, and nothing here waits for a clock.
@@ -135,6 +136,20 @@ const PAIRS = FACE_STATES.flatMap((from) =>
   FACE_STATES.filter((to) => to !== from).map((to) => [from, to] as const),
 )
 
+/** The states that wait for the reader: the only ones that keep a loop, a slow blink. */
+const WAITING: readonly FaceState[] = ['question', 'permission', 'blocked']
+
+/** The states that hold still once shown: every one but loading and those that wait. */
+const CALM = FACE_STATES.filter((state) => state !== 'loading' && !WAITING.includes(state))
+
+/** The working states, which are ordinary and drawn in no colour of their own. */
+const WORK: readonly FaceState[] = ['thinking', 'reading', 'writing', 'running', 'checking']
+
+/** A pose with its lids left out: everything a blink does not move. */
+function lidless(frame: FaceFrame): number[] {
+  return frame.layers[0]!.pose.filter((_, index) => index !== AT.lidLeft && index !== AT.lidRight)
+}
+
 /** How long a change from one state to another lasts at the preset's own pace. */
 function lengthOf(from: FaceState, to: FaceState): number {
   return face.change[changeBetween(from, to)]
@@ -145,6 +160,21 @@ describe('One expression per state an agent can be in', () => {
     const labels = FACE_STATES.map((state) => EXPRESSIONS[state].label)
     expect(labels.every((label) => label.trim() !== '')).toBe(true)
     expect(new Set(labels).size).toBe(FACE_STATES.length)
+  })
+
+  test('the working states are drawn in a neutral role, and nothing in the primary', () => {
+    for (const state of WORK) {
+      expect(['text-foreground', 'text-muted-foreground']).toContain(
+        TONE_CLASSES[EXPRESSIONS[state].tone],
+      )
+    }
+    expect(Object.values(TONE_CLASSES)).not.toContain('text-primary')
+  })
+
+  test('colour is kept for what it means: waiting, an error, done', () => {
+    for (const state of WAITING) expect(TONE_CLASSES[EXPRESSIONS[state].tone]).toBe('text-warning')
+    expect(TONE_CLASSES[EXPRESSIONS.error.tone]).toBe('text-destructive')
+    expect(TONE_CLASSES[EXPRESSIONS.done.tone]).toBe('text-success')
   })
 
   test('every state is drawn in a role of the theme and never in a colour of its own', () => {
@@ -177,7 +207,11 @@ describe('One expression per state an agent can be in', () => {
   )
 })
 
-describe('Life within a state', () => {
+describe('Within a state', () => {
+  test('only the states that wait for the reader keep a loop', () => {
+    expect(FACE_STATES.filter((state) => EXPRESSIONS[state].waits)).toEqual(WAITING)
+  })
+
   test.each(FACE_STATES)('%s lives for a minute without a single cut', (state) => {
     for (const [seed, detail] of [
       [3, DETAILS.full],
@@ -186,6 +220,39 @@ describe('Life within a state', () => {
       const frameAt = told({ seed, start: state, detail })
       expect(largestStep(frameAt, 0, 60, detail)).toBeLessThan(CUT)
     }
+  })
+
+  test.each(CALM)('%s holds still from the moment it is shown', (state) => {
+    const frameAt = told({ seed: 3, start: state })
+    const first = drawing(frameAt(0))
+    for (let at = 0; at < 60; at += 0.1) {
+      const frame = frameAt(at)
+      expect(frame.still).toBe(true)
+      expect(drawing(frame)).toEqual(first)
+    }
+  })
+
+  test.each(WAITING)('%s keeps a slow blink, and nothing else moves', (state) => {
+    const frameAt = told({ seed: 3, start: state })
+    const first = lidless(frameAt(0))
+    let shut = 0
+    let was = false
+    for (let tick = 0; tick < 60 * RATE; tick += 1) {
+      const frame = frameAt(tick / RATE)
+      expect(frame.still).toBe(false)
+      expect(lidless(frame)).toEqual(first)
+      const closed = frame.layers[0]!.pose[AT.lidLeft]! > 0.9
+      if (closed && !was) shut += 1
+      was = closed
+    }
+    expect(shut).toBeGreaterThanOrEqual(Math.floor(60 / face.call.every[1]))
+    expect(shut).toBeLessThanOrEqual(Math.ceil(60 / face.call.every[0]))
+  })
+
+  test('loading goes on turning: it is the loading indicator', () => {
+    const frameAt = told({ seed: 3, start: 'loading' })
+    expect(frameAt(1).still).toBe(false)
+    expect(travel(drawing(frameAt(1)), drawing(frameAt(1.3)))).toBeGreaterThan(0.5)
   })
 
   test('the same seed tells the same story, and another seed another one', () => {
@@ -198,7 +265,7 @@ describe('Life within a state', () => {
     const same = told({ seed: 42, start: 'asleep', changes })
     const other = told({ seed: 43, start: 'asleep', changes })
     let differs = false
-    for (let at = 0; at < 12; at += 0.05) {
+    for (let at = 0; at < 40; at += 0.05) {
       const drawn = drawing(one(at))
       expect(drawing(same(at))).toEqual(drawn)
       differs ||= travel(drawn, drawing(other(at))) > 0.01
@@ -207,42 +274,41 @@ describe('Life within a state', () => {
   })
 
   test('a face asked about a moment it let go of tells it again, the same', () => {
-    const frameAt = told({ seed: 9, start: 'reading' })
-    const early = drawing(frameAt(1.5))
-    // Far enough on for the early blinks, passes and flourishes to have been let go of.
+    const frameAt = told({ seed: 9, start: 'question' })
+    const early = Array.from({ length: 400 }, (_, index) => drawing(frameAt(index / 20)))
+    // Far enough on for the early blinks to have been let go of.
     frameAt(900)
-    expect(drawing(frameAt(1.5))).toEqual(early)
+    expect(Array.from({ length: 400 }, (_, index) => drawing(frameAt(index / 20)))).toEqual(early)
   })
 
-  test('blinks never fall into a rhythm, and keep inside the bounds of their state', () => {
-    const { blink } = EXPRESSIONS.done
-    const frameAt = told({ seed: 5, start: 'done' })
-    const shut: number[] = []
+  test('slow blinks never fall into a rhythm, and keep inside their bounds', () => {
+    const frameAt = told({ seed: 5, start: 'question' })
+    const starts: number[] = []
     let was = false
-    for (let tick = 0; tick < 240 * RATE; tick += 1) {
+    for (let tick = 0; tick < 300 * RATE; tick += 1) {
       const at = tick / RATE
       const lid = frameAt(at).layers[0]!.pose[AT.lidLeft]!
-      if (lid > 0.9 && !was) shut.push(at)
+      if (lid > 0.9 && !was) starts.push(at)
       was = lid > 0.9
     }
-    // A double blink is two shuts a gap apart; only the first of each pair starts an interval.
-    const starts = shut.filter((at, index) => index === 0 || at - shut[index - 1]! > 1)
     const gaps = starts.slice(1).map((at, index) => at - starts[index]!)
     expect(gaps.length).toBeGreaterThan(20)
-    const reach = face.blink.down + face.blink.up + face.blink.gap + face.blink.down
+    const reach = face.call.down + face.call.up
     for (const gap of gaps) {
-      expect(gap).toBeGreaterThanOrEqual(blink!.every[0] - reach)
-      expect(gap).toBeLessThanOrEqual(blink!.every[1] + reach)
+      expect(gap).toBeGreaterThanOrEqual(face.call.every[0] - reach)
+      expect(gap).toBeLessThanOrEqual(face.call.every[1] + reach)
     }
     const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length
     const spread = Math.sqrt(gaps.reduce((sum, gap) => sum + (gap - mean) ** 2, 0) / gaps.length)
     expect(spread).toBeGreaterThan(0.5)
   })
 
-  test('a state that does not blink never closes its eyes on its own', () => {
-    const frameAt = told({ seed: 5, start: 'error' })
-    for (let at = 0; at < 60; at += 1 / 60) {
-      expect(frameAt(at).layers[0]!.pose[AT.lidLeft]).toBe(0)
+  test('a state that does not wait never closes its eyes on its own', () => {
+    for (const state of CALM) {
+      const frameAt = told({ seed: 5, start: state })
+      for (let at = 0; at < 60; at += 1 / 60) {
+        expect(frameAt(at).layers[0]!.pose[AT.lidLeft]).toBe(EXPRESSIONS[state].lid)
+      }
     }
   })
 })
@@ -284,6 +350,26 @@ describe('Transitions', () => {
         })
         const end = interrupted + lengthOf(to, third) + 0.3
         expect(largestStep(frameAt, at - 0.1, end)).toBeLessThan(CUT)
+      }
+    },
+  )
+
+  test('every change is one short movement: a second at most', () => {
+    for (const length of Object.values(face.change)) expect(length).toBeLessThanOrEqual(1)
+  })
+
+  test.each(PAIRS.filter(([, to]) => CALM.includes(to)))(
+    '%s to %s plays its movement once, and then holds still',
+    (from, to) => {
+      const at = 2.3
+      const frameAt = told({ seed: 2, start: from, changes: [{ state: to, at }] })
+      expect(frameAt(at + lengthOf(from, to) / 2).still).toBe(false)
+      const landed = at + lengthOf(from, to) + 0.001
+      const rest = drawing(frameAt(landed))
+      for (let when = landed; when < landed + 30; when += 0.25) {
+        const frame = frameAt(when)
+        expect(frame.still).toBe(true)
+        expect(drawing(frame)).toEqual(rest)
       }
     },
   )
@@ -369,9 +455,9 @@ describe('Sizes', () => {
     expect(icon.left.width).toBeGreaterThan(full.left.width)
   })
 
-  test('small, a gesture travels further so that it still reads', () => {
-    const frameAt = told({ seed: 3, start: 'reading' })
-    const pose = frameAt(1.2).layers[0]!.pose
+  test('small, a movement travels further so that it still reads', () => {
+    const frameAt = told({ seed: 3, start: 'thinking', changes: [{ state: 'done', at: 1 }] })
+    const pose = frameAt(1.1).layers[0]!.pose
     const reach = (detail: FaceDetail): number => {
       const moved = drawnOf(pose, detail)
       const still = drawnOf(
