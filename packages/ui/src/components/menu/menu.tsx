@@ -35,14 +35,14 @@ const BARE =
 const DETAIL = 'ml-auto pl-3 text-muted-foreground'
 
 const ITEM =
-  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:tinted data-disabled:opacity-50'
+  'flex items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none hover-motion data-highlighted:tinted data-disabled:opacity-50'
 
 /**
  * A command that cannot be undone: its words and its icon in the destructive tone — the icon is
  * drawn in `currentColor` — and the hand's tint faintly in that tone too.
  */
 const DESTRUCTIVE_ITEM =
-  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-destructive outline-none select-none hover-motion data-highlighted:tinted-destructive data-disabled:opacity-50'
+  'flex items-center gap-2 rounded-md px-2 py-1.5 text-destructive outline-none select-none hover-motion data-highlighted:tinted-destructive data-disabled:opacity-50'
 
 export interface MenuItem {
   label: string

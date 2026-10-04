@@ -455,12 +455,19 @@
      refuses to be. */
   button:not(:disabled, [aria-disabled='true']),
   [role='button']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true'], [data-disabled]),
+  [role='option']:not([aria-disabled='true'], [data-disabled]),
+  [role='tab']:not([aria-disabled='true'], [data-disabled]),
+  [role='checkbox']:not([aria-disabled='true'], [data-disabled]),
+  [role='combobox']:not([aria-disabled='true'], [data-disabled]),
   a[href] {
     cursor: pointer;
   }
 
   button:disabled,
-  [aria-disabled='true'] {
+  [aria-disabled='true'],
+  [role='menuitem'][data-disabled],
+  [role='option'][data-disabled] {
     cursor: not-allowed;
   }
 
