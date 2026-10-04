@@ -4,19 +4,21 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { HelperChip } from './helper-chip.tsx'
 
 /**
- * A helper, and only the helper: its letter avatar, its name, a state dot. Nothing to press on
- * it and no ×: nobody stops a helper by hand. The dot's legend is a tooltip on the dot.
+ * A helper, and only the helper: its letter avatar and its name. No dot: its state is the chip's
+ * own background, as on the live chip — a tint breathing while it works, one sweep in the colour
+ * of the state it changes to. Nothing to press on it and no ×: nobody stops a helper by hand. The
+ * state in words is a tooltip on the avatar.
  */
 const meta = {
   tags: ['autodocs'],
   title: 'Components/HelperChip',
   component: HelperChip,
-  args: { name: 'Reviewer', status: 'running' },
+  args: { name: 'Reviewer', state: 'running' },
   argTypes: {
     name: { control: 'text' },
-    status: {
+    state: {
       control: 'inline-radio',
-      options: ['pending', 'running', 'success', 'failure', 'cancelled'],
+      options: ['running', 'stuck', 'finished', 'failed', 'stopped'],
     },
     others: { table: { disable: true } },
     tone: { table: { disable: true } },
@@ -26,45 +28,65 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** At work: the avatar, the name, a running dot — and no control to stop it. */
+/** The chip of a helper, its avatar and its name and nothing else: no dot, no button, no ×. */
+function bare(canvasElement: HTMLElement): HTMLElement {
+  const chip = canvasElement.querySelector<HTMLElement>('[data-helper-chip]')!
+  expect(chip).toHaveTextContent(/^R\s*Reviewer$/)
+  expect(chip.querySelector('[data-status-dot]')).toBeNull()
+  expect(within(canvasElement).queryByRole('button')).toBeNull()
+  expect(chip).not.toHaveTextContent('×')
+  return chip
+}
+
+/** At work: its background breathes, and the avatar's legend says so. */
 export const Running: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const chip = canvasElement.querySelector<HTMLElement>('[data-helper-chip]')!
-    expect(chip).toHaveTextContent(/^RReviewer$/)
-    expect(canvas.queryByRole('button')).toBeNull()
-    expect(chip).not.toHaveTextContent('×')
-    const dot = canvas.getByRole('img', { name: 'Running' })
+    const chip = bare(canvasElement)
+    expect(chip.querySelector('[data-breath]')).not.toBeNull()
+    const avatar = within(canvasElement).getByRole('img', { name: 'Reviewer, running' })
     await userEvent.tab()
-    expect(dot).toHaveFocus()
+    expect(avatar).toHaveFocus()
     await waitFor(() => {
-      expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Running')
+      expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Reviewer, running')
     })
     await userEvent.tab()
   },
 }
 
-/** Waiting for its turn. */
-export const Pending: Story = {
-  args: { status: 'pending' },
+/** No activity for five minutes: the breath stops. */
+export const Stuck: Story = {
+  args: { state: 'stuck' },
   play: async ({ canvasElement }) => {
-    expect(within(canvasElement).getByRole('img', { name: 'Waiting' })).toBeInTheDocument()
+    const chip = bare(canvasElement)
+    expect(chip.querySelector('[data-breath]')).toBeNull()
+    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, no activity' })).toBeVisible()
   },
 }
 
-/** Done. */
-export const Done: Story = {
-  args: { status: 'success' },
+/** Done: neutral again. */
+export const Finished: Story = {
+  args: { state: 'finished' },
   play: async ({ canvasElement }) => {
-    expect(within(canvasElement).getByRole('img', { name: 'Done' })).toBeInTheDocument()
+    expect(bare(canvasElement).querySelector('[data-breath]')).toBeNull()
+    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, done' })).toBeVisible()
   },
 }
 
 /** Failed. */
 export const Failed: Story = {
-  args: { status: 'failure' },
+  args: { state: 'failed' },
   play: async ({ canvasElement }) => {
-    expect(within(canvasElement).getByRole('img', { name: 'Failed' })).toBeInTheDocument()
+    bare(canvasElement)
+    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, failed' })).toBeVisible()
+  },
+}
+
+/** Stopped. */
+export const Stopped: Story = {
+  args: { state: 'stopped' },
+  play: async ({ canvasElement }) => {
+    bare(canvasElement)
+    expect(within(canvasElement).getByRole('img', { name: 'Reviewer, stopped' })).toBeVisible()
   },
 }
 

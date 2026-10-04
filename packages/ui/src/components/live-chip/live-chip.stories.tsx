@@ -1,15 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconTerminal } from '../../icons.ts'
+import { Button } from '../button/button.tsx'
 import { LetterAvatar } from '../letter-avatar/letter-avatar.tsx'
-import { LiveChip, type LiveChipProps } from './live-chip.tsx'
+import { LiveChip, type LiveChipProps, type LiveState } from './live-chip.tsx'
 
 /**
  * What goes on, as one chip: a run, a helper and a Probe are the same chip and differ only by what
- * fills its icon slot. Neutral; its seconds in a room kept for three digits; a tint that breathes
- * while it works; one tinted sweep when it ends, and ✓ or ✕ in place of its icon. Its legend is
- * its tooltip. No × on the chip: stopping a run belongs to the line of the page it stands on.
+ * fills its icon slot — the type of what runs: a command's icon, a helper's letter avatar. Neutral;
+ * its seconds in a room kept for three digits; while it works, a tint of its own breathes across
+ * it; every change from working plays one sweep in the colour of the state it changes to, and the
+ * icon gives way to that state's glyph. Its legend is its tooltip. No × on the chip: stopping a
+ * run belongs to the line of the page it stands on.
  */
 
 /** A minute and a half ago, for a chip that is still at work. */
@@ -28,6 +32,16 @@ function colourOf(room: HTMLElement, className: string): string {
   const colour = getComputedStyle(probe).color
   probe.remove()
   return colour
+}
+
+/** Reads the background a theme class resolves to on this page, off a probe. */
+function fillOf(room: HTMLElement, className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  room.append(probe)
+  const fill = getComputedStyle(probe).backgroundColor
+  probe.remove()
+  return fill
 }
 
 /** Hovers the chip and reads its legend. */
@@ -77,14 +91,19 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * Working: a neutral chip whose tint breathes, its icon in place and its seconds ticking. Asked
- * for less movement — as the runner of these stories asks — the tint stands still.
+ * Working: a neutral chip whose tint breathes — the running tone, its own and not the warning of a
+ * stuck chip — its icon in place and its seconds ticking. Asked for less movement — as the runner
+ * of these stories asks — the tint stands still.
  */
 export const Running: Story = {
   play: async ({ canvasElement, args }) => {
     const chip = within(canvasElement).getByRole('button', { name: 'test, running' })
     const breath = chip.querySelector('[data-breath]')
     expect(breath).not.toBeNull()
+    expect(getComputedStyle(breath!).backgroundColor).toBe(fillOf(canvasElement, 'bg-info-muted'))
+    expect(getComputedStyle(breath!).backgroundColor).not.toBe(
+      fillOf(canvasElement, 'bg-warning-muted'),
+    )
     expect(getComputedStyle(breath!).animationName).toBe(
       globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'breathe',
     )
@@ -215,3 +234,71 @@ export const LongName: Story = {
     expect(await legendOf(chip)).toContain(args.name)
   },
 }
+
+/** Where each change from working lands, and the sweep it plays in that state's colour. */
+const SWEEPS: Record<Exclude<LiveState, 'running'>, string> = {
+  stuck: 'bg-warning-muted',
+  finished: 'bg-success-muted',
+  failed: 'bg-destructive-muted',
+  stopped: 'bg-accent',
+}
+
+/**
+ * A chip that starts working and changes to `to` a moment later, as a user would see it; Replay
+ * plays the change again.
+ */
+function Change({ to, ...args }: LiveChipProps & { to: LiveState }): ReactNode {
+  const [round, setRound] = useState(0)
+  const [state, setState] = useState<LiveState>('running')
+  const [startedAt] = useState(() => Date.now() - 84_000)
+  const [endedAt, setEndedAt] = useState<number | null>(null)
+  useEffect(() => {
+    setState('running')
+    setEndedAt(null)
+    const change = setTimeout(() => {
+      setState(to)
+      if (to !== 'stuck') setEndedAt(Date.now())
+    }, 1200)
+    return () => clearTimeout(change)
+  }, [to, round])
+  return (
+    <div className="flex items-center gap-3">
+      <LiveChip {...args} state={state} startedAt={startedAt} endedAt={endedAt} />
+      <Button variant="secondary" size="sm" onClick={() => setRound((one) => one + 1)}>
+        Replay
+      </Button>
+    </div>
+  )
+}
+
+/** A change from working, played: the chip lands on `to`, its glyph in place of its icon. */
+function change(to: Exclude<LiveState, 'running'>): Story {
+  return {
+    args: { name: 'test' },
+    render: (args) => <Change {...args} to={to} />,
+    play: async ({ canvasElement }) => {
+      const canvas = within(canvasElement)
+      expect(canvas.getByRole('button', { name: 'test, running' })).toBeInTheDocument()
+      const chip = await waitFor(
+        () => canvas.getByRole('button', { name: new RegExp(`^test, (?!running)`) }),
+        { timeout: 3000 },
+      )
+      expect(chip.querySelector(`[data-end="${to}"]`)).not.toBeNull()
+      expect(chip.querySelector('[data-breath]')).toBeNull()
+      expect(chip.dataset.sweepTone).toBe(to)
+      expect(fillOf(canvasElement, SWEEPS[to])).not.toBe(fillOf(canvasElement, 'bg-card'))
+    },
+  }
+}
+
+/** Working, then stuck: one sweep in the warning tone, and the paused clock. */
+export const RunningToStuck: Story = change('stuck')
+
+/** Working, then done: one sweep in the success tone, and the ✓. */
+export const RunningToFinished: Story = change('finished')
+
+/** Working, then failed: one sweep in the destructive tone, and the ✕. */
+export const RunningToFailed: Story = change('failed')
+
+/** Working, then stopped: one quiet sweep in the neutral accent, and the stop glyph. */
+export const RunningToStopped: Story = change('stopped')
