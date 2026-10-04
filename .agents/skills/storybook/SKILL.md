@@ -15,8 +15,9 @@ tested: a component exists in the catalogue, in every state, before anything wir
 
 ## Before you start
 
-- Read `AGENTS.md` (UI rules and the 1.0 interface conventions) and the skills
-  `frontend-design`, `review-animations` and `vercel-react-best-practices` in `.agents/skills/`.
+- Read `AGENTS.md` and `packages/ui/AGENTS.md` (UI rules and the 1.0 interface conventions)
+  and the skills `frontend-design`, `review-animations` and `vercel-react-best-practices` in
+  `.agents/skills/`.
 - Look for an existing component before writing one: the catalogue is the inventory. Extend a
   component through its props, never by restyling it through `className` from outside.
 - A component is plain presentational React: values in, callbacks out. No Effect, no RPC, no

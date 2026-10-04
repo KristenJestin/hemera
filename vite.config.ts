@@ -19,7 +19,7 @@ export default defineConfig({
     settings: {
       shadcn: {
         ui: '@hemera/ui',
-        note: 'Every visual value comes from packages/ui/src/theme.css; see AGENTS.md, UI rules.',
+        note: 'Every visual value comes from packages/ui/src/theme.css; see packages/ui/AGENTS.md, UI rules.',
       },
     },
     categories: {
