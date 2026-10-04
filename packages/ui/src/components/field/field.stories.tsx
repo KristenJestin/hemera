@@ -96,7 +96,22 @@ export const WithKbd: Story = {
     expect(trailing!.top).toBeGreaterThanOrEqual(box.top)
     expect(trailing!.bottom).toBeLessThanOrEqual(box.bottom)
     expect(trailing!.left - input.right).toBeGreaterThanOrEqual(8)
+    // The field has a fill of its own, lighter than the keys' surface, so the hint stands out.
+    const field = within(canvasElement).getByLabelText('Search').closest('[data-input-box]')!
+    const key = field.querySelector('kbd')!
+    expect(getComputedStyle(field).backgroundColor).not.toBe(getComputedStyle(key).backgroundColor)
+    expect(getComputedStyle(field).backgroundColor).toBe(fillOf(field, 'bg-input-fill'))
   },
+}
+
+/** Reads the background a theme class resolves to beside an element, off a probe. */
+function fillOf(beside: Element, className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  beside.parentElement!.append(probe)
+  const fill = getComputedStyle(probe).backgroundColor
+  probe.remove()
+  return fill
 }
 
 /** Both: the icon before the text, the keystroke after it, in the same box. */
