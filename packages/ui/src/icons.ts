@@ -22,15 +22,22 @@ import {
   IconCopyFilled as TablerCopyFilled,
   IconDots as TablerDots,
   IconDotsFilled as TablerDotsFilled,
+  IconExternalLink as TablerExternalLink,
+  IconExternalLinkFilled as TablerExternalLinkFilled,
   IconFolder as TablerFolder,
   IconFolderFilled as TablerFolderFilled,
   IconGitBranch as TablerGitBranch,
+  IconInfoCircle as TablerInfoCircle,
+  IconInfoCircleFilled as TablerInfoCircleFilled,
   IconPencil as TablerPencil,
   IconPencilFilled as TablerPencilFilled,
+  IconPlayerPlay as TablerPlayerPlay,
+  IconPlayerPlayFilled as TablerPlayerPlayFilled,
   IconPlayerStop as TablerPlayerStop,
   IconPlayerStopFilled as TablerPlayerStopFilled,
   IconPlus as TablerPlus,
   IconPlusFilled as TablerPlusFilled,
+  IconRefresh as TablerRefresh,
   IconSearch as TablerSearch,
   IconSearchFilled as TablerSearchFilled,
   IconSettings as TablerSettings,
@@ -107,11 +114,19 @@ export const IconChevronDown = catalogued(
 export const IconClockPause = catalogued(TablerClockPause, TablerClockPause, 'IconClockPause')
 export const IconCopy = catalogued(TablerCopyFilled, TablerCopy, 'IconCopy')
 export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
+export const IconExternalLink = catalogued(
+  TablerExternalLinkFilled,
+  TablerExternalLink,
+  'IconExternalLink',
+)
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
+export const IconInfoCircle = catalogued(TablerInfoCircleFilled, TablerInfoCircle, 'IconInfoCircle')
 export const IconPencil = catalogued(TablerPencilFilled, TablerPencil, 'IconPencil')
+export const IconPlayerPlay = catalogued(TablerPlayerPlayFilled, TablerPlayerPlay, 'IconPlayerPlay')
 export const IconPlayerStop = catalogued(TablerPlayerStopFilled, TablerPlayerStop, 'IconPlayerStop')
 export const IconPlus = catalogued(TablerPlusFilled, TablerPlus, 'IconPlus')
+export const IconRefresh = catalogued(TablerRefresh, TablerRefresh, 'IconRefresh')
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconTerminal = catalogued(TablerTerminal, TablerTerminal, 'IconTerminal')

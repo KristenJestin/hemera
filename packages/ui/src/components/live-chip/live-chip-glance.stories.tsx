@@ -268,7 +268,7 @@ export const ProbeFailed: Story = glanced(
 )
 
 /** From the keyboard: Enter opens the glance, Escape closes it, the focus goes back to the chip. */
-export const Keyboard: Story = {
+export const Focused: Story = {
   args: {
     name: 'test',
     icon: <IconTerminal size="sm" />,

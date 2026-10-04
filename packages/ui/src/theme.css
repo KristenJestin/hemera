@@ -280,6 +280,12 @@
   /* How wide a live chip may grow before its name ends in an ellipsis: wide enough for a name to
      be read, narrow enough for a line of chips to stay a line. */
   --spacing-chip: 11.5rem;
+  /* The least a live chip's name is given, however narrow the line: a few words, never a few
+     letters. The chip does not shrink below its name's least and its seconds whole. */
+  --spacing-chip-name: 4rem;
+  /* How wide a live chip's glance is: a long command, an address and three lines of output read
+     without wrapping every other word. */
+  --spacing-glance: 20rem;
 
   /* How tall a dialog may be drawn, whatever it holds: past that only its body scrolls. A share
      of the window, because it is the window it has to leave a margin in. */

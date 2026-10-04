@@ -228,6 +228,9 @@ downloaded or installed while the application runs.
 - Errors in words. A silent turn says so. Agents' errors and unanswered requests are shown. A
   start has a maximum delay.
 - Skeletons for rows whose shape is known; a spinner only for what has none.
+- What goes on (a run, a service, a helper, a Probe) is a `LiveChip` and nothing beside it: its
+  actions (Restart, Stop, Run again, details) live in the glance the chip opens, never as
+  buttons on the line.
 - A reading measure of 70 to 80 characters for prose (the Spec page, the Chat, Discuss); code,
   tables and command output may be wider.
 - Designs at 1920×1080 and 1366×768, light and dark.

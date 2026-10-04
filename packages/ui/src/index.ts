@@ -60,6 +60,13 @@ export {
   type LiveChipProps,
   type LiveState,
 } from './components/live-chip/live-chip.tsx'
+export {
+  LiveChipGlance,
+  glanceWordsOf,
+  type LiveChipGlanceProps,
+  type LiveGlance,
+  type LiveKind,
+} from './components/live-chip/live-chip-glance.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {

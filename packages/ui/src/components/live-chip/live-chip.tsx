@@ -3,7 +3,9 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { IconCheck, IconClockPause, IconPlayerStop, IconX } from '../../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
+import { Popover } from '../popover/popover.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
+import { type LiveGlance, LiveChipGlance } from './live-chip-glance.tsx'
 import { type LiveState, LiveTint, useSweep } from './tint.tsx'
 
 /**
@@ -45,7 +47,7 @@ export const LIVE_WORDS: Record<LiveState, string> = {
 export const STUCK_AFTER = '5 minutes'
 
 const CHIP =
-  'relative isolate inline-flex h-control-sm max-w-chip min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:tinted focus-ring hover-motion'
+  'relative isolate inline-flex h-control-sm max-w-chip shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:tinted focus-ring hover-motion'
 
 /** The icon's room, held by the chip's own icon whether it shows or not. */
 const MARK = 'relative flex shrink-0'
@@ -69,7 +71,8 @@ const GLYPHS: Record<Shown, ReactNode> = {
   stopped: <IconPlayerStop size="sm" aria-hidden="true" />,
 }
 
-const NAME = 'min-w-0 truncate font-medium'
+/** The name takes what room is left, and never less than a few words: it ends in an ellipsis. */
+const NAME = 'min-w-chip-name flex-1 truncate text-left font-medium'
 
 /** Three digits and the unit, set against its end; a fourth digit widens it. */
 const TIME = 'min-w-8 shrink-0 text-right font-mono text-muted-foreground tabular-nums'
@@ -109,7 +112,12 @@ export interface LiveChipProps {
   startedAt: number
   /** When it ended; null while it works or is stuck, and the seconds tick. */
   endedAt: number | null
-  /** What pressing the chip does: open what it stands for. */
+  /**
+   * What pressing the chip opens: its glance, with everything about it and its actions. A page
+   * shows the chip alone, never a Restart or a Stop beside it.
+   */
+  glance?: LiveGlance | undefined
+  /** What pressing a chip without a glance does. */
   onPress?: (() => void) | undefined
 }
 
@@ -152,28 +160,38 @@ export function LiveChip({
   state,
   startedAt,
   endedAt,
+  glance,
   onPress,
 }: LiveChipProps): ReactNode {
   const now = useNow(endedAt === null)
   const sweep = useSweep(state)
   const time = durationOf((endedAt ?? now) - startedAt)
 
-  return (
-    <Tooltip label={`${name} · ${legendOf(state, time)}`}>
-      <button
-        type="button"
-        className={CHIP}
-        aria-label={`${name}, ${LIVE_WORDS[state]}`}
-        data-live-chip=""
-        data-state={state}
-        data-sweep-tone={sweep.swept ?? undefined}
-        onClick={() => onPress?.()}
-      >
-        <LiveTint state={state} sweep={sweep} />
-        <Mark icon={icon} shown={state} />
-        <span className={NAME}>{name}</span>
-        <span className={TIME}>{time}</span>
-      </button>
-    </Tooltip>
+  const chip = (
+    <button
+      type="button"
+      className={CHIP}
+      aria-label={`${name}, ${LIVE_WORDS[state]}`}
+      data-live-chip=""
+      data-state={state}
+      data-sweep-tone={sweep.swept ?? undefined}
+      onClick={glance === undefined ? () => onPress?.() : undefined}
+    >
+      <LiveTint state={state} sweep={sweep} />
+      <Mark icon={icon} shown={state} />
+      <span className={NAME} data-name="">
+        {name}
+      </span>
+      <span className={TIME}>{time}</span>
+    </button>
   )
+  // With a glance, the glance is the legend, and more: the chip opens it rather than a tooltip.
+  if (glance !== undefined) {
+    return (
+      <Popover trigger={chip} label={name} align="start">
+        <LiveChipGlance name={name} state={state} time={time} glance={glance} />
+      </Popover>
+    )
+  }
+  return <Tooltip label={`${name} · ${legendOf(state, time)}`}>{chip}</Tooltip>
 }
