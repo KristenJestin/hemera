@@ -105,7 +105,7 @@ export const Stacked: Story = {
   },
 }
 
-/** The diff from the changes: the same sheet as every view, opened grown to the frame's width; its expand folds it back. */
+/** The diff from the changes: the same sheet as every view, at its width; its expand grows it to the frame's, and folds it back. */
 export const Expanded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -113,13 +113,16 @@ export const Expanded: Story = {
     const view = await waitFor(() => canvas.getByRole('region', { name: 'Diff' }))
     const body = canvasElement.querySelector<HTMLElement>('[data-base]')!.parentElement!
     await waitFor(() => {
+      expect(view.getBoundingClientRect().width).toBeLessThan(body.getBoundingClientRect().width)
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Expand Diff' }))
+    await waitFor(() => {
       expect(view.getBoundingClientRect().width).toBe(body.getBoundingClientRect().width)
     })
     await userEvent.click(canvas.getByRole('button', { name: 'Collapse Diff' }))
     await waitFor(() => {
       expect(view.getBoundingClientRect().width).toBeLessThan(body.getBoundingClientRect().width)
     })
-    expect(canvas.getByRole('button', { name: 'Expand Diff' })).toBeVisible()
   },
 }
 

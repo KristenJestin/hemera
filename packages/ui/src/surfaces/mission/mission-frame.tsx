@@ -33,8 +33,8 @@ import { type Ball, BallMark } from '../../blocks/ball/ball-mark.tsx'
  * rounds, the diff from the changes — and is a sheet of its own: a solid surface slid in from the
  * right edge over the base, with its own line and shadow, at the width it asks for — `narrow` for
  * a task or a round, `wide` for the Spec or the Memory — and every sheet grows to the frame's
- * whole width and back on the expand beside its ×; a view that needs the room, the diff, opens
- * grown. One sheet, one way in, for every view. Nothing is drawn through the sheet; what shows of
+ * whole width and back on the expand beside its ×, and none opens grown: the diff included. One
+ * sheet, one way in, for every view. Nothing is drawn through the sheet; what shows of
  * the base beside it is the base, at rest and out of reach, under a scrim — the theme's overlay,
  * as behind a dialog. One head for every view: its icon and title, its own actions, the expand
  * and an × at its end, as a modal has. The × and Escape close the sheet on top and show the one
@@ -57,8 +57,6 @@ export interface MissionView {
   title: string
   icon: ReactNode
   width: ViewWidth
-  /** Whether it opens grown to the frame's whole width: for what needs the room, the diff. */
-  expanded?: boolean | undefined
   /** What the view adds to its head while it is shown. */
   actions?: ReactNode
   body: ReactNode
@@ -195,10 +193,8 @@ export function MissionFrame({
   const sliding = useTransition(sheet)
   const fading = useTransition(crossfade)
   const prefix = useId()
-  // The sheets grown to the frame's width, by view: what a view asks for at first, then the hand's.
-  const [grown, setGrown] = useState<ReadonlySet<string>>(
-    () => new Set(views.filter((view) => view.expanded === true).map((view) => view.id)),
-  )
+  // The sheets grown to the frame's width, by view: the hand's doing, and nothing else's.
+  const [grown, setGrown] = useState<ReadonlySet<string>>(() => new Set())
   const grow = (id: string, on: boolean): void =>
     setGrown((before) => {
       const next = new Set(before)

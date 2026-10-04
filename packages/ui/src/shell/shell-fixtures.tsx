@@ -362,7 +362,6 @@ export function viewsOf(openSpec: () => void): readonly MissionView[] {
       title: 'Diff',
       icon: <IconGitCompare size="sm" />,
       width: 'wide',
-      expanded: true,
       body: <Prose title="14 files in api, 3 in web, 1 in shared" lines={60} wide />,
     },
     {
