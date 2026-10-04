@@ -61,6 +61,7 @@ const chain = Effect.gen(function* () {
   const mainLines: string[] = []
   let relaunched = 0
   let logsShown = 0
+  let foldersAsked = 0
   const displayed: Preferences[] = []
 
   const { port1: mainToEngine, port2: engineEnd } = new MessageChannel()
@@ -99,6 +100,10 @@ const chain = Effect.gen(function* () {
           showLog: Effect.sync(() => {
             logsShown += 1
           }),
+          chooseFolder: Effect.sync(() => {
+            foldersAsked += 1
+            return '/work/acme'
+          }),
           display: (preferences) =>
             Effect.sync(() => {
               displayed.push(preferences)
@@ -122,6 +127,7 @@ const chain = Effect.gen(function* () {
     mainLines,
     relaunches: () => relaunched,
     logsShown: () => logsShown,
+    foldersAsked: () => foldersAsked,
     displayed,
   }
 })
@@ -207,6 +213,15 @@ describe('The window reaches the engine through main', () => {
         const { window, logsShown } = yield* chain
         yield* window['application.showLog']()
         expect(logsShown()).toBe(1)
+      }),
+    ))
+
+  test('main opens the system’s folder picker when the window asks, and answers the folder', () =>
+    run(
+      Effect.gen(function* () {
+        const { window, foldersAsked } = yield* chain
+        expect(yield* window['application.chooseFolder']()).toBe('/work/acme')
+        expect(foldersAsked()).toBe(1)
       }),
     ))
 

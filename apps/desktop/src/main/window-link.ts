@@ -35,6 +35,8 @@ export interface Application {
   readonly relaunch: Effect.Effect<void>
   /** Shows the diagnostic log in the system's file manager. */
   readonly showLog: Effect.Effect<void>
+  /** The system's own folder picker: the folder chosen, or null when none was. */
+  readonly chooseFolder: Effect.Effect<string | null>
   /** The preferences the engine answered: worn now, and kept for the next start's first frame. */
   readonly display: (preferences: Preferences) => Effect.Effect<void>
 }
@@ -214,4 +216,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
     'application.showLog': () => application.showLog.pipe(observed('application.showLog', log)),
+    'application.chooseFolder': () =>
+      application.chooseFolder.pipe(observed('application.chooseFolder', log)),
   })
