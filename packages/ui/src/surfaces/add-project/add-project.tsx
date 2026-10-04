@@ -129,7 +129,6 @@ export function AddProject({
       title="Add a Project"
       open={open}
       onOpenChange={onOpenChange}
-      size="wide"
       actions={
         <>
           {refused !== undefined && (

@@ -128,6 +128,10 @@ export const Empty: Story = {
   play: async () => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
     expect(within(dialog).getByRole('textbox', { name: 'Folder' })).toHaveValue('')
+    // A form's dialog, as narrow as every other: one folder field needs no more.
+    expect(dialog.getBoundingClientRect().width).toBeLessThanOrEqual(
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 28,
+    )
     expect(within(dialog).queryByRole('textbox', { name: 'Name' })).toBeNull()
   },
 }
