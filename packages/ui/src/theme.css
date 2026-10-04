@@ -496,6 +496,18 @@
   }
 }
 
+/* A view's sheet growing to its frame's whole width and folding back to its own: its width
+   travels on the beat and curve its slide came in on (the `sheet` kind), and it is the width that
+   travels, never a transform, which would stretch what the sheet holds on the way. */
+@utility sheet-motion {
+  transition-property: max-width;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 @layer base {
   html,
   body {

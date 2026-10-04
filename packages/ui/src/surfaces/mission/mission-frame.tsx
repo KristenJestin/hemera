@@ -152,9 +152,12 @@ const BASE = 'flex min-h-0 flex-1 flex-col overflow-auto'
  */
 const SCRIM = 'absolute inset-0 bg-overlay'
 
-/** A sheet: a solid surface of its own over the base, its own line and shadow on the edge it came from. */
+/**
+ * A sheet: a solid surface of its own over the base, its own line and shadow on the edge it came
+ * from. Its width grows and folds on the theme's `sheet-motion`, a transition of the width itself.
+ */
 const SHEET_BOX =
-  'absolute inset-y-0 right-0 flex w-full flex-col border-l border-border bg-surface-content shadow-lg'
+  'absolute inset-y-0 right-0 flex w-full flex-col border-l border-border bg-surface-content shadow-lg sheet-motion'
 
 /** How wide a sheet is at rest, by what it asked for; grown, the frame's whole width. */
 const SHEET_WIDTH: Record<ViewWidth, string> = {
@@ -320,8 +323,6 @@ export function MissionFrame({
               // Out of sight while another stands over it; a sheet on its way out stays in
               // sight, or its leaving would be a cut.
               hidden={open.includes(view.id) && shown !== view.id}
-              // Its width is a layout change motion plays on the same beat as its travel.
-              layout
               initial={SHEET.from}
               animate={SHEET.to}
               exit={SHEET.from}
