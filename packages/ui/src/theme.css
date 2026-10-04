@@ -139,15 +139,17 @@
   --hover-destructive: rgba(248, 113, 113, 0.12);
   --accent-foreground: #ececf1;
 
-  /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
+  /* The dark primary is a light fuchsia where it must read on the page: text, links, the focus
+     ring, muted fills. A filled primary is the light theme's own, exactly — its gradient, its
+     white label (4.7:1 on its top colour, 6.3:1 at its bottom), its edge and its highlight —
+     only its shadow made for the dark page: one brand fuchsia for every filled button. */
   --primary: #e879f9;
-  --primary-foreground: #040406;
-  --primary-strong: #d946ef;
+  --primary-foreground: #ffffff;
+  --primary-strong: #a21caf;
   --primary-muted: rgba(232, 121, 249, 0.1);
   --primary-muted-foreground: #f0abfc;
-  /* Lit from above in the dark too; the page's own dark reads at 5.9:1 or more over all of it. */
-  --primary-gradient: linear-gradient(180deg, #f0abfc 0%, #d946ef 100%);
-  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --primary-gradient: linear-gradient(180deg, #c026d3 0%, #a21caf 100%);
+  --primary-raise: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.5);
 
   --success: #4ade80;
   --success-muted: rgba(74, 222, 128, 0.1);
@@ -473,6 +475,12 @@
 
 /* The two regions of a frameless window: what drags it, and what does not — a control drawn
    inside the drag zone has to say so, or the press moves the window instead of pressing it. */
+/* The room of a scrollbar kept whether one is drawn or not: what a scroller holds never moves
+   sideways when its bar comes or goes. */
+@utility scrollbar-stable {
+  scrollbar-gutter: stable;
+}
+
 @utility drag-zone {
   -webkit-app-region: drag;
 }

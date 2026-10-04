@@ -48,6 +48,11 @@ export interface CommandLineFieldProps {
   commands?: readonly CatalogueChoice[] | undefined
   /** What the engine refuses in a line, in words, the token named; undefined for nothing. */
   refusalOf: (line: string) => string | undefined
+  /**
+   * Whether a line of its own may be written for Linux and Windows; false hides the fold where
+   * such a line cannot be kept yet.
+   */
+  systems?: boolean | undefined
 }
 
 /** A line with nothing in it yet. */
@@ -102,7 +107,12 @@ function LineInput({
 }
 
 /** The line every system runs, and the fold with a line of its own for each system. */
-function Lines({ value, onChange, refusalOf }: Omit<CommandLineFieldProps, 'commands'>): ReactNode {
+function Lines({
+  value,
+  onChange,
+  refusalOf,
+  systems: ownLines = true,
+}: Omit<CommandLineFieldProps, 'commands'>): ReactNode {
   const folding = useTransition(fold)
   const [systems, setSystems] = useState(value.lineLinux !== null || value.lineWindows !== null)
   return (
@@ -113,17 +123,19 @@ function Lines({ value, onChange, refusalOf }: Omit<CommandLineFieldProps, 'comm
         error={refusalOf(value.line)}
         onValueChange={(line) => onChange({ ...value, line })}
       />
-      <button
-        type="button"
-        className={DISCLOSURE}
-        aria-expanded={systems}
-        onClick={() => setSystems(!systems)}
-      >
-        <span className={DISCLOSURE_CHEVRON} aria-expanded={systems} aria-hidden="true">
-          <IconChevronRight size="sm" />
-        </span>
-        Lines for Linux and Windows
-      </button>
+      {ownLines && (
+        <button
+          type="button"
+          className={DISCLOSURE}
+          aria-expanded={systems}
+          onClick={() => setSystems(!systems)}
+        >
+          <span className={DISCLOSURE_CHEVRON} aria-expanded={systems} aria-hidden="true">
+            <IconChevronRight size="sm" />
+          </span>
+          Lines for Linux and Windows
+        </button>
+      )}
       <AnimatePresence initial={false}>
         {systems && (
           <motion.div
@@ -163,9 +175,10 @@ export function CommandLineField({
   onChange,
   commands,
   refusalOf,
+  systems = true,
 }: CommandLineFieldProps): ReactNode {
   if (commands === undefined) {
-    return <Lines value={value} onChange={onChange} refusalOf={refusalOf} />
+    return <Lines value={value} onChange={onChange} refusalOf={refusalOf} systems={systems} />
   }
   const chosen = commands.find((one) => one.id === value.command)
   return (
@@ -212,7 +225,9 @@ export function CommandLineField({
           {
             value: 'line',
             label: 'A line of its own',
-            panel: <Lines value={value} onChange={onChange} refusalOf={refusalOf} />,
+            panel: (
+              <Lines value={value} onChange={onChange} refusalOf={refusalOf} systems={systems} />
+            ),
           },
         ]}
       />

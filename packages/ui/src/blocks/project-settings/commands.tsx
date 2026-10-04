@@ -1,5 +1,6 @@
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { cn } from 'cn'
+import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -10,6 +11,7 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
   IconBolt,
   IconBraces,
@@ -38,7 +40,8 @@ import { Section } from './parts.tsx'
  * with its legend; a line says its roles in words to a screen reader.
  *
  * Pressing a line opens its form. There, a line holding shell syntax is refused as it is typed,
- * the token named: Hemera runs a command without a shell.
+ * the token named: Hemera runs a command without a shell. A command added grows into the list on
+ * `fold`, pushing the lines after it; one removed folds out the same way.
  */
 export { COMMAND_TYPES, TYPE_WORDS, typeIcon }
 export type { CommandType }
@@ -109,6 +112,9 @@ const COLUMNS = [
 
 const RULE = 'border-b border-border last:border-b-0'
 
+/** A line as it grows in or folds out: clipped to the height it travels through. */
+const ARRIVING = 'overflow-hidden border-b border-border last:border-b-0'
+
 const LINE =
   'flex h-control-lg w-full min-w-0 items-center gap-3 rounded-md px-4 text-left text-sm outline-none hover:tinted focus-ring hover-motion'
 
@@ -164,8 +170,16 @@ export interface CommandRowProps {
 export function CommandRow({ command, onOpen }: CommandRowProps): ReactNode {
   const roles = rolesOf(command)
   const ownLines = command.lineLinux !== null || command.lineWindows !== null
+  const folding = useTransition(fold)
   return (
-    <li className={RULE} data-command={command.name}>
+    <motion.li
+      className={ARRIVING}
+      data-command={command.name}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
       <button type="button" className={LINE} onClick={onOpen}>
         <span className={TYPE} aria-hidden="true">
           {typeIcon(command.type)}
@@ -193,7 +207,7 @@ export function CommandRow({ command, onOpen }: CommandRowProps): ReactNode {
           <IconChevronRight size="sm" />
         </span>
       </button>
-    </li>
+    </motion.li>
   )
 }
 
@@ -302,13 +316,15 @@ export function CommandsSection({
                   <CommandRowSkeleton />
                 </>
               ) : (
-                commands.map((command) => (
-                  <CommandRow
-                    key={command.id}
-                    command={command}
-                    onOpen={() => onOpen(command.id)}
-                  />
-                ))
+                <AnimatePresence initial={false}>
+                  {commands.map((command) => (
+                    <CommandRow
+                      key={command.id}
+                      command={command}
+                      onOpen={() => onOpen(command.id)}
+                    />
+                  ))}
+                </AnimatePresence>
               )}
             </ul>
           </>

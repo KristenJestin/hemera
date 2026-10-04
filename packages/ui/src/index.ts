@@ -179,11 +179,14 @@ export {
   COMMAND_TYPES,
   CommandForm,
   CommandsSection,
+  NEW_COMMAND,
+  typeIcon,
   type CommandDraft,
   type CommandType,
   type SettingsCommand,
 } from './blocks/project-settings/commands.tsx'
 export {
+  NEW_STEP,
   RecipeSection,
   StepForm,
   type SettingsStep,

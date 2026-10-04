@@ -41,10 +41,13 @@ export interface AddProjectProps {
   name: string
   onName: (name: string) => void
   nameError?: string | undefined
-  /** How the Project is marked in the sidebar and its header. */
-  identity: Identity
-  onIdentity: (identity: Identity) => void
-  onChooseImage: () => void
+  /**
+   * How the Project is marked in the sidebar and its header. Left out where a mark cannot be kept
+   * yet: the field is hidden.
+   */
+  identity?: Identity | undefined
+  onIdentity?: ((identity: Identity) => void) | undefined
+  onChooseImage?: (() => void) | undefined
   /** What was found in the folder; null before a folder is given. */
   found: readonly FoundRepository[] | null
   /** Whether Hemera is looking in the folder. */
@@ -126,7 +129,6 @@ export function AddProject({
       title="Add a Project"
       open={open}
       onOpenChange={onOpenChange}
-      size="wide"
       actions={
         <>
           {refused !== undefined && (
@@ -163,12 +165,14 @@ export function AddProject({
         {looked && (
           <>
             <Input label="Name" value={name} onValueChange={onName} error={nameError} />
-            <IdentityField
-              name={name}
-              identity={identity}
-              onChange={onIdentity}
-              onChooseImage={onChooseImage}
-            />
+            {identity !== undefined && onIdentity !== undefined && (
+              <IdentityField
+                name={name}
+                identity={identity}
+                onChange={onIdentity}
+                onChooseImage={onChooseImage ?? (() => undefined)}
+              />
+            )}
             <div className="flex flex-col gap-2">
               <span className={LABEL} id={listId}>
                 Repositories

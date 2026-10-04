@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 import { Effect } from 'effect'
 import { shell } from 'electron/common'
-import { BrowserWindow, Menu, app, nativeTheme, screen } from 'electron/main'
+import { BrowserWindow, Menu, app, dialog, nativeTheme, screen } from 'electron/main'
 
 import { DIAGNOSTIC_FILE, openDiagnosticLog, type Log } from './diagnostic.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
@@ -114,6 +114,14 @@ const run = Effect.gen(function* () {
       app.exit(0)
     }),
     showLog: Effect.sync(() => shell.showItemInFolder(join(dataFolder, DIAGNOSTIC_FILE))),
+    chooseFolder: Effect.promise(async () => {
+      const [window] = BrowserWindow.getAllWindows()
+      const options = { properties: ['openDirectory' as const, 'createDirectory' as const] }
+      const chosen = await (window === undefined
+        ? dialog.showOpenDialog(options)
+        : dialog.showOpenDialog(window, options))
+      return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+    }),
     display: (preferences) =>
       Effect.sync(() => {
         nativeTheme.themeSource = preferences.theme

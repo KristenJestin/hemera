@@ -50,7 +50,7 @@ const SIZE: Record<DialogSize, string> = {
  * widest body a dialog may have — so a hover never widens what holds it. Nothing is ever
  * scrolled sideways either: what a dialog is asked to hold wider than itself is cut, not slid.
  */
-const BODY = '-mx-2 -my-1 min-h-0 overflow-x-clip'
+const BODY = '-mx-2 -my-1 min-h-0 overflow-x-clip scrollbar-stable'
 
 /** The body at rest: it scrolls what the dialog cannot show. */
 const SCROLLS = 'overflow-y-auto'
@@ -58,7 +58,9 @@ const SCROLLS = 'overflow-y-auto'
 /**
  * The body while it grows or folds to what it holds: cut, because what is taller than the body
  * for the length of a spring is not something to scroll, and a scrollbar that came for that
- * long would be one more thing appearing at once.
+ * long would be one more thing appearing at once. A body that already scrolls is not cut: its
+ * bar stays where it is through the change. Either way the bar's room is kept
+ * (`scrollbar-stable`), so what the body holds never moves sideways.
  */
 const CLIPPED = 'overflow-y-hidden'
 
@@ -168,6 +170,7 @@ interface Reading {
 function Body({ children }: { children: ReactNode }): ReactNode {
   const transition = useTransition(morph)
   const content = useRef<HTMLDivElement>(null)
+  const body = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState<Reading | null>(null)
   const [moving, setMoving] = useState(false)
   useLayoutEffect(() => {
@@ -207,12 +210,15 @@ function Body({ children }: { children: ReactNode }): ReactNode {
   const played = height !== null && !height.atOnce && transition !== instant
   return (
     <motion.div
+      ref={body}
       className={cn(BODY, moving ? CLIPPED : SCROLLS)}
       initial={false}
       animate={{ height: height?.value ?? 'auto' }}
       transition={played ? transition : instant}
       onAnimationStart={() => {
-        setMoving(played)
+        const node = body.current
+        const scrolling = node !== null && node.scrollHeight > node.clientHeight
+        setMoving(played && !scrolling)
       }}
       onAnimationComplete={() => {
         setMoving(false)

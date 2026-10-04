@@ -179,6 +179,46 @@ export const Grown: Story = {
   },
 }
 
+/** A dialog already at its height whose body a choice makes taller still. */
+function GrowingAtHeight(args: DialogProps): ReactNode {
+  const [more, setMore] = useState(false)
+  return (
+    <Dialog {...args} trigger="Add">
+      <div className="flex flex-col gap-3">
+        <Checkbox label="Track a branch" checked={more} onCheckedChange={setMore} />
+        {more && <Input label="Branch" value="main" onValueChange={() => undefined} />}
+        <ol className="flex flex-col gap-2 text-sm">
+          {LINES.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ol>
+      </div>
+    </Dialog>
+  )
+}
+
+/**
+ * Grown at its height: the body already scrolls, and a choice makes it taller still. The room of
+ * its scrollbar is kept whatever happens, so nothing in the body moves sideways while it grows.
+ */
+export const GrownAtHeight: Story = {
+  args: { title: 'Add a repository', description: 'It joins Acme.', actions: undefined },
+  render: (args) => <GrowingAtHeight {...args} />,
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement, 'Add')
+    const box = within(dialog).getByRole('checkbox', { name: 'Track a branch' })
+    const body = [...dialog.children].find((part) => part.contains(box))!
+    expect(getComputedStyle(body).scrollbarGutter).toBe('stable')
+    const content = body.firstElementChild!
+    const width = content.getBoundingClientRect().width
+    await userEvent.click(box)
+    await expect(within(dialog).getByRole('textbox', { name: 'Branch' })).toBeInTheDocument()
+    expect(content.getBoundingClientRect().width).toBe(width)
+    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight)
+    await closed()
+  },
+}
+
 /** From the keyboard: the focus is trapped inside while it is open and comes back on close. */
 export const Focused: Story = {
   play: async ({ canvasElement }) => {

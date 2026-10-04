@@ -44,4 +44,9 @@ describe('An image sequence of a story', () => {
     expect(valueOf('84000', 1234)).toBe(84_000)
     expect(valueOf('finished', 1234)).toBe('finished')
   })
+
+  test('an argument written as JSON is given as what it holds: a row added to a list', () => {
+    expect(valueOf('[{"id":"lint","name":"lint"}]', 1234)).toEqual([{ id: 'lint', name: 'lint' }])
+    expect(valueOf('{"kind":"idle"}', 1234)).toEqual({ kind: 'idle' })
+  })
 })

@@ -109,6 +109,19 @@ describe('The primary and the focus', () => {
     expect(theme).toContain('@utility primary-fill {')
   })
 
+  test('a filled primary is the same in both themes, its white label at 4.5:1 or more over all of it', () => {
+    for (const role of ['primary-gradient', 'primary-foreground', 'primary-strong']) {
+      expect(roleIn(theme, role, 'dark')).toBe(roleIn(theme, role, 'light'))
+    }
+    const highlight = (side: 'light' | 'dark') =>
+      roleIn(theme, 'primary-raise', side).split(/,(?![^(]*\))/)[0]
+    expect(highlight('dark')).toBe(highlight('light'))
+    const label = roleIn(theme, 'primary-foreground', 'dark')
+    for (const stop of roleIn(theme, 'primary-gradient', 'dark').match(/#[\da-f]{6}/g) ?? []) {
+      expect(contrastOf(label, stop)).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   test('no component fills a surface with the flat primary', () => {
     const flat = componentSources
       .filter(({ source }) => /(?<![\w-])(?:[\w-]+:)*bg-primary(?![\w-])/.test(source))

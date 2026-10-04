@@ -80,7 +80,11 @@ const drawn = ({
       retryProject: nothing,
       relaunch: nothing,
       showLog: nothing,
+      addProject: nothing,
     },
+    projectSettings: createElement('p', null, 'The settings of the Project'),
+    addProject: createElement('p', null, 'The dialog that adds a Project'),
+    appSettings: createElement('p', null, 'The choice of theme'),
   }
   return renderToStaticMarkup(createElement(Shell, props))
 }
@@ -156,6 +160,11 @@ describe('The sidebar and Home', () => {
     expect(markup).toContain('Try again')
   })
 
+  test('the dialog that adds a Project is over the window once the engine answered', () => {
+    expect(drawn({})).toContain('The dialog that adds a Project')
+    expect(drawn({ engine: { kind: 'starting' } })).not.toContain('The dialog that adds a Project')
+  })
+
   test('folded, the sidebar is a rail', () => {
     expect(drawn({ folded: true })).toContain('data-folded="true"')
   })
@@ -187,15 +196,16 @@ describe('The pages', () => {
   test('the Settings page, its place marked at the foot of the sidebar', () => {
     const markup = drawn({ route: { kind: 'settings' } })
     expect(markup).toMatch(/<h1[^>]*>Settings<\/h1>/)
+    expect(markup).toContain('The choice of theme')
     expect(markup).toMatch(/<button[^>]*aria-current="page"[^>]*>.*?Settings/)
   })
 
-  test('a Project’s settings: the trail leads back to the Project', () => {
+  test('a Project’s settings: its settings page, and the trail leads back to the Project', () => {
     const markup = drawn({
       route: { kind: 'projectSettings', id: 'acme' },
       project: { kind: 'ready', project: ACME },
     })
-    expect(markup).toMatch(/<h1[^>]*>Settings of Acme<\/h1>/)
+    expect(markup).toContain('The settings of the Project')
     expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Settings/)
   })
 })

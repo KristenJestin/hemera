@@ -13,7 +13,8 @@
  *     --set state=done --frames 12 --every 40 --out /tmp/status-mark
  *
  * `--set name=value` may be repeated; `now` is the time the change is made, in milliseconds,
- * `null` is null, and a number is a number. `--theme dark` draws the dark theme.
+ * `null` is null, a number is a number, and a value that opens with `[` or `{` is read as JSON —
+ * a list with one row more, to watch it arrive. `--theme dark` draws the dark theme.
  */
 
 import { mkdirSync } from 'node:fs'
@@ -67,11 +68,28 @@ export function sequenceOf(argv: readonly string[]): Sequence {
   }
 }
 
-/** A value of `--set`, as the story's argument receives it. */
-export type ArgValue = string | number | null
+/** A value written as JSON: what a list or a record of a story's arguments holds. */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly Json[]
+  | { readonly [key: string]: Json }
 
-/** One value of `--set`: `now` is the moment the change is made, `null` null, digits a number. */
+/** A value of `--set`, as the story's argument receives it. */
+export type ArgValue = string | number | null | Json
+
+/**
+ * One value of `--set`: `now` is the moment the change is made, `null` null, digits a number, and
+ * a list or a record written as JSON what it holds.
+ */
 export function valueOf(written: string, now: number): ArgValue {
+  if (/^[[{]/.test(written)) {
+    // `JSON.parse` answers nothing but JSON values, which is what `Json` describes.
+    const read: Json = JSON.parse(written)
+    return read
+  }
   if (written === 'now') return now
   if (written === 'null') return null
   if (/^-?\d+(\.\d+)?$/.test(written)) return Number(written)
@@ -106,12 +124,14 @@ async function record(sequence: Sequence): Promise<void> {
       const updatedArgs = Object.fromEntries(
         [...sequence.set].map(([name, written]) => [name, valueOf(written, Date.now())]),
       )
+      // Carried as text and read in the page: a list of rows is deeper than the types of what
+      // Playwright carries can follow.
       await page.evaluate(
         ({ storyId, args }) => {
           const channel = Reflect.get(globalThis, '__STORYBOOK_ADDONS_CHANNEL__')
-          channel.emit('updateStoryArgs', { storyId, updatedArgs: args })
+          channel.emit('updateStoryArgs', { storyId, updatedArgs: JSON.parse(args) })
         },
-        { storyId: sequence.story, args: updatedArgs },
+        { storyId: sequence.story, args: JSON.stringify(updatedArgs) },
       )
     }
     for (let frame = 0; frame < sequence.frames; frame += 1) {

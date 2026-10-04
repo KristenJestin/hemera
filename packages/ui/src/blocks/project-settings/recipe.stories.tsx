@@ -53,6 +53,18 @@ function Held(args: RecipeSectionProps) {
   )
 }
 
+/**
+ * The steps as given, held nowhere: a step added to them grows into the list, pushing the steps
+ * under it (watched in an image sequence, the story's steps changed while it shows).
+ */
+export const Arriving: Story = {
+  render: (args) => <RecipeSection {...args} />,
+  play: async ({ canvasElement }) => {
+    const steps = within(canvasElement).getByRole('list', { name: 'Steps' })
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(5)
+  },
+}
+
 /** Five steps, the second one's source not in the main checkout. */
 export const Filled: Story = {
   play: async ({ canvasElement, args }) => {
@@ -123,7 +135,15 @@ export const LongText: Story = {
 }
 
 /** The form of a step, holding its draft. */
-function Form({ draft: first, pathError }: { draft: StepDraft; pathError?: string }) {
+function Form({
+  draft: first,
+  pathError,
+  systems,
+}: {
+  draft: StepDraft
+  pathError?: string
+  systems?: boolean
+}) {
   const [draft, setDraft] = useState(first)
   return (
     <div className="mx-auto flex w-full max-w-view-narrow flex-col gap-5 p-4">
@@ -139,6 +159,7 @@ function Form({ draft: first, pathError }: { draft: StepDraft; pathError?: strin
         }))}
         pathError={pathError}
         refusalOf={shellRefusal}
+        systems={systems}
       />
     </div>
   )
@@ -193,6 +214,21 @@ export const FormOwnLine: Story = {
     expect(await canvas.findByText(/“&&” is shell syntax/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Lines for Linux and Windows' }))
     expect(await canvas.findByRole('textbox', { name: 'Line on Windows' })).toBeVisible()
+  },
+}
+
+/** A run of a line of its own where one line is kept for every system: no fold for Linux and Windows. */
+export const FormOneLine: Story = {
+  render: () => (
+    <Form
+      systems={false}
+      draft={{ kind: 'run', place: 'api', path: null, command: null, line: 'pnpm db:migrate' }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('textbox', { name: 'Line' })).toHaveValue('pnpm db:migrate')
+    expect(canvas.queryByRole('button', { name: 'Lines for Linux and Windows' })).toBeNull()
   },
 }
 

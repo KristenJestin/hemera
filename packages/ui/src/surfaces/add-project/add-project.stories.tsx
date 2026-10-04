@@ -21,6 +21,8 @@ interface AddProjectFixtureProps {
   folderError?: string | undefined
   /** Why creating the Project is refused. */
   refused?: string | undefined
+  /** Whether the Project's mark can be chosen; false where it cannot be kept yet. */
+  marked?: boolean | undefined
 }
 
 /** The dialog, holding what a renderer's hook would: the folder, the name, what was found. */
@@ -30,6 +32,7 @@ function AddProjectFixture({
   detecting = false,
   folderError,
   refused: refusal,
+  marked = true,
 }: AddProjectFixtureProps) {
   const [open, setOpen] = useState(true)
   const [folder, setFolder] = useState(firstFolder)
@@ -71,8 +74,8 @@ function AddProjectFixture({
         folderError={folderError}
         name={name}
         onName={setName}
-        identity={identity}
-        onIdentity={setIdentity}
+        identity={marked ? identity : undefined}
+        onIdentity={marked ? setIdentity : undefined}
         onChooseImage={() => setIdentity((before) => ({ ...before, image: ACME_LOGO }))}
         found={found}
         detecting={looking}
@@ -125,6 +128,10 @@ export const Empty: Story = {
   play: async () => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
     expect(within(dialog).getByRole('textbox', { name: 'Folder' })).toHaveValue('')
+    // A form's dialog, as narrow as every other: one folder field needs no more.
+    expect(dialog.getBoundingClientRect().width).toBeLessThanOrEqual(
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 28,
+    )
     expect(within(dialog).queryByRole('textbox', { name: 'Name' })).toBeNull()
   },
 }
@@ -184,6 +191,17 @@ export const NoRepository: Story = {
       'drafts{Enter}',
     )
     expect(within(dialog).getByRole('checkbox', { name: 'drafts' })).toBeChecked()
+  },
+}
+
+/** Where a Project's mark cannot be kept yet: the folder, the name and the repositories, no mark. */
+export const WithoutMark: Story = {
+  args: { folder: '~/work/acme', found: ACME_FOUND, marked: false },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('acme')
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Colour' })).toBeNull()
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(3)
   },
 }
 
