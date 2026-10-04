@@ -60,7 +60,14 @@ function resolveOnWindows(program: string, lookup: Lookup): string | null {
     .filter((one) => one.length > 0)
     .map((one) => one.toLowerCase())
   const named = extname(program).toLowerCase()
-  const tries = named !== '' && extensions.includes(named) ? [''] : ['', ...extensions]
+  // A name without an extension is never run as it is: `pnpm` beside `pnpm.cmd` is a script for
+  // another shell, and `cmd.exe` runs the shim.
+  const tries =
+    named !== '' && extensions.includes(named)
+      ? ['']
+      : named === ''
+        ? extensions
+        : ['', ...extensions]
   const folders = /[\\/]/.test(program)
     ? [isAbsolute(program) ? '' : lookup.cwd]
     : lookup.path.split(';').filter((one) => one.length > 0)

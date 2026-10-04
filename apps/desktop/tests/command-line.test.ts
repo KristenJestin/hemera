@@ -47,6 +47,17 @@ describe('A line becomes a process without a shell', () => {
     expect(line).toContain('^"two^ words^"')
   })
 
+  test('on Windows a bare name is the shim cmd.exe would run, never a file without an extension', () => {
+    // What corepack and npm install beside each other: a shell script for Git Bash, and the shim.
+    const bin = realpathSync.native(temporaryFolder('shims'))
+    writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\n')
+    writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\n')
+    const invocation = invocationOf(['pnpm', 'dev'], 'win32', windowsLookup(bin))
+    removeFolders()
+    expect(invocation?.program).toBe('C:\\Windows\\system32\\cmd.exe')
+    expect(invocation?.args[3]).toContain('pnpm.cmd')
+  })
+
   test('on Windows a shim under node_modules/.bin has its words escaped twice', () => {
     const root = realpathSync.native(temporaryFolder('shims'))
     const bin = join(root, 'node_modules', '.bin')
