@@ -13,6 +13,7 @@ import { WorkspacesSection, type WorkspacesSectionProps } from './workspaces.tsx
 /**
  * Where a Project's Workspaces are made, and what their branches start with. An empty field is
  * the default, and shows it in its quiet tone; a field written in carries the × that empties it.
+ * Under them, the folder and the branch they make for one mission, as values.
  */
 const meta = {
   tags: ['autodocs'],
@@ -27,6 +28,7 @@ const meta = {
     prefix: null,
     defaultPrefix: DEFAULT_PREFIX,
     onPrefix: fn(),
+    example: 'ACME-12',
   },
   render: (args) => <Held {...args} />,
   decorators: [
@@ -58,12 +60,12 @@ function Held(args: WorkspacesSectionProps) {
         setPrefix(next)
         args.onPrefix(next)
       }}
-      prefixError={prefix === null ? undefined : branchRefusal(prefix)}
+      prefixError={prefix === null ? undefined : branchRefusal(`${prefix}${args.example}`)}
     />
   )
 }
 
-/** Nothing chosen: both fields show what applies — Hemera's folder, the Project's slug. */
+/** Nothing chosen: both fields show what applies, and ACME-12's folder and branch follow. */
 export const Defaults: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -72,17 +74,27 @@ export const Defaults: Story = {
     expect(folder).toHaveAttribute('placeholder', DEFAULT_FOLDER)
     expect(canvas.getByRole('textbox', { name: 'Branch prefix' })).toHaveAttribute(
       'placeholder',
-      'acme',
+      'hemera/',
     )
+    expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
+      '~/hemera-workspaces/acme/ACME-12',
+    )
+    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('hemera/ACME-12')
     expect(canvas.queryByRole('button', { name: /^Back to the default/ })).toBeNull()
   },
 }
 
 /** Both chosen: each field carries the × that takes it back to the default. */
 export const Chosen: Story = {
-  args: { folder: '/mnt/fast/acme-workspaces', prefix: 'team/acme' },
+  args: { folder: '/mnt/fast/acme-workspaces', prefix: 'team/acme-' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
+    expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
+      '/mnt/fast/acme-workspaces/ACME-12',
+    )
+    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent(
+      'team/acme-ACME-12',
+    )
     await userEvent.click(canvas.getByRole('button', { name: 'Back to the default folder' }))
     expect(args.onFolder).toHaveBeenCalledWith(null)
     expect(canvas.getByRole('textbox', { name: 'Workspaces folder' })).toHaveValue('')
@@ -93,10 +105,10 @@ export const Chosen: Story = {
 export const PrefixRefused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Branch prefix' }), 'acme team')
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Branch prefix' }), 'acme team/')
     expect(
       await canvas.findByText(
-        '“acme team” is not a branch name Git accepts: it holds a space or a control character.',
+        '“acme team/ACME-12” is not a branch name Git accepts: it holds a space or a control character.',
       ),
     ).toBeVisible()
   },

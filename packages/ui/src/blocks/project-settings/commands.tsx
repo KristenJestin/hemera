@@ -1,6 +1,6 @@
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Checkbox } from '../../components/checkbox/checkbox.tsx'
@@ -11,26 +11,20 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
-  IconAdjustments,
   IconBolt,
   IconBraces,
-  IconBrowserCheck,
-  IconBug,
   IconChecklist,
   IconChevronRight,
   IconDeviceDesktop,
-  IconHammer,
   IconHandStop,
-  IconListCheck,
   IconLock,
   IconPencil,
   IconPlus,
-  IconScript,
-  IconTestPipe,
   IconWorld,
 } from '../../icons.ts'
-import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { Section, SectionHead, TemplateMenu } from './parts.tsx'
+import { CommandLineField } from './command-line.tsx'
+import { type CommandType, typeIcon, TYPE_WORDS, COMMAND_TYPES } from './command-types.tsx'
+import { Section } from './parts.tsx'
 
 /**
  * A Project's command catalogue, in its settings: every command on one line, and what it may be
@@ -46,55 +40,8 @@ import { Section, SectionHead, TemplateMenu } from './parts.tsx'
  * Pressing a line opens its sheet. There, a line holding shell syntax is refused as it is typed,
  * the token named: Hemera runs a command without a shell.
  */
-export const COMMAND_TYPES = [
-  'serve',
-  'test',
-  'lint',
-  'typecheck',
-  'build',
-  'e2e',
-  'configure',
-  'debug',
-  'script',
-] as const
-export type CommandType = (typeof COMMAND_TYPES)[number]
-
-/** What each type is called. */
-export const TYPE_WORDS: Record<CommandType, string> = {
-  serve: 'Service',
-  test: 'Test',
-  lint: 'Lint',
-  typecheck: 'Typecheck',
-  build: 'Build',
-  e2e: 'End-to-end',
-  configure: 'Configure',
-  debug: 'Debug',
-  script: 'Script',
-}
-
-/** The icon of each type: what a command looks like wherever it is, its live chip included. */
-export function typeIcon(type: CommandType): ReactNode {
-  switch (type) {
-    case 'serve':
-      return <IconWorld size="sm" />
-    case 'test':
-      return <IconTestPipe size="sm" />
-    case 'lint':
-      return <IconListCheck size="sm" />
-    case 'typecheck':
-      return <IconBraces size="sm" />
-    case 'build':
-      return <IconHammer size="sm" />
-    case 'e2e':
-      return <IconBrowserCheck size="sm" />
-    case 'configure':
-      return <IconAdjustments size="sm" />
-    case 'debug':
-      return <IconBug size="sm" />
-    case 'script':
-      return <IconScript size="sm" />
-  }
-}
+export { COMMAND_TYPES, TYPE_WORDS, typeIcon }
+export type { CommandType }
 
 /** Where a service runs: once per Workspace, or once for the Project in its main checkout. */
 export type ServiceScope = 'workspace' | 'project'
@@ -105,8 +52,9 @@ export interface SettingsCommand {
   type: CommandType
   /** The line every system runs, unless it has its own. */
   line: string
-  lineWindows: string | null
   lineLinux: string | null
+  lineMac: string | null
+  lineWindows: string | null
   /** The repository it runs under, by path; `.` for the main checkout's root. */
   place: string
   /** The folder under it; null for the repository itself. */
@@ -216,7 +164,8 @@ export interface CommandRowProps {
 /** One command on one line. */
 export function CommandRow({ command, onOpen }: CommandRowProps): ReactNode {
   const roles = rolesOf(command)
-  const ownLines = command.lineWindows !== null || command.lineLinux !== null
+  const ownLines =
+    command.lineLinux !== null || command.lineMac !== null || command.lineWindows !== null
   return (
     <li className={RULE} data-command={command.name}>
       <button type="button" className={LINE} onClick={onOpen}>
@@ -292,7 +241,7 @@ function ColumnsHead(): ReactNode {
       <span className={cn(NAME, HEAD_WORD, 'font-normal')}>Name</span>
       <span className={cn('min-w-0 flex-1', HEAD_WORD)}>Line</span>
       <span className={ROOM}>
-        <Legend label="Its own line on Windows or Linux">
+        <Legend label="Its own line on Linux, macOS or Windows">
           <span className="flex text-muted-foreground">
             <IconDeviceDesktop size="sm" />
           </span>
@@ -379,8 +328,9 @@ export const NEW_COMMAND: CommandDraft = {
   name: '',
   type: 'script',
   line: '',
-  lineWindows: null,
   lineLinux: null,
+  lineMac: null,
+  lineWindows: null,
   place: '.',
   folder: null,
   scope: 'workspace',
@@ -396,10 +346,8 @@ export interface CommandFormProps {
   onChange: (draft: CommandDraft) => void
   /** The repositories it may run under, by path. */
   places: readonly string[]
-  /** What is wrong with each line as it is typed, in words, the token named. */
-  lineError?: string | undefined
-  lineWindowsError?: string | undefined
-  lineLinuxError?: string | undefined
+  /** What the engine refuses in a line, in words, the token named; undefined for nothing. */
+  refusalOf: (line: string) => string | undefined
   nameError?: string | undefined
   globsError?: string | undefined
 }
@@ -408,52 +356,15 @@ const GROUP = 'flex flex-col gap-3'
 
 const GROUP_TITLE = 'text-sm font-medium'
 
-const DISCLOSURE =
-  'flex h-control-text w-fit items-center gap-1.5 rounded-md text-sm text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion'
-
-const DISCLOSURE_CHEVRON = 'flex chevron-motion aria-expanded:rotate-90'
-
-/** A line that may hold the names Hemera fills: the braces at its end offer them. */
-function LineInput({
-  label,
-  value,
-  placeholder,
-  error,
-  onValueChange,
-}: {
-  label: string
-  value: string
-  placeholder?: string | undefined
-  error?: string | undefined
-  onValueChange: (value: string) => void
-}): ReactNode {
-  return (
-    <Input
-      label={label}
-      value={value}
-      placeholder={placeholder}
-      error={error}
-      onValueChange={onValueChange}
-      trailing={
-        <TemplateMenu field={label} onInsert={(name) => onValueChange(`${value}${name}`)} />
-      }
-    />
-  )
-}
-
 /** The sheet of a command: everything it is and may do. */
 export function CommandForm({
   draft,
   onChange,
   places,
-  lineError,
-  lineWindowsError,
-  lineLinuxError,
+  refusalOf,
   nameError,
   globsError,
 }: CommandFormProps): ReactNode {
-  const folding = useTransition(fold)
-  const [systems, setSystems] = useState(draft.lineWindows !== null || draft.lineLinux !== null)
   const set = (part: Partial<CommandDraft>): void => onChange({ ...draft, ...part })
   return (
     <>
@@ -480,54 +391,19 @@ export function CommandForm({
           }))}
         />
       </div>
-      <div className="flex flex-col gap-2">
-        <LineInput
-          label="Line"
-          value={draft.line}
-          error={lineError}
-          onValueChange={(line) => set({ line })}
-        />
-        <button
-          type="button"
-          className={DISCLOSURE}
-          aria-expanded={systems}
-          onClick={() => setSystems(!systems)}
-        >
-          <span className={DISCLOSURE_CHEVRON} aria-expanded={systems} aria-hidden="true">
-            <IconChevronRight size="sm" />
-          </span>
-          Lines for Windows and Linux
-        </button>
-        <AnimatePresence initial={false}>
-          {systems && (
-            <motion.div
-              key="systems"
-              className="overflow-hidden"
-              initial={collapse}
-              animate={expand}
-              exit={collapse}
-              transition={folding}
-            >
-              <div className="flex flex-col gap-3 pt-1">
-                <LineInput
-                  label="Line on Windows"
-                  value={draft.lineWindows ?? ''}
-                  placeholder={draft.line}
-                  error={lineWindowsError}
-                  onValueChange={(line) => set({ lineWindows: line === '' ? null : line })}
-                />
-                <LineInput
-                  label="Line on Linux"
-                  value={draft.lineLinux ?? ''}
-                  placeholder={draft.line}
-                  error={lineLinuxError}
-                  onValueChange={(line) => set({ lineLinux: line === '' ? null : line })}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      <CommandLineField
+        value={{
+          command: null,
+          line: draft.line,
+          lineLinux: draft.lineLinux,
+          lineMac: draft.lineMac,
+          lineWindows: draft.lineWindows,
+        }}
+        onChange={({ line, lineLinux, lineMac, lineWindows }) =>
+          set({ line, lineLinux, lineMac, lineWindows })
+        }
+        refusalOf={refusalOf}
+      />
       <div className="flex items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className={GROUP_TITLE} aria-hidden="true">

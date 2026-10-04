@@ -10,7 +10,7 @@ import {
   type StepDraft,
   StepForm,
 } from './recipe.tsx'
-import { STEPS, shellRefusal } from './project-settings-fixtures.ts'
+import { COMMANDS, STEPS, shellRefusal } from './project-settings-fixtures.ts'
 
 /**
  * A Project's preparation recipe: what is done in a new Workspace, in order — copy, link, run.
@@ -131,9 +131,14 @@ function Sheet({ draft: first, pathError }: { draft: StepDraft; pathError?: stri
         draft={draft}
         onChange={setDraft}
         places={['api', 'web', 'shared']}
-        commands={['install', 'build', 'test']}
+        commands={COMMANDS.map((one) => ({
+          id: one.id,
+          name: one.name,
+          type: one.type,
+          line: one.line,
+        }))}
         pathError={pathError}
-        lineError={shellRefusal(draft.line ?? '')}
+        refusalOf={shellRefusal}
       />
     </div>
   )
@@ -154,7 +159,10 @@ export const SheetMissingSource: Story = {
   },
 }
 
-/** A run of a line of its own, in which the names Hemera fills are offered. */
+/**
+ * A run of a line of its own: the same field as the catalogue's, the line, the names Hemera fills,
+ * the lines for each system, and shell syntax refused as it is typed.
+ */
 export const SheetOwnLine: Story = {
   render: () => (
     <Sheet
@@ -169,28 +177,46 @@ export const SheetOwnLine: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('combobox', { name: 'Command' })).toHaveTextContent('A line of its own')
+    expect(canvas.getByRole('tab', { name: 'A line of its own' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
     await userEvent.click(canvas.getByRole('button', { name: 'Insert a name in Line' }))
     await userEvent.click(
       await within(document.body).findByRole('menuitem', {
         name: /\{workspace\}\s*Workspace name/,
       }),
     )
-    expect(canvas.getByRole('textbox', { name: 'Line' })).toHaveValue(
-      'pnpm db:migrate --database acme_{workspace}',
+    const line = canvas.getByRole('textbox', { name: 'Line' })
+    expect(line).toHaveValue('pnpm db:migrate --database acme_{workspace}')
+    await userEvent.type(line, ' && pnpm seed')
+    expect(await canvas.findByText(/“&&” is shell syntax/)).toBeVisible()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Lines for Linux, macOS and Windows' }),
     )
+    expect(await canvas.findByRole('textbox', { name: 'Line on macOS' })).toBeVisible()
   },
 }
 
-/** A run of a catalogue command: the command chosen, no line to write. */
+/** A run of a command of the catalogue: chosen by its name, its line under it, no line to write. */
 export const SheetCommand: Story = {
   render: () => (
     <Sheet draft={{ kind: 'run', place: '.', path: null, command: 'install', line: null }} />
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('combobox', { name: 'Command' })).toHaveTextContent('install')
-    expect(canvas.queryByRole('textbox', { name: 'Line' })).toBeNull()
+    expect(canvas.getByRole('tab', { name: 'From the catalogue' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(canvas.getByRole('combobox', { name: 'Command of the catalogue' })).toHaveTextContent(
+      'install',
+    )
+    expect(canvas.getByText('pnpm install')).toBeVisible()
+    // The catalogue lists its commands, and only them.
+    await userEvent.click(canvas.getByRole('combobox', { name: 'Command of the catalogue' }))
+    const options = await within(document.body).findAllByRole('option')
+    expect(options.map((option) => option.textContent)).not.toContain('A line of its own')
   },
 }
 

@@ -273,3 +273,23 @@ export const SheetNew: Story = {
     expect(canvas.getByRole('button', { name: 'Choose…' })).toBeVisible()
   },
 }
+
+/** The icon a repository wears, chosen in its sheet among the short set; a folder until it is. */
+export const SheetIcon: Story = {
+  render: () => (
+    <Sheet
+      draft={API}
+      remotes={REMOTES.get('api')}
+      freshness={{ kind: 'fetched', when: '09:02' }}
+      onChooseFolder={() => {}}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const icon = canvas.getByRole('combobox', { name: 'Icon' })
+    expect(icon).toHaveTextContent('Folder')
+    await userEvent.click(icon)
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Server' }))
+    expect(icon).toHaveTextContent('Server')
+  },
+}

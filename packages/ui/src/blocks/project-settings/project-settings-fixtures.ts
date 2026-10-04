@@ -12,9 +12,9 @@ import type { SettingsVariable } from './variables.tsx'
  */
 export const MAIN_CHECKOUT = '~/work/acme'
 
-export const DEFAULT_FOLDER = '~/.local/share/hemera/workspaces/acme'
+export const DEFAULT_FOLDER = '~/hemera-workspaces/acme'
 
-export const DEFAULT_PREFIX = 'acme'
+export const DEFAULT_PREFIX = 'hemera/'
 
 /** A long path in every field: what a real disk can hold. */
 export const LONG_PATH =
@@ -27,6 +27,7 @@ export const LONG_LINE =
 export const REPOSITORIES: readonly SettingsRepository[] = [
   {
     id: 'api',
+    icon: 'server',
     path: 'api',
     includedByDefault: true,
     remote: 'origin',
@@ -35,6 +36,7 @@ export const REPOSITORIES: readonly SettingsRepository[] = [
   },
   {
     id: 'web',
+    icon: 'world',
     path: 'web',
     includedByDefault: true,
     remote: 'origin',
@@ -43,6 +45,7 @@ export const REPOSITORIES: readonly SettingsRepository[] = [
   },
   {
     id: 'shared',
+    icon: 'package',
     path: 'shared',
     includedByDefault: true,
     remote: 'origin',
@@ -58,6 +61,7 @@ export const REPOSITORIES: readonly SettingsRepository[] = [
 /** The repository Git cannot read, in its own words. */
 export const UNREADABLE: SettingsRepository = {
   id: 'billing',
+  icon: 'database',
   path: 'billing',
   includedByDefault: false,
   remote: 'origin',
@@ -71,6 +75,7 @@ export const DENSE_REPOSITORIES: readonly SettingsRepository[] = [
   ...REPOSITORIES,
   {
     id: 'ui-kit',
+    icon: 'package',
     path: 'packages/ui-kit',
     includedByDefault: false,
     remote: null,
@@ -112,8 +117,9 @@ function command(
   part: Partial<SettingsCommand> & Pick<SettingsCommand, 'id' | 'name' | 'type' | 'line' | 'place'>,
 ): SettingsCommand {
   return {
-    lineWindows: null,
     lineLinux: null,
+    lineMac: null,
+    lineWindows: null,
     folder: null,
     scope: 'workspace',
     check: false,

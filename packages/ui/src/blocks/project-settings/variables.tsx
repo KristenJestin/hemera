@@ -1,3 +1,4 @@
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import type { ReactNode } from 'react'
 
 import { Button, IconButton } from '../../components/button/button.tsx'
@@ -8,7 +9,7 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { Menu } from '../../components/menu/menu.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconDots, IconEye, IconEyeOff, IconPencil, IconPlus, IconTrash } from '../../icons.ts'
-import { Section, SectionHead, TemplateMenu } from './parts.tsx'
+import { Section, TemplateMenu } from './parts.tsx'
 
 /**
  * The variables of a Project: what every command and every step of its Workspaces runs with.

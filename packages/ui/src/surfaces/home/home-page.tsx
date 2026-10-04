@@ -5,7 +5,8 @@ import { MissionRow, MissionRowSkeleton } from '../../blocks/mission/mission-row
 import { Button } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
-import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
+import { Frame } from '../../components/frame/frame.tsx'
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Page, PageHeader } from '../page.tsx'
 
 /**
@@ -17,7 +18,7 @@ import { Page, PageHeader } from '../page.tsx'
  * - **Since you left**: what happened while the window was away, in the order it happened.
  * - **Recent**: what was worked on last.
  *
- * Each list is a frame — the house motif — whose body holds its rows, the row a mission is
+ * Each list is its head — name and count — above a frame, the house motif, whose body holds its rows, the row a mission is
  * everywhere; an empty list says so in three words in the body, and no more. A Home with no
  * Project yet is one empty state in the middle, Hemera asleep, and the way to add one. Rows on
  * their way are the row's own shape, so nothing moves when they arrive.
@@ -58,10 +59,6 @@ const TWO = 'grid grid-cols-1 items-start gap-6 lg:grid-cols-2'
 
 const EMPTY = 'px-4 py-3 text-sm text-muted-foreground'
 
-const COUNT = 'flex items-center gap-1.5 text-sm font-medium tabular-nums'
-
-const COUNT_TONE = 'size-1.5 rounded-full bg-warning'
-
 function Rows({
   rows,
   label,
@@ -101,33 +98,22 @@ function Rows({
   )
 }
 
+/** A list of Home: its head above its frame, as every section of the window has it. */
 function Section({
   title,
   count,
   children,
 }: {
   title: string
+  /** How many wait in it; only the lists that call for the user say so. */
   count?: number | undefined
   children: ReactNode
 }): ReactNode {
   return (
-    <Frame
-      header={
-        <FrameHeader
-          title={title}
-          action={
-            count !== undefined && count > 0 ? (
-              <span className={COUNT}>
-                <span aria-hidden="true" className={COUNT_TONE} />
-                {count}
-              </span>
-            ) : undefined
-          }
-        />
-      }
-    >
-      {children}
-    </Frame>
+    <section aria-label={title} className="flex flex-col gap-3">
+      <SectionHead title={title} count={count === 0 ? undefined : count} calls />
+      <Frame>{children}</Frame>
+    </section>
   )
 }
 

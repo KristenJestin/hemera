@@ -4,7 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { BallMark } from '../blocks/ball/ball-mark.tsx'
 import { ContentHeader } from './content-header.tsx'
-import { LONG_NAME, MANY_PROJECTS, MISSION, PROJECTS } from './shell-fixtures.tsx'
+import { LONG_NAME, MANY_PROJECTS, MARKED_PROJECTS, MISSION, PROJECTS } from './shell-fixtures.tsx'
 import { Sidebar, type SidebarPlace, SidebarRow } from './sidebar.tsx'
 
 /**
@@ -258,5 +258,17 @@ export const Focused: Story = {
     await userEvent.tab()
     await userEvent.tab()
     expect(canvas.getByRole('button', { name: 'Settings' })).toHaveFocus()
+  },
+}
+
+/**
+ * Projects marked as their users chose: Hemera with an icon in a tone, Billing with a logo of its
+ * own, the others with their letter in the tone of their name.
+ */
+export const Marked: Story = {
+  args: { projects: MARKED_PROJECTS },
+  play: async ({ canvasElement }) => {
+    expect(canvasElement.querySelector('[data-mark-icon="rocket"]')).not.toBeNull()
+    expect(canvasElement.querySelector('[data-mark-image]')).not.toBeNull()
   },
 }

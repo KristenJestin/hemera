@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 
 import { Face } from '../components/face/face.tsx'
 import { LetterAvatar } from '../components/letter-avatar/letter-avatar.tsx'
+import { type Identity, ProjectMark } from '../components/project-mark/project-mark.tsx'
 import { Skeleton } from '../components/loading/loading.tsx'
 import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
@@ -112,6 +113,8 @@ export type SidebarPlace =
 export interface SidebarProject {
   id: string
   name: string
+  /** What the user chose to mark it with; nothing chosen is its letter. */
+  identity?: Identity | undefined
   /** What stands under the Project when it is open: its missions by stage, its Chats. */
   under?: ReactNode
 }
@@ -225,7 +228,9 @@ export function Sidebar({
                   mark={`project:${project.id}`}
                   current={current.kind === 'project' && current.id === project.id}
                   name={project.name}
-                  icon={<LetterAvatar name={project.name} others={names} />}
+                  icon={
+                    <ProjectMark name={project.name} others={names} identity={project.identity} />
+                  }
                   onPress={() => onProject(project.id)}
                   control={
                     project.under === undefined ? undefined : (

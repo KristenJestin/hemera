@@ -1,3 +1,4 @@
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
@@ -7,25 +8,32 @@ import { Empty } from '../../components/empty/empty.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
+import {
+  MARK_ICONS,
+  MARK_ICON_WORDS,
+  type MarkIcon,
+  markIcon,
+} from '../../components/project-mark/project-mark.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconAlertTriangle,
   IconChevronRight,
   IconCloudDownload,
+  IconFolder,
   IconFolderOpen,
   IconGitBranch,
   IconPlus,
   IconStack2,
 } from '../../icons.ts'
-import { Section, SectionHead } from './parts.tsx'
+import { Section } from './parts.tsx'
 
 /**
  * The repositories of a Project, in its settings: each on one line, what Hemera reads of it and
  * what the user chose for it.
  *
- * A line is the box that says whether new Workspaces take the repository, its path in the main
- * checkout in the mono face, and what its work starts from — the remote and the base branch,
+ * A line is the box that says whether new Workspaces take the repository, its icon — chosen in
+ * its sheet, a folder until it is — and its path in the main checkout in the mono face, and what its work starts from — the remote and the base branch,
  * `origin/main` — with when that base was last fetched. A base not fetched for a while says so in
  * the warning tone; a repository Git cannot read says Git's own reason where its base would be,
  * in the destructive tone. Pressing the line opens its sheet, where all of it is written.
@@ -56,8 +64,13 @@ export interface SettingsRepository {
   freshness: BaseFreshness
   /** Git's own words when the repository cannot be read. */
   unreadable?: string | undefined
-  /** A mark of its own before its path; only the exploration of the repository's identity has one. */
-  icon?: ReactNode
+  /** The icon it wears before its path, chosen in its sheet; a folder until one is. */
+  icon?: MarkIcon | undefined
+}
+
+/** The icon a repository wears: the one chosen, or a folder. */
+function iconOf(icon: MarkIcon | undefined): ReactNode {
+  return icon === undefined ? <IconFolder size="sm" /> : markIcon(icon)
 }
 
 /** How the base's freshness is said, in a few words. */
@@ -158,7 +171,7 @@ export function RepositoryRow({ repository, onInclude, onOpen }: RepositoryRowPr
         />
         <button type="button" className={OPEN} onClick={onOpen}>
           <span className={PATH}>
-            {repository.icon !== undefined && <span className={ICON_ROOM}>{repository.icon}</span>}
+            <span className={ICON_ROOM}>{iconOf(repository.icon)}</span>
             <span className="truncate">{path}</span>
           </span>
           {unreadable === undefined ? (
@@ -199,6 +212,11 @@ export function RepositoryRowSkeleton(): ReactNode {
         </Skeleton>
         <span className={STILL}>
           <span className={PATH}>
+            <span className={ICON_ROOM}>
+              <Skeleton shape="block">
+                <IconFolder size="sm" />
+              </Skeleton>
+            </span>
             <Skeleton>{LIKELY.path}</Skeleton>
           </span>
           <span className={BASE}>
@@ -288,6 +306,7 @@ export interface RemoteChoice {
 /** What the sheet of a repository writes. */
 export interface RepositoryDraft {
   path: string
+  icon?: MarkIcon | undefined
   includedByDefault: boolean
   /** The remote chosen; null for none. */
   remote: string | null
@@ -311,6 +330,9 @@ export interface RepositoryFormProps {
   branchError?: string | undefined
   onChooseFolder: () => void
 }
+
+/** The value the icon select holds for the folder every repository wears until one is chosen. */
+const FOLDER = 'folder'
 
 /** The value the remote select holds for "no remote": a space, which no remote's name holds. */
 const NO_REMOTE = 'no remote'
@@ -354,6 +376,32 @@ export function RepositoryForm({
           </Button>
         }
       />
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium" aria-hidden="true">
+          Icon
+        </span>
+        <Select<MarkIcon | typeof FOLDER>
+          label="Icon"
+          className="w-full"
+          value={draft.icon ?? FOLDER}
+          mark={<span className="flex text-muted-foreground">{iconOf(draft.icon)}</span>}
+          onValueChange={(value) =>
+            onChange({ ...draft, icon: value === FOLDER ? undefined : value })
+          }
+          items={[
+            {
+              value: FOLDER,
+              label: 'Folder',
+              icon: <span className="flex text-muted-foreground">{iconOf(undefined)}</span>,
+            },
+            ...MARK_ICONS.map((icon) => ({
+              value: icon,
+              label: MARK_ICON_WORDS[icon],
+              icon: <span className="flex text-muted-foreground">{markIcon(icon)}</span>,
+            })),
+          ]}
+        />
+      </div>
       <Checkbox
         checked={draft.includedByDefault}
         onCheckedChange={(includedByDefault) => onChange({ ...draft, includedByDefault })}

@@ -10,33 +10,6 @@ import { IconBraces, IconTrash } from '../../icons.ts'
  * section writes in, and the menu that offers the names Hemera fills in a line or a value.
  */
 
-const HEAD = 'flex min-h-control-md items-center gap-3'
-
-const TITLE = 'text-lg font-semibold tracking-tight'
-
-const COUNT = 'text-sm text-muted-foreground tabular-nums'
-
-const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
-
-export interface SectionHeadProps {
-  title: string
-  /** How many things the section holds, said after its title; left out while they load. */
-  count?: number | undefined
-  /** What the section offers at the end of its head: Add a repository. */
-  actions?: ReactNode
-}
-
-/** The head of a section: its name, how many it holds, and what it offers at the end. */
-export function SectionHead({ title, count, actions }: SectionHeadProps): ReactNode {
-  return (
-    <div className={HEAD}>
-      <h2 className={TITLE}>{title}</h2>
-      {count !== undefined && <span className={COUNT}>{count}</span>}
-      {actions !== undefined && <div className={ACTIONS}>{actions}</div>}
-    </div>
-  )
-}
-
 /** A section: its head, and what it holds under it. */
 export function Section({
   label,

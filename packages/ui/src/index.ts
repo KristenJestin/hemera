@@ -173,7 +173,7 @@ export {
   type RepositoryDraft,
   type SettingsRepository,
 } from './blocks/project-settings/repositories.tsx'
-export { WorkspacesFields, WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
+export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
 export {
   COMMAND_TYPES,
   CommandForm,
@@ -201,3 +201,17 @@ export {
   type SettingsRun,
 } from './blocks/project-settings/services.tsx'
 export { SheetFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
+export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
+export {
+  MARK_ICONS,
+  ProjectMark,
+  type Identity,
+  type MarkIcon,
+  type ProjectMarkProps,
+} from './components/project-mark/project-mark.tsx'
+export {
+  CommandLineField,
+  type CatalogueChoice,
+  type CommandLineValue,
+} from './blocks/project-settings/command-line.tsx'
+export { IdentityField, type IdentityFieldProps } from './surfaces/add-project/identity-field.tsx'

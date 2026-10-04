@@ -2,7 +2,7 @@ import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { ErrorState } from '../../components/error-state/error-state.tsx'
-import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
+import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { type SheetView, SheetStack } from '../../components/sheet/sheet.tsx'
 import { OVER_MARK, SlidingMark } from '../../components/sliding-mark/sliding-mark.tsx'
 import { IconAlertTriangle, IconFolder } from '../../icons.ts'
@@ -34,6 +34,8 @@ export interface SettingsSection {
 
 export interface ProjectSettingsProps {
   name: string
+  /** What the user chose to mark it with; nothing chosen is its letter. */
+  identity?: Identity | undefined
   /** The folder of the user's own clones, as it is written on this machine. */
   mainCheckout: string
   sections: readonly SettingsSection[]
@@ -62,12 +64,18 @@ const SPLIT = 'flex min-w-0 items-start gap-8'
 /** The list of sections: it stays in sight while the section beside it scrolls. */
 const NAV = 'sticky top-0 isolate flex w-settings-nav shrink-0 flex-col gap-0.5'
 
+/**
+ * A section's entry: faint under the hand — a tint and the text's own colour — and, chosen, clearly
+ * apart: the primary's quiet fill under it, a bar of the primary on its edge, its words in the
+ * primary's ink and heavier.
+ */
 const ITEM =
-  'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground outline-none select-none hover:bg-accent hover:text-foreground focus-ring hover-motion aria-[current=page]:text-foreground'
+  'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground outline-none select-none hover:tinted hover:text-foreground focus-ring hover-motion aria-[current=page]:font-medium aria-[current=page]:text-primary-muted-foreground aria-[current=page]:hover:shadow-none'
 
 const ITEM_ICON = 'flex size-icon-md shrink-0 items-center justify-center'
 
-const MARK = 'absolute inset-0 rounded-md bg-accent'
+/** The mark under the chosen entry: the primary's quiet fill, and its bar on the leading edge. */
+const MARK = 'absolute inset-0 rounded-md border-l-2 border-primary bg-primary-muted'
 
 const PROBLEM = 'ml-auto flex shrink-0 text-destructive'
 
@@ -75,6 +83,7 @@ const BODY = 'flex min-w-0 flex-1 flex-col gap-8'
 
 export function ProjectSettings({
   name,
+  identity,
   mainCheckout,
   sections,
   current,
@@ -96,7 +105,7 @@ export function ProjectSettings({
       >
         <Page>
           <PageHeader
-            lead={<LetterAvatar name={name} />}
+            lead={<ProjectMark name={name} identity={identity} />}
             title={name}
             about={
               <span className={CHECKOUT}>

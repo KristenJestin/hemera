@@ -8,7 +8,8 @@ import {
   type SettingsCommand,
   typeIcon,
 } from '../../blocks/project-settings/commands.tsx'
-import { Section, SectionHead, SheetFoot } from '../../blocks/project-settings/parts.tsx'
+import { Section, SheetFoot } from '../../blocks/project-settings/parts.tsx'
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import {
   NEW_STEP,
   RecipeSection,
@@ -51,21 +52,17 @@ import {
   VariableForm,
   VariablesSection,
 } from '../../blocks/project-settings/variables.tsx'
-import { WorkspacesFields, WorkspacesSection } from '../../blocks/project-settings/workspaces.tsx'
+import { WorkspacesSection } from '../../blocks/project-settings/workspaces.tsx'
 import {
   IconChecklist,
   IconGitBranch,
   IconListNumbers,
-  IconPackage,
-  IconServer,
-  IconWorld,
   IconPlayerPlay,
   IconSettings,
   IconStack2,
   IconTerminal,
   IconVariable,
 } from '../../icons.ts'
-import { FrameFooter } from '../../components/frame/frame.tsx'
 import type { SheetView } from '../../components/sheet/sheet.tsx'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
@@ -136,29 +133,12 @@ export interface SettingsFixtureProps {
   runs?: readonly SettingsRun[] | undefined
   /** The Project the settings are of: Acme, or Hemera itself. */
   project?: 'acme' | 'hemera' | undefined
-  /**
-   * Where the Workspaces' folder and branch prefix are written (open question 20): a section of
-   * their own, or under the repositories, whose worktrees they are.
-   */
-  workspacesIn?: 'section' | 'repositories' | undefined
-  /** Whether each repository wears an icon of its own before its path, as in 0.x. */
-  repositoryIcons?: boolean | undefined
 }
-
-/** The icons 0.x let a repository wear, by id: what the exploration of its identity draws. */
-const REPOSITORY_ICONS = new Map<string, ReactNode>(
-  Object.entries({
-    api: <IconServer size="sm" />,
-    web: <IconWorld size="sm" />,
-    shared: <IconPackage size="sm" />,
-    'ui-kit': <IconPackage size="sm" />,
-    billing: <IconServer size="sm" />,
-  }),
-)
 
 function draftOfRepository(repository: SettingsRepository): RepositoryDraft {
   return {
     path: repository.path,
+    icon: repository.icon,
     includedByDefault: repository.includedByDefault,
     remote: repository.remote,
     baseBranch: repository.baseBranch,
@@ -184,8 +164,6 @@ export function SettingsFixture({
   refuse = false,
   runs: givenRuns,
   project = 'acme',
-  workspacesIn = 'section',
-  repositoryIcons = false,
 }: SettingsFixtureProps): ReactNode {
   const name = project === 'hemera' ? 'Hemera' : 'Acme'
   const firstRepositories = (): SettingsRepository[] => {
@@ -410,9 +388,7 @@ export function SettingsFixture({
               draft={sheet.draft}
               onChange={(draft) => setSheet({ ...sheet, draft })}
               places={places}
-              lineError={shellRefusal(sheet.draft.line)}
-              lineWindowsError={shellRefusal(sheet.draft.lineWindows ?? '')}
-              lineLinuxError={shellRefusal(sheet.draft.lineLinux ?? '')}
+              refusalOf={shellRefusal}
             />
           ),
           footer: foot(sheet.id === null ? null : sheet.draft.name),
@@ -431,7 +407,12 @@ export function SettingsFixture({
               draft={sheet.draft}
               onChange={(draft) => setSheet({ ...sheet, draft })}
               places={places}
-              commands={commands.map((one) => one.name)}
+              commands={commands.map((one) => ({
+                id: one.id,
+                name: one.name,
+                type: one.type,
+                line: one.line,
+              }))}
               pathError={
                 step?.problem !== undefined &&
                 step.path === sheet.draft.path &&
@@ -439,7 +420,7 @@ export function SettingsFixture({
                   ? `${placeOfStep(step)}/${whatOf(step)} is ${step.problem}.`
                   : undefined
               }
-              lineError={shellRefusal(sheet.draft.line ?? '')}
+              refusalOf={shellRefusal}
             />
           ),
           footer: foot(sheet.id === null ? null : `step ${String(position)}`),
@@ -475,37 +456,19 @@ export function SettingsFixture({
         : undefined,
     }),
   )
-  const sections = [...SECTIONS, ...(dense ? LATER_SECTIONS : [])]
-    .filter((one) => workspacesIn === 'section' || one.id !== 'workspaces')
-    .map((one) => ({ id: one.id, label: one.label, icon: one.icon, problem: problems.get(one.id) }))
+  const sections = [...SECTIONS, ...(dense ? LATER_SECTIONS : [])].map((one) => ({
+    id: one.id,
+    label: one.label,
+    icon: one.icon,
+    problem: problems.get(one.id),
+  }))
 
   const body = ((): ReactNode => {
     switch (current) {
       case 'repositories':
         return (
           <RepositoriesSection
-            repositories={
-              repositoryIcons
-                ? repositories.map((one) => ({ ...one, icon: REPOSITORY_ICONS.get(one.id) }))
-                : repositories
-            }
-            footer={
-              workspacesIn === 'repositories' ? (
-                <FrameFooter>
-                  <WorkspacesFields
-                    inline
-                    folder={folder}
-                    defaultFolder={DEFAULT_FOLDER}
-                    onFolder={setFolder}
-                    onChooseFolder={() => {}}
-                    prefix={prefix}
-                    defaultPrefix={project === 'hemera' ? 'hemera' : DEFAULT_PREFIX}
-                    onPrefix={setPrefix}
-                    prefixError={prefix === null ? undefined : branchRefusal(prefix)}
-                  />
-                </FrameFooter>
-              ) : undefined
-            }
+            repositories={repositories}
             loading={loading}
             onInclude={(id, included) =>
               setRepositories((before) =>
@@ -534,13 +497,14 @@ export function SettingsFixture({
           <WorkspacesSection
             loading={loading}
             folder={folder}
-            defaultFolder={DEFAULT_FOLDER}
+            defaultFolder={project === 'hemera' ? '~/hemera-workspaces/hemera' : DEFAULT_FOLDER}
             onFolder={setFolder}
             onChooseFolder={() => {}}
             prefix={prefix}
-            defaultPrefix={project === 'hemera' ? 'hemera' : DEFAULT_PREFIX}
+            defaultPrefix={DEFAULT_PREFIX}
             onPrefix={setPrefix}
-            prefixError={prefix === null ? undefined : branchRefusal(prefix)}
+            example={project === 'hemera' ? 'HEM-58' : 'ACME-12'}
+            prefixError={prefix === null ? undefined : branchRefusal(`${prefix}ACME-12`)}
           />
         )
       case 'commands':

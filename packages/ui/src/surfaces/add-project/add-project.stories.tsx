@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import type { Identity } from '../../components/project-mark/project-mark.tsx'
+import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { AddProject, type FoundRepository } from './add-project.tsx'
 
 /**
@@ -35,6 +37,7 @@ function AddProjectFixture({
   const [found, setFound] = useState<FoundRepository[] | null>(
     firstFound === undefined ? null : [...firstFound],
   )
+  const [identity, setIdentity] = useState<Identity>({})
   const [byHand, setByHand] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
   // The system's picker, as a story can have it: it gives Acme's folder, and Hemera looks in it.
@@ -68,6 +71,9 @@ function AddProjectFixture({
         folderError={folderError}
         name={name}
         onName={setName}
+        identity={identity}
+        onIdentity={setIdentity}
+        onChooseImage={() => setIdentity((before) => ({ ...before, image: ACME_LOGO }))}
         found={found}
         detecting={looking}
         onChoose={(path, chosen) =>
@@ -229,7 +235,7 @@ export const LongText: Story = {
   },
 }
 
-/** From the keyboard: the folder, the picker, the name, the boxes, the field by hand, the buttons. */
+/** From the keyboard: the folder, the picker, the name, the mark, the boxes; Escape closes. */
 export const Focused: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND },
   play: async () => {
@@ -241,6 +247,19 @@ export const Focused: Story = {
     await userEvent.tab()
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveFocus()
     await userEvent.tab()
+    // The colours are one stop, the arrows walk them.
+    const chosen = within(dialog).getByRole('radio', { checked: true })
+    expect(chosen).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => {
+      expect(within(dialog).getByRole('radio', { checked: true })).toHaveFocus()
+    })
+    expect(within(dialog).getByRole('radio', { checked: true })).not.toBe(chosen)
+    await userEvent.tab()
+    expect(within(dialog).getByRole('combobox', { name: 'Icon' })).toHaveFocus()
+    await userEvent.tab()
+    expect(within(dialog).getByRole('button', { name: 'Choose an image…' })).toHaveFocus()
+    await userEvent.tab()
     const api = within(dialog).getByRole('checkbox', { name: 'api' })
     expect(api).toHaveFocus()
     await userEvent.keyboard(' ')
@@ -249,5 +268,32 @@ export const Focused: Story = {
     await waitFor(() => {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
+  },
+}
+
+/**
+ * The Project's mark chosen as it is added: a colour, an icon of the set, or a logo of its own —
+ * drawn beside its name as the sidebar will draw it; left alone, the name's letter.
+ */
+export const Marked: Story = {
+  args: { folder: '~/work/acme', found: ACME_FOUND },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    const preview = dialog.querySelector('[data-mark-preview]')
+    expect(preview?.querySelector('[data-avatar]')).toHaveTextContent('A')
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Cyan' }))
+    expect(within(dialog).getByRole('radio', { name: 'Cyan' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Icon' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Rocket' }))
+    await waitFor(() => {
+      expect(preview?.querySelector('[data-mark-icon="rocket"]')).not.toBeNull()
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Choose an image…' }))
+    expect(preview?.querySelector('[data-mark-image]')).not.toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove the image' }))
+    expect(preview?.querySelector('[data-mark-image]')).toBeNull()
   },
 }

@@ -6,7 +6,9 @@ import { Dialog } from '../../components/dialog/dialog.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
+import type { Identity } from '../../components/project-mark/project-mark.tsx'
 import { IconFolderOpen, IconGitBranch, IconPlus } from '../../icons.ts'
+import { IdentityField } from './identity-field.tsx'
 
 /**
  * Adding a Project by hand: a folder, the repositories found in it, a name.
@@ -39,6 +41,10 @@ export interface AddProjectProps {
   name: string
   onName: (name: string) => void
   nameError?: string | undefined
+  /** How the Project is marked in the sidebar and its header. */
+  identity: Identity
+  onIdentity: (identity: Identity) => void
+  onChooseImage: () => void
   /** What was found in the folder; null before a folder is given. */
   found: readonly FoundRepository[] | null
   /** Whether Hemera is looking in the folder. */
@@ -98,6 +104,9 @@ export function AddProject({
   name,
   onName,
   nameError,
+  identity,
+  onIdentity,
+  onChooseImage,
   found,
   detecting = false,
   onChoose,
@@ -154,6 +163,12 @@ export function AddProject({
         {looked && (
           <>
             <Input label="Name" value={name} onValueChange={onName} error={nameError} />
+            <IdentityField
+              name={name}
+              identity={identity}
+              onChange={onIdentity}
+              onChooseImage={onChooseImage}
+            />
             <div className="flex flex-col gap-2">
               <span className={LABEL} id={listId}>
                 Repositories

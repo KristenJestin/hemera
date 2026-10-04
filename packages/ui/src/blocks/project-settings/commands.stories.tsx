@@ -102,7 +102,7 @@ export const Legends: Story = {
       'Runs at each opening',
       'Asks before running',
       'What it may write',
-      'Its own line on Windows or Linux',
+      'Its own line on Linux, macOS or Windows',
     ]) {
       expect(canvas.getByRole('img', { name: legend })).toBeInTheDocument()
     }
@@ -140,9 +140,7 @@ function Sheet({ draft: first }: { draft: CommandDraft }) {
         draft={draft}
         onChange={setDraft}
         places={['api', 'web', 'shared']}
-        lineError={shellRefusal(draft.line)}
-        lineWindowsError={shellRefusal(draft.lineWindows ?? '')}
-        lineLinuxError={shellRefusal(draft.lineLinux ?? '')}
+        refusalOf={shellRefusal}
       />
     </div>
   )
@@ -179,17 +177,20 @@ export const SheetShellSyntax: Story = {
   },
 }
 
-/** A line of its own for Windows: the fold opens on it, the default line as its placeholder. */
+/** A line of its own for Windows: the fold opens on it, the common line as each one's placeholder. */
 export const SheetPerSystem: Story = {
   render: () => <Sheet draft={BUILD} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('button', { name: 'Lines for Windows and Linux' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
+    expect(
+      canvas.getByRole('button', { name: 'Lines for Linux, macOS and Windows' }),
+    ).toHaveAttribute('aria-expanded', 'true')
     expect(canvas.getByRole('textbox', { name: 'Line on Windows' })).toHaveValue(
       'pnpm build:windows',
+    )
+    expect(canvas.getByRole('textbox', { name: 'Line on macOS' })).toHaveAttribute(
+      'placeholder',
+      'pnpm build',
     )
     expect(canvas.getByRole('textbox', { name: 'Line on Linux' })).toHaveAttribute(
       'placeholder',

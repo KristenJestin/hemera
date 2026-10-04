@@ -6,9 +6,10 @@ import { ServicesSection, type SettingsRun } from './services.tsx'
 import { FAILED_RUN, RUNNABLE, RUNS } from './project-settings-fixtures.ts'
 
 /**
- * What runs in a Project's main checkout: each live thing its chip and nothing beside it, the
- * glance the chip opens holding its address, its last lines, Restart and Stop; a service not
- * running, with Start; a command run at each opening that waits for the user, with Run and Not now.
+ * What runs in a Project's main checkout, as a table: each line its state, name, place, line and
+ * time; pressing a live line opens its glance — its address, its last lines, Restart and Stop; a
+ * service not running, with Start; a command run at each opening that waits for you, with Run and
+ * Not now.
  */
 const meta = {
   tags: ['autodocs'],
@@ -44,7 +45,7 @@ type Story = StoryObj<typeof meta>
 const byId = (id: string): SettingsRun => RUNS.find((run) => run.id === id)!
 
 /** Opens a chip's glance, and gives the glance back. */
-async function glance(canvasElement: HTMLElement, name: string): Promise<HTMLElement> {
+async function glance(canvasElement: HTMLElement, name: RegExp): Promise<HTMLElement> {
   await userEvent.click(within(canvasElement).getByRole('button', { name }))
   return waitFor(() => within(document.body).getByRole('dialog'))
 }
@@ -55,7 +56,7 @@ export const Filled: Story = {
     const canvas = within(canvasElement)
     const list = canvas.getByRole('list', { name: 'Running in the main checkout' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(5)
-    // A live line is its chip and nothing to press beside it.
+    // A live line is one control, which opens its glance: nothing to press beside it.
     const docs = canvasElement.querySelector<HTMLElement>('[data-run="docs"]')
     expect(docs).not.toBeNull()
     if (docs !== null) expect(within(docs).getAllByRole('button')).toHaveLength(1)
@@ -66,7 +67,7 @@ export const Filled: Story = {
 export const Starting: Story = {
   args: { runs: [byId('mock-api')] },
   play: async ({ canvasElement }) => {
-    const panel = await glance(canvasElement, 'mock-api, running')
+    const panel = await glance(canvasElement, /^mock-api, running/)
     expect(panel).toHaveTextContent('loading 214 fixtures…')
     expect(within(panel).queryByRole('button', { name: 'Copy the address' })).toBeNull()
     expect(within(panel).getByRole('button', { name: 'Stop' })).toBeVisible()
@@ -77,7 +78,7 @@ export const Starting: Story = {
 export const Ready: Story = {
   args: { runs: [byId('docs')] },
   play: async ({ canvasElement, args }) => {
-    const panel = await glance(canvasElement, 'docs, running')
+    const panel = await glance(canvasElement, /^docs, running/)
     expect(panel).toHaveTextContent('http://localhost:6100')
     await userEvent.click(within(panel).getByRole('button', { name: 'Copy the address' }))
     expect(args.onCopyUrl).toHaveBeenCalledWith('docs')
@@ -90,7 +91,7 @@ export const Ready: Story = {
 export const Failed: Story = {
   args: { runs: [FAILED_RUN] },
   play: async ({ canvasElement, args }) => {
-    const panel = await glance(canvasElement, 'search, failed')
+    const panel = await glance(canvasElement, /^search, failed/)
     expect(panel).toHaveTextContent('EADDRINUSE')
     await userEvent.click(within(panel).getByRole('button', { name: 'Restart' }))
     expect(args.onRestart).toHaveBeenCalledWith('search')
@@ -139,7 +140,7 @@ export const Loading: Story = {
   },
 }
 
-/** A long name and a long line: the chip ends its name in an ellipsis, the line too. */
+/** A long name and a long line: each ends in an ellipsis in its column. */
 export const LongText: Story = {
   args: {
     runs: [
@@ -153,15 +154,15 @@ export const LongText: Story = {
     ],
   },
   play: async ({ canvasElement }) => {
-    const chip = within(canvasElement).getByRole('button', {
-      name: 'platform-api-and-background-workers, failed',
+    const row = within(canvasElement).getByRole('button', {
+      name: /^platform-api-and-background-workers, failed/,
     })
-    const name = chip.querySelector('[data-name]')!
+    const name = within(row).getByText('platform-api-and-background-workers')
     expect(name.scrollWidth).toBeGreaterThan(name.clientWidth)
   },
 }
 
-/** Asked for less movement: no breath on the live chips, every state there at once. */
+/** Asked for less movement: no mark turns, every state there at once. */
 export const ReducedMotion: Story = {
   render: (args) => (
     <MotionConfig reducedMotion="always">

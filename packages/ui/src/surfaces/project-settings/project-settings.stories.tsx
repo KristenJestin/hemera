@@ -107,14 +107,21 @@ export const Unreadable: Story = {
   },
 }
 
-/** Where the Workspaces go and what their branches start with: empty fields show the defaults. */
+/**
+ * Where the Workspaces go and what their branches start with: empty fields show the defaults, and
+ * under them the folder and the branch they make for ACME-12.
+ */
 export const Workspaces: Story = {
   args: { section: 'workspaces' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const prefix = canvas.getByRole('textbox', { name: 'Branch prefix' })
-    expect(prefix).toHaveAttribute('placeholder', 'acme')
-    await userEvent.type(prefix, 'team..acme')
+    expect(prefix).toHaveAttribute('placeholder', 'hemera/')
+    expect(canvasElement.querySelector('[data-example-branch]')).toHaveTextContent('hemera/ACME-12')
+    expect(canvasElement.querySelector('[data-example-folder]')).toHaveTextContent(
+      '~/hemera-workspaces/acme/ACME-12',
+    )
+    await userEvent.type(prefix, 'team..acme/')
     expect(await canvas.findByText(/is not a branch name Git accepts: it holds “..”/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Back to the default prefix' }))
     expect(prefix).toHaveValue('')
@@ -188,17 +195,17 @@ export const Variables: Story = {
   },
 }
 
-/** What runs in the main checkout: live chips, a service to start, a command waiting for you. */
+/** What runs in the main checkout, as a table: live lines, a service to start, a command waiting for you. */
 export const Services: Story = {
   args: { section: 'services', runs: [...RUNS, FAILED_RUN] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const list = canvas.getByRole('list', { name: 'Running in the main checkout' })
-    expect(within(list).getByRole('button', { name: 'docs, running' })).toBeVisible()
-    expect(within(list).getByRole('button', { name: 'search, failed' })).toBeVisible()
+    expect(within(list).getByRole('button', { name: /^docs, running/ })).toBeVisible()
+    expect(within(list).getByRole('button', { name: /^search, failed/ })).toBeVisible()
     expect(within(list).getByRole('img', { name: 'Waiting for you' })).toBeVisible()
     await userEvent.click(within(list).getByRole('button', { name: 'Run db' }))
-    expect(await within(list).findByRole('button', { name: 'db, running' })).toBeVisible()
+    expect(await within(list).findByRole('button', { name: /^db, running/ })).toBeVisible()
   },
 }
 

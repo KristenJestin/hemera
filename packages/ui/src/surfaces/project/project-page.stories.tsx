@@ -8,6 +8,7 @@ import {
   REPOSITORIES,
   STAGE_GROUPS,
 } from '../../shell/shell-fixtures.tsx'
+import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { ProjectPage } from './project-page.tsx'
 
 /**
@@ -185,5 +186,16 @@ export const Focused: Story = {
     expect(field.closest('[data-input-box]')).toContainElement(canvas.getByText('Ctrl'))
     await userEvent.keyboard('Export the audit log{Enter}')
     expect(args.onStart).toHaveBeenCalledWith('Export the audit log')
+  },
+}
+
+/** A Project marked with a logo of its own: the logo before its name, as in the sidebar. */
+export const Marked: Story = {
+  args: { identity: { image: ACME_LOGO } },
+  play: async ({ canvasElement }) => {
+    expect(canvasElement.querySelector('header [data-mark-image]')).toHaveAttribute(
+      'src',
+      ACME_LOGO,
+    )
   },
 }

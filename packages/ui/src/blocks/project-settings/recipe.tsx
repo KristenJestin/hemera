@@ -1,3 +1,4 @@
+import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Reorder, useDragControls } from 'motion/react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
@@ -17,7 +18,8 @@ import {
   IconTerminal,
 } from '../../icons.ts'
 import { arrival, useTransition } from '../../motion.ts'
-import { Section, SectionHead, TemplateMenu } from './parts.tsx'
+import { type CatalogueChoice, CommandLineField } from './command-line.tsx'
+import { Section, TemplateMenu } from './parts.tsx'
 
 /**
  * The preparation recipe of a Project: what is done in a new Workspace, in order, once its
@@ -38,10 +40,13 @@ export interface SettingsStep {
   place: string
   /** What a copy or a link places, under its repository. */
   path: string | null
-  /** The catalogue command a run starts, by name; null for a line of its own. */
+  /** The catalogue command a run starts, by id; null for a line of its own. */
   command: string | null
-  /** The line a run of its own runs. */
+  /** The line a run of its own runs, and the lines of its own for each system. */
   line: string | null
+  lineLinux?: string | null | undefined
+  lineMac?: string | null | undefined
+  lineWindows?: string | null | undefined
   /** What is wrong with the step, in words: a source missing from the main checkout. */
   problem?: string | undefined
 }
@@ -274,18 +279,16 @@ export type StepDraft = Omit<SettingsStep, 'id' | 'problem'>
 
 export const NEW_STEP: StepDraft = { kind: 'copy', place: '.', path: '', command: null, line: null }
 
-/** The value the command select holds for a line of its own. */
-const OWN_LINE = 'own line'
-
 export interface StepFormProps {
   draft: StepDraft
   onChange: (draft: StepDraft) => void
   places: readonly string[]
-  /** The catalogue's commands, by name. */
-  commands: readonly string[]
+  /** The commands of the catalogue a run may start. */
+  commands: readonly CatalogueChoice[]
   /** What is wrong with the source, in words. */
   pathError?: string | undefined
-  lineError?: string | undefined
+  /** What the engine refuses in a line, in words, the token named; undefined for nothing. */
+  refusalOf: (line: string) => string | undefined
 }
 
 const LABEL = 'text-sm font-medium'
@@ -297,7 +300,7 @@ export function StepForm({
   places,
   commands,
   pathError,
-  lineError,
+  refusalOf,
 }: StepFormProps): ReactNode {
   const set = (part: Partial<StepDraft>): void => onChange({ ...draft, ...part })
   return (
@@ -337,43 +340,18 @@ export function StepForm({
         </div>
       </div>
       {draft.kind === 'run' ? (
-        <>
-          <div className="flex flex-col gap-1">
-            <span className={LABEL} aria-hidden="true">
-              Command
-            </span>
-            <Select
-              label="Command"
-              className="w-full"
-              value={draft.command ?? OWN_LINE}
-              onValueChange={(command) =>
-                set(
-                  command === OWN_LINE
-                    ? { command: null, line: draft.line ?? '' }
-                    : { command, line: null },
-                )
-              }
-              items={[
-                ...commands.map((command) => ({ value: command, label: command })),
-                { value: OWN_LINE, label: 'A line of its own' },
-              ]}
-            />
-          </div>
-          {draft.command === null && (
-            <Input
-              label="Line"
-              value={draft.line ?? ''}
-              error={lineError}
-              onValueChange={(line) => set({ line })}
-              trailing={
-                <TemplateMenu
-                  field="Line"
-                  onInsert={(name) => set({ line: `${draft.line ?? ''}${name}` })}
-                />
-              }
-            />
-          )}
-        </>
+        <CommandLineField
+          commands={commands}
+          value={{
+            command: draft.command,
+            line: draft.line ?? '',
+            lineLinux: draft.lineLinux ?? null,
+            lineMac: draft.lineMac ?? null,
+            lineWindows: draft.lineWindows ?? null,
+          }}
+          onChange={(value) => set(value)}
+          refusalOf={refusalOf}
+        />
       ) : (
         <Input
           label="Source in the main checkout"

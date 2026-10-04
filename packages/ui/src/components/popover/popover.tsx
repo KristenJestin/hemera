@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { Popover as BasePopover } from '@base-ui/react/popover'
 import { type ReactElement, type ReactNode, useRef } from 'react'
 
@@ -67,6 +68,8 @@ export interface PopoverProps {
   anchorOnly?: boolean | undefined
   /** Said once it has finished closing, its exit played: what waits for it to be gone. */
   onClosed?: (() => void) | undefined
+  /** Where the trigger sits — a row the whole width of its list; never how it looks. */
+  className?: string | undefined
 }
 
 export function Popover({
@@ -81,6 +84,7 @@ export function Popover({
   label,
   anchorOnly = false,
   onClosed,
+  className,
 }: PopoverProps): ReactNode {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
@@ -92,7 +96,7 @@ export function Popover({
         if (!next) onClosed?.()
       }}
     >
-      <span ref={anchor} className="inline-flex">
+      <span ref={anchor} className={cn('inline-flex', className)}>
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>
       <BasePopover.Portal container={container}>
