@@ -3,8 +3,13 @@ import type { Stroke } from './strokes.ts'
 /**
  * The colours the face is drawn in: roles of the theme, never colours of its own. Telling two
  * states apart never depends on them — the shape says it, the colour only says it again.
+ *
+ * Ordinary work is drawn in the text's own colour: a face that is working is the usual case, and
+ * a usual case in a colour of its own would always be shouting. A colour is kept for what it
+ * says: waiting for the reader, something gone wrong, a turn done well; and asleep steps back
+ * into the muted text.
  */
-export const TONES = ['current', 'quiet', 'busy', 'build', 'needs', 'good', 'bad'] as const
+export const TONES = ['current', 'quiet', 'busy', 'needs', 'good', 'bad'] as const
 
 export type FaceTone = (typeof TONES)[number]
 
@@ -13,8 +18,7 @@ export const TONE_CLASSES = {
   /** Whatever colour the face sits in, as the loading indicator it stands in for is. */
   current: 'text-current',
   quiet: 'text-muted-foreground',
-  busy: 'text-primary',
-  build: 'text-build',
+  busy: 'text-foreground',
   needs: 'text-warning',
   good: 'text-success',
   bad: 'text-destructive',
@@ -41,8 +45,8 @@ export interface Pull {
 }
 
 /**
- * What a gesture does to the face at one instant: the head and the eyes, a shape either eye or
- * the mouth is pulled towards, how far it closes the lids, and how big it draws the mouth.
+ * What a change says on the way at one instant: the head and the eyes, a shape either eye or the
+ * mouth is pulled towards, how far it closes the lids, and how big it draws the mouth.
  */
 export interface Beat extends Head {
   readonly left: Pull | null
@@ -50,10 +54,6 @@ export interface Beat extends Head {
   readonly mouth: Pull | null
   readonly lid: number
   readonly mouthScale: number
-  /** How much wider or narrower the loading orbit is drawn, -1 to 1 around its own radius. */
-  readonly reach: number
-  /** Turns of the loading orbit on top of its own beat. */
-  readonly turn: number
 }
 
 /** The face doing nothing at all. */
@@ -67,47 +67,11 @@ export const REST: Beat = {
   mouth: null,
   lid: 0,
   mouthScale: 1,
-  reach: 0,
-  turn: 0,
 }
 
 /** A beat that says only what it is given, and rests everywhere else. */
 export function beat(said: Partial<Beat>): Beat {
   return { ...REST, ...said }
-}
-
-/**
- * One pull `w` of the way into another. The same shape blends its share; two different shapes
- * cannot both be held by one feature, so the one pulling harder at this instant keeps it.
- */
-function blendPull(from: Pull | null, to: Pull | null, w: number): Pull | null {
-  if (from === null && to === null) return null
-  if (from === null) return to === null ? null : { to: to.to, k: to.k * w }
-  if (to === null) return { to: from.to, k: from.k * (1 - w) }
-  if (from.to === to.to) return { to: to.to, k: from.k + (to.k - from.k) * w }
-  return from.k * (1 - w) > to.k * w
-    ? { to: from.to, k: from.k * (1 - w) }
-    : { to: to.to, k: to.k * w }
-}
-
-/** One beat `w` of the way into another: how a gesture hands the head on to the next. */
-export function blend(from: Beat, to: Beat, w: number): Beat {
-  if (w <= 0) return from
-  if (w >= 1) return to
-  const at = (a: number, b: number): number => a + (b - a) * w
-  return {
-    yaw: at(from.yaw, to.yaw),
-    pitch: at(from.pitch, to.pitch),
-    gazeX: at(from.gazeX, to.gazeX),
-    gazeY: at(from.gazeY, to.gazeY),
-    left: blendPull(from.left, to.left, w),
-    right: blendPull(from.right, to.right, w),
-    mouth: blendPull(from.mouth, to.mouth, w),
-    lid: at(from.lid, to.lid),
-    mouthScale: at(from.mouthScale, to.mouthScale),
-    reach: at(from.reach, to.reach),
-    turn: at(from.turn, to.turn),
-  }
 }
 
 /**

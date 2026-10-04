@@ -91,7 +91,6 @@ interface Story {
   readonly seed: number
   readonly start: FaceState
   readonly changes?: readonly Played[]
-  readonly detail?: FaceDetail
   readonly reduced?: boolean
 }
 
@@ -101,7 +100,6 @@ function told(story: Story): (at: number) => FaceFrame {
     state: story.start,
     at: 0,
     seed: story.seed,
-    detail: story.detail ?? DETAILS.full,
     reduced: story.reduced ?? false,
   })
   const waiting = [...(story.changes ?? [])]
@@ -217,7 +215,7 @@ describe('Within a state', () => {
       [3, DETAILS.full],
       [17, DETAILS.icon],
     ] as const) {
-      const frameAt = told({ seed, start: state, detail })
+      const frameAt = told({ seed, start: state })
       expect(largestStep(frameAt, 0, 60, detail)).toBeLessThan(CUT)
     }
   })

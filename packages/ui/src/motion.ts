@@ -223,21 +223,25 @@ export const wipe: Transition = { duration: durations.slow, ease: [0.65, 0, 0.35
  * moved around, eased on the frame by the face's own player, so that any shape travels into any
  * other and a change that arrives half-way through another is taken from wherever the face is.
  * What that player plays by is written here, in one table, so that the face reads its beats from
- * the preset like every other movement. What each gesture does inside its own pass — where the
- * eyes land, when a nod comes — is the gesture itself, and is written with it beside the face,
- * as the points of its strokes are.
+ * the preset like every other movement.
  *
- * - `blink`: the lid coming down, and going back up a little slower, the way a real one moves;
- *   `gap` is what separates the two halves of a double blink, long enough to read as two and
- *   short enough to read as one gesture. `hold` is how long a lid stays shut when a change of
- *   state is carried across it — the way an animator cuts on a blink.
- * - `shape`: a change of shape inside a state: a gesture pulling one eye, a flourish handing it
- *   back.
- * - `handover`: how long a new gesture takes to take the head over from the one before it. The
- *   head is handed on, never seized: a gesture that seized it would snap it to wherever its own
- *   first frame is.
- * - `change`: how long each change of state lasts, by what it says. Going from one kind of work
- *   to another is a glance and a flinch is quick; falling asleep and waking up are not.
+ * The face is calm. A face that moves all the time is tiring to have in the corner of the eye, so
+ * it holds still in its state and moves when its state changes: one short movement, then still
+ * again. Two things loop, and only these. Loading is the loading indicator, and turns as one does.
+ * The states that wait for the reader — a question, a permission, a blocker — keep a slow blink
+ * at a long interval: the work has stopped until someone answers, and a face that blinks now and
+ * then is a face still waiting, without anything moving enough to pull the eye from what it
+ * reads. An error does not loop: its flinch is its change, and it then stares, still, in red.
+ *
+ * - `blink`: the lid a change is carried across, coming down and going back up a little slower,
+ *   the way a real one moves. `hold` is how long the lid stays shut while the shape changes
+ *   behind it — the way an animator cuts on a blink.
+ * - `call`: the slow blink of a state that waits for the reader: the gap between two, drawn
+ *   afresh each time inside `every` so that it never falls into a rhythm, and a lid twice as slow
+ *   as a change's, so that it reads as patience and not as a twitch.
+ * - `change`: how long each change of state lasts, by what it says, a second at most. Going from
+ *   one kind of work to another is a glance and a flinch is quick; falling asleep and waking up
+ *   take the longest.
  * - `carry`: how much of its speed the head keeps when a change takes it over, 0 to 1: at 0 it
  *   stops dead on the frame the change arrives, at 1 it finishes the move it was in first.
  * - `spin`: one turn of the loading orbit, on the theme's `turn`, the beat the loading indicator
@@ -248,23 +252,23 @@ export const wipe: Transition = { duration: durations.slow, ease: [0.65, 0, 0.35
  *   `hold`, in seconds, then eases into the next draw over its `ease`: never a pause, never a
  *   pattern.
  * - `fade`: the one thing a reader asking for less movement is still given — a soft cross-fade
- *   from one still expression to the next, in opacity alone, so the face never jumps at them.
+ *   from one still expression to the next, in opacity alone, so the face never jumps at them. No
+ *   loop at all: a waiting face is as still as any other.
  */
 export const face = {
-  blink: { down: 0.09, up: 0.15, gap: 0.09, hold: 0.06 },
-  shape: 0.28,
-  handover: 0.42,
+  blink: { down: 0.09, up: 0.15, hold: 0.06 },
+  call: { every: [7, 11], down: 0.18, up: 0.3 },
   change: {
     shift: 0.36,
-    focus: 0.6,
-    alert: 0.66,
-    resume: 0.62,
+    focus: 0.5,
+    alert: 0.6,
+    resume: 0.55,
     turn: 0.5,
-    cheer: 0.95,
-    flinch: 0.8,
-    recover: 0.9,
-    drift: 2.4,
-    wake: 1.4,
+    cheer: 0.7,
+    flinch: 0.6,
+    recover: 0.7,
+    drift: 1,
+    wake: 0.9,
     boot: 0.8,
     gather: 0.65,
   },

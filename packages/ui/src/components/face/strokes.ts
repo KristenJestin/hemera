@@ -91,8 +91,6 @@ export const MOUTHS = {
    * turning on the way.
    */
   open: [-0.3, 0, 0, 0, 0.3, 0, 4.6],
-  /** The same dot, heavier: a yawn at its widest, grown in height and width together. */
-  gape: [-0.4, 0, 0, 0, 0.4, 0, 7],
   /** The smile upside down. */
   frown: [-3.2, 1.2, 0, -1.2, 3.2, 1.2, 2.3],
   /** Shorter, and pushed to one side, level: working something out. */

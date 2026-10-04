@@ -9,20 +9,21 @@ import { EXPRESSIONS, type FaceState } from './states.ts'
 import { clock, onFrame } from './ticker.ts'
 
 /**
- * Hemera's face: a small mascot whose expression, motion and colour say what an agent is doing.
+ * Hemera's face: a small mascot whose expression says what an agent is doing.
  *
  * Two eyes and a mouth, each one stroke of three points, and every state a way of placing those
- * points, a way of moving the head and a way of blinking. Inside a state it lives — blinks, looks
- * about, plays a short flourish now and then — at intervals drawn from a seed, so it never falls
- * into a loop and the same seed always tells the same story. Between two states it never cuts:
- * every change is a designed motion from wherever the face is, eyes, mouth, head and colour
- * together, and a change arriving half-way through another is taken from there.
+ * points. The face is calm: it holds still in its state, in the text's own colour for ordinary
+ * work, and moves when its state changes — one short, designed movement from wherever the face
+ * is, eyes, mouth, head and colour together, a change arriving half-way through another taken
+ * from there — and is still again. Only loading, which is the loading indicator, goes on turning,
+ * and the states that wait for the reader blink slowly now and then, at intervals drawn from a
+ * seed, so the same seed always tells the same story.
  *
  * Telling two states apart never depends on the colour; it only says again what the shape says.
  * The state is said in words too — to whatever reads the page, and, with `legend`, in a tooltip
  * on the face.
  *
- * Small, it simplifies rather than blurs: heavier strokes, gestures that travel further so they
+ * Small, it simplifies rather than blurs: heavier strokes, movements that travel further so they
  * still read. A reader asking for less movement gets still expressions and a soft
  * cross-fade between them.
  */
@@ -69,8 +70,8 @@ export interface FaceProps {
   /** How big it is drawn. */
   size?: FaceSize | undefined
   /**
-   * Makes its life deterministic: the same seed and the same changes at the same moments are the
-   * same face. Left out, each face draws its own, so two side by side never move in step.
+   * Makes the face deterministic: the same seed and the same changes at the same moments are the
+   * same face. Left out, each face draws its own, so two waiting side by side never blink in step.
    */
   seed?: number | undefined
   /** What the face says in words; the state's own words when left out. */
@@ -112,17 +113,16 @@ export function Face({
     wake.current()
   }
 
-  // A new seed, a new size or a change of preference is a new face, begun where the state is.
+  // A new seed or a change of preference is a new face, begun where the state is.
   useLayoutEffect(() => {
     player.current = createFace({
       state: latest.current,
       at: clock(),
       seed: chosen,
-      detail,
       reduced,
     })
     draw()
-  }, [chosen, detail, reduced])
+  }, [chosen, reduced])
 
   useLayoutEffect(() => {
     latest.current = state
@@ -131,7 +131,7 @@ export function Face({
   }, [state])
 
   // Painted on the page's one frame loop while it is on screen and has anything to move: a face
-  // scrolled away, or a still one under reduced motion, costs nothing.
+  // scrolled away, or one holding still in its state, costs nothing.
   useEffect(() => {
     let stop: (() => void) | null = null
     let seen = true
@@ -173,6 +173,7 @@ export function Face({
       role={legend ? undefined : 'img'}
       aria-label={legend ? undefined : words}
       data-state={state}
+      data-waiting={EXPRESSIONS[state].waits}
       className={cn(inline ? INLINE : FRAME, SIZE_CLASSES[size], className)}
     >
       <FaceFigure detail={detail} painter={painter} />
