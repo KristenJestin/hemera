@@ -1,37 +1,29 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
+import { Face, type FaceSize } from '../face/face.tsx'
+
 /**
  * What stands in for something on its way, in two forms, chosen by what is known of its shape.
  *
  * - `Skeleton`: what is coming has a shape the page already knows — a row, a title, a line — so
- *   that shape is drawn now, in the skeleton's own fill, breathing. When the content arrives it takes
- *   the skeleton's place exactly, and nothing around it moves.
- * - `Loading`: what is coming has no shape to draw — a button working, a panel whose size
- *   depends on its answer. Three dots going round, in `currentColor`.
- *
- * One element turns and the dots ride it, so the spinner is a single rotation the compositor
- * carries on its own. Under reduced motion `motion-safe` leaves the rotation and the breath out
- * of the stylesheet entirely, and both stand still.
+ *   the component draws that shape now, in the skeleton's own fill, breathing. When the content
+ *   arrives it takes the skeleton's place exactly, and nothing around it moves.
+ * - `Loading`: what is coming has no shape to draw — a button working, a panel whose size depends
+ *   on its answer. Hemera's face in its loading state: three dots going round, in `currentColor`.
+ *   There is no other spinner in the catalogue.
  */
-const SIZE = {
-  sm: 'size-icon-sm',
-  md: 'size-icon-md',
-  lg: 'size-icon-lg',
-} as const
 
-const DOT = {
-  sm: 'size-1',
-  md: 'size-1',
-  lg: 'size-1.5',
-} as const
-
-/** One class per dot, written out: a class name built at run time is one Tailwind never sees. */
-const ORBIT = ['orbit-0', 'orbit-1', 'orbit-2']
+/** The size of face each step of the indicator is drawn at. */
+const FACE: Record<'sm' | 'md' | 'lg', FaceSize> = {
+  sm: 'icon',
+  md: 'sm',
+  lg: 'md',
+}
 
 export interface LoadingProps {
-  /** One step of the icon scale, so the indicator sits where an icon would. */
-  size?: keyof typeof SIZE
+  /** Where it stands: beside a label, alone in a control, alone in a panel. */
+  size?: keyof typeof FACE
   /** What a screen reader says while this is on screen. */
   label?: string
   /** Where the indicator sits; never how it looks. */
@@ -40,11 +32,9 @@ export interface LoadingProps {
 
 export function Loading({ size = 'md', label = 'Loading', className }: LoadingProps): ReactNode {
   return (
-    <span role="status" aria-label={label} className={cn('relative', SIZE[size], className)}>
-      <span className="absolute inset-0 flex items-center justify-center motion-safe:animate-turn">
-        {ORBIT.map((orbit) => (
-          <span key={orbit} className={cn('absolute rounded-full bg-current', DOT[size], orbit)} />
-        ))}
+    <span role="status" aria-label={label} className={cn('inline-flex shrink-0', className)}>
+      <span aria-hidden="true" className="flex">
+        <Face state="loading" size={FACE[size]} label={label} />
       </span>
     </span>
   )

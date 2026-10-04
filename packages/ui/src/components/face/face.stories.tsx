@@ -452,7 +452,7 @@ export const Interrupted: Story = {
 
 /**
  * The window while Hemera starts: its face at the size of a hero, awake and thinking, in the
- * middle of the window — never the three dots of a spinner. The words are said to whatever reads
+ * middle of the window — never the loading dots. The words are said to whatever reads
  * the page, and on the face's tooltip.
  */
 export const Starting: Story = {

@@ -227,7 +227,8 @@ downloaded or installed while the application runs.
   reduced-motion path.
 - Errors in words. A silent turn says so. Agents' errors and unanswered requests are shown. A
   start has a maximum delay.
-- Skeletons for rows whose shape is known; a spinner only for what has none.
+- Skeletons for rows whose shape is known; for what has none, the face's loading state
+  (`Loading`, `<Face state="loading">`): there is no other spinner.
 - What goes on (a run, a service, a helper, a Probe) is a `LiveChip` and nothing beside it: its
   actions (Restart, Stop, Run again, details) live in the glance the chip opens, never as
   buttons on the line.

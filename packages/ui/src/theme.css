@@ -427,12 +427,6 @@
   }
 }
 
-/* Where a dot of the loading indicator sits on the ring it orbits: a third of a turn apart,
-   pushed out from the middle by a share of the dot's own size. Only the ring ever turns. */
-@utility orbit-* {
-  transform: rotate(calc(--value(integer) * 120deg)) translateY(-110%);
-}
-
 @layer base {
   html,
   body {

@@ -135,8 +135,9 @@ export const Error: Story = {
   who it is, a `LetterAvatar`; Hemera itself, its `Face`. A mark's legend is a tooltip on the
   glyph (`Legend`), never a panel.
 - **Hide what cannot be done** rather than refusing it in red. Errors are said in words.
-- **Skeletons** for rows whose shape is known, hiding the real content entirely; a spinner only
-  for what has no known shape.
+- **Skeletons** for rows whose shape is known, drawn by the row itself in its loading mode and
+  hiding the real content entirely; for what has no known shape, the face's loading state
+  (`Loading`, `<Face state="loading">`): there is no other spinner.
 - **Prose** at a reading measure of 70 to 80 characters.
 - **Never the engine's vocabulary** on screen: plain words ("Changed outside Hemera", not
   "stale").

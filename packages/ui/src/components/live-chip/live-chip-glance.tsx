@@ -21,7 +21,8 @@ import type { LiveState } from './tint.tsx'
  * - Its state with its mark, and how long, in words: "Running for 84s", "Failed after 12s".
  * - Its whole name, never cut, and its type: "Command · pnpm test".
  * - A service's address, with copy and open.
- * - The step it is on, or the last lines it printed or said.
+ * - The last lines it printed — a short tail of five at most, the newest at the bottom, one line
+ *   each and never wrapped — or, for a helper, the step it is on.
  * - Its actions, by kind and state: Restart and Stop while a run or a service works; Run again
  *   once a run or a Probe has ended, Restart once a service has; nothing to stop on a helper or a
  *   Probe — nobody stops them by hand. ⓘ opens its details, always.
@@ -78,8 +79,14 @@ const TYPE = 'text-sm text-muted-foreground'
 const ADDRESS =
   'flex items-center gap-1 rounded-md border border-border bg-muted py-0.5 pr-0.5 pl-2 font-mono text-sm'
 
+/** How many of the last lines a glance shows: a short tail, the newest at the bottom. */
+const TAIL = 5
+
+/** The tail: one line each, never wrapped, cut at the panel's edge, muted, in the code face. */
 const OUTPUT =
-  'flex flex-col rounded-md bg-muted px-2 py-1.5 font-mono text-xs whitespace-pre-wrap break-all text-muted-foreground'
+  'flex flex-col rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground'
+
+const LINE = 'truncate whitespace-pre'
 
 const ACTIONS = 'flex items-center gap-2 border-t border-border pt-3'
 
@@ -143,11 +150,13 @@ export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProp
       )}
       {glance.step !== undefined && <p className="text-sm text-foreground">{glance.step}</p>}
       {glance.output !== undefined && glance.output.length > 0 && (
-        <div className={OUTPUT}>
-          {glance.output.map((line, at) => (
+        <div className={OUTPUT} data-output="">
+          {glance.output.slice(-TAIL).map((line, at) => (
             // Lines of output repeat; where they stand is what tells them apart.
             // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
-            <span key={at}>{line}</span>
+            <span key={at} className={LINE}>
+              {line}
+            </span>
           ))}
         </div>
       )}
