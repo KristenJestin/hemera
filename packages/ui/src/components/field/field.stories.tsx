@@ -67,10 +67,14 @@ export const WithIcon: Story = {
 }
 
 /** Where the parts of a field's box stand: the box, the text, and what leads and trails it. */
-function partsOf(
-  canvasElement: HTMLElement,
-  label: string,
-): { box: DOMRect; input: DOMRect; leading: DOMRect | null; trailing: DOMRect | null } {
+interface Parts {
+  readonly box: DOMRect
+  readonly input: DOMRect
+  readonly leading: DOMRect | null
+  readonly trailing: DOMRect | null
+}
+
+function partsOf(canvasElement: HTMLElement, label: string): Parts {
   const control = within(canvasElement).getByLabelText(label)
   const box = control.closest<HTMLElement>('[data-input-box]')!
   const rectOf = (slot: string): DOMRect | null =>
@@ -151,8 +155,10 @@ export const Disabled: Story = {
   play: async ({ canvasElement }) => {
     const remote = within(canvasElement).getByLabelText('Remote')
     expect(remote).toBeDisabled()
-    // The whole box goes quiet, its icon and its hint with it.
-    expect(getComputedStyle(remote.closest('[data-input-box]')!).opacity).toBe('0.5')
+    // The whole box goes quiet, its icon with it; the keystroke that reaches it is not shown.
+    const box = remote.closest<HTMLElement>('[data-input-box]')!
+    expect(getComputedStyle(box).opacity).toBe('0.5')
+    expect(box.querySelector('[data-slot="trailing"]')).toBeNull()
   },
 }
 

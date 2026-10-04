@@ -28,6 +28,25 @@ import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
 const CONTROL =
   'w-full rounded-md border border-input bg-muted text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
 
+/**
+ * The box of a one-line input: the recessed surface, its edge and its ring are the box's, and the
+ * text, the icon before it and the hint after it are laid inside with the same inset from each
+ * edge and the same gap between them, at every size. An invalid or disabled control says so on
+ * the whole box.
+ */
+const BOX: Record<'sm' | 'md', string> = {
+  sm: 'relative flex h-control-sm min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-muted px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
+  md: 'relative flex h-control-md min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-muted px-2.5 text-foreground focus-ring has-data-invalid:border-destructive has-disabled:opacity-50',
+}
+
+/** The text itself, borderless inside its box: the box is what is seen. */
+const TEXT =
+  'h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+
+const LEADING = 'pointer-events-none flex shrink-0 text-muted-foreground'
+
+const TRAILING = 'flex shrink-0 items-center gap-1 text-muted-foreground'
+
 interface FieldShellProps {
   /** What the control is called. Required: a control with no label is a control nobody can use. */
   label: string
@@ -80,8 +99,15 @@ function FieldShell({ label, description, error, disabled, className, children }
 }
 
 export interface InputProps extends Omit<FieldShellProps, 'children'> {
-  /** One icon of the catalogue, drawn inside the control before the text. */
+  /** One icon of the catalogue, drawn inside the box before the text. */
   icon?: ReactNode
+  /**
+   * What sits inside the box after the text: the keystroke that reaches the field (`Kbd`) or a
+   * small action. Inside, never beside: a hint outside the box is a hint about something else.
+   */
+  trailing?: ReactNode
+  /** `sm` beside small controls, `md` everywhere else. */
+  size?: 'sm' | 'md' | undefined
   placeholder?: string | undefined
   defaultValue?: string | undefined
   value?: string | undefined
@@ -107,6 +133,8 @@ export function Input({
   disabled,
   className,
   icon,
+  trailing,
+  size = 'md',
   placeholder,
   defaultValue,
   value,
@@ -125,9 +153,9 @@ export function Input({
       className={className}
     >
       <div className="flex items-center gap-2">
-        <div className="relative flex min-w-0 flex-1 items-center rounded-md focus-ring">
+        <div className={BOX[size]} data-input-box="">
           {icon !== undefined && (
-            <span className="pointer-events-none absolute left-2 flex text-muted-foreground">
+            <span className={LEADING} data-slot="leading">
               {icon}
             </span>
           )}
@@ -139,8 +167,14 @@ export function Input({
             onBlur={() => onBlur?.()}
             onFocus={() => onFocus?.()}
             onKeyDown={(event) => onKeyDown?.(event)}
-            className={cn(CONTROL, 'h-control-md px-2 text-sm', icon !== undefined && 'pl-6')}
+            className={TEXT}
           />
+          {/* A disabled field cannot be reached, so the keystroke that reaches it is not shown. */}
+          {trailing !== undefined && disabled !== true && (
+            <span className={TRAILING} data-slot="trailing">
+              {trailing}
+            </span>
+          )}
         </div>
         {action}
       </div>
