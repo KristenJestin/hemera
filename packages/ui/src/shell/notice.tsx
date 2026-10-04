@@ -5,7 +5,7 @@ import { IconButton } from '../components/button/button.tsx'
 import { LetterAvatar } from '../components/letter-avatar/letter-avatar.tsx'
 import { StatusMark } from '../components/status-mark/status-mark.tsx'
 import { IconGitBranch, IconX } from '../icons.ts'
-import { VIEW_TRAVEL, arrival, useTransition } from '../motion.ts'
+import { VIEW_TRAVEL, arrival, leave, morph, useTransition } from '../motion.ts'
 
 /**
  * A notification while the window has the focus: the system's would be lost behind the window
@@ -18,8 +18,9 @@ import { VIEW_TRAVEL, arrival, useTransition } from '../motion.ts'
  *
  * Pressing it goes where the notification leads — the mission, the need, the setting — and takes
  * the notification with it; its × only takes the notification. One arrives from under the edge
- * on `arrival`, pushes the ones already there up, and leaves by fading; asked for less movement
- * it is there at once.
+ * on `arrival` and pushes the ones already there up; one leaving fades on `leave`, short, and is
+ * out of the flow at once, so the others close the gap together on `morph`, each moving as one
+ * card — its words, its ×, its edge and its shadow. Asked for less movement it is there at once.
  */
 export type NoticeTone = 'you' | 'done' | 'failed' | 'outside'
 
@@ -75,10 +76,14 @@ export interface NoticeStackProps {
 }
 
 export function NoticeStack({ notices, onOpen, onDismiss }: NoticeStackProps): ReactNode {
-  const transition = useTransition(arrival)
+  const arriving = useTransition(arrival)
+  const closing = useTransition(morph)
+  const leaving = useTransition(leave)
+  // The arrival for the card, the gap closing for its place: motion reads `layout` by name.
+  const transition = { ...arriving, layout: closing }
   return (
     <div role="region" aria-label="Notifications" aria-live="polite" className={STACK}>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {notices.map((notice) => (
           <motion.div
             key={notice.id}
@@ -87,7 +92,7 @@ export function NoticeStack({ notices, onOpen, onDismiss }: NoticeStackProps): R
             data-notice={notice.tone}
             initial={{ opacity: 0, y: VIEW_TRAVEL }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0, transition: leaving }}
             transition={transition}
           >
             <button type="button" className={OPEN} onClick={() => onOpen(notice.id)}>
