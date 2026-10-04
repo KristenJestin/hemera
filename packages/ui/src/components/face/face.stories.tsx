@@ -442,3 +442,27 @@ export const Interrupted: Story = {
     }
   },
 }
+
+/**
+ * The window while Hemera starts: its face at the size of a hero, awake and thinking, in the
+ * middle of the window — never the three dots of a spinner. The words are said to whatever reads
+ * the page, and on the face's tooltip.
+ */
+export const Starting: Story = {
+  parameters: { layout: 'fullscreen', controls: { disable: true } },
+  render: () => (
+    <div className="flex h-screen w-full flex-col items-center justify-center gap-4">
+      <Face state="thinking" size="hero" seed={4} label="Starting Hemera" />
+      <p className="text-sm text-muted-foreground">Starting Hemera</p>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const face = within(canvasElement).getByRole('img', { name: 'Starting Hemera' })
+    expect(face.getBoundingClientRect().width).toBe(128)
+    // A drawn face — two eyes and a mouth, each a stroke with a length — and not loading dots.
+    await waitFor(() => {
+      expect(strokesOf(face).every((stroke) => stroke.trim() !== '')).toBe(true)
+    })
+    expect(face).toHaveAttribute('data-state', 'thinking')
+  },
+}
