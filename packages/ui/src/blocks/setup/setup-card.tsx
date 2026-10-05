@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -6,6 +7,7 @@ import { Frame, FrameFooter, FrameHeader } from '../../components/frame/frame.ts
 import { Loading } from '../../components/loading/loading.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconBan, IconCheck, IconMessages } from '../../icons.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
   type Proposal,
   ProposalEditor,
@@ -30,6 +32,10 @@ import {
  * Propose again. Discussed, the user's words stand under the proposal while the agent writes
  * another. An answer the engine refuses is said above the answers, in its words, and the card
  * stays as it was.
+ *
+ * What changes in the card — the proposal giving way to its editor, the answers giving way to
+ * others, the discussion opening — folds in and out by its own height on `fold`, so the card grows
+ * and shrinks and pushes what stands under it; nothing is scaled.
  */
 export type CardStatus =
   /** The agent is still reading: the proposal's own shape. */
@@ -71,6 +77,30 @@ export interface SetupCardProps {
 const REFUSAL = 'w-full text-sm text-destructive-muted-foreground'
 
 const QUIET = 'flex flex-col text-muted-foreground'
+
+/** A part that folds in and out, clipped to the height it travels through. */
+const FOLDING = 'overflow-hidden'
+
+/** A part of the card that folds in and out on `fold` when what it shows changes. */
+function Folding({ show, children }: { show: string | null; children: ReactNode }): ReactNode {
+  const folding = useTransition(fold)
+  return (
+    <AnimatePresence initial={false}>
+      {show !== null && (
+        <motion.div
+          key={show}
+          className={FOLDING}
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={folding}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
 
 const NOTE =
   'mx-3 my-2 flex flex-col gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm'
@@ -217,6 +247,20 @@ function Answers({
   }
 }
 
+/** Which answers the card offers, by group; null when it offers none. */
+function answersOf(status: CardStatus): string | null {
+  if (status.state === 'proposed' || status.state === 'editing' || status.state === 'declined') {
+    return status.state
+  }
+  return null
+}
+
+/** What the body shows: the proposal's shape, its editor, or the proposal itself. */
+function modeOf(status: CardStatus, proposal: Proposal | null): string {
+  if (status.state === 'reading' || proposal === null) return 'reading'
+  return status.state === 'editing' ? 'editing' : 'proposal'
+}
+
 export function SetupCard({
   kind,
   status,
@@ -238,17 +282,21 @@ export function SetupCard({
     return (
       <>
         {summary}
-        {status.state === 'discussing' && (
-          <DiscussField kind={kind} onSend={onSend} onCancel={on.onCancel} />
-        )}
-        {status.state === 'discussed' && (
-          <div className={NOTE} data-note="">
-            <p className="whitespace-pre-line">{status.note}</p>
-            <span className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loading size="sm" label="The setup agent is writing another proposal" />
-            </span>
-          </div>
-        )}
+        <Folding
+          show={status.state === 'discussing' || status.state === 'discussed' ? status.state : null}
+        >
+          {status.state === 'discussing' && (
+            <DiscussField kind={kind} onSend={onSend} onCancel={on.onCancel} />
+          )}
+          {status.state === 'discussed' && (
+            <div className={NOTE} data-note="">
+              <p className="whitespace-pre-line">{status.note}</p>
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loading size="sm" label="The setup agent is writing another proposal" />
+              </span>
+            </div>
+          )}
+        </Folding>
       </>
     )
   })()
@@ -260,7 +308,6 @@ export function SetupCard({
       data-card-state={status.state}
     >
       <Frame
-        animated
         header={
           <FrameHeader
             icon={<span className="flex text-muted-foreground">{setupIcon(kind)}</span>}
@@ -268,9 +315,13 @@ export function SetupCard({
             action={<Answered status={status} />}
           />
         }
-        footer={<Answers status={status} {...on} />}
+        footer={
+          <Folding show={answersOf(status)}>
+            <Answers status={status} {...on} />
+          </Folding>
+        }
       >
-        {body}
+        <Folding show={modeOf(status, proposal)}>{body}</Folding>
       </Frame>
     </section>
   )
