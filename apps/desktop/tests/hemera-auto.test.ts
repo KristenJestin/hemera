@@ -16,7 +16,7 @@ import {
   PERMISSION_POLICY,
   WrittenAnswer,
 } from '@hemera/core/domain'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { Effect, Fiber, Layer, Predicate, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -29,6 +29,7 @@ import { AGENT_MODES } from '../src/engine/agents/modes.ts'
 import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
+import { Memory } from '../src/engine/memory/index.ts'
 import { DATABASE_FILE } from '../src/engine/migrate.ts'
 import { AGENT_REQUESTS, answerNeed, createNeed, getNeed } from '../src/engine/needs.ts'
 import { HemeraAuto, decisionChanges, whoJudgesFor } from '../src/engine/permissions/hemera-auto.ts'
@@ -37,7 +38,13 @@ import { SessionTurns } from '../src/engine/permissions/ports.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { agentSessions, appPreferences, domainEvents, needs } from '../src/engine/storage/schema.ts'
+import {
+  agentSessions,
+  appPreferences,
+  domainEvents,
+  memoryJournal,
+  needs,
+} from '../src/engine/storage/schema.ts'
 import { type Started, commandsEngine } from './commands-engine.ts'
 import { type FakeJev, type Reply, fakeJev, scored } from './fake-jev.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -635,5 +642,68 @@ describe('One human question per call: the agent’s own requests are Hemera’s
     expect(answer.chosen).toEqual(['allow'])
     // The only need is Hemera's own question, from its gate, for the call itself.
     expect(answer.created).toEqual([{ kind: 'Permission' }])
+  })
+})
+
+describe('Hemera Auto’s verdicts are lines of the mission’s Journal', () => {
+  test('who judged and how, allowed or asked, with the model and scores, masked', async () => {
+    jev.answer = (request) =>
+      request.body.includes('fs_write') ? scored(0.4, 0.1, 0) : scored(2.7, 0.9, 0)
+    const { answer } = await withJev(({ builder, missionId }) =>
+      Effect.gen(function* () {
+        yield* Secrets.useSync((secrets) => secrets.register('suite', ['tok-registered-77']))
+        yield* callTool(builder, 'fs_write', {
+          path: 'notes.md',
+          content: 'x',
+          why: 'tok-registered-77',
+        })
+        yield* run(builder, 'make clean-all')
+        yield* Memory.use((memory) => memory.catchUp)
+        const database = yield* Database
+        return yield* database
+          .select()
+          .from(memoryJournal)
+          .where(eq(memoryJournal.missionId, missionId))
+          .orderBy(asc(memoryJournal.sequence))
+      }),
+    )
+    const lines = answer.filter((row) => row.kind === 'permission')
+    expect(lines.map((row) => row.text)).toEqual([
+      'Allowed fs_write ~/acme/notes.md by Jev: Jev rates it risk 0.4, approval 0.1, asked by the user 0',
+      'Asked the user about commands_run make clean-all by Jev: Jev rates it risk 2.7, approval 0.9, asked by the user 0',
+    ])
+    expect(JSON.parse(lines[0]?.fields ?? '{}')).toMatchObject({
+      verdict: 'allow',
+      by: 'judge',
+      judge: 'Jev',
+      model: JEV_MODEL,
+      risk: 0.4,
+      approval: 0.1,
+      userRequested: 0,
+      settled: 'jev',
+    })
+    const all = answer.map((row) => `${row.text} ${row.fields}`).join('\n')
+    expect(all).not.toContain('tok-registered-77')
+    expect(all).not.toContain(KEY)
+  })
+
+  test('a call Jev could not rate is asked by Hemera’s rules, the failure said', async () => {
+    jev.answer = () => ({ status: 503, body: '' })
+    const { answer } = await withJev(({ builder, missionId }) =>
+      Effect.gen(function* () {
+        yield* write(builder)
+        yield* Memory.use((memory) => memory.catchUp)
+        const database = yield* Database
+        return yield* database
+          .select()
+          .from(memoryJournal)
+          .where(eq(memoryJournal.missionId, missionId))
+      }),
+    )
+    const [line] = answer.filter((row) => row.kind === 'permission')
+    expect(line?.text).toBe(
+      "Asked the user about fs_write ~/acme/notes.md by Hemera's rules: no judge could rate it: Jev answered HTTP 503",
+    )
+    expect(JSON.parse(line?.fields ?? '{}')).toMatchObject({ failure: 'http 503', judge: null })
   })
 })

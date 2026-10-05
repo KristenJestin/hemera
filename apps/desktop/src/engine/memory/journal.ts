@@ -174,9 +174,10 @@ const verdictSaid = (verdict: string): readonly [string, string] => {
 }
 
 /**
- * A permission decision: who decided (Hemera's rules, a grant of the mission, the judge, the
- * user) and why, with the policy's version and level. Never the call's raw arguments: the target
- * is the masked text the decision recorded.
+ * A permission decision: who decided (Hemera's rules, a grant of the mission, the judge by its
+ * name, the user) and why, with the policy's version and level; for a judged call the model and
+ * the scores, how it was settled, and why the judge failed when it did. Never the call's raw
+ * arguments: the target is the masked text the decision recorded.
  */
 const permissionDecided = (event: DomainEvent): JournalDraft | null => {
   const missionId = ofMission(event)
@@ -187,6 +188,8 @@ const permissionDecided = (event: DomainEvent): JournalDraft | null => {
   const target = stringOf(event.payload, 'target') ?? ''
   const reasons = stringsOf(event.payload, 'reasons')
   const choice = stringOf(event.payload, 'choice')
+  const judge = stringOf(event.payload, 'judge')
+  const numberOf = (key: string) => Option.getOrNull(readNumber(event.payload[key]))
   const what = `${tool} ${target}`.trim()
   const [verb, Verb] = verdictSaid(verdict)
   const because = reasons.length === 0 ? '' : `: ${reasons.join('; ')}`
@@ -196,7 +199,7 @@ const permissionDecided = (event: DomainEvent): JournalDraft | null => {
       () => `The user ${verb} ${what}${choice === 'allow-for-mission' ? ' for this mission' : ''}`,
     ),
     Match.when('grant', () => `${Verb} ${what} by the mission's grant`),
-    Match.when('judge', () => `${Verb} ${what} by the judge${because}`),
+    Match.when('judge', () => `${Verb} ${what} by ${judge ?? 'the judge'}${because}`),
     Match.orElse(() => `${Verb} ${what} by Hemera's rules${because}`),
   )
   return {
@@ -215,6 +218,14 @@ const permissionDecided = (event: DomainEvent): JournalDraft | null => {
       level: stringOf(event.payload, 'level'),
       grantId: stringOf(event.payload, 'grantId'),
       requestId: stringOf(event.payload, 'requestId'),
+      judge,
+      model: stringOf(event.payload, 'model'),
+      risk: numberOf('risk'),
+      approval: numberOf('approval'),
+      userRequested: numberOf('userRequested'),
+      settled: stringOf(event.payload, 'settled'),
+      latencyMs: numberOf('latencyMs'),
+      failure: stringOf(event.payload, 'failure'),
     },
     refs: {
       session: stringOf(event.payload, 'sessionId'),
