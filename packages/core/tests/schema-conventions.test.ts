@@ -64,6 +64,15 @@ class Place extends Schema.Class<Place>('Place')({
 }) {}
 
 describe('JSON Schema for MCP tools', () => {
+  test('a tool that takes no argument is an object with no property, and keeps its description', () => {
+    const Nothing = Schema.Struct({}).annotate({ description: 'Lists what there is.' })
+    expect(toToolInputSchema(Nothing)).toEqual({
+      type: 'object',
+      properties: {},
+      description: 'Lists what there is.',
+    })
+  })
+
   const WriteNote = Schema.Struct({
     title: Schema.NonEmptyString.annotate({ description: 'Title of the note.' }),
     body: Schema.optional(Schema.String).annotate({ description: 'Markdown body.' }),

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema, SchemaAST } from 'effect'
 import type { JsonSchema } from 'effect'
 
 /** The JSON Schema an MCP tool declares for its input. */
@@ -17,6 +17,10 @@ export interface ToolInputSchema extends JsonSchema.JsonSchema {
 export function toToolInputSchema(schema: Schema.Top): ToolInputSchema {
   const document = Schema.toJsonSchemaDocument(schema, { referencePolicy: () => undefined })
   const root = document.schema
+  // A struct with no field is an object all the same: a tool that takes no argument.
+  if (isEmptyStruct(schema.ast)) {
+    return { type: 'object', properties: {}, description: root.description }
+  }
   if (root.type !== 'object') {
     throw new Error('An MCP tool input must be a JSON object at the root: decode it with a Struct.')
   }
@@ -25,3 +29,8 @@ export function toToolInputSchema(schema: Schema.Top): ToolInputSchema {
     ? input
     : { ...input, $defs: document.definitions }
 }
+
+const isEmptyStruct = (ast: SchemaAST.AST): boolean =>
+  SchemaAST.isObjects(ast) &&
+  ast.propertySignatures.length === 0 &&
+  ast.indexSignatures.length === 0

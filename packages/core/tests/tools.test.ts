@@ -1,0 +1,212 @@
+/**
+ * Hemera's MCP tools as one table: the roles that have each, its gate class, what it does to the
+ * world, the argument that carries its path, and its input, from which the JSON Schema an agent
+ * reads is generated. And the guarantee that no tool, of this ticket or a later one, reaches Ship.
+ */
+
+import { Predicate } from 'effect'
+import type { Schema } from 'effect'
+import { describe, expect, test } from 'vite-plus/test'
+
+import {
+  ROLES,
+  ROLE_PLACES,
+  TOOL_NAMES,
+  TOOLS,
+  type Role,
+  admitTool,
+  hemeraToolNamed,
+  readOnlyHint,
+  toolsOf,
+} from '../src/domain/index.ts'
+import { toToolInputSchema } from '../src/schema/index.ts'
+
+const toolsFor = (role: Role) => [...toolsOf(role)].sort()
+
+describe('Each role has exactly its tools', () => {
+  test.each<[Role, ReadonlyArray<string>]>([
+    [
+      'planner',
+      ['commands_list', 'commands_output', 'commands_run', 'fs_list', 'fs_read', 'search'],
+    ],
+    [
+      'probe',
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'commands_stop',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'search',
+      ],
+    ],
+    ['cold-read', ['fs_list', 'fs_read', 'search']],
+    [
+      'builder',
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'commands_stop',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'search',
+      ],
+    ],
+    [
+      'helper',
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'commands_stop',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'search',
+      ],
+    ],
+    ['documenter', ['fs_edit', 'fs_list', 'fs_read', 'fs_write', 'search']],
+    ['spec-reviewer', ['search']],
+    ['code-reviewer', ['fs_read', 'search']],
+    [
+      'chat',
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'commands_stop',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'search',
+      ],
+    ],
+  ])('%s', (role, tools) => {
+    expect(toolsFor(role)).toEqual(tools)
+  })
+
+  test('every role has a place, and the read-only ones are the Planner, the cold read and the reviewers', () => {
+    expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
+      'planner',
+      'cold-read',
+      'spec-reviewer',
+      'code-reviewer',
+    ])
+    expect(ROLE_PLACES.planner.kind).toBe('main-checkout')
+    expect(ROLE_PLACES.probe.kind).toBe('own-worktree')
+    expect(ROLE_PLACES.builder.kind).toBe('workspace')
+    expect(ROLE_PLACES.chat.kind).toBe('main-checkout')
+  })
+})
+
+describe('The table says what each tool does to the world', () => {
+  test('the tools that only read are local, the ones that write or run are judged or workflow', () => {
+    for (const name of TOOL_NAMES) {
+      const tool = TOOLS[name]
+      if (tool.gate === 'local') expect(tool.effect, name).toBe('reads')
+      else expect(tool.effect, name).not.toBe('reads')
+    }
+  })
+
+  test('read-only tools carry readOnlyHint true, the others false', () => {
+    expect(TOOL_NAMES.filter((name) => readOnlyHint(name)).sort()).toEqual([
+      'commands_list',
+      'commands_output',
+      'fs_list',
+      'fs_read',
+      'search',
+    ])
+  })
+
+  test('a workflow tool names the argument its path is in, or says it takes none', () => {
+    for (const name of TOOL_NAMES) {
+      const tool = TOOLS[name]
+      expect(Object.hasOwn(tool, 'path'), name).toBe(true)
+      if (tool.path !== null) {
+        expect(Object.keys(tool.input.fields), name).toContain(tool.path)
+      }
+    }
+  })
+})
+
+describe('Every input schema is generated from its Schema', () => {
+  test('the whole list, as an agent reads it', () => {
+    const listed = TOOL_NAMES.map((name) => ({
+      name,
+      inputSchema: toToolInputSchema(TOOLS[name].input),
+    }))
+    expect(listed).toMatchSnapshot()
+  })
+
+  test('every tool has a description taken from its schema', () => {
+    for (const name of TOOL_NAMES) {
+      expect(toToolInputSchema(TOOLS[name].input).description, name).toMatch(/\w{3}/)
+    }
+  })
+
+  test('a tool name is one the model APIs accept', () => {
+    for (const name of TOOL_NAMES) expect(name).toMatch(/^[a-z][a-z0-9_]{0,63}$/)
+  })
+})
+
+/**
+ * Ship is human: no tool of any ticket may push, merge, close, cancel, clean up or ship a mission.
+ * The test reads the whole table, names, descriptions and field descriptions, every time.
+ */
+const SHIP_WORDS = /\b(ship\w*|push\w*|merg\w*|clos\w*|cancel\w*|clean\s*-?\s*up\w*|cleanup\w*)\b/i
+
+/** `Array.isArray` does not narrow a read-only array out of a union: this does. */
+const isList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+const textsOf = (value: Schema.Json): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) return [value]
+  if (isList(value)) return value.flatMap((item) => textsOf(item))
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return []
+  return Object.values(value).flatMap((item) => textsOf(item))
+}
+
+describe('No MCP tool can Ship, push, merge, close, cancel or clean up a mission', () => {
+  test('no tool name, description or argument says so', () => {
+    for (const name of TOOL_NAMES) {
+      expect(name).not.toMatch(SHIP_WORDS)
+      const schema: Schema.Json = JSON.parse(JSON.stringify(toToolInputSchema(TOOLS[name].input)))
+      for (const text of textsOf(schema)) expect(text, name).not.toMatch(SHIP_WORDS)
+    }
+  })
+
+  test('the words are caught however they are written', () => {
+    for (const said of ['Ship it', 'git push', 'merges the branch', 'Close', 'clean up', 'cleanup'])
+      expect(said).toMatch(SHIP_WORDS)
+  })
+})
+
+describe('A name an agent reports is read back as the tool it designates', () => {
+  test('under every prefix an agent registers it with', () => {
+    expect(hemeraToolNamed('mcp__hemera__fs_read')).toBe('fs_read')
+    expect(hemeraToolNamed('hemera_commands_run')).toBe('commands_run')
+    expect(hemeraToolNamed('search')).toBe('search')
+    expect(hemeraToolNamed('Bash')).toBeNull()
+  })
+})
+
+describe('A tool is admitted for a role or refused with the reason', () => {
+  test('a name Hemera has no tool for, and a tool the role does not have', () => {
+    expect(admitTool('planner', toolsOf('planner'), 'fs_read')).toEqual({ admitted: true })
+    expect(admitTool('planner', toolsOf('planner'), 'git_push')).toEqual({
+      admitted: false,
+      reason: 'refused: Hemera has no tool named git_push',
+    })
+    expect(admitTool('planner', toolsOf('planner'), 'fs_write')).toEqual({
+      admitted: false,
+      reason: 'refused: the Planner has no tool fs_write',
+    })
+  })
+})
