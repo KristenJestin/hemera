@@ -244,3 +244,21 @@ export const KeyboardPath: Story = {
     await expect(canvas.getByRole('button', { name: 'Retry' })).toHaveFocus()
   },
 }
+
+/** In a narrow column, as Home's half at 1366×768: the titles give way, the actions stay whole. */
+export const Narrow: Story = {
+  decorators: [
+    (Story) => (
+      <div className="max-w-md">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const cut = canvas
+      .getAllByRole('button', { name: /here$/ })
+      .filter((button) => button.scrollWidth > button.clientWidth)
+    await expect(cut).toEqual([])
+  },
+}

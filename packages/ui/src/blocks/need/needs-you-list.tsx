@@ -122,9 +122,12 @@ function Row({
           <span className={TITLE}>{need.title}</span>
           <span className={DETAIL}>{need.text ?? ''}</span>
           <span className={WHEN}>{need.when}</span>
-          <Button size="sm" aria-expanded={opened} onClick={onToggle}>
-            {ACTIONS[kind]}
-          </Button>
+          {/* The action keeps its width: the title and what the agent wrote give way first. */}
+          <span className="flex shrink-0">
+            <Button size="sm" aria-expanded={opened} onClick={onToggle}>
+              {ACTIONS[kind]}
+            </Button>
+          </span>
         </div>
       )}
       <AnimatePresence initial={false}>
