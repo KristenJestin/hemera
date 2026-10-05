@@ -44,7 +44,9 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
       const { dataFolder } = yield* ProfileHome
       const places = yield* MissionPlaces
       const context = { home: settings.home, platform: settings.platform }
-      const said = (place: string) => `sensitive place: ${place}`
+      // A place under the home is shown from it with forward slashes, as `outside` shows it.
+      const said = (place: string) =>
+        `sensitive place: ${place.startsWith('~') ? place.replaceAll('\\', '/') : place}`
       /** The sensitive place below a folder, shown from the home with the folder before it. */
       const below = (root: string, path: string) => {
         const found = sensitivePlace(relative(root, path), context)
