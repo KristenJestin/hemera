@@ -75,6 +75,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
 
     const tables = (await on(data, tablesOf)).map((line) => line.split(':')[0])
     expect(tables).toEqual([
+      'agent_sessions',
       'app_preferences',
       'command_runs',
       'domain_events',

@@ -252,6 +252,12 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['needs.answer'](request).pipe(closedAs(gone), observed('needs.answer', log)),
     'needs.retry': (request) =>
       engine['needs.retry'](request).pipe(closedAs(gone), observed('needs.retry', log)),
+    // The agents and their updates are the engine's alone: forwarded as they are.
+    'agents.list': () => engine['agents.list']().pipe(closedAs(gone), observed('agents.list', log)),
+    'agents.checkUpdates': () =>
+      engine['agents.checkUpdates']().pipe(closedAs(gone), observed('agents.checkUpdates', log)),
+    'agents.update': (request) =>
+      engine['agents.update'](request).pipe(closedAs(gone), observed('agents.update', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
     'application.showLog': () => application.showLog.pipe(observed('application.showLog', log)),

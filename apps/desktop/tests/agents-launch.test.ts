@@ -59,11 +59,15 @@ const standIn = (pid: number): StandIn => {
 const host = (forks: Array<StandIn | Error>) =>
   Effect.gen(function* () {
     const handedToEngine: Array<{ launch: number; port: string }> = []
-    const asked: Array<{ program: string; args: ReadonlyArray<string> }> = []
+    const asked: Array<{
+      program: string
+      args: ReadonlyArray<string>
+      environment: Readonly<Record<string, string>>
+    }> = []
     let channels = 0
     const launcher: Launcher<string> = {
-      fork: (program, args) => {
-        asked.push({ program, args })
+      fork: (program, args, environment) => {
+        asked.push({ program, args, environment })
         const next = forks.shift()
         if (next === undefined || next instanceof Error) throw next ?? new Error('no stand-in')
         return next
@@ -106,7 +110,12 @@ describe('Main launches an agents’ process for the engine', () => {
         const { client, asked } = yield* host([child])
         const events = yield* Effect.forkChild(
           Stream.runCollect(
-            client['agents.launch']({ launch: 7, program: '/echo.mjs', args: ['-v'] }),
+            client['agents.launch']({
+              launch: 7,
+              program: '/echo.mjs',
+              args: ['-v'],
+              environment: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+            }),
           ),
         )
         yield* forked(asked, 1)
@@ -116,7 +125,13 @@ describe('Main launches an agents’ process for the engine', () => {
           Started.make({ pid: 4242 }),
           Exited.make({ code: 3 }),
         ])
-        expect(asked).toEqual([{ program: '/echo.mjs', args: ['-v'] }])
+        expect(asked).toEqual([
+          {
+            program: '/echo.mjs',
+            args: ['-v'],
+            environment: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+          },
+        ])
       }),
     ))
 
@@ -126,7 +141,9 @@ describe('Main launches an agents’ process for the engine', () => {
         const child = standIn(1)
         const { client, handedToEngine, asked } = yield* host([child])
         yield* Effect.forkChild(
-          Stream.runDrain(client['agents.launch']({ launch: 9, program: '/p', args: [] })),
+          Stream.runDrain(
+            client['agents.launch']({ launch: 9, program: '/p', args: [], environment: {} }),
+          ),
         )
         yield* forked(asked, 1)
         child.spawn()
@@ -140,7 +157,9 @@ describe('Main launches an agents’ process for the engine', () => {
       Effect.gen(function* () {
         const { client, lines } = yield* host([new Error('no such file')])
         const failure = yield* Effect.flip(
-          Stream.runDrain(client['agents.launch']({ launch: 1, program: '/missing', args: [] })),
+          Stream.runDrain(
+            client['agents.launch']({ launch: 1, program: '/missing', args: [], environment: {} }),
+          ),
         )
         expect(failure).toBeInstanceOf(LaunchFailed)
         expect(failure).toMatchObject({ reason: 'no such file' })
@@ -154,7 +173,9 @@ describe('Main launches an agents’ process for the engine', () => {
         const child = standIn(5)
         const { client, asked } = yield* host([child])
         const events = yield* Effect.forkChild(
-          Stream.runDrain(client['agents.launch']({ launch: 2, program: '/p', args: [] })),
+          Stream.runDrain(
+            client['agents.launch']({ launch: 2, program: '/p', args: [], environment: {} }),
+          ),
         )
         yield* forked(asked, 1)
         child.spawn()

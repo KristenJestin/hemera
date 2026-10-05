@@ -27,8 +27,12 @@ export interface Forked<P> {
 }
 
 export interface Launcher<P> {
-  /** Forks the agents' process for `program`; throws when it cannot. */
-  readonly fork: (program: string, args: ReadonlyArray<string>) => Forked<P>
+  /** Forks the agents' process for `program`, with `environment` over its own; throws when it cannot. */
+  readonly fork: (
+    program: string,
+    args: ReadonlyArray<string>,
+    environment: Readonly<Record<string, string>>,
+  ) => Forked<P>
   /** A fresh pair of joined ports: the process's end, then the engine's. */
   readonly channel: () => readonly [P, P]
   /** Posts the engine its end of the port of `launch`. */
@@ -38,12 +42,12 @@ export interface Launcher<P> {
 /** The answer to `agents.launch`: the launch's events, for as long as its process runs. */
 export const launchHandlers = <P>(launcher: Launcher<P>, log: Log) =>
   HostRpcs.toLayer({
-    'agents.launch': ({ launch, program, args }) =>
+    'agents.launch': ({ launch, program, args, environment }) =>
       Stream.callback<LaunchEvent, LaunchFailed>((events) =>
         Effect.gen(function* () {
           let forked: Forked<P>
           try {
-            forked = launcher.fork(program, args)
+            forked = launcher.fork(program, args, environment)
           } catch (cause) {
             const reason = cause instanceof Error ? cause.message : String(cause)
             log(`agents.launch: ${program} was not started: ${reason}`)

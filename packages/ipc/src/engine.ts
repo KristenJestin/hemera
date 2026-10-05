@@ -1,12 +1,14 @@
 /**
  * The engine's domain: its start, its status, and the calls on the Profile it holds, the Projects,
- * their repositories, their Workspaces, their commands, their missions and the needs included.
+ * their repositories, their Workspaces, their commands, their missions and the needs included,
+ * and the coding agents with their state.
  * Served by the engine to main, and by main to the window, which forwards.
  */
 
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { AgentStatesRpcs } from './agent-states.ts'
 import { EngineGone } from './gone.ts'
 import {
   AutomaticBackups,
@@ -108,6 +110,7 @@ export const EngineRpcs = RpcGroup.make(
   RunsRpcs,
   MissionsRpcs,
   NeedsRpcs,
+  AgentStatesRpcs,
 )
 
 /**

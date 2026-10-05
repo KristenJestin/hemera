@@ -31,7 +31,9 @@ const gone = () => new AgentsProcessGone()
 /** The engine's side of a port whose other end runs the echo program. */
 const echo = Effect.gen(function* () {
   const { port1: enginePort, port2: agentsPort } = new MessageChannel()
-  const exited = yield* Effect.forkScoped(runProgram(fromMessagePort(agentsPort), ECHO, []))
+  const exited = yield* Effect.forkScoped(
+    runProgram(fromMessagePort(agentsPort), ECHO, [], process.env),
+  )
   const protocol = yield* makeClientProtocol(fromMessagePort(enginePort), 'the agents’ process')
   const client = yield* RpcClient.make(AgentsRpcs).pipe(
     Effect.provideService(RpcClient.Protocol, protocol),

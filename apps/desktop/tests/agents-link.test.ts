@@ -27,6 +27,9 @@ import { launchHandlers, type Forked, type Launcher } from '../src/main/launches
 
 const ECHO = join(import.meta.dirname, 'fixtures', 'echo.mjs')
 
+/** Says the greeting it finds in its environment, then ends. */
+const GREETS = join(import.meta.dirname, 'fixtures', 'greets.mjs')
+
 const setup = Effect.gen(function* () {
   const runFork = yield* FiberSet.makeRuntime<never, void, never>()
   const engineLines: string[] = []
@@ -36,7 +39,7 @@ const setup = Effect.gen(function* () {
 
   /** An agents' process run in this one: `kill` closes its port and reports an exit. */
   const launcher: Launcher<MessagePort> = {
-    fork: (program, args) => {
+    fork: (program, args, environment) => {
       const spawned: Array<() => void> = []
       const exited: Array<(code: number) => void> = []
       const exit = (code: number) => {
@@ -51,8 +54,12 @@ const setup = Effect.gen(function* () {
           given = port
           runFork(
             Effect.scoped(
-              Effect.flatMap(runProgram(fromMessagePort(port), program, args), (code) =>
-                Effect.sync(() => exit(code)),
+              Effect.flatMap(
+                runProgram(fromMessagePort(port), program, args, {
+                  ...process.env,
+                  ...environment,
+                }),
+                (code) => Effect.sync(() => exit(code)),
               ),
             ),
           )
@@ -98,7 +105,7 @@ describe('The engine speaks to a program through an agents’ process main start
     run(
       Effect.gen(function* () {
         const { launch, engineLines } = yield* setup
-        const agents = yield* launch(ECHO, [])
+        const agents = yield* launch(ECHO, [], {})
         expect(agents.pid).toBe(100)
         const read = yield* Effect.forkChild(Stream.runCollect(Stream.take(agents.output, 2)))
         yield* agents.write('hello')
@@ -113,11 +120,21 @@ describe('The engine speaks to a program through an agents’ process main start
       }),
     ))
 
+  test('the program runs with the environment the engine asked for, over the process’s own', () =>
+    run(
+      Effect.gen(function* () {
+        const { launch } = yield* setup
+        const agents = yield* launch(GREETS, [], { HEMERA_TEST_GREETING: 'bare and ready' })
+        const [said] = yield* Stream.runCollect(Stream.take(agents.output, 1))
+        expect(said).toEqual(Output.make({ line: 'bare and ready' }))
+      }),
+    ))
+
   test('a killed agents’ process ends its stream with AgentsProcessGone once its exit is seen', () =>
     run(
       Effect.gen(function* () {
         const { launch, kill, engineLines } = yield* setup
-        const agents = yield* launch(ECHO, [])
+        const agents = yield* launch(ECHO, [], {})
         const heard = yield* Deferred.make<void>()
         const read = yield* Effect.forkChild(
           Stream.runDrain(Stream.tap(agents.output, () => Deferred.succeed(heard, undefined))),

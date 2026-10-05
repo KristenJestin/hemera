@@ -19,7 +19,8 @@ const parent: ParentPort = process.parentPort
 
 parent.once('message', ({ ports: [port] }) => {
   if (port === undefined || program === undefined) process.exit(2)
-  void Effect.runPromise(Effect.scoped(runProgram(fromMessagePortMain(port), program, args))).then(
-    (code) => process.exit(code),
-  )
+  // Main forked this process with the environment the engine asked for over its own.
+  void Effect.runPromise(
+    Effect.scoped(runProgram(fromMessagePortMain(port), program, args, process.env)),
+  ).then((code) => process.exit(code))
 })

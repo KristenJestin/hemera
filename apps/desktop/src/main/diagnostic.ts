@@ -11,10 +11,13 @@
  * credentials otherwise (main holds no secret value: they stay in the engine's memory). A test
  * fails if another file writes to the diagnostic file. Past 8 MB the log becomes a generation of
  * its own, which the diagnostic rotation removes once it is old.
+ *
+ * The ACP traces of the agent sessions are in the same class and go through this file too, one
+ * file per session under `traces/`, masked the same way before every line.
  */
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { Cause, Effect, Exit, Option, Stream } from 'effect'
 
@@ -68,6 +71,48 @@ export function openDiagnosticLog(
     appendFileSync(file, `${new Date().toISOString()} [${source}] ${mask(line)}\n`)
     written += 1
     if (written % LOOK_EVERY === 0) turnOver(directory, file)
+  }
+}
+
+/** The folder of the data folder that holds the ACP traces, one file per agent session. */
+export const TRACES_FOLDER = 'traces'
+
+/** How large a trace grows before it becomes its one earlier generation, `<session>.1.log`. */
+export const TRACE_TURNOVER_BYTES = 4 * 1024 * 1024
+
+/** What a session id may hold to name a file: nothing that walks out of the folder. */
+const FILE_SAFE = /^[\w-]+$/
+
+/** The trace file of one agent session, or null for an id that could not name a file safely. */
+export function traceFileOf(directory: string, sessionId: string): string | null {
+  return FILE_SAFE.test(sessionId) ? join(directory, TRACES_FOLDER, `${sessionId}.log`) : null
+}
+
+/**
+ * The trace of one agent session, opened in append, every line masked by `mask` before it is
+ * written. Past 4 MB the file becomes `<session>.1.log`, replacing the one before. A line that
+ * cannot be written is dropped: a trace is a help to diagnose, never a condition of the
+ * conversation it is about.
+ */
+export function openTraceLog(file: string, mask: (line: string) => string): Log {
+  let size: number | null = null
+  return (line) => {
+    try {
+      const written = `${mask(line)}\n`
+      const bytes = Buffer.byteLength(written)
+      if (size === null) {
+        mkdirSync(dirname(file), { recursive: true })
+        size = statSync(file, { throwIfNoEntry: false })?.size ?? 0
+      }
+      if (size > 0 && size + bytes > TRACE_TURNOVER_BYTES) {
+        renameSync(file, file.replace(/\.log$/, '.1.log'))
+        size = 0
+      }
+      appendFileSync(file, written)
+      size += bytes
+    } catch {
+      // A full disk loses the line, not the turn.
+    }
   }
 }
 

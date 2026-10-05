@@ -1,11 +1,15 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  ADAPTER_PACKAGES,
   DESCRIBE_ARGUMENTS,
+  adapterClosure,
+  adapterProblems,
+  carryAdapters,
   channelAsked,
   channelProblems,
   identityOf,
@@ -197,5 +201,123 @@ describe('Un paquet lit son canal dans son manifeste', () => {
     } finally {
       rmSync(folder, { recursive: true, force: true })
     }
+  })
+})
+
+/** What a fake package declares. */
+interface FakeManifest {
+  readonly version?: string
+  readonly dependencies?: Readonly<Record<string, string>>
+  readonly peerDependencies?: Readonly<Record<string, string>>
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+}
+
+/** A package written into a fake `node_modules`, with its manifest. */
+function aPackage(folder: string, name: string, manifest: FakeManifest = {}): string {
+  const path = join(folder, 'node_modules', name)
+  mkdirSync(path, { recursive: true })
+  writeFileSync(join(path, 'package.json'), JSON.stringify({ name, version: '1.0.0', ...manifest }))
+  writeFileSync(join(path, 'index.js'), '')
+  return path
+}
+
+describe('The bundled adapters are carried outside the asar', () => {
+  test('their closure is their dependencies and peers, never an optional one nor the agent itself', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-closure-'))
+    try {
+      const adapter = aPackage(folder, '@scope/adapter', {
+        dependencies: { shared: '1', '@openai/codex': '1' },
+        peerDependencies: { peer: '1', 'absent-peer': '1' },
+        optionalDependencies: { 'platform-binary': '1' },
+      })
+      // A dependency nested under the package that declares it, as pnpm keeps it.
+      aPackage(adapter, 'nested')
+      aPackage(folder, 'shared', { dependencies: { 'nested-of-shared': '1' } })
+      aPackage(folder, 'nested-of-shared')
+      aPackage(folder, 'peer')
+      aPackage(folder, '@openai/codex')
+      aPackage(folder, 'platform-binary')
+      const closure = adapterClosure(folder, ['@scope/adapter'])
+      expect([...closure.keys()].toSorted()).toEqual([
+        '@scope/adapter',
+        'nested-of-shared',
+        'peer',
+        'shared',
+      ])
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('a second version of a package goes under the package that needs it', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-versions-'))
+    try {
+      const adapter = aPackage(folder, '@scope/adapter', { dependencies: { one: '1', two: '1' } })
+      aPackage(folder, 'one', { dependencies: { shared: '1' } })
+      aPackage(folder, 'shared', { version: '1.0.0' })
+      const two = aPackage(adapter, 'two', { dependencies: { shared: '2' } })
+      aPackage(two, 'shared', { version: '2.0.0' })
+      const closure = adapterClosure(folder, ['@scope/adapter'])
+      expect([...closure.keys()]).toEqual([
+        '@scope/adapter',
+        'one',
+        'shared',
+        'two',
+        'two/node_modules/shared',
+      ])
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('the closure is copied as a node_modules, without the nested ones of pnpm', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-carry-'))
+    try {
+      const adapter = aPackage(folder, '@scope/adapter', { dependencies: { shared: '1' } })
+      aPackage(adapter, 'shared')
+      const out = join(folder, 'adapters')
+      carryAdapters(folder, ['@scope/adapter'], out)
+      expect(existsSync(join(out, 'node_modules', '@scope', 'adapter', 'package.json'))).toBe(true)
+      expect(existsSync(join(out, 'node_modules', 'shared', 'package.json'))).toBe(true)
+      expect(existsSync(join(out, 'node_modules', '@scope', 'adapter', 'node_modules'))).toBe(false)
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('the two adapters of this application resolve, without the agents they would carry', () => {
+    const closure = adapterClosure(join(repository, 'apps', 'desktop'), ADAPTER_PACKAGES)
+    for (const name of ADAPTER_PACKAGES) expect(closure.has(name)).toBe(true)
+    expect(
+      [...closure.keys()].filter(
+        (place) =>
+          place.includes('@anthropic-ai/claude-agent-sdk-') || place.includes('@openai/codex'),
+      ),
+    ).toEqual([])
+  })
+
+  test('a package without its adapters, or with an agent binary among them, is reported', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-unpacked-'))
+    try {
+      expect(adapterProblems(folder).map((problem) => problem.entry)).toEqual([
+        ...ADAPTER_PACKAGES.map((name) => `resources/adapters/node_modules/${name}`),
+      ])
+      const carried = join(folder, 'resources', 'adapters')
+      for (const name of ADAPTER_PACKAGES) aPackage(carried, name)
+      expect(adapterProblems(folder)).toEqual([])
+      aPackage(carried, '@anthropic-ai/claude-agent-sdk-linux-x64')
+      expect(adapterProblems(folder)).toHaveLength(1)
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('the adapters are the one node_modules a package may carry', () => {
+    expect(
+      refusedEntries([
+        'resources/adapters/node_modules/@agentclientprotocol/codex-acp/dist/index.js',
+      ]),
+    ).toEqual([])
+    expect(refusedEntries(['resources/app/node_modules/zod/index.js'])).toHaveLength(1)
   })
 })

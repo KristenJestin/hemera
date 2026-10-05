@@ -52,10 +52,11 @@ const electronLauncher = (
   engine: UtilityProcess,
   log: Log,
 ): Launcher<MessagePortMain> => ({
-  fork: (program, args) => {
+  fork: (program, args, environment) => {
     const child = utilityProcess.fork(join(main, '..', 'agents', 'index.js'), [program, ...args], {
       serviceName: 'agents',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...environment },
     })
     // What the agents' process itself says (never its program's lines, which travel on the port)
     // is what a process that could not start leaves behind.

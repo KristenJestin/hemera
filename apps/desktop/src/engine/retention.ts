@@ -5,8 +5,9 @@
  *   the journal), kept as long as the mission exists and never purged;
  * - **heavy**: the large pieces tied to a mission (`missions/<key>/evidence/`, the contents of the
  *   snapshots), kept as long as the mission; none exists yet;
- * - **diagnostic**: what helps understand a run and nothing more (`diagnostic.log`, the outputs of
- *   commands), rotated by age and by total size, never while its mission is live;
+ * - **diagnostic**: what helps understand a run and nothing more (`diagnostic.log`, the ACP traces
+ *   under `traces/`, the outputs of commands), rotated by age and by total size, never while its
+ *   mission is live;
  * - **state**: what the Profile is made of rather than a history (Projects, Workspaces,
  *   preferences), kept as long as what it describes.
  *
@@ -21,7 +22,7 @@ import { LIVE_RUN_STATES } from '@hemera/core/domain'
 import { type Table, getTableName, inArray, notInArray, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 
-import { DIAGNOSTIC_FILE, DIAGNOSTIC_GENERATION } from '../main/diagnostic.ts'
+import { DIAGNOSTIC_FILE, DIAGNOSTIC_GENERATION, TRACES_FOLDER } from '../main/diagnostic.ts'
 import { Database, refusedWhile } from './storage/database.ts'
 import { commandRuns, missions } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
@@ -55,14 +56,16 @@ export const TABLE_CLASSES = {
   needs: 'permanent',
   need_deliveries: 'permanent',
   mission_stops: 'permanent',
+  agent_sessions: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**
  * The class of every file and folder of the data folder that holds history or diagnostics. The
- * diagnostic log stands for its earlier generations too.
+ * diagnostic log stands for its earlier generations too; the traces folder for every file in it.
  */
 export const FILE_CLASSES = {
   [DIAGNOSTIC_FILE]: 'diagnostic',
+  [TRACES_FOLDER]: 'diagnostic',
 } as const satisfies Record<string, RetentionClass>
 
 /** The tables among these that have no class: what a later ticket forgot to declare. */
@@ -114,27 +117,30 @@ export const sweepDiagnostics = (dataFolder: string, limits: Partial<SweepLimits
       .from(commandRuns)
       .pipe(Effect.mapError(refusedWhile('reading the runs')))
 
-    const names = (() => {
+    const listed = (folder: string) => {
       try {
-        return readdirSync(dataFolder)
+        return readdirSync(folder).map((name) => ({ name, path: join(folder, name) }))
       } catch {
         return []
       }
-    })()
-    const files = names
-      .filter(
-        (name) =>
+    }
+    // The traces are tied to no mission this sweep can see: they rotate freely.
+    const files = [
+      ...listed(dataFolder).filter(
+        ({ name }) =>
           DIAGNOSTIC_GENERATION.test(name) && FILE_CLASSES[DIAGNOSTIC_FILE] === 'diagnostic',
-      )
-      .flatMap((name) => {
-        const path = join(dataFolder, name)
-        try {
-          const stat = statSync(path)
-          return [{ path, bytes: stat.size, at: stat.mtimeMs }]
-        } catch {
-          return []
-        }
-      })
+      ),
+      ...listed(join(dataFolder, TRACES_FOLDER)).filter(
+        ({ name }) => name.endsWith('.log') && FILE_CLASSES[TRACES_FOLDER] === 'diagnostic',
+      ),
+    ].flatMap(({ path }) => {
+      try {
+        const stat = statSync(path)
+        return [{ path, bytes: stat.size, at: stat.mtimeMs }]
+      } catch {
+        return []
+      }
+    })
 
     // Each piece of the diagnostic class: its weight, its date, and whether a live mission holds it.
     const pieces = [

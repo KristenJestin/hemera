@@ -61,18 +61,19 @@ const linesOf = (readable: Readable): Stream.Stream<string> =>
   Stream.splitLines(Stream.fromEffectRepeat(nextPiece(readable.setEncoding('utf8'))))
 
 /**
- * Runs `program` with `args` in a worker and serves it over `port` until it ends, with the code
- * it ended with.
+ * Runs `program` with `args` in a worker, in `environment`, and serves it over `port` until it
+ * ends, with the code it ended with.
  */
 export const runProgram = (
   port: Port,
   program: string,
   args: ReadonlyArray<string>,
+  environment: NodeJS.ProcessEnv,
 ): Effect.Effect<number, never, Scope.Scope> =>
   Effect.gen(function* () {
     const worker = new Worker(program, {
       argv: [...args],
-      env: process.env,
+      env: environment,
       stdin: true,
       stdout: true,
       stderr: true,

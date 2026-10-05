@@ -46,6 +46,11 @@ export const AgentsLaunch = Schema.Struct({
   launch: Schema.Number,
   program: Schema.String,
   args: Schema.Array(Schema.String),
+  /**
+   * What the program's environment holds over the agents' process's own: an agent's bare mode is
+   * set through it (its own executable, its configuration, its timeouts).
+   */
+  environment: Schema.Record(Schema.String, Schema.String),
 })
 export type AgentsLaunch = typeof AgentsLaunch.Type
 

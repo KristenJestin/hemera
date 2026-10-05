@@ -55,6 +55,7 @@ export const agentsLauncher = <P>(
   return (
     program: string,
     args: ReadonlyArray<string>,
+    environment: Readonly<Record<string, string>>,
   ): Effect.Effect<AgentsProcess, LaunchFailed, Scope.Scope> =>
     Effect.gen(function* () {
       const launch = launches
@@ -63,7 +64,7 @@ export const agentsLauncher = <P>(
       const started = yield* Deferred.make<number, LaunchFailed>()
       const exited = yield* Deferred.make<number>()
 
-      yield* host['agents.launch']({ launch, program, args }).pipe(
+      yield* host['agents.launch']({ launch, program, args, environment }).pipe(
         Stream.runForEach((event) =>
           Match.value(event).pipe(
             Match.tagsExhaustive({
