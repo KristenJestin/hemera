@@ -117,6 +117,26 @@ export const OnAMission: Story = {
   },
 }
 
+/** A Chat open: listed under Acme with its glyph, the trail says Acme › its title. */
+export const OnAChat: Story = {
+  render: () => <AppFixture page={{ kind: 'chat', id: 'invoices' }} withMissions withChats />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const places = canvas.getByRole('navigation', { name: 'Places' })
+    expect(within(places).getByRole('button', { name: 'Invoices export' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(canvas.getByRole('navigation', { name: 'Where you are' })).toHaveTextContent(
+      'AcmeInvoices export',
+    )
+    await userEvent.click(within(places).getByRole('button', { name: 'Release notes for 2.4' }))
+    await waitFor(() => {
+      expect(canvas.getByRole('heading', { level: 1, name: 'Release notes for 2.4' })).toBeVisible()
+    })
+  },
+}
+
 /** The engine coming up: the sheet veiled, Hemera's face loading, the chrome in place. */
 export const Starting: Story = {
   render: () => <AppFixture engine="starting" />,

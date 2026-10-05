@@ -8,7 +8,7 @@ import { type Identity, ProjectMark } from '../components/project-mark/project-m
 import { Skeleton } from '../components/loading/loading.tsx'
 import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconChevronRight, IconHome, IconPlus, IconSettings } from '../icons.ts'
+import { IconChevronRight, IconHome, IconMessages, IconPlus, IconSettings } from '../icons.ts'
 import { collapse, expand, fold, useTransition } from '../motion.ts'
 
 /**
@@ -107,6 +107,7 @@ export type SidebarPlace =
   | { readonly kind: 'home' }
   | { readonly kind: 'project'; readonly id: string }
   | { readonly kind: 'mission'; readonly key: string }
+  | { readonly kind: 'chat'; readonly id: string }
   | { readonly kind: 'settings' }
   | { readonly kind: 'elsewhere' }
 
@@ -144,6 +145,7 @@ function markOf(place: SidebarPlace): string | null {
   if (place.kind === 'settings') return 'settings'
   if (place.kind === 'project') return `project:${place.id}`
   if (place.kind === 'mission') return `mission:${place.key}`
+  if (place.kind === 'chat') return `chat:${place.id}`
   return null
 }
 
@@ -400,6 +402,36 @@ export function SidebarRow({
       <span className={cn(OVER_MARK, ROW_KEY)}>{missionKey}</span>
       <span className={cn(OVER_MARK, NAME)}>{title}</span>
       {trailing !== undefined && <span className={cn(OVER_MARK, 'ml-auto flex')}>{trailing}</span>}
+    </button>
+  )
+}
+
+export interface SidebarChatRowProps {
+  id: string
+  title: string
+  current?: boolean | undefined
+  onPress: () => void
+}
+
+/** A Chat's row under its Project: the Chat's glyph where a mission has its key, and its title. */
+export function SidebarChatRow({
+  id,
+  title,
+  current = false,
+  onPress,
+}: SidebarChatRowProps): ReactNode {
+  return (
+    <button
+      type="button"
+      data-mark={`chat:${id}`}
+      aria-current={current ? 'page' : undefined}
+      className={cn(ROW, current && OVER_MARK)}
+      onClick={onPress}
+    >
+      <span className={cn(OVER_MARK, 'flex shrink-0')} aria-hidden="true">
+        <IconMessages size="sm" />
+      </span>
+      <span className={cn(OVER_MARK, NAME)}>{title}</span>
     </button>
   )
 }
