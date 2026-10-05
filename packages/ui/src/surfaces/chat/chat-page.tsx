@@ -70,11 +70,16 @@ export interface ChatPageProps {
   onRetry: () => void
 }
 
-const HEADER = 'mx-auto flex w-full max-w-page shrink-0 flex-col gap-1 px-8 pt-6 pb-3'
+/**
+ * The header and the dock keep the room of the thread's scrollbar, as the thread does, so the
+ * three stand on one column whether the thread scrolls or not.
+ */
+const STILL = 'shrink-0 overflow-hidden scrollbar-stable'
+const HEADER = 'mx-auto flex w-full max-w-measure flex-col gap-1 px-8 pt-6 pb-3'
 const TITLE_LINE = 'flex min-h-control-md min-w-0 items-center gap-2'
 const TITLE = 'min-w-0 truncate text-2xl font-semibold tracking-tight'
 const ABOUT = 'flex min-w-0 items-center gap-2 text-sm text-muted-foreground'
-const DOCK = 'mx-auto flex w-full max-w-measure shrink-0 flex-col gap-3 px-8 pb-6'
+const DOCK = 'mx-auto flex w-full max-w-measure flex-col gap-3 px-8 pb-6'
 const CARD =
   'flex flex-col gap-3 overflow-hidden rounded-lg border border-border bg-card p-4 text-sm'
 
@@ -206,39 +211,41 @@ export function ChatPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className={HEADER}>
-        <div className={TITLE_LINE}>
-          <h1 className={TITLE}>{title}</h1>
-          <Rename title={title} onRename={onRename} />
-          <div className="ml-auto flex shrink-0 items-center">
-            <Button size="sm" onClick={onCreateMission}>
-              <IconListCheck size="sm" aria-hidden="true" />
-              Create a mission from this Chat
-            </Button>
+      <div className={STILL}>
+        <header className={HEADER}>
+          <div className={TITLE_LINE}>
+            <h1 className={TITLE}>{title}</h1>
+            <Rename title={title} onRename={onRename} />
+            <div className="ml-auto flex shrink-0 items-center">
+              <Button size="sm" onClick={onCreateMission}>
+                <IconListCheck size="sm" aria-hidden="true" />
+                Create a mission from this Chat
+              </Button>
+            </div>
           </div>
-        </div>
-        <div className={ABOUT}>
-          <ProjectMark name={project.name} identity={project.identity} />
-          <span className="min-w-0 shrink truncate text-foreground">{project.name}</span>
-          <span aria-hidden="true">·</span>
-          <span className="shrink-0">Chat</span>
-          <span aria-hidden="true">·</span>
-          <span className="min-w-0 shrink truncate font-mono text-xs">{checkout}</span>
-          <span aria-hidden="true">·</span>
-          <span className="flex min-w-0 shrink-0">
-            <ModelPicker
-              label="Model of this Chat"
-              agents={agents}
-              value={model}
-              fallback={fallback}
-              judge={judge}
-              onChange={onModel}
-              onFavourite={onFavourite}
-              onHide={onHide}
-            />
-          </span>
-        </div>
-      </header>
+          <div className={ABOUT}>
+            <ProjectMark name={project.name} identity={project.identity} />
+            <span className="min-w-0 shrink truncate text-foreground">{project.name}</span>
+            <span aria-hidden="true">·</span>
+            <span className="shrink-0">Chat</span>
+            <span aria-hidden="true">·</span>
+            <span className="min-w-0 shrink truncate font-mono text-xs">{checkout}</span>
+            <span aria-hidden="true">·</span>
+            <span className="flex min-w-0 shrink-0">
+              <ModelPicker
+                label="Model of this Chat"
+                agents={agents}
+                value={model}
+                fallback={fallback}
+                judge={judge}
+                onChange={onModel}
+                onFavourite={onFavourite}
+                onHide={onHide}
+              />
+            </span>
+          </div>
+        </header>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-stable">
         {items.length === 0 ? (
@@ -257,39 +264,41 @@ export function ChatPage({
         )}
       </div>
 
-      <div className={DOCK}>
-        <AnimatePresence initial={false}>
-          {held !== undefined && (
-            <HeldCard key={held.id} item={held} agent={agent} onAnswer={onAnswer} />
-          )}
-        </AnimatePresence>
-        <MentionField
-          label="Message"
-          placeholder="Ask anything… @ a file, a mission, a command"
-          value={draft}
-          onValueChange={onDraft}
-          mentionables={mentionables}
-          onSubmit={send}
-          autoFocus={items.length === 0}
-          trailing={
-            working ? (
-              <Button size="sm" onClick={onStop}>
-                <IconPlayerStop size="sm" aria-hidden="true" />
-                Stop
-              </Button>
-            ) : draft.trim() === '' ? null : (
-              <Tooltip label="Send" keys="Enter">
-                <IconButton
-                  variant="primary"
-                  size="sm"
-                  icon={<IconArrowUp size="sm" />}
-                  aria-label="Send"
-                  onClick={send}
-                />
-              </Tooltip>
-            )
-          }
-        />
+      <div className={STILL}>
+        <div className={DOCK}>
+          <AnimatePresence initial={false}>
+            {held !== undefined && (
+              <HeldCard key={held.id} item={held} agent={agent} onAnswer={onAnswer} />
+            )}
+          </AnimatePresence>
+          <MentionField
+            label="Message"
+            placeholder="Ask anything… @ a file, a mission, a command"
+            value={draft}
+            onValueChange={onDraft}
+            mentionables={mentionables}
+            onSubmit={send}
+            autoFocus={items.length === 0}
+            trailing={
+              working ? (
+                <Button size="sm" onClick={onStop}>
+                  <IconPlayerStop size="sm" aria-hidden="true" />
+                  Stop
+                </Button>
+              ) : draft.trim() === '' ? null : (
+                <Tooltip label="Send" keys="Enter">
+                  <IconButton
+                    variant="primary"
+                    size="sm"
+                    icon={<IconArrowUp size="sm" />}
+                    aria-label="Send"
+                    onClick={send}
+                  />
+                </Tooltip>
+              )
+            }
+          />
+        </div>
       </div>
     </div>
   )
