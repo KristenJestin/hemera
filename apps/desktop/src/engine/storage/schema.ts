@@ -464,3 +464,72 @@ export const agentSessions = sqliteTable('agent_sessions', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
+
+/**
+ * The actions with an effect outside the database (a file written, a command run, and later a
+ * push, a forge call, a step of a delivery): the intent, written and committed before the effect
+ * starts, then its outcome. `state` is `started` until the outcome is known, then `done` or
+ * `failed`; an intent an engine that stopped left without an outcome is `indeterminate` until its
+ * post-condition, when its kind has one, says what happened. `details` is the JSON of what the
+ * action is (the post-condition reads it), masked; `outcome` says how it ended, masked.
+ * `handled_at` is when the handler of an indeterminate action was called, once.
+ */
+export const effectfulActions = sqliteTable(
+  'effectful_actions',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind').notNull(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    taskId: text('task_id'),
+    details: text('details').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    outcome: text('outcome').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    handledAt: text('handled_at'),
+  },
+  (table) => [index('actions_by_state').on(table.state, table.startedAt)],
+)
+
+/**
+ * The calls of Hemera's MCP tools, one row per call (a retry under the same call key is the same
+ * row): the session, its role and mission, the tool and its gate class, the verdict and who gave
+ * it, the outcome, its reason (masked), and how long it took. Never a file's content.
+ */
+export const toolCalls = sqliteTable(
+  'tool_calls',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    role: text('role').notNull(),
+    projectId: text('project_id'),
+    missionId: text('mission_id'),
+    tool: text('tool').notNull(),
+    gateClass: text('gate_class'),
+    verdict: text('verdict'),
+    verdictBy: text('verdict_by'),
+    outcome: text('outcome').notNull(),
+    reason: text('reason').$type<Masked<string>>(),
+    callKey: text('call_key'),
+    durationMs: integer('duration_ms').notNull(),
+    calledAt: text('called_at').notNull(),
+  },
+  (table) => [index('calls_by_session').on(table.sessionId, table.calledAt)],
+)
+
+/**
+ * The fingerprint (sha256 of the bytes) of the version of a file a session last read or wrote, by
+ * the file's resolved path: a write is made only on that version. Kept with the session, across
+ * restarts.
+ */
+export const sessionFiles = sqliteTable(
+  'session_files',
+  {
+    sessionId: text('session_id').notNull(),
+    path: text('path').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    recordedAt: text('recorded_at').notNull(),
+  },
+  (table) => [unique('file_once_in_session').on(table.sessionId, table.path)],
+)

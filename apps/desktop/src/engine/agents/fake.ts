@@ -36,7 +36,7 @@ import {
   type Usage,
 } from '@agentclientprotocol/sdk'
 import { AgentsProcessGone, Output } from '@hemera/ipc'
-import { Effect, Stream } from 'effect'
+import { Effect, Option, Schema, Stream } from 'effect'
 
 import type { AgentsProcess } from '../agents.ts'
 
@@ -103,6 +103,16 @@ export type FakeStep =
     }
   /** The process ends on the spot, in the middle of the turn, which is never answered. */
   | { readonly does: 'dies' }
+  /**
+   * One of Hemera's tools called over the MCP server the session was handed, as a real agent
+   * calls it: the answer is kept in `toolAnswers` and reported as the tool call's content.
+   */
+  | {
+      readonly does: 'uses'
+      readonly id: string
+      readonly tool: string
+      readonly arguments: Readonly<Record<string, Schema.Json>>
+    }
 
 /** What the agent is scripted to be: what it announces, and what it does when it is asked. */
 export interface FakeScript {
@@ -156,6 +166,8 @@ export interface FakeAnswers {
   loads: number
   resumes: number
   cancels: number
+  /** What each tool it called over MCP answered: its text, and whether it was an error. */
+  readonly toolAnswers: Array<{ readonly text: string; readonly isError: boolean }>
 }
 
 export interface FakeAgent {
@@ -215,6 +227,7 @@ function updateOf(step: FakeStep): SessionUpdate | null {
     case 'asks':
     case 'switches':
     case 'dies':
+    case 'uses':
       return null
   }
 }
@@ -245,6 +258,7 @@ export function fakeAgent(script: FakeScript = {}): FakeAgent {
     loads: 0,
     resumes: 0,
     cancels: 0,
+    toolAnswers: [],
   }
 
   let sessionId = script.nativeSessionId ?? 'native-session'
@@ -323,6 +337,32 @@ export function fakeAgent(script: FakeScript = {}): FakeAgent {
         })
         if (answered.outcome.outcome === 'cancelled') answers.cancelled += 1
         else answers.optionIds.push(answered.outcome.optionId)
+        continue
+      }
+      if (step.does === 'uses') {
+        const server = answers.mcpServers.at(-1)?.find((one) => one.name === 'hemera')
+        if (server === undefined || !('url' in server)) break
+        // oxlint-disable-next-line no-await-in-loop -- a tool's answer comes before the next step
+        const answer = await callOverMcp(server, 'tools/call', {
+          name: step.tool,
+          arguments: step.arguments,
+          _meta: { 'claudecode/toolUseId': step.id },
+        })
+        const read = readToolResult(answer)
+        const text = Option.isSome(read)
+          ? read.value.content.map((block) => block.text).join('\n')
+          : JSON.stringify(answer)
+        const isError = Option.isSome(read) ? read.value.isError === true : true
+        answers.toolAnswers.push({ text, isError })
+        // oxlint-disable-next-line no-await-in-loop -- the report of a call follows its answer
+        await send({
+          sessionUpdate: 'tool_call',
+          toolCallId: step.id,
+          title: `mcp__hemera__${step.tool}`,
+          kind: 'other',
+          status: isError ? 'failed' : 'completed',
+          content: [{ type: 'content', content: { type: 'text', text } }],
+        })
         continue
       }
       const update = updateOf(step)
@@ -436,4 +476,48 @@ export function fakeAgent(script: FakeScript = {}): FakeAgent {
   }
 
   return { process, answers, die }
+}
+
+/** What `tools/call` answers, as far as an agent reads it. */
+const ToolResult = Schema.Struct({
+  result: Schema.Struct({
+    content: Schema.Array(Schema.Struct({ type: Schema.String, text: Schema.String })),
+    isError: Schema.optional(Schema.Boolean),
+  }),
+})
+const readToolResult = (answer: Schema.Json) =>
+  Option.map(Schema.decodeUnknownOption(ToolResult)(answer), (read) => read.result)
+
+const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/**
+ * One JSON-RPC request to an MCP server over streamable HTTP, as an agent sends it: its headers
+ * (the bearer token among them), and the answer read whether it comes as JSON or as an event
+ * stream. Answers the JSON-RPC response, or `{ status }` when the server answered no JSON.
+ */
+export async function callOverMcp(
+  server: {
+    readonly url: string
+    readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>
+  },
+  method: string,
+  params: Readonly<Record<string, Schema.Json>>,
+): Promise<Schema.Json> {
+  const response = await fetch(server.url, {
+    method: 'POST',
+    headers: {
+      ...Object.fromEntries(server.headers.map((header) => [header.name, header.value])),
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-06-18',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  const text = await response.text()
+  const data = text
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => line.slice('data: '.length))
+    .at(-1)
+  return Option.getOrElse(readJson(data ?? text), () => ({ status: response.status }))
 }

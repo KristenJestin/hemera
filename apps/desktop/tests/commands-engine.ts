@@ -34,7 +34,10 @@ export interface Started {
  */
 export function commandsEngine(
   data: string,
-  parts: Pick<ProfileParts, 'askBeforeRunning' | 'missions' | 'secrets'> = {},
+  parts: Pick<
+    ProfileParts,
+    'askBeforeRunning' | 'missions' | 'secrets' | 'tools' | 'actionRules'
+  > = {},
 ) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {
     const lines: string[] = []
