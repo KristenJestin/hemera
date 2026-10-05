@@ -256,6 +256,17 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['needs.answer'](request).pipe(closedAs(gone), observed('needs.answer', log)),
     'needs.retry': (request) =>
       engine['needs.retry'](request).pipe(closedAs(gone), observed('needs.retry', log)),
+    // A Project's "never" list is the engine's alone: forwarded as it is.
+    'permissions.neverList': (request) =>
+      engine['permissions.neverList'](request).pipe(
+        closedAs(gone),
+        observed('permissions.neverList', log),
+      ),
+    'permissions.setNeverList': (request) =>
+      engine['permissions.setNeverList'](request).pipe(
+        closedAs(gone),
+        observed('permissions.setNeverList', log),
+      ),
     // The agents and their updates are the engine's alone: forwarded as they are.
     'agents.list': () => engine['agents.list']().pipe(closedAs(gone), observed('agents.list', log)),
     'agents.checkUpdates': () =>

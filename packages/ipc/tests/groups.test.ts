@@ -216,6 +216,8 @@ const missionHandlers = {
   'needs.get': unused,
   'needs.answer': unused,
   'needs.retry': unused,
+  'permissions.neverList': unused,
+  'permissions.setNeverList': unused,
   'notifications.settings': unused,
   'notifications.setKind': unused,
   'notifications.setSound': unused,

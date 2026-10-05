@@ -272,6 +272,24 @@ export const projectCommands = sqliteTable(
 )
 
 /**
+ * A Project's "never" list: the commands always refused to its agents, in the order they were
+ * listed. `entry` is the JSON of a `NeverEntry`: a program with its leading arguments, or a
+ * catalogue command by its id. Read live by every call, never copied into a mission.
+ */
+export const projectNeverEntries = sqliteTable(
+  'project_never_entries',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    entry: text('entry').notNull(),
+  },
+  (table) => [index('never_by_project').on(table.projectId, table.position)],
+)
+
+/**
  * The runs of a Project's commands and lines, in a Workspace or in the main checkout
  * (`workspace_id` null): who started it, the line as it ran, its folder, its state and exit, the
  * address it published, and the last of what it printed. `command_id` is kept as it was, even

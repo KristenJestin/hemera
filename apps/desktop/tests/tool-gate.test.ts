@@ -170,9 +170,12 @@ describe("A role's guards come before any verdict", () => {
   })
 })
 
-describe('Without the verdicts of #36, a judged call is denied, never allowed', () => {
-  test('a Builder writing inside its place is refused, and nothing is written', async () => {
-    const answers = await commandsEngine(data)(({ profile }) =>
+describe('With the default order and no judge, what the rules do not allow asks', () => {
+  test('a Builder writing inside its place is asked, and nothing is written', async () => {
+    const questions = questionsKept()
+    const answers = await commandsEngine(data, {
+      tools: { permissionRequests: questions.layer },
+    })(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const { mission, main } = yield* acmeWithMission(work)
@@ -185,15 +188,22 @@ describe('Without the verdicts of #36, a judged call is denied, never allowed', 
         }),
       ),
     )
-    expect(answers[0].text).toBe('refused: permissions are not available yet')
-    expect(answers[1].text).toBe('refused: permissions are not available yet')
+    expect(answers[0].text).toBe('refused: approvals are not available yet')
+    expect(answers[1].text).toBe('refused: approvals are not available yet')
+    expect(questions.asked.map((one) => one.reason)).toEqual([
+      'no judge could rate it: no judge is set up',
+      'no judge could rate it: no judge is set up',
+    ])
     expect(existsSync(join(work, 'acme', 'notes.md'))).toBe(false)
-    // A read inside the place is the one thing allowed.
+    // A read inside the place is allowed by the rules.
     expect(answers[2]).toMatchObject({ ok: true })
   })
 
-  test('a read outside the place is refused with where it leads, never allowed', async () => {
-    const answer = await commandsEngine(data, { tools: { home: work } })(({ profile }) =>
+  test('a read of a sensitive place outside asks with both reasons, never allowed', async () => {
+    const questions = questionsKept()
+    const answer = await commandsEngine(data, {
+      tools: { home: work, permissionRequests: questions.layer },
+    })(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const { mission, main } = yield* acmeWithMission(work)
@@ -207,8 +217,11 @@ describe('Without the verdicts of #36, a judged call is denied, never allowed', 
     expect(answer).toEqual({
       ok: false,
       refused: true,
-      text: 'refused: outside the Workspace: ~/.ssh/config',
+      text: 'refused: approvals are not available yet',
     })
+    expect(questions.asked[0]?.reason).toBe(
+      'outside the Workspace: ~/.ssh/config; sensitive place: ~/.ssh',
+    )
   })
 })
 

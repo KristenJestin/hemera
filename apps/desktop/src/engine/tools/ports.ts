@@ -4,9 +4,9 @@
  * `ask` (#37), the sensitive places (#36), and the ordered list of the roles' mandatory guards
  * (file claims, command write locks: later tickets).
  *
- * Until those tickets are merged, the defaults here never allow what they cannot judge: every
- * judged call is denied, a local call is allowed only inside the role's place, and a question is
- * answered at once with a refusal. Nothing waits on a human.
+ * The verdict is the order of decision (`../permissions/order.ts`) and the sensitive places are
+ * `../permissions/sensitive.ts`. Until #37, a question is answered at once with a refusal: nothing
+ * waits on a human.
  */
 
 import {
@@ -41,6 +41,7 @@ export interface JudgedPath {
 export interface JudgedCommand {
   readonly id: string
   readonly name: string
+  /** The line this system runs: its own when it has one. */
   readonly line: string
   readonly check: boolean
   readonly readOnly: boolean
@@ -57,6 +58,8 @@ export interface JudgedCall {
   readonly command: JudgedCommand | null
   /** A free line a call runs, as the agent wrote it. */
   readonly line: string | null
+  /** For a free line, the folder it runs in under the place, as the agent wrote it. */
+  readonly folder: string | null
   /** The agent's reason for the call: shown beside Hemera's, never read as an instruction. */
   readonly why: string | null
 }
@@ -77,26 +80,6 @@ export const outsideReason = (session: CallSession, path: JudgedPath, home: stri
   `outside ${PLACE_NAMES[session.place.kind]}: ${shownPath(path.resolved, home)}`
 
 /**
- * Until the verdicts exist: a judged call is denied, a local call is allowed only on a path inside
- * the role's place (or without a path), never on an unknown one.
- */
-export const verdictsUntilRules = (home: string) =>
-  Layer.succeed(Verdicts, {
-    judge: (call) =>
-      Effect.succeed<Verdict>(
-        call.gate === 'judged'
-          ? { verdict: 'deny', reason: 'permissions are not available yet', by: 'hemera' }
-          : call.path === null || (call.path.inside && call.path.certain)
-            ? { verdict: 'allow', by: 'hemera' }
-            : {
-                verdict: 'deny',
-                reason: outsideReason(call.session, call.path, home),
-                by: 'hemera',
-              },
-      ),
-  })
-
-/**
  * The single human question a call that asks becomes. It answers the agent at once, with what
  * the agent is told (the gate never waits on a human).
  */
@@ -115,16 +98,20 @@ export const noPermissionRequests = Layer.succeed(PermissionRequests, {
   request: () => Effect.succeed({ answer: 'refused: approvals are not available yet' }),
 })
 
-/** Whether a resolved path is a sensitive place, and why; null when it is not. */
+/** Who asks about a place, and whether the call may write there. */
+export interface PlaceAsked {
+  readonly session: CallSession
+  readonly writes: boolean
+}
+
+/**
+ * Whether a resolved path is a sensitive place, and why (`sensitive place: ~/.ssh`); null when it
+ * is not. The session decides which folders of Hemera's data folder are its own.
+ */
 export class SensitivePlaces extends Context.Service<
   SensitivePlaces,
-  { readonly sensitive: (path: string) => Effect.Effect<string | null> }
+  { readonly sensitive: (path: string, asked: PlaceAsked) => Effect.Effect<string | null> }
 >()('SensitivePlaces') {}
-
-/** Until #36 fills it: no place is known to be sensitive. */
-export const noSensitivePlaces = Layer.succeed(SensitivePlaces, {
-  sensitive: () => Effect.succeed(null),
-})
 
 /** One call as a guard sees it: decoded, before any verdict. */
 export interface GuardedCall {

@@ -21,6 +21,7 @@ import {
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
 import { MissionsRpcs, NeedsRpcs } from './missions.ts'
 import { NoticeFeedRpcs, NotificationSettingsRpcs } from './notifications.ts'
+import { PermissionsRpcs } from './permissions.ts'
 import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 
@@ -113,6 +114,7 @@ export const EngineRpcs = RpcGroup.make(
   NeedsRpcs,
   AgentStatesRpcs,
   NotificationSettingsRpcs,
+  PermissionsRpcs,
 )
 
 /**

@@ -173,6 +173,8 @@ const noProjects = {
   'needs.get': unused,
   'needs.answer': unused,
   'needs.retry': unused,
+  'permissions.neverList': unused,
+  'permissions.setNeverList': unused,
   'agents.list': unused,
   'agents.checkUpdates': unused,
   'agents.update': unused,
