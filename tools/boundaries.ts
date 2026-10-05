@@ -16,7 +16,7 @@
  *   node tools/boundaries.ts
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 /** What a shared package must never import, and why. */
@@ -89,12 +89,26 @@ export function storageRefusalsOf(file: string, source: string): Refusal[] {
 
 function sourceFilesOf(directory: string): string[] {
   if (!existsSync(directory)) return []
-  return readdirSync(directory).flatMap((entry) => {
-    if (entry === 'node_modules') return []
-    const path = join(directory, entry)
-    if (statSync(path).isDirectory()) return sourceFilesOf(path)
-    return /\.[cm]?tsx?$/.test(entry) ? [path] : []
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === 'node_modules') return []
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return sourceFilesOf(path)
+    return /\.[cm]?tsx?$/.test(entry.name) ? [path] : []
   })
+}
+
+/**
+ * What a source file holds, or nothing when it is gone: a file another process creates and
+ * removes while the tree is walked (a test's own deliberate type error) is not source.
+ */
+function sourceOf(path: string): string {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error) {
+    // SAFETY: what `readFileSync` throws is a system error, which carries a `code`.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
 }
 
 /** The source folders of the applications, each `apps/<name>/src`. */
@@ -108,11 +122,11 @@ function applicationSources(root: string): string[] {
 export function analyze(root: string): Refusal[] {
   const named = (path: string) => relative(root, path).replaceAll('\\', '/')
   const shared = sourceFilesOf(join(root, 'packages')).flatMap((path) =>
-    refusalsOf(named(path), readFileSync(path, 'utf8')),
+    refusalsOf(named(path), sourceOf(path)),
   )
   const storage = [join(root, 'packages'), ...applicationSources(root)]
     .flatMap(sourceFilesOf)
-    .flatMap((path) => storageRefusalsOf(named(path), readFileSync(path, 'utf8')))
+    .flatMap((path) => storageRefusalsOf(named(path), sourceOf(path)))
   return [...shared, ...storage]
 }
 

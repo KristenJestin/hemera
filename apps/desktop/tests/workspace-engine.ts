@@ -28,7 +28,7 @@ import { createProject } from '../src/engine/projects.ts'
 import { repositoryStatusesLayer } from '../src/engine/repositories.ts'
 import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { type WorkspaceServices, preparationsLayer } from '../src/engine/workspaces.ts'
-import { remote, repository } from './repositories.ts'
+import { remote, repository, repositoryWithRemote } from './repositories.ts'
 import { SHIPPED, type Storage, on } from './storage.ts'
 
 /** A runner that records what it was handed and answers as told, by the line it runs. */
@@ -99,6 +99,26 @@ export function atlasOnDisk(work: string): string {
     const path = repository(join(main, name), DEFAULT_BASE_BRANCH)
     remote(path, join(work, 'remotes', `${name}.git`))
   }
+  mkdirSync(main, { recursive: true })
+  writeFileSync(join(main, '.env'), 'FROM_MAIN=1\n')
+  return main
+}
+
+/**
+ * The same, with the repositories made side by side: the eighteen `git` processes of the
+ * sequential version, on Windows, are what a `beforeEach` once ran out of its ten seconds on.
+ */
+export async function atlasOnDiskConcurrently(work: string): Promise<string> {
+  const main = join(work, 'atlas')
+  await Promise.all(
+    REPOSITORIES.map((name) =>
+      repositoryWithRemote(
+        join(main, name),
+        DEFAULT_BASE_BRANCH,
+        join(work, 'remotes', `${name}.git`),
+      ),
+    ),
+  )
   mkdirSync(main, { recursive: true })
   writeFileSync(join(main, '.env'), 'FROM_MAIN=1\n')
   return main

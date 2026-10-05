@@ -43,7 +43,7 @@ import {
   until,
 } from './commands-engine.ts'
 import { endChild, on, removeFolders, temporaryFolder } from './storage.ts'
-import { atlas, atlasOnDisk, opened } from './workspace-engine.ts'
+import { atlas, atlasOnDiskConcurrently, opened } from './workspace-engine.ts'
 
 let data: string
 let main: string
@@ -52,9 +52,11 @@ const strays: ChildProcess[] = []
 
 beforeEach(async () => {
   data = realpathSync.native(temporaryFolder('runs'))
-  main = atlasOnDisk(realpathSync.native(temporaryFolder('runs-work')))
   pids = join(realpathSync.native(temporaryFolder('runs-pids')), 'pids.txt')
-  await opened(data)
+  // The checkout and the migrated data folder do not wait for each other.
+  const checkout = atlasOnDiskConcurrently(realpathSync.native(temporaryFolder('runs-work')))
+  await Promise.all([checkout, opened(data)])
+  main = await checkout
 })
 
 afterEach(async () => {
