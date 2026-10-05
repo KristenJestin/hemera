@@ -68,6 +68,7 @@ const chain = Effect.gen(function* () {
   let logsShown = 0
   let foldersAsked = 0
   const displayed: Preferences[] = []
+  const previewed: string[][] = []
 
   const { port1: mainToEngine, port2: engineEnd } = new MessageChannel()
   const engineServer = yield* makeServerProtocol
@@ -114,6 +115,11 @@ const chain = Effect.gen(function* () {
               displayed.push(preferences)
             }),
           notices: Stream.make(OPENED),
+          preview: (style, sound) =>
+            Effect.sync(() => {
+              previewed.push([style, sound])
+              return 'played'
+            }),
         },
         (line) => mainLines.push(line),
       ),
@@ -135,6 +141,7 @@ const chain = Effect.gen(function* () {
     logsShown: () => logsShown,
     foldersAsked: () => foldersAsked,
     displayed,
+    previewed,
   }
 })
 
@@ -161,6 +168,19 @@ describe('Notifications, between the window, main and the engine', () => {
         expect(after.kinds.find((kind) => kind.id === 'need')?.on).toBe(false)
         const sounds = yield* window['notifications.setSound']({ sound: 'done', on: false })
         expect(sounds.sounds.find((sound) => sound.sound === 'done')?.on).toBe(false)
+      }),
+    ))
+
+  test('the window chooses a sound style and previews a sound through main', () =>
+    run(
+      Effect.gen(function* () {
+        const { window, previewed } = yield* chain
+        expect((yield* window['notifications.setStyle']({ style: 'zen' })).style).toBe('zen')
+        expect((yield* window['notifications.settings']()).style).toBe('zen')
+        expect(yield* window['notifications.preview']({ style: 'zen', sound: 'error' })).toBe(
+          'played',
+        )
+        expect(previewed).toEqual([['zen', 'error']])
       }),
     ))
 

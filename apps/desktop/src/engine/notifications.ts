@@ -16,6 +16,7 @@
 
 import { type NeedFields, missionKey } from '@hemera/core/domain'
 import {
+  DEFAULT_SOUND_STYLE,
   HomeTarget,
   type KindSetting,
   NeedEnded,
@@ -28,8 +29,10 @@ import {
   type NotificationSettings,
   type NotificationTarget,
   ProjectTarget,
+  SOUND_STYLES,
   SOUNDS,
   type Sound,
+  SoundStyle,
   UnknownNotificationKind,
 } from '@hemera/ipc'
 import { eq, like, sql } from 'drizzle-orm'
@@ -383,10 +386,15 @@ export const noticeFeed = (
 
 const KIND_KEY = 'notifications.kind.'
 const SOUND_KEY = 'notifications.sound.'
+const STYLE_KEY = 'notifications.style'
 
 const switchCodec = Schema.fromJsonString(Schema.Boolean)
 const readSwitch = Schema.decodeUnknownOption(switchCodec)
 const writeSwitch = Schema.encodeSync(switchCodec)
+
+const styleCodec = Schema.fromJsonString(SoundStyle)
+const readStyle = Schema.decodeUnknownOption(styleCodec)
+const writeStyle = Schema.encodeSync(styleCodec)
 
 /** The words of each sound's switch. */
 export const SOUND_LABELS: Record<Sound, string> = {
@@ -395,9 +403,27 @@ export const SOUND_LABELS: Record<Sound, string> = {
   done: 'Something is done',
 }
 
+/** The name of each sound style in the settings. */
+export const SOUND_STYLE_LABELS: Record<SoundStyle, string> = {
+  hemera: 'Hemera',
+  minimal: 'Minimal',
+  soft: 'Soft',
+  glass: 'Glass',
+  arcade: 'Arcade',
+  mechanical: 'Mechanical',
+  organic: 'Organic',
+  dreamy: 'Dreamy',
+  scifi: 'Sci-fi',
+  rubber: 'Rubber',
+  cinematic: 'Cinematic',
+  studio: 'Studio',
+  zen: 'Zen',
+}
+
 /**
  * The switches as they stand, listed from the registry: a kind registered later appears with its
- * default, and a switch this version cannot read answers its default too.
+ * default, and a switch this version cannot read answers its default too. So does the sound style:
+ * Hemera's own when none was chosen or the one kept is not a style of this version.
  */
 export const readNotificationSettings = (
   registry: Registry,
@@ -424,15 +450,17 @@ export const readNotificationSettings = (
       label: SOUND_LABELS[sound],
       on: on(SOUND_KEY + sound, true),
     }))
-    return { kinds, sounds }
+    const style = Option.getOrElse(readStyle(kept.get(STYLE_KEY)), () => DEFAULT_SOUND_STYLE)
+    const styles = SOUND_STYLES.map((one) => ({ style: one, label: SOUND_STYLE_LABELS[one] }))
+    return { kinds, sounds, style, styles }
   })
 
-const writeSwitchRow = (key: string, on: boolean) =>
+const writeRow = (key: string, value: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     yield* database
       .insert(appPreferences)
-      .values({ key, value: writeSwitch(on) })
+      .values({ key, value })
       .onConflictDoUpdate({ target: appPreferences.key, set: { value: sql`excluded.value` } })
       .pipe(Effect.mapError(refusedWhile('writing the notification settings')))
   })
@@ -443,10 +471,14 @@ export const setNotificationKind = (registry: Registry, id: string, on: boolean)
     if (!registry.kinds.some((kind) => kind.id === id)) {
       return yield* new UnknownNotificationKind({ id })
     }
-    yield* writeSwitchRow(KIND_KEY + id, on)
+    yield* writeRow(KIND_KEY + id, writeSwitch(on))
     return yield* readNotificationSettings(registry)
   })
 
 /** Turns a sound on or off, and answers the switches as they now stand. */
 export const setNotificationSound = (registry: Registry, sound: Sound, on: boolean) =>
-  Effect.andThen(writeSwitchRow(SOUND_KEY + sound, on), readNotificationSettings(registry))
+  Effect.andThen(writeRow(SOUND_KEY + sound, writeSwitch(on)), readNotificationSettings(registry))
+
+/** Chooses the sound style, and answers the settings as they now stand. */
+export const setSoundStyle = (registry: Registry, style: SoundStyle) =>
+  Effect.andThen(writeRow(STYLE_KEY, writeStyle(style)), readNotificationSettings(registry))

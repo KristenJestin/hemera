@@ -1,17 +1,21 @@
 /**
- * The three sounds (needs you, error, done): short files shipped with the application, played by
- * main through the system's own player. Never through the window: a sound never takes the focus,
- * and plays the same whether the window is shown, minimised or hidden.
+ * The three sounds (needs you, error, done): short files shipped with the application, one folder
+ * per sound style, played by main through the system's own player. Never through the window: a
+ * sound never takes the focus, and plays the same whether the window is shown, minimised or hidden.
+ * WAV everywhere, since Windows' player reads nothing else.
  *
  * In a package the files are unpacked beside the archive (`app.asar.unpacked`), since a player is
  * another program and cannot read inside the archive.
  */
 
 import { execFile } from 'node:child_process'
-import { closeSync, openSync, readSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type { Sound } from '@hemera/ipc'
+import { DEFAULT_SOUND_STYLE, type Sound, type SoundPreview, type SoundStyle } from '@hemera/ipc'
+import { Effect } from 'effect'
+
+import type { DoNotDisturb } from './notifications.ts'
 
 /** Where the sounds are, beside the bundles, relative to the application. */
 export const SOUNDS_FOLDER = 'sounds'
@@ -21,7 +25,16 @@ export function soundsFolderOf(main: string): string {
   return join(main, '..', '..', SOUNDS_FOLDER).replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked')
 }
 
-export const soundFile = (folder: string, sound: Sound): string => join(folder, `${sound}.wav`)
+/** A style's file of a sound, or Hemera's own when that style lacks it: never silence instead. */
+export function soundFile(
+  folder: string,
+  style: SoundStyle,
+  sound: Sound,
+  exists: (file: string) => boolean = existsSync,
+): string {
+  const chosen = join(folder, style, `${sound}.wav`)
+  return exists(chosen) ? chosen : join(folder, DEFAULT_SOUND_STYLE, `${sound}.wav`)
+}
 
 /** The length of a PCM WAV file, read from its header. */
 export function wavDurationSeconds(file: string): number {
@@ -83,7 +96,36 @@ export async function playSound(
   return false
 }
 
-/** How long a player may take: the sounds last under a second. */
+/** Plays a sound in a style with the first player that does; false when none could. */
+export const playStyle =
+  (
+    platform: NodeJS.Platform,
+    folder: string,
+    player: Player,
+    exists: (file: string) => boolean = existsSync,
+  ) =>
+  (style: SoundStyle, sound: Sound): Promise<boolean> =>
+    playSound(platform, soundFile(folder, style, sound, exists), player)
+
+export interface PreviewPorts {
+  readonly doNotDisturb: Effect.Effect<DoNotDisturb>
+  /** Plays the sound in the style: whether a player did. */
+  readonly play: (style: SoundStyle, sound: Sound) => Effect.Effect<boolean>
+}
+
+/**
+ * One sound of one style, played once, as a notification's would be. The window asking has the
+ * focus, so it is the in-app rule: Do Not Disturb on keeps it quiet, unreadable lets it be heard.
+ */
+export const previewSound =
+  (ports: PreviewPorts) =>
+  (style: SoundStyle, sound: Sound): Effect.Effect<SoundPreview> =>
+    Effect.gen(function* () {
+      if ((yield* ports.doNotDisturb) === 'on') return 'do-not-disturb'
+      return (yield* ports.play(style, sound)) ? 'played' : 'no-player'
+    })
+
+/** How long a player may take: the sounds last under a second and a half. */
 const PLAY_LIMIT_MILLIS = 5000
 
 /** The machine's own player, run without a shell or a window. */

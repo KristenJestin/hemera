@@ -30,8 +30,8 @@ import { refreshDisplay, windowHandlers, type Application } from './window-link.
 import { OPENING_COLORS } from './opening-colors.ts'
 import { headless, windowOptions } from './window-options.ts'
 import { serveWindows } from './window-ports.ts'
-import { soundsFolderOf } from './sounds.ts'
-import { systemNotifierPorts } from './system-notifier.ts'
+import { previewSound, soundsFolderOf } from './sounds.ts'
+import { systemNotifierPorts, systemSounds } from './system-notifier.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
@@ -116,6 +116,7 @@ const run = Effect.gen(function* () {
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
   // What main tells the window of notifications: whoever listens hears it from then on.
   const notices = yield* PubSub.unbounded<WindowNotice>()
+  const sounds = systemSounds({ soundsFolder: soundsFolderOf(main), quiet: underSuite, log })
   const application: Application = {
     report,
     relaunch: Effect.sync(() => {
@@ -137,6 +138,7 @@ const run = Effect.gen(function* () {
         writeSidecar(dataFolder, preferences, log)
       }),
     notices: Stream.fromPubSub(notices),
+    preview: previewSound(sounds),
   }
   yield* refreshDisplay(engine.client, application).pipe(Effect.ignore, Effect.forkScoped)
   // Served before the page loads: the first thing the page does is hand over its port.
@@ -154,7 +156,7 @@ const run = Effect.gen(function* () {
     systemNotifierPorts({
       settings: engine.client['notifications.settings']().pipe(closedAs(() => new EngineGone())),
       tell: (notice) => PubSub.publishUnsafe(notices, notice),
-      soundsFolder: soundsFolderOf(main),
+      sounds,
       quiet: underSuite,
       log,
     }),

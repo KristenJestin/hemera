@@ -12,7 +12,7 @@ directories:
   output: ../../dist/package
   buildResources: build
 
-# Only what was built, the migrations the engine applies at start, the three sounds, and the
+# Only what was built, the migrations the engine applies at start, the sounds (three per style), and the
 # manifest that names its entry point. The sources and every development dependency stay out by
 # not being named.
 # electron-builder collects the production `node_modules` of its own accord, whatever this list
@@ -21,7 +21,7 @@ directories:
 files:
   - dist/**
   - drizzle/**
-  - sounds/*.wav
+  - sounds/*/*.wav
   - package.json
   - '!node_modules/**/*'
 
@@ -37,7 +37,7 @@ extraResources:
 # The sounds are played by the system's own player, another program, which cannot read inside the
 # archive: they are kept beside it.
 asarUnpack:
-  - sounds/*.wav
+  - sounds/*/*.wav
 
 # The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
 # The folder is emptied through this option and never by hand: an empty locales folder is a

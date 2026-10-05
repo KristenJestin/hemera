@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { AlertDialog } from '../../components/alert-dialog/alert-dialog.tsx'
-import { Button } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
 import { Checkbox } from '../../components/checkbox/checkbox.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
@@ -9,6 +9,7 @@ import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconAlertTriangle,
   IconCheck,
@@ -16,6 +17,7 @@ import {
   IconCloudDownload,
   IconCopy,
   IconFolder,
+  IconPlayerPlay,
   IconShieldLock,
 } from '../../icons.ts'
 
@@ -408,18 +410,37 @@ export interface Toggle {
   on: boolean
 }
 
+/** A sound style, and its name. */
+export interface SoundStyleChoice {
+  id: string
+  label: string
+}
+
 export interface NotificationsProps {
   events: readonly Toggle[]
   sounds: readonly Toggle[]
+  /** The sound style chosen, among `styles`. */
+  style: string
+  styles: readonly SoundStyleChoice[]
+  /** The sound being previewed, while it plays. */
+  previewing?: string | undefined
   onEvent: (id: string, on: boolean) => void
   onSound: (id: string, on: boolean) => void
+  onStyle: (id: string) => void
+  /** Plays a sound once, in the style chosen. */
+  onPreview: (id: string) => void
 }
 
 export function NotificationsSection({
   events,
   sounds,
+  style,
+  styles,
+  previewing,
   onEvent,
   onSound,
+  onStyle,
+  onPreview,
 }: NotificationsProps): ReactNode {
   return (
     <>
@@ -435,6 +456,14 @@ export function NotificationsSection({
         ))}
       </Section>
       <Section title="Sounds">
+        <Row name="Sound style">
+          <Select<string>
+            label="Sound style"
+            value={style}
+            onValueChange={onStyle}
+            items={styles.map((one) => ({ value: one.id, label: one.label }))}
+          />
+        </Row>
         {sounds.map((sound) => (
           <div key={sound.id} className={ROW}>
             <Checkbox
@@ -442,6 +471,18 @@ export function NotificationsSection({
               checked={sound.on}
               onCheckedChange={(on) => onSound(sound.id, on)}
             />
+            <span className="ml-auto inline-flex shrink-0">
+              <Tooltip label="Play">
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  state={previewing === sound.id ? 'loading' : 'idle'}
+                  icon={<IconPlayerPlay size="sm" />}
+                  aria-label={`Play ${sound.label}`}
+                  onClick={() => onPreview(sound.id)}
+                />
+              </Tooltip>
+            </span>
           </div>
         ))}
       </Section>

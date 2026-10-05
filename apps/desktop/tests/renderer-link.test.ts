@@ -179,6 +179,7 @@ const noProjects = {
   'notifications.settings': unused,
   'notifications.setKind': unused,
   'notifications.setSound': unused,
+  'notifications.setStyle': unused,
 }
 
 /** A main that answers as told, and says when the window stopped listening. */
@@ -214,6 +215,7 @@ const main = async (engine: 'answers' | 'gone') => {
       }),
     'application.chooseFolder': () => Effect.succeed('/work/acme'),
     'notifications.window': () => Stream.concat(Stream.make(NOTICE), Stream.never),
+    'notifications.preview': () => Effect.succeed('played'),
     ...noProjects,
     'catalogue.save': () => Effect.fail(new ShellSyntax({ token: '&&' })),
     'variables.reveal': ({ key }) => Effect.succeed(`value of ${key}`),

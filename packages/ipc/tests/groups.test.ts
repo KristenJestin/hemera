@@ -219,6 +219,7 @@ const missionHandlers = {
   'notifications.settings': unused,
   'notifications.setKind': unused,
   'notifications.setSound': unused,
+  'notifications.setStyle': unused,
 }
 
 const claudeState: AgentState = {

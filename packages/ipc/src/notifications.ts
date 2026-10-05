@@ -20,6 +20,31 @@ export const SOUNDS = ['needs-you', 'error', 'done'] as const
 export const Sound = Schema.Literals(SOUNDS)
 export type Sound = typeof Sound.Type
 
+/**
+ * How the three sounds sound: Hemera's own, the default, then one style per sound pack of uisfx
+ * (interface sounds, CC0), each holding a cue chosen for each of the three sounds.
+ */
+export const SOUND_STYLES = [
+  'hemera',
+  'minimal',
+  'soft',
+  'glass',
+  'arcade',
+  'mechanical',
+  'organic',
+  'dreamy',
+  'scifi',
+  'rubber',
+  'cinematic',
+  'studio',
+  'zen',
+] as const
+export const SoundStyle = Schema.Literals(SOUND_STYLES)
+export type SoundStyle = typeof SoundStyle.Type
+
+/** The style played when none was chosen, and the one a missing file falls back to. */
+export const DEFAULT_SOUND_STYLE = SOUND_STYLES[0]
+
 /** The mark a notice is drawn with in the window: what waits, what finished, what failed. */
 export const NoticeTone = Schema.Literals(['you', 'done', 'failed', 'outside'])
 export type NoticeTone = typeof NoticeTone.Type
@@ -101,10 +126,19 @@ export const SoundSetting = Schema.Struct({
 })
 export type SoundSetting = typeof SoundSetting.Type
 
-/** The switches of Notifications & sounds: one per registered kind, one per sound. */
+/** A sound style, and its name in the settings. */
+export const SoundStyleOption = Schema.Struct({ style: SoundStyle, label: Schema.String })
+export type SoundStyleOption = typeof SoundStyleOption.Type
+
+/**
+ * The settings of Notifications & sounds: one switch per registered kind, one per sound, and the
+ * sound style chosen among those listed.
+ */
 export const NotificationSettings = Schema.Struct({
   kinds: Schema.Array(KindSetting),
   sounds: Schema.Array(SoundSetting),
+  style: SoundStyle,
+  styles: Schema.Array(SoundStyleOption),
 })
 export type NotificationSettings = typeof NotificationSettings.Type
 
@@ -132,6 +166,26 @@ export const NotificationSettingsRpcs = RpcGroup.make(
     payload: { sound: Sound, on: Schema.Boolean },
     success: NotificationSettings,
     error: failing,
+  }),
+  Rpc.make('notifications.setStyle', {
+    payload: { style: SoundStyle },
+    success: NotificationSettings,
+    error: failing,
+  }),
+)
+
+/**
+ * What a preview came to: heard, kept quiet by Do Not Disturb, or not heard because no player on
+ * this machine could play it.
+ */
+export const SoundPreview = Schema.Literals(['played', 'do-not-disturb', 'no-player'])
+export type SoundPreview = typeof SoundPreview.Type
+
+/** Main's own: one sound of one style, played once by the player notifications use. */
+export const SoundPreviewRpcs = RpcGroup.make(
+  Rpc.make('notifications.preview', {
+    payload: { style: SoundStyle, sound: Sound },
+    success: SoundPreview,
   }),
 )
 
