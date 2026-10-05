@@ -19,7 +19,7 @@ import {
   type AgentLine,
   type Port,
 } from '@hemera/ipc'
-import { Cause, Deferred, Effect, Queue, Stream } from 'effect'
+import { Cause, Deferred, Effect, Predicate, Queue, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { RpcServer } from 'effect/rpc'
 
@@ -62,7 +62,7 @@ const linesOf = (readable: Readable): Stream.Stream<string> =>
 
 /**
  * Runs `program` with `args` in a worker, in `environment`, and serves it over `port` until it
- * ends, with the code it ended with.
+ * has ended and its output has been handed over, with the code it ended with.
  */
 export const runProgram = (
   port: Port,
@@ -80,15 +80,51 @@ export const runProgram = (
     })
     yield* Effect.addFinalizer(() => Effect.promise(() => worker.terminate()))
 
-    const exited = Deferred.makeUnsafe<number>()
-    worker.on('exit', (code) => {
-      Deferred.doneUnsafe(exited, Effect.succeed(code))
-    })
     // A program that cannot even be loaded says so here and nowhere else.
-    const failures = yield* Queue.unbounded<AgentLine>()
+    const failures = yield* Queue.unbounded<AgentLine, Cause.Done>()
     worker.on('error', (failed) => {
       Queue.offerUnsafe(failures, Diagnostic.make({ line: failed.message }))
     })
+
+    /**
+     * The program has ended and what it said has been handed over: every output call is
+     * answered and nothing is left unread in its pipes, or the engine closed the port. Ending
+     * sooner would interrupt the output on its way, and a program that says its line and exits
+     * at once would be heard by no one.
+     */
+    const handedOver = Deferred.makeUnsafe<number>()
+    const answering = new Set<string>()
+    let code: number | undefined
+    let engineGone = false
+    const settle = (): void => {
+      if (code === undefined) return
+      const unread =
+        worker.stdout.readableLength + worker.stderr.readableLength + Queue.sizeUnsafe(failures)
+      if (engineGone || (answering.size === 0 && unread === 0)) {
+        Deferred.doneUnsafe(handedOver, Effect.succeed(code))
+      }
+    }
+    // The pipes have ended by now, and the load failure was told before: the output ends too.
+    worker.on('exit', (exitCode) => {
+      code = exitCode
+      Queue.endUnsafe(failures)
+      settle()
+    })
+    const served: Port = {
+      post: (message) => {
+        port.post(message)
+        if (Predicate.isTagged(message, 'Exit') && answering.delete(String(message.requestId))) {
+          settle()
+        }
+      },
+      start: (onMessage, onClose) =>
+        port.start(onMessage, () => {
+          engineGone = true
+          onClose()
+          settle()
+        }),
+      close: () => port.close(),
+    }
 
     const output = Stream.mergeAll(
       [
@@ -100,7 +136,10 @@ export const runProgram = (
     )
 
     const handlers = AgentsRpcs.toLayer({
-      'agent.output': () => output,
+      'agent.output': (_, { requestId }) => {
+        answering.add(String(requestId))
+        return output
+      },
       'agent.write': ({ line }) =>
         Effect.callback<void>((resume) => {
           worker.stdin?.write(`${line}\n`, () => resume(Effect.void))
@@ -109,11 +148,11 @@ export const runProgram = (
     })
 
     const server = yield* makeServerProtocol
-    server.accept(port)
+    server.accept(served)
     yield* RpcServer.make(AgentsRpcs, { disableFatalDefects: true }).pipe(
       Effect.provide(handlers),
       Effect.provideService(RpcServer.Protocol, server.protocol),
       Effect.forkScoped,
     )
-    return yield* Deferred.await(exited)
+    return yield* Deferred.await(handedOver)
   })

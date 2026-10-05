@@ -106,6 +106,8 @@ export const agentsLauncher = <P>(
         // The stream ends once the exit is known, so whoever reads it to its end has seen it.
         output: client['agent.output']().pipe(
           streamClosedAs(gone),
+          // It also ends when the program has ended and all it said has been read.
+          Stream.concat(Stream.failSync(gone)),
           Stream.catch((failed) =>
             Stream.unwrap(Effect.as(Deferred.await(exited), Stream.fail(failed))),
           ),
