@@ -101,6 +101,11 @@ import {
   IconShieldLock as TablerShieldLock,
   IconBell as TablerBell,
   IconBellFilled as TablerBellFilled,
+  IconGauge as TablerGauge,
+  IconGaugeFilled as TablerGaugeFilled,
+  IconSend as TablerSend,
+  IconSendFilled as TablerSendFilled,
+  IconArrowBackUp as TablerArrowBackUp,
   type IconProps as TablerIconProps,
   type TablerIcon,
 } from '@tabler/icons-react'
@@ -276,3 +281,6 @@ export const IconHelpCircle = catalogued(TablerHelpCircle, TablerHelpCircle, 'Ic
 export const IconPlug = catalogued(TablerPlug, TablerPlug, 'IconPlug')
 export const IconShieldLock = catalogued(TablerShieldLock, TablerShieldLock, 'IconShieldLock')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
+export const IconGauge = catalogued(TablerGaugeFilled, TablerGauge, 'IconGauge')
+export const IconSend = catalogued(TablerSendFilled, TablerSend, 'IconSend')
+export const IconArrowBackUp = catalogued(TablerArrowBackUp, TablerArrowBackUp, 'IconArrowBackUp')

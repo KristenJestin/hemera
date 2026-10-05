@@ -49,7 +49,7 @@ export const Empty: Story = {
 }
 
 /**
- * The frame at its fullest: a dozen sections, five repositories — one Git cannot read, one with
+ * The frame at its fullest: fourteen sections, five repositories — one Git cannot read, one with
  * no remote, one left out of Workspaces — and twenty commands.
  */
 export const Dense: Story = {
@@ -57,7 +57,7 @@ export const Dense: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const nav = canvas.getByRole('navigation', { name: 'Settings of the Project' })
-    expect(within(nav).getAllByRole('button')).toHaveLength(12)
+    expect(within(nav).getAllByRole('button')).toHaveLength(14)
     // The problem is found from any section: its glyph is in the list.
     expect(
       within(nav).getByRole('button', { name: 'Repositories, billing cannot be read' }),
@@ -204,6 +204,92 @@ export const Services: Story = {
     expect(within(list).getByRole('img', { name: 'Waiting for you' })).toBeVisible()
     await userEvent.click(within(list).getByRole('button', { name: 'Run db' }))
     expect(await within(list).findByRole('button', { name: /^db, running/ })).toBeVisible()
+  },
+}
+
+/** The commands never run in Acme, whoever asks: a line each, its bin at its end. */
+export const NeverRun: Story = {
+  args: { section: 'never' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Never run' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+  },
+}
+
+/** A command added to the list from its dialog; one already refused is said so under its field. */
+export const NeverRunAdd: Story = {
+  args: { section: 'never' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
+    const field = within(dialog).getByRole('textbox', { name: 'Command' })
+    await userEvent.type(field, 'terraform apply')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    expect(await within(dialog).findByText('“terraform apply” is already refused.')).toBeVisible()
+    await userEvent.clear(field)
+    await userEvent.type(field, 'kubectl delete namespace acme')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await waitFor(() => {
+      expect(
+        within(canvas.getByRole('list', { name: 'Never run' })).getAllByRole('listitem'),
+      ).toHaveLength(5)
+    })
+  },
+}
+
+/**
+ * The model of each role in Acme: two overridden, each with its ×; the others on the application's
+ * model, said in the quiet tone under "App default". The trigger is the model picker's slot.
+ */
+export const ModelsByRole: Story = {
+  args: { section: 'models' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getAllByRole('button', { name: /^Back to the app default for/ })).toHaveLength(2)
+    expect(canvas.getAllByText('App default')).toHaveLength(4)
+  },
+}
+
+/** The cap and the budget of a mission: empty fields show the application's values. */
+export const CapAndBudget: Story = {
+  args: { section: 'budget' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('textbox', { name: 'Sub-agents at once' })).toHaveAttribute(
+      'placeholder',
+      '3',
+    )
+    expect(canvas.getByRole('textbox', { name: 'Launches' })).toHaveValue('24')
+  },
+}
+
+/** The instruction files of each repository, and how each agent gets them. */
+export const Instructions: Story = {
+  args: { section: 'instructions' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const table = canvas.getByRole('table', { name: 'Instructions' })
+    expect(
+      within(table).getByRole('img', { name: 'Hemera sends CLAUDE.md of shared to Codex' }),
+    ).toBeInTheDocument()
+  },
+}
+
+/** The agent sections of a Project just added: nothing refused, every role on the app's model. */
+export const AgentSectionsEmpty: Story = {
+  args: { empty: true, section: 'never' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('heading', { name: 'Nothing refused' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Models by role' }))
+    expect(await canvas.findAllByText('App default')).toHaveLength(6)
+    await userEvent.click(canvas.getByRole('button', { name: 'Instructions' }))
+    expect(await canvas.findByRole('heading', { name: 'No instruction file' })).toBeVisible()
   },
 }
 
