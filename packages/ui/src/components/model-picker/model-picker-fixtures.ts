@@ -1,18 +1,13 @@
 import type { PickerAgent } from './model-picker.tsx'
 
 /**
- * The agents a story's picker is drawn on: two installed, with their models, efforts and modes,
- * one not installed. Names stay generic: the catalogue shows how a model is picked, not which.
+ * The agents a story's picker is drawn on: the three this machine has, with their models and
+ * efforts. Names stay generic: the catalogue shows how a model is picked, not which.
  */
 export const AGENTS: readonly PickerAgent[] = [
   {
     id: 'claude',
     name: 'Claude Code',
-    installed: true,
-    modes: [
-      { id: 'default', label: 'Default' },
-      { id: 'plan', label: 'Plan' },
-    ],
     models: [
       { id: 'opus', name: 'Opus', efforts: ['low', 'medium', 'high', 'max'], favourite: true },
       { id: 'sonnet', name: 'Sonnet', efforts: ['low', 'medium', 'high', 'max'], favourite: true },
@@ -24,27 +19,27 @@ export const AGENTS: readonly PickerAgent[] = [
   {
     id: 'codex',
     name: 'Codex',
-    installed: true,
-    modes: [
-      { id: 'default', label: 'Default' },
-      { id: 'read-only', label: 'Read only' },
-    ],
     models: [
       { id: 'gpt-large', name: 'gpt-5', efforts: ['low', 'medium', 'high'] },
       { id: 'gpt-mini', name: 'gpt-5-mini', efforts: ['low', 'medium', 'high'] },
       { id: 'gpt-codex', name: 'gpt-5-codex', efforts: ['low', 'medium', 'high'], favourite: true },
     ],
   },
-  { id: 'opencode', name: 'OpenCode', installed: false, install: 'npm install -g opencode-ai' },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    models: [
+      { id: 'big-pickle', name: 'big-pickle' },
+      { id: 'grok-code', name: 'grok-code-fast' },
+    ],
+  },
 ]
 
-/** A model with a long name, in an agent of its own: what a self-hosted model can be called. */
+/** A model with a long name and a long list: what a self-hosted catalogue can look like. */
 export const LONG_AGENTS: readonly PickerAgent[] = [
   {
     id: 'claude',
     name: 'Claude Code',
-    installed: true,
-    modes: [{ id: 'default', label: 'Default' }],
     models: [
       {
         id: 'long',

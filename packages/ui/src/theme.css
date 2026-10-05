@@ -333,7 +333,7 @@
 
   /* The model picker: as wide as an agent's tabs and a model's name with its marks, and a list
      that keeps its height whatever the search leaves in it, so nothing jumps while typing. */
-  --spacing-picker: 24rem;
+  --spacing-picker: 30rem;
   --spacing-picker-list: 15rem;
   /* The menu of the mention field: a long path and its kind's glyph on one line, and eight
      entries before it scrolls. */

@@ -95,7 +95,6 @@ export {
   type ModelChoice,
   type ModelPickerProps,
   type PickerAgent,
-  type PickerMode,
   type PickerModel,
 } from './components/model-picker/model-picker.tsx'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { AGENTS, LONG_AGENTS } from './model-picker-fixtures.ts'
-import { type ModelChoice, ModelPicker, type PickerAgent } from './model-picker.tsx'
+import { type ModelChoice, ModelPicker } from './model-picker.tsx'
 
 /**
  * The model picker: one popover, the same in the app's settings, a Project's, the check before a
@@ -47,27 +47,30 @@ export const Closed: Story = {
   },
 }
 
-/** Every mark at once: effort as a gauge, a mode that is not the agent's own, Hemera Auto judging. */
+/** Every mark at once: the agent's mark, effort as a gauge, Hemera Auto judging. */
 export const Marks: Story = {
   args: {
-    value: { agent: 'claude', model: 'opus', effort: 'high', mode: 'plan' },
+    value: { agent: 'claude', model: 'opus', effort: 'high' },
     judge: 'auto',
   },
   play: async ({ canvasElement }) => {
     await expect(
       within(canvasElement).getByRole('button', {
-        name: 'Model of the Builder: Claude Code · Opus · effort high · mode Plan · Hemera Auto judges permissions',
+        name: 'Model of the Builder: Claude Code · Opus · effort high · Hemera Auto judges permissions',
       }),
     ).toBeVisible()
   },
 }
 
-/** Open: the agents, the current one's models with the current one checked, its effort and mode. */
+/** Open: the agents as their marks, the current one's models with the current one checked, its effort. */
 export const Open: Story = {
   args: { open: true, value: { agent: 'claude', model: 'opus', effort: 'high' } },
   play: async () => {
     await expect(await body().findByRole('option', { name: /Opus/, selected: true })).toBeVisible()
-    await expect(body().getByRole('radio', { name: 'high' })).toBeChecked()
+    await expect(body().getByRole('slider', { name: 'Effort' })).toHaveAttribute(
+      'aria-valuetext',
+      'High',
+    )
     await waitFor(() =>
       expect(body().getByRole('combobox', { name: 'Search models' })).toHaveFocus(),
     )
@@ -76,7 +79,7 @@ export const Open: Story = {
 
 /**
  * The keyboard path: open, the focus is in the search; type, Down, Enter picks; Tab reaches the
- * effort; Escape closes and the focus is back on the trigger.
+ * effort (after the edit toggle), Up raises it; Escape closes and the focus is back on the trigger.
  */
 export const Picking: Story = {
   render: function Render(args) {
@@ -106,17 +109,17 @@ export const Picking: Story = {
     await userEvent.type(search, 'opus')
     await userEvent.keyboard('{Enter}')
     await expect(args.onChange).toHaveBeenLastCalledWith({ agent: 'claude', model: 'opus' })
+    // Past the edit toggle beside the search, the effort.
     await userEvent.tab()
-    const effort = body().getByRole('radiogroup', { name: 'Effort' })
-    await expect(within(effort).getByRole('radio', { name: 'Default' })).toHaveFocus()
-    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await userEvent.tab()
+    await expect(body().getByRole('slider', { name: 'Effort' })).toHaveFocus()
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}')
     await expect(args.onChange).toHaveBeenLastCalledWith({
       agent: 'claude',
       model: 'opus',
       effort: 'medium',
     })
-    // The first Escape puts away the gauge's tooltip, the second the picker.
-    await userEvent.keyboard('{Escape}{Escape}')
+    await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(trigger).toHaveFocus())
   },
 }
@@ -167,16 +170,6 @@ export const UsesTheDefault: Story = {
   },
 }
 
-/** The agent not installed: its tab says so, and its pane is its install command. */
-export const AgentNotInstalled: Story = {
-  args: { open: true },
-  play: async () => {
-    await userEvent.click(await body().findByRole('tab', { name: 'OpenCode' }))
-    await expect(body().getByText('npm install -g opencode-ai')).toBeVisible()
-    await expect(body().queryByRole('listbox', { name: 'Models of OpenCode' })).toBeNull()
-  },
-}
-
 /** The model chosen is one the agent no longer offers: the trigger says so with its glyph. */
 export const NoLongerOffered: Story = {
   args: { value: { agent: 'codex', model: 'gpt-retired' } },
@@ -214,16 +207,17 @@ export const LongText: Story = {
   },
 }
 
-/** No agent installed at all: every tab is its install command. */
-export const NothingInstalled: Story = {
-  args: {
-    open: true,
-    value: null,
-    fallback: undefined,
-    agents: AGENTS.map((agent): PickerAgent =>
-      agent.installed
-        ? { id: agent.id, name: agent.name, installed: false, install: `install ${agent.id}` }
-        : agent,
+/** No agent on this machine: said once, in the panel's room. */
+export const NoAgent: Story = { args: { open: true, agents: [], value: null } }
+
+/** Set in another box, as in the composer: no frame of its own, and it opens upwards. */
+export const Bare: Story = {
+  args: { bare: true, value: { agent: 'codex', model: 'gpt-codex', effort: 'medium' } },
+  decorators: [
+    (Story) => (
+      <div className="flex min-h-screen items-end p-8">
+        <Story />
+      </div>
     ),
-  },
+  ],
 }
