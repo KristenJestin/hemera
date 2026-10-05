@@ -4,6 +4,7 @@ import { AlertDialog } from '../../components/alert-dialog/alert-dialog.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Checkbox } from '../../components/checkbox/checkbox.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
+import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
@@ -33,7 +34,7 @@ const VALUE = 'flex min-w-0 shrink-0 items-center gap-2 text-sm'
 const MONO = 'min-w-0 truncate font-mono text-xs'
 
 /** A row: what it sets, under it a detail, and its value or control at the end. */
-function Row({
+export function Row({
   name,
   detail,
   children,
@@ -64,7 +65,7 @@ function Section({ title, children }: { title: string; children: ReactNode }): R
 }
 
 /** A state as its mark, its words in the legend. */
-function Mark({ state, label }: { state: MarkState; label: string }): ReactNode {
+export function Mark({ state, label }: { state: MarkState; label: string }): ReactNode {
   return (
     <Legend label={label}>
       <span className="inline-flex" aria-hidden="true">
@@ -165,7 +166,11 @@ export interface AgentRow {
 }
 
 export interface AgentsProps {
+  /** What the section is called: Agents, or Agents on this machine where Hemera is first opened. */
+  title?: string | undefined
   agents: readonly AgentRow[]
+  /** Whether Hemera is still looking for the agents: the rows' own shape. */
+  loading?: boolean | undefined
   checking?: boolean | undefined
   onCheck: () => void
   onUpdate: (agent: string) => void
@@ -219,37 +224,68 @@ function AgentValue({
   )
 }
 
+/** An agent's row on its way: its name, its version, and a command's room. */
+function AgentSkeleton(): ReactNode {
+  return (
+    <div className={ROW} aria-hidden="true" data-row-skeleton="">
+      <span className={NAME}>
+        <Skeleton>Claude Code</Skeleton>
+        <span className={DETAIL}>
+          <Skeleton>2.1.280 · npm</Skeleton>
+        </span>
+      </span>
+      <span className={VALUE}>
+        <Skeleton>
+          <code className={MONO}>claude /login</code>
+        </Skeleton>
+      </span>
+    </div>
+  )
+}
+
 export function AgentsSection({
+  title = 'Agents',
   agents,
+  loading = false,
   checking,
   onCheck,
   onUpdate,
   onCopy,
 }: AgentsProps): ReactNode {
   return (
-    <section aria-label="Agents" className="flex flex-col gap-3">
+    <section aria-label={title} aria-busy={loading} className="flex flex-col gap-3">
       <SectionHead
-        title="Agents"
+        title={title}
         actions={
-          <Button variant="link" state={checking === true ? 'loading' : 'idle'} onClick={onCheck}>
-            Check for updates
-          </Button>
+          loading ? undefined : (
+            <Button variant="link" state={checking === true ? 'loading' : 'idle'} onClick={onCheck}>
+              Check for updates
+            </Button>
+          )
         }
       />
       <Frame>
-        {agents.map((agent) => (
-          <Row
-            key={agent.name}
-            name={agent.name}
-            detail={
-              agent.state.installed
-                ? [agent.state.version, agent.state.installer].filter(Boolean).join(' · ')
-                : 'Not installed'
-            }
-          >
-            <AgentValue agent={agent} onUpdate={onUpdate} onCopy={onCopy} />
-          </Row>
-        ))}
+        {loading && (
+          <>
+            <AgentSkeleton />
+            <AgentSkeleton />
+            <AgentSkeleton />
+          </>
+        )}
+        {!loading &&
+          agents.map((agent) => (
+            <Row
+              key={agent.name}
+              name={agent.name}
+              detail={
+                agent.state.installed
+                  ? [agent.state.version, agent.state.installer].filter(Boolean).join(' · ')
+                  : 'Not installed'
+              }
+            >
+              <AgentValue agent={agent} onUpdate={onUpdate} onCopy={onCopy} />
+            </Row>
+          ))}
       </Frame>
     </section>
   )
