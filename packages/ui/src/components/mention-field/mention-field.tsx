@@ -54,6 +54,8 @@ export interface MentionFieldProps {
   /** What sits inside the box, at its bottom end: the send button. */
   trailing?: ReactNode
   disabled?: boolean | undefined
+  /** Whether it takes the focus when it appears: a new Chat's composer. */
+  autoFocus?: boolean | undefined
 }
 
 const BOX =
@@ -148,6 +150,7 @@ export function MentionField({
   onSubmit,
   trailing,
   disabled,
+  autoFocus,
 }: MentionFieldProps): ReactNode {
   const id = useId()
   const area = useRef<HTMLTextAreaElement>(null)
@@ -244,6 +247,8 @@ export function MentionField({
             aria-activedescendant={open && found.length > 0 ? optionId(current) : undefined}
             placeholder={placeholder}
             disabled={disabled}
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- a new Chat is there to be written in
+            autoFocus={autoFocus}
             className={AREA}
             value={value}
             onChange={(event) => {
@@ -255,7 +260,9 @@ export function MentionField({
             onKeyDown={key}
           />
           {trailing !== undefined && (
-            <div className="flex shrink-0 items-center justify-end gap-1 px-2 pb-2">{trailing}</div>
+            <div className="flex min-h-control-sm shrink-0 items-center justify-end gap-1 px-2 pb-2">
+              {trailing}
+            </div>
           )}
         </div>
       }
