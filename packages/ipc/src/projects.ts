@@ -40,6 +40,8 @@ export const Project = Schema.Struct({
   workspacesRoot: Schema.NullOr(Schema.String),
   /** What its Workspace branches start with, or null for its name as a slug. */
   branchPrefix: Schema.NullOr(Schema.String),
+  /** What the keys of its next missions start with: `ACME` for `ACME-12`. */
+  keyPrefix: Schema.String,
   version: Schema.Number,
   createdAt: Schema.String,
   updatedAt: Schema.String,

@@ -213,6 +213,40 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['runs.output'](request).pipe(closedAs(gone), observed('runs.output', log)),
     'runs.changes': () =>
       engine['runs.changes']().pipe(streamClosedAs(gone), observedStream('runs.changes', log)),
+    // The missions and the needs are the engine's alone: forwarded as they are.
+    'missions.list': (request) =>
+      engine['missions.list'](request).pipe(closedAs(gone), observed('missions.list', log)),
+    'missions.get': (request) =>
+      engine['missions.get'](request).pipe(closedAs(gone), observed('missions.get', log)),
+    'missions.create': (request) =>
+      engine['missions.create'](request).pipe(closedAs(gone), observed('missions.create', log)),
+    'missions.freeze': (request) =>
+      engine['missions.freeze'](request).pipe(closedAs(gone), observed('missions.freeze', log)),
+    'missions.backToPlanning': (request) =>
+      engine['missions.backToPlanning'](request).pipe(
+        closedAs(gone),
+        observed('missions.backToPlanning', log),
+      ),
+    'missions.launch': (request) =>
+      engine['missions.launch'](request).pipe(closedAs(gone), observed('missions.launch', log)),
+    'missions.fix': (request) =>
+      engine['missions.fix'](request).pipe(closedAs(gone), observed('missions.fix', log)),
+    'missions.ship': (request) =>
+      engine['missions.ship'](request).pipe(closedAs(gone), observed('missions.ship', log)),
+    'missions.cancel': (request) =>
+      engine['missions.cancel'](request).pipe(closedAs(gone), observed('missions.cancel', log)),
+    'missions.changes': () =>
+      engine['missions.changes']().pipe(
+        streamClosedAs(gone),
+        observedStream('missions.changes', log),
+      ),
+    'needs.list': () => engine['needs.list']().pipe(closedAs(gone), observed('needs.list', log)),
+    'needs.get': (request) =>
+      engine['needs.get'](request).pipe(closedAs(gone), observed('needs.get', log)),
+    'needs.answer': (request) =>
+      engine['needs.answer'](request).pipe(closedAs(gone), observed('needs.answer', log)),
+    'needs.retry': (request) =>
+      engine['needs.retry'](request).pipe(closedAs(gone), observed('needs.retry', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
     'application.showLog': () => application.showLog.pipe(observed('application.showLog', log)),

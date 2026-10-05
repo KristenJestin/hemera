@@ -10,7 +10,15 @@
  */
 
 import { sql } from 'drizzle-orm'
-import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
 
 /**
  * The Profile itself, in one row: its identifier, the version of Hemera that created it, and the
@@ -71,17 +79,28 @@ export const domainEvents = sqliteTable(
  * under which branch prefix its Workspaces are made, null meaning the default for both. The
  * identifier is internal and never changes; the name changes freely. `version` is what an edit
  * must have read: an edit of an older one is refused.
+ *
+ * `key_prefix` starts the keys of its missions, once in the Profile; it is null only for a Project
+ * made before missions existed, until the engine's start gives it its default. `next_mission` is
+ * the number its next mission takes: numbers are never reused, whatever became of a mission.
  */
-export const projects = sqliteTable('projects', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  mainCheckout: text('main_checkout').notNull(),
-  workspacesRoot: text('workspaces_root'),
-  branchPrefix: text('branch_prefix'),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-  version: integer('version').notNull(),
-})
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    mainCheckout: text('main_checkout').notNull(),
+    workspacesRoot: text('workspaces_root'),
+    branchPrefix: text('branch_prefix'),
+    keyPrefix: text('key_prefix'),
+    nextMission: integer('next_mission').notNull().default(1),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    version: integer('version').notNull(),
+  },
+  // An index rather than a column constraint: adding it leaves the table and its rows in place.
+  (table) => [uniqueIndex('key_prefix_once').on(table.keyPrefix)],
+)
 
 /**
  * The repositories of a Project, each at a path relative to its main checkout, once per Project,
@@ -256,7 +275,7 @@ export const projectCommands = sqliteTable(
  * address it published, and the last of what it printed. `command_id` is kept as it was, even
  * once the command is removed from the catalogue. A free line keeps the line and the folder it
  * was asked with (`asked_line`, `asked_folder`, before its template names were filled), which is
- * what a restart runs again.
+ * what a restart runs again. `mission_id` is the mission it was started for, which a cancel stops.
  */
 export const commandRuns = sqliteTable(
   'command_runs',
@@ -275,6 +294,7 @@ export const commandRuns = sqliteTable(
     askedFolder: text('asked_folder'),
     startedBy: text('started_by').notNull(),
     sessionId: text('session_id'),
+    missionId: text('mission_id'),
     state: text('state').notNull(),
     exitCode: integer('exit_code'),
     url: text('url'),
@@ -303,3 +323,118 @@ export const supervisedProcesses = sqliteTable('supervised_processes', {
   engine: text('engine').notNull(),
   startedAt: text('started_at').notNull(),
 })
+
+/**
+ * The missions: an identifier (a ULID) every internal reference uses, and a key given at creation
+ * that never changes, made of the Project's prefix then and its number in that Project. The idea
+ * it started from is a sentence, a ticket reference, or both; the remote ticket, when there is
+ * one, is its provider, key and address. `round` is the number of the last review round, 0 before
+ * the first. `cleanup` is null while there is nothing to clean up.
+ */
+export const missions = sqliteTable(
+  'missions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    keyPrefix: text('key_prefix').notNull(),
+    keyNumber: integer('key_number').notNull(),
+    title: text('title').notNull(),
+    ideaSentence: text('idea_sentence'),
+    ideaTicket: text('idea_ticket'),
+    type: text('type').notNull(),
+    ticketProvider: text('ticket_provider'),
+    ticketKey: text('ticket_key'),
+    ticketUrl: text('ticket_url'),
+    stage: text('stage').notNull(),
+    round: integer('round').notNull(),
+    cleanup: text('cleanup'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    unique('mission_key_once').on(table.keyPrefix, table.keyNumber),
+    index('missions_by_project').on(table.projectId, table.keyNumber),
+  ],
+)
+
+/**
+ * The marks a mission carries, each once (`identity` says which one it is), as the JSON of its
+ * `Mark`. "Needs you" is never stored: it is derived from the pending needs.
+ */
+export const missionMarks = sqliteTable(
+  'mission_marks',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    identity: text('identity').notNull(),
+    mark: text('mark').notNull(),
+    setAt: text('set_at').notNull(),
+  },
+  (table) => [unique('mark_once_on_mission').on(table.missionId, table.identity)],
+)
+
+/**
+ * The needs: whom each belongs to (the application, a Project, or a mission and optionally one of
+ * its tasks), its kind's fields as the JSON of its `NeedFields`, who asked for it, and its life.
+ * `answer` is the JSON of the answer once there is one, given under `answer_key`, the answer's
+ * idempotency key; `ended_reason` says why it expired or was withdrawn.
+ */
+export const needs = sqliteTable(
+  'needs',
+  {
+    id: text('id').primaryKey(),
+    ownerKind: text('owner_kind').notNull(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    missionId: text('mission_id').references(() => missions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id'),
+    kind: text('kind').notNull(),
+    fields: text('fields').notNull(),
+    /** The engine service that owns it and is handed its answer. */
+    service: text('service').notNull(),
+    /** The role of the agent that asked for it, or null when Hemera did. */
+    requestedBy: text('requested_by'),
+    state: text('state').notNull(),
+    answer: text('answer'),
+    answerKey: text('answer_key'),
+    endedReason: text('ended_reason'),
+    createdAt: text('created_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    index('needs_by_state').on(table.state, table.createdAt),
+    index('needs_by_mission').on(table.missionId, table.state),
+  ],
+)
+
+/**
+ * The answers not yet handed to the service that owns their need: written with the answer, in its
+ * transaction, and marked delivered once the service has it. An engine that stopped in between
+ * hands it over at its next start; nothing else ever answers a need.
+ */
+export const needDeliveries = sqliteTable('need_deliveries', {
+  needId: text('need_id')
+    .primaryKey()
+    .references(() => needs.id, { onDelete: 'cascade' }),
+  deliveredAt: text('delivered_at'),
+})
+
+/**
+ * What a cancel has to stop for a mission, one row per stopper, written with the cancel and
+ * removed once that stopper has stopped what it holds. A stopper that failed keeps its row and its
+ * reason, and is tried again at the next start.
+ */
+export const missionStops = sqliteTable(
+  'mission_stops',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    stopper: text('stopper').notNull(),
+    failedReason: text('failed_reason'),
+  },
+  (table) => [unique('stop_once').on(table.missionId, table.stopper)],
+)

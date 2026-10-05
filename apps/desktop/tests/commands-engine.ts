@@ -32,7 +32,10 @@ export interface Started {
  * One opening of the engine over `data`: the Profile started, the program run, then everything
  * closed, as a quit closes it. Two calls are a restart.
  */
-export function commandsEngine(data: string, parts: Pick<ProfileParts, 'askBeforeRunning'> = {}) {
+export function commandsEngine(
+  data: string,
+  parts: Pick<ProfileParts, 'askBeforeRunning' | 'missions'> = {},
+) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {
     const lines: string[] = []
     return Effect.runPromise(

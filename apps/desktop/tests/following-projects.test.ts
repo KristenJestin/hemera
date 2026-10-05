@@ -17,6 +17,7 @@ const project = (id: string, name: string, version = 1): Project => ({
   mainCheckout: `/work/${id}`,
   workspacesRoot: null,
   branchPrefix: null,
+  keyPrefix: name.toUpperCase().slice(0, 4),
   version,
   createdAt: '2026-10-04T08:00:00.000Z',
   updatedAt: '2026-10-04T08:00:00.000Z',

@@ -108,6 +108,8 @@ export const Run = Schema.Struct({
   startedBy: RunStarter,
   /** The agent's session that started it, when one did. */
   sessionId: Schema.NullOr(Schema.String),
+  /** The mission it was started for, which a cancel of that mission stops. */
+  missionId: Schema.NullOr(Schema.String),
   state: RunState,
   exitCode: Schema.NullOr(Schema.Number),
   /** The address a service published, or null while it has published none. */

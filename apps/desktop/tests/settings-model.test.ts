@@ -78,6 +78,7 @@ const run = (id: string, commandId: string | null, more: Partial<Run> = {}): Run
   folder: '/work/acme',
   startedBy: 'user',
   sessionId: null,
+  missionId: null,
   state: 'running',
   exitCode: null,
   url: null,

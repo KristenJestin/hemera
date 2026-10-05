@@ -1,8 +1,8 @@
 /**
  * What the engine answers: its status (which version and channel, on which data folder, and
  * where the Profile's database stands), every change of it, and the calls on the Profile, its
- * Projects, their repositories, their Workspaces and their commands included; and, from main
- * alone, that the window is shown.
+ * Projects, their repositories, their Workspaces, their commands, their missions and the needs
+ * included; and, from main alone, that the window is shown.
  */
 
 import { EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
@@ -37,6 +37,8 @@ import { beginPreparation } from './preparation.ts'
 import { checkRecipe, getRecipe, saveRecipe } from './recipe.ts'
 import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from './runs.ts'
 import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
+import { createMission, getMission, listMissions, missionChanges, moveMission } from './missions.ts'
+import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
 import {
   createWorkspace,
   getWorkspace,
@@ -144,6 +146,28 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'runs.restart': ({ id }) => use(restartRun(id)).pipe(observed('runs.restart', log)),
     'runs.output': ({ id }) => use(runOutput(id)).pipe(observed('runs.output', log)),
     'runs.changes': () => follow(runChanges).pipe(observedStream('runs.changes', log)),
+    'missions.list': ({ projectId }) =>
+      use(listMissions(projectId)).pipe(observed('missions.list', log)),
+    'missions.get': ({ id }) => use(getMission(id)).pipe(observed('missions.get', log)),
+    'missions.create': (asked) => use(createMission(asked)).pipe(observed('missions.create', log)),
+    // The moves the window asks for are the user's: an agent never reaches them.
+    'missions.freeze': ({ id }) =>
+      use(moveMission(id, 'freeze', 'user')).pipe(observed('missions.freeze', log)),
+    'missions.backToPlanning': ({ id }) =>
+      use(moveMission(id, 'backToPlanning', 'user')).pipe(observed('missions.backToPlanning', log)),
+    'missions.launch': ({ id }) =>
+      use(moveMission(id, 'launch', 'user')).pipe(observed('missions.launch', log)),
+    'missions.fix': ({ id }) =>
+      use(moveMission(id, 'fix', 'user')).pipe(observed('missions.fix', log)),
+    'missions.ship': ({ id }) =>
+      use(moveMission(id, 'ship', 'user')).pipe(observed('missions.ship', log)),
+    'missions.cancel': ({ id }) =>
+      use(moveMission(id, 'cancel', 'user')).pipe(observed('missions.cancel', log)),
+    'missions.changes': () => follow(missionChanges).pipe(observedStream('missions.changes', log)),
+    'needs.list': () => use(listNeeds).pipe(observed('needs.list', log)),
+    'needs.get': ({ id }) => use(getNeed(id)).pipe(observed('needs.get', log)),
+    'needs.answer': (asked) => use(answerNeed(asked)).pipe(observed('needs.answer', log)),
+    'needs.retry': ({ id }) => use(retryNeed(id)).pipe(observed('needs.retry', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   })
 }

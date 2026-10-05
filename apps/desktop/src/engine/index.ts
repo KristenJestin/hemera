@@ -91,7 +91,7 @@ const engine = (
 
     if (probePort !== undefined && headless(process.env)) {
       yield* RpcServer.make(ProbeRpcs, { disableFatalDefects: true }).pipe(
-        Effect.provide(probeHandlers(launch)),
+        Effect.provide(probeHandlers(launch, profile)),
         Effect.provideServiceEffect(RpcServer.Protocol, serveOn(probePort)),
         Effect.forkScoped,
       )
