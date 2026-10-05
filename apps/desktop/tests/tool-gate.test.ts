@@ -557,6 +557,8 @@ describe('Writing only on the version that was read', () => {
       ),
     )
     const now = readFileSync(file, 'utf8')
+    // Which of the two the system chose, for the record of a run on each system.
+    console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
     if (answer.ok) expect(now).toBe('after\n')
     else {
       expect(answer.text).toMatch(/^could not write held\.txt: .*; the file is as it was$/)
