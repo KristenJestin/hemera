@@ -27,6 +27,7 @@ import { openDiagnosticLog, type Log } from '../main/diagnostic.ts'
 import { headless } from '../main/window-options.ts'
 import { agentsLauncher } from './agents.ts'
 import { portHandovers } from './handovers.ts'
+import { RESTORED_REQUESTS } from './permissions/requests.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
 import { secretsRegistry, type SecretsRegistry } from './secrets.ts'
@@ -37,7 +38,7 @@ import { engineHandlers } from './serve.ts'
  * adds it here. And the steps that reconcile a restored Profile with the world, in their order.
  */
 const BACKUP_FOLDERS: ReadonlyArray<string> = []
-const RECONCILIATION_STEPS = [] as const
+const RECONCILIATION_STEPS = [RESTORED_REQUESTS] as const
 
 const readStart = Schema.decodeUnknownOption(Schema.toCodecJson(EngineStart))
 const readHandover = Schema.decodeUnknownOption(AgentsPortHandover)

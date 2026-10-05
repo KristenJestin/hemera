@@ -551,3 +551,102 @@ export const sessionFiles = sqliteTable(
   },
   (table) => [unique('file_once_in_session').on(table.sessionId, table.path)],
 )
+
+/**
+ * The requests of calls that asked the user (#37), one per call, with its permission need. It
+ * belongs to its owner (a mission and its task, or a Project for the Chat), numbered per owner, and
+ * keeps the whole call so that Hemera can act on it once the user answers, across restarts: the
+ * tool, its arguments and the place it was called on (`call`, JSON), what the verdict saw
+ * (`guard`, JSON) and the identity of the action (`identity`, JSON). The arguments are kept as the
+ * agent sent them, since they are what runs; every text shown to someone is masked.
+ *
+ * `state` is `pending` until the answer, `allowed` until Hemera acts, `running` while it does, and
+ * `ended` with its `result` and `result_text` (what the agent is handed). `handed_over_at` is when
+ * the result reached the delivery.
+ */
+export const permissionRequests = sqliteTable(
+  'permission_requests',
+  {
+    id: text('id').primaryKey(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    missionId: text('mission_id').references(() => missions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id'),
+    number: integer('number').notNull(),
+    /** The agent's own key of the call: the same key from the same owner is the same request. */
+    callKey: text('call_key'),
+    /** The session and role that asked, for the record only: the request is the owner's. */
+    sessionId: text('session_id').notNull(),
+    role: text('role').notNull(),
+    tool: text('tool').notNull(),
+    call: text('call').notNull(),
+    guard: text('guard').notNull(),
+    identity: text('identity').notNull(),
+    described: text('described').$type<Masked<string>>().notNull(),
+    hemeraReason: text('hemera_reason').$type<Masked<string>>().notNull(),
+    agentReason: text('agent_reason').$type<Masked<string>>().notNull(),
+    sensitive: integer('sensitive', { mode: 'boolean' }).notNull(),
+    needId: text('need_id').notNull(),
+    state: text('state').notNull(),
+    choice: text('choice'),
+    grantId: text('grant_id'),
+    result: text('result'),
+    resultText: text('result_text').$type<Masked<string>>(),
+    createdAt: text('created_at').notNull(),
+    answeredAt: text('answered_at'),
+    endedAt: text('ended_at'),
+    handedOverAt: text('handed_over_at'),
+  },
+  (table) => [
+    unique('request_number_once').on(table.ownerKind, table.ownerId, table.number),
+    unique('request_key_once').on(table.ownerKind, table.ownerId, table.callKey),
+    index('requests_by_state').on(table.state),
+    index('requests_by_need').on(table.needId),
+  ],
+)
+
+/**
+ * The "Allow for this mission" grants (CT-19): the action's identity (JSON) and the key it is
+ * looked up by, the action in words (masked), who gave it and when, how many calls it allowed, and
+ * its end: `live`, `revoked` by the user, or `fallen` when its identity moved, with the reason.
+ */
+export const missionGrants = sqliteTable(
+  'mission_grants',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    identity: text('identity').notNull(),
+    action: text('action').$type<Masked<string>>().notNull(),
+    givenBy: text('given_by').notNull(),
+    givenAt: text('given_at').notNull(),
+    uses: integer('uses').notNull(),
+    state: text('state').notNull(),
+    endedReason: text('ended_reason'),
+    endedAt: text('ended_at'),
+  },
+  (table) => [index('grants_by_mission').on(table.missionId, table.key, table.state)],
+)
+
+/**
+ * The results of requests queued for their owner until the delivery into a session exists (#40),
+ * which drains it: one row per request, so a result is queued once however often it is handed.
+ */
+export const queuedDeliveries = sqliteTable(
+  'queued_deliveries',
+  {
+    requestId: text('request_id').primaryKey(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    taskId: text('task_id'),
+    number: integer('number').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    queuedAt: text('queued_at').notNull(),
+  },
+  (table) => [index('queued_by_owner').on(table.ownerKind, table.ownerId, table.queuedAt)],
+)

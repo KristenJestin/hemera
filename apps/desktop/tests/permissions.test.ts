@@ -160,9 +160,9 @@ describe('The order of decision: each step, and only steps 1 and 2 refuse', () =
     expect(questions).toEqual(['sensitive place: ~/acme/.env'])
   })
 
-  test('a grant may lift an outside question, never a sensitive place', async () => {
+  test('a grant allows an outside call, never a sensitive place', async () => {
     const liftsAll = Layer.succeed(MissionGrants, {
-      lifts: (_, concerns) => Effect.succeed(concerns),
+      allowing: () => Effect.succeed('g-1'),
     })
     const { answer, questions } = await withBuilder(
       ({ builder }) =>

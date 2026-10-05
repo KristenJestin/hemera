@@ -1,6 +1,6 @@
 /**
  * The ports the order of decision calls and later tickets fill: the remote judge (#38), the
- * grants of "Allow for this mission" (#37), the Project's "who commits" rule (B4, R5), and the
+ * grants of "Allow for this mission" (`grants.ts`), the Project's "who commits" rule (B4, R5), and the
  * folders of the data folder a mission's sessions may reach (CT-17).
  *
  * Their defaults never allow what they cannot judge: no judge (the call asks), no grant, no agent
@@ -31,25 +31,23 @@ export const noJudge = Layer.succeed(Judge, {
   judge: () => Effect.succeed({ verdict: 'unavailable', reason: 'no judge is set up' }),
 })
 
-/** A question an "Allow for this mission" grant may lift; never a sensitive place. */
-export type GrantableConcern =
-  | { readonly kind: 'outside'; readonly place: string }
-  | { readonly kind: 'ask-before-running'; readonly command: string }
-
-/** The grants hook, between the sensitive places and the rest of step 3. */
+/**
+ * The grants hook, after the refusals and the sensitive places: a live "Allow for this mission"
+ * grant of the call's mission for the same action allows it. Its identity is recomputed before
+ * each use, and a grant whose identity moved falls rather than allows.
+ */
 export class MissionGrants extends Context.Service<
   MissionGrants,
   {
-    /** The concerns among those given that a grant of the call's mission lifts. */
-    readonly lifts: (
-      call: JudgedCall,
-      concerns: ReadonlyArray<GrantableConcern>,
-    ) => Effect.Effect<ReadonlyArray<GrantableConcern>>
+    /** The id of the grant that allows the call, counted as used; null when none does. */
+    readonly allowing: (call: JudgedCall) => Effect.Effect<string | null>
   }
 >()('MissionGrants') {}
 
-/** Until #37: no grant, nothing lifted. */
-export const noMissionGrants = Layer.succeed(MissionGrants, { lifts: () => Effect.succeed([]) })
+/** No grant: nothing is allowed by one. */
+export const noMissionGrants = Layer.succeed(MissionGrants, {
+  allowing: () => Effect.succeed(null),
+})
 
 /** The Project's "who commits" rule, as far as agents are concerned. */
 export class CommitRights extends Context.Service<

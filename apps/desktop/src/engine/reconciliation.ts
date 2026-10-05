@@ -39,6 +39,9 @@ export class ReconciliationFailed extends Schema.TaggedError<ReconciliationFaile
   }
 }
 
+/** What a step may stand on: the Profile's database and its events. */
+export type StepServices = Database | DomainEvents
+
 export interface ReconciliationStep {
   readonly name: string
   /** Once per live mission, or once for the Profile. */
@@ -46,11 +49,14 @@ export interface ReconciliationStep {
   /** The states a subject moves through, in the order the world moves through them. */
   readonly states: ReadonlyArray<string>
   /** What Hemera recorded of the subject. */
-  readonly recorded: (subject: string) => Effect.Effect<string, ReconciliationFailed>
+  readonly recorded: (subject: string) => Effect.Effect<string, ReconciliationFailed, StepServices>
   /** What the world shows of it. */
-  readonly observed: (subject: string) => Effect.Effect<string, ReconciliationFailed>
+  readonly observed: (subject: string) => Effect.Effect<string, ReconciliationFailed, StepServices>
   /** Records a state further along than the recorded one. */
-  readonly advance: (subject: string, to: string) => Effect.Effect<void, ReconciliationFailed>
+  readonly advance: (
+    subject: string,
+    to: string,
+  ) => Effect.Effect<void, ReconciliationFailed, StepServices>
 }
 
 /** The steps, in the order they run. */

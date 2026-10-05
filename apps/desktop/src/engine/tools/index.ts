@@ -24,6 +24,8 @@ import { missions, workspaces } from '../storage/schema.ts'
 import { ToolAccess, toolAccessLayer } from './access.ts'
 import { effectfulActionsLayer } from './actions.ts'
 import { ToolGate, toolGateLayer } from './gate.ts'
+import { type Delivery, queuedDelivery } from '../permissions/delivery.ts'
+import { missionGrantsLayer } from '../permissions/grants.ts'
 import { decisionOrderLayer } from '../permissions/order.ts'
 import {
   type CommitRights,
@@ -32,8 +34,13 @@ import {
   missionPlacesLayer,
   noAgentCommits,
   noJudge,
-  noMissionGrants,
 } from '../permissions/ports.ts'
+import {
+  type TaskStates,
+  approvalsLayer,
+  everyTaskHolds,
+  permissionRequestsLayer,
+} from '../permissions/requests.ts'
 import { sensitivePlacesLayer } from '../permissions/sensitive.ts'
 import {
   type GateGuards,
@@ -41,7 +48,6 @@ import {
   type SensitivePlaces,
   type Verdicts,
   noGateGuards,
-  noPermissionRequests,
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
 
@@ -55,8 +61,12 @@ export interface ToolsParts {
   readonly guards?: Layer.Layer<GateGuards>
   /** Step 5 of the order of decision: the remote judge (#38). */
   readonly judge?: Layer.Layer<Judge>
-  /** The grants of "Allow for this mission" (#37). */
+  /** The grants of "Allow for this mission"; the mission's stored grants otherwise. */
   readonly grants?: Layer.Layer<MissionGrants>
+  /** Where the result of an answered request goes (#40); queued for its owner otherwise. */
+  readonly delivery?: Layer.Layer<Delivery>
+  /** Whether a request's task still holds (later tickets); every task does otherwise. */
+  readonly taskStates?: Layer.Layer<TaskStates>
   /** The Project's "who commits" rule (B4, R5). */
   readonly commitRights?: Layer.Layer<CommitRights>
   /** What `~` stands for; the user's home folder otherwise. */
@@ -142,26 +152,29 @@ export const hemeraEndpointLayer = (log: Log) =>
 /** The tools of the engine: the endpoint, over the server, over the gate and its ports. */
 export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) => {
   const home = parts.home ?? homedir()
+  const platform = process.platform
   return hemeraEndpointLayer(log).pipe(
-    Layer.provideMerge(toolServerLayer(log, version)),
+    Layer.provideMerge(
+      Layer.merge(toolServerLayer(log, version), approvalsLayer({ log, home, platform })),
+    ),
     Layer.provideMerge(toolGateLayer({ log, home: parts.home })),
     Layer.provideMerge(
       Layer.mergeAll(
         toolAccessLayer(log),
-        parts.verdicts ?? decisionOrderLayer({ log, home, platform: process.platform }),
-        parts.permissionRequests ?? noPermissionRequests,
+        parts.verdicts ?? decisionOrderLayer({ log, home, platform }),
+        parts.permissionRequests ?? permissionRequestsLayer({ log, home, platform }),
         parts.guards ?? noGateGuards,
         effectfulActionsLayer,
+        parts.delivery ?? queuedDelivery,
+        parts.taskStates ?? everyTaskHolds,
       ),
     ),
     Layer.provideMerge(
       Layer.mergeAll(
         parts.sensitivePlaces ??
-          sensitivePlacesLayer({ home, platform: process.platform }).pipe(
-            Layer.provide(missionPlacesLayer),
-          ),
+          sensitivePlacesLayer({ home, platform }).pipe(Layer.provide(missionPlacesLayer)),
         parts.judge ?? noJudge,
-        parts.grants ?? noMissionGrants,
+        parts.grants ?? missionGrantsLayer({ log, platform }),
         parts.commitRights ?? noAgentCommits,
       ),
     ),

@@ -7,9 +7,9 @@
  *     touches `.git`; for every agent of a mission, a write to a remote or to the history, a forge
  *     CLI's write, a package publication, `git commit` without the right). The only steps that
  *     may refuse;
- *  3. places: a sensitive place always asks; then the grants hook (an "Allow for this mission"
- *     grant may lift the rest of this step); then a path outside the role's place, or words that
- *     do not read, ask, and so does a catalogue command marked "ask before running";
+ *  3. places: a sensitive place always asks; then the grants hook (a live "Allow for this
+ *     mission" grant for the same action allows it); then a path outside the role's place, or
+ *     words that do not read, ask, and so does a catalogue command marked "ask before running";
  *  4. the local allows, only for what is fully understood: a read inside, a plain listing, a
  *     catalogue command of the place that does not go through a shell;
  *  5. the judge, which allows or asks;
@@ -50,7 +50,12 @@ import { mutate } from '../transaction.ts'
 import { resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
-import { CommitRights, type GrantableConcern, Judge, MissionGrants } from './ports.ts'
+import { CommitRights, Judge, MissionGrants } from './ports.ts'
+
+/** A question the step 3 asks about, besides a sensitive place. */
+type Concern =
+  | { readonly kind: 'outside'; readonly place: string }
+  | { readonly kind: 'ask-before-running'; readonly command: string }
 
 /** How long the judge is given before its silence asks. */
 export const JUDGE_LIMIT = Duration.seconds(10)
@@ -70,17 +75,21 @@ export interface OrderSettings {
 /** A verdict with every reason behind it, before it is recorded. */
 interface Decision {
   readonly verdict: 'allow' | 'ask' | 'deny'
-  readonly by: 'rules' | 'judge'
+  readonly by: 'rules' | 'judge' | 'grant'
   readonly reasons: ReadonlyArray<string>
+  /** It asks because of a sensitive place. */
+  readonly sensitive: boolean
+  /** The grant that allowed it. */
+  readonly grantId: string | null
 }
 
 const decided = (
   verdict: Decision['verdict'],
   reasons: ReadonlyArray<string>,
   by: Decision['by'] = 'rules',
-): Decision => ({ verdict, by, reasons })
+): Decision => ({ verdict, by, reasons, sensitive: false, grantId: null })
 
-const userName = (): string => {
+export const userName = (): string => {
   try {
     return userInfo().username
   } catch {
@@ -158,7 +167,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
       const places = (call: JudgedCall) =>
         Effect.gen(function* () {
           const sensitive: string[] = []
-          const concerns: GrantableConcern[] = []
+          const concerns: Concern[] = []
           const writes =
             call.tool !== 'fs_read' && call.tool !== 'fs_list' && call.tool !== 'search'
           const root = call.session.place.root
@@ -206,7 +215,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           return { sensitive: [...new Set(sensitive)], concerns }
         })
 
-      const said = (call: JudgedCall, concern: GrantableConcern): string =>
+      const said = (call: JudgedCall, concern: Concern): string =>
         concern.kind === 'ask-before-running'
           ? `ask before running: ${concern.command}`
           : concernSaid(concern, PLACE_NAMES[call.session.place.kind])
@@ -255,12 +264,16 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           // A sensitive place always asks, and no grant lifts it: every concern is said.
           if (pointed.sensitive.length > 0) {
             const also = pointed.concerns.map((one) => said(call, one))
-            return decided('ask', [...new Set([...also, ...pointed.sensitive])])
+            return {
+              ...decided('ask', [...new Set([...also, ...pointed.sensitive])]),
+              sensitive: true,
+            }
           }
-          const lifted = yield* MissionGrants.use((grants) => grants.lifts(call, pointed.concerns))
-          const left = pointed.concerns.filter((concern) => !lifted.includes(concern))
-          if (left.length > 0)
-            return decided('ask', [...new Set(left.map((one) => said(call, one)))])
+          const grantId = yield* MissionGrants.use((grants) => grants.allowing(call))
+          if (grantId !== null) return { ...decided('allow', [], 'grant'), grantId }
+          if (pointed.concerns.length > 0) {
+            return decided('ask', [...new Set(pointed.concerns.map((one) => said(call, one)))])
+          }
           if (allowedLocally(call)) return decided('allow', [])
           return yield* judged(call)
         })
@@ -287,6 +300,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               target,
               verdict: decision.verdict,
               by: decision.by,
+              grantId: decision.grantId,
               reasons,
               policyVersion: PERMISSION_POLICY.policyVersion,
               level: PERMISSION_POLICY.level,
@@ -316,10 +330,26 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             )
             yield* record(call, decision)
             const reason = decision.reasons.join('; ')
-            return decision.verdict === 'allow'
-              ? ({ verdict: 'allow', by: decision.by } satisfies Verdict)
-              : ({ verdict: decision.verdict, reason, by: decision.by } satisfies Verdict)
+            if (decision.verdict === 'allow') {
+              return { verdict: 'allow', by: decision.by } satisfies Verdict
+            }
+            return decision.verdict === 'ask'
+              ? ({
+                  verdict: 'ask',
+                  reason,
+                  by: decision.by,
+                  sensitive: decision.sensitive,
+                } satisfies Verdict)
+              : ({ verdict: 'deny', reason, by: decision.by } satisfies Verdict)
           }).pipe(Effect.provide(services)),
+        refusal: (call) =>
+          refusals(call).pipe(
+            Effect.map((decision) =>
+              decision?.verdict === 'deny' ? decision.reasons.join('; ') : null,
+            ),
+            Effect.catchCause(() => Effect.succeed('the rules could not read this call')),
+            Effect.provide(services),
+          ),
       }
     }),
   )

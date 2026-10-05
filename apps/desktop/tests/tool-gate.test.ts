@@ -410,6 +410,7 @@ describe('The same call key executes once', () => {
         const release = yield* Deferred.make<void>()
         const asked: string[] = []
         const holding = Layer.succeed(Verdicts, {
+          refusal: () => Effect.succeed(null),
           judge: () =>
             Effect.andThen(
               Effect.sync(() => asked.push('judged')),
