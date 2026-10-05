@@ -106,6 +106,12 @@ import {
   IconSend as TablerSend,
   IconSendFilled as TablerSendFilled,
   IconArrowBackUp as TablerArrowBackUp,
+  IconArrowUp as TablerArrowUp,
+  IconAt as TablerAt,
+  IconShieldCheck as TablerShieldCheck,
+  IconShieldCheckFilled as TablerShieldCheckFilled,
+  IconStar as TablerStar,
+  IconStarFilled as TablerStarFilled,
   type IconProps as TablerIconProps,
   type TablerIcon,
 } from '@tabler/icons-react'
@@ -284,3 +290,11 @@ export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
 export const IconGauge = catalogued(TablerGaugeFilled, TablerGauge, 'IconGauge')
 export const IconSend = catalogued(TablerSendFilled, TablerSend, 'IconSend')
 export const IconArrowBackUp = catalogued(TablerArrowBackUp, TablerArrowBackUp, 'IconArrowBackUp')
+export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
+export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
+export const IconShieldCheck = catalogued(
+  TablerShieldCheckFilled,
+  TablerShieldCheck,
+  'IconShieldCheck',
+)
+export const IconStar = catalogued(TablerStarFilled, TablerStar, 'IconStar')
