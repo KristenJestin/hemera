@@ -23,3 +23,9 @@ export const MENTIONABLES: readonly Mentionable[] = [
       'web/src/features/billing/invoices/components/export-dialog/steps/choose-columns-and-format.tsx',
   },
 ]
+
+/** What a searched source finds: files the field was not handed up front. */
+export const FOUND_FILES: readonly Mentionable[] = [
+  { kind: 'file', id: 'r1', label: 'api/src/reports/monthly-report.ts' },
+  { kind: 'file', id: 'r2', label: 'web/src/pages/reports/report-list.tsx' },
+]

@@ -88,6 +88,7 @@ export {
   type Mentionable,
   type MentionFieldProps,
   type MentionKind,
+  type MentionRef,
 } from './components/mention-field/mention-field.tsx'
 export {
   choiceWords,

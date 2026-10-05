@@ -30,14 +30,34 @@ export interface Mentionable {
   recent?: number | undefined
 }
 
+/** A mention as the field keeps it beside the text: what it is, which one, and its label. */
+export interface MentionRef {
+  kind: MentionKind
+  id: string
+  label: string
+}
+
 export interface MentionFieldProps {
   /** What the field is called. */
   label: string
   placeholder?: string | undefined
   /** The text, a mention written `@` and its label. */
   value: string
-  onValueChange: (value: string) => void
+  /** The text, and the mentions it holds in their order, as structured data. */
+  onValueChange: (value: string, mentions: readonly MentionRef[]) => void
+  /**
+   * The mentions the value holds, when they are known: each is drawn as its badge even when no
+   * source lists it any longer.
+   */
+  mentions?: readonly MentionRef[] | undefined
+  /** What can be mentioned without asking: the recent ones carry their rank. */
   mentionables: readonly Mentionable[]
+  /**
+   * A source searched as one types (the files of a large checkout, say): what it finds is ranked
+   * with `mentionables`. Rows of a mention's shape stand in while it answers, and a failure is
+   * said in the menu, in its own words.
+   */
+  search?: ((query: string, signal: AbortSignal) => Promise<readonly Mentionable[]>) | undefined
   /**
    * What Enter and the Send in the box's corner do; left out, Enter starts a new line and there
    * is no Send.
@@ -168,7 +188,7 @@ export function FieldBox({
   children,
 }: FieldBoxProps): ReactNode {
   return (
-    <div className={BOX} data-disabled={disabled ? '' : undefined}>
+    <div className={BOX} data-field-box="" data-disabled={disabled ? '' : undefined}>
       {children}
       {(leading !== undefined || trailing !== undefined || submit !== undefined) && (
         <div className={FOOT}>

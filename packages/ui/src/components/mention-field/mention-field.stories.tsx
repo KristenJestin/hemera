@@ -3,8 +3,13 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { badgesOffBaseline, keepsItsLines } from './badge-baseline.ts'
-import { MENTIONABLES } from './mention-field-fixtures.ts'
-import { loadMentionEditor, MentionField, MentionFieldSkeleton } from './mention-field.tsx'
+import { FOUND_FILES, MENTIONABLES } from './mention-field-fixtures.ts'
+import {
+  loadMentionEditor,
+  type Mentionable,
+  MentionField,
+  MentionFieldSkeleton,
+} from './mention-field.tsx'
 
 /**
  * The mention field: the Chat's composer, Discuss, an answer, a Review remark, the first field of
@@ -32,9 +37,9 @@ const meta = {
       <MentionField
         {...args}
         value={value}
-        onValueChange={(next) => {
+        onValueChange={(next, mentions) => {
           setValue(next)
-          args.onValueChange(next)
+          args.onValueChange(next, mentions)
         }}
       />
     )
@@ -79,11 +84,17 @@ export const Empty: Story = {}
 /** `@` alone: the recent ones first, then the rest. */
 export const Menu: Story = {
   play: async ({ canvasElement }) => {
+    const box = field(canvasElement).closest('[data-field-box]')
+    const height = box?.getBoundingClientRect().height
     await typeIn(field(canvasElement), 'Look at @')
     const options = await menu().findAllByRole('option', {}, LOADED)
     await expect(options[0]).toHaveTextContent('server.ts')
     await expect(options[1]).toHaveTextContent('ACME-12')
     await expect(options[2]).toHaveTextContent('test')
+    await expect(box?.getBoundingClientRect().height).toBe(height)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(menu().queryByRole('listbox')).toBeNull())
+    await expect(box?.getBoundingClientRect().height).toBe(height)
   },
 }
 
@@ -95,6 +106,8 @@ export const Search: Story = {
     await expect(first).toHaveTextContent('server.ts')
   },
 }
+
+const INVOICES = { kind: 'file', id: 'f3', label: 'web/src/pages/invoices/list.tsx' }
 
 /**
  * The keyboard path: Down and Enter put the mention in the text; Tab does the same; Escape puts
@@ -108,6 +121,7 @@ export const Mentioning: Story = {
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onValueChange).toHaveBeenLastCalledWith(
       'See @web/src/pages/invoices/list.tsx ',
+      [INVOICES],
     )
     await expect(box).toHaveFocus()
     await typeIn(null, 'and @lint')
@@ -115,6 +129,7 @@ export const Mentioning: Story = {
     await userEvent.keyboard('{Tab}')
     await expect(args.onValueChange).toHaveBeenLastCalledWith(
       'See @web/src/pages/invoices/list.tsx and @lint ',
+      [INVOICES, { kind: 'command', id: 'c2', label: 'lint' }],
     )
     await expect(box).toHaveFocus()
     await typeIn(null, ' @ACME')
@@ -247,5 +262,76 @@ export const Loading: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Send' })).toBeDisabled()
+  },
+}
+
+/** Backspace after a mention takes it away whole: no `@` left behind, no menu reopened. */
+export const DeletingAMention: Story = {
+  play: async ({ args, canvasElement }) => {
+    await typeIn(field(canvasElement), 'Look at @ACME-12')
+    await menu().findByRole('option', { name: /ACME-12/ }, LOADED)
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onValueChange).toHaveBeenLastCalledWith('Look at @ACME-12 ', [
+      { kind: 'mission', id: 'm1', label: 'ACME-12' },
+    ])
+    await userEvent.keyboard('{Backspace}{Backspace}')
+    await expect(args.onValueChange).toHaveBeenLastCalledWith('Look at ', [])
+    await expect(menu().queryByRole('listbox')).toBeNull()
+  },
+}
+
+/**
+ * The mentions a value holds, handed in beside it: a mention no source lists any longer is still
+ * drawn as its badge.
+ */
+export const KnownMentions: Story = {
+  args: {
+    value: 'Compare @api/src/legacy/billing.ts with @ACME-12',
+    mentions: [{ kind: 'file', id: 'f9', label: 'api/src/legacy/billing.ts' }],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'api/src/legacy/billing.ts' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'ACME-12' })).toBeVisible()
+  },
+}
+
+/** What a source finds once asked, a moment later. */
+const searchFiles = (query: string): Promise<readonly Mentionable[]> =>
+  new Promise((resolve) =>
+    setTimeout(
+      () => resolve(FOUND_FILES.filter((one) => one.label.includes(query.toLowerCase()))),
+      400,
+    ),
+  )
+
+/**
+ * A source searched as one types: skeleton rows of a mention's shape while it answers, then what
+ * it found among the rest, ranked together; the field does not move.
+ */
+export const SearchingASource: Story = {
+  args: { search: searchFiles },
+  play: async ({ canvasElement }) => {
+    const box = field(canvasElement).closest('[data-field-box]')
+    const height = box?.getBoundingClientRect().height
+    await typeIn(field(canvasElement), '@report')
+    await menu().findByRole('listbox', { name: 'Mentions', busy: true }, LOADED)
+    await expect(
+      await menu().findByRole('option', { name: /monthly-report\.ts/ }, LOADED),
+    ).toBeVisible()
+    await expect(box?.getBoundingClientRect().height).toBe(height)
+  },
+}
+
+/** A source that fails: said in words in the menu. */
+export const SearchFailed: Story = {
+  args: {
+    search: () => Promise.reject(new Error('The file list could not be read.')),
+  },
+  play: async ({ canvasElement }) => {
+    await typeIn(field(canvasElement), '@zzzz')
+    await expect(
+      await menu().findByText('The file list could not be read.', {}, LOADED),
+    ).toBeVisible()
   },
 }
