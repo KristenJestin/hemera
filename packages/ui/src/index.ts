@@ -79,6 +79,8 @@ export {
 } from './blocks/chat/chat-thread.tsx'
 export { ChatPage, type ChatPageProps, type ChatTurn } from './surfaces/chat/chat-page.tsx'
 export {
+  kindOf,
+  MentionBadge,
   MentionField,
   mentionsFor,
   type Mentionable,

@@ -52,13 +52,32 @@ const field = (canvasElement: HTMLElement) =>
   within(canvasElement).getByRole('textbox', { name: 'Message' })
 const menu = () => within(document.body)
 
+/** The menu follows typing a key at a time: on a busy runner it is given the time that takes. */
+const LOADED = { timeout: 5000 }
+
+/**
+ * Typing as a hand types, a key at a time: the editor reads each key's change before the next
+ * one, which the simulated keyboard otherwise outruns in an editable area.
+ */
+const typeIn = async (box: HTMLElement | null, text: string) => {
+  if (box !== null) await userEvent.click(box)
+  // One key after the other, never at once: the order is the point.
+  await [...text].reduce<Promise<void>>(
+    (before, key) =>
+      before.then(async () => {
+        await userEvent.keyboard(key)
+      }),
+    Promise.resolve(),
+  )
+}
+
 export const Empty: Story = {}
 
 /** `@` alone: the recent ones first, then the rest. */
 export const Menu: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.type(field(canvasElement), 'Look at @')
-    const options = await menu().findAllByRole('option')
+    await typeIn(field(canvasElement), 'Look at @')
+    const options = await menu().findAllByRole('option', {}, LOADED)
     await expect(options[0]).toHaveTextContent('server.ts')
     await expect(options[1]).toHaveTextContent('ACME-12')
     await expect(options[2]).toHaveTextContent('test')
@@ -68,8 +87,8 @@ export const Menu: Story = {
 /** A fuzzy search: `srvts` finds `api/src/server.ts`. */
 export const Search: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.type(field(canvasElement), '@srvts')
-    const [first] = await menu().findAllByRole('option')
+    await typeIn(field(canvasElement), '@srvts')
+    const [first] = await menu().findAllByRole('option', {}, LOADED)
     await expect(first).toHaveTextContent('server.ts')
   },
 }
@@ -81,22 +100,22 @@ export const Search: Story = {
 export const Mentioning: Story = {
   play: async ({ args, canvasElement }) => {
     const box = field(canvasElement)
-    await userEvent.type(box, 'See @inv')
-    await menu().findAllByRole('option')
+    await typeIn(box, 'See @inv')
+    await menu().findAllByRole('option', {}, LOADED)
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onValueChange).toHaveBeenLastCalledWith(
       'See @web/src/pages/invoices/list.tsx ',
     )
     await expect(box).toHaveFocus()
-    await userEvent.keyboard('and @lint')
-    await menu().findByRole('option', { name: /lint/ })
+    await typeIn(null, 'and @lint')
+    await menu().findByRole('option', { name: /lint/ }, LOADED)
     await userEvent.keyboard('{Tab}')
     await expect(args.onValueChange).toHaveBeenLastCalledWith(
       'See @web/src/pages/invoices/list.tsx and @lint ',
     )
     await expect(box).toHaveFocus()
-    await userEvent.keyboard(' @ACME')
-    await menu().findAllByRole('option')
+    await typeIn(null, ' @ACME')
+    await menu().findAllByRole('option', {}, LOADED)
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(menu().queryByRole('listbox')).toBeNull())
     await expect(box).toHaveFocus()
@@ -106,26 +125,38 @@ export const Mentioning: Story = {
 /** Missions and commands: each with its glyph and what it is in a quiet line. */
 export const MissionsAndCommands: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.type(field(canvasElement), '@acme')
-    await expect(await menu().findByRole('option', { name: /ACME-14/ })).toBeVisible()
+    await typeIn(field(canvasElement), '@acme')
+    await expect(await menu().findByRole('option', { name: /ACME-14/ }, LOADED)).toBeVisible()
   },
 }
 
 /** Nothing matches: said in the menu, which stays where it opened. */
 export const NoMatch: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.type(field(canvasElement), '@zzzz')
-    await expect(await menu().findByText('Nothing matches “zzzz”')).toBeVisible()
+    await typeIn(field(canvasElement), '@zzzz')
+    await expect(await menu().findByText('Nothing matches “zzzz”', {}, LOADED)).toBeVisible()
   },
 }
 
 /** A long path: its file name whole, its folder cut. */
 export const LongPath: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.type(field(canvasElement), '@columns')
+    await typeIn(field(canvasElement), '@columns')
     await expect(
-      await menu().findByRole('option', { name: /choose-columns-and-format\.tsx/ }),
+      await menu().findByRole('option', { name: /choose-columns-and-format\.tsx/ }, LOADED),
     ).toBeVisible()
+  },
+}
+
+/** Mentions already written: badges, a file by its name, its path in the tooltip. */
+export const Badges: Story = {
+  args: { value: 'Compare @api/src/server.ts with @ACME-12 then run @test' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const file = canvas.getByRole('button', { name: 'api/src/server.ts' })
+    await expect(file).toHaveTextContent('server.ts')
+    await expect(file).not.toHaveTextContent('api/src')
+    await expect(canvas.getByRole('button', { name: 'ACME-12' })).toBeVisible()
   },
 }
 
@@ -139,9 +170,11 @@ export const LongText: Story = {
     ).join('\n'),
   },
   play: async ({ canvasElement }) => {
-    const box = field(canvasElement)
-    const height = box.getBoundingClientRect().height
-    await userEvent.type(box, '{Enter}One more line')
-    await expect(box.getBoundingClientRect().height).toBe(height)
+    const box = field(canvasElement).parentElement
+    const height = box?.getBoundingClientRect().height
+    await userEvent.click(field(canvasElement))
+    await userEvent.keyboard('{Enter}')
+    await typeIn(null, 'One more line')
+    await expect(box?.getBoundingClientRect().height).toBe(height)
   },
 }

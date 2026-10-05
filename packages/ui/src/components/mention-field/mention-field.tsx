@@ -1,32 +1,42 @@
-import { cn } from 'cn'
+import type { JSONContent } from '@tiptap/core'
+import { Document } from '@tiptap/extension-document'
+import { Mention } from '@tiptap/extension-mention'
+import { Paragraph } from '@tiptap/extension-paragraph'
+import { Text } from '@tiptap/extension-text'
+import { Placeholder } from '@tiptap/extensions'
 import {
-  type KeyboardEvent,
-  type ReactNode,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+  EditorContent,
+  type NodeViewProps,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+  useEditor,
+} from '@tiptap/react'
+import { exitSuggestion, type SuggestionProps } from '@tiptap/suggestion'
+import { cn } from 'cn'
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconFileText, IconListCheck, IconTerminal } from '../../icons.ts'
 import { Popover } from '../popover/popover.tsx'
-import { caretAnchor } from './caret.ts'
+import { Tooltip } from '../tooltip/tooltip.tsx'
 import { fuzzyScore } from './fuzzy.ts'
 
 /**
  * The mention field: where a message is written — the Chat's composer, Discuss, an answer, a
- * Review remark, the first field of a mission.
+ * Review remark, the first field of a mission. On Tiptap, which owns the editing; this file owns
+ * what it looks like and what it offers.
  *
  * - It never changes height: its box is four lines, and a longer text scrolls inside it.
- * - `@` at the start of a word opens a menu hung at that `@`, and it stays there while the rest
- *   is typed. It lists the files of the main checkout, the missions and the commands, the recent
- *   ones first; what follows the `@` searches them, fuzzily.
- * - Up and Down walk the menu, Enter or Tab put the mention in the text, Escape puts the menu
- *   away. The caret never leaves the field: the menu is a list beside what is typed, not a place
- *   to go.
+ * - `@` at the start of a word opens a menu at the caret: the files of the main checkout, the
+ *   missions and the commands, the recent first; what follows the `@` searches them, fuzzily.
+ *   Up and Down walk it, Enter or Tab write the mention, Escape puts the menu away. The caret
+ *   never leaves the field.
+ * - A mention is a badge: a file's name alone (its path in the tooltip), a mission's key, a
+ *   command's name. Backspace takes it away whole. In the text the field hands back, it is
+ *   `@` and the whole path.
  * - Without a menu, Enter sends when the field has somewhere to send to, and Shift+Enter starts
  *   a new line.
+ * - A bar at the foot of the box holds what the caller sets there: the composer's model picker
+ *   at its start, Send or Stop at its end.
  */
 
 export type MentionKind = 'file' | 'mission' | 'command'
@@ -34,7 +44,7 @@ export type MentionKind = 'file' | 'mission' | 'command'
 export interface Mentionable {
   kind: MentionKind
   id: string
-  /** What the mention writes after its `@`: a path, a mission's key, a command's name. */
+  /** What the mention stands for: a path, a mission's key, a command's name. */
   label: string
   /** What it is, in a quiet line: a mission's title, a command's line. */
   detail?: string | undefined
@@ -46,12 +56,15 @@ export interface MentionFieldProps {
   /** What the field is called. */
   label: string
   placeholder?: string | undefined
+  /** The text, a mention written `@` and its label. */
   value: string
   onValueChange: (value: string) => void
   mentionables: readonly Mentionable[]
   /** What Enter does without a menu open; left out, Enter starts a new line. */
   onSubmit?: (() => void) | undefined
-  /** What sits inside the box, at its bottom end: the send button. */
+  /** What stands at the start of the box's foot: the composer's model picker. */
+  leading?: ReactNode
+  /** What stands at its end: Send, Stop. */
   trailing?: ReactNode
   disabled?: boolean | undefined
   /** Whether it takes the focus when it appears: a new Chat's composer. */
@@ -59,13 +72,16 @@ export interface MentionFieldProps {
 }
 
 const BOX =
-  'flex h-composer w-full min-w-0 flex-col rounded-lg border border-input bg-input-fill focus-within:border-ring has-disabled:opacity-50'
-const AREA =
-  'min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent px-3 pt-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+  'flex h-composer w-full min-w-0 flex-col rounded-lg border border-input bg-input-fill focus-within:border-ring has-data-disabled:opacity-50'
+const AREA = 'min-h-0 w-full flex-1 overflow-y-auto px-3 pt-2.5 text-sm text-foreground'
+const EDITABLE = 'min-h-full outline-none whitespace-pre-wrap break-words'
+const FOOT = 'flex min-h-control-sm shrink-0 items-center gap-1 px-2 pb-2'
 const LIST = 'flex max-h-mention-list w-mention flex-col gap-0.5 overflow-y-auto'
 const OPTION =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md px-2 text-sm select-none hover-motion data-[active=true]:tinted'
 const QUIET = 'min-w-0 truncate text-xs text-muted-foreground'
+const BADGE =
+  'mx-0.5 inline-flex items-center gap-1 rounded-md bg-primary-muted px-1.5 align-baseline text-xs font-medium text-primary-muted-foreground outline-none'
 
 /** How many entries the menu lists at most. */
 const SHOWN = 50
@@ -76,15 +92,11 @@ const GLYPHS: Record<MentionKind, ReactNode> = {
   command: <IconTerminal size="sm" />,
 }
 
-/** The `@` being typed before the caret, and what follows it. */
-function typing(text: string, caret: number): { start: number; query: string } | null {
-  const found = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret))
-  if (found === null) return null
-  const query = found[1] ?? ''
-  return { start: caret - query.length - 1, query }
-}
-
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
+
+/** What a badge shows: a file's name, anything else whole. */
+const shortName = (kind: MentionKind, label: string): string =>
+  kind === 'file' ? baseName(label) : label
 
 /** A search in a path counts most in its file name, then in the path, then in the detail. */
 function scoreOf(item: Mentionable, query: string): number | null {
@@ -121,24 +133,78 @@ export function mentionsFor(
     .slice(0, SHOWN)
 }
 
-function Entry({ item }: { item: Mentionable }): ReactNode {
-  if (item.kind === 'file') {
-    const slash = item.label.lastIndexOf('/')
-    return (
-      <>
-        <span className="shrink-0">{baseName(item.label)}</span>
-        {slash > 0 && <span className={QUIET}>{item.label.slice(0, slash)}</span>}
-      </>
-    )
-  }
+const KINDS: readonly MentionKind[] = ['file', 'mission', 'command']
+
+/** A mention as a badge: its glyph and its short name, its whole label in the tooltip. */
+export function MentionBadge({ kind, label }: { kind: MentionKind; label: string }): ReactNode {
   return (
-    <>
-      <span className={cn('shrink-0', item.kind === 'command' && 'font-mono text-xs')}>
-        {item.label}
-      </span>
-      {item.detail !== undefined && <span className={QUIET}>{item.detail}</span>}
-    </>
+    <Tooltip label={label}>
+      <button type="button" tabIndex={-1} aria-label={label} className={BADGE}>
+        <span className="flex" aria-hidden="true">
+          {GLYPHS[kind]}
+        </span>
+        {shortName(kind, label)}
+      </button>
+    </Tooltip>
   )
+}
+
+/** What a written `@label` most likely is, with nothing else to go on: a key, a path, a name. */
+export function kindOf(label: string): MentionKind {
+  if (/^[A-Z][A-Z0-9]*-\d+$/.test(label)) return 'mission'
+  return label.includes('/') || label.includes('.') ? 'file' : 'command'
+}
+
+/** A mention in the field: its badge. */
+function Badge({ node }: NodeViewProps): ReactNode {
+  const kind = KINDS.find((one) => one === node.attrs['kind']) ?? 'file'
+  return (
+    <NodeViewWrapper as="span" className="inline">
+      <MentionBadge kind={kind} label={String(node.attrs['label'] ?? '')} />
+    </NodeViewWrapper>
+  )
+}
+
+/** The text a document stands for: a mention as `@` and its label, a paragraph as a line. */
+function textOf(document: JSONContent): string {
+  return (document.content ?? [])
+    .map((paragraph) =>
+      (paragraph.content ?? [])
+        .map((part) =>
+          part.type === 'mention' ? `@${String(part.attrs?.['label'] ?? '')}` : (part.text ?? ''),
+        )
+        .join(''),
+    )
+    .join('\n')
+}
+
+/** The document a text stands for: an `@` followed by a known label is that mention's badge. */
+function documentOf(text: string, mentionables: readonly Mentionable[]): JSONContent {
+  const known = new Map(mentionables.map((item) => [item.label, item]))
+  return {
+    type: 'doc',
+    content: text.split('\n').map((line) => {
+      const parts = line
+        .split(/(@\S+)/)
+        .filter((part) => part !== '')
+        .map((part): JSONContent => {
+          const item = part.startsWith('@') ? known.get(part.slice(1)) : undefined
+          return item === undefined
+            ? { type: 'text', text: part }
+            : { type: 'mention', attrs: { id: item.id, label: item.label, kind: item.kind } }
+        })
+      return parts.length === 0 ? { type: 'paragraph' } : { type: 'paragraph', content: parts }
+    }),
+  }
+}
+
+/** What the suggestion hands the menu while it is open. */
+interface Menu {
+  query: string
+  items: readonly Mentionable[]
+  pick: (item: Mentionable) => void
+  /** What Tiptap draws around the `@` and its query: what the menu hangs off. */
+  at: Element | null
 }
 
 export function MentionField({
@@ -148,81 +214,145 @@ export function MentionField({
   onValueChange,
   mentionables,
   onSubmit,
+  leading,
   trailing,
-  disabled,
-  autoFocus,
+  disabled = false,
+  autoFocus = false,
 }: MentionFieldProps): ReactNode {
   const id = useId()
-  const area = useRef<HTMLTextAreaElement>(null)
-  const [caret, setCaret] = useState(value.length)
+  const [menu, setMenu] = useState<Menu | null>(null)
   const [active, setActive] = useState(0)
-  /** The `@` whose menu was put away with Escape: it stays away until another one is typed. */
-  const [dismissed, setDismissed] = useState<number | null>(null)
-  /** Where the caret goes once a mention is written. */
-  const placeCaret = useRef<number | null>(null)
+  /** What the editor reads at the moment it reads it: the props and state of this render. */
+  const latest = useRef({ mentionables, onSubmit, onValueChange, menu, active })
+  latest.current = { mentionables, onSubmit, onValueChange, menu, active }
+  /** The text this field last handed back, so a value it wrote is not written back into it. */
+  const handed = useRef(value)
 
-  const mention = typing(value, caret)
-  const open = mention !== null && mention.start !== dismissed && disabled !== true
-  const found = useMemo(
-    () => (mention === null ? [] : mentionsFor(mentionables, mention.query)),
-    [mentionables, mention?.query],
-  )
-  const current = Math.min(active, Math.max(0, found.length - 1))
+  const current = Math.min(active, Math.max(0, (menu?.items.length ?? 1) - 1))
   const optionId = (at: number) => `${id}-mention-${String(at)}`
+
+  const editor = useEditor({
+    immediatelyRender: true,
+    editable: !disabled,
+    autofocus: autoFocus ? 'end' : false,
+    content: documentOf(value, mentionables),
+    editorProps: {
+      attributes: {
+        role: 'textbox',
+        'aria-multiline': 'true',
+        'aria-label': label,
+        'aria-autocomplete': 'list',
+        class: EDITABLE,
+      },
+      handleKeyDown: (_view, event) => {
+        const { menu: open, onSubmit: submit } = latest.current
+        if (open !== null || event.key !== 'Enter') return false
+        if (event.shiftKey || submit === undefined) return false
+        event.preventDefault()
+        submit()
+        return true
+      },
+    },
+    extensions: [
+      Document,
+      Paragraph,
+      Text,
+      Placeholder.configure({ placeholder: placeholder ?? '' }),
+      Mention.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            kind: { default: 'file' },
+          }
+        },
+        addNodeView() {
+          return ReactNodeViewRenderer(Badge, { as: 'span' })
+        },
+      }).configure({
+        renderText: ({ node }) => `@${String(node.attrs['label'] ?? '')}`,
+        suggestion: {
+          char: '@',
+          items: ({ query }) => [...mentionsFor(latest.current.mentionables, query)],
+          command: ({ editor: on, range, props }) => {
+            on.chain()
+              .focus()
+              .insertContentAt(range, [
+                { type: 'mention', attrs: props },
+                { type: 'text', text: ' ' },
+              ])
+              .run()
+          },
+          render: () => {
+            const show = (props: SuggestionProps<Mentionable>) => {
+              setMenu({
+                query: props.query,
+                items: props.items,
+                pick: (item) => props.command({ id: item.id, label: item.label, kind: item.kind }),
+                at: props.decorationNode,
+              })
+            }
+            return {
+              onStart: (props) => {
+                setActive(0)
+                show(props)
+              },
+              onUpdate: (props) => {
+                setActive(0)
+                show(props)
+              },
+              onExit: () => setMenu(null),
+              onKeyDown: ({ event, view }) => {
+                const { menu: open, active: at } = latest.current
+                if (open === null) return false
+                const last = Math.max(0, open.items.length - 1)
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  const delta = event.key === 'ArrowDown' ? 1 : -1
+                  setActive(Math.min(Math.max(Math.min(at, last) + delta, 0), last))
+                  return true
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  const item = open.items[Math.min(at, last)]
+                  if (item === undefined) return false
+                  open.pick(item)
+                  return true
+                }
+                if (event.key === 'Escape') {
+                  exitSuggestion(view)
+                  setMenu(null)
+                  return true
+                }
+                return false
+              },
+            }
+          },
+        },
+      }),
+    ],
+    onUpdate: ({ editor: on }) => {
+      const text = textOf(on.getJSON())
+      handed.current = text
+      latest.current.onValueChange(text)
+    },
+  })
+
+  // A value set from outside — the composer emptied once a message is sent — is drawn anew.
+  useEffect(() => {
+    if (value === handed.current) return
+    handed.current = value
+    editor.commands.setContent(documentOf(value, mentionables), { emitUpdate: false })
+  }, [editor, value, mentionables])
+
+  useEffect(() => {
+    editor.setEditable(!disabled)
+  }, [editor, disabled])
 
   // The entry walked to is kept in sight in a list that scrolls.
   useLayoutEffect(() => {
-    if (!open) return
+    if (menu === null) return
     document.getElementById(optionId(current))?.scrollIntoView({ block: 'nearest' })
-  }, [open, current])
+  }, [menu, current])
 
-  useLayoutEffect(() => {
-    if (placeCaret.current === null || area.current === null) return
-    area.current.setSelectionRange(placeCaret.current, placeCaret.current)
-    placeCaret.current = null
-  })
-
-  const follow = (node: HTMLTextAreaElement) => {
-    setCaret(node.selectionStart)
-  }
-
-  const write = (item: Mentionable | undefined) => {
-    if (item === undefined || mention === null) return
-    const before = value.slice(0, mention.start)
-    const written = `@${item.label} `
-    placeCaret.current = before.length + written.length
-    setCaret(placeCaret.current)
-    setActive(0)
-    onValueChange(before + written + value.slice(caret))
-  }
-
-  const key = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (open) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault()
-        const delta = event.key === 'ArrowDown' ? 1 : -1
-        setActive(Math.min(Math.max(current + delta, 0), Math.max(0, found.length - 1)))
-        return
-      }
-      if ((event.key === 'Enter' || event.key === 'Tab') && found.length > 0) {
-        event.preventDefault()
-        write(found[current])
-        return
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        setDismissed(mention.start)
-        return
-      }
-    }
-    if (event.key === 'Enter' && !event.shiftKey && onSubmit !== undefined) {
-      event.preventDefault()
-      onSubmit()
-    }
-  }
-
-  const anchor = useMemo(() => caretAnchor(area, mention?.start ?? null), [mention?.start])
+  const open = menu !== null
 
   return (
     <Popover
@@ -231,45 +361,30 @@ export function MentionField({
       keepFocus
       side="top"
       align="start"
-      at={anchor}
+      at={menu?.at ?? undefined}
       open={open}
       onOpenChange={(next) => {
-        if (!next && mention !== null) setDismissed(mention.start)
+        if (!next) {
+          exitSuggestion(editor.view)
+          setMenu(null)
+        }
       }}
       className="w-full"
       trigger={
-        <div className={BOX}>
-          <textarea
-            ref={area}
-            aria-label={label}
-            aria-controls={open ? `${id}-mentions` : undefined}
-            aria-autocomplete="list"
-            aria-activedescendant={open && found.length > 0 ? optionId(current) : undefined}
-            placeholder={placeholder}
-            disabled={disabled}
-            // oxlint-disable-next-line jsx-a11y/no-autofocus -- a new Chat is there to be written in
-            autoFocus={autoFocus}
-            className={AREA}
-            value={value}
-            onChange={(event) => {
-              follow(event.target)
-              setActive(0)
-              onValueChange(event.target.value)
-            }}
-            onSelect={(event) => follow(event.currentTarget)}
-            onKeyDown={key}
-          />
-          {trailing !== undefined && (
-            <div className="flex min-h-control-sm shrink-0 items-center justify-end gap-1 px-2 pb-2">
-              {trailing}
+        <div className={BOX} data-disabled={disabled ? '' : undefined}>
+          <EditorContent editor={editor} className={AREA} />
+          {(leading !== undefined || trailing !== undefined) && (
+            <div className={FOOT}>
+              {leading}
+              <span className="ml-auto flex items-center gap-1">{trailing}</span>
             </div>
           )}
         </div>
       }
     >
-      {found.length === 0 ? (
+      {menu === null || menu.items.length === 0 ? (
         <p id={`${id}-mentions`} className="w-mention px-2 py-1.5 text-sm text-muted-foreground">
-          Nothing matches “{mention?.query}”
+          Nothing matches “{menu?.query}”
         </p>
       ) : (
         <div
@@ -280,7 +395,7 @@ export function MentionField({
           tabIndex={0}
           className={LIST}
         >
-          {found.map((item, at) => (
+          {menu.items.map((item, at) => (
             <div
               key={item.id}
               id={optionId(at)}
@@ -291,12 +406,21 @@ export function MentionField({
               onPointerMove={() => setActive(at)}
               // The caret stays in the field: a press on the menu never takes the focus.
               onPointerDown={(event) => event.preventDefault()}
-              onClick={() => write(item)}
+              onClick={() => menu.pick(item)}
             >
               <span className="flex shrink-0 text-muted-foreground" aria-hidden="true">
                 {GLYPHS[item.kind]}
               </span>
-              <Entry item={item} />
+              <span className={cn('shrink-0', item.kind === 'command' && 'font-mono text-xs')}>
+                {shortName(item.kind, item.label)}
+              </span>
+              {item.kind === 'file'
+                ? item.label.includes('/') && (
+                    <span className={QUIET}>
+                      {item.label.slice(0, item.label.lastIndexOf('/'))}
+                    </span>
+                  )
+                : item.detail !== undefined && <span className={QUIET}>{item.detail}</span>}
             </div>
           ))}
         </div>

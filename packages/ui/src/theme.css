@@ -582,3 +582,13 @@
     color: var(--color-selection-foreground);
   }
 }
+
+/* The mention field's placeholder: Tiptap marks the empty first line and hands it the words, and
+   the line draws them in the quiet tone without taking any room of its own. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}

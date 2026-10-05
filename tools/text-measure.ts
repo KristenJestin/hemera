@@ -33,14 +33,11 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  *   brings its edges in by the same distance whatever its size.
  * - The body of a dialog grows and folds to what it holds: the height it reads is one it follows,
  *   never one it decides.
- * - The mention field reads where the `@` being typed is drawn, to hang its menu there: it follows
- *   a moving target, as the sliding mark does, and sizes nothing.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/components/sliding-mark/sliding-mark.tsx',
   'packages/ui/src/motion.ts',
   'packages/ui/src/components/dialog/dialog.tsx',
-  'packages/ui/src/components/mention-field/caret.ts',
 ]
 
 export interface Refusal {
