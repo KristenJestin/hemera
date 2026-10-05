@@ -1,18 +1,20 @@
 /**
  * The commands run at each opening of Hemera: once per Project, in its main checkout, once the
  * window is shown and never before; a command that cannot start is logged and the next one runs;
- * and a command marked "ask before running" waits for the user's permission.
+ * and a command marked "ask before running" asks through a Project-level permission need.
  */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { PermissionAnswer, ProjectOwner } from '@hemera/core/domain'
 import type { CommandDraft, Project } from '@hemera/ipc'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AskBeforeRunning, type PermissionAsk } from '../src/engine/ask-before-running.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
+import { answerNeed, listNeeds } from '../src/engine/needs.ts'
 import { listRuns, startRun } from '../src/engine/runs.ts'
 import {
   FAILS_LOUDLY,
@@ -178,23 +180,59 @@ describe('An "at open" command marked "ask before running"', () => {
       atOpen('seed', nodeLine(script(WRITES_ITS_PID), pids), { askBeforeRunning: true }),
     )
 
-  test('waits for permission and never runs while no one can be asked', async () => {
-    const outcome = await commandsEngine(data)(({ profile, lines }) =>
+  test('asks through a Project-level permission need, Allow once and Deny only, and does not run before Allow', async () => {
+    const outcome = await commandsEngine(data)(({ profile }) =>
       Effect.gen(function* () {
         const project = yield* profile.use(Effect.flatMap(atlas(main), asking))
         yield* profile.windowShown
-        yield* profile.use(until(mainRuns(project), (seen) => seen.length === 1))
-        yield* Effect.sleep('500 millis')
-        return { runs: yield* profile.use(mainRuns(project)), lines }
+        const groups = yield* profile.use(until(listNeeds, (seen) => seen.length === 1))
+        yield* Effect.sleep('300 millis')
+        const before = { runs: yield* profile.use(mainRuns(project)), pids: pidsWritten() }
+        const need = groups[0]?.needs[0]
+        if (need === undefined) return yield* Effect.die(new Error('no need was created'))
+        yield* profile.use(
+          answerNeed({
+            id: need.id,
+            key: 'k1',
+            answer: PermissionAnswer.make({ choice: 'allow-once' }),
+          }),
+        )
+        yield* until(Effect.sync(pidsWritten), (written) => written.length === 1)
+        return { project, need, before, after: yield* profile.use(mainRuns(project)) }
       }),
     )
-    expect(outcome.runs.map((run) => run.state)).toEqual(['waiting_for_permission'])
+    expect(outcome.need.owner).toEqual(ProjectOwner.make({ projectId: outcome.project.id }))
+    expect(outcome.need.choices).toEqual(['allow-once', 'deny'])
+    expect(outcome.need.fields).toMatchObject({
+      agentReason: 'Hemera runs it, by a rule you recorded.',
+      hemeraReason: 'ask before running: seed',
+      sensitive: false,
+    })
+    expect(Predicate.isTagged(outcome.need.fields, 'Permission')).toBe(true)
+    expect(outcome.before.runs.map((run) => run.state)).toEqual(['waiting_for_permission'])
+    expect(outcome.before.pids).toEqual([])
+    expect(outcome.after.map((run) => run.state)).toEqual(['running'])
+    expect(pidsWritten()).toHaveLength(1)
+  })
+
+  test('a Deny ends the run without running it', async () => {
+    const runs = await commandsEngine(data)(({ profile }) =>
+      Effect.gen(function* () {
+        const project = yield* profile.use(Effect.flatMap(atlas(main), asking))
+        yield* profile.windowShown
+        const groups = yield* profile.use(until(listNeeds, (seen) => seen.length === 1))
+        yield* profile.use(
+          answerNeed({
+            id: groups[0]?.needs[0]?.id ?? '',
+            key: 'k1',
+            answer: PermissionAnswer.make({ choice: 'deny' }),
+          }),
+        )
+        return yield* profile.use(until(mainRuns(project), (seen) => seen[0]?.state === 'failed'))
+      }),
+    )
+    expect(runs.map((run) => run.state)).toEqual(['failed'])
     expect(pidsWritten()).toEqual([])
-    expect(
-      outcome.lines.some(
-        (line) => line.includes('seed of Project') && line.includes('does not run'),
-      ),
-    ).toBe(true)
   })
 
   test('runs once when the port allows it once, asked at Project level', async () => {

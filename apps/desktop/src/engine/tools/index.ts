@@ -24,6 +24,17 @@ import { missions, workspaces } from '../storage/schema.ts'
 import { ToolAccess, toolAccessLayer } from './access.ts'
 import { effectfulActionsLayer } from './actions.ts'
 import { ToolGate, toolGateLayer } from './gate.ts'
+import { decisionOrderLayer } from '../permissions/order.ts'
+import {
+  type CommitRights,
+  type Judge,
+  type MissionGrants,
+  missionPlacesLayer,
+  noAgentCommits,
+  noJudge,
+  noMissionGrants,
+} from '../permissions/ports.ts'
+import { sensitivePlacesLayer } from '../permissions/sensitive.ts'
 import {
   type GateGuards,
   type PermissionRequests,
@@ -31,8 +42,6 @@ import {
   type Verdicts,
   noGateGuards,
   noPermissionRequests,
-  noSensitivePlaces,
-  verdictsUntilRules,
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
 
@@ -44,6 +53,12 @@ export interface ToolsParts {
   readonly permissionRequests?: Layer.Layer<PermissionRequests>
   readonly sensitivePlaces?: Layer.Layer<SensitivePlaces>
   readonly guards?: Layer.Layer<GateGuards>
+  /** Step 5 of the order of decision: the remote judge (#38). */
+  readonly judge?: Layer.Layer<Judge>
+  /** The grants of "Allow for this mission" (#37). */
+  readonly grants?: Layer.Layer<MissionGrants>
+  /** The Project's "who commits" rule (B4, R5). */
+  readonly commitRights?: Layer.Layer<CommitRights>
   /** What `~` stands for; the user's home folder otherwise. */
   readonly home?: string
 }
@@ -125,18 +140,30 @@ export const hemeraEndpointLayer = (log: Log) =>
   )
 
 /** The tools of the engine: the endpoint, over the server, over the gate and its ports. */
-export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
-  hemeraEndpointLayer(log).pipe(
+export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) => {
+  const home = parts.home ?? homedir()
+  return hemeraEndpointLayer(log).pipe(
     Layer.provideMerge(toolServerLayer(log, version)),
     Layer.provideMerge(toolGateLayer({ log, home: parts.home })),
     Layer.provideMerge(
       Layer.mergeAll(
         toolAccessLayer(log),
-        parts.verdicts ?? verdictsUntilRules(parts.home ?? homedir()),
+        parts.verdicts ?? decisionOrderLayer({ log, home, platform: process.platform }),
         parts.permissionRequests ?? noPermissionRequests,
-        parts.sensitivePlaces ?? noSensitivePlaces,
         parts.guards ?? noGateGuards,
         effectfulActionsLayer,
       ),
     ),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        parts.sensitivePlaces ??
+          sensitivePlacesLayer({ home, platform: process.platform }).pipe(
+            Layer.provide(missionPlacesLayer),
+          ),
+        parts.judge ?? noJudge,
+        parts.grants ?? noMissionGrants,
+        parts.commitRights ?? noAgentCommits,
+      ),
+    ),
   )
+}

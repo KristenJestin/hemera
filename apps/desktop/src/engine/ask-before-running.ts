@@ -8,15 +8,12 @@
  * once or Deny only. Hemera's own runs never go through the agents' permission gate: this port is
  * the only question they ask.
  *
- * The needs are created and answered by later work. Until then this port's own implementation
- * never runs the command and never answers: the run stays waiting for permission, listed with its
- * Project, and the diagnostic log says so.
+ * Its implementation is `HemeraRunConsent` (`permissions/consent.ts`): a permission need, and the
+ * run waits for its answer. An agent's call never comes here: the gate has decided it.
  */
 
 import type { RunStarter } from '@hemera/core/domain'
-import { Context, Effect, Layer } from 'effect'
-
-import type { Log } from '../main/diagnostic.ts'
+import { Context, type Effect } from 'effect'
 
 /** What is asked: which command, where, by whom, and at which level the need is raised. */
 export interface PermissionAsk {
@@ -27,6 +24,8 @@ export interface PermissionAsk {
   readonly name: string
   readonly line: string
   readonly startedBy: RunStarter
+  /** The mission the run is for, whose need it then is; null outside a mission. */
+  readonly missionId: string | null
   /** A command run at opening asks at Project level, with Allow once and Deny only. */
   readonly level: 'project' | 'place'
 }
@@ -40,17 +39,3 @@ export class AskBeforeRunning extends Context.Service<
     readonly decide: (asked: PermissionAsk) => Effect.Effect<PermissionAnswer>
   }
 >()('AskBeforeRunning') {}
-
-/** No one to ask yet: the command waits, never runs, and the diagnostic says so. */
-export const nobodyToAskLayer = (log: Log) =>
-  Layer.succeed(AskBeforeRunning, {
-    decide: (asked) =>
-      Effect.andThen(
-        Effect.sync(() =>
-          log(
-            `${asked.name} of Project ${asked.projectId} waits for the user's permission (run ${asked.runId}): this version of Hemera cannot ask yet, so it does not run`,
-          ),
-        ),
-        Effect.never,
-      ),
-  })

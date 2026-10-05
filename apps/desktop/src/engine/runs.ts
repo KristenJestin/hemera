@@ -19,6 +19,7 @@
  */
 
 import { request as httpsRequest } from 'node:https'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import {
@@ -69,6 +70,7 @@ import { Secrets } from './secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
 import { commandRuns } from './storage/schema.ts'
 import { ProcessSupervisor, type Supervised } from './supervisor.ts'
+import { defended } from './permissions/defence.ts'
 import { mutate } from './transaction.ts'
 import { environmentAt } from './variables.ts'
 import {
@@ -111,6 +113,8 @@ export interface RunsSettings {
   readonly readinessEveryMillis: number
   readonly readinessForMillis: number
   readonly graceMillis: number
+  /** The empty folder the forge CLIs of an agent's commands read their configuration from. */
+  readonly agentConfigFolder: string
 }
 
 /** One run going in this engine, and everything known of it. */
@@ -207,6 +211,8 @@ export const runsLayer = (log: Log, settings: Partial<RunsSettings> = {}) =>
           readinessEveryMillis: settings.readinessEveryMillis ?? READINESS_EVERY_MS,
           readinessForMillis: settings.readinessForMillis ?? READINESS_FOR_MS,
           graceMillis: settings.graceMillis ?? STOP_GRACE_MS,
+          agentConfigFolder:
+            settings.agentConfigFolder ?? join(tmpdir(), 'hemera-agents-no-forge-login'),
         },
         mask: secrets.mask,
       }
@@ -574,7 +580,8 @@ export const startRun = (asked: RunAsked) =>
         ? portlessNameFor(command.portlessName, place.project.name)
         : null
 
-    const ask = command !== null && command.askBeforeRunning
+    // An agent's call was decided by the gate, which asks for a command marked so: never twice.
+    const ask = command !== null && command.askBeforeRunning && asked.startedBy !== 'agent'
     const live: Live = {
       run: {
         id: crypto.randomUUID(),
@@ -604,7 +611,11 @@ export const startRun = (asked: RunAsked) =>
       published: yield* Deferred.make<string | null>(),
       portless: portless !== null,
     }
-    const environment = yield* environmentAt(place)
+    // An agent's command in a mission gets the defence in depth: no forge login, no push.
+    const environment =
+      asked.startedBy === 'agent' && (asked.missionId ?? null) !== null
+        ? defended(yield* environmentAt(place), runs.settings.agentConfigFolder)
+        : yield* environmentAt(place)
     yield* mutate('recording a run', (transaction) =>
       transaction
         .insert(commandRuns)
@@ -639,7 +650,7 @@ export const startRun = (asked: RunAsked) =>
     runs.live.set(live.run.id, live)
     const launching = launch(live, { words, folder, environment, portless })
 
-    if (command === null || !command.askBeforeRunning) {
+    if (command === null || !ask) {
       yield* launching
       return live.run
     }
@@ -654,6 +665,7 @@ export const startRun = (asked: RunAsked) =>
         name: command.name,
         line: live.run.line,
         startedBy: asked.startedBy,
+        missionId: live.run.missionId,
         level: asked.atOpen === true ? 'project' : 'place',
       })
       .pipe(

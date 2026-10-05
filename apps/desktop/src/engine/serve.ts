@@ -41,6 +41,7 @@ import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from '
 import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
 import { createMission, getMission, listMissions, missionChanges, moveMission } from './missions.ts'
 import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
+import { neverList, setNeverList } from './permissions/never-list.ts'
 import {
   REGISTRY,
   noticeFeed,
@@ -185,6 +186,10 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'needs.get': ({ id }) => use(getNeed(id)).pipe(observed('needs.get', log)),
     'needs.answer': (asked) => use(answerNeed(asked)).pipe(observed('needs.answer', log)),
     'needs.retry': ({ id }) => use(retryNeed(id)).pipe(observed('needs.retry', log)),
+    'permissions.neverList': ({ projectId }) =>
+      use(neverList(projectId)).pipe(observed('permissions.neverList', log)),
+    'permissions.setNeverList': ({ projectId, entries }) =>
+      use(setNeverList(projectId, entries)).pipe(observed('permissions.setNeverList', log)),
     'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
     'agents.checkUpdates': () =>
       Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),

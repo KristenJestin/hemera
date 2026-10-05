@@ -34,6 +34,7 @@ import {
   type ToolArguments,
   type ToolName,
   admitTool,
+  lineFor,
 } from '@hemera/core/domain'
 import { formatSchemaError } from '@hemera/core/schema'
 import type { Command } from '@hemera/ipc'
@@ -213,10 +214,13 @@ export const placesForWorkflow = (
   session: CallSession,
   path: JudgedPath,
   home: string = homedir(),
+  writes = true,
 ) =>
   Effect.gen(function* () {
     if (!path.inside || !path.certain) return `refused: ${outsideReason(session, path, home)}`
-    const sensitive = yield* SensitivePlaces.use((places) => places.sensitive(path.resolved))
+    const sensitive = yield* SensitivePlaces.use((places) =>
+      places.sensitive(path.resolved, { session, writes }),
+    )
     return sensitive === null ? null : `refused: ${sensitive}`
   })
 
@@ -373,7 +377,12 @@ export const toolGateLayer = (settings: GateSettings) =>
           // 5. Workflow tools: the places rule, never a question.
           if (entry.gate === 'workflow') {
             if (path !== null) {
-              const refused = yield* placesForWorkflow(session, path, home)
+              const refused = yield* placesForWorkflow(
+                session,
+                path,
+                home,
+                entry.effect !== 'reads',
+              )
               if (refused !== null) {
                 noted.verdictBy = 'places'
                 return refusal(refused)
@@ -392,13 +401,17 @@ export const toolGateLayer = (settings: GateSettings) =>
                   : {
                       id: command.id,
                       name: command.name,
-                      line: command.line,
+                      line: lineFor(command, process.platform),
                       check: command.check,
                       readOnly: command.readOnly,
                       askBeforeRunning: command.askBeforeRunning,
                       writeGlobs: command.writeGlobs,
                     },
               line: call.tool === 'commands_run' ? (call.args.line ?? null) : null,
+              folder:
+                call.tool === 'commands_run' && call.args.command === undefined
+                  ? (call.args.repository ?? null)
+                  : null,
               why:
                 call.tool === 'fs_write' || call.tool === 'fs_edit' || call.tool === 'commands_run'
                   ? (call.args.why ?? null)

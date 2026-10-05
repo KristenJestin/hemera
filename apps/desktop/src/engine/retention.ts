@@ -49,6 +49,7 @@ export const TABLE_CLASSES = {
   workspace_steps: 'state',
   environment_variables: 'state',
   project_commands: 'state',
+  project_never_entries: 'state',
   command_runs: 'diagnostic',
   supervised_processes: 'state',
   missions: 'permanent',
