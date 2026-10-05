@@ -159,14 +159,14 @@ export const UsesTheDefault: Story = {
       name: 'Model of the Reviewer: Default (Codex · gpt-5)',
     })
     await userEvent.click(trigger)
-    await expect(
-      await body().findByRole(
-        'option',
-        { name: /Use the default/, selected: true },
-        // The popover opens on a click under load too: given the time a busy runner takes.
-        { timeout: 5000 },
-      ),
-    ).toBeVisible()
+    // Visible once the popover has finished coming in, which a busy runner can take a while to do.
+    await waitFor(
+      () =>
+        expect(
+          body().getByRole('option', { name: /Use the default/, selected: true }),
+        ).toBeVisible(),
+      { timeout: 5000 },
+    )
   },
 }
 
