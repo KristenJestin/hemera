@@ -23,6 +23,7 @@ import {
 } from './migrate.ts'
 import { ProfileHome } from './profile-home.ts'
 import type { Database, DatabaseError, SqliteClient } from './storage/database.ts'
+import { betweenMutations } from './transaction.ts'
 
 /** The file that makes a folder a backup of Hemera, written last. */
 export const MANIFEST_FILE = 'manifest.json'
@@ -116,7 +117,8 @@ export const writeBackup = (
       },
       catch: failedIn(parent),
     })
-    yield* copyDatabase(join(folder, DATABASE_FILE))
+    // The Journal's projection writes in the background: the copy waits for no write to be open.
+    yield* betweenMutations(copyDatabase(join(folder, DATABASE_FILE)))
     const carried = registered.filter((one) => existsSync(join(home.dataFolder, one)))
     const manifest: Manifest = {
       profileId: (yield* profileRow)?.id ?? '',

@@ -21,6 +21,7 @@ import { getAgentSession } from '../agents/sessions.ts'
 import { getProject } from '../projects.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions, workspaces } from '../storage/schema.ts'
+import { Memory, SessionEpochs } from '../memory/index.ts'
 import { ToolAccess, toolAccessLayer } from './access.ts'
 import { effectfulActionsLayer } from './actions.ts'
 import { ToolGate, toolGateLayer } from './gate.ts'
@@ -80,6 +81,7 @@ const grantOf = (sessionId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     const session = yield* getAgentSession(sessionId)
+    const epoch = yield* SessionEpochs.use((epochs) => epochs.current(sessionId))
     const role = readRole(session.role)
     const missionId = session.ownerKind === 'mission' ? session.ownerId : null
     const projectId =
@@ -99,11 +101,12 @@ const grantOf = (sessionId: string) =>
       .pipe(Effect.mapError(refusedWhile('reading the Workspaces')))
     return Option.match(role, {
       // A role this version does not know is handed no tool rather than guessed at.
-      onNone: () => ({ role: null, sessionId, projectId, missionId, folder }),
+      onNone: () => ({ role: null, sessionId, epoch, projectId, missionId, folder }),
       onSome: (known) => ({
         role: known,
         grant: {
           sessionId,
+          epoch,
           role: known,
           tools: toolsOf(known),
           place: { ...ROLE_PLACES[known], root: folder },
@@ -123,16 +126,20 @@ export const hemeraEndpointLayer = (log: Log) =>
     Effect.gen(function* () {
       const server = yield* ToolServer
       const access = yield* ToolAccess
-      const context = yield* Effect.context<Database>()
+      const context = yield* Effect.context<Database | SessionEpochs>()
+      const memory = yield* Memory
       return {
         url: Effect.succeed(server.url),
         mint: (sessionId) =>
           Effect.gen(function* () {
+            // No session is handed its tools, and so its Memory, before the Journal caught up.
+            yield* memory.ready
             const found = yield* grantOf(sessionId).pipe(Effect.provide(context), Effect.orDie)
             if (!('grant' in found)) {
               log(`tools: session ${sessionId} has a role this version does not know: no tool`)
               return yield* access.mint({
                 sessionId,
+                epoch: found.epoch,
                 role: 'cold-read',
                 tools: [],
                 place: { kind: 'main-checkout', readOnly: true, root: found.folder },

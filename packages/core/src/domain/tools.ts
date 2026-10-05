@@ -19,6 +19,14 @@
 
 import { Schema } from 'effect'
 
+import {
+  JOURNAL_PAGE,
+  JOURNAL_TEXT_MAX,
+  NOTE_TEXT_MAX,
+  NOTE_TOPIC_MAX,
+  NOW_TEXT_MAX,
+} from './memory.ts'
+
 /** The roles of an agent session at this version; later tickets add theirs. */
 export const ROLES = [
   'planner',
@@ -77,8 +85,11 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
 
 export type GateClass = 'local' | 'judged' | 'workflow'
 
-/** What a tool does to the world: reads it, writes files, or runs (or stops) a command. */
-export type ToolEffect = 'reads' | 'writes' | 'runs'
+/**
+ * What a tool does to the world: reads it, writes files, runs (or stops) a command, or records
+ * in Hemera's own Memory of the mission, which writes nothing in the role's place.
+ */
+export type ToolEffect = 'reads' | 'writes' | 'runs' | 'records'
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
@@ -260,6 +271,119 @@ const CommandsStop = Schema.Struct({
   run: Text('The run, by the id commands_run answered.'),
 }).annotate({ description: 'Stop a run you started, and everything it started.' })
 
+const Bounded = (maximum: number, description: string) =>
+  Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum)).annotate({ description })
+
+const MemoryRead = Schema.Struct({
+  part: Schema.Literals(['now', 'notes', 'journal']).annotate({
+    description:
+      'Which part to read: `now` (where the mission stands), `notes` (what was learned) or `journal` (what happened, newest first).',
+  }),
+  before: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+      description: `For the journal: the line number to read before, as the previous page gave it. A page holds ${String(JOURNAL_PAGE)} lines.`,
+    }),
+  ),
+  all: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: 'For the notes: true to include the notes a condensed note replaced.',
+    }),
+  ),
+  mission: Schema.optionalKey(
+    Text(
+      'The key of a mission yours depends on (`ACME-3`), to read its Memory, read-only; your own mission without it.',
+    ),
+  ),
+}).annotate({
+  description:
+    "Read your mission's Memory: Now, the Notes, or a page of the Journal. Your brief already holds Now, the Notes and the end of the Journal; read further back with `before`.",
+})
+
+const NowSet = Schema.Struct({
+  doing: Schema.optionalKey(
+    Bounded(NOW_TEXT_MAX, 'What you are doing now, in one line: your own line of Now.'),
+  ),
+  next: Schema.optionalKey(
+    Bounded(
+      NOW_TEXT_MAX,
+      "The mission's next step, in one line: only the stage's main session sets it.",
+    ),
+  ),
+})
+  .annotate({
+    description:
+      'Update Now: your own "doing" line, and the next step when you are the main session of the stage. Write in the language of the user.',
+  })
+  .check(
+    Schema.makeFilter((asked) => asked.doing !== undefined || asked.next !== undefined, {
+      expected: 'a doing line, a next step, or both',
+    }),
+  )
+
+const JournalAdd = Schema.Struct({
+  text: Bounded(
+    JOURNAL_TEXT_MAX,
+    'Why you chose what you chose, or what you found: what Hemera cannot know without you.',
+  ),
+}).annotate({
+  description:
+    "Add a line to the mission's Journal. Hemera already writes what it knows (stages, answers, checks, runs): write only why you chose, or what you found. Write in the language of the user.",
+})
+
+const Topic = Schema.optionalKey(
+  Bounded(NOTE_TOPIC_MAX, 'What the note is about, in a few words (`tests`, `database`).'),
+)
+
+const NoteAdd = Schema.Struct({
+  text: Bounded(
+    NOTE_TEXT_MAX,
+    'What was learned: a trap of the repository, a test that needs a database.',
+  ),
+  topic: Topic,
+}).annotate({
+  description:
+    'Add a note: something learned on the way that the next agent must know. Write in the language of the user.',
+})
+
+const NotesCondense = Schema.Struct({
+  replaces: Schema.Array(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+      description: 'A note, by its number as memory_read gave it.',
+    }),
+  )
+    .check(Schema.isNonEmpty())
+    .annotate({ description: 'The notes the new one replaces.' }),
+  text: Bounded(NOTE_TEXT_MAX, 'The note that replaces them.'),
+  topic: Topic,
+}).annotate({
+  description:
+    'Replace several notes by one. The replaced notes stay readable with memory_read `all`. Only the main session of the stage condenses.',
+})
+
+const EvidenceAdd = Schema.Struct({
+  name: Bounded(200, 'What to call this evidence (`unit tests output`).'),
+  content: Schema.optionalKey(
+    Schema.String.check(Schema.isNonEmpty()).annotate({
+      description: 'The evidence as text (a full log, a test output).',
+    }),
+  ),
+  path: Schema.optionalKey(
+    Text(
+      'Or a file of your place to keep, relative to it: a text file, or a png, jpeg or webp image.',
+    ),
+  ),
+  about: Schema.optionalKey(Bounded(200, 'What it is evidence of: a scenario, a check, a run.')),
+})
+  .annotate({
+    description:
+      'Keep a piece of evidence with the mission: a full log, a test output, an image. It is kept as long as the mission, outside the place you work in; a secret in a text is masked.',
+  })
+  .check(
+    Schema.makeFilter((asked) => (asked.content === undefined) !== (asked.path === undefined), {
+      expected: 'either a content or a path, not both',
+    }),
+  )
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -374,6 +498,54 @@ export const TOOLS = {
     input: CommandsStop,
     label: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
   }),
+  memory_read: tool({
+    roles: ['planner', 'probe', 'builder'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: MemoryRead,
+    label: { label: 'Read memory', mark: 'read-memory', doing: 'Reading the Memory' },
+  }),
+  now_set: tool({
+    roles: ['planner', 'probe', 'builder', 'helper', 'documenter'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: NowSet,
+    label: { label: 'Update Now', mark: 'update-now', doing: 'Updating Now' },
+  }),
+  journal_add: tool({
+    roles: ['planner', 'builder'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: JournalAdd,
+    label: { label: 'Add to the Journal', mark: 'journal-add', doing: 'Writing in the Journal' },
+  }),
+  note_add: tool({
+    roles: ['planner', 'probe', 'builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: NoteAdd,
+    label: { label: 'Add a note', mark: 'note-add', doing: 'Adding a note' },
+  }),
+  notes_condense: tool({
+    roles: ['planner', 'builder'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: NotesCondense,
+    label: { label: 'Condense notes', mark: 'notes-condense', doing: 'Condensing the notes' },
+  }),
+  evidence_add: tool({
+    roles: ['probe', 'builder'],
+    gate: 'workflow',
+    effect: 'records',
+    path: 'path',
+    input: EvidenceAdd,
+    label: { label: 'Add evidence', mark: 'evidence-add', doing: 'Keeping evidence' },
+  }),
 }
 
 export type ToolName = keyof typeof TOOLS
@@ -389,6 +561,12 @@ export const TOOL_NAMES = [
   'commands_run',
   'commands_output',
   'commands_stop',
+  'memory_read',
+  'now_set',
+  'journal_add',
+  'note_add',
+  'notes_condense',
+  'evidence_add',
 ] as const satisfies ReadonlyArray<ToolName>
 
 /** The arguments of a tool once decoded. */

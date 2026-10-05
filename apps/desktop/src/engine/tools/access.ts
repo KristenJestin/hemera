@@ -26,6 +26,8 @@ export interface Grant {
   /** The digest of the token: what the record and the diagnostic call the caller. */
   readonly id: string
   readonly sessionId: string
+  /** The session's epoch when the token was minted: a write at an older one is refused. */
+  readonly epoch: number
   readonly role: Role
   readonly tools: ReadonlyArray<ToolName>
   readonly place: { readonly kind: PlaceKind; readonly readOnly: boolean; readonly root: string }

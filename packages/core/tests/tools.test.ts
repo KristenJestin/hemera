@@ -23,11 +23,41 @@ import { toToolInputSchema } from '../src/schema/index.ts'
 
 const toolsFor = (role: Role) => [...toolsOf(role)].sort()
 
+const MEMORY_TOOLS = [
+  'memory_read',
+  'now_set',
+  'journal_add',
+  'note_add',
+  'notes_condense',
+  'evidence_add',
+] as const
+
+describe('The cold read and the two reviewers get no Memory (CT-06)', () => {
+  test.each<Role>(['cold-read', 'spec-reviewer', 'code-reviewer'])(
+    '%s has no Memory tool',
+    (role) => {
+      expect(toolsOf(role).filter((name) => MEMORY_TOOLS.some((one) => one === name))).toEqual([])
+    },
+  )
+})
+
 describe('Each role has exactly its tools', () => {
   test.each<[Role, ReadonlyArray<string>]>([
     [
       'planner',
-      ['commands_list', 'commands_output', 'commands_run', 'fs_list', 'fs_read', 'search'],
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'fs_list',
+        'fs_read',
+        'journal_add',
+        'memory_read',
+        'note_add',
+        'notes_condense',
+        'now_set',
+        'search',
+      ],
     ],
     [
       'probe',
@@ -36,10 +66,14 @@ describe('Each role has exactly its tools', () => {
         'commands_output',
         'commands_run',
         'commands_stop',
+        'evidence_add',
         'fs_edit',
         'fs_list',
         'fs_read',
         'fs_write',
+        'memory_read',
+        'note_add',
+        'now_set',
         'search',
       ],
     ],
@@ -51,10 +85,16 @@ describe('Each role has exactly its tools', () => {
         'commands_output',
         'commands_run',
         'commands_stop',
+        'evidence_add',
         'fs_edit',
         'fs_list',
         'fs_read',
         'fs_write',
+        'journal_add',
+        'memory_read',
+        'note_add',
+        'notes_condense',
+        'now_set',
         'search',
       ],
     ],
@@ -69,10 +109,12 @@ describe('Each role has exactly its tools', () => {
         'fs_list',
         'fs_read',
         'fs_write',
+        'note_add',
+        'now_set',
         'search',
       ],
     ],
-    ['documenter', ['fs_edit', 'fs_list', 'fs_read', 'fs_write', 'search']],
+    ['documenter', ['fs_edit', 'fs_list', 'fs_read', 'fs_write', 'now_set', 'search']],
     ['spec-reviewer', ['search']],
     ['code-reviewer', ['fs_read', 'search']],
     [
@@ -108,11 +150,18 @@ describe('Each role has exactly its tools', () => {
 })
 
 describe('The table says what each tool does to the world', () => {
-  test('the tools that only read are local, the ones that write or run are judged or workflow', () => {
+  test('a local tool only reads, and a judged one writes or runs', () => {
     for (const name of TOOL_NAMES) {
       const tool = TOOLS[name]
       if (tool.gate === 'local') expect(tool.effect, name).toBe('reads')
-      else expect(tool.effect, name).not.toBe('reads')
+      if (tool.gate === 'judged') expect(['writes', 'runs'], name).toContain(tool.effect)
+    }
+  })
+
+  test('the Memory tools are workflow tools that never write in the place', () => {
+    for (const name of MEMORY_TOOLS) {
+      expect(TOOLS[name].gate, name).toBe('workflow')
+      expect(['reads', 'records'], name).toContain(TOOLS[name].effect)
     }
   })
 
@@ -122,6 +171,7 @@ describe('The table says what each tool does to the world', () => {
       'commands_output',
       'fs_list',
       'fs_read',
+      'memory_read',
       'search',
     ])
   })

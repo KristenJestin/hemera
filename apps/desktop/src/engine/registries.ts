@@ -1,0 +1,11 @@
+/**
+ * What the engine registers where it is composed: the folders of the data folder a backup carries,
+ * relative to it (each ticket that creates one adds it here), and the steps that reconcile a
+ * restored Profile with the world, in their order.
+ */
+
+import { MISSIONS_FOLDER } from './memory/files.ts'
+import { RESTORED_REQUESTS } from './permissions/requests.ts'
+
+export const BACKUP_FOLDERS: ReadonlyArray<string> = [MISSIONS_FOLDER]
+export const RECONCILIATION_STEPS = [RESTORED_REQUESTS] as const
