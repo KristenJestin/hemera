@@ -4,7 +4,8 @@
  * What a process of a Workspace is given is the process's own environment, then the Project's
  * variables, then the Workspace's, their template names filled for the place it runs in. A value
  * is often a secret: it is never written to a domain event, the diagnostic or an error. A list
- * answers names with a mask; one value is revealed only when it is asked for by name.
+ * answers names with a mask; one value is revealed only when it is asked for by name. Every value
+ * is registered as a known secret, so it is masked wherever else it shows up.
  */
 
 import {
@@ -27,6 +28,7 @@ import { Cause, Effect, Predicate } from 'effect'
 import type { NewEvent } from './journal.ts'
 import { Database, DatabaseError, refusedWhile } from './storage/database.ts'
 import { environmentVariables } from './storage/schema.ts'
+import { Secrets, placeSource, registerVariables } from './secrets.ts'
 import { mutate } from './transaction.ts'
 import { type Place, placeOf, templateValuesOf } from './workspaces.ts'
 
@@ -125,6 +127,7 @@ export const setVariable = (edit: VariableEdit) =>
         return { result: undefined, events: [changed('variable.set', edit, key)] }
       }),
     )
+    yield* registerVariables(edit.projectId, edit.workspaceId)
     return { key, value: MASK } satisfies MaskedVariable
   })
 
@@ -147,6 +150,7 @@ export const removeVariable = (asked: VariableKey) =>
         return { result: undefined, events: [changed('variable.removed', asked, asked.key)] }
       }),
     )
+    yield* registerVariables(asked.projectId, asked.workspaceId)
   })
 
 /** One value, as it was set: what the settings page shows when the user asks to see it. */
@@ -165,7 +169,11 @@ const filled = (
 ): Record<string, string> =>
   Object.fromEntries(rows.map((row) => [row.key, fillTemplate(row.value, values)]))
 
-/** The Project's and the place's own variables, filled for that place. */
+/**
+ * The Project's and the place's own variables, filled for that place. The values as they are
+ * filled, which a template makes differ from the values written, are registered as known secrets
+ * of the place before any process is given them.
+ */
 const variablesAt = (place: Place) =>
   Effect.gen(function* () {
     const values = templateValuesOf(place)
@@ -174,6 +182,11 @@ const variablesAt = (place: Place) =>
       place.workspace === null
         ? {}
         : filled(yield* rowsOf(place.project.id, place.workspace.id), values)
+    const secrets = yield* Secrets
+    secrets.register(placeSource(place.project.id, place.workspace?.id ?? null), [
+      ...Object.values(project),
+      ...Object.values(workspace),
+    ])
     return { project, workspace }
   })
 

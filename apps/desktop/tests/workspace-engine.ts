@@ -26,6 +26,7 @@ import {
 import { ProfileHome } from '../src/engine/profile-home.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { repositoryStatusesLayer } from '../src/engine/repositories.ts'
+import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { type WorkspaceServices, preparationsLayer } from '../src/engine/workspaces.ts'
 import { remote, repository } from './repositories.ts'
 import { SHIPPED, type Storage, on } from './storage.ts'
@@ -72,6 +73,7 @@ export function workspaceEngine(data: string, runner: FakeRunner = fakeRunner())
     Layer.succeed(ProfileHome, { dataFolder: data, version: '1.0.0', migrations: SHIPPED }),
     runner.layer,
     preparationsLayer(() => {}),
+    Layer.succeed(Secrets, secretsRegistry()),
   )
   return <A, E>(
     program: Effect.Effect<A, E, WorkspaceServices | Storage | Scope.Scope>,

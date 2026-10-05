@@ -37,12 +37,7 @@ import {
   preparationStateOf,
   resumedSteps,
 } from '@hemera/core/domain'
-import {
-  PreparationRunning,
-  type PreparationStep,
-  type StepFailure,
-  type Workspace,
-} from '@hemera/ipc'
+import { PreparationRunning, type PreparationStep, type Workspace } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
 import { Effect, Option, Result } from 'effect'
 
@@ -51,6 +46,7 @@ import type { NewEvent } from './journal.ts'
 import { RecipeRunner } from './recipe-runner.ts'
 import { refusedWhile } from './storage/database.ts'
 import { workspaceSteps } from './storage/schema.ts'
+import { Secrets } from './secrets.ts'
 import { mutate } from './transaction.ts'
 import { givenVariables } from './variables.ts'
 import {
@@ -83,7 +79,13 @@ export function linkType(platform: NodeJS.Platform, folder: boolean): 'junction'
 /** How a step ended. */
 interface Outcome {
   readonly state: Extract<StepState, 'done' | 'failed' | 'skipped'>
-  readonly failure: StepFailure | null
+  readonly failure: Failure | null
+}
+
+/** How a step failed, before its output is masked: `writeSteps` masks it as it writes it. */
+interface Failure {
+  readonly doing: string
+  readonly output: string
 }
 
 const done: Outcome = { state: 'done', failure: null }
@@ -252,21 +254,29 @@ const outcomeOf = (place: Place, workspace: Workspace, step: PreparationStep) =>
   }
 }
 
-/** Writes steps' states, with the events that tell them, in one transaction. */
+/**
+ * Writes steps' states, with the events that tell them, in one transaction. What a failed step
+ * printed is masked here, before it is kept.
+ */
 const writeSteps = (
   doing: string,
-  steps: ReadonlyArray<Pick<PreparationStep, 'id' | 'state' | 'failure'>>,
+  steps: ReadonlyArray<{
+    readonly id: string
+    readonly state: StepState
+    readonly failure: Failure | null
+  }>,
   events: ReadonlyArray<NewEvent>,
 ) =>
   mutate(doing, (transaction) =>
     Effect.gen(function* () {
+      const secrets = yield* Secrets
       for (const step of steps) {
         yield* transaction
           .update(workspaceSteps)
           .set({
             state: step.state,
             failedDoing: step.failure?.doing ?? null,
-            failedOutput: step.failure?.output ?? null,
+            failedOutput: step.failure === null ? null : secrets.mask(step.failure.output),
           })
           .where(eq(workspaceSteps.id, step.id))
           .pipe(Effect.mapError(refusedWhile('writing a step')))

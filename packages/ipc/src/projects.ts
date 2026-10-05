@@ -6,7 +6,12 @@
  * work starts from and is delivered to. The two are different things and keep different names.
  */
 
-import { InvalidBranchName, InvalidProjectName, InvalidRepositoryPath } from '@hemera/core/domain'
+import {
+  InvalidBranchName,
+  InvalidProjectName,
+  InvalidRepositoryPath,
+  MaskedText,
+} from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
@@ -163,11 +168,11 @@ export const RepositoryStatusChange = Schema.Struct({
 })
 export type RepositoryStatusChange = typeof RepositoryStatusChange.Type
 
-/** Git refused: its standard error as it wrote it, with what it was asked and where. */
+/** Git refused: its standard error as it wrote it, masked, with what it was asked and where. */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   args: Schema.Array(Schema.String),
   folder: Schema.String,
-  stderr: Schema.String,
+  stderr: MaskedText,
 }) {
   override get message(): string {
     const said = this.stderr.trim()

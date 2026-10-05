@@ -29,6 +29,7 @@ import { agentsLauncher } from './agents.ts'
 import { portHandovers } from './handovers.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
+import { secretsRegistry, type SecretsRegistry } from './secrets.ts'
 import { engineHandlers } from './serve.ts'
 
 /**
@@ -53,6 +54,7 @@ const engine = (
   [enginePort, hostPort, probePort]: ReadonlyArray<MessagePortMain>,
   parent: ParentPort,
   log: Log,
+  secrets: SecretsRegistry,
 ): Effect.Effect<never, never, Scope.Scope> =>
   Effect.gen(function* () {
     if (enginePort === undefined || hostPort === undefined) {
@@ -71,7 +73,7 @@ const engine = (
     // The Profile first: its database is opened, migrated and reconciled before anything is served.
     const profile = yield* startProfile(
       start,
-      { backupFolders: BACKUP_FOLDERS, reconciliationSteps: RECONCILIATION_STEPS },
+      { backupFolders: BACKUP_FOLDERS, reconciliationSteps: RECONCILIATION_STEPS, secrets },
       log,
     )
 
@@ -109,6 +111,8 @@ parent.once('message', ({ data, ports }) => {
     process.stderr.write('the engine was started without a start message it could read\n')
     process.exit(1)
   }
-  const log = openDiagnosticLog(start.value.dataFolder, 'engine')
-  Effect.runFork(Effect.scoped(engine(start.value, ports, parent, log)))
+  // The registry of known secrets is the engine's, built before anything is written.
+  const secrets = secretsRegistry()
+  const log = openDiagnosticLog(start.value.dataFolder, 'engine', secrets.mask)
+  Effect.runFork(Effect.scoped(engine(start.value, ports, parent, log, secrets)))
 })

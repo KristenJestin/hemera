@@ -10,6 +10,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { maskShapes } from '@hemera/core/domain'
 import { Effect } from 'effect'
 import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, dialog, nativeTheme, screen } from 'electron/main'
@@ -90,7 +91,8 @@ async function openWindow(log: Log): Promise<BrowserWindow> {
 /** Everything main runs once Electron is ready, for as long as the application lives. */
 const run = Effect.gen(function* () {
   const dataFolder = app.getPath('userData')
-  const log = openDiagnosticLog(dataFolder, 'main')
+  // Main holds no secret value: it masks the shapes of credentials.
+  const log = openDiagnosticLog(dataFolder, 'main', maskShapes)
   const identity = identityOf(app.getAppPath(), app.getVersion())
   log(`starting ${identity.version} on channel ${identity.channel}, data folder ${dataFolder}`)
 

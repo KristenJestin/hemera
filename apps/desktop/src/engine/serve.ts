@@ -39,6 +39,7 @@ import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from '
 import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
 import { createMission, getMission, listMissions, missionChanges, moveMission } from './missions.ts'
 import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
+import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import {
   createWorkspace,
   getWorkspace,
@@ -73,6 +74,12 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'preferences.write': (change) =>
       calls.writePreferences(change).pipe(observed('preferences.write', log)),
     'profile.backups': () => calls.backups.pipe(observed('profile.backups', log)),
+    'diagnostics.retention': () =>
+      Effect.succeed({
+        folder: dataFolder,
+        maxAgeDays: MAX_AGE_DAYS,
+        maxTotalMegabytes: MAX_TOTAL_MEGABYTES,
+      }).pipe(observed('diagnostics.retention', log)),
     'profile.backup': ({ folder }) => calls.backup(folder).pipe(observed('profile.backup', log)),
     'profile.restore': ({ folder }) => calls.restore(folder).pipe(observed('profile.restore', log)),
     'projects.list': () => use(listProjects).pipe(observed('projects.list', log)),
