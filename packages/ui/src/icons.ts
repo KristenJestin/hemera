@@ -96,6 +96,11 @@ import {
   IconRocket as TablerRocket,
   IconPhoto as TablerPhoto,
   IconPalette as TablerPalette,
+  IconHelpCircle as TablerHelpCircle,
+  IconPlug as TablerPlug,
+  IconShieldLock as TablerShieldLock,
+  IconBell as TablerBell,
+  IconBellFilled as TablerBellFilled,
   type IconProps as TablerIconProps,
   type TablerIcon,
 } from '@tabler/icons-react'
@@ -267,3 +272,7 @@ export const IconDeviceMobile = catalogued(
 export const IconRocket = catalogued(TablerRocket, TablerRocket, 'IconRocket')
 export const IconPhoto = catalogued(TablerPhoto, TablerPhoto, 'IconPhoto')
 export const IconPalette = catalogued(TablerPalette, TablerPalette, 'IconPalette')
+export const IconHelpCircle = catalogued(TablerHelpCircle, TablerHelpCircle, 'IconHelpCircle')
+export const IconPlug = catalogued(TablerPlug, TablerPlug, 'IconPlug')
+export const IconShieldLock = catalogued(TablerShieldLock, TablerShieldLock, 'IconShieldLock')
+export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')

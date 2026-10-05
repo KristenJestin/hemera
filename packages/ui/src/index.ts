@@ -103,6 +103,20 @@ export {
 } from './components/tooltip/tooltip.tsx'
 export { OverlayContainerProvider, type OverlayContainer } from './overlay.ts'
 export { BALL_LEGENDS, BallMark, type Ball, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export {
+  NEED_KINDS,
+  NeedCard,
+  type NeedAsk,
+  type NeedCardProps,
+  type NeedKind,
+  type NeedState,
+  type PermissionChoice,
+} from './blocks/need/need-card.tsx'
+export {
+  NeedsYouList,
+  type NeedRow,
+  type NeedsYouListProps,
+} from './blocks/need/needs-you-list.tsx'
 export { EngineVeil, type EngineState, type EngineVeilProps } from './shell/engine-veil.tsx'
 export {
   NoticeStack,
@@ -219,3 +233,17 @@ export {
   type CommandLineValue,
 } from './blocks/project-settings/command-line.tsx'
 export { IdentityField, type IdentityFieldProps } from './surfaces/add-project/identity-field.tsx'
+export {
+  AgentsSection,
+  AppearanceSection,
+  DeveloperSection,
+  HemeraAutoSection,
+  ModelsSection,
+  NotificationsSection,
+  ProfileSection,
+} from './blocks/app-settings/app-sections.tsx'
+export {
+  AppSettings,
+  type AppSection,
+  type AppSettingsProps,
+} from './surfaces/app-settings/app-settings.tsx'
