@@ -247,3 +247,48 @@ export {
   type AppSection,
   type AppSettingsProps,
 } from './surfaces/app-settings/app-settings.tsx'
+export {
+  NeverForm,
+  NeverSection,
+  type NeverFormProps,
+  type NeverLine,
+  type NeverSectionProps,
+} from './blocks/project-settings/never.tsx'
+export {
+  RoleModelsSection,
+  type ProjectRoleModel,
+  type RoleModelsSectionProps,
+} from './blocks/project-settings/role-models.tsx'
+export {
+  BudgetSection,
+  type BudgetLimit,
+  type BudgetSectionProps,
+} from './blocks/project-settings/budget.tsx'
+export {
+  InstructionsSection,
+  readingOf,
+  type AgentInstructions,
+  type InstructionsSectionProps,
+  type Reading,
+  type RepositoryInstructions,
+} from './blocks/project-settings/instructions.tsx'
+export {
+  SETUP_KINDS,
+  SETUP_TITLES,
+  type Proposal,
+  type ProposedCommand,
+  type ProposedNever,
+  type ProposedRepository,
+  type ProposedStep,
+  type ProposedVariable,
+  type SetupKind,
+} from './blocks/setup/proposal.tsx'
+export { SetupCard, type CardStatus, type SetupCardProps } from './blocks/setup/setup-card.tsx'
+export {
+  ProjectSetup,
+  allAnswered,
+  type ProjectSetupProps,
+  type SetupAgent,
+  type SetupCardEntry,
+} from './surfaces/project-setup/project-setup.tsx'
+export { FirstLaunch, type FirstLaunchProps } from './surfaces/first-launch/first-launch.tsx'
