@@ -53,32 +53,24 @@ export interface RoleModelsSectionProps {
   onPick: (role: string) => void
   /** Takes a role back to the application's model. */
   onReset: (role: string) => void
-  /**
-   * Open question 62, while it is open: what a role without override shows — the application's
-   * model in the quiet tone (`model`), or the words "App default" alone (`word`).
-   */
-  showsDefault?: 'model' | 'word' | undefined
 }
 
 function RoleRow({
   model,
   onPick,
   onReset,
-  showsDefault,
 }: {
   model: ProjectRoleModel
   onPick: () => void
   onReset: () => void
-  showsDefault: 'model' | 'word'
 }): ReactNode {
   const own = model.override !== null
-  const word = !own && showsDefault === 'word'
   return (
     <li className={RULE} data-role={model.role}>
       <div className={ROW}>
         <span className={NAME}>
           <span className="truncate">{model.role}</span>
-          {!own && !word && <span className={DETAIL}>App default</span>}
+          {!own && <span className={DETAIL}>App default</span>}
         </span>
         <span className={END}>
           <Button
@@ -91,9 +83,7 @@ function RoleRow({
             }
             onClick={onPick}
           >
-            <span className={own ? OWN : QUIET}>
-              {word ? 'App default' : (model.override ?? model.appDefault)}
-            </span>
+            <span className={own ? OWN : QUIET}>{model.override ?? model.appDefault}</span>
             <IconChevronDown size="sm" aria-hidden="true" />
           </Button>
           <span className={RESET_ROOM}>
@@ -138,7 +128,6 @@ export function RoleModelsSection({
   loading = false,
   onPick,
   onReset,
-  showsDefault = 'model',
 }: RoleModelsSectionProps): ReactNode {
   return (
     <Section label="Models by role">
@@ -159,7 +148,6 @@ export function RoleModelsSection({
                 model={model}
                 onPick={() => onPick(model.role)}
                 onReset={() => onReset(model.role)}
-                showsDefault={showsDefault}
               />
             ))
           )}
