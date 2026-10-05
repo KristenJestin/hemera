@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { loadMentionEditor } from '../components/mention-field/mention-field.tsx'
 import { AppFixture, LONG_NAME, MANY_PROJECTS, NOTICES } from './shell-fixtures.tsx'
 
 /**
@@ -119,6 +120,7 @@ export const OnAMission: Story = {
 
 /** A Chat open: listed under Acme with its glyph, the trail says Acme › its title. */
 export const OnAChat: Story = {
+  loaders: [async () => ({ editor: await loadMentionEditor() })],
   render: () => <AppFixture page={{ kind: 'chat', id: 'invoices' }} withMissions withChats />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)

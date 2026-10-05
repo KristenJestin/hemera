@@ -4,7 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { badgesOffBaseline, keepsItsLines } from './badge-baseline.ts'
 import { MENTIONABLES } from './mention-field-fixtures.ts'
-import { MentionField } from './mention-field.tsx'
+import { loadMentionEditor, MentionField, MentionFieldSkeleton } from './mention-field.tsx'
 
 /**
  * The mention field: the Chat's composer, Discuss, an answer, a Review remark, the first field of
@@ -17,6 +17,8 @@ const meta = {
   title: 'Components/MentionField',
   component: MentionField,
   parameters: { layout: 'fullscreen' },
+  // The editor arrives before the story draws, as a page that knows it shows a field asks for it.
+  loaders: [async () => ({ editor: await loadMentionEditor() })],
   args: {
     label: 'Message',
     placeholder: 'Ask anything… @ a file, a mission, a command',
@@ -231,5 +233,19 @@ export const Working: Story = {
     await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
     await expect(args.onStop).toHaveBeenCalled()
+  },
+}
+
+/**
+ * The field while its editor arrives: its box and its foot as they will be, a skeleton where the
+ * words go, Send quiet. The editor takes this room exactly.
+ */
+export const Loading: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => <MentionFieldSkeleton {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByRole('textbox')).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Send' })).toBeDisabled()
   },
 }

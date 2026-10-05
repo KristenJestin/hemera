@@ -5,6 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { badgesOffBaseline, keepsItsLines } from '../../components/mention-field/badge-baseline.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
+import { loadMentionEditor } from '../../components/mention-field/mention-field.tsx'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import {
   CONVERSATION,
@@ -26,6 +27,8 @@ const meta = {
   title: 'Surfaces/Chat',
   component: ChatPage,
   parameters: { layout: 'fullscreen' },
+  // The composer's editor arrives before the story draws, as the Chat's route asks for it.
+  loaders: [async () => ({ editor: await loadMentionEditor() })],
   args: {
     title: 'Invoices export',
     project: { name: 'Acme' },

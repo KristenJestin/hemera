@@ -80,8 +80,10 @@ export {
 export { ChatPage, type ChatPageProps, type ChatTurn } from './surfaces/chat/chat-page.tsx'
 export {
   kindOf,
+  loadMentionEditor,
   MentionBadge,
   MentionField,
+  MentionFieldSkeleton,
   mentionsFor,
   type Mentionable,
   type MentionFieldProps,
