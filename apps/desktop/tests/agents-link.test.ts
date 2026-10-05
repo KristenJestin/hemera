@@ -14,6 +14,7 @@ import {
   makeClientProtocol,
   makeServerProtocol,
   Output,
+  type AgentLine,
 } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, FiberSet, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -127,6 +128,35 @@ describe('The engine speaks to a program through an agents’ process main start
         const agents = yield* launch(GREETS, [], { HEMERA_TEST_GREETING: 'bare and ready' })
         const [said] = yield* Stream.runCollect(Stream.take(agents.output, 1))
         expect(said).toEqual(Output.make({ line: 'bare and ready' }))
+      }),
+    ))
+
+  test('a program that says its line and ends at once is heard, however many run together', () =>
+    run(
+      Effect.gen(function* () {
+        const { launch } = yield* setup
+        const greetings = Array.from({ length: 40 }, (_, index) => `greeting ${String(index)}`)
+        const heard = yield* Effect.forEach(
+          greetings,
+          (greeting) =>
+            Effect.gen(function* () {
+              const agents = yield* launch(GREETS, [], { HEMERA_TEST_GREETING: greeting })
+              const said: AgentLine[] = []
+              // Read to its end, which is AgentsProcessGone once the exit is known.
+              const ended = yield* Effect.flip(
+                Stream.runForEach(agents.output, (line) => Effect.sync(() => said.push(line))),
+              )
+              return { said, ended, code: yield* agents.exited }
+            }),
+          { concurrency: 'unbounded' },
+        )
+        expect(heard).toEqual(
+          greetings.map((greeting) => ({
+            said: [Output.make({ line: greeting })],
+            ended: new AgentsProcessGone(),
+            code: 0,
+          })),
+        )
       }),
     ))
 
