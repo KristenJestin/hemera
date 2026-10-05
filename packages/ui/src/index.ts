@@ -68,6 +68,39 @@ export {
   type LiveKind,
 } from './components/live-chip/live-chip-glance.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
+export {
+  ChatThread,
+  type ChatAction,
+  type ChatActionKind,
+  type ChatItem,
+  type ChatLineTone,
+  type ChatThreadProps,
+  type HeldAnswer,
+} from './blocks/chat/chat-thread.tsx'
+export { ChatPage, type ChatPageProps, type ChatTurn } from './surfaces/chat/chat-page.tsx'
+export {
+  kindOf,
+  loadMentionEditor,
+  MentionBadge,
+  MentionField,
+  MentionFieldSkeleton,
+  mentionsFor,
+  type Mentionable,
+  type MentionFieldProps,
+  type MentionKind,
+} from './components/mention-field/mention-field.tsx'
+export {
+  choiceWords,
+  EFFORTS,
+  EffortGauge,
+  ModelPicker,
+  type Effort,
+  type Judge,
+  type ModelChoice,
+  type ModelPickerProps,
+  type PickerAgent,
+  type PickerModel,
+} from './components/model-picker/model-picker.tsx'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {
   Select,
@@ -126,10 +159,12 @@ export {
 } from './shell/notice.tsx'
 export {
   Sidebar,
+  SidebarChatRow,
   SidebarRow,
   type SidebarPlace,
   type SidebarProject,
   type SidebarProps,
+  type SidebarChatRowProps,
   type SidebarRowProps,
 } from './shell/sidebar.tsx'
 export { WindowShell, type WindowShellProps } from './shell/window-shell.tsx'

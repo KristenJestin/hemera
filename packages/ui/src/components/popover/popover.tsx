@@ -1,6 +1,12 @@
 import { cn } from 'cn'
 import { Popover as BasePopover } from '@base-ui/react/popover'
-import { type ReactElement, type ReactNode, useRef } from 'react'
+import {
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  useRef,
+} from 'react'
 
 import { useOverlayContainer } from '../../overlay.ts'
 
@@ -66,6 +72,16 @@ export interface PopoverProps {
    * every screen reader announces as one.
    */
   anchorOnly?: boolean | undefined
+  /**
+   * What takes the focus when the panel opens, when it is not its first control: the search of a
+   * picker, which is where a hand that opened it wants to type.
+   */
+  initialFocus?: RefObject<HTMLElement | null> | undefined
+  /**
+   * Where the panel hangs, when it is not the trigger: a place inside it, such as the `@` a
+   * mention field's menu belongs to. The trigger stays what the panel is about.
+   */
+  at?: ComponentProps<typeof BasePopover.Positioner>['anchor']
   /** Said once it has finished closing, its exit played: what waits for it to be gone. */
   onClosed?: (() => void) | undefined
   /** Where the trigger sits — a row the whole width of its list; never how it looks. */
@@ -84,6 +100,8 @@ export function Popover({
   label,
   anchorOnly = false,
   onClosed,
+  initialFocus,
+  at,
   className,
 }: PopoverProps): ReactNode {
   const anchor = useRef<HTMLSpanElement>(null)
@@ -100,11 +118,11 @@ export function Popover({
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>
       <BasePopover.Portal container={container}>
-        <BasePopover.Positioner anchor={anchor} side={side} align={align} sideOffset={4}>
+        <BasePopover.Positioner anchor={at ?? anchor} side={side} align={align} sideOffset={4}>
           <BasePopover.Popup
             className={POPUP}
             aria-label={title === undefined ? label : undefined}
-            initialFocus={keepFocus ? false : undefined}
+            initialFocus={keepFocus ? false : initialFocus}
             finalFocus={keepFocus ? false : undefined}
           >
             {title !== undefined && (

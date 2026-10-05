@@ -29,10 +29,20 @@ import {
 import { ReviewStage, type ReviewStageProps } from '../surfaces/mission/review-stage.tsx'
 import type { ProjectStageGroup } from '../surfaces/project/project-page.tsx'
 import { ProjectPage } from '../surfaces/project/project-page.tsx'
+import { ChatPage } from '../surfaces/chat/chat-page.tsx'
+import { CONVERSATION } from '../surfaces/chat/chat-fixtures.ts'
+import { AGENTS } from '../components/model-picker/model-picker-fixtures.ts'
+import { MENTIONABLES } from '../components/mention-field/mention-field-fixtures.ts'
 import { ContentHeader, type Crumb } from './content-header.tsx'
 import { EngineVeil, type EngineState } from './engine-veil.tsx'
 import { type NoticeItem, NoticeStack } from './notice.tsx'
-import { Sidebar, type SidebarPlace, type SidebarProject, SidebarRow } from './sidebar.tsx'
+import {
+  Sidebar,
+  SidebarChatRow,
+  type SidebarPlace,
+  type SidebarProject,
+  SidebarRow,
+} from './sidebar.tsx'
 import { WindowShell } from './window-shell.tsx'
 
 /**
@@ -562,12 +572,48 @@ export function MissionFixture({
   )
 }
 
+/** A Chat of Acme, with the state its page holds: what is being written. */
+function ChatFixture({ title }: { title: string }): ReactNode {
+  const [draft, setDraft] = useState('')
+  const none = () => {}
+  return (
+    <ChatPage
+      title={title}
+      project={ACME}
+      checkout="~/code/acme"
+      agents={AGENTS}
+      model={{ agent: 'claude', model: 'sonnet' }}
+      items={CONVERSATION}
+      turn="idle"
+      mentionables={MENTIONABLES}
+      draft={draft}
+      onDraft={setDraft}
+      onSend={() => setDraft('')}
+      onStop={none}
+      onModel={none}
+      onFavourite={none}
+      onHide={none}
+      onAnswer={none}
+      onOpenMission={none}
+      onRename={none}
+      onRetry={none}
+    />
+  )
+}
+
 /** Where the window is: which page the sheet shows. */
 export type AppPage =
   | { kind: 'home' }
   | { kind: 'project'; id: string }
   | { kind: 'mission'; key: string }
+  | { kind: 'chat'; id: string }
   | { kind: 'settings' }
+
+/** Acme's Chats, listed under it in the sidebar. */
+export const CHATS = [
+  { id: 'invoices', title: 'Invoices export' },
+  { id: 'release', title: 'Release notes for 2.4' },
+] as const
 
 export interface AppFixtureProps {
   page?: AppPage
@@ -581,6 +627,8 @@ export interface AppFixtureProps {
   notices?: readonly NoticeItem[]
   /** Whether the sidebar shows missions under Acme, the room a later ticket fills. */
   withMissions?: boolean
+  /** Whether the sidebar shows Acme's Chats under its missions. */
+  withChats?: boolean
   dense?: boolean
 }
 
@@ -591,6 +639,8 @@ function placeOf(page: AppPage): SidebarPlace {
       return { kind: 'project', id: page.id }
     case 'mission':
       return { kind: 'mission', key: page.key }
+    case 'chat':
+      return { kind: 'chat', id: page.id }
     case 'settings':
       return { kind: 'settings' }
     case 'home':
@@ -612,6 +662,11 @@ function crumbsOf(
       return [{ id: 'settings', label: 'Settings' }]
     case 'project':
       return [{ id: 'project', label: projectName(page.id) }]
+    case 'chat':
+      return [
+        { id: 'project', label: ACME.name, onPress: goAcme },
+        { id: 'chat', label: CHATS.find((chat) => chat.id === page.id)?.title ?? 'Chat' },
+      ]
     case 'mission':
       return [
         { id: 'project', label: ACME.name, onPress: goAcme },
@@ -633,6 +688,7 @@ export function AppFixture({
   engine,
   notices: noticesAtFirst = [],
   withMissions = false,
+  withChats = false,
   dense = false,
 }: AppFixtureProps): ReactNode {
   const [page, setPage] = useState<AppPage>(first)
@@ -648,7 +704,7 @@ export function AppFixture({
     setPage({ kind: 'mission', key })
   }
   const under = (project: SidebarProject): ReactNode =>
-    withMissions && project.id === ACME.id ? (
+    (withMissions || withChats) && project.id === ACME.id ? (
       <>
         <SidebarRow
           missionKey="ACME-12"
@@ -664,6 +720,16 @@ export function AppFixture({
           current={page.kind === 'mission' && page.key === 'ACME-15'}
           onPress={() => goMission('ACME-15')}
         />
+        {withChats &&
+          CHATS.map((chat) => (
+            <SidebarChatRow
+              key={chat.id}
+              id={chat.id}
+              title={chat.title}
+              current={page.kind === 'chat' && page.id === chat.id}
+              onPress={() => setPage({ kind: 'chat', id: chat.id })}
+            />
+          ))}
       </>
     ) : undefined
   const projectName = (id: string): string =>
@@ -761,6 +827,9 @@ export function AppFixture({
       )}
       {page.kind === 'mission' && (
         <MissionBody machine={machine} title={dense ? LONG_TITLE : MISSION.title} />
+      )}
+      {page.kind === 'chat' && (
+        <ChatFixture title={CHATS.find((chat) => chat.id === page.id)?.title ?? 'Chat'} />
       )}
       {page.kind === 'settings' && (
         <div className="px-8 py-6">

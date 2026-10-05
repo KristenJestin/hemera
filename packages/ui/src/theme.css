@@ -331,6 +331,17 @@
      name, a variable's key — so the lines under it start their next part on the same column. */
   --spacing-settings-name: 10rem;
 
+  /* The model picker: as wide as an agent's tabs and a model's name with its marks, and a list
+     that keeps its height whatever the search leaves in it, so nothing jumps while typing. */
+  --spacing-picker: 30rem;
+  --spacing-picker-list: 15rem;
+  /* The menu of the mention field: a long path and its kind's glyph on one line, and eight
+     entries before it scrolls. */
+  --spacing-mention: 22rem;
+  --spacing-mention-list: 16rem;
+  /* The box the Chat's composer and every mention field are drawn in: four lines, always. */
+  --spacing-composer: 6.5rem;
+
   /* How wide a notification is drawn in the window's corner. */
   --spacing-notice: 22rem;
 
@@ -570,4 +581,14 @@
     background-color: var(--color-selection);
     color: var(--color-selection-foreground);
   }
+}
+
+/* The mention field's placeholder: Tiptap marks the empty first line and hands it the words, and
+   the line draws them in the quiet tone without taking any room of its own. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
 }

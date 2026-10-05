@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { loadMentionEditor } from '../components/mention-field/mention-field.tsx'
 import { AppFixture, LONG_NAME, MANY_PROJECTS, NOTICES } from './shell-fixtures.tsx'
 
 /**
@@ -113,6 +114,27 @@ export const OnAMission: Story = {
       expect(canvas.getByRole('navigation', { name: 'Where you are' })).toHaveTextContent(
         'AcmeACME-12Review · round 1Spec',
       )
+    })
+  },
+}
+
+/** A Chat open: listed under Acme with its glyph, the trail says Acme › its title. */
+export const OnAChat: Story = {
+  loaders: [async () => ({ editor: await loadMentionEditor() })],
+  render: () => <AppFixture page={{ kind: 'chat', id: 'invoices' }} withMissions withChats />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const places = canvas.getByRole('navigation', { name: 'Places' })
+    expect(within(places).getByRole('button', { name: 'Invoices export' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(canvas.getByRole('navigation', { name: 'Where you are' })).toHaveTextContent(
+      'AcmeInvoices export',
+    )
+    await userEvent.click(within(places).getByRole('button', { name: 'Release notes for 2.4' }))
+    await waitFor(() => {
+      expect(canvas.getByRole('heading', { level: 1, name: 'Release notes for 2.4' })).toBeVisible()
     })
   },
 }
