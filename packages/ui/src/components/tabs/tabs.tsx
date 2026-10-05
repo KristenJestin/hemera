@@ -21,7 +21,7 @@ const LIST = 'relative isolate flex items-center gap-1 border-b border-border'
 
 /** The selected tab is drawn over the mark; the others are crossed by it. */
 const TAB =
-  'relative inline-flex h-control-md items-center gap-1.5 rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground'
+  'relative inline-flex h-control-md items-center gap-1.5 rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground data-disabled:opacity-50'
 
 /** What a tab says, drawn over the mark whichever tab the mark is crossing. */
 const CONTENT = 'inline-flex items-center gap-1.5'
@@ -35,6 +35,11 @@ export interface TabsItem<Value extends string> {
   icon?: ReactNode
   /** What the tab shows when it is the one selected. */
   panel: ReactNode
+  /**
+   * Why the tab cannot be chosen now: it is then disabled, and this follows its label in its name
+   * (and in its tooltip, when it shows its icon alone).
+   */
+  unavailable?: string | undefined
 }
 
 export interface TabsProps<Value extends string> {
@@ -55,6 +60,10 @@ export interface TabsProps<Value extends string> {
   /** Where the strip sits; never how it looks. */
   className?: string | undefined
 }
+
+/** A tab's name: its label, and why it cannot be chosen when it cannot. */
+const nameOf = (item: TabsItem<string>): string =>
+  item.unavailable === undefined ? item.label : `${item.label} · ${item.unavailable}`
 
 export function Tabs<Value extends string>({
   label,
@@ -79,12 +88,13 @@ export function Tabs<Value extends string>({
       <BaseTabs.List activateOnFocus aria-label={label} className={LIST}>
         {items.map((item) =>
           iconsOnly ? (
-            <Tooltip key={item.value} label={item.label} side="bottom">
+            <Tooltip key={item.value} label={nameOf(item)} side="bottom">
               <BaseTabs.Tab
                 value={item.value}
                 data-mark={item.value}
+                disabled={item.unavailable !== undefined}
                 className={TAB}
-                aria-label={item.label}
+                aria-label={nameOf(item)}
               >
                 <span className={cn(OVER_MARK, CONTENT)}>{item.icon}</span>
               </BaseTabs.Tab>
@@ -94,7 +104,9 @@ export function Tabs<Value extends string>({
               key={item.value}
               value={item.value}
               data-mark={item.value}
+              disabled={item.unavailable !== undefined}
               className={TAB}
+              aria-label={item.unavailable === undefined ? undefined : nameOf(item)}
             >
               <span className={cn(OVER_MARK, CONTENT)}>
                 {item.icon}

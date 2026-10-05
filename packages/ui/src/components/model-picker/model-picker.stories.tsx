@@ -1,8 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { AGENTS, LONG_AGENTS } from './model-picker-fixtures.ts'
+import {
+  AGENTS,
+  AGENTS_FAILED,
+  AGENTS_LOADING,
+  AGENTS_SIGNED_OUT,
+  LONG_AGENTS,
+} from './model-picker-fixtures.ts'
 import { type ModelChoice, ModelPicker } from './model-picker.tsx'
 
 /**
@@ -243,5 +249,65 @@ export const NoKnownDefault: Story = {
     const effort = await body().findByRole('radiogroup', { name: 'Effort' })
     await expect(within(effort).getByRole('radio', { name: 'Default' })).toBeChecked()
     await expect(within(effort).getAllByRole('radio')).toHaveLength(4)
+  },
+}
+
+/** An agent installed but not signed in: its mark is there, not choosable, why in its tooltip. */
+export const NotSignedIn: Story = {
+  args: { open: true, agents: AGENTS_SIGNED_OUT },
+  play: async () => {
+    const codex = await body().findByRole('tab', { name: 'Codex · Not signed in' })
+    await expect(codex).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(codex)
+    await expect(body().getByRole('tab', { name: 'Claude Code' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+  },
+}
+
+/** The models on their way: skeleton rows of a model's shape in the list's own room. */
+export const ModelsLoading: Story = {
+  args: { open: true, value: null, agents: AGENTS_LOADING },
+  play: async () => {
+    const list = await body().findByRole('listbox', { name: 'Models of Claude Code' })
+    await expect(list).toHaveAttribute('aria-busy', 'true')
+    await expect(within(list).queryAllByRole('option')).toHaveLength(0)
+  },
+}
+
+/**
+ * The models landing while the picker is open: the popover keeps its box, the list its height,
+ * from the skeleton rows to the models.
+ */
+export const ModelsLanding: Story = {
+  args: { open: true, value: null, agents: AGENTS_LOADING },
+  render: function Render(args) {
+    const [agents, setAgents] = useState(args.agents)
+    useEffect(() => {
+      const landing = setTimeout(() => setAgents(AGENTS), 600)
+      return () => clearTimeout(landing)
+    }, [])
+    return <ModelPicker {...args} agents={agents} />
+  },
+  play: async () => {
+    const panel = await body().findByRole('dialog', { name: 'Model of the Builder' })
+    await body().findByRole('listbox', { name: 'Models of Claude Code', busy: true })
+    const before = panel.getBoundingClientRect()
+    await body().findByRole('option', { name: /Opus/ }, { timeout: 5000 })
+    const after = panel.getBoundingClientRect()
+    await expect([after.width, after.height]).toEqual([before.width, before.height])
+  },
+}
+
+/** The models could not be read: said in words in the list's room, with Retry. */
+export const ModelsFailed: Story = {
+  args: { open: true, value: null, agents: AGENTS_FAILED, onRetry: fn() },
+  play: async ({ args }) => {
+    await expect(
+      await body().findByText('Claude Code did not list its models in time.'),
+    ).toBeVisible()
+    await userEvent.click(body().getByRole('button', { name: 'Retry' }))
+    await expect(args.onRetry).toHaveBeenCalledWith('claude')
   },
 }

@@ -113,3 +113,25 @@ export const Focused: Story = {
     expect(canvas.getByText('Every branch of every repository.')).toBeInTheDocument()
   },
 }
+
+/** A tab that cannot be chosen now: dimmed, skipped, and why said after its name. */
+export const Unavailable: Story = {
+  args: {
+    items: PLACES.map((place) =>
+      place.value === 'branches'
+        ? Object.assign({}, place, { unavailable: 'Not cloned yet' })
+        : place,
+    ),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    const branches = canvas.getByRole('tab', { name: 'Branches · Not cloned yet' })
+    await expect(branches).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(branches)
+    await expect(args.onValueChange).not.toHaveBeenCalled()
+    await expect(canvas.getByRole('tab', { name: /repositories/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+  },
+}
