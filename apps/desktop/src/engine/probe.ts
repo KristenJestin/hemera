@@ -1,16 +1,20 @@
 /**
  * The end-to-end suite's one seam into the engine, served only when the suite runs headless
  * (`HEMERA_E2E_HEADLESS=1`, as `window-options.ts`): it lets the suite crash the engine from
- * inside, have it start an agents' process for the test program, and stream at a high rate.
- * A run of Hemera outside the suite never opens this port.
+ * inside, have it start an agents' process for the test program, stream at a high rate, and
+ * create a need as an engine service would. A run of Hemera outside the suite never opens this
+ * port.
  */
 
-import { AgentsProcessGone, LaunchFailed, type AgentLine } from '@hemera/ipc'
+import { ApplicationOwner, EnvironmentFields } from '@hemera/core/domain'
+import { AgentsProcessGone, LaunchFailed, StorageFailed, type AgentLine } from '@hemera/ipc'
 import { Effect, Predicate, Schema, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
 import type { AgentsProcess } from './agents.ts'
+import { createNeed, needService } from './needs.ts'
+import type { StartedProfile } from './profile.ts'
 
 export const Pid = Schema.TaggedStruct('Pid', { pid: Schema.Number })
 export const Line = Schema.TaggedStruct('Line', { line: Schema.String })
@@ -31,14 +35,19 @@ export const ProbeRpcs = RpcGroup.make(
     success: Item,
     stream: true,
   }),
+  /** Creates a pending environment need of the application, as an engine service would. */
+  Rpc.make('probe.need', { success: Schema.String, error: StorageFailed }),
 )
+
+/** The service the suite's needs belong to: none answers them, so nothing ever delivers one. */
+const SUITE = needService('end-to-end suite')
 
 type Launch = (
   program: string,
   args: ReadonlyArray<string>,
 ) => Effect.Effect<AgentsProcess, LaunchFailed, Scope.Scope>
 
-export const probeHandlers = (launch: Launch) =>
+export const probeHandlers = (launch: Launch, profile: StartedProfile) =>
   ProbeRpcs.toLayer({
     'probe.crash': () => Effect.sync(() => process.crash()),
     'probe.agents': ({ program, input }) =>
@@ -62,4 +71,25 @@ export const probeHandlers = (launch: Launch) =>
         Stream.map((index) => Item.make({ index, text: 'x'.repeat(size) })),
         Stream.rechunk(1),
       ),
+    'probe.need': () =>
+      profile
+        .use(
+          createNeed(
+            SUITE,
+            ApplicationOwner.make({}),
+            EnvironmentFields.make({
+              missing: 'Docker is not running',
+              action: 'Start Docker',
+              settingsSection: null,
+            }),
+          ),
+        )
+        .pipe(
+          Effect.map((need) => need.id),
+          Effect.mapError((refusal) =>
+            refusal instanceof StorageFailed
+              ? refusal
+              : new StorageFailed({ sentence: refusal.message }),
+          ),
+        ),
   })

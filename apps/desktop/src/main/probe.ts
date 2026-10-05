@@ -96,6 +96,21 @@ export const installProbe = (
           engineWorkingSetAfterKb: metrics(),
         }))
       },
+      createNeed: () => Effect.runPromise(client['probe.need']()),
+      pendingNeeds: () =>
+        Effect.runPromise(
+          closedAs(gone)(engineClient['needs.list']()).pipe(
+            Effect.map((groups) =>
+              groups.flatMap((group) =>
+                group.needs.map((need) => ({
+                  id: need.id,
+                  state: need.state,
+                  answered: need.answer !== null,
+                })),
+              ),
+            ),
+          ),
+        ),
     }
     globalThis.hemeraProbe = probe
     yield* Effect.addFinalizer(() =>

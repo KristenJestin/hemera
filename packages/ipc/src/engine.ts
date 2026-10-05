@@ -1,7 +1,7 @@
 /**
  * The engine's domain: its start, its status, and the calls on the Profile it holds, the Projects,
- * their repositories, their Workspaces and their commands included. Served by the engine to main,
- * and by main to the window, which forwards.
+ * their repositories, their Workspaces, their commands, their missions and the needs included.
+ * Served by the engine to main, and by main to the window, which forwards.
  */
 
 import { Schema } from 'effect'
@@ -16,6 +16,7 @@ import {
   StorageFailed,
 } from './profile.ts'
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
+import { MissionsRpcs, NeedsRpcs } from './missions.ts'
 import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 
@@ -102,6 +103,8 @@ export const EngineRpcs = RpcGroup.make(
   VariablesRpcs,
   CatalogueRpcs,
   RunsRpcs,
+  MissionsRpcs,
+  NeedsRpcs,
 )
 
 /**

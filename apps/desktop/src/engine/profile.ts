@@ -21,7 +21,17 @@ import {
   RestoreRefused,
   StorageFailed,
 } from '@hemera/ipc'
-import { Context, Effect, Layer, Predicate, Result, Stream, SubscriptionRef } from 'effect'
+import {
+  Cause,
+  Context,
+  Effect,
+  Layer,
+  Predicate,
+  Result,
+  Schedule,
+  Stream,
+  SubscriptionRef,
+} from 'effect'
 import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
@@ -59,6 +69,9 @@ import {
 import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
 import { supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
+import { type MissionParts, type MissionServices, missionsLayer, runStops } from './missions.ts'
+import { deliverAnswers, recheckNeeds } from './needs.ts'
+import { assignKeyPrefixes } from './projects.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -81,10 +94,18 @@ export interface ProfileParts {
   readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
   /** How runs wait for an address and give a process its grace; the defaults otherwise. */
   readonly runs?: Partial<RunsSettings>
+  /** The guards, stoppers and need owners later tickets register; none otherwise. */
+  readonly missions?: Partial<MissionParts>
 }
 
-/** What the calls on the Profile stand on: the Projects, their Workspaces and their runs. */
-export type EngineServices = WorkspaceServices | RunServices
+/** How often the pending environment needs are checked again while they wait. */
+const RECHECK_EVERY = '5 minutes'
+
+/**
+ * What the calls on the Profile stand on: the Projects, their Workspaces, their runs and their
+ * missions.
+ */
+export type EngineServices = WorkspaceServices | RunServices | MissionServices
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -172,7 +193,8 @@ export const startProfile = (
     )
     // The commands: the supervisor (its registry in the database, its children's standard error
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
-    const layers = runsRecipeRunnerLayer.pipe(
+    const layers = missionsLayer(parts.missions).pipe(
+      Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
           supervisorLayer(log),
@@ -261,6 +283,39 @@ export const startProfile = (
       ),
     )
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
+
+    // A Project made before missions existed is given its key prefix before anything reads it.
+    yield* run(assignKeyPrefixes).pipe(
+      Effect.tap((given) =>
+        given === 0
+          ? Effect.void
+          : Effect.sync(() => log(`gave ${String(given)} Project(s) a key prefix`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the Projects were not given their key prefix: ${said(refusal)}`)),
+      ),
+    )
+
+    // Once automations may run: what a cancel could not stop yet is tried again, the answers an
+    // engine that stopped did not hand over are handed over, and the pending environment needs are
+    // checked again, then every few minutes. No pending need is ever answered here.
+    /** One step of the start: its failure or its defect is written down and the rest goes on. */
+    const step = <A, E>(doing: string, effect: Effect.Effect<A, E, Layer.Success<typeof layers>>) =>
+      run(effect).pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => log(`${doing} failed: ${Cause.pretty(cause).split('\n')[0] ?? ''}`)),
+        ),
+      )
+    yield* gate.pass.pipe(
+      Effect.andThen(step('stopping what cancelled missions left', runStops(null))),
+      Effect.andThen(step('handing over the answers left', deliverAnswers)),
+      Effect.andThen(
+        step('checking the environment needs again', recheckNeeds).pipe(
+          Effect.repeat(Schedule.spaced(RECHECK_EVERY)),
+        ),
+      ),
+      Effect.forkScoped,
+    )
 
     // A preparation a stopped engine interrupted carries on once automations may run.
     yield* gate.pass.pipe(

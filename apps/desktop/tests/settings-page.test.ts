@@ -28,6 +28,7 @@ const ACME: Project = {
   mainCheckout: '/work/acme',
   workspacesRoot: null,
   branchPrefix: null,
+  keyPrefix: 'ACME',
   version: 1,
   createdAt: '2026-10-04T08:00:00.000Z',
   updatedAt: '2026-10-04T08:00:00.000Z',

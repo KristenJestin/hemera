@@ -166,6 +166,7 @@ const runOf = (row: RunRow): Run => ({
   folder: row.folder,
   startedBy: RUN_STARTERS.find((one) => one === row.startedBy) ?? 'user',
   sessionId: row.sessionId,
+  missionId: row.missionId,
   state: RUN_STATES.find((one) => one === row.state) ?? 'failed',
   exitCode: row.exitCode,
   url: row.url,
@@ -248,6 +249,7 @@ const writeRun = (live: Live, event: string | null) =>
       folder: run.folder,
       startedBy: run.startedBy,
       sessionId: run.sessionId,
+      missionId: run.missionId,
       state: run.state,
       exitCode: run.exitCode,
       url: run.url,
@@ -466,6 +468,8 @@ export interface RunAsked {
   readonly folder: string | null
   readonly startedBy: RunStarter
   readonly sessionId: string | null
+  /** The mission it is started for: a cancel of that mission stops it. */
+  readonly missionId?: string | null
   /** Run at opening: a permission it needs is asked at Project level. */
   readonly atOpen?: boolean
 }
@@ -564,6 +568,7 @@ export const startRun = (asked: RunAsked) =>
         folder,
         startedBy: asked.startedBy,
         sessionId: asked.sessionId,
+        missionId: asked.missionId ?? null,
         state: ask ? 'waiting_for_permission' : 'starting',
         exitCode: null,
         url: null,
@@ -597,6 +602,7 @@ export const startRun = (asked: RunAsked) =>
           askedFolder: command === null ? relativeFolder : null,
           startedBy: asked.startedBy,
           sessionId: asked.sessionId,
+          missionId: live.run.missionId,
           state: live.run.state,
           exitCode: null,
           url: null,
@@ -728,6 +734,21 @@ export const restartRun = (id: string) =>
       folder: row.commandId === null ? row.askedFolder : null,
       startedBy: 'user',
       sessionId: null,
+      missionId: row.missionId,
+    })
+  })
+
+/**
+ * Stops every run going for a mission, its services included: what a cancel of the mission asks.
+ * A service it joined that another mission started is that mission's, and keeps going.
+ */
+export const stopMissionRuns = (missionId: string) =>
+  Effect.gen(function* () {
+    const runs = yield* Runs
+    const going = [...runs.live.values()].filter((live) => live.run.missionId === missionId)
+    yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
+      concurrency: 'unbounded',
+      discard: true,
     })
   })
 

@@ -31,6 +31,16 @@ export interface HemeraProbe {
   readonly agentsOutcome: () => Promise<{ readonly ended: string; readonly lines: string[] }>
   /** Streams `count` items of `size` characters from the engine, one acknowledgement each. */
   readonly load: (count: number, size: number) => Promise<LoadMeasure>
+  /** Creates a pending environment need of the application; answers its id. */
+  readonly createNeed: () => Promise<string>
+  /** Every pending need of Needs you, as the window reads them: id, state and answer. */
+  readonly pendingNeeds: () => Promise<ReadonlyArray<PendingNeed>>
+}
+
+export interface PendingNeed {
+  readonly id: string
+  readonly state: string
+  readonly answered: boolean
 }
 
 declare global {

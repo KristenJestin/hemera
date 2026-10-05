@@ -1,5 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 
+import { DecisionFields, MissionOwner } from '@hemera/core/domain'
 import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -21,6 +22,9 @@ import {
   InvalidProjectName,
   LaunchFailed,
   makeClientProtocol,
+  MoveRefused,
+  type Need,
+  NeedChanged,
   makeServerProtocol,
   NotFetchedSince,
   Preferences,
@@ -149,6 +153,7 @@ const run: Run = {
   folder: '/atlas',
   startedBy: 'user',
   sessionId: null,
+  missionId: null,
   state: 'ready',
   exitCode: null,
   url: 'http://localhost:5173/',
@@ -171,6 +176,45 @@ const commandHandlers = {
   'runs.changes': () => Stream.concat(Stream.make(run), Stream.never),
 }
 
+/** A decision the api's migration waits on, in ACME-12. */
+const need: Need = {
+  id: 'n1',
+  owner: MissionOwner.make({ projectId: 'p1', missionId: 'm1', taskId: null }),
+  fields: DecisionFields.make({
+    question: 'Which table holds the invoices?',
+    options: ['invoices', 'billing_invoices'],
+    recommended: { option: 'invoices', reason: 'the api already reads it' },
+  }),
+  choices: [],
+  requestedBy: 'builder',
+  state: 'pending',
+  answer: null,
+  endedReason: null,
+  createdAt: '2026-10-05T00:00:00.000Z',
+  endedAt: null,
+}
+
+/** The missions of an engine that refuses a cancel once Done and holds one pending need. */
+const missionHandlers = {
+  'missions.list': unused,
+  'missions.get': unused,
+  'missions.create': unused,
+  'missions.freeze': unused,
+  'missions.backToPlanning': unused,
+  'missions.launch': unused,
+  'missions.fix': unused,
+  'missions.ship': unused,
+  'missions.cancel': () =>
+    Effect.fail(
+      new MoveRefused({ move: 'cancel', stage: 'done', reasons: ['the mission is in done'] }),
+    ),
+  'missions.changes': () => Stream.concat(Stream.make(NeedChanged.make({ need })), Stream.never),
+  'needs.list': () => Effect.succeed([{ projectId: 'p1', needs: [need] }]),
+  'needs.get': unused,
+  'needs.answer': unused,
+  'needs.retry': unused,
+}
+
 /** main's view of an engine that answers its status and then never ends the change stream. */
 const engineLink = Effect.gen(function* () {
   const { port1: mainPort, port2: enginePort } = new MessageChannel()
@@ -189,6 +233,7 @@ const engineLink = Effect.gen(function* () {
         ...projectHandlers,
         ...workspaceHandlers,
         ...commandHandlers,
+        ...missionHandlers,
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -377,6 +422,23 @@ describe('The preferences', () => {
           const refused = yield* Effect.flip(client['profile.restore']({ folder: '/backup' }))
           expect(refused).toBeInstanceOf(RestoreRefused)
           expect(refused.message).toBe('Not this one.')
+        }),
+      ),
+    ))
+})
+
+describe('The missions on the engine link', () => {
+  test('a refused move names its move, and a need arrives as itself', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          const refused = yield* Effect.flip(client['missions.cancel']({ id: 'm1' }))
+          expect(refused).toBeInstanceOf(MoveRefused)
+          expect(refused.message).toBe('Cancel is refused: the mission is in done.')
+          expect(yield* client['needs.list']()).toEqual([{ projectId: 'p1', needs: [need] }])
+          const [first] = yield* Stream.runCollect(Stream.take(client['missions.changes'](), 1))
+          expect(first).toEqual(NeedChanged.make({ need }))
         }),
       ),
     ))

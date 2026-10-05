@@ -20,6 +20,8 @@ import {
   ROOT_REPOSITORY,
   branchName,
   branchPrefix,
+  defaultKeyPrefix,
+  keyPrefix,
   projectName,
   repositoryPath,
 } from '@hemera/core/domain'
@@ -28,6 +30,7 @@ import {
   type BranchPrefixEdit,
   InvalidFolder,
   InvalidRepositoryPath,
+  KeyPrefixTaken,
   type NewProject,
   type NewRepository,
   type Project,
@@ -42,7 +45,7 @@ import {
   UnknownRepository,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { Effect, Option, Result, Stream } from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
@@ -54,7 +57,7 @@ import {
   type EngineTransaction,
   refusedWhile,
 } from './storage/database.ts'
-import { projectRepositories, projects } from './storage/schema.ts'
+import { missions, projectRepositories, projects } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 
 /** The date every row and event of one change shares. */
@@ -164,6 +167,8 @@ const projectOf = (row: ProjectRow, repositories: ReadonlyArray<RepositoryRow>):
   mainCheckout: row.mainCheckout,
   workspacesRoot: row.workspacesRoot,
   branchPrefix: row.branchPrefix,
+  // Null only between the migration that brought missions and the start that gives it one.
+  keyPrefix: row.keyPrefix ?? defaultKeyPrefix(row.name),
   version: row.version,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -231,7 +236,7 @@ export const getRepository = (id: string) =>
 
 /** What an edit of a Project may change of its row. */
 type ProjectChange = Partial<
-  Pick<ProjectRow, 'name' | 'mainCheckout' | 'workspacesRoot' | 'branchPrefix'>
+  Pick<ProjectRow, 'name' | 'mainCheckout' | 'workspacesRoot' | 'branchPrefix' | 'keyPrefix'>
 >
 
 /** What an edit of a repository may change of its row. */
@@ -349,6 +354,42 @@ const twice = (paths: ReadonlyArray<string>, candidates: ReadonlyArray<string>) 
       )
 }
 
+/**
+ * Whether a key prefix is taken for a Project: another Project holds it, or keys of another
+ * Project's missions carry it. Two missions never have the same key in a Profile.
+ */
+const prefixTaken = (transaction: EngineTransaction, prefix: string, projectId: string) =>
+  Effect.gen(function* () {
+    const held = yield* transaction
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.keyPrefix, prefix), ne(projects.id, projectId)))
+      .limit(1)
+      .pipe(Effect.mapError(refusedWhile('reading the key prefixes')))
+    const carried = yield* transaction
+      .select({ id: missions.id })
+      .from(missions)
+      .where(and(eq(missions.keyPrefix, prefix), ne(missions.projectId, projectId)))
+      .limit(1)
+      .pipe(Effect.mapError(refusedWhile('reading the key prefixes')))
+    return held.length > 0 || carried.length > 0
+  })
+
+/** The prefixes tried for a Project's name: its default, then the default and a number. */
+const candidatePrefixes = (name: string): ReadonlyArray<string> => {
+  const base = defaultKeyPrefix(name)
+  return [base, ...Array.from({ length: 98 }, (_, rank) => `${base}${String(rank + 2)}`)]
+}
+
+/** The first prefix of a Project's name that is free. */
+const freePrefix = (transaction: EngineTransaction, name: string, projectId: string) =>
+  Effect.gen(function* () {
+    for (const candidate of candidatePrefixes(name)) {
+      if (!(yield* prefixTaken(transaction, candidate, projectId))) return candidate
+    }
+    return yield* Effect.die(new Error(`no key prefix is free for “${name}”`))
+  })
+
 export const createProject = (asked: NewProject) =>
   Effect.gen(function* () {
     const name = yield* Effect.fromResult(projectName(asked.name))
@@ -362,14 +403,26 @@ export const createProject = (asked: NewProject) =>
     yield* mutate('creating a Project', (transaction) =>
       Effect.gen(function* () {
         const at = now()
+        const prefix = yield* freePrefix(transaction, name, id)
         yield* transaction
           .insert(projects)
-          .values({ id, name, mainCheckout, createdAt: at, updatedAt: at, version: 1 })
+          .values({
+            id,
+            name,
+            mainCheckout,
+            keyPrefix: prefix,
+            createdAt: at,
+            updatedAt: at,
+            version: 1,
+          })
           .pipe(Effect.mapError(refusedWhile('writing the Project')))
         const added = yield* insertRepositories(transaction, id, rows)
         return {
           result: undefined,
-          events: [projectEvent('project.created', id, { name, mainCheckout }), ...added],
+          events: [
+            projectEvent('project.created', id, { name, mainCheckout, keyPrefix: prefix }),
+            ...added,
+          ],
         }
       }),
     )
@@ -433,6 +486,82 @@ export const setBranchPrefix = (edit: BranchPrefixEdit) =>
       }),
     )
     return yield* getProject(edit.id)
+  })
+
+/** A change of the prefix that starts the keys of a Project's next missions. */
+export interface KeyPrefixEdit {
+  readonly id: string
+  readonly version: number
+  readonly prefix: string
+}
+
+/**
+ * The prefix of a Project's next missions. Its missions keep their keys: only the later ones take
+ * the new prefix, and the old one stays the Project's while keys carry it.
+ */
+export const setKeyPrefix = (edit: KeyPrefixEdit) =>
+  Effect.gen(function* () {
+    const prefix = yield* Effect.fromResult(keyPrefix(edit.prefix))
+    yield* mutate('choosing the key prefix', (transaction) =>
+      Effect.gen(function* () {
+        if (yield* prefixTaken(transaction, prefix, edit.id)) {
+          return yield* new KeyPrefixTaken({ prefix })
+        }
+        yield* bump(transaction, edit.id, edit.version, { keyPrefix: prefix })
+        return {
+          result: undefined,
+          events: [projectEvent('project.updated', edit.id, { keyPrefix: prefix })],
+        }
+      }),
+    )
+    return yield* getProject(edit.id)
+  })
+
+/**
+ * At the engine's start: each Project made before missions existed is given its default prefix,
+ * the first of its name that is free.
+ */
+export const assignKeyPrefixes = Effect.gen(function* () {
+  const database = yield* Database
+  const bare = yield* database
+    .select({ id: projects.id, name: projects.name })
+    .from(projects)
+    .where(isNull(projects.keyPrefix))
+    .orderBy(asc(projects.createdAt), asc(projects.id))
+    .pipe(Effect.mapError(refusedWhile('reading the Projects')))
+  for (const project of bare) {
+    yield* mutate('giving a Project its key prefix', (transaction) =>
+      Effect.map(givePrefix(transaction, project), (prefix) => ({
+        result: undefined,
+        events: [
+          {
+            type: 'project.updated',
+            entityKind: 'project',
+            entityId: project.id,
+            source: 'system',
+            author: 'hemera',
+            payload: { keyPrefix: prefix },
+          } satisfies NewEvent,
+        ],
+      })),
+    )
+  }
+  return bare.length
+})
+
+/** Gives a Project without a key prefix the first free one of its name, inside a transaction. */
+export const givePrefix = (
+  transaction: EngineTransaction,
+  project: { readonly id: string; readonly name: string },
+) =>
+  Effect.gen(function* () {
+    const prefix = yield* freePrefix(transaction, project.name, project.id)
+    yield* transaction
+      .update(projects)
+      .set({ keyPrefix: prefix })
+      .where(eq(projects.id, project.id))
+      .pipe(Effect.mapError(refusedWhile('writing the Project')))
+    return prefix
   })
 
 export const addRepository = (asked: NewRepository) =>
