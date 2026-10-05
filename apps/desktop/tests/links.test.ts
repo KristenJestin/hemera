@@ -14,6 +14,8 @@ import {
   fromMessagePort,
   makeClientProtocol,
   makeServerProtocol,
+  HomeTarget,
+  OpenTarget,
   type EngineStart,
   type EnvironmentReport,
   type Preferences,
@@ -55,6 +57,9 @@ const report: EnvironmentReport = {
   notVerified: [],
   producedAt: '2026-10-03T00:00:00.000Z',
 }
+
+/** What main tells the window once it listens: a system notification was clicked. */
+const OPENED = OpenTarget.make({ target: HomeTarget.make({ projectId: null }) })
 
 const chain = Effect.gen(function* () {
   const engineLines: string[] = []
@@ -108,6 +113,7 @@ const chain = Effect.gen(function* () {
             Effect.sync(() => {
               displayed.push(preferences)
             }),
+          notices: Stream.make(OPENED),
         },
         (line) => mainLines.push(line),
       ),
@@ -143,6 +149,29 @@ const eventually = (condition: () => boolean, what: string) =>
     }
     return yield* Effect.die(new Error(`never saw ${what}`))
   })
+
+describe('Notifications, between the window, main and the engine', () => {
+  test('the window reads the switches and turns one off through main', () =>
+    run(
+      Effect.gen(function* () {
+        const { window } = yield* chain
+        const before = yield* window['notifications.settings']()
+        expect(before.kinds.find((kind) => kind.id === 'need')?.on).toBe(true)
+        const after = yield* window['notifications.setKind']({ id: 'need', on: false })
+        expect(after.kinds.find((kind) => kind.id === 'need')?.on).toBe(false)
+        const sounds = yield* window['notifications.setSound']({ sound: 'done', on: false })
+        expect(sounds.sounds.find((sound) => sound.sound === 'done')?.on).toBe(false)
+      }),
+    ))
+
+  test('the window hears what main tells it', () =>
+    run(
+      Effect.gen(function* () {
+        const { window } = yield* chain
+        expect(yield* Stream.runHead(window['notifications.window']())).toEqual(Option.some(OPENED))
+      }),
+    ))
+})
 
 describe('The window reaches the engine through main', () => {
   test('the window reads the engine status the engine was started with', () =>

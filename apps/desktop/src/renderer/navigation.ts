@@ -8,6 +8,8 @@
  * is what keeps its scroll, its folds and its choice (`MissionFrame`).
  */
 
+import type { NotificationTarget } from '@hemera/ipc'
+import { Match } from 'effect'
 import {
   AT_BASE,
   closeView,
@@ -68,6 +70,25 @@ export function show(navigation: Navigation, view: string | null): Navigation {
 export function close(navigation: Navigation, view: string): Navigation {
   return overMission(navigation, (state) => closeView(state, view))
 }
+
+/**
+ * Where a notification leads: a need or a mission, the mission's page; a Project, its page; a
+ * group, Home, whose Needs you shows them.
+ */
+export const routeOf = (target: NotificationTarget): Route =>
+  Match.value(target).pipe(
+    Match.tags({
+      Need: ({ projectId, missionKey }): Route => ({ kind: 'mission', projectId, key: missionKey }),
+      Mission: ({ projectId, missionKey }): Route => ({
+        kind: 'mission',
+        projectId,
+        key: missionKey,
+      }),
+      Project: ({ projectId }): Route => ({ kind: 'project', id: projectId }),
+      Home: (): Route => ({ kind: 'home' }),
+    }),
+    Match.exhaustive,
+  )
 
 /** The place the sidebar marks for a page: a Project's settings are under the Project. */
 export function placeOf(route: Route): SidebarPlace {

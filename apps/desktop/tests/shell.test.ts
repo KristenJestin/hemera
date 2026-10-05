@@ -86,6 +86,7 @@ const drawn = ({
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
     appSettings: createElement('p', null, 'The choice of theme'),
+    notices: createElement('p', null, 'The in-app notifications'),
   }
   return renderToStaticMarkup(createElement(Shell, props))
 }
@@ -123,6 +124,11 @@ describe('The window waits for the engine before it mounts its pages', () => {
     })
     expect(markup).toContain(sentence)
     expect(markup).toContain('Restart Hemera')
+  })
+
+  test('the in-app notifications are drawn once the engine answered, never under its veil', () => {
+    expect(drawn({})).toContain('The in-app notifications')
+    expect(drawn({ engine: { kind: 'stopped' } })).not.toContain('The in-app notifications')
   })
 
   test('once the engine answered, the veil is gone and Home is mounted', () => {

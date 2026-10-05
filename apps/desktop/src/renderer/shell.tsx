@@ -47,6 +47,8 @@ export interface ShellProps {
   addProject?: ReactNode
   /** What the application's Settings page holds under its title. */
   appSettings?: ReactNode
+  /** The in-app notifications, over the sheet's bottom corner. */
+  notices?: ReactNode
   actions: ShellActions
 }
 
@@ -190,6 +192,7 @@ export function Shell({
   projectSettings,
   addProject,
   appSettings,
+  notices,
   actions,
 }: ShellProps): ReactNode {
   const listed = projects.kind === 'ready' ? projects.projects : []
@@ -230,7 +233,9 @@ export function Shell({
         }
         header={<ContentHeader folded={folded} onFold={actions.fold} crumbs={crumbs} />}
         overlay={
-          veil === null ? undefined : (
+          veil === null ? (
+            notices
+          ) : (
             <EngineVeil
               state={veil.state}
               maxDelay={ENGINE_START_LIMIT / 1000}

@@ -216,6 +216,9 @@ const missionHandlers = {
   'needs.get': unused,
   'needs.answer': unused,
   'needs.retry': unused,
+  'notifications.settings': unused,
+  'notifications.setKind': unused,
+  'notifications.setSound': unused,
 }
 
 const claudeState: AgentState = {

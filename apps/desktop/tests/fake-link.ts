@@ -50,5 +50,6 @@ export const SILENT_LINK: Link = {
   restartRun: never,
   runOutput: never,
   onRunChanges: silent,
+  onNotices: silent,
   close: () => undefined,
 }
