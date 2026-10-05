@@ -329,17 +329,21 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
           const why = call.why?.trim() ?? ''
           const agentReason = secrets.mask(why === '' ? 'no reason given' : why)
           const hemeraReason = secrets.mask(asked.reason)
+          const { sensitive } = asked
           const writeNeed = yield* createNeedIn(
             PERMISSION_REQUESTS,
             missionId === null
               ? ProjectOwner.make({ projectId })
               : MissionOwner.make({ projectId, missionId, taskId: null }),
-            PermissionFields.make({
-              call: shown,
-              agentReason,
-              hemeraReason,
-              sensitive: asked.sensitive,
-            }),
+            asked.settingsSection === null
+              ? PermissionFields.make({ call: shown, agentReason, hemeraReason, sensitive })
+              : PermissionFields.make({
+                  call: shown,
+                  agentReason,
+                  hemeraReason,
+                  sensitive,
+                  settingsSection: asked.settingsSection,
+                }),
           )
           const row = yield* mutate('asking the user', (transaction) =>
             Effect.gen(function* () {

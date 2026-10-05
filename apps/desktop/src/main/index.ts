@@ -14,12 +14,14 @@ import { maskShapes } from '@hemera/core/domain'
 import { closedAs, EngineGone, type WindowNotice } from '@hemera/ipc'
 import { Effect, PubSub, Stream } from 'effect'
 import { shell } from 'electron/common'
-import { BrowserWindow, Menu, app, dialog, nativeTheme, screen } from 'electron/main'
+import { BrowserWindow, Menu, app, dialog, nativeTheme, safeStorage, screen } from 'electron/main'
 
 import { DIAGNOSTIC_FILE, openDiagnosticLog, type Log } from './diagnostic.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
+import { type JevKeyEngine, jevKeyHandling } from './jev-key.ts'
+import { missingSecretService, passwordStoreSwitch, readBusNames } from './secret-service.ts'
 import { applicationOrigin } from './origin.ts'
 import { GROUP_WINDOW } from './notifications.ts'
 import { runNotifier } from './notifier.ts'
@@ -113,6 +115,31 @@ const run = Effect.gen(function* () {
     underSuite,
   )
 
+  // The Jev key: restored before the window loads, so the first judged call can use it. Main
+  // seals and decrypts; the engine stores the ciphertext and holds the key in memory.
+  const keyEngine: JevKeyEngine = {
+    state: engine.client['jevKey.state']().pipe(closedAs(() => new EngineGone())),
+    ciphertext: engine.client['jevKey.ciphertext']().pipe(closedAs(() => new EngineGone())),
+    store: (ciphertext) =>
+      engine.client['jevKey.store']({ ciphertext }).pipe(closedAs(() => new EngineGone())),
+    restore: (key) =>
+      engine.client['jevKey.restore']({ key }).pipe(closedAs(() => new EngineGone())),
+    remove: engine.client['jevKey.remove']().pipe(closedAs(() => new EngineGone())),
+  }
+  const jevKey = jevKeyHandling({
+    engine: keyEngine,
+    storage: safeStorage,
+    platform: process.platform,
+    missing: () => missingSecretService({ platform: process.platform, ready: false, busNames }),
+    log,
+  })
+  if (passwordStore !== null) {
+    log(
+      `no keyring for this desktop: the Secret Service is asked with --password-store=${passwordStore}`,
+    )
+  }
+  yield* jevKey.restore
+
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
   // What main tells the window of notifications: whoever listens hears it from then on.
   const notices = yield* PubSub.unbounded<WindowNotice>()
@@ -139,6 +166,7 @@ const run = Effect.gen(function* () {
       }),
     notices: Stream.fromPubSub(notices),
     preview: previewSound(sounds),
+    hemeraAuto: { status: jevKey.status, save: jevKey.save, remove: jevKey.remove },
   }
   yield* refreshDisplay(engine.client, application).pipe(Effect.ignore, Effect.forkScoped)
   // Served before the page loads: the first thing the page does is hand over its port.
@@ -187,6 +215,21 @@ const run = Effect.gen(function* () {
  * frameless window with no menu bar would close itself on a keystroke nobody chose.
  */
 Menu.setApplicationMenu(null)
+
+/**
+ * The keyring the Jev key is sealed with, chosen before `ready` because Chromium reads it then: on
+ * a Linux desktop Electron does not pick a keyring for, a Secret Service on the session bus is
+ * asked for rather than the plain-text fallback. A `--password-store` the user passed is left
+ * alone. The bus is asked once, in one bounded round trip.
+ */
+const busNames = process.platform === 'linux' ? await readBusNames() : null
+const passwordStore = passwordStoreSwitch({
+  platform: process.platform,
+  env: process.env,
+  argv: process.argv,
+  busNames,
+})
+if (passwordStore !== null) app.commandLine.appendSwitch('password-store', passwordStore)
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

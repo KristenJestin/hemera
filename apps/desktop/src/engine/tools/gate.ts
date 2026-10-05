@@ -572,6 +572,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                   },
                   reason: verdict.reason,
                   sensitive: verdict.sensitive ?? false,
+                  settingsSection: verdict.settingsSection ?? null,
                   key: asked.callKey,
                 }),
               )

@@ -16,11 +16,13 @@ import {
   WindowRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
+  type HemeraAutoStatus,
   type Preferences,
   type PreferencesChange,
   type Sound,
   type SoundPreview,
   type SoundStyle,
+  type StorageFailed,
   type WindowNotice,
 } from '@hemera/ipc'
 import { Effect } from 'effect'
@@ -48,6 +50,12 @@ export interface Application {
   readonly notices: Stream.Stream<WindowNotice>
   /** Plays one sound of one style once, as a notification would. */
   readonly preview: (style: SoundStyle, sound: Sound) => Effect.Effect<SoundPreview>
+  /** Hemera Auto's key, which main alone seals: where it stands, saved, removed. */
+  readonly hemeraAuto: {
+    readonly status: Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
+    readonly save: (key: string) => Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
+    readonly remove: Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
+  }
 }
 
 const gone = () => new EngineGone()
@@ -283,6 +291,28 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('permissions.revoke', log),
       ),
+    'permissions.decisions': () =>
+      engine['permissions.decisions']().pipe(
+        streamClosedAs(gone),
+        observedStream('permissions.decisions', log),
+      ),
+    'hemeraAuto.setConsent': (request) =>
+      engine['hemeraAuto.setConsent'](request).pipe(
+        closedAs(gone),
+        observed('hemeraAuto.setConsent', log),
+      ),
+    'hemeraAuto.whoJudges': (request) =>
+      engine['hemeraAuto.whoJudges'](request).pipe(
+        closedAs(gone),
+        observed('hemeraAuto.whoJudges', log),
+      ),
+    // The key is sealed here, in main: the engine is handed only its ciphertext to store.
+    'hemeraAuto.status': () =>
+      application.hemeraAuto.status.pipe(observed('hemeraAuto.status', log)),
+    'hemeraAuto.saveKey': ({ key }) =>
+      application.hemeraAuto.save(key).pipe(observed('hemeraAuto.saveKey', log)),
+    'hemeraAuto.removeKey': () =>
+      application.hemeraAuto.remove.pipe(observed('hemeraAuto.removeKey', log)),
     // A mission's Memory is the engine's alone: forwarded as it is.
     'memory.now': (request) =>
       engine['memory.now'](request).pipe(closedAs(gone), observed('memory.now', log)),

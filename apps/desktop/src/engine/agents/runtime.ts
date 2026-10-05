@@ -22,6 +22,7 @@ import type { LaunchFailed } from '@hemera/ipc'
 import type { Log } from '../../main/diagnostic.ts'
 import type { AgentsProcess } from '../agents.ts'
 import type { DomainEvents } from '../domain-events.ts'
+import { SessionTurns } from '../permissions/ports.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 import { agentDirectoryOf } from './bare.ts'
 import {
@@ -144,6 +145,7 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
         | IdleAgents
         | AcpTraces
         | AgentPermissionAnswer
+        | SessionTurns
         | Scope.Scope
       >()
       const scope = yield* Effect.scope
@@ -151,6 +153,7 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
       const live = new Map<string, Live>()
       const endpoint = Context.get(context, HemeraEndpoint)
       const idle = Context.get(context, IdleAgents)
+      const turns = Context.get(context, SessionTurns)
 
       /** Ends a process's bookkeeping, once, however it ended. */
       const forget = (sessionId: string, one: Live) =>
@@ -264,6 +267,8 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
             const first = one.firstBlocks
             one.firstBlocks = []
             one.turning = true
+            // A new turn: a verdict of the judge from the last one is not reused in it.
+            yield* turns.begin(sessionId)
             const outcome = yield* one.session
               .prompt([...first, ...blocks])
               .pipe(Effect.ensuring(Effect.sync(() => void (one.turning = false))))

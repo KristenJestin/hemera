@@ -19,7 +19,8 @@ here (the engine, main) follows `packages/core/AGENTS.md`; the renderer's interf
   outside `sandbox`, `contextIsolation`, `nodeIntegration: false`, `backgroundThrottling`,
   `spellcheck` and `preload` — in particular `additionalArguments`, `enableBlinkFeatures`,
   `disableBlinkFeatures`, `experimentalFeatures`, `offscreen` and any non-default partition.
-  No `commandLine.appendSwitch`, no ozone flag, no `--no-sandbox`, `--single-process`,
+  No `commandLine.appendSwitch` but `password-store` (on Linux, the Secret Service that seals the
+  Jev key, never over the user's own), no ozone flag, no `--no-sandbox`, `--single-process`,
   `--in-process-gpu` or `--disable-gpu`.
 - Wayland has no `win.setPosition()` and no `screen.getCursorScreenPoint()` by design of the
   protocol. They are not used.

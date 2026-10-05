@@ -43,6 +43,8 @@ export const PermissionFields = Schema.TaggedStruct('Permission', {
   hemeraReason: Schema.String,
   /** The call touches a sensitive place: it is never allowed for the whole mission. */
   sensitive: Schema.Boolean,
+  /** The id of an app setting section (`hemera-auto`) that would settle such calls, if one would. */
+  settingsSection: Schema.optionalKey(Schema.String),
 })
 
 export const NeedFields = Schema.Union([
