@@ -1,5 +1,7 @@
 /** What the end-to-end suite's probe answers (`probe.ts`), declared where the suite can read it. */
 
+import type { NeedFields, NeedOwner } from '@hemera/core/domain'
+
 export interface LoadMeasure {
   readonly items: number
   readonly millis: number
@@ -31,8 +33,16 @@ export interface HemeraProbe {
   readonly agentsOutcome: () => Promise<{ readonly ended: string; readonly lines: string[] }>
   /** Streams `count` items of `size` characters from the engine, one acknowledgement each. */
   readonly load: (count: number, size: number) => Promise<LoadMeasure>
-  /** Creates a pending environment need of the application; answers its id. */
-  readonly createNeed: () => Promise<string>
+  /**
+   * Creates a pending need of that owner with those fields (something missing of the
+   * application's unless said), as an engine service would; answers its id.
+   */
+  readonly createNeed: (owner?: NeedOwner, fields?: NeedFields) => Promise<string>
+  /** Creates a mission of the Project from an idea, as the window will; answers its id and key. */
+  readonly createMission: (
+    projectId: string,
+    sentence: string,
+  ) => Promise<{ readonly id: string; readonly key: string }>
   /** Every pending need of Needs you, as the window reads them: id, state and answer. */
   readonly pendingNeeds: () => Promise<ReadonlyArray<PendingNeed>>
   /** A fake agent writes `count` Journal lines of a new mission over `folder`, in the background. */

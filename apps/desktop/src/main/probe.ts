@@ -4,6 +4,7 @@
  * `browser.electron.execute`; each method answers a promise of plain values.
  */
 
+import { ApplicationOwner, EnvironmentFields } from '@hemera/core/domain'
 import { closedAs, EngineGone, fromMessagePortMain, makeClientProtocol } from '@hemera/ipc'
 import { Cause, Effect, Exit, Option, Predicate, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -22,6 +23,13 @@ import {
 import type { WindowPorts } from './window-ports.ts'
 
 const gone = () => new EngineGone()
+
+/** The need the suite creates unless it says which: something missing, Hemera's own. */
+const DOCKER = EnvironmentFields.make({
+  missing: 'Docker is not running',
+  action: 'Start Docker',
+  settingsSection: null,
+})
 
 export const installProbe = (
   port: MessagePortMain,
@@ -96,7 +104,14 @@ export const installProbe = (
           engineWorkingSetAfterKb: metrics(),
         }))
       },
-      createNeed: () => Effect.runPromise(client['probe.need']()),
+      createNeed: (owner = ApplicationOwner.make({}), fields = DOCKER) =>
+        Effect.runPromise(client['probe.need']({ owner, fields })),
+      createMission: (projectId, sentence) =>
+        Effect.runPromise(
+          closedAs(gone)(
+            engineClient['missions.create']({ projectId, idea: { sentence, ticket: null } }),
+          ).pipe(Effect.map((mission) => ({ id: mission.id, key: mission.key }))),
+        ),
       agentWrites: (folder, count) =>
         Effect.runPromise(client['probe.agentWrites']({ folder, count })),
       memory: () => Effect.runPromise(client['probe.memory']()),
