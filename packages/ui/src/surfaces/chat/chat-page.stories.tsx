@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { badgesOffBaseline, keepsItsLines } from '../../components/mention-field/badge-baseline.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import {
@@ -66,13 +67,15 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** A new Chat: nothing said yet, the focus in the composer. */
+/** A new Chat: nothing said yet, the focus in the composer, Send quiet in its corner. */
 export const Empty: Story = {
   args: { title: 'New Chat', items: [] },
-  play: async ({ canvasElement }) => {
+  play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
     await waitFor(() => expect(canvas.getByRole('textbox', { name: 'Message' })).toHaveFocus())
-    await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Send' })).toBeDisabled()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSend).not.toHaveBeenCalled()
   },
 }
 
@@ -85,21 +88,29 @@ export const Conversation: Story = {
     await userEvent.click(fold)
     await expect(fold).toHaveAttribute('aria-expanded', 'true')
     await expect(await canvas.findByText('web/src/pages/invoices/list.tsx')).toBeVisible()
+    // A mention in a message stands on the line like a word and moves no line.
+    const bubble = canvas.getByRole('button', { name: 'api/src/routes/invoices.ts' }).parentElement
+    if (bubble === null) throw new Error('no bubble')
+    await expect(badgesOffBaseline(bubble)).toEqual([])
+    await expect(keepsItsLines(bubble)).toBe(true)
   },
 }
 
 /** Long enough to scroll: the thread scrolls under a header and a composer that stay. */
 export const LongConversation: Story = { args: { items: LONG_CONVERSATION } }
 
-/** Something typed: Send appears, Enter sends. */
+/** Something typed: Send fills, Enter sends, and so does a press on Send. */
 export const Typing: Story = {
   args: { draft: 'Does the PDF need the same columns as the CSV?' },
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'Send' })).toBeVisible()
+    const send = canvas.getByRole('button', { name: 'Send' })
+    await expect(send).toBeEnabled()
     await userEvent.click(canvas.getByRole('textbox', { name: 'Message' }))
     await userEvent.keyboard('{Enter}')
-    await expect(args.onSend).toHaveBeenCalled()
+    await expect(args.onSend).toHaveBeenCalledTimes(1)
+    await userEvent.click(send)
+    await expect(args.onSend).toHaveBeenCalledTimes(2)
   },
 }
 
@@ -112,6 +123,7 @@ export const Working: Story = {
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('img', { name: 'Claude Code is working' })).toBeVisible()
+    // Send is Stop, in the same corner, while the turn runs.
     await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
     await expect(args.onStop).toHaveBeenCalled()

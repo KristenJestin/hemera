@@ -15,7 +15,7 @@ import {
 } from '../../components/model-picker/model-picker.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconArrowUp, IconLock, IconMessages, IconPencil, IconPlayerStop } from '../../icons.ts'
+import { IconLock, IconMessages, IconPencil } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 
 /**
@@ -193,9 +193,6 @@ export function ChatPage({
       item.kind === 'held' && item.answer === 'waiting',
   )
   const working = turn === 'working'
-  const send = () => {
-    if (draft.trim() !== '' && !working) onSend()
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -245,7 +242,7 @@ export function ChatPage({
             value={draft}
             onValueChange={onDraft}
             mentionables={mentionables}
-            onSubmit={send}
+            onSubmit={onSend}
             leading={
               <ModelPicker
                 label="Model of this Chat"
@@ -260,24 +257,8 @@ export function ChatPage({
               />
             }
             autoFocus={items.length === 0}
-            trailing={
-              working ? (
-                <Button size="sm" onClick={onStop}>
-                  <IconPlayerStop size="sm" aria-hidden="true" />
-                  Stop
-                </Button>
-              ) : draft.trim() === '' ? null : (
-                <Tooltip label="Send" keys="Enter">
-                  <IconButton
-                    variant="primary"
-                    size="sm"
-                    icon={<IconArrowUp size="sm" />}
-                    aria-label="Send"
-                    onClick={send}
-                  />
-                </Tooltip>
-              )
-            }
+            working={working}
+            onStop={onStop}
           />
         </div>
       </div>

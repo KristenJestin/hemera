@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { badgesOffBaseline, keepsItsLines } from './badge-baseline.ts'
 import { MENTIONABLES } from './mention-field-fixtures.ts'
 import { MentionField } from './mention-field.tsx'
 
@@ -157,6 +158,30 @@ export const Badges: Story = {
     await expect(file).toHaveTextContent('server.ts')
     await expect(file).not.toHaveTextContent('api/src')
     await expect(canvas.getByRole('button', { name: 'ACME-12' })).toBeVisible()
+    const line = field(canvasElement).querySelector('p')
+    if (line === null) throw new Error('no line')
+    await expect(badgesOffBaseline(line)).toEqual([])
+    await expect(keepsItsLines(line)).toBe(true)
+  },
+}
+
+/**
+ * Badges in a text of several lines, wrapped and broken: each name on its line's baseline, and
+ * every line as tall as a line of words alone.
+ */
+export const BadgesOnSeveralLines: Story = {
+  args: {
+    value: [
+      'Compare @api/src/server.ts with @ACME-12 then run @test and once @lint passes too read @web/src/pages/invoices/list.tsx before @ACME-14 lands on @shared/src/money.ts and @api/package.json',
+      'A line of words alone.',
+      'Then @dev',
+    ].join('\n'),
+  },
+  play: async ({ canvasElement }) => {
+    const lines = [...field(canvasElement).querySelectorAll('p')]
+    await expect(lines).toHaveLength(3)
+    await expect(lines.flatMap((line) => badgesOffBaseline(line))).toEqual([])
+    await expect(lines.filter((line) => !keepsItsLines(line))).toEqual([])
   },
 }
 
@@ -176,5 +201,35 @@ export const LongText: Story = {
     await userEvent.keyboard('{Enter}')
     await typeIn(null, 'One more line')
     await expect(box?.getBoundingClientRect().height).toBe(height)
+  },
+}
+
+/**
+ * A field that sends: Send in the box's corner, quiet while nothing is written, filled once
+ * something is; Enter sends, Shift+Enter starts a new line.
+ */
+export const Sending: Story = {
+  args: { onSubmit: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    const send = canvas.getByRole('button', { name: 'Send' })
+    await expect(send).toBeDisabled()
+    await typeIn(field(canvasElement), 'Hi')
+    await waitFor(() => expect(send).toBeEnabled())
+    await userEvent.keyboard('{Shift>}{Enter}{/Shift}')
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledTimes(1)
+  },
+}
+
+/** While what was sent is worked on, Send is Stop, in the same place. */
+export const Working: Story = {
+  args: { value: 'And the PDF?', onSubmit: fn(), working: true, onStop: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
+    await expect(args.onStop).toHaveBeenCalled()
   },
 }

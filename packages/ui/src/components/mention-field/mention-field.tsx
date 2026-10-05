@@ -15,7 +15,14 @@ import { exitSuggestion, type SuggestionProps } from '@tiptap/suggestion'
 import { cn } from 'cn'
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
-import { IconFileText, IconListCheck, IconTerminal } from '../../icons.ts'
+import {
+  IconArrowUp,
+  IconFileText,
+  IconListCheck,
+  IconPlayerStop,
+  IconTerminal,
+} from '../../icons.ts'
+import { IconButton } from '../button/button.tsx'
 import { Popover } from '../popover/popover.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
 import { fuzzyScore } from './fuzzy.ts'
@@ -35,8 +42,11 @@ import { fuzzyScore } from './fuzzy.ts'
  *   `@` and the whole path.
  * - Without a menu, Enter sends when the field has somewhere to send to, and Shift+Enter starts
  *   a new line.
+ * - A field that sends has its Send in the box's bottom-right corner: a small square with an
+ *   arrow up, filled once there is something to send and quiet while there is not. While what
+ *   it sent is being worked on, it is Stop, in the same place.
  * - A bar at the foot of the box holds what the caller sets there: the composer's model picker
- *   at its start, Send or Stop at its end.
+ *   at its start, then whatever stands before Send.
  */
 
 export type MentionKind = 'file' | 'mission' | 'command'
@@ -60,11 +70,18 @@ export interface MentionFieldProps {
   value: string
   onValueChange: (value: string) => void
   mentionables: readonly Mentionable[]
-  /** What Enter does without a menu open; left out, Enter starts a new line. */
+  /**
+   * What Enter and the Send in the box's corner do; left out, Enter starts a new line and there
+   * is no Send.
+   */
   onSubmit?: (() => void) | undefined
+  /** Whether what was sent is being worked on: Send is then Stop, and Enter sends nothing. */
+  working?: boolean | undefined
+  /** What Stop does, while `working`. */
+  onStop?: (() => void) | undefined
   /** What stands at the start of the box's foot: the composer's model picker. */
   leading?: ReactNode
-  /** What stands at its end: Send, Stop. */
+  /** What stands at its end, before Send. */
   trailing?: ReactNode
   disabled?: boolean | undefined
   /** Whether it takes the focus when it appears: a new Chat's composer. */
@@ -72,7 +89,7 @@ export interface MentionFieldProps {
 }
 
 const BOX =
-  'flex h-composer w-full min-w-0 flex-col rounded-lg border border-input bg-input-fill focus-within:border-ring has-data-disabled:opacity-50'
+  'flex h-composer w-full min-w-0 flex-col rounded-lg border border-input bg-input-fill focus-within:border-ring data-disabled:opacity-50'
 const AREA = 'min-h-0 w-full flex-1 overflow-y-auto px-3 pt-2.5 text-sm text-foreground'
 const EDITABLE = 'min-h-full outline-none whitespace-pre-wrap break-words'
 const FOOT = 'flex min-h-control-sm shrink-0 items-center gap-1 px-2 pb-2'
@@ -80,8 +97,15 @@ const LIST = 'flex max-h-mention-list w-mention flex-col gap-0.5 overflow-y-auto
 const OPTION =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md px-2 text-sm select-none hover-motion data-[active=true]:tinted'
 const QUIET = 'min-w-0 truncate text-xs text-muted-foreground'
+/**
+ * A badge sits in the line like a word: its name is text in the flow, on the baseline of the text
+ * around it, at its size, and the badge is a line of its own no taller than the line it stands in
+ * (`leading-4` inside the text's `leading` of eighteen), so it never moves a line, in one line or
+ * in several. The glyph is set beside the name, out of the flow, so it has no baseline to bring.
+ */
 const BADGE =
-  'mx-0.5 inline-flex items-center gap-1 rounded-md bg-primary-muted px-1.5 align-baseline text-xs font-medium text-primary-muted-foreground outline-none'
+  'relative mx-0.5 inline-block rounded-sm bg-primary-muted pr-1 pl-5 align-baseline leading-4 font-medium whitespace-nowrap text-primary-muted-foreground outline-none'
+const BADGE_GLYPH = 'absolute inset-y-0 left-0.5 flex items-center'
 
 /** How many entries the menu lists at most. */
 const SHOWN = 50
@@ -140,7 +164,7 @@ export function MentionBadge({ kind, label }: { kind: MentionKind; label: string
   return (
     <Tooltip label={label}>
       <button type="button" tabIndex={-1} aria-label={label} className={BADGE}>
-        <span className="flex" aria-hidden="true">
+        <span className={BADGE_GLYPH} aria-hidden="true">
           {GLYPHS[kind]}
         </span>
         {shortName(kind, label)}
@@ -214,18 +238,28 @@ export function MentionField({
   onValueChange,
   mentionables,
   onSubmit,
+  working = false,
+  onStop,
   leading,
   trailing,
   disabled = false,
   autoFocus = false,
 }: MentionFieldProps): ReactNode {
   const id = useId()
+  const empty = value.trim() === ''
+  /** Sends what is written, when there is something and nothing is being worked on. */
+  const submit =
+    onSubmit === undefined
+      ? undefined
+      : () => {
+          if (!empty && !working) onSubmit()
+        }
   const [menu, setMenu] = useState<Menu | null>(null)
   const [active, setActive] = useState(0)
   /** What the editor reads at the moment it reads it: the props and state of the last render. */
-  const latest = useRef({ mentionables, onSubmit, onValueChange, menu, active })
+  const latest = useRef({ mentionables, submit, onValueChange, menu, active })
   useLayoutEffect(() => {
-    latest.current = { mentionables, onSubmit, onValueChange, menu, active }
+    latest.current = { mentionables, submit, onValueChange, menu, active }
   })
   /** The text this field last handed back, so a value it wrote is not written back into it. */
   const handed = useRef(value)
@@ -247,11 +281,11 @@ export function MentionField({
         class: EDITABLE,
       },
       handleKeyDown: (_view, event) => {
-        const { menu: open, onSubmit: submit } = latest.current
+        const { menu: open, submit: send } = latest.current
         if (open !== null || event.key !== 'Enter') return false
-        if (event.shiftKey || submit === undefined) return false
+        if (event.shiftKey || send === undefined) return false
         event.preventDefault()
-        submit()
+        send()
         return true
       },
     },
@@ -375,10 +409,35 @@ export function MentionField({
       trigger={
         <div className={BOX} data-disabled={disabled ? '' : undefined}>
           <EditorContent editor={editor} className={AREA} />
-          {(leading !== undefined || trailing !== undefined) && (
+          {(leading !== undefined || trailing !== undefined || submit !== undefined) && (
             <div className={FOOT}>
               {leading}
-              <span className="ml-auto flex items-center gap-1">{trailing}</span>
+              <span className="ml-auto flex items-center gap-1">
+                {trailing}
+                {submit !== undefined &&
+                  (working ? (
+                    <Tooltip label="Stop">
+                      <IconButton
+                        variant="primary"
+                        size="sm"
+                        icon={<IconPlayerStop size="sm" weight="filled" />}
+                        aria-label="Stop"
+                        onClick={onStop}
+                      />
+                    </Tooltip>
+                  ) : (
+                    <Tooltip label="Send" keys="Enter" disabled={empty}>
+                      <IconButton
+                        variant="primary"
+                        size="sm"
+                        icon={<IconArrowUp size="sm" />}
+                        aria-label="Send"
+                        disabled={empty || disabled}
+                        onClick={submit}
+                      />
+                    </Tooltip>
+                  ))}
+              </span>
             </div>
           )}
         </div>
