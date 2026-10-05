@@ -54,7 +54,27 @@ import {
 } from '../../blocks/project-settings/variables.tsx'
 import { WorkspacesSection } from '../../blocks/project-settings/workspaces.tsx'
 import {
+  INSTRUCTIONS,
+  LIMITS,
+  NEVER_LINES,
+  READERS,
+  ROLE_MODELS,
+  limitRefusal,
+  neverRefusal,
+} from '../../blocks/project-settings/agent-settings-fixtures.ts'
+import { type BudgetLimit, BudgetSection } from '../../blocks/project-settings/budget.tsx'
+import { InstructionsSection } from '../../blocks/project-settings/instructions.tsx'
+import { type NeverLine, NeverForm, NeverSection } from '../../blocks/project-settings/never.tsx'
+import {
+  type ProjectRoleModel,
+  RoleModelsSection,
+} from '../../blocks/project-settings/role-models.tsx'
+import {
+  IconAdjustments,
+  IconBan,
   IconChecklist,
+  IconFileText,
+  IconGauge,
   IconGitBranch,
   IconListNumbers,
   IconPlayerPlay,
@@ -79,6 +99,10 @@ export type SectionId =
   | 'preparation'
   | 'variables'
   | 'services'
+  | 'never'
+  | 'models'
+  | 'budget'
+  | 'instructions'
 
 export const SECTIONS: readonly SettingsSection[] = [
   { id: 'repositories', label: 'Repositories', icon: <IconGitBranch size="sm" /> },
@@ -87,16 +111,18 @@ export const SECTIONS: readonly SettingsSection[] = [
   { id: 'preparation', label: 'Preparation', icon: <IconListNumbers size="sm" /> },
   { id: 'variables', label: 'Variables', icon: <IconVariable size="sm" /> },
   { id: 'services', label: 'Services', icon: <IconPlayerPlay size="sm" /> },
+  { id: 'never', label: 'Never run', icon: <IconBan size="sm" /> },
+  { id: 'models', label: 'Models by role', icon: <IconAdjustments size="sm" /> },
+  { id: 'budget', label: 'Cap and budget', icon: <IconGauge size="sm" /> },
+  { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
 ]
 
-/** The sections later slices add to the same frame: a dozen in all. */
+/** The sections later slices add to the same frame: fourteen in all. */
 export const LATER_SECTIONS: readonly SettingsSection[] = [
-  { id: 'agents', label: 'Agents and permissions', icon: <IconSettings size="sm" /> },
   { id: 'tickets', label: 'Tickets and Specs', icon: <IconStack2 size="sm" /> },
   { id: 'checks', label: 'Checks', icon: <IconChecklist size="sm" /> },
   { id: 'documentation', label: 'Documentation recipes', icon: <IconStack2 size="sm" /> },
   { id: 'delivery', label: 'Delivery rules', icon: <IconSettings size="sm" /> },
-  { id: 'never', label: 'Never run', icon: <IconSettings size="sm" /> },
 ]
 
 /** What a dialog is writing, and the draft it holds. */
@@ -105,10 +131,11 @@ export type FormState =
   | { readonly kind: 'command'; readonly id: string | null; readonly draft: CommandDraft }
   | { readonly kind: 'step'; readonly id: string | null; readonly draft: StepDraft }
   | { readonly kind: 'variable'; readonly key: string | null; readonly draft: VariableDraft }
+  | { readonly kind: 'never'; readonly id: null; readonly draft: string }
 
 /** How a story opens a dialog as it starts: what it writes, by id, or a new one. */
 export type FormOpener = {
-  readonly kind: 'repository' | 'command' | 'step' | 'variable'
+  readonly kind: 'repository' | 'command' | 'step' | 'variable' | 'never'
   readonly id: string | null
 }
 
@@ -224,6 +251,14 @@ export function SettingsFixture({
           ? [...RUNS, FAILED_RUN]
           : [...RUNS],
   )
+  const [neverLines, setNeverLines] = useState<NeverLine[]>(() => (empty ? [] : [...NEVER_LINES]))
+  const [roles, setRoles] = useState<ProjectRoleModel[]>(() =>
+    empty ? ROLE_MODELS.map((one) => ({ ...one, override: null })) : [...ROLE_MODELS],
+  )
+  const [limits, setLimits] = useState<BudgetLimit[]>(() =>
+    empty ? LIMITS.map((one) => ({ ...one, value: null })) : [...LIMITS],
+  )
+  const [neverTried, setNeverTried] = useState(false)
   const [refused, setRefused] = useState<string | undefined>(undefined)
   const [dialog, setForm] = useState<FormState | null>(() => {
     if (opener === undefined) return null
@@ -265,11 +300,14 @@ export function SettingsFixture({
           key: open.id,
           draft: { key: open.id ?? '', value: open.id === null ? '' : (VALUES.get(open.id) ?? '') },
         }
+      case 'never':
+        return { kind: 'never', id: null, draft: '' }
     }
   }
 
   const open = (next: FormState): void => {
     setRefused(undefined)
+    setNeverTried(false)
     setForm(next)
   }
   const close = (): void => {
@@ -316,6 +354,12 @@ export function SettingsFixture({
           ? [...before, saved]
           : before.map((one) => (one.id === dialog.id ? saved : one)),
       )
+    }
+    if (dialog.kind === 'never') {
+      setNeverTried(true)
+      if (neverRefusal(dialog.draft, neverLines) !== undefined) return
+      const line = dialog.draft.trim()
+      setNeverLines((before) => [...before, { id: `n${String(before.length + 1)}`, line }])
     }
     if (dialog.kind === 'variable') {
       const draft = dialog.draft
@@ -419,6 +463,19 @@ export function SettingsFixture({
           footer: foot(dialog.id === null ? null : `step ${String(position)}`),
         }
       }
+      case 'never':
+        return {
+          title: 'Never run',
+          icon: <IconBan size="sm" />,
+          body: (
+            <NeverForm
+              value={dialog.draft}
+              onChange={(draft) => setForm({ ...dialog, draft })}
+              error={neverTried ? neverRefusal(dialog.draft, neverLines) : undefined}
+            />
+          ),
+          footer: foot(null),
+        }
       case 'variable':
         return {
           title: dialog.key ?? 'New variable',
@@ -594,6 +651,54 @@ export function SettingsFixture({
             onCopyUrl={() => {}}
             onOpenUrl={() => {}}
             onDetails={() => {}}
+          />
+        )
+      case 'never':
+        return (
+          <NeverSection
+            lines={neverLines}
+            loading={loading}
+            onAdd={() => open({ kind: 'never', id: null, draft: '' })}
+            onRemove={(id) => setNeverLines((before) => before.filter((one) => one.id !== id))}
+          />
+        )
+      case 'models':
+        return (
+          <RoleModelsSection
+            roles={roles}
+            loading={loading}
+            onPick={() => {}}
+            onReset={(role) =>
+              setRoles((before) =>
+                before.map((one) => (one.role === role ? { ...one, override: null } : one)),
+              )
+            }
+          />
+        )
+      case 'budget':
+        return (
+          <BudgetSection
+            limits={limits}
+            refusalOf={limitRefusal}
+            loading={loading}
+            onLimit={(id, value) =>
+              setLimits((before) => before.map((one) => (one.id === id ? { ...one, value } : one)))
+            }
+          />
+        )
+      case 'instructions':
+        return (
+          <InstructionsSection
+            repositories={
+              empty
+                ? [{ repository: 'api', files: [] }]
+                : project === 'hemera'
+                  ? [{ repository: '.', files: ['AGENTS.md', 'CLAUDE.md'] }]
+                  : INSTRUCTIONS
+            }
+            agents={READERS}
+            loading={loading}
+            onOpen={() => {}}
           />
         )
       default: {
