@@ -53,7 +53,8 @@ import {
   type ReconciliationStep,
 } from './reconciliation.ts'
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
-import { type AskBeforeRunning, nobodyToAskLayer } from './ask-before-running.ts'
+import type { AskBeforeRunning } from './ask-before-running.ts'
+import { RUN_CONSENT, hemeraRunConsent, withdrawLeftConsents } from './permissions/consent.ts'
 import { runAtOpen } from './at-open.ts'
 import { SYSTEM_GIT, gitLayer, spawnGit } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
@@ -101,7 +102,7 @@ export interface ProfileParts {
   readonly reconciliationSteps: ReadonlyArray<ReconciliationStep>
   readonly liveMissions?: Layer.Layer<LiveMissions>
   readonly restoreJournal?: Layer.Layer<RestoreJournal>
-  /** Who is asked before a command marked so runs; until the permission needs exist, no one. */
+  /** Who is asked before a command marked so runs; a permission need otherwise. */
   readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
   /** How runs wait for an address and give a process its grace; the defaults otherwise. */
   readonly runs?: Partial<RunsSettings>
@@ -117,6 +118,12 @@ export interface ProfileParts {
   /** The rules of the actions with an effect outside the database; this version's otherwise. */
   readonly actionRules?: Layer.Layer<ActionRules>
 }
+
+/**
+ * The empty folder, in the data folder, the forge CLIs of agents' commands read their
+ * configuration from: none of them is signed in there.
+ */
+const AGENT_CONFIG_FOLDER = join('permissions', 'no-forge-login')
 
 /** How often the pending environment needs are checked again while they wait. */
 const RECHECK_EVERY = '5 minutes'
@@ -224,14 +231,23 @@ export const startProfile = (
     )
     // The commands: the supervisor (its registry in the database, its children's standard error
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
-    const layers = missionsLayer(parts.missions).pipe(
+    // Hemera's own runs of a command marked "ask before running" ask through a permission need.
+    const consent = hemeraRunConsent(log)
+    const missionParts: Partial<MissionParts> = {
+      ...parts.missions,
+      owners: new Map([[RUN_CONSENT, consent.handler], ...(parts.missions?.owners ?? [])]),
+    }
+    const layers = missionsLayer(missionParts).pipe(
       Layer.provideMerge(toolsLayer(log, version, parts.tools)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
           supervisorLayer(log),
-          runsLayer(log, parts.runs),
-          parts.askBeforeRunning ?? nobodyToAskLayer(log),
+          runsLayer(log, {
+            agentConfigFolder: join(dataFolder, AGENT_CONFIG_FOLDER),
+            ...parts.runs,
+          }),
+          parts.askBeforeRunning ?? consent.layer,
         ),
       ),
       Layer.provideMerge(Layer.merge(profileLayers, parts.actionRules ?? actionRulesLayer())),
@@ -342,6 +358,12 @@ export const startProfile = (
       ),
     )
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
+    // No run waits across a restart: the questions of "ask before running" it left are withdrawn.
+    yield* run(withdrawLeftConsents).pipe(
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the consent needs left were not withdrawn: ${said(refusal)}`)),
+      ),
+    )
 
     // A Project made before missions existed is given its key prefix before anything reads it.
     yield* run(assignKeyPrefixes).pipe(
