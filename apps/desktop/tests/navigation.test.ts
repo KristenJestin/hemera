@@ -36,6 +36,21 @@ describe('The window’s routes', () => {
     expect(placeOf(settings.route)).toEqual({ kind: 'settings' })
   })
 
+  test('Home filtered to a Project says it after Home, which leads back to every need', () => {
+    const filtered = go(START, { kind: 'home', projectId: 'acme' })
+    const trail = trailOf(filtered, names)
+    expect(trail.map((crumb) => crumb.label)).toEqual(['Home', 'Acme'])
+    expect(trail[0]?.step).toEqual({ go: { kind: 'home' } })
+    expect(trail[1]?.step).toBeUndefined()
+    expect(placeOf(filtered.route)).toEqual({ kind: 'home' })
+  })
+
+  test('Settings opened at a section is still Settings in the trail and the sidebar', () => {
+    const models = go(START, { kind: 'settings', section: 'models' })
+    expect(labels(models)).toEqual(['Settings'])
+    expect(placeOf(models.route)).toEqual({ kind: 'settings' })
+  })
+
   test('a Project’s page says its name; its settings lead back to it and keep it marked', () => {
     const page = go(START, { kind: 'project', id: 'acme' })
     expect(labels(page)).toEqual(['Acme'])

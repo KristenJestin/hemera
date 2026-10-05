@@ -14,6 +14,7 @@ import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useEngine } from './use-engine.ts'
+import { useMinute, useNeeds } from './use-needs.ts'
 import { useNotices } from './use-notices.ts'
 import { useProject, useProjects } from './use-projects.ts'
 import { useSettings } from './use-settings.ts'
@@ -64,6 +65,8 @@ function Application() {
     route.kind === 'project' || route.kind === 'projectSettings' ? route.id : null
   const [projects, retryProjects] = useProjects(link, ready)
   const [project, retryProject] = useProject(link, ready, shownProject)
+  const [needs, answering] = useNeeds(link, ready)
+  const now = useMinute()
   const [adding, setAdding] = useState(false)
   const [theme, setTheme] = useState<ThemePreference | null>(null)
   useEffect(() => {
@@ -96,9 +99,11 @@ function Application() {
       engine={engine}
       projects={projects}
       project={project}
+      needs={needs}
       navigation={navigation}
       folded={folded}
-      today={TODAY.format(new Date())}
+      today={TODAY.format(now)}
+      now={now}
       projectSettings={
         settingsOf === null ? null : (
           <SettingsPage key={settingsOf} data={settingsData} settings={settings} tools={tools} />
@@ -128,11 +133,16 @@ function Application() {
         go: (to) => setNavigation((before) => go(before, to)),
         show: (view) => setNavigation((before) => show(before, view)),
         fold: setFolded,
-        retryProjects,
+        retryProjects: () => {
+          retryProjects()
+          answering.retry()
+        },
         retryProject,
         relaunch: () => void link.relaunch(),
         showLog: () => void link.showLog(),
         addProject: () => setAdding(true),
+        answer: answering.answer,
+        recheck: answering.recheck,
       }}
     />
   )

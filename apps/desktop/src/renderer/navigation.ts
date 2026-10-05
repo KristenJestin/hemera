@@ -15,13 +15,21 @@ import {
   closeView,
   openView,
   showView,
+  type AppSection,
   type MissionFrameState,
   type SidebarPlace,
 } from '@hemera/ui'
 
 export type Route =
-  | { readonly kind: 'home' }
-  | { readonly kind: 'settings' }
+  | {
+      readonly kind: 'home'
+      /** Needs you filtered to one Project's needs, as a notification about it leads there. */
+      readonly projectId?: string | undefined
+      /** The need unfolded in Needs you, as its notification leads to it. */
+      readonly need?: string | undefined
+    }
+  /** At a section, when a need or a notification about a setting opens it. */
+  | { readonly kind: 'settings'; readonly section?: AppSection | undefined }
   | { readonly kind: 'project'; readonly id: string }
   /** The settings of a Project: its own page, entered from the Project page's header. */
   | { readonly kind: 'projectSettings'; readonly id: string }
@@ -72,20 +80,22 @@ export function close(navigation: Navigation, view: string): Navigation {
 }
 
 /**
- * Where a notification leads: a need or a mission, the mission's page; a Project, its page; a
- * group, Home, whose Needs you shows them.
+ * Where a notification leads: a need, Home with that Project's needs and the need unfolded, where
+ * it is answered (the mission's page, where its card will also be, is not built yet); a mission,
+ * its page; a Project, its page; a group, Home, filtered to its Project when it has one.
  */
 export const routeOf = (target: NotificationTarget): Route =>
   Match.value(target).pipe(
     Match.tags({
-      Need: ({ projectId, missionKey }): Route => ({ kind: 'mission', projectId, key: missionKey }),
+      Need: ({ projectId, needId }): Route => ({ kind: 'home', projectId, need: needId }),
       Mission: ({ projectId, missionKey }): Route => ({
         kind: 'mission',
         projectId,
         key: missionKey,
       }),
       Project: ({ projectId }): Route => ({ kind: 'project', id: projectId }),
-      Home: (): Route => ({ kind: 'home' }),
+      Home: ({ projectId }): Route =>
+        projectId === null ? { kind: 'home' } : { kind: 'home', projectId },
     }),
     Match.exhaustive,
   )
@@ -129,7 +139,12 @@ export function trailOf(navigation: Navigation, names: Names): Trail[] {
   const project = (id: string): string => names.project(id) ?? 'Project'
   switch (route.kind) {
     case 'home':
-      return [{ id: 'home', label: 'Home' }]
+      return route.projectId === undefined
+        ? [{ id: 'home', label: 'Home' }]
+        : [
+            { id: 'home', label: 'Home', step: { go: { kind: 'home' } } },
+            { id: 'project', label: project(route.projectId) },
+          ]
     case 'settings':
       return [{ id: 'settings', label: 'Settings' }]
     case 'project':

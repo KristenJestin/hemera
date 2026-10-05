@@ -59,9 +59,9 @@ describe('The in-app notifications', () => {
 describe('Where a notification leads', () => {
   test.each<[string, NotificationTarget, ReturnType<typeof routeOf>]>([
     [
-      'a need: its mission',
+      'a need: Home, that Project’s needs, with that need unfolded',
       NeedTarget.make({ projectId: 'acme', missionKey: 'ACME-12', needId: 'n' }),
-      { kind: 'mission', projectId: 'acme', key: 'ACME-12' },
+      { kind: 'home', projectId: 'acme', need: 'n' },
     ],
     [
       'a mission: the mission',
@@ -73,7 +73,11 @@ describe('Where a notification leads', () => {
       ProjectTarget.make({ projectId: 'acme' }),
       { kind: 'project', id: 'acme' },
     ],
-    ['a Project’s group: Home', HomeTarget.make({ projectId: 'acme' }), { kind: 'home' }],
+    [
+      'a Project’s group: Home, that Project’s needs',
+      HomeTarget.make({ projectId: 'acme' }),
+      { kind: 'home', projectId: 'acme' },
+    ],
     ['a group across Projects: Home', HomeTarget.make({ projectId: null }), { kind: 'home' }],
   ])('%s', (_, target, route) => {
     expect(routeOf(target)).toEqual(route)

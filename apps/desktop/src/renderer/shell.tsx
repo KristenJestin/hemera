@@ -1,3 +1,4 @@
+import type { NeedAnswer } from '@hemera/core/domain'
 import { DatabaseRefused, type Project } from '@hemera/ipc'
 import {
   ContentHeader,
@@ -6,6 +7,7 @@ import {
   ProjectPage,
   Sidebar,
   WindowShell,
+  type AppSection,
   type Crumb,
   type EngineState as VeilState,
 } from '@hemera/ui'
@@ -14,6 +16,7 @@ import type { ReactNode } from 'react'
 
 import { ENGINE_START_LIMIT, type EngineState } from './engine-start.ts'
 import { placeOf, trailOf, type Navigation, type Route, type Step } from './navigation.ts'
+import { handlersFor, needRowsOf, waitingCount, type NeedsState } from './needs.ts'
 import type { ProjectState, ProjectsState } from './projects.ts'
 
 const isRefused = Schema.is(DatabaseRefused)
@@ -30,6 +33,10 @@ export interface ShellActions {
   showLog: () => void
   /** Opens the dialog that adds a Project. */
   addProject: () => void
+  /** Answers a need from its card, known by its button's label while it is on its way. */
+  answer: (id: string, label: string, answer: NeedAnswer) => void
+  /** Checks a need of something missing again. */
+  recheck: (id: string) => void
 }
 
 export interface ShellProps {
@@ -37,10 +44,14 @@ export interface ShellProps {
   projects: ProjectsState
   /** The Project the page shows, when the route is one of a Project's. */
   project: ProjectState
+  /** Every need that waits, for Home's Needs you and the sidebar's count. */
+  needs: NeedsState
   navigation: Navigation
   folded: boolean
   /** Today, as Home's header says it. */
   today: string
+  /** Now, which each need's "when" is counted from. */
+  now: Date
   /** The settings page of the Project the route shows, drawn by its own hooks. */
   projectSettings?: ReactNode
   /** The dialog that adds a Project, over the window. */
@@ -80,9 +91,18 @@ function repositoryName(project: Project, path: string): string {
 }
 
 /** A page's frame with its title, for the page whose sections later tickets add. */
-function TitledPage({ title, children }: { title: string; children?: ReactNode }): ReactNode {
+function TitledPage({
+  title,
+  section,
+  children,
+}: {
+  title: string
+  /** The section a link opened it at, which the settings' own page (#50) shows. */
+  section?: string | undefined
+  children?: ReactNode
+}): ReactNode {
   return (
-    <div className="flex flex-col gap-6 py-6">
+    <div className="flex flex-col gap-6 py-6" data-settings-section={section}>
       <h1 className="px-8 text-2xl font-semibold tracking-tight">{title}</h1>
       {children}
     </div>
@@ -123,6 +143,8 @@ interface RoutePageProps {
   route: Route
   projects: ProjectsState
   project: ProjectState
+  needs: NeedsState
+  now: Date
   nameOf: (id: string) => string | undefined
   today: string
   projectSettings: ReactNode
@@ -135,6 +157,8 @@ function RoutePage({
   route,
   projects,
   project,
+  needs,
+  now,
   nameOf,
   today,
   projectSettings,
@@ -142,22 +166,49 @@ function RoutePage({
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
-    case 'home':
+    case 'home': {
+      const listed = projects.kind === 'ready' ? projects.projects : []
+      const rows = needRowsOf(needs, listed, now, route.projectId)
+      const failure =
+        projects.kind === 'failed'
+          ? projects.sentence
+          : needs.kind === 'failed'
+            ? needs.sentence
+            : undefined
+      const tools = {
+        answer: actions.answer,
+        recheck: actions.recheck,
+        openSettings: (section: AppSection) => actions.go({ kind: 'settings', section }),
+      }
       return (
         <HomePage
+          // A need led to by its notification is unfolded: the list opens on it.
+          key={route.need ?? ''}
           today={today}
-          hasProjects={projects.kind !== 'ready' || projects.projects.length > 0}
+          // Something waiting is shown even before the first Project: Git missing, say.
+          hasProjects={projects.kind !== 'ready' || projects.projects.length > 0 || rows.length > 0}
           needsYou={{ rows: [] }}
+          needs={{
+            rows,
+            projects: ['Hemera', ...listed.map((one) => one.name)],
+            open: route.need,
+            on: (id) => {
+              const need =
+                needs.kind === 'ready' ? needs.needs.find((one) => one.id === id) : undefined
+              return need === undefined ? {} : handlersFor(need, tools)
+            },
+          }}
           questions={{ rows: [] }}
           sinceYouLeft={{ rows: [] }}
           recent={{ rows: [] }}
-          loading={projects.kind === 'loading'}
-          error={projects.kind === 'failed' ? projects.sentence : undefined}
+          loading={projects.kind === 'loading' || needs.kind === 'loading'}
+          error={failure}
           onOpen={() => undefined}
           onAddProject={actions.addProject}
           onRetry={actions.retryProjects}
         />
       )
+    }
     case 'project':
       return (
         <ProjectRoute
@@ -171,7 +222,11 @@ function RoutePage({
     case 'projectSettings':
       return projectSettings
     case 'settings':
-      return <TitledPage title="Settings">{appSettings}</TitledPage>
+      return (
+        <TitledPage title="Settings" section={route.section}>
+          {appSettings}
+        </TitledPage>
+      )
     case 'mission':
       return null
   }
@@ -186,9 +241,11 @@ export function Shell({
   engine,
   projects,
   project,
+  needs,
   navigation,
   folded,
   today,
+  now,
   projectSettings,
   addProject,
   appSettings,
@@ -218,7 +275,7 @@ export function Shell({
         sidebar={
           <Sidebar
             folded={folded}
-            waiting={0}
+            waiting={waitingCount(needs)}
             projects={listed.map(({ id, name }) => ({ id, name }))}
             opened={new Set()}
             onOpen={() => undefined}
@@ -251,6 +308,8 @@ export function Shell({
             route={route}
             projects={projects}
             project={project}
+            needs={needs}
+            now={now}
             nameOf={nameOf}
             today={today}
             projectSettings={projectSettings}

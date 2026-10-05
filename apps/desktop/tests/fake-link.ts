@@ -50,6 +50,11 @@ export const SILENT_LINK: Link = {
   restartRun: never,
   runOutput: never,
   onRunChanges: silent,
+  needs: never,
+  answerNeed: never,
+  retryNeed: never,
+  mission: never,
+  onMissionChanges: silent,
   onNotices: silent,
   close: () => undefined,
 }

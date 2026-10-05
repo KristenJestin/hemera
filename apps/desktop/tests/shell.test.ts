@@ -1,12 +1,20 @@
 /** What the window draws for each state of the engine, the Projects and the route. */
 
-import { DatabaseOpen, DatabaseRefused, type EngineStatus, type Project } from '@hemera/ipc'
+import { ApplicationOwner, EnvironmentFields, ProjectOwner } from '@hemera/core/domain'
+import {
+  DatabaseOpen,
+  DatabaseRefused,
+  type EngineStatus,
+  type Need,
+  type Project,
+} from '@hemera/ipc'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { EngineState } from '../src/renderer/engine-start.ts'
 import { START, go, type Route } from '../src/renderer/navigation.ts'
+import type { NeedsState } from '../src/renderer/needs.ts'
 import type { ProjectState, ProjectsState } from '../src/renderer/projects.ts'
 import { Shell, type ShellProps } from '../src/renderer/shell.tsx'
 
@@ -57,6 +65,7 @@ interface Drawn {
   project?: ProjectState
   route?: Route
   folded?: boolean
+  needs?: NeedsState
 }
 
 const drawn = ({
@@ -65,14 +74,17 @@ const drawn = ({
   project = { kind: 'loading' },
   route = { kind: 'home' },
   folded = false,
+  needs = { kind: 'ready', needs: [], missions: new Map(), answers: new Map() },
 }: Drawn): string => {
   const props: ShellProps = {
     engine,
     projects,
     project,
+    needs,
     navigation: go(START, route),
     folded,
     today: 'Saturday 4 October',
+    now: new Date('2026-10-04T12:00:00.000Z'),
     actions: {
       go: nothing,
       show: nothing,
@@ -82,6 +94,8 @@ const drawn = ({
       relaunch: nothing,
       showLog: nothing,
       addProject: nothing,
+      answer: nothing,
+      recheck: nothing,
     },
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
@@ -214,5 +228,90 @@ describe('The pages', () => {
     })
     expect(markup).toContain('The settings of the Project')
     expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Settings/)
+  })
+})
+
+const docker = (id: string, owner: Need['owner'], settingsSection: string | null = null): Need => ({
+  id,
+  owner,
+  fields: EnvironmentFields.make({
+    missing: `Docker is not running (${id})`,
+    action: 'Start Docker',
+    settingsSection,
+  }),
+  choices: [],
+  requestedBy: null,
+  state: 'pending',
+  answer: null,
+  endedReason: null,
+  createdAt: '2026-10-04T11:56:00.000Z',
+  endedAt: null,
+})
+
+const withNeeds = (needs: ReadonlyArray<Need>): NeedsState => ({
+  kind: 'ready',
+  needs,
+  missions: new Map(),
+  answers: new Map(),
+})
+
+describe('Needs you, on Home and in the sidebar', () => {
+  test('every pending need is a row of Home’s Needs you, and the sidebar counts them', () => {
+    const markup = drawn({
+      needs: withNeeds([
+        docker('a', ApplicationOwner.make({})),
+        docker('b', ProjectOwner.make({ projectId: 'acme' })),
+      ]),
+    })
+    expect(markup).toContain('Docker is not running (a)')
+    expect(markup).toContain('Docker is not running (b)')
+    expect(markup).toContain('2 waiting')
+    expect(markup).not.toContain('Nothing waits for you.')
+  })
+
+  test('with no Project yet, Hemera’s own needs are still shown on Home', () => {
+    const markup = drawn({
+      projects: { kind: 'ready', projects: [] },
+      needs: withNeeds([docker('a', ApplicationOwner.make({}))]),
+    })
+    expect(markup).toContain('Docker is not running (a)')
+    expect(markup).toContain('1 waiting')
+  })
+
+  test('Home led to by a Project’s notification shows that Project’s needs only', () => {
+    const markup = drawn({
+      route: { kind: 'home', projectId: 'acme' },
+      needs: withNeeds([
+        docker('a', ApplicationOwner.make({})),
+        docker('b', ProjectOwner.make({ projectId: 'acme' })),
+      ]),
+    })
+    expect(markup).not.toContain('Docker is not running (a)')
+    expect(markup).toContain('Docker is not running (b)')
+    expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Home.*<\/button>.*Acme/)
+    // The sidebar still counts every need.
+    expect(markup).toContain('2 waiting')
+  })
+
+  test('a need led to by its notification is unfolded on Home', () => {
+    const markup = drawn({
+      route: { kind: 'home', projectId: 'acme', need: 'b' },
+      needs: withNeeds([docker('b', ProjectOwner.make({ projectId: 'acme' }), 'models')]),
+    })
+    expect(markup).toContain('aria-expanded="true"')
+    expect(markup).toContain('Open Settings › Models by role')
+  })
+
+  test('needs on their way are rows’ shapes; needs that cannot be read are said in words', () => {
+    expect(drawn({ needs: { kind: 'loading' } })).toContain('data-row-skeleton')
+    const failed = drawn({
+      needs: { kind: 'failed', sentence: 'The data folder refused while reading the needs.' },
+    })
+    expect(failed).toContain('The data folder refused while reading the needs.')
+  })
+
+  test('Settings opened by a need’s link is opened at its section', () => {
+    const markup = drawn({ route: { kind: 'settings', section: 'models' } })
+    expect(markup).toContain('data-settings-section="models"')
   })
 })
