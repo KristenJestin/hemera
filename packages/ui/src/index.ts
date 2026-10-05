@@ -69,6 +69,13 @@ export {
 } from './components/live-chip/live-chip-glance.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
+  MentionField,
+  mentionsFor,
+  type Mentionable,
+  type MentionFieldProps,
+  type MentionKind,
+} from './components/mention-field/mention-field.tsx'
+export {
   choiceWords,
   EFFORTS,
   EffortGauge,
