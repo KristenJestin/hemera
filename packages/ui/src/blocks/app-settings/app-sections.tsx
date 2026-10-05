@@ -8,11 +8,15 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import {
+  type ModelChoice,
+  ModelPicker,
+  type PickerAgent,
+} from '../../components/model-picker/model-picker.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconAlertTriangle,
   IconCheck,
-  IconChevronDown,
   IconCloudDownload,
   IconCopy,
   IconFolder,
@@ -295,29 +299,41 @@ export function AgentsSection({
 
 export interface RoleModel {
   role: string
-  /** `Claude Code · Sonnet · medium`. */
-  model: string
+  /** The application's model for the role: the last level, so there is no default above it. */
+  model: ModelChoice
 }
 
 export interface ModelsProps {
   roles: readonly RoleModel[]
-  /** Opens the model picker (#47's component) for a role. */
-  onPick: (role: string) => void
+  /** The agents this machine has, and their models: what the picker offers. */
+  agents: readonly PickerAgent[]
+  onChange: (role: string, choice: ModelChoice) => void
+  onFavourite: (agent: string, model: string, favourite: boolean) => void
+  onHide: (agent: string, model: string, hidden: boolean) => void
 }
 
-export function ModelsSection({ roles, onPick }: ModelsProps): ReactNode {
+export function ModelsSection({
+  roles,
+  agents,
+  onChange,
+  onFavourite,
+  onHide,
+}: ModelsProps): ReactNode {
   return (
     <Section title="Models by role">
       {roles.map((one) => (
         <Row key={one.role} name={one.role}>
-          <Button
-            size="sm"
-            aria-label={`Model of ${one.role}: ${one.model}`}
-            onClick={() => onPick(one.role)}
-          >
-            {one.model}
-            <IconChevronDown size="sm" aria-hidden="true" />
-          </Button>
+          <ModelPicker
+            label={`Model of ${one.role}`}
+            agents={agents}
+            value={one.model}
+            onChange={(choice) => {
+              // The application's level inherits nothing, so the picker offers no default here.
+              if (choice !== null) onChange(one.role, choice)
+            }}
+            onFavourite={onFavourite}
+            onHide={onHide}
+          />
         </Row>
       ))}
     </Section>

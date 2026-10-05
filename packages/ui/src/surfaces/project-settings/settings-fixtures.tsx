@@ -10,6 +10,7 @@ import {
 } from '../../blocks/project-settings/commands.tsx'
 import { FormFoot, Section } from '../../blocks/project-settings/parts.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
+import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import {
   NEW_STEP,
   RecipeSection,
@@ -666,13 +667,15 @@ export function SettingsFixture({
         return (
           <RoleModelsSection
             roles={roles}
+            agents={AGENTS}
             loading={loading}
-            onPick={() => {}}
-            onReset={(role) =>
+            onChange={(role, choice) =>
               setRoles((before) =>
-                before.map((one) => (one.role === role ? { ...one, override: null } : one)),
+                before.map((one) => (one.role === role ? { ...one, override: choice } : one)),
               )
             }
+            onFavourite={() => {}}
+            onHide={() => {}}
           />
         )
       case 'budget':

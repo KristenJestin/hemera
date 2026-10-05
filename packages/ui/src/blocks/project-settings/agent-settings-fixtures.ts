@@ -1,6 +1,8 @@
 import type { BudgetLimit } from './budget.tsx'
 import type { AgentInstructions, RepositoryInstructions } from './instructions.tsx'
 import type { NeverLine } from './never.tsx'
+import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
+import type { PickerAgent, PickerModel } from '../../components/model-picker/model-picker.tsx'
 import type { ProjectRoleModel } from './role-models.tsx'
 
 /**
@@ -28,22 +30,49 @@ export function neverRefusal(line: string, lines: readonly NeverLine[]): string 
   return undefined
 }
 
-/** The model of each role at the application's level, which a role without override runs on. */
+/**
+ * The model of each role in Acme: two roles overridden, the others on the application's model.
+ * Drawn on the picker's agents, so every model here is one the picker offers.
+ */
 export const ROLE_MODELS: readonly ProjectRoleModel[] = [
-  { role: 'Planner', override: null, appDefault: 'Claude Code · Opus · high' },
+  {
+    role: 'Planner',
+    override: null,
+    appDefault: { agent: 'claude', model: 'opus', effort: 'high' },
+  },
   {
     role: 'Builder',
-    override: 'Codex · gpt-5.5 · medium',
-    appDefault: 'Claude Code · Sonnet · medium',
+    override: { agent: 'codex', model: 'gpt-large', effort: 'medium' },
+    appDefault: { agent: 'claude', model: 'sonnet' },
   },
-  { role: 'Reviewer', override: null, appDefault: 'Claude Code · Sonnet · high' },
-  { role: 'Probe', override: 'Claude Code · Haiku', appDefault: 'Claude Code · Sonnet · low' },
-  { role: 'Helper', override: null, appDefault: 'Claude Code · Haiku' },
-  { role: 'Setup agent', override: null, appDefault: 'Claude Code · Sonnet · medium' },
+  {
+    role: 'Reviewer',
+    override: null,
+    appDefault: { agent: 'claude', model: 'sonnet', effort: 'high' },
+  },
+  {
+    role: 'Probe',
+    override: { agent: 'claude', model: 'haiku' },
+    appDefault: { agent: 'claude', model: 'sonnet', effort: 'low' },
+  },
+  { role: 'Helper', override: null, appDefault: { agent: 'claude', model: 'haiku' } },
+  { role: 'Setup agent', override: null, appDefault: { agent: 'claude', model: 'sonnet' } },
 ]
 
-/** A long model name: an agent of a long name, a model of a long version. */
-export const LONG_MODEL = 'OpenCode · acme-internal-gateway/qwen3-coder-480b-a35b-instruct · high'
+/** A long model name: a model of a long version behind a gateway. */
+export const LONG_MODEL = 'acme-internal-gateway/qwen3-coder-480b-a35b-instruct'
+
+const LONG_ROLE_MODEL: PickerModel = {
+  id: 'qwen-long',
+  name: LONG_MODEL,
+  efforts: ['low', 'medium', 'high'],
+}
+
+/** The picker's agents with one model of a long name: what a self-hosted gateway can offer. */
+export const LONG_ROLE_AGENTS: readonly PickerAgent[] = [
+  ...AGENTS.filter((agent) => agent.id !== 'opencode'),
+  { id: 'opencode', name: 'OpenCode', models: [LONG_ROLE_MODEL] },
+]
 
 /** The cap and the budget of a mission, each empty for the application's default. */
 export const LIMITS: readonly BudgetLimit[] = [

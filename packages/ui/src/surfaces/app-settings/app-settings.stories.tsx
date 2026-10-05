@@ -10,6 +10,7 @@ import {
   NotificationsSection,
   ProfileSection,
 } from '../../blocks/app-settings/app-sections.tsx'
+import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import { AppSettings } from './app-settings.tsx'
 
 /**
@@ -144,12 +145,15 @@ export const Models: Story = {
     children: (
       <ModelsSection
         roles={[
-          { role: 'Planner', model: 'Claude Code · Opus · high' },
-          { role: 'Builder', model: 'Claude Code · Sonnet · medium' },
-          { role: 'Reviewer', model: 'Codex · gpt-5 · high' },
-          { role: 'Chat', model: 'Claude Code · Sonnet · low' },
+          { role: 'Planner', model: { agent: 'claude', model: 'opus', effort: 'high' } },
+          { role: 'Builder', model: { agent: 'claude', model: 'sonnet', effort: 'medium' } },
+          { role: 'Reviewer', model: { agent: 'codex', model: 'gpt-large', effort: 'high' } },
+          { role: 'Chat', model: { agent: 'claude', model: 'sonnet', effort: 'low' } },
         ]}
-        onPick={fn()}
+        agents={AGENTS}
+        onChange={fn()}
+        onFavourite={fn()}
+        onHide={fn()}
       />
     ),
   },
