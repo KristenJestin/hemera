@@ -21,7 +21,7 @@ import { Effect, Predicate } from 'effect'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { DIAGNOSTIC_FILE } from '../src/main/diagnostic.ts'
+import { DIAGNOSTIC_FILE, TRACES_FOLDER } from '../src/main/diagnostic.ts'
 import { createMission, moveMission } from '../src/engine/missions.ts'
 import { createProject } from '../src/engine/projects.ts'
 import {
@@ -77,6 +77,7 @@ describe('Every table and file of history or diagnostics has its class', () => {
     )
     expect(TABLE_CLASSES.command_runs).toBe('diagnostic')
     expect(FILE_CLASSES[DIAGNOSTIC_FILE]).toBe('diagnostic')
+    expect(FILE_CLASSES[TRACES_FOLDER]).toBe('diagnostic')
   })
 })
 
@@ -99,6 +100,15 @@ describe('Only the diagnostic sink writes into the diagnostic class', () => {
       if (relative(SOURCE, file) === SINK) return false
       const source = readFileSync(file, 'utf8')
       return /DIAGNOSTIC_FILE|diagnostic\.log/.test(source) && WRITES.test(source)
+    })
+    expect(offenders).toEqual([])
+  })
+
+  test('no other file names the traces folder and writes to the disk', () => {
+    const offenders = files(SOURCE).filter((file) => {
+      if (relative(SOURCE, file) === SINK) return false
+      const source = readFileSync(file, 'utf8')
+      return /TRACES_FOLDER|'traces'/.test(source) && WRITES.test(source)
     })
     expect(offenders).toEqual([])
   })
@@ -216,6 +226,22 @@ describe('The diagnostic class rotates by age and size, never under a live missi
     )
     expect(() => statSync(generation)).toThrow()
     expect(readFileSync(current, 'utf8')).toBe('today\n')
+  })
+
+  test('an ACP trace older than 30 days goes, and a recent one stays', async () => {
+    const traces = join(data, TRACES_FOLDER)
+    mkdirSync(traces)
+    const old = join(traces, 'old-session.1.log')
+    const recent = join(traces, 'recent-session.log')
+    writeFileSync(old, 'an old line\n')
+    utimesSync(old, new Date(now - 40 * DAY), new Date(now - 40 * DAY))
+    writeFileSync(recent, 'a recent line\n')
+    utimesSync(recent, new Date(now - DAY), new Date(now - DAY))
+    await commandsEngine(data)(({ profile }) =>
+      profile.use(sweepDiagnostics(data, { now, maxTotalBytes: 1_000_000_000 })),
+    )
+    expect(() => statSync(old)).toThrow()
+    expect(readFileSync(recent, 'utf8')).toBe('a recent line\n')
   })
 
   test('a diagnostic file older than 30 days is removed; a recent one is kept', async () => {

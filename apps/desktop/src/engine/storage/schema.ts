@@ -440,3 +440,27 @@ export const missionStops = sqliteTable(
   },
   (table) => [unique('stop_once').on(table.missionId, table.stopper)],
 )
+
+/**
+ * The agents' sessions: the agent, who owns the session (a mission or a Project) and in which
+ * role, the folder it works in, the agent's own session id once it has one, and the options
+ * Hemera chose for it (model, effort, mode) beside what the agent reported it took. What was
+ * chosen is what every restart of the agent applies again.
+ */
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(),
+  ownerKind: text('owner_kind').notNull(),
+  ownerId: text('owner_id').notNull(),
+  role: text('role').notNull(),
+  folder: text('folder').notNull(),
+  nativeId: text('native_id'),
+  chosenModel: text('chosen_model'),
+  chosenEffort: text('chosen_effort'),
+  chosenMode: text('chosen_mode'),
+  takenModel: text('taken_model'),
+  takenEffort: text('taken_effort'),
+  takenMode: text('taken_mode'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})

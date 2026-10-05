@@ -10,13 +10,136 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import {
+  cpSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import { extractFile } from '@electron/asar'
 
 /** Folders whose content has no business inside a package. */
 export const REFUSED_IN_PACKAGE = ['spikes', 'src', 'node_modules'] as const
+
+/**
+ * The ACP adapters Hemera carries for Claude Code and Codex. A packaged Hemera forks them as Node
+ * scripts, so they are files on disk beside the archive: `resources/adapters/node_modules`.
+ */
+export const ADAPTER_PACKAGES = [
+  '@agentclientprotocol/claude-agent-acp',
+  '@agentclientprotocol/codex-acp',
+] as const
+
+/** Where the adapters are gathered before electron-builder carries them, under the application. */
+export const ADAPTERS_FOLDER = 'adapters'
+
+/** Where a package carries them, from its unpacked folder. */
+const CARRIED_ADAPTERS = 'resources/adapters/node_modules'
+
+/**
+ * Packages an adapter declares and never runs: `codex-acp` runs the user's own `codex` through
+ * `CODEX_PATH`, so the Codex it depends on (its platform binary with it) is left out by name.
+ */
+const LEFT_OUT = ['@openai/codex']
+
+/** The folders of the agents' own packages and platform binaries, which no package may carry. */
+const AGENT_BINARIES = /^(@anthropic-ai\/claude-agent-sdk-[^/]+|@openai\/codex[^/]*)$/
+
+/** Where `name` resolves from `folder`, the way Node resolves it, or null. */
+function packageFolder(folder: string, name: string): string | null {
+  for (let at = folder; ; at = dirname(at)) {
+    const candidate = join(at, 'node_modules', name)
+    if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate)
+    if (dirname(at) === at) return null
+  }
+}
+
+interface Manifest {
+  dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+}
+
+function manifestOf(folder: string): Manifest {
+  // SAFETY: an installed package's own manifest, read for the two fields above.
+  return JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as Manifest
+}
+
+/**
+ * The runtime closure of the adapters laid out as a `node_modules` Node resolves like an
+ * installed one: each package by where it goes (`name`, or `parent/node_modules/name` when
+ * another version holds the top), with the folder it is copied from. Their dependencies and peers
+ * (`claude-agent-sdk` needs its peers at run time), never an optional dependency (the agents'
+ * platform binaries), each resolved from the package that declares it, as pnpm keeps it. A peer
+ * nobody installed is an optional one, and is skipped.
+ */
+export function adapterClosure(from: string, roots: ReadonlyArray<string>): Map<string, string> {
+  const layout = new Map<string, string>()
+  /** `chain`: where the package that needs `name` sits, and the places above it. */
+  const visit = (name: string, folder: string | null, chain: ReadonlyArray<string>): void => {
+    if (folder === null || LEFT_OUT.includes(name)) return
+    const seen = [...chain.toReversed().map((place) => `${place}/node_modules/${name}`), name].find(
+      (place) => layout.has(place),
+    )
+    if (seen !== undefined && layout.get(seen) === folder) return
+    const parent = chain.at(-1)
+    if (seen !== undefined && parent === undefined) {
+      throw new Error(`${name} is asked for at two versions by the adapters themselves`)
+    }
+    const place = seen === undefined ? name : `${parent}/node_modules/${name}`
+    layout.set(place, folder)
+    const manifest = manifestOf(folder)
+    for (const dependency of Object.keys({
+      ...manifest.dependencies,
+      ...manifest.peerDependencies,
+    })) {
+      visit(
+        dependency,
+        packageFolder(folder, dependency),
+        seen === undefined ? [place] : [...chain, place],
+      )
+    }
+  }
+  for (const root of roots) {
+    const folder = packageFolder(from, root)
+    if (folder === null) throw new Error(`${root} is not installed in ${from}`)
+    visit(root, folder, [])
+  }
+  return layout
+}
+
+/** Copies the closure into `out/node_modules`, each package without its own nested one. */
+export function carryAdapters(from: string, roots: ReadonlyArray<string>, out: string): void {
+  rmSync(out, { recursive: true, force: true })
+  for (const [place, folder] of adapterClosure(from, roots)) {
+    cpSync(folder, join(out, 'node_modules', ...place.split('/')), {
+      recursive: true,
+      dereference: true,
+      filter: (source) => !relative(folder, source).split(sep).includes('node_modules'),
+    })
+  }
+}
+
+/** Whether the package carries both adapters, outside the archive, and no agent binary. */
+export function adapterProblems(unpacked: string): PackageProblem[] {
+  const carried = join(unpacked, ...CARRIED_ADAPTERS.split('/'))
+  const missing = ADAPTER_PACKAGES.filter(
+    (name) => !existsSync(join(carried, name, 'package.json')),
+  ).map((name) => ({
+    entry: `${CARRIED_ADAPTERS}/${name}`,
+    problem: 'is missing from the package',
+  }))
+  const binaries = existsSync(carried)
+    ? entriesUnder(carried)
+        .filter((entry) => AGENT_BINARIES.test(entry))
+        .map((entry) => ({ entry, problem: 'is an agent binary, which Hemera never ships' }))
+    : []
+  return [...missing, ...binaries]
+}
 
 /** The three channels a package can be built as, and the one it is built as by default. */
 export const CHANNELS = ['prod', 'beta', 'dev'] as const
@@ -146,11 +269,17 @@ function entriesUnder(root: string, from: string = root): string[] {
 
 /** What a packaged tree carries that it should not. */
 export function refusedEntries(entries: string[]): PackageProblem[] {
-  return entries
-    .filter((entry) =>
-      REFUSED_IN_PACKAGE.some((refused) => entry === refused || entry.split('/').includes(refused)),
-    )
-    .map((entry) => ({ entry, problem: 'belongs to the sources, not to a package' }))
+  return (
+    entries
+      // The adapters are the one `node_modules` a package carries, on purpose.
+      .filter((entry) => !entry.startsWith(`${CARRIED_ADAPTERS}/`) && entry !== CARRIED_ADAPTERS)
+      .filter((entry) =>
+        REFUSED_IN_PACKAGE.some(
+          (refused) => entry === refused || entry.split('/').includes(refused),
+        ),
+      )
+      .map((entry) => ({ entry, problem: 'belongs to the sources, not to a package' }))
+  )
 }
 
 /**
@@ -192,6 +321,7 @@ export function inspectPackage(
     ...refusedEntries(entriesUnder(unpacked)),
     ...localesProblems(existsSync(locales) ? readdirSync(locales) : []),
     ...channelProblems(channelOfPackage(unpacked), asked),
+    ...adapterProblems(unpacked),
   ]
 }
 
@@ -228,6 +358,7 @@ if (import.meta.main) {
   const version = versionFrom(described.status === 0 ? described.stdout : '0.0.0')
 
   run('node build.ts', application)
+  carryAdapters(application, ADAPTER_PACKAGES, join(application, ADAPTERS_FOLDER))
 
   run(
     `pnpm exec electron-builder --config electron-builder.yml ${packagingOptions(channel, version)

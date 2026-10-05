@@ -2,14 +2,16 @@
  * What the engine answers: its status (which version and channel, on which data folder, and
  * where the Profile's database stands), every change of it, and the calls on the Profile, its
  * Projects, their repositories, their Workspaces, their commands, their missions and the needs
- * included; and, from main alone, that the window is shown.
+ * included, and the coding agents with their state and updates; and, from main alone, that the
+ * window is shown.
  */
 
 import { EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
-import { Stream, SubscriptionRef } from 'effect'
+import { Layer, Stream, SubscriptionRef } from 'effect'
 import { Effect } from 'effect'
 
 import { observed, observedStream, type Log } from '../main/diagnostic.ts'
+import { Agents, machineAgentsLayer } from './agents/service.ts'
 import type { StartedProfile } from './profile.ts'
 import {
   addRepository,
@@ -175,6 +177,12 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'needs.get': ({ id }) => use(getNeed(id)).pipe(observed('needs.get', log)),
     'needs.answer': (asked) => use(answerNeed(asked)).pipe(observed('needs.answer', log)),
     'needs.retry': ({ id }) => use(retryNeed(id)).pipe(observed('needs.retry', log)),
+    'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
+    'agents.checkUpdates': () =>
+      Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),
+    // Run only because the user asked, from the window.
+    'agents.update': ({ agent }) =>
+      Agents.use((agents) => agents.update(agent)).pipe(observed('agents.update', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
-  })
+  }).pipe(Layer.provide(machineAgentsLayer()))
 }

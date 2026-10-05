@@ -166,6 +166,9 @@ const noProjects = {
   'needs.get': unused,
   'needs.answer': unused,
   'needs.retry': unused,
+  'agents.list': unused,
+  'agents.checkUpdates': unused,
+  'agents.update': unused,
 }
 
 /** A main that answers as told, and says when the window stopped listening. */

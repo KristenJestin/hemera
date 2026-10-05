@@ -13,8 +13,15 @@ allowBuilds:
   geckodriver: false
   msgpackr-extract: false
 
-# No package of this repository installs zod (see AGENTS.md, Effect). chromium-bidi brings it in
+# No code of this repository imports zod (see AGENTS.md, Effect). chromium-bidi brings it in
 # under puppeteer-core, which loads it only for WebDriver BiDi; the end-to-end suite drives
-# Electron over CDP and never reaches it.
+# Electron over CDP and never reaches it. The ACP SDK and the two bundled adapters depend on zod
+# at run time to read the protocol's messages: it stays theirs, and Hemera's own code reads
+# them with Effect Schema.
 overrides:
   chromium-bidi: '-'
+
+# Codex in bare mode: no environment, Hemera's MCP tools as dynamic tools forwarded to Hemera's
+# server, the user's MCP servers and skills off, no title thread (see the patch's header).
+patchedDependencies:
+  '@agentclientprotocol/codex-acp@1.12.0': patches/@agentclientprotocol__codex-acp@1.12.0.patch

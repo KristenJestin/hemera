@@ -45,6 +45,7 @@ const SUITE = needService('end-to-end suite')
 type Launch = (
   program: string,
   args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string>>,
 ) => Effect.Effect<AgentsProcess, LaunchFailed, Scope.Scope>
 
 export const probeHandlers = (launch: Launch, profile: StartedProfile) =>
@@ -53,7 +54,7 @@ export const probeHandlers = (launch: Launch, profile: StartedProfile) =>
     'probe.agents': ({ program, input }) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const agents = yield* launch(program, [])
+          const agents = yield* launch(program, [], {})
           yield* Effect.forEach(input, agents.write, { discard: true })
           return Stream.concat(
             Stream.make(Pid.make({ pid: agents.pid })),

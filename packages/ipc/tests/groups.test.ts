@@ -1,11 +1,13 @@
 import { MessageChannel } from 'node:worker_threads'
 
-import { DecisionFields, MissionOwner, maskText } from '@hemera/core/domain'
+import { type AgentProvider, DecisionFields, MissionOwner, maskText } from '@hemera/core/domain'
 import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  type AgentState,
+  AgentUpdateRefused,
   AgentsProcessGone,
   BaseUnavailable,
   closedAs,
@@ -24,6 +26,7 @@ import {
   makeClientProtocol,
   MoveRefused,
   type Need,
+  NotQualified,
   NeedChanged,
   makeServerProtocol,
   NotFetchedSince,
@@ -215,6 +218,27 @@ const missionHandlers = {
   'needs.retry': unused,
 }
 
+const claudeState: AgentState = {
+  id: 'claude',
+  label: 'Claude Code',
+  installed: true,
+  version: '2.0.31',
+  signedIn: true,
+  installer: 'npm',
+  qualification: NotQualified.make({ reason: 'it has not run bare here' }),
+  installHint: 'npm install -g @anthropic-ai/claude-code',
+  loginHint: 'claude auth login',
+  latest: null,
+}
+
+/** The agents of an engine that lists one and refuses every update. */
+const agentHandlers = {
+  'agents.list': () => Effect.succeed([claudeState]),
+  'agents.checkUpdates': unused,
+  'agents.update': ({ agent }: { readonly agent: AgentProvider }) =>
+    Effect.fail(new AgentUpdateRefused({ agent, reason: 'Hemera cannot place it.' })),
+}
+
 /** main's view of an engine that answers its status and then never ends the change stream. */
 const engineLink = Effect.gen(function* () {
   const { port1: mainPort, port2: enginePort } = new MessageChannel()
@@ -236,6 +260,7 @@ const engineLink = Effect.gen(function* () {
         ...workspaceHandlers,
         ...commandHandlers,
         ...missionHandlers,
+        ...agentHandlers,
       }),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
@@ -445,6 +470,21 @@ describe('The missions on the engine link', () => {
           expect(yield* client['needs.list']()).toEqual([{ projectId: 'p1', needs: [need] }])
           const [first] = yield* Stream.runCollect(Stream.take(client['missions.changes'](), 1))
           expect(first).toEqual(NeedChanged.make({ need }))
+        }),
+      ),
+    ))
+})
+
+describe('The agents on the engine link', () => {
+  test('their states and a refused update arrive as themselves', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          expect(yield* client['agents.list']()).toEqual([claudeState])
+          const refused = yield* Effect.flip(client['agents.update']({ agent: 'opencode' }))
+          expect(refused).toBeInstanceOf(AgentUpdateRefused)
+          expect(refused.message).toBe('Hemera cannot place it.')
         }),
       ),
     ))

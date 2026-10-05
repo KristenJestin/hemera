@@ -23,6 +23,15 @@ files:
   - package.json
   - '!node_modules/**/*'
 
+# The ACP adapters of Claude Code and Codex, which the engine forks as Node scripts: a script must
+# be a file on disk, so they sit beside the archive, in `resources/adapters/node_modules`.
+# `tools/package-desktop.ts` gathers their runtime closure into `adapters/` first, inside this
+# folder (a `from` above the project matches nothing, silently), and `node_modules` is named on
+# both sides because electron-builder refuses one at the root of a fileset.
+extraResources:
+  - from: adapters/node_modules
+    to: adapters/node_modules
+
 # The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
 # The folder is emptied through this option and never by hand: an empty locales folder is a
 # crash at start, not a smaller package.
