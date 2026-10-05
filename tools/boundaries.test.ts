@@ -1,4 +1,6 @@
-import { resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { analyze, importsOf, refusalsOf, storageRefusalsOf } from './boundaries.ts'
@@ -8,6 +10,19 @@ const repository = resolve(import.meta.dirname, '..')
 describe('The shared packages stay free of Electron', () => {
   test('no shared package of the repository imports Electron or React', () => {
     expect(analyze(repository)).toEqual([])
+  })
+
+  // A symbolic link to nothing is listed and then cannot be read, as a file removed between the
+  // listing and the reading: the walk goes on instead of failing with ENOENT.
+  test.skipIf(process.platform === 'win32')('a source file that is gone is not source', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-boundaries-'))
+    try {
+      mkdirSync(join(root, 'packages', 'ipc', 'src'), { recursive: true })
+      symlinkSync(join(root, 'nothing.ts'), join(root, 'packages', 'ipc', 'src', 'gone.ts'))
+      expect(analyze(root)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('every way of naming a module is read', () => {

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import {
   type RepositoryDraft,
@@ -178,6 +178,15 @@ const API: RepositoryDraft = {
   baseBranch: 'main',
 }
 
+/**
+ * Waits for a closed select's list to leave the page. It animates out, and the accessibility
+ * check that follows the play function would otherwise read it half way through its exit.
+ */
+const listboxClosed = () =>
+  waitFor(() => {
+    expect(within(document.body).queryByRole('listbox')).toBeNull()
+  })
+
 /** The form of `api`: its path, its inclusion, the remote chosen among its own, its base. */
 export const FormEdit: Story = {
   render: () => (
@@ -195,6 +204,7 @@ export const FormEdit: Story = {
     await userEvent.click(canvas.getByRole('combobox', { name: 'Remote' }))
     await userEvent.click(await within(document.body).findByRole('option', { name: 'upstream' }))
     expect(await canvas.findByText('git@forge.acme.test:platform/api.git')).toBeVisible()
+    await listboxClosed()
   },
 }
 
@@ -309,5 +319,6 @@ export const FormIcon: Story = {
     await userEvent.click(icon)
     await userEvent.click(await within(document.body).findByRole('option', { name: 'Server' }))
     expect(icon).toHaveTextContent('Server')
+    await listboxClosed()
   },
 }
