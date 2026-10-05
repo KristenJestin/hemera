@@ -4,6 +4,7 @@
  * a variable's value read only when the user asks.
  */
 
+import { maskText } from '@hemera/core/domain'
 import {
   InvalidBranchName,
   NotFetchedSince,
@@ -115,7 +116,10 @@ function engine(overrides: Partial<Link> = {}) {
       return 'acme-local-6f1c2a'
     },
     runs: async () => [],
-    runOutput: async () => ({ output: 'ready\nLocal: http://localhost:5173\n', dropped: 0 }),
+    runOutput: async () => ({
+      output: maskText('ready\nLocal: http://localhost:5173\n', []),
+      dropped: 0,
+    }),
     onRunChanges: (listener) => {
       runListeners.add(listener)
       return () => runListeners.delete(listener)

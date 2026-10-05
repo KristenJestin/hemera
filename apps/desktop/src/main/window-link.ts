@@ -76,6 +76,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       changePreferences(engine, application)(change).pipe(observed('preferences.write', log)),
     'profile.backups': () =>
       engine['profile.backups']().pipe(closedAs(gone), observed('profile.backups', log)),
+    'diagnostics.retention': () =>
+      engine['diagnostics.retention']().pipe(
+        closedAs(gone),
+        observed('diagnostics.retention', log),
+      ),
     'profile.backup': (request) =>
       engine['profile.backup'](request).pipe(closedAs(gone), observed('profile.backup', log)),
     // A restore takes effect at the next start: once the engine has staged it, Hemera relaunches.

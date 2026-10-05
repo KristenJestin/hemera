@@ -13,6 +13,7 @@ import {
   InvalidCommand,
   InvalidRepositoryPath,
   InvalidTemplate,
+  MaskedText,
   RUN_STARTERS,
   RUN_STATES,
   ShellSyntax,
@@ -133,7 +134,8 @@ export const RunStart = Schema.Struct({
 export type RunStart = typeof RunStart.Type
 
 /** The last of what a run printed, and how many characters before it were dropped. */
-export const RunOutput = Schema.Struct({ output: Schema.String, dropped: Schema.Number })
+/** The last of what a run printed, masked, and how much of it was dropped. */
+export const RunOutput = Schema.Struct({ output: MaskedText, dropped: Schema.Number })
 export type RunOutput = typeof RunOutput.Type
 
 export class UnknownCommand extends Schema.TaggedError<UnknownCommand>()('UnknownCommand', {

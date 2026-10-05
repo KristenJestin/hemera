@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 
-import { DecisionFields, MissionOwner } from '@hemera/core/domain'
+import { DecisionFields, MissionOwner, maskText } from '@hemera/core/domain'
 import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
@@ -228,6 +228,8 @@ const engineLink = Effect.gen(function* () {
         'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
         'preferences.write': () => Effect.void,
         'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
+        'diagnostics.retention': () =>
+          Effect.succeed({ folder: '/data', maxAgeDays: 30, maxTotalMegabytes: 500 }),
         'profile.backup': ({ folder }) => Effect.succeed(folder),
         'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
         ...projectHandlers,
@@ -381,7 +383,11 @@ describe('Errors that can reach a screen', () => {
       'This folder is not a backup of Hemera.',
     ],
     [
-      new GitFailed({ args: ['status'], folder: '/r', stderr: 'fatal: not a git repository\n' }),
+      new GitFailed({
+        args: ['status'],
+        folder: '/r',
+        stderr: maskText('fatal: not a git repository\n', []),
+      }),
       'fatal: not a git repository',
     ],
     [new GitMissing({ program: 'git' }), 'Git was not found: git is not on the PATH.'],

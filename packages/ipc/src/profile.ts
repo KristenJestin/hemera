@@ -62,3 +62,14 @@ export class StaleVersion extends Schema.TaggedError<StaleVersion>()('StaleVersi
     return `This ${this.entity} changed elsewhere; reopen it and try again.`
   }
 }
+
+/**
+ * Where the diagnostics are kept, and how long and how much of them: what Settings › Developer
+ * shows. The diagnostic class rotates by age and by total size, never while its mission is live.
+ */
+export const DiagnosticsRetention = Schema.Struct({
+  folder: Schema.String,
+  maxAgeDays: Schema.Number,
+  maxTotalMegabytes: Schema.Number,
+})
+export type DiagnosticsRetention = typeof DiagnosticsRetention.Type

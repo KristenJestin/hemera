@@ -10,6 +10,7 @@ import { Rpc, RpcGroup } from 'effect/rpc'
 import { EngineGone } from './gone.ts'
 import {
   AutomaticBackups,
+  DiagnosticsRetention,
   Preferences,
   PreferencesChange,
   RestoreRefused,
@@ -89,6 +90,8 @@ export const EngineRpcs = RpcGroup.make(
     success: Schema.String,
     error: ProfileFailed,
   }),
+  /** Where the diagnostics are kept, and the two constants of their rotation. */
+  Rpc.make('diagnostics.retention', { success: DiagnosticsRetention, error: EngineGone }),
   /** Restores the backup folder `folder`, then relaunches Hemera. */
   Rpc.make('profile.restore', {
     payload: { folder: Schema.String },

@@ -12,6 +12,7 @@ import {
   InvalidTemplate,
   InvalidVariableKey,
   InvalidWorkspaceName,
+  MaskedText,
   PREPARATION_STATES,
   RECIPE_KINDS,
   STEP_KINDS,
@@ -62,7 +63,8 @@ export const WorkspaceRepository = Schema.Struct({
 export type WorkspaceRepository = typeof WorkspaceRepository.Type
 
 /** What a failed step did, and the end of what it printed or of what refused it. */
-export const StepFailure = Schema.Struct({ doing: Schema.String, output: Schema.String })
+/** A step that failed: what it was doing, and the end of what it printed, masked. */
+export const StepFailure = Schema.Struct({ doing: Schema.String, output: MaskedText })
 export type StepFailure = typeof StepFailure.Type
 
 /** A step of a Workspace's preparation, where it stands now. */

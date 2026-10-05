@@ -30,6 +30,7 @@ import {
   RequestedEnvironment,
   fittingAnswer,
   isLive,
+  maskedJson,
   permissionChoices,
   STAGES,
 } from '@hemera/core/domain'
@@ -53,6 +54,7 @@ import {
   refusedWhile,
 } from './storage/database.ts'
 import { missions, needDeliveries, needs, projects } from './storage/schema.ts'
+import { Secrets } from './secrets.ts'
 import { mutate } from './transaction.ts'
 
 /**
@@ -140,7 +142,7 @@ export class NeedRefused extends Schema.TaggedError<NeedRefused>()('NeedRefused'
 }
 
 /** What the calls on needs stand on. */
-export type NeedServices = Database | DomainEvents | NeedOwners | SessionGrants
+export type NeedServices = Database | DomainEvents | NeedOwners | SessionGrants | Secrets
 
 type NeedRow = typeof needs.$inferSelect
 
@@ -363,6 +365,8 @@ const insertNeed = (
 ) =>
   Effect.gen(function* () {
     const id = crypto.randomUUID()
+    // What a need says may quote what an agent, a command or Git wrote: it is masked before it is kept.
+    const masked = maskedJson((yield* Secrets).maskRecord(fields))
     yield* mutate('writing a need', (transaction) =>
       checkedOwner(transaction, owner).pipe(
         Effect.andThen(
@@ -372,7 +376,7 @@ const insertNeed = (
               id,
               ...ownerColumns(owner),
               kind: kindOf(fields),
-              fields: JSON.stringify(fields),
+              fields: masked,
               service,
               requestedBy,
               state: 'pending',

@@ -189,6 +189,8 @@ const main = async (engine: 'answers' | 'gone') => {
         written.push(change)
       }),
     'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
+    'diagnostics.retention': () =>
+      Effect.succeed({ folder: '/data', maxAgeDays: 30, maxTotalMegabytes: 500 }),
     'profile.backup': ({ folder }) => Effect.succeed(folder),
     'profile.restore': () => Effect.void,
     'environment.report': () => Effect.succeed(report),

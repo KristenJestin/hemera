@@ -8,6 +8,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { MASK, maskText } from '@hemera/core/domain'
 import { NewBranch, type CommandDraft, type Project, type Run, ShellSyntax } from '@hemera/ipc'
 import { Effect, Fiber, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -481,7 +482,7 @@ describe('What a stopped engine left running', () => {
           folder: main,
           startedBy: 'user',
           state: 'running',
-          output: '',
+          output: maskText('', []),
           dropped: 0,
           startedAt: new Date().toISOString(),
         })
@@ -571,7 +572,9 @@ describe('The RecipeRunner runs the recipe’s run steps', () => {
     )
     const steps = workspace.prepared.steps.filter((step) => step.kind === 'run')
     expect(steps.map((step) => step.state)).toEqual(['done', 'failed'])
-    expect(steps[1]?.failure?.output).toContain('PORT=3100')
+    // A variable's value is a known secret, masked wherever it shows, a port included.
+    expect(steps[1]?.failure?.output).toContain(`PORT=${MASK}`)
+    expect(steps[1]?.failure?.output).not.toContain('3100')
     expect(workspace.runs.map((run) => [run.startedBy, run.state, run.exitCode])).toEqual([
       ['hemera', 'failed', 4],
       ['hemera', 'done', 0],

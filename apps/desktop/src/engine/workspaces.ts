@@ -59,6 +59,7 @@ import { Context, Effect, Layer, Match, Option, Result, Schema, Stream } from 'e
 import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
+import { type Secrets, unregisterWorkspace } from './secrets.ts'
 import { DomainEvents } from './domain-events.ts'
 import { Git, type GitRefusal } from './git.ts'
 import type { DomainEvent, EventPayload, NewEvent } from './journal.ts'
@@ -118,7 +119,12 @@ export const preparationsLayer = (log: Log) =>
   )
 
 /** What the calls on Workspaces, their recipe and their variables stand on. */
-export type WorkspaceServices = ProjectServices | ProfileHome | Preparations | RecipeRunner
+export type WorkspaceServices =
+  | ProjectServices
+  | ProfileHome
+  | Preparations
+  | RecipeRunner
+  | Secrets
 
 /** The folder Hemera keeps Workspaces in when a Project chose none, under its data folder. */
 export const WORKSPACES_FOLDER = 'workspaces'
@@ -157,7 +163,9 @@ export const stepOf = (row: StepRow): PreparationStep => ({
   line: row.line,
   state: stepState(row.state),
   failure:
-    row.failedDoing === null ? null : { doing: row.failedDoing, output: row.failedOutput ?? '' },
+    row.failedDoing === null || row.failedOutput === null
+      ? null
+      : { doing: row.failedDoing, output: row.failedOutput },
 })
 
 /** The Workspaces asked for, each with its worktrees and its steps in order. */
@@ -659,6 +667,7 @@ export const removeWorkspace = (id: string) =>
     const preparations = yield* Preparations
     if (!(yield* preparations.hold(id))) return yield* refuseRemoval('it is being prepared')
     yield* removal(workspace, project).pipe(Effect.ensuring(preparations.release(id)))
+    yield* unregisterWorkspace(project.id, id)
   })
 
 const removal = (workspace: Workspace, project: Project) =>

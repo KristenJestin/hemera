@@ -55,7 +55,9 @@ import {
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
 import { type AskBeforeRunning, nobodyToAskLayer } from './ask-before-running.ts'
 import { runAtOpen } from './at-open.ts'
-import { gitLayer } from './git.ts'
+import { SYSTEM_GIT, gitLayer, spawnGit } from './git.ts'
+import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
+import { Secrets, type SecretsRegistry, secretsRegistry, registerAllVariables } from './secrets.ts'
 import { resumeInterrupted } from './preparation.ts'
 import { repositoryStatusesLayer } from './repositories.ts'
 import {
@@ -96,6 +98,11 @@ export interface ProfileParts {
   readonly runs?: Partial<RunsSettings>
   /** The guards, stoppers and need owners later tickets register; none otherwise. */
   readonly missions?: Partial<MissionParts>
+  /**
+   * The registry of known secret values: the engine's own, which its diagnostic log masks with
+   * too; a registry of its own otherwise.
+   */
+  readonly secrets?: SecretsRegistry
 }
 
 /** How often the pending environment needs are checked again while they wait. */
@@ -105,7 +112,7 @@ const RECHECK_EVERY = '5 minutes'
  * What the calls on the Profile stand on: the Projects, their Workspaces, their runs and their
  * missions.
  */
-export type EngineServices = WorkspaceServices | RunServices | MissionServices
+export type EngineServices = WorkspaceServices | RunServices | MissionServices | Secrets
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -178,7 +185,9 @@ export const startProfile = (
     }
     if (restored !== null) log(`restored the backup taken at ${restored.takenAt}`)
 
+    const secrets = parts.secrets ?? secretsRegistry()
     const profileLayers = Layer.mergeAll(
+      Layer.succeed(Secrets, secrets),
       databaseLayer(file),
       domainEventsLayer,
       automationGateLayer,
@@ -187,7 +196,7 @@ export const startProfile = (
       parts.liveMissions ?? noLiveMissions,
       parts.restoreJournal ?? noRestoreJournal,
       Layer.succeed(ProfileHome, start),
-      gitLayer(),
+      gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
       repositoryStatusesLayer,
       preparationsLayer(log),
     )
@@ -228,6 +237,14 @@ export const startProfile = (
     const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof layers>>) =>
       Effect.provide(effect, context)
     const gate = Context.get(context, AutomationGate)
+
+    // The known secrets the variables hold are registered before anything else runs: the restore,
+    // the reconciliation, Git, the runs a stopped engine left.
+    yield* run(registerAllVariables).pipe(
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the variables were not registered as secrets: ${said(refusal)}`)),
+      ),
+    )
 
     let reconciliation: Reconciliation = 'none'
     const databaseNow = (): DatabaseStatus =>
@@ -314,6 +331,11 @@ export const startProfile = (
           Effect.repeat(Schedule.spaced(RECHECK_EVERY)),
         ),
       ),
+      Effect.forkScoped,
+    )
+    // The diagnostic class rotates at the start, then every hour.
+    yield* step('rotating the diagnostics', sweepDiagnostics(dataFolder)).pipe(
+      Effect.repeat(Schedule.spaced(SWEEP_EVERY)),
       Effect.forkScoped,
     )
 

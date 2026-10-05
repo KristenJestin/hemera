@@ -29,6 +29,7 @@ import {
   type RunStarter,
   type RunState,
   InvalidCommand,
+  type Masked,
   ROOT_REPOSITORY,
   addressIn,
   checkedLine,
@@ -64,6 +65,7 @@ import { getCommand } from './catalogue.ts'
 import { findOnPath, hostLookup, invocationOf } from './command-line.ts'
 import type { DomainEvents } from './domain-events.ts'
 import { RecipeRunner, RecipeRunRefused } from './recipe-runner.ts'
+import { Secrets } from './secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
 import { commandRuns } from './storage/schema.ts'
 import { ProcessSupervisor, type Supervised } from './supervisor.ts'
@@ -79,6 +81,12 @@ import {
 
 /** How much of the end of what a run printed is kept. */
 export const OUTPUT_KEPT = 64 * 1024
+
+/**
+ * How much more than what is kept is held raw: what is masked is the whole of it, then cut, so a
+ * secret or a key block the cut would split is still recognised whole.
+ */
+const OUTPUT_MARGIN = 16 * 1024
 
 /** How often, and for how long, a service's address is asked whether it answers. */
 export const READINESS_EVERY_MS = 500
@@ -134,6 +142,8 @@ interface RunsState {
   readonly log: Log
   readonly platform: NodeJS.Platform
   readonly settings: RunsSettings
+  /** What a run printed, masked as the engine's registry of known secrets masks it. */
+  readonly mask: (text: string) => Masked<string>
 }
 
 export class Runs extends Context.Service<Runs, RunsState>()('Runs') {}
@@ -146,6 +156,7 @@ export type RunServices =
   | Runs
   | ProcessSupervisor
   | AskBeforeRunning
+  | Secrets
 
 const readConflict = Schema.decodeUnknownOption(
   Schema.fromJsonString(
@@ -185,6 +196,7 @@ export const runsLayer = (log: Log, settings: Partial<RunsSettings> = {}) =>
     Effect.gen(function* () {
       const scope = yield* Effect.scope
       const changes = yield* PubSub.unbounded<Run>()
+      const secrets = yield* Secrets
       return {
         live: new Map<string, Live>(),
         scope,
@@ -196,6 +208,7 @@ export const runsLayer = (log: Log, settings: Partial<RunsSettings> = {}) =>
           readinessForMillis: settings.readinessForMillis ?? READINESS_FOR_MS,
           graceMillis: settings.graceMillis ?? STOP_GRACE_MS,
         },
+        mask: secrets.mask,
       }
     }),
   )
@@ -254,8 +267,7 @@ const writeRun = (live: Live, event: string | null) =>
       exitCode: run.exitCode,
       url: run.url,
       portConflict: run.portConflict === null ? null : JSON.stringify(run.portConflict),
-      output: live.output,
-      dropped: live.dropped,
+      ...shownOutput(runs, live),
       startedAt: run.startedAt,
       endedAt: run.endedAt,
     }
@@ -318,14 +330,21 @@ const endRun = (live: Live, state: RunState, exitCode: number | null, note: stri
     runs.live.delete(live.run.id)
   })
 
-/** Keeps a line of what a run printed, the oldest dropped past `OUTPUT_KEPT`. */
+/** Keeps a line of what a run printed, raw, the oldest dropped past the kept part and its margin. */
 const keep = (live: Live, line: string): void => {
   live.output += `${line}\n`
-  if (live.output.length > OUTPUT_KEPT) {
-    const dropped = live.output.length - OUTPUT_KEPT
+  if (live.output.length > OUTPUT_KEPT + OUTPUT_MARGIN) {
+    const dropped = live.output.length - OUTPUT_KEPT - OUTPUT_MARGIN
     live.dropped += dropped
     live.output = live.output.slice(dropped)
   }
+}
+
+/** What a run printed as it is shown and kept: masked whole, then its last `OUTPUT_KEPT`. */
+const shownOutput = (runs: RunsState, live: Live): RunOutput => {
+  const masked = runs.mask(live.output)
+  const tail = masked.slice(-OUTPUT_KEPT)
+  return { output: runs.mask(tail), dropped: live.dropped + masked.length - tail.length }
 }
 
 /** The run of the Project, other than this one, going with an address on `port`. */
@@ -607,7 +626,7 @@ export const startRun = (asked: RunAsked) =>
           exitCode: null,
           url: null,
           portConflict: null,
-          output: '',
+          output: runs.mask(''),
           dropped: 0,
           startedAt: live.run.startedAt,
           endedAt: null,
@@ -685,8 +704,7 @@ export const runOutput = (id: string) =>
   Effect.gen(function* () {
     const runs = yield* Runs
     const live = runs.live.get(id)
-    if (live !== undefined)
-      return { output: live.output, dropped: live.dropped } satisfies RunOutput
+    if (live !== undefined) return shownOutput(runs, live)
     const row = yield* runRow(id)
     return { output: row.output, dropped: row.dropped } satisfies RunOutput
   })

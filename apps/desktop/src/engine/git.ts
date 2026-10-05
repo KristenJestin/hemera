@@ -20,6 +20,7 @@
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 
+import { type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
 import { Context, Effect, Layer, Option } from 'effect'
 
@@ -47,6 +48,12 @@ export interface GitProgram {
 
 /** The machine's own `git`, found on the PATH. */
 export const SYSTEM_GIT: GitProgram = { command: 'git', leading: [] }
+
+/**
+ * What Git's standard error is masked with when no registry of known secrets is handed: the
+ * shapes of credentials (a URL's password, a token). The engine hands its registry.
+ */
+const SHAPES_ONLY = (text: string): Masked<string> => maskText(text, [])
 
 /** Runs one command in `folder` and answers what it printed. */
 export type GitSpawn = (
@@ -82,7 +89,7 @@ const exited = (child: ChildProcess): boolean =>
  * to go.
  */
 export const spawnGit =
-  (program: GitProgram): GitSpawn =>
+  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitSpawn =>
   (folder, args, kind) => {
     const run = Effect.callback<string, GitRefusal>((resume) => {
       const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
@@ -123,7 +130,9 @@ export const spawnGit =
         settle(
           failure.code === 'ENOENT'
             ? Effect.fail(new GitMissing({ program: program.command }))
-            : Effect.fail(new GitFailed({ args: [...args], folder, stderr: failure.message })),
+            : Effect.fail(
+                new GitFailed({ args: [...args], folder, stderr: mask(failure.message) }),
+              ),
         ),
       )
       child.once('close', (code) =>
@@ -134,7 +143,7 @@ export const spawnGit =
                 new GitFailed({
                   args: [...args],
                   folder,
-                  stderr: Buffer.concat(err).toString('utf8'),
+                  stderr: mask(Buffer.concat(err).toString('utf8')),
                 }),
               ),
         ),

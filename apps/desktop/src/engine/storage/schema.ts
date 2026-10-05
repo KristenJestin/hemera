@@ -6,9 +6,11 @@
  * construction. Hemera 1.0 starts this schema afresh: nothing of the 0.x model is here.
  *
  * Two conventions run through it. An identifier is a `crypto.randomUUID()` in a text column, and
- * a date is an ISO string: a text date sorts and reads as itself.
+ * a date is an ISO string: a text date sorts and reads as itself. A column that keeps text an
+ * agent, a command, Git or a forge produced takes `Masked<string>`: it is masked before the insert.
  */
 
+import type { Masked } from '@hemera/core/domain'
 import { sql } from 'drizzle-orm'
 import {
   check,
@@ -211,7 +213,7 @@ export const workspaceSteps = sqliteTable(
     line: text('line'),
     state: text('state').notNull(),
     failedDoing: text('failed_doing'),
-    failedOutput: text('failed_output'),
+    failedOutput: text('failed_output').$type<Masked<string>>(),
   },
   (table) => [unique('step_once_in_workspace').on(table.workspaceId, table.position)],
 )
@@ -299,7 +301,7 @@ export const commandRuns = sqliteTable(
     exitCode: integer('exit_code'),
     url: text('url'),
     portConflict: text('port_conflict'),
-    output: text('output').notNull(),
+    output: text('output').$type<Masked<string>>().notNull(),
     dropped: integer('dropped').notNull(),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
@@ -392,7 +394,7 @@ export const needs = sqliteTable(
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'cascade' }),
     taskId: text('task_id'),
     kind: text('kind').notNull(),
-    fields: text('fields').notNull(),
+    fields: text('fields').$type<Masked<string>>().notNull(),
     /** The engine service that owns it and is handed its answer. */
     service: text('service').notNull(),
     /** The role of the agent that asked for it, or null when Hemera did. */
