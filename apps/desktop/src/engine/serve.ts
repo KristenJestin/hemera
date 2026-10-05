@@ -42,6 +42,7 @@ import { listVariables, removeVariable, revealVariable, setVariable } from './va
 import { createMission, getMission, listMissions, missionChanges, moveMission } from './missions.ts'
 import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
 import { listGrants, revokeGrant } from './permissions/grants.ts'
+import { HemeraAuto, decisionChanges, whoJudgesFor } from './permissions/hemera-auto.ts'
 import { neverList, setNeverList } from './permissions/never-list.ts'
 import {
   REGISTRY,
@@ -195,6 +196,25 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(listGrants(missionId)).pipe(observed('permissions.grants', log)),
     'permissions.revoke': ({ grantId }) =>
       use(revokeGrant(grantId)).pipe(observed('permissions.revoke', log)),
+    'permissions.decisions': () =>
+      follow(decisionChanges).pipe(observedStream('permissions.decisions', log)),
+    'hemeraAuto.setConsent': ({ consent }) =>
+      use(HemeraAuto.use((auto) => auto.setConsent(consent))).pipe(
+        observed('hemeraAuto.setConsent', log),
+      ),
+    'hemeraAuto.whoJudges': ({ agent, mode }) =>
+      use(whoJudgesFor(agent, mode)).pipe(observed('hemeraAuto.whoJudges', log)),
+    // The key itself is main's alone: what main sealed is stored, what main decrypted is held.
+    'jevKey.state': () =>
+      use(HemeraAuto.use((auto) => auto.state)).pipe(observed('jevKey.state', log)),
+    'jevKey.ciphertext': () =>
+      use(HemeraAuto.use((auto) => auto.ciphertext)).pipe(observed('jevKey.ciphertext', log)),
+    'jevKey.store': ({ ciphertext }) =>
+      use(HemeraAuto.use((auto) => auto.storeKey(ciphertext))).pipe(observed('jevKey.store', log)),
+    'jevKey.restore': ({ key }) =>
+      use(HemeraAuto.use((auto) => auto.restoreKey(key))).pipe(observed('jevKey.restore', log)),
+    'jevKey.remove': () =>
+      use(HemeraAuto.use((auto) => auto.removeKey)).pipe(observed('jevKey.remove', log)),
     'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
     'agents.checkUpdates': () =>
       Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),

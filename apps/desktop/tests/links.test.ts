@@ -120,6 +120,11 @@ const chain = Effect.gen(function* () {
               previewed.push([style, sound])
               return 'played'
             }),
+          hemeraAuto: {
+            status: Effect.die('the key is not asked of this main'),
+            save: () => Effect.die('the key is not asked of this main'),
+            remove: Effect.die('the key is not asked of this main'),
+          },
         },
         (line) => mainLines.push(line),
       ),

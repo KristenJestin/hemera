@@ -19,6 +19,7 @@ import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/age
 import { getAgentSession, openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
 import { openProfile } from '../src/engine/migrate.ts'
+import { sessionTurnsLayer } from '../src/engine/permissions/ports.ts'
 import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { SHIPPED, type Storage, on, removeFolders, temporaryFolder } from './storage.ts'
 
@@ -103,6 +104,7 @@ const run = <A, E>(
     program.pipe(
       Effect.provide(agentRuntimeLayer({ dataFolder: data, log: () => {} })),
       Effect.provide(acpTracesLayer(data)),
+      Effect.provide(sessionTurnsLayer),
       Effect.provide(Layer.succeed(Secrets, secretsRegistry())),
       Effect.provide(built.layers),
     ),

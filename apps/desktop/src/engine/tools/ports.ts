@@ -75,6 +75,8 @@ export type Verdict =
       readonly by: string
       /** The call touches a sensitive place: it is never allowed for the whole mission. */
       readonly sensitive?: boolean
+      /** The settings section that would settle such a call (`hemera-auto`), when one would. */
+      readonly settingsSection?: string
     }
   | { readonly verdict: 'deny'; readonly reason: string; readonly by: string }
 
@@ -110,6 +112,8 @@ export interface RequestAsked {
   /** Hemera's reasons, as the verdict gave them. */
   readonly reason: string
   readonly sensitive: boolean
+  /** The settings section the question links to (`hemera-auto`), or null. */
+  readonly settingsSection: string | null
   /** The agent's own key of the call: the same key from the same owner is the same request. */
   readonly key: string | null
 }

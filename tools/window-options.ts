@@ -43,6 +43,12 @@ export const REFUSED_SWITCHES = [
   '--disable-gpu',
 ] as const
 
+/**
+ * The one Chromium switch the application may add: the keyring the Jev key is sealed with, on a
+ * Linux desktop Electron does not pick one for. It chooses storage, not graphics or isolation.
+ */
+export const ALLOWED_SWITCHES = ['password-store'] as const
+
 /** Platform variables the application never sets: the target decides, and the report reads. */
 export const REFUSED_ENVIRONMENT = [
   'ELECTRON_OZONE_PLATFORM_HINT',
@@ -71,7 +77,7 @@ function sourceFilesOf(directory: string): string[] {
 
 const WEB_PREFERENCES = /webPreferences\s*:\s*\{([^}]*)\}/g
 const OPTION_KEY = /([A-Za-z][A-Za-z0-9]*)\s*:/g
-const APPEND_SWITCH = /commandLine\s*\.\s*append(?:Switch|Argument)/
+const APPEND_SWITCH = /commandLine\s*\.\s*append(Switch|Argument)\s*\(\s*(?:'([^']*)'|"([^"]*)")?/g
 
 /** The `webPreferences` keys a source file asks for, in the order it asks for them. */
 export function webPreferenceKeys(source: string): string[] {
@@ -113,7 +119,9 @@ export function refusalsOf(file: string, source: string): Refusal[] {
       at(option, 'is a window option AGENTS.md refuses')
     }
   }
-  if (APPEND_SWITCH.test(source)) {
+  for (const [, kind, single, double] of source.matchAll(APPEND_SWITCH)) {
+    const name = single ?? double
+    if (kind === 'Switch' && ALLOWED_SWITCHES.some((allowed) => allowed === name)) continue
     at('commandLine.appendSwitch', 'adds a Chromium switch; the target decides, not the code')
   }
   for (const flag of REFUSED_SWITCHES) {

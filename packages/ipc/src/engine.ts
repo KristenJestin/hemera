@@ -21,7 +21,7 @@ import {
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
 import { MissionsRpcs, NeedsRpcs } from './missions.ts'
 import { NoticeFeedRpcs, NotificationSettingsRpcs } from './notifications.ts'
-import { PermissionsRpcs } from './permissions.ts'
+import { JevKeyRpcs, PermissionsRpcs } from './permissions.ts'
 import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 
@@ -121,9 +121,11 @@ export const EngineRpcs = RpcGroup.make(
  * What the engine serves main: everything the window may ask, which main forwards, and what main
  * alone tells it or follows. The window is shown: what waits for the window before it runs (the
  * commands run at each opening) may start now; the engine answers at once and runs them in the
- * background. The notices are main's to deliver, never the window's to follow.
+ * background. The notices are main's to deliver, never the window's to follow, and so is the Jev
+ * key: main alone seals it, hands its ciphertext to be stored and the decrypted key to be held.
  */
 export const EngineMainRpcs = EngineRpcs.merge(
   RpcGroup.make(Rpc.make('engine.windowShown', { success: Schema.Void, error: EngineGone })),
   NoticeFeedRpcs,
+  JevKeyRpcs,
 )

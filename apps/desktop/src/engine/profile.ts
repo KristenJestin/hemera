@@ -56,6 +56,8 @@ import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.
 import type { AskBeforeRunning } from './ask-before-running.ts'
 import { RUN_CONSENT, hemeraRunConsent, withdrawLeftConsents } from './permissions/consent.ts'
 import { Approvals, PERMISSION_REQUESTS, requestsHandler } from './permissions/requests.ts'
+import type { HemeraAuto } from './permissions/hemera-auto.ts'
+import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
 import { SYSTEM_GIT, gitLayer, spawnGit } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
@@ -143,6 +145,8 @@ export type EngineServices =
   | ToolGate
   | ToolAccess
   | HemeraEndpoint
+  | HemeraAuto
+  | SessionTurns
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -227,6 +231,7 @@ export const startProfile = (
       parts.restoreJournal ?? noRestoreJournal,
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
+      sessionTurnsLayer,
       repositoryStatusesLayer,
       preparationsLayer(log),
     )

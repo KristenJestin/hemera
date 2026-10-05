@@ -16,7 +16,8 @@
  *  6. any failure of the judge asks. Never an allow on an error path.
  *
  * Every decision is a `permission.decided` event (who decided, why, the policy version and its
- * level, the target masked) and one line of the diagnostic log.
+ * level, the target masked; for a judged call the judge, its model and its scores; how it was
+ * settled and how long it took) and one line of the diagnostic log.
  */
 
 import { userInfo } from 'node:os'
@@ -38,7 +39,7 @@ import {
   runsAShell,
   wordsOf,
 } from '@hemera/core/domain'
-import { Duration, Effect, Layer, Option, Result } from 'effect'
+import { Clock, Duration, Effect, Layer, Option, Result } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import type { DomainEvents } from '../domain-events.ts'
@@ -50,7 +51,7 @@ import { mutate } from '../transaction.ts'
 import { resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
-import { CommitRights, Judge, MissionGrants } from './ports.ts'
+import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
 
 /** A question the step 3 asks about, besides a sensitive place. */
 type Concern =
@@ -81,13 +82,34 @@ interface Decision {
   readonly sensitive: boolean
   /** The grant that allowed it. */
   readonly grantId: string | null
+  /** How it was settled: by the rules, a grant, the judge now or reused, or asked for want of one. */
+  readonly settled: 'rules' | 'grant' | 'jev' | 'reused' | 'asked'
+  /** The judge's rating, when one rated it. */
+  readonly judged: Judged | null
+  /** Why the judge failed, as a safe category, when it did. */
+  readonly failure: string | null
+  /** The round trip to the judge, when it was asked now. */
+  readonly roundTripMs: number | null
+  /** The settings section that would settle such a call (`hemera-auto`), when one would. */
+  readonly settingsSection: string | null
 }
 
 const decided = (
   verdict: Decision['verdict'],
   reasons: ReadonlyArray<string>,
   by: Decision['by'] = 'rules',
-): Decision => ({ verdict, by, reasons, sensitive: false, grantId: null })
+): Decision => ({
+  verdict,
+  by,
+  reasons,
+  sensitive: false,
+  grantId: null,
+  settled: verdict === 'ask' ? 'asked' : 'rules',
+  judged: null,
+  failure: null,
+  roundTripMs: null,
+  settingsSection: null,
+})
 
 export const userName = (): string => {
   try {
@@ -246,14 +268,29 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           Effect.timeoutOption(JUDGE_LIMIT),
           Effect.map(
             Option.match({
-              onNone: () => decided('ask', ['the judge did not answer in time']),
-              onSome: (answer) =>
+              onNone: (): Decision => ({
+                ...decided('ask', ['the judge did not answer in time']),
+                failure: 'timeout',
+              }),
+              onSome: (answer): Decision =>
                 answer.verdict === 'unavailable'
-                  ? decided('ask', [`no judge could rate it: ${answer.reason}`])
-                  : decided(answer.verdict, [answer.reason], 'judge'),
+                  ? {
+                      ...decided('ask', [`no judge could rate it: ${answer.reason}`]),
+                      failure: answer.failure ?? null,
+                      roundTripMs: answer.roundTripMs ?? null,
+                      settingsSection: answer.settingsSection ?? null,
+                    }
+                  : {
+                      ...decided(answer.verdict, [answer.reason], 'judge'),
+                      settled: answer.judged?.settled ?? 'jev',
+                      judged: answer.judged ?? null,
+                      roundTripMs: answer.judged?.roundTripMs ?? null,
+                    },
             }),
           ),
-          Effect.catchCause(() => Effect.succeed(decided('ask', ['the judge failed']))),
+          Effect.catchCause(() =>
+            Effect.succeed({ ...decided('ask', ['the judge failed']), failure: 'failed' }),
+          ),
         )
 
       const order = (call: JudgedCall) =>
@@ -270,7 +307,13 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             }
           }
           const grantId = yield* MissionGrants.use((grants) => grants.allowing(call))
-          if (grantId !== null) return { ...decided('allow', [], 'grant'), grantId }
+          if (grantId !== null) {
+            return {
+              ...decided('allow', [], 'grant'),
+              grantId,
+              settled: 'grant',
+            } satisfies Decision
+          }
           if (pointed.concerns.length > 0) {
             return decided('ask', [...new Set(pointed.concerns.map((one) => said(call, one)))])
           }
@@ -279,11 +322,12 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
         })
 
       /** The decision told: one event for the Journal, one line of the diagnostic log. */
-      const record = (call: JudgedCall, decision: Decision) =>
+      const record = (call: JudgedCall, decision: Decision, latencyMs: number) =>
         Effect.gen(function* () {
           const secrets = yield* Secrets
           const target = secrets.mask(targetOf(call, home).slice(0, 500))
           const reasons = decision.reasons.map((reason) => secrets.mask(reason))
+          const rating = decision.judged
           const owner =
             call.session.missionId === null
               ? { entityKind: 'project', entityId: call.session.projectId }
@@ -304,6 +348,15 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               reasons,
               policyVersion: PERMISSION_POLICY.policyVersion,
               level: PERMISSION_POLICY.level,
+              judge: rating?.judge ?? null,
+              model: rating?.model ?? null,
+              risk: rating?.scores.risk ?? null,
+              approval: rating?.scores.approval ?? null,
+              userRequested: rating?.scores.userRequested ?? null,
+              settled: decision.settled,
+              latencyMs,
+              roundTripMs: decision.roundTripMs,
+              failure: decision.failure,
             },
           }
           yield* mutate('recording a permission decision', () =>
@@ -313,34 +366,48 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               Effect.sync(() => log(`permissions: a decision was not recorded: ${failed.message}`)),
             ),
           )
-          log(
-            secrets.mask(
-              `permissions: ${ROLE_NAMES[call.session.role]} ${call.tool} ${target}: ${decision.verdict} by ${decision.by}${reasons.length === 0 ? '' : ` (${reasons.join('; ')})`} [policy ${String(PERMISSION_POLICY.policyVersion)}, ${PERMISSION_POLICY.level}]`,
-            ),
-          )
+          const line = [
+            `permissions: ${ROLE_NAMES[call.session.role]} ${call.tool} ${target.slice(0, 200)}: ${decision.verdict} by ${decision.by}${reasons.length === 0 ? '' : ` (${reasons.join('; ')})`}`,
+            `[policy ${String(PERMISSION_POLICY.policyVersion)}, ${PERMISSION_POLICY.level}]`,
+            ...(rating === null
+              ? []
+              : [
+                  `judge=${rating.judge} model=${rating.model} risk=${String(rating.scores.risk)} approval=${String(rating.scores.approval)} userRequested=${String(rating.scores.userRequested)}`,
+                ]),
+            ...(decision.roundTripMs === null ? [] : [`jev=${String(decision.roundTripMs)}ms`]),
+            ...(decision.failure === null ? [] : [`failure=${decision.failure}`]),
+            `settled=${decision.settled} in ${String(latencyMs)}ms`,
+          ]
+          log(secrets.mask(line.join(' ')))
         })
 
       return {
         judge: (call) =>
           Effect.gen(function* () {
+            const began = yield* Clock.currentTimeMillis
             const decision = yield* order(call).pipe(
               Effect.catchCause(() =>
                 Effect.succeed(decided('ask', ['the rules could not read this call'])),
               ),
             )
-            yield* record(call, decision)
+            const ended = yield* Clock.currentTimeMillis
+            yield* record(call, decision, Math.max(0, Math.round(ended - began)))
             const reason = decision.reasons.join('; ')
             if (decision.verdict === 'allow') {
               return { verdict: 'allow', by: decision.by } satisfies Verdict
             }
-            return decision.verdict === 'ask'
-              ? ({
-                  verdict: 'ask',
-                  reason,
-                  by: decision.by,
-                  sensitive: decision.sensitive,
-                } satisfies Verdict)
-              : ({ verdict: 'deny', reason, by: decision.by } satisfies Verdict)
+            if (decision.verdict === 'deny') {
+              return { verdict: 'deny', reason, by: decision.by } satisfies Verdict
+            }
+            const asked = {
+              verdict: 'ask',
+              reason,
+              by: decision.by,
+              sensitive: decision.sensitive,
+            } as const
+            return decision.settingsSection === null
+              ? (asked satisfies Verdict)
+              : ({ ...asked, settingsSection: decision.settingsSection } satisfies Verdict)
           }).pipe(Effect.provide(services)),
         refusal: (call) =>
           refusals(call).pipe(

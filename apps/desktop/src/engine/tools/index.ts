@@ -26,6 +26,14 @@ import { effectfulActionsLayer } from './actions.ts'
 import { ToolGate, toolGateLayer } from './gate.ts'
 import { type Delivery, queuedDelivery } from '../permissions/delivery.ts'
 import { missionGrantsLayer } from '../permissions/grants.ts'
+import {
+  HemeraAuto,
+  type HumanIntent,
+  hemeraAutoLayer,
+  humanIntentLayer,
+  jevJudgeLayer,
+} from '../permissions/hemera-auto.ts'
+import { JevTransport, jevTransport } from '../permissions/jev.ts'
 import { decisionOrderLayer } from '../permissions/order.ts'
 import {
   type CommitRights,
@@ -33,7 +41,6 @@ import {
   type MissionGrants,
   missionPlacesLayer,
   noAgentCommits,
-  noJudge,
 } from '../permissions/ports.ts'
 import {
   type TaskStates,
@@ -51,7 +58,7 @@ import {
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
 
-export { ToolAccess, ToolGate, ToolServer }
+export { HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
 /** What later tickets plug into the gate; the defaults otherwise. */
 export interface ToolsParts {
@@ -59,8 +66,12 @@ export interface ToolsParts {
   readonly permissionRequests?: Layer.Layer<PermissionRequests>
   readonly sensitivePlaces?: Layer.Layer<SensitivePlaces>
   readonly guards?: Layer.Layer<GateGuards>
-  /** Step 5 of the order of decision: the remote judge (#38). */
+  /** Step 5 of the order of decision: Jev, through Hemera Auto, otherwise. */
   readonly judge?: Layer.Layer<Judge>
+  /** How Jev is reached; the pinned endpoint otherwise. Suites hand a fake Jev. */
+  readonly jevTransport?: Layer.Layer<JevTransport>
+  /** What the user said that Jev is told; the user's answers in the database otherwise. */
+  readonly humanIntent?: Layer.Layer<HumanIntent>
   /** The grants of "Allow for this mission"; the mission's stored grants otherwise. */
   readonly grants?: Layer.Layer<MissionGrants>
   /** Where the result of an answered request goes (#40); queued for its owner otherwise. */
@@ -173,9 +184,16 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
       Layer.mergeAll(
         parts.sensitivePlaces ??
           sensitivePlacesLayer({ home, platform }).pipe(Layer.provide(missionPlacesLayer)),
-        parts.judge ?? noJudge,
+        parts.judge ?? jevJudgeLayer({ log, home, platform }),
         parts.grants ?? missionGrantsLayer({ log, platform }),
         parts.commitRights ?? noAgentCommits,
+      ),
+    ),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        hemeraAutoLayer(log),
+        parts.humanIntent ?? humanIntentLayer,
+        parts.jevTransport ?? Layer.succeed(JevTransport, jevTransport),
       ),
     ),
   )

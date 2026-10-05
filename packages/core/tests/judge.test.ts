@@ -3,7 +3,7 @@
  * context Jev is told, and who judges a call.
  */
 
-import fc from 'fast-check'
+import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
