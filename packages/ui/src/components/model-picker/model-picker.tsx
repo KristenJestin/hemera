@@ -192,7 +192,7 @@ function entriesOf(models: readonly PickerModel[], query: string, withDefault: b
   ]
 }
 
-export const LEVEL_WORDS: Record<Effort | 'default', string> = {
+const LEVEL_WORDS: Record<Effort | 'default', string> = {
   default: 'Default',
   low: 'Low',
   medium: 'Medium',
@@ -200,10 +200,10 @@ export const LEVEL_WORDS: Record<Effort | 'default', string> = {
   max: 'Max',
 }
 
-export type EffortLevel = Effort | 'default'
+type EffortLevel = Effort | 'default'
 
 /** The levels of a model's effort, the one that is on, and what each stands for. */
-export interface EffortLevels {
+interface EffortLevels {
   levels: readonly EffortLevel[]
   on: EffortLevel
   /** The effort a level stands for: none for the default. */
@@ -215,7 +215,7 @@ export interface EffortLevels {
  * effort is the model's own, that level stands for "the default" and choosing it chooses none;
  * when it does not, a "Default" level comes first.
  */
-export function effortLevels(
+function effortLevels(
   efforts: readonly Effort[],
   defaultEffort: Effort | undefined,
   effort: Effort | undefined,
@@ -229,7 +229,7 @@ export function effortLevels(
   }
 }
 
-export interface EffortControlProps {
+interface EffortControlProps {
   efforts: readonly Effort[]
   defaultEffort?: Effort | undefined
   effort: Effort | undefined
@@ -237,14 +237,14 @@ export interface EffortControlProps {
 }
 
 /** The default's mark: a dot after the level's word. */
-export const DEFAULT_DOT = 'size-1 shrink-0 rounded-full bg-current'
+const DEFAULT_DOT = 'size-1 shrink-0 rounded-full bg-current'
 
 /**
  * The effort as one row of segments, least to most: a radio group, so Tab lands on the level
  * that is on and the arrows walk the others. The model's own default wears a dot, and its name
  * says it.
  */
-export function EffortSegments({
+function EffortSegments({
   efforts,
   defaultEffort,
   effort,
