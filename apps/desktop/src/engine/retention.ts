@@ -3,8 +3,8 @@
  *
  * - **permanent**: the history of a mission (its records, its marks, its needs and their answers,
  *   the journal), kept as long as the mission exists and never purged;
- * - **heavy**: the large pieces tied to a mission (`missions/<key>/evidence/`, the contents of the
- *   snapshots), kept as long as the mission; none exists yet;
+ * - **heavy**: the large pieces tied to a mission (`missions/<key>/evidence/` and the rows that
+ *   reference it, the contents of the snapshots), kept as long as the mission;
  * - **diagnostic**: what helps understand a run and nothing more (`diagnostic.log`, the ACP traces
  *   under `traces/`, the outputs of commands), rotated by age and by total size, never while its
  *   mission is live;
@@ -23,6 +23,7 @@ import { type Table, getTableName, inArray, notInArray, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import { DIAGNOSTIC_FILE, DIAGNOSTIC_GENERATION, TRACES_FOLDER } from '../main/diagnostic.ts'
+import { MISSIONS_FOLDER } from './memory/files.ts'
 import { Database, refusedWhile } from './storage/database.ts'
 import { commandRuns, missions } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
@@ -64,6 +65,12 @@ export const TABLE_CLASSES = {
   permission_requests: 'permanent',
   mission_grants: 'permanent',
   queued_deliveries: 'state',
+  projection_cursors: 'state',
+  memory_journal: 'permanent',
+  memory_now_lines: 'permanent',
+  memory_next: 'permanent',
+  memory_notes: 'permanent',
+  memory_evidence: 'heavy',
 } as const satisfies Record<string, RetentionClass>
 
 /**
@@ -73,6 +80,8 @@ export const TABLE_CLASSES = {
 export const FILE_CLASSES = {
   [DIAGNOSTIC_FILE]: 'diagnostic',
   [TRACES_FOLDER]: 'diagnostic',
+  // The Memory's evidence, and the markdown files regenerated from the database beside it.
+  [MISSIONS_FOLDER]: 'heavy',
 } as const satisfies Record<string, RetentionClass>
 
 /** The tables among these that have no class: what a later ticket forgot to declare. */

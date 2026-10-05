@@ -27,18 +27,11 @@ import { openDiagnosticLog, type Log } from '../main/diagnostic.ts'
 import { headless } from '../main/window-options.ts'
 import { agentsLauncher } from './agents.ts'
 import { portHandovers } from './handovers.ts'
-import { RESTORED_REQUESTS } from './permissions/requests.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
+import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from './registries.ts'
 import { secretsRegistry, type SecretsRegistry } from './secrets.ts'
 import { engineHandlers } from './serve.ts'
-
-/**
- * The folders of the data folder a backup carries, relative to it: each ticket that creates one
- * adds it here. And the steps that reconcile a restored Profile with the world, in their order.
- */
-const BACKUP_FOLDERS: ReadonlyArray<string> = []
-const RECONCILIATION_STEPS = [RESTORED_REQUESTS] as const
 
 const readStart = Schema.decodeUnknownOption(Schema.toCodecJson(EngineStart))
 const readHandover = Schema.decodeUnknownOption(AgentsPortHandover)
@@ -94,7 +87,7 @@ const engine = (
 
     if (probePort !== undefined && headless(process.env)) {
       yield* RpcServer.make(ProbeRpcs, { disableFatalDefects: true }).pipe(
-        Effect.provide(probeHandlers(launch, profile)),
+        Effect.provide(probeHandlers(launch, profile, start.dataFolder)),
         Effect.provideServiceEffect(RpcServer.Protocol, serveOn(probePort)),
         Effect.forkScoped,
       )

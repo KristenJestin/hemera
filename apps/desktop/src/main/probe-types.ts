@@ -35,6 +35,21 @@ export interface HemeraProbe {
   readonly createNeed: () => Promise<string>
   /** Every pending need of Needs you, as the window reads them: id, state and answer. */
   readonly pendingNeeds: () => Promise<ReadonlyArray<PendingNeed>>
+  /** A fake agent writes `count` Journal lines of a new mission over `folder`, in the background. */
+  readonly agentWrites: (folder: string, count: number) => Promise<void>
+  /** What the Memory holds: the agent's events and lines, and each mission's files. */
+  readonly memory: () => Promise<MemoryState>
+}
+
+export interface MemoryState {
+  readonly agentEvents: number
+  readonly agentLines: number
+  readonly journalLines: number
+  readonly files: ReadonlyArray<{
+    readonly key: string
+    readonly names: ReadonlyArray<string>
+    readonly journalFileLines: number
+  }>
 }
 
 export interface PendingNeed {
