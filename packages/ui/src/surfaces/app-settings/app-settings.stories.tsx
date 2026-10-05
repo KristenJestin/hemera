@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
   AgentsSection,
@@ -188,26 +188,131 @@ export const HemeraAutoNoStorage: Story = {
   },
 }
 
+const STYLES = [
+  { id: 'hemera', label: 'Hemera' },
+  { id: 'minimal', label: 'Minimal' },
+  { id: 'soft', label: 'Soft' },
+  { id: 'glass', label: 'Glass' },
+  { id: 'arcade', label: 'Arcade' },
+  { id: 'mechanical', label: 'Mechanical' },
+  { id: 'organic', label: 'Organic' },
+  { id: 'dreamy', label: 'Dreamy' },
+  { id: 'scifi', label: 'Sci-fi' },
+  { id: 'rubber', label: 'Rubber' },
+  { id: 'cinematic', label: 'Cinematic' },
+  { id: 'studio', label: 'Studio' },
+  { id: 'zen', label: 'Zen' },
+]
+
+const notifications = (props: Partial<Parameters<typeof NotificationsSection>[0]>) => (
+  <NotificationsSection
+    events={[
+      { id: 'needs', label: 'A need waits for you', on: true },
+      { id: 'questions', label: 'A Planning question waits for you', on: true },
+      { id: 'ready', label: 'A mission is ready for review', on: true },
+      { id: 'failed', label: 'A run or a check failed', on: false },
+      { id: 'outside', label: 'A repository changed outside Hemera', on: false },
+    ]}
+    sounds={[
+      { id: 'needs-you', label: 'Something needs you', on: true },
+      { id: 'error', label: 'Something failed', on: true },
+      { id: 'done', label: 'Something is done', on: false },
+    ]}
+    style="hemera"
+    styles={STYLES}
+    onEvent={fn()}
+    onSound={fn()}
+    onStyle={fn()}
+    onPreview={fn()}
+    {...props}
+  />
+)
+
+/** Hemera's own sound style; each sound can be heard in it, once, from its play button. */
 export const Notifications: Story = {
+  args: { current: 'notifications', children: notifications({}) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('combobox', { name: 'Sound style' })).toHaveTextContent('Hemera')
+    await expect(canvas.getByRole('button', { name: 'Play Something needs you' })).toBeEnabled()
+    await expect(canvas.getByRole('button', { name: 'Play Something failed' })).toBeEnabled()
+    await expect(canvas.getByRole('button', { name: 'Play Something is done' })).toBeEnabled()
+  },
+}
+
+const onStyle = fn()
+const onPreview = fn()
+
+/** Another style chosen: the select says which, and a sound previews in it. */
+export const SoundStyleChosen: Story = {
   args: {
     current: 'notifications',
-    children: (
-      <NotificationsSection
-        events={[
-          { id: 'needs', label: 'A need waits for you', on: true },
-          { id: 'questions', label: 'A Planning question waits for you', on: true },
-          { id: 'ready', label: 'A mission is ready for review', on: true },
-          { id: 'failed', label: 'A run or a check failed', on: false },
-          { id: 'outside', label: 'A repository changed outside Hemera', on: false },
-        ]}
-        sounds={[
-          { id: 'needs', label: 'A need waits', on: true },
-          { id: 'done', label: 'A mission is done', on: false },
-        ]}
-        onEvent={fn()}
-        onSound={fn()}
-      />
-    ),
+    children: notifications({ style: 'glass', onStyle, onPreview }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const select = canvas.getByRole('combobox', { name: 'Sound style' })
+    await expect(select).toHaveTextContent('Glass')
+    await userEvent.click(canvas.getByRole('button', { name: 'Play Something failed' }))
+    await expect(onPreview).toHaveBeenCalledWith('error')
+    await userEvent.click(select)
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'Zen' }))
+    await expect(onStyle).toHaveBeenCalledWith('zen')
+  },
+}
+
+/** A sound previewing: its button shows it plays and cannot be pressed again until it ends. */
+export const SoundPreviewPlaying: Story = {
+  args: {
+    current: 'notifications',
+    children: notifications({ style: 'zen', previewing: 'needs-you' }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Play Something needs you' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await expect(canvas.getByRole('button', { name: 'Play Something is done' })).toBeEnabled()
+  },
+}
+
+/** Long names: the labels wrap, the play buttons stay at the end of their rows. */
+export const SoundLongNames: Story = {
+  args: {
+    current: 'notifications',
+    children: notifications({
+      style: 'long',
+      styles: [
+        ...STYLES,
+        { id: 'long', label: 'Cinematic, with deep impacts, polished tails and quiet scale' },
+      ],
+      sounds: [
+        {
+          id: 'needs-you',
+          label: 'Something needs you: a decision, a permission or a missing tool in a mission',
+          on: true,
+        },
+        {
+          id: 'error',
+          label: 'Something failed: a run, a check or the preparation of a Workspace',
+          on: true,
+        },
+        {
+          id: 'done',
+          label: 'Something is done: a mission, a review or the preparation of a Workspace',
+          on: true,
+        },
+      ],
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const play = canvas.getByRole('button', { name: /^Play Something failed/ })
+    await expect(play).toBeVisible()
+    await expect(canvas.getByRole('combobox', { name: 'Sound style' })).toHaveTextContent(
+      /^Cinematic, with deep impacts/,
+    )
   },
 }
 
