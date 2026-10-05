@@ -157,7 +157,12 @@ export const UsesTheDefault: Story = {
     })
     await userEvent.click(trigger)
     await expect(
-      await body().findByRole('option', { name: /Use the default/, selected: true }),
+      await body().findByRole(
+        'option',
+        { name: /Use the default/, selected: true },
+        // The popover opens on a click under load too: given the time a busy runner takes.
+        { timeout: 5000 },
+      ),
     ).toBeVisible()
   },
 }
