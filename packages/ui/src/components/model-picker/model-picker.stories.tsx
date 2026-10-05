@@ -62,15 +62,19 @@ export const Marks: Story = {
   },
 }
 
-/** Open: the agents as their marks, the current one's models with the current one checked, its effort. */
+/**
+ * Open: the agents as their marks, the current one's models with the current one checked, and
+ * under them its effort, the model's default marked with a dot.
+ */
 export const Open: Story = {
-  args: { open: true, value: { agent: 'claude', model: 'opus', effort: 'high' } },
+  args: { open: true, value: { agent: 'claude', model: 'opus', effort: 'max' } },
   play: async () => {
     await expect(await body().findByRole('option', { name: /Opus/, selected: true })).toBeVisible()
-    await expect(body().getByRole('slider', { name: 'Effort' })).toHaveAttribute(
-      'aria-valuetext',
-      'High',
-    )
+    const effort = body().getByRole('radiogroup', { name: 'Effort' })
+    await expect(within(effort).getByRole('radio', { name: 'Max' })).toBeChecked()
+    await expect(
+      within(effort).getByRole('radio', { name: "High, the model's default" }),
+    ).not.toBeChecked()
     await waitFor(() =>
       expect(body().getByRole('combobox', { name: 'Search models' })).toHaveFocus(),
     )
@@ -79,7 +83,8 @@ export const Open: Story = {
 
 /**
  * The keyboard path: open, the focus is in the search; type, Down, Enter picks; Tab reaches the
- * effort (after the edit toggle), Up raises it; Escape closes and the focus is back on the trigger.
+ * effort (after the edit toggle) on the model's default, the arrows walk it, and back on the
+ * default no effort is chosen; Escape closes and the focus is back on the trigger.
  */
 export const Picking: Story = {
   render: function Render(args) {
@@ -112,12 +117,21 @@ export const Picking: Story = {
     // Past the edit toggle beside the search, the effort.
     await userEvent.tab()
     await userEvent.tab()
-    await expect(body().getByRole('slider', { name: 'Effort' })).toHaveFocus()
-    await userEvent.keyboard('{ArrowUp}{ArrowUp}')
+    const fallback = body().getByRole('radio', { name: "High, the model's default" })
+    await expect(fallback).toHaveFocus()
+    await expect(fallback).toBeChecked()
+    await userEvent.keyboard('{ArrowLeft}')
     await expect(args.onChange).toHaveBeenLastCalledWith({
       agent: 'claude',
       model: 'opus',
       effort: 'medium',
+    })
+    await expect(body().getByRole('radio', { name: 'Medium' })).toBeChecked()
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(args.onChange).toHaveBeenLastCalledWith({
+      agent: 'claude',
+      model: 'opus',
+      effort: undefined,
     })
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(trigger).toHaveFocus())
@@ -220,4 +234,14 @@ export const Bare: Story = {
       </div>
     ),
   ],
+}
+
+/** A model whose agent does not say its default effort: "Default" comes first among the levels. */
+export const NoKnownDefault: Story = {
+  args: { open: true, value: { agent: 'claude', model: 'sonnet-1m' } },
+  play: async () => {
+    const effort = await body().findByRole('radiogroup', { name: 'Effort' })
+    await expect(within(effort).getByRole('radio', { name: 'Default' })).toBeChecked()
+    await expect(within(effort).getAllByRole('radio')).toHaveLength(4)
+  },
 }

@@ -1,4 +1,5 @@
-import { Slider } from '@base-ui/react/slider'
+import { Radio } from '@base-ui/react/radio'
+import { RadioGroup } from '@base-ui/react/radio-group'
 import { cn } from 'cn'
 import {
   type KeyboardEvent,
@@ -36,10 +37,10 @@ import { Tooltip } from '../tooltip/tooltip.tsx'
  * - The agents are tabs drawn as their marks, their names in the tooltips. Only the agents this
  *   machine has are offered: one that is not installed is said in the app's settings, not here.
  * - The popover opens with the focus in the search. The models are a list the search filters,
- *   favourites first, hidden ones left out; Up and Down walk it, Enter picks. Beside it, the
- *   effort is a vertical scale — more at the top — that the arrows, the hand and a press on a
- *   level all set. It stays open and updates in place: the list keeps one height whatever it
- *   holds, so nothing moves while typing.
+ *   favourites first, hidden ones left out; Up and Down walk it, Enter picks. Under it, the
+ *   effort is one row of segments, least to most, the model's default marked with a dot; the
+ *   arrows walk it, a press sets it. It stays open and updates in place: the list keeps one
+ *   height whatever it holds, and the effort's row its room, so nothing moves while typing.
  * - The mode is not offered: Hemera sets it, since an agent left in a mode of its own (planning
  *   only, say) could no longer do what Hemera asks of it.
  * - Where a level inherits a model (a Project, a mission), "Use the default" heads the list.
@@ -54,6 +55,8 @@ export interface PickerModel {
   name: string
   /** The efforts the model accepts, lowest first; none when it takes no effort. */
   efforts?: readonly Effort[] | undefined
+  /** The effort the model runs at when none is chosen, when the agent says which. */
+  defaultEffort?: Effort | undefined
   favourite?: boolean | undefined
   hidden?: boolean | undefined
 }
@@ -95,16 +98,17 @@ export interface ModelPickerProps {
 }
 
 const MARKS = 'flex shrink-0 items-center gap-1.5 text-muted-foreground'
-const PANE = 'flex w-picker gap-3'
+const PANE = 'flex w-picker flex-col gap-2'
 const LIST =
   'flex h-picker-list flex-col gap-0.5 overflow-y-auto scrollbar-stable rounded-md outline-none'
 const OPTION =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md px-2 text-sm select-none hover-motion hover:tinted data-[active=true]:tinted'
 const GROUP_LABEL = 'px-2 pt-2 pb-1 text-xs text-muted-foreground'
 const QUIET = 'px-2 py-3 text-sm text-muted-foreground'
-const EFFORT_COLUMN = 'flex w-20 shrink-0 flex-col gap-2 border-l border-border pl-3'
-const LEVEL =
-  'flex h-control-sm items-center rounded-md px-1.5 text-xs text-muted-foreground outline-none hover-motion hover:text-foreground data-[on=true]:font-medium data-[on=true]:text-foreground'
+const EFFORT_ROW = 'flex items-center gap-3 border-t border-border px-2 pt-2'
+const SEGMENTS = 'flex h-control-sm min-w-0 flex-1 items-stretch gap-0.5 rounded-md bg-muted p-0.5'
+const SEGMENT =
+  'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-sm px-2 text-xs text-muted-foreground outline-none select-none focus-ring hover-motion hover:text-foreground data-checked:bg-card data-checked:font-medium data-checked:text-foreground data-checked:shadow-sm'
 
 /** The words of a choice, as the trigger's name and tooltip say them. */
 export function choiceWords(
@@ -188,7 +192,7 @@ function entriesOf(models: readonly PickerModel[], query: string, withDefault: b
   ]
 }
 
-const LEVEL_WORDS: Record<Effort | 'default', string> = {
+export const LEVEL_WORDS: Record<Effort | 'default', string> = {
   default: 'Default',
   low: 'Low',
   medium: 'Medium',
@@ -196,65 +200,84 @@ const LEVEL_WORDS: Record<Effort | 'default', string> = {
   max: 'Max',
 }
 
+export type EffortLevel = Effort | 'default'
+
+/** The levels of a model's effort, the one that is on, and what each stands for. */
+export interface EffortLevels {
+  levels: readonly EffortLevel[]
+  on: EffortLevel
+  /** The effort a level stands for: none for the default. */
+  effortOf: (level: string) => Effort | undefined
+}
+
 /**
- * The effort as a vertical scale: the model's levels, its own default at the foot, more effort
- * further up. One control — a slider the arrows walk, Up for more — and each level's word beside
- * its notch sets it under a press.
+ * The levels a model's effort is chosen among, and which one is on. When the agent says which
+ * effort is the model's own, that level stands for "the default" and choosing it chooses none;
+ * when it does not, a "Default" level comes first.
  */
-function EffortScale({
-  efforts,
-  effort,
-  onEffort,
-}: {
+export function effortLevels(
+  efforts: readonly Effort[],
+  defaultEffort: Effort | undefined,
+  effort: Effort | undefined,
+): EffortLevels {
+  const known = defaultEffort !== undefined && efforts.includes(defaultEffort)
+  return {
+    levels: known ? efforts : ['default', ...efforts],
+    on: effort ?? (known ? defaultEffort : 'default'),
+    // What a radio group hands back is whatever value its radio held: one of the efforts, or not.
+    effortOf: (level) => efforts.find((one) => one === level && one !== defaultEffort),
+  }
+}
+
+export interface EffortControlProps {
   efforts: readonly Effort[]
+  defaultEffort?: Effort | undefined
   effort: Effort | undefined
   onEffort: (effort: Effort | undefined) => void
-}): ReactNode {
-  const levels: readonly (Effort | 'default')[] = ['default', ...efforts]
-  const at = effort === undefined ? 0 : Math.max(0, levels.indexOf(effort))
-  const choose = (index: number) => {
-    const level = levels[index]
-    onEffort(level === undefined || level === 'default' ? undefined : level)
-  }
+}
+
+/** The default's mark: a dot after the level's word. */
+export const DEFAULT_DOT = 'size-1 shrink-0 rounded-full bg-current'
+
+/**
+ * The effort as one row of segments, least to most: a radio group, so Tab lands on the level
+ * that is on and the arrows walk the others. The model's own default wears a dot, and its name
+ * says it.
+ */
+export function EffortSegments({
+  efforts,
+  defaultEffort,
+  effort,
+  onEffort,
+}: EffortControlProps): ReactNode {
+  const { levels, on, effortOf } = effortLevels(efforts, defaultEffort, effort)
   return (
-    <div className={EFFORT_COLUMN}>
-      <span className="text-xs text-muted-foreground">Effort</span>
-      <div className="flex min-h-0 flex-1 gap-2">
-        <Slider.Root
-          orientation="vertical"
-          min={0}
-          max={levels.length - 1}
-          step={1}
-          value={at}
-          onValueChange={(value) => choose(value)}
-          className="flex"
-        >
-          <Slider.Control className="flex h-full w-4 justify-center py-2.5">
-            <Slider.Track className="relative w-1 rounded-full bg-border">
-              <Slider.Indicator className="w-full rounded-full primary-fill" />
-              <Slider.Thumb
-                aria-label="Effort"
-                getAriaValueText={(_, value) => LEVEL_WORDS[levels[value] ?? 'default']}
-                className="size-3 rounded-full border border-primary-strong bg-card shadow-sm outline-none focus-ring"
-              />
-            </Slider.Track>
-          </Slider.Control>
-        </Slider.Root>
-        <div className="flex flex-col-reverse justify-between" aria-hidden="true">
-          {levels.map((level, index) => (
-            <button
-              key={level}
-              type="button"
-              tabIndex={-1}
-              data-on={index === at}
-              className={LEVEL}
-              onClick={() => choose(index)}
-            >
-              {LEVEL_WORDS[level]}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className={EFFORT_ROW}>
+      <span className="shrink-0 text-xs text-muted-foreground" aria-hidden="true">
+        Effort
+      </span>
+      <RadioGroup
+        aria-label="Effort"
+        value={on}
+        onValueChange={(level) => onEffort(effortOf(level))}
+        className={SEGMENTS}
+      >
+        {levels.map((level) => (
+          <Radio.Root
+            key={level}
+            value={level}
+            aria-label={
+              level === defaultEffort
+                ? `${LEVEL_WORDS[level]}, the model's default`
+                : LEVEL_WORDS[level]
+            }
+            className={SEGMENT}
+          >
+            {LEVEL_WORDS[level]}
+            {level === defaultEffort && <span className={DEFAULT_DOT} aria-hidden="true" />}
+          </Radio.Root>
+        ))}
+      </RadioGroup>
     </div>
   )
 }
@@ -294,6 +317,7 @@ function AgentPane({
   const mine = value?.agent === agent.id ? value : null
   const model = agent.models.find((one) => one.id === mine?.model)
   const efforts = model?.efforts ?? []
+  const defaultEffort = model?.defaultEffort
 
   const pick = (entry: Entry | undefined) => {
     if (entry === undefined) return
@@ -455,14 +479,17 @@ function AgentPane({
         )}
       </div>
       {mine !== null && efforts.length > 0 ? (
-        <EffortScale
+        <EffortSegments
           efforts={efforts}
+          defaultEffort={defaultEffort}
           effort={mine.effort}
           onEffort={(effort) => onChange({ agent: mine.agent, model: mine.model, effort })}
         />
       ) : (
-        // The column keeps its room when the model takes no effort, so the list never widens.
-        <div className={EFFORT_COLUMN} aria-hidden="true" />
+        // The row keeps its room when the model takes no effort, so the panel never jumps.
+        <div className={EFFORT_ROW} aria-hidden="true">
+          <span className="h-control-sm" />
+        </div>
       )}
     </div>
   )

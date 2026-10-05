@@ -9,8 +9,20 @@ export const AGENTS: readonly PickerAgent[] = [
     id: 'claude',
     name: 'Claude Code',
     models: [
-      { id: 'opus', name: 'Opus', efforts: ['low', 'medium', 'high', 'max'], favourite: true },
-      { id: 'sonnet', name: 'Sonnet', efforts: ['low', 'medium', 'high', 'max'], favourite: true },
+      {
+        id: 'opus',
+        name: 'Opus',
+        efforts: ['low', 'medium', 'high', 'max'],
+        defaultEffort: 'high',
+        favourite: true,
+      },
+      {
+        id: 'sonnet',
+        name: 'Sonnet',
+        efforts: ['low', 'medium', 'high', 'max'],
+        defaultEffort: 'medium',
+        favourite: true,
+      },
       { id: 'haiku', name: 'Haiku' },
       { id: 'sonnet-1m', name: 'Sonnet (1M context)', efforts: ['low', 'medium', 'high'] },
       { id: 'opus-legacy', name: 'Opus (previous)', hidden: true },
@@ -20,9 +32,25 @@ export const AGENTS: readonly PickerAgent[] = [
     id: 'codex',
     name: 'Codex',
     models: [
-      { id: 'gpt-large', name: 'gpt-5', efforts: ['low', 'medium', 'high'] },
-      { id: 'gpt-mini', name: 'gpt-5-mini', efforts: ['low', 'medium', 'high'] },
-      { id: 'gpt-codex', name: 'gpt-5-codex', efforts: ['low', 'medium', 'high'], favourite: true },
+      {
+        id: 'gpt-large',
+        defaultEffort: 'medium',
+        name: 'gpt-5',
+        efforts: ['low', 'medium', 'high'],
+      },
+      {
+        id: 'gpt-mini',
+        defaultEffort: 'medium',
+        name: 'gpt-5-mini',
+        efforts: ['low', 'medium', 'high'],
+      },
+      {
+        id: 'gpt-codex',
+        defaultEffort: 'medium',
+        name: 'gpt-5-codex',
+        efforts: ['low', 'medium', 'high'],
+        favourite: true,
+      },
     ],
   },
   {
