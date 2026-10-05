@@ -211,3 +211,34 @@ export const NeedAnswered: Story = {
     expect(needs.getByText('Applied')).toBeInTheDocument()
   },
 }
+
+/**
+ * No open question: Needs you takes the whole width, so its titles have room, and Questions sits
+ * below it with its empty state.
+ */
+export const NeedsYouWithoutQuestions: Story = {
+  args: { ...NeedsYou.args, questions: NONE },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const needs = canvas.getByRole('region', { name: 'Needs you' })
+    const questions = canvas.getByRole('region', { name: 'Questions' })
+    expect(within(questions).getByText('No open question.')).toBeInTheDocument()
+    const room = canvas.getByRole('region', { name: 'Since you left' }).getBoundingClientRect()
+    expect(needs.getBoundingClientRect().width).toBe(room.width)
+    expect(questions.getBoundingClientRect().top).toBeGreaterThan(
+      needs.getBoundingClientRect().bottom,
+    )
+  },
+}
+
+/** Open questions: Needs you and Questions side by side, as wide as each other. */
+export const NeedsYouWithQuestions: Story = {
+  args: { ...NeedsYou.args, questions: { rows: HOME_ROWS.questions } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const needs = canvas.getByRole('region', { name: 'Needs you' }).getBoundingClientRect()
+    const questions = canvas.getByRole('region', { name: 'Questions' }).getBoundingClientRect()
+    expect(questions.top).toBe(needs.top)
+    expect(questions.left).toBeGreaterThan(needs.right)
+  },
+}

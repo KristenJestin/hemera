@@ -13,9 +13,10 @@ import { Page, PageHeader } from '../page.tsx'
 /**
  * Home: the page the window opens on, and the frame of four lists whose content comes later.
  *
- * - **Needs you** and **Questions**, side by side: what blocks and waits for the user across every
- *   Project, and the Planning questions that wait too. The two that call, so they are first and
- *   their counts are in the header.
+ * - **Needs you** and **Questions**: what blocks and waits for the user across every Project, and
+ *   the Planning questions that wait too. The two that call, so they are first and their counts
+ *   are in the header. Side by side when questions wait; otherwise Needs you takes the whole
+ *   width and Questions, empty, sits under it.
  * - **Since you left**: what happened while the window was away, in the order it happened.
  * - **Recent**: what was worked on last.
  *
@@ -66,6 +67,8 @@ const waiting = (row: NeedsYouListProps['rows'][number]): boolean =>
 
 /** Side by side, each as tall as what it holds: a card never stretches to its neighbour. */
 const TWO = 'grid grid-cols-1 items-start gap-6 lg:grid-cols-2'
+/** One under the other, each the page's whole width. */
+const ONE = 'flex flex-col gap-6'
 
 const EMPTY = 'px-4 py-3 text-sm text-muted-foreground'
 
@@ -171,7 +174,8 @@ export function HomePage({
   return (
     <Page>
       <PageHeader title="Home" about={<span>{today}</span>} />
-      <div className={TWO}>
+      {/* Needs you takes the whole width unless questions wait beside it: its titles need the room. */}
+      <div className={questions.rows.length > 0 ? TWO : ONE}>
         {needs === undefined ? (
           <Section title="Needs you" count={needsYou.rows.length}>
             <Rows
