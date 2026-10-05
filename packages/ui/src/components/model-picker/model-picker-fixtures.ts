@@ -81,3 +81,31 @@ export const LONG_AGENTS: readonly PickerAgent[] = [
     ],
   },
 ]
+
+const [CLAUDE, CODEX, OPENCODE] = AGENTS
+
+/** Codex is installed but not signed in. */
+export const AGENTS_SIGNED_OUT: readonly PickerAgent[] = [
+  ...(CLAUDE === undefined ? [] : [CLAUDE]),
+  ...(CODEX === undefined ? [] : [{ ...CODEX, unavailable: 'Not signed in' }]),
+  ...(OPENCODE === undefined ? [] : [OPENCODE]),
+]
+
+/** Every agent's models still on their way. */
+export const AGENTS_LOADING: readonly PickerAgent[] = AGENTS.map(({ id, name }) => ({
+  id,
+  name,
+  models: [],
+  loading: true,
+}))
+
+/** Claude Code could not list its models. */
+export const AGENTS_FAILED: readonly PickerAgent[] = [
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    models: [],
+    error: 'Claude Code did not list its models in time.',
+  },
+  ...AGENTS.filter((agent) => agent.id !== 'claude'),
+]

@@ -15,6 +15,7 @@ import { exitSuggestion, type SuggestionProps } from '@tiptap/suggestion'
 import { cn } from 'cn'
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { Skeleton } from '../loading/loading.tsx'
 import { Popover } from '../popover/popover.tsx'
 import {
   AREA,
@@ -24,6 +25,7 @@ import {
   MentionBadge,
   type Mentionable,
   type MentionFieldProps,
+  type MentionRef,
   mentionsFor,
   shortName,
 } from './mention-parts.tsx'
@@ -33,6 +35,8 @@ const LIST = 'flex max-h-mention-list w-mention flex-col gap-0.5 overflow-y-auto
 const OPTION =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md px-2 text-sm select-none hover-motion data-[active=true]:tinted'
 const QUIET = 'min-w-0 truncate text-xs text-muted-foreground'
+/** The names the rows of a menu still searching are drawn at: a file's name, short and long. */
+const LOADING_ROWS = ['server.ts', 'invoices-list.tsx', 'ACME-12']
 
 /**
  * The mention field's editor, on Tiptap, which owns the editing; `mention-field.tsx` says what
@@ -62,8 +66,31 @@ function textOf(document: JSONContent): string {
     .join('\n')
 }
 
+/** The mentions a document holds, in their order. */
+function mentionsOf(document: JSONContent): MentionRef[] {
+  return (document.content ?? []).flatMap((paragraph) =>
+    (paragraph.content ?? [])
+      .filter((part) => part.type === 'mention')
+      .map((part) => ({
+        kind: KINDS.find((one) => one === part.attrs?.['kind']) ?? 'file',
+        id: String(part.attrs?.['id'] ?? ''),
+        label: String(part.attrs?.['label'] ?? ''),
+      })),
+  )
+}
+
+/** What the sources and a search found, each once: what a search found wins. */
+function merged(
+  mentionables: readonly Mentionable[],
+  found: readonly Mentionable[],
+): readonly Mentionable[] {
+  const keyOf = (item: Mentionable) => `${item.kind}:${item.id}`
+  const fresh = new Set(found.map(keyOf))
+  return [...mentionables.filter((item) => !fresh.has(keyOf(item))), ...found]
+}
+
 /** The document a text stands for: an `@` followed by a known label is that mention's badge. */
-function documentOf(text: string, mentionables: readonly Mentionable[]): JSONContent {
+function documentOf(text: string, mentionables: readonly MentionRef[]): JSONContent {
   const known = new Map(mentionables.map((item) => [item.label, item]))
   return {
     type: 'doc',
@@ -82,10 +109,14 @@ function documentOf(text: string, mentionables: readonly Mentionable[]): JSONCon
   }
 }
 
+const NONE: readonly MentionRef[] = []
+
 /** What the suggestion hands the menu while it is open. */
 interface Menu {
   query: string
   items: readonly Mentionable[]
+  /** Whether a search is still answering. */
+  loading: boolean
   pick: (item: Mentionable) => void
   /** What Tiptap draws around the `@` and its query: what the menu hangs off. */
   at: Element | null
@@ -97,7 +128,9 @@ export function MentionEditor({
   placeholder,
   value,
   onValueChange,
+  mentions = NONE,
   mentionables,
+  search,
   onSubmit,
   working = false,
   onStop,
@@ -117,11 +150,15 @@ export function MentionEditor({
         }
   const [menu, setMenu] = useState<Menu | null>(null)
   const [active, setActive] = useState(0)
+  /** Why the last search failed, in its own words; null when it did not. */
+  const [failure, setFailure] = useState<string | null>(null)
   /** What the editor reads at the moment it reads it: the props and state of the last render. */
-  const latest = useRef({ mentionables, submit, onValueChange, menu, active })
+  const latest = useRef({ mentionables, search, submit, onValueChange, menu, active })
   useLayoutEffect(() => {
-    latest.current = { mentionables, submit, onValueChange, menu, active }
+    latest.current = { mentionables, search, submit, onValueChange, menu, active }
   })
+  /** What a search found and was mentioned, so a value set again draws it as its badge. */
+  const found = useRef<readonly MentionRef[]>([])
   /** The text this field last handed back, so a value it wrote is not written back into it. */
   const handed = useRef(value)
 
@@ -132,7 +169,7 @@ export function MentionEditor({
     immediatelyRender: true,
     editable: !disabled,
     autofocus: autoFocus ? 'end' : false,
-    content: documentOf(value, mentionables),
+    content: documentOf(value, [...mentionables, ...mentions]),
     editorProps: {
       attributes: {
         role: 'textbox',
@@ -166,10 +203,24 @@ export function MentionEditor({
           return ReactNodeViewRenderer(Badge, { as: 'span' })
         },
       }).configure({
+        // A mention goes whole: Backspace leaves no `@` behind to open the menu again.
+        deleteTriggerWithBackspace: true,
         renderText: ({ node }) => `@${String(node.attrs['label'] ?? '')}`,
         suggestion: {
           char: '@',
-          items: ({ query }) => [...mentionsFor(latest.current.mentionables, query)],
+          items: async ({ query, signal }) => {
+            const { mentionables: listed, search: asking } = latest.current
+            if (asking === undefined) return [...mentionsFor(listed, query)]
+            try {
+              const answered = await asking(query, signal)
+              setFailure(null)
+              return [...mentionsFor(merged(listed, answered), query)]
+            } catch (error) {
+              if (signal.aborted) throw error
+              setFailure(error instanceof Error ? error.message : 'The search failed.')
+              return [...mentionsFor(listed, query)]
+            }
+          },
           command: ({ editor: on, range, props }) => {
             on.chain()
               .focus()
@@ -181,12 +232,17 @@ export function MentionEditor({
           },
           render: () => {
             const show = (props: SuggestionProps<Mentionable>) => {
-              setMenu({
+              setMenu((before) => ({
                 query: props.query,
-                items: props.items,
-                pick: (item) => props.command({ id: item.id, label: item.label, kind: item.kind }),
+                // While a search answers, what the last one found stays rather than flickering.
+                items: props.loading && before !== null ? before.items : props.items,
+                loading: props.loading,
+                pick: (item) => {
+                  found.current = [...found.current, item]
+                  props.command({ id: item.id, label: item.label, kind: item.kind })
+                },
                 at: props.decorationNode,
-              })
+              }))
             }
             return {
               onStart: (props) => {
@@ -226,9 +282,10 @@ export function MentionEditor({
       }),
     ],
     onUpdate: ({ editor: on }) => {
-      const text = textOf(on.getJSON())
+      const document = on.getJSON()
+      const text = textOf(document)
       handed.current = text
-      latest.current.onValueChange(text)
+      latest.current.onValueChange(text, mentionsOf(document))
     },
   })
 
@@ -236,8 +293,11 @@ export function MentionEditor({
   useEffect(() => {
     if (value === handed.current) return
     handed.current = value
-    editor.commands.setContent(documentOf(value, mentionables), { emitUpdate: false })
-  }, [editor, value, mentionables])
+    editor.commands.setContent(
+      documentOf(value, [...mentionables, ...mentions, ...found.current]),
+      { emitUpdate: false },
+    )
+  }, [editor, value, mentionables, mentions])
 
   useEffect(() => {
     editor.setEditable(!disabled)
@@ -281,28 +341,79 @@ export function MentionEditor({
         </FieldBox>
       }
     >
-      {menu === null || menu.items.length === 0 ? (
-        <p id={`${id}-mentions`} className="w-mention px-2 py-1.5 text-sm text-muted-foreground">
-          Nothing matches “{menu?.query}”
-        </p>
+      <MentionMenu
+        id={`${id}-mentions`}
+        menu={menu}
+        failure={failure}
+        searching={search !== undefined}
+        current={current}
+        optionId={optionId}
+        onActive={setActive}
+      />
+    </Popover>
+  )
+}
+
+/**
+ * The menu under the `@`: rows of a mention's shape while a search first answers, what it found,
+ * or that nothing matches; a search that failed says why, above.
+ */
+function MentionMenu({
+  id,
+  menu,
+  failure,
+  searching,
+  current,
+  optionId,
+  onActive,
+}: {
+  id: string
+  menu: Menu | null
+  failure: string | null
+  /** Whether a source is searched as one types. */
+  searching: boolean
+  current: number
+  optionId: (at: number) => string
+  onActive: (at: number) => void
+}): ReactNode {
+  return (
+    <>
+      {failure !== null && (
+        <p className="w-mention px-2 py-1.5 text-sm text-muted-foreground">{failure}</p>
+      )}
+      {searching && menu?.loading === true && menu.items.length === 0 ? (
+        <div id={id} role="listbox" aria-label="Mentions" aria-busy="true" className={LIST}>
+          {LOADING_ROWS.map((name) => (
+            <div key={name} className={OPTION} aria-hidden="true">
+              <Skeleton>{name}</Skeleton>
+            </div>
+          ))}
+        </div>
+      ) : menu === null || menu.items.length === 0 ? (
+        failure === null && (
+          <p id={id} className="w-mention px-2 py-1.5 text-sm text-muted-foreground">
+            Nothing matches “{menu?.query}”
+          </p>
+        )
       ) : (
         <div
-          id={`${id}-mentions`}
+          id={id}
           role="listbox"
           aria-label="Mentions"
+          aria-busy={searching && menu.loading ? 'true' : undefined}
           // Walked from the field; a list that scrolls is also one the keyboard can scroll.
           tabIndex={0}
           className={LIST}
         >
           {menu.items.map((item, at) => (
             <div
-              key={item.id}
+              key={`${item.kind}:${item.id}`}
               id={optionId(at)}
               role="option"
               aria-selected={at === current}
               data-active={at === current}
               className={OPTION}
-              onPointerMove={() => setActive(at)}
+              onPointerMove={() => onActive(at)}
               // The caret stays in the field: a press on the menu never takes the focus.
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => menu.pick(item)}
@@ -324,6 +435,6 @@ export function MentionEditor({
           ))}
         </div>
       )}
-    </Popover>
+    </>
   )
 }

@@ -23,6 +23,7 @@ import {
 } from '../../icons.ts'
 import { AgentMark } from '../agent-mark/agent-mark.tsx'
 import { Button, IconButton } from '../button/button.tsx'
+import { Skeleton } from '../loading/loading.tsx'
 import { Popover } from '../popover/popover.tsx'
 import { Tabs } from '../tabs/tabs.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
@@ -45,6 +46,10 @@ import { Tooltip } from '../tooltip/tooltip.tsx'
  *   only, say) could no longer do what Hemera asks of it.
  * - Where a level inherits a model (a Project, a mission), "Use the default" heads the list.
  * - Favourites and hidden models are chosen in the list's edit mode.
+ * - An agent installed but not ready (not signed in, say) keeps its mark, disabled, the reason
+ *   in its tooltip. Models still on their way are rows of their shape, in the list's own room;
+ *   models that could not be read are said in words there, with Retry: the panel keeps its size
+ *   through all of it.
  */
 
 export const EFFORTS = ['low', 'medium', 'high', 'max'] as const
@@ -66,6 +71,12 @@ export interface PickerAgent {
   id: string
   name: string
   models: readonly PickerModel[]
+  /** Whether its models are still on their way: the list shows rows of their shape meanwhile. */
+  loading?: boolean | undefined
+  /** Why its models could not be read, in words: said in the list's room, beside Retry. */
+  error?: string | undefined
+  /** Why it cannot be chosen now (not signed in, say): its mark is there, disabled, this its tooltip. */
+  unavailable?: string | undefined
 }
 
 export interface ModelChoice {
@@ -95,6 +106,8 @@ export interface ModelPickerProps {
   onChange: (choice: ModelChoice | null) => void
   onFavourite: (agent: string, model: string, favourite: boolean) => void
   onHide: (agent: string, model: string, hidden: boolean) => void
+  /** Asks again for the models of an agent that could not list them. */
+  onRetry?: ((agent: string) => void) | undefined
 }
 
 const MARKS = 'flex shrink-0 items-center gap-1.5 text-muted-foreground'
@@ -105,6 +118,9 @@ const OPTION =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md px-2 text-sm select-none hover-motion hover:tinted data-[active=true]:tinted'
 const GROUP_LABEL = 'px-2 pt-2 pb-1 text-xs text-muted-foreground'
 const QUIET = 'px-2 py-3 text-sm text-muted-foreground'
+const FAILED = 'flex h-picker-list flex-col items-start gap-2 px-2 py-3 text-sm'
+/** The names the rows of a list still loading are drawn at: a model's name, short and long. */
+const LOADING_ROWS = ['Model name', 'A longer model name', 'Model', 'Model name (long)', 'Model 2']
 const EFFORT_ROW = 'flex items-center gap-3 border-t border-border px-2 pt-2'
 const SEGMENTS = 'flex h-control-sm min-w-0 flex-1 items-stretch gap-0.5 rounded-md bg-muted p-0.5'
 const SEGMENT =
@@ -282,6 +298,49 @@ function EffortSegments({
   )
 }
 
+/** The list's room while an agent's models are on their way, or after they could not be read. */
+function NotListed({
+  id,
+  agent,
+  onRetry,
+}: {
+  id: string
+  agent: PickerAgent
+  onRetry: ((agent: string) => void) | undefined
+}): ReactNode {
+  if (agent.loading === true) {
+    return (
+      <div
+        id={id}
+        role="listbox"
+        aria-label={`Models of ${agent.name}`}
+        aria-busy="true"
+        className={LIST}
+      >
+        {LOADING_ROWS.map((name) => (
+          <div key={name} className={OPTION} aria-hidden="true">
+            <Skeleton>{name}</Skeleton>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div id={id} className={FAILED}>
+      <p className="text-muted-foreground">{agent.error}</p>
+      {onRetry !== undefined && (
+        <Button variant="secondary" size="sm" onClick={() => onRetry(agent.id)}>
+          Retry
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** The tab a picker opens on: the agent of its choice, else of its default, else the first ready. */
+const firstTab = (agents: readonly PickerAgent[], shown: ModelChoice | null | undefined): string =>
+  shown?.agent ?? (agents.find((agent) => agent.unavailable === undefined) ?? agents[0])?.id ?? ''
+
 function AgentPane({
   agent,
   value,
@@ -294,6 +353,7 @@ function AgentPane({
   onChange,
   onFavourite,
   onHide,
+  onRetry,
 }: {
   agent: PickerAgent
   value: ModelChoice | null
@@ -306,6 +366,7 @@ function AgentPane({
   onChange: (choice: ModelChoice | null) => void
   onFavourite: (agent: string, model: string, favourite: boolean) => void
   onHide: (agent: string, model: string, hidden: boolean) => void
+  onRetry: ((agent: string) => void) | undefined
 }): ReactNode {
   const id = useId()
   const entries = useMemo(
@@ -373,7 +434,9 @@ function AgentPane({
           </Tooltip>
         </div>
 
-        {editing ? (
+        {agent.loading === true || agent.error !== undefined ? (
+          <NotListed id={`${id}-list`} agent={agent} onRetry={onRetry} />
+        ) : editing ? (
           <ul id={`${id}-list`} aria-label={`Models of ${agent.name}`} className={LIST}>
             {agent.models
               .filter((one) => matches(one.name, query))
@@ -507,9 +570,10 @@ export function ModelPicker({
   onChange,
   onFavourite,
   onHide,
+  onRetry,
 }: ModelPickerProps): ReactNode {
   const search = useRef<HTMLInputElement>(null)
-  const [tab, setTab] = useState(value?.agent ?? fallback?.agent ?? agents[0]?.id ?? '')
+  const [tab, setTab] = useState(() => firstTab(agents, value ?? fallback))
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(false)
   const shown = value ?? fallback
@@ -565,6 +629,7 @@ export function ModelPicker({
             value: agent.id,
             label: agent.name,
             icon: <AgentMark id={agent.id} name={agent.name} />,
+            unavailable: agent.unavailable,
             panel: (
               <AgentPane
                 agent={agent}
@@ -578,6 +643,7 @@ export function ModelPicker({
                 onChange={onChange}
                 onFavourite={onFavourite}
                 onHide={onHide}
+                onRetry={onRetry}
               />
             ),
           }))}

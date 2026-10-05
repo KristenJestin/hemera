@@ -9,6 +9,7 @@ export {
   type Mentionable,
   type MentionFieldProps,
   type MentionKind,
+  type MentionRef,
   mentionsFor,
 } from './mention-parts.tsx'
 
