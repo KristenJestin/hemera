@@ -50,7 +50,7 @@ import { workspaces } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { workspaceEvent } from '../src/engine/workspaces.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
-import { commandsEngine } from './commands-engine.ts'
+import { commandsEngine, until } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -250,35 +250,53 @@ describe('A need created is told as a notice of its kind', () => {
 })
 
 describe('A need that ends is never notified, and takes its notification away', () => {
-  test.each(['answered', 'expired', 'withdrawn'] as const)(
-    'a need %s is told as ended',
-    async (how) => {
-      let needId = ''
-      const feed = await told(
-        2,
-        Effect.gen(function* () {
-          const project = yield* acme()
-          const need = yield* createNeed(
-            BILLING,
-            ProjectOwner.make({ projectId: project.id }),
-            decision,
-          )
-          needId = need.id
-          if (how === 'answered') {
-            yield* answerNeed({
-              id: need.id,
-              answer: WrittenAnswer.make({ text: 'invoices' }),
-              key: 'k',
-            })
-          }
-          if (how === 'expired') yield* expireNeed(need.id, 'the base moved')
-          if (how === 'withdrawn') yield* withdrawNeed(need.id, 'resolved')
-        }),
-      )
-      expect(raised(feed[0]!).needId).toBe(needId)
-      expect(feed[1]).toEqual(NeedEnded.make({ needId }))
-    },
-  )
+  /** A need of Acme's, then once its notice is told, `end`; answers everything told. */
+  const ending = (end: (needId: string) => Effect.Effect<unknown, unknown, EngineServices>) =>
+    commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const heard: NoticeFeed[] = []
+            const committed = yield* DomainEvents.use((events) => events.subscribe)
+            yield* Effect.forkChild(
+              Stream.runForEach(noticesOf(REGISTRY, committed), (one) =>
+                Effect.sync(() => heard.push(one)),
+              ),
+            )
+            const project = yield* acme()
+            const need = yield* createNeed(
+              BILLING,
+              ProjectOwner.make({ projectId: project.id }),
+              decision,
+            )
+            yield* until(
+              Effect.sync(() => heard.length),
+              (count) => count === 1,
+            )
+            yield* Effect.orDie(end(need.id))
+            yield* until(
+              Effect.sync(() => heard.length),
+              (count) => count === 2,
+            )
+            return { heard, needId: need.id }
+          }),
+        ),
+      ),
+    )
+
+  test.each([
+    [
+      'answered',
+      (id: string) =>
+        answerNeed({ id, answer: WrittenAnswer.make({ text: 'invoices' }), key: 'k' }),
+    ],
+    ['expired', (id: string) => expireNeed(id, 'the base moved')],
+    ['withdrawn', (id: string) => withdrawNeed(id, 'resolved')],
+  ] as const)('a need %s is told as ended', async (_, end) => {
+    const { heard, needId } = await ending(end)
+    expect(raised(heard[0]!).needId).toBe(needId)
+    expect(heard[1]).toEqual(NeedEnded.make({ needId }))
+  })
 })
 
 describe('A Workspace preparation that ends is told by its own kind', () => {
