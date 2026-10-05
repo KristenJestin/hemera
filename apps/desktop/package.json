@@ -30,6 +30,8 @@
     "@hemera/core": "workspace:*",
     "@hemera/ipc": "workspace:*",
     "@hemera/ui": "workspace:*",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/server": "2.3.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

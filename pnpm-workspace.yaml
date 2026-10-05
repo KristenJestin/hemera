@@ -15,9 +15,9 @@ allowBuilds:
 
 # No code of this repository imports zod (see AGENTS.md, Effect). chromium-bidi brings it in
 # under puppeteer-core, which loads it only for WebDriver BiDi; the end-to-end suite drives
-# Electron over CDP and never reaches it. The ACP SDK and the two bundled adapters depend on zod
-# at run time to read the protocol's messages: it stays theirs, and Hemera's own code reads
-# them with Effect Schema.
+# Electron over CDP and never reaches it. The ACP SDK, the MCP server SDK and the two bundled
+# adapters depend on zod at run time to read the protocol's messages: it stays theirs, and
+# Hemera's own code reads them with Effect Schema.
 overrides:
   chromium-bidi: '-'
 
