@@ -272,6 +272,17 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('permissions.setNeverList', log),
       ),
+    // A mission's grants are the engine's alone: forwarded as they are.
+    'permissions.grants': (request) =>
+      engine['permissions.grants'](request).pipe(
+        closedAs(gone),
+        observed('permissions.grants', log),
+      ),
+    'permissions.revoke': (request) =>
+      engine['permissions.revoke'](request).pipe(
+        closedAs(gone),
+        observed('permissions.revoke', log),
+      ),
     // The agents and their updates are the engine's alone: forwarded as they are.
     'agents.list': () => engine['agents.list']().pipe(closedAs(gone), observed('agents.list', log)),
     'agents.checkUpdates': () =>

@@ -55,6 +55,7 @@ import {
 import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.ts'
 import type { AskBeforeRunning } from './ask-before-running.ts'
 import { RUN_CONSENT, hemeraRunConsent, withdrawLeftConsents } from './permissions/consent.ts'
+import { Approvals, PERMISSION_REQUESTS, requestsHandler } from './permissions/requests.ts'
 import { runAtOpen } from './at-open.ts'
 import { SYSTEM_GIT, gitLayer, spawnGit } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
@@ -235,7 +236,11 @@ export const startProfile = (
     const consent = hemeraRunConsent(log)
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
-      owners: new Map([[RUN_CONSENT, consent.handler], ...(parts.missions?.owners ?? [])]),
+      owners: new Map([
+        [RUN_CONSENT, consent.handler],
+        [PERMISSION_REQUESTS, requestsHandler],
+        ...(parts.missions?.owners ?? []),
+      ]),
     }
     const layers = missionsLayer(missionParts).pipe(
       Layer.provideMerge(toolsLayer(log, version, parts.tools)),
@@ -396,6 +401,12 @@ export const startProfile = (
           Effect.repeat(Schedule.spaced(RECHECK_EVERY)),
         ),
       ),
+      Effect.forkScoped,
+    )
+    // Once automations may run: the requests the user answered are acted on, now and after each
+    // answer, and their results handed over; what a stopped engine left is finished first.
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Effect.scoped(Approvals.use((approvals) => approvals.watch)))),
       Effect.forkScoped,
     )
     // The diagnostic class rotates at the start, then every hour.

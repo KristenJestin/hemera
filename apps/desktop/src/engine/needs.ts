@@ -356,6 +356,48 @@ const kindOf = Match.type<Fields>().pipe(
   }),
 )
 
+/**
+ * Writes a need inside a transaction its writer holds, its owner checked there: the need's row and
+ * its `need.created` event. `masked` is its fields, masked before the transaction.
+ */
+const needWritten = (
+  transaction: EngineTransaction,
+  written: {
+    readonly service: NeedService
+    readonly owner: NeedOwner
+    readonly fields: Fields
+    readonly masked: ReturnType<typeof maskedJson>
+    readonly requestedBy: string | null
+    readonly by: By
+  },
+) =>
+  Effect.gen(function* () {
+    const id = crypto.randomUUID()
+    yield* checkedOwner(transaction, written.owner)
+    const [row] = yield* transaction
+      .insert(needs)
+      .values({
+        id,
+        ...ownerColumns(written.owner),
+        kind: kindOf(written.fields),
+        fields: written.masked,
+        service: written.service,
+        requestedBy: written.requestedBy,
+        state: 'pending',
+        answer: null,
+        answerKey: null,
+        endedReason: null,
+        createdAt: now(),
+        endedAt: null,
+      })
+      .returning()
+      .pipe(Effect.mapError(refusedWhile('writing a need')))
+    return {
+      id,
+      events: row === undefined ? [] : [needEvent('need.created', row, written.by)],
+    }
+  })
+
 const insertNeed = (
   service: NeedService,
   owner: NeedOwner,
@@ -364,42 +406,52 @@ const insertNeed = (
   by: By,
 ) =>
   Effect.gen(function* () {
-    const id = crypto.randomUUID()
     // What a need says may quote what an agent, a command or Git wrote: it is masked before it is kept.
     const masked = maskedJson((yield* Secrets).maskRecord(fields))
-    yield* mutate('writing a need', (transaction) =>
-      checkedOwner(transaction, owner).pipe(
-        Effect.andThen(
-          transaction
-            .insert(needs)
-            .values({
-              id,
-              ...ownerColumns(owner),
-              kind: kindOf(fields),
-              fields: masked,
-              service,
-              requestedBy,
-              state: 'pending',
-              answer: null,
-              answerKey: null,
-              endedReason: null,
-              createdAt: now(),
-              endedAt: null,
-            })
-            .returning()
-            .pipe(
-              Effect.mapError(refusedWhile('writing a need')),
-              Effect.map(([row]) => ({
-                result: undefined,
-                events: row === undefined ? [] : [needEvent('need.created', row, by)],
-              })),
-            ),
-        ),
+    const written = yield* mutate('writing a need', (transaction) =>
+      needWritten(transaction, { service, owner, fields, masked, requestedBy, by }).pipe(
+        Effect.map(({ id, events }) => ({ result: id, events })),
       ),
     )
     // Written a moment ago: a need that is not there now is a defect, not a refusal.
-    return yield* getNeed(id).pipe(Effect.catchTag('UnknownNeed', Effect.die))
+    return yield* getNeed(written).pipe(Effect.catchTag('UnknownNeed', Effect.die))
   })
+
+/**
+ * A need an engine service writes inside a transaction of its own, with what the transaction
+ * writes beside it: its fields masked first (`Secrets`), its owner checked in the transaction.
+ * Answers the body that writes it, for `mutate`.
+ */
+export const createNeedIn = (service: NeedService, owner: NeedOwner, fields: Fields) =>
+  Secrets.useSync((secrets) => {
+    const masked = maskedJson(secrets.maskRecord(fields))
+    return (transaction: EngineTransaction) =>
+      needWritten(transaction, {
+        service,
+        owner,
+        fields,
+        masked,
+        requestedBy: null,
+        by: BY_HEMERA,
+      })
+  })
+
+/**
+ * Expires a need inside the transaction of its owner, pending or already answered: an answer the
+ * owner could not act on because the situation changed. Answers the events.
+ */
+export const expireNeedIn = (transaction: EngineTransaction, id: string, reason: string) =>
+  transaction
+    .update(needs)
+    .set({ state: 'expired', endedReason: reason, endedAt: now() })
+    .where(and(eq(needs.id, id), inArray(needs.state, ['pending', 'answered'])))
+    .returning()
+    .pipe(
+      Effect.mapError(refusedWhile('expiring a need')),
+      Effect.map((rows) =>
+        rows.map((row) => needEvent('need.expired', row, BY_HEMERA, { reason })),
+      ),
+    )
 
 /**
  * A need an engine service creates and owns: an error, a permission, or any of the four kinds. No

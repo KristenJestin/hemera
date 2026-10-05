@@ -75,6 +75,7 @@ import {
 import { resolvePath } from './paths.ts'
 import {
   type CallSession,
+  type FrozenCall,
   GateGuards,
   type JudgedCall,
   type JudgedPath,
@@ -97,9 +98,25 @@ export interface ToolCallAsked {
   readonly callKey: string | null
 }
 
+/** What came of acting on a call the user allowed. */
+export type Performed =
+  | { readonly kind: 'answered'; readonly answer: ToolAnswer }
+  /** Something it was allowed on no longer holds: nothing ran. */
+  | { readonly kind: 'changed'; readonly reason: string }
+
 export class ToolGate extends Context.Service<
   ToolGate,
-  { readonly call: (asked: ToolCallAsked) => Effect.Effect<ToolAnswer> }
+  {
+    readonly call: (asked: ToolCallAsked) => Effect.Effect<ToolAnswer>
+    /**
+     * Acts on a call the user allowed, through the same steps, `holds` saying what else no longer
+     * holds (null when everything does).
+     */
+    readonly perform: (
+      frozen: FrozenCall,
+      holds: (call: JudgedCall) => Effect.Effect<string | null>,
+    ) => Effect.Effect<Performed>
+  }
 >()('ToolGate') {}
 
 /** What the gate stands on. */
@@ -224,6 +241,18 @@ export const placesForWorkflow = (
     return sensitive === null ? null : `refused: ${sensitive}`
   })
 
+/** A call past steps 2 to 4: decoded, resolved, its command found, its role's guards passed. */
+interface Prepared {
+  readonly session: CallSession
+  readonly name: ToolName
+  readonly effect: (typeof TOOLS)[ToolName]['effect']
+  readonly call: Decoded
+  readonly path: JudgedPath | null
+  readonly command: Command | null
+  /** What the verdict is asked about; null for a workflow tool, which never asks. */
+  readonly judged: JudgedCall | null
+}
+
 /** What the record of one call carries beside its outcome. */
 interface Noted {
   gateClass: string | null
@@ -297,9 +326,13 @@ export const toolGateLayer = (settings: GateSettings) =>
           ? { kind: 'project', projectId: grant.projectId }
           : { kind: 'mission', missionId: grant.missionId, taskId: null }
 
-      /** Steps 2 to 7 and 9: the answer of one call, and what its record notes. */
-      const decide = (grant: Grant, asked: ToolCallAsked, noted: Noted) =>
+      /** Steps 2 to 4: the call decoded, resolved and past the role's guards, or its refusal. */
+      const prepare = (grant: Grant, tool: string, raw: Schema.Json, noted: Noted) =>
         Effect.gen(function* () {
+          const refused = (answer: ToolAnswer): Result.Result<Prepared, ToolAnswer> => {
+            noted.verdictBy = 'guard'
+            return Result.fail(answer)
+          }
           const session: CallSession = {
             sessionId: grant.sessionId,
             role: grant.role,
@@ -309,28 +342,27 @@ export const toolGateLayer = (settings: GateSettings) =>
           }
           const role = ROLE_NAMES[grant.role]
           // 2. The tool is one of the session's.
-          const admission = admitTool(grant.role, grant.tools, asked.tool)
-          const name = TOOL_NAMES.find((one) => one === asked.tool)
+          const admission = admitTool(grant.role, grant.tools, tool)
+          const name = TOOL_NAMES.find((one) => one === tool)
           if (!admission.admitted || name === undefined) {
-            noted.verdictBy = 'guard'
-            return refusal(admission.admitted ? `refused: no tool ${asked.tool}` : admission.reason)
+            return refused(
+              refusal(admission.admitted ? `refused: no tool ${tool}` : admission.reason),
+            )
           }
           const entry = TOOLS[name]
           noted.gateClass = entry.gate
           // 3. The arguments decode with its schema.
-          const decoded = yield* decodeCall(name, asked.arguments).pipe(Effect.result)
+          const decoded = yield* decodeCall(name, raw).pipe(Effect.result)
           if (Result.isFailure(decoded)) {
-            noted.verdictBy = 'guard'
-            return refusal(
-              `refused: the arguments of ${name} do not read: ${formatSchemaError(decoded.failure)}`,
+            return refused(
+              refusal(
+                `refused: the arguments of ${name} do not read: ${formatSchemaError(decoded.failure)}`,
+              ),
             )
           }
           const call = decoded.success
           const target = yield* targetOf(grant, call, home)
-          if (Result.isFailure(target)) {
-            noted.verdictBy = 'guard'
-            return target.failure
-          }
+          if (Result.isFailure(target)) return refused(target.failure)
           const path = target.success
           let command: Command | null = null
           if (call.tool === 'commands_run' && call.args.command !== undefined) {
@@ -339,9 +371,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               Effect.catchTag('UnknownCommand', () => Effect.succeed(Option.none<Command>())),
             )
             if (Option.isNone(found)) {
-              noted.verdictBy = 'guard'
-              return refusal(
-                `refused: the catalogue has no command ${call.args.command}: list them with commands_list`,
+              return refused(
+                refusal(
+                  `refused: the catalogue has no command ${call.args.command}: list them with commands_list`,
+                ),
               )
             }
             command = found.value
@@ -350,87 +383,73 @@ export const toolGateLayer = (settings: GateSettings) =>
           // 4. The role's mandatory guards, before any verdict.
           const readOnly = ROLE_PLACES[grant.role].readOnly || grant.place.readOnly
           if (readOnly && entry.effect === 'writes') {
-            noted.verdictBy = 'guard'
-            return refusal(`refused: ${role} does not write files`)
+            return refused(refusal(`refused: ${role} does not write files`))
           }
           if (readOnly && entry.effect === 'runs') {
             if (call.tool !== 'commands_run') {
-              noted.verdictBy = 'guard'
-              return refusal(`refused: ${role} does not stop runs`)
+              return refused(refusal(`refused: ${role} does not stop runs`))
             }
             if (command === null || !runnableReadOnly(command)) {
-              noted.verdictBy = 'guard'
               const what = command === null ? 'a command line' : command.name
-              return refusal(
-                `refused: ${role} runs only the catalogue's read-only checks, and ${what} is not one`,
+              return refused(
+                refusal(
+                  `refused: ${role} runs only the catalogue's read-only checks, and ${what} is not one`,
+                ),
               )
             }
           }
           for (const guard of yield* GateGuards) {
-            const refused = yield* guard({ session, tool: name, path })
-            if (refused !== null) {
-              noted.verdictBy = 'guard'
-              return refusal(refused)
-            }
+            const said = yield* guard({ session, tool: name, path })
+            if (said !== null) return refused(refusal(said))
           }
+          const judged: JudgedCall | null =
+            entry.gate === 'workflow'
+              ? null
+              : {
+                  session,
+                  tool: name,
+                  gate: entry.gate,
+                  path,
+                  command:
+                    command === null
+                      ? null
+                      : {
+                          id: command.id,
+                          name: command.name,
+                          line: lineFor(command, process.platform),
+                          check: command.check,
+                          readOnly: command.readOnly,
+                          askBeforeRunning: command.askBeforeRunning,
+                          writeGlobs: command.writeGlobs,
+                        },
+                  line: call.tool === 'commands_run' ? (call.args.line ?? null) : null,
+                  folder:
+                    call.tool === 'commands_run' && call.args.command === undefined
+                      ? (call.args.repository ?? null)
+                      : null,
+                  why:
+                    call.tool === 'fs_write' ||
+                    call.tool === 'fs_edit' ||
+                    call.tool === 'commands_run'
+                      ? (call.args.why ?? null)
+                      : null,
+                }
+          const prepared: Result.Result<Prepared, ToolAnswer> = Result.succeed({
+            session,
+            name,
+            effect: entry.effect,
+            call,
+            path,
+            command,
+            judged,
+          })
+          return prepared
+        })
 
-          // 5. Workflow tools: the places rule, never a question.
-          if (entry.gate === 'workflow') {
-            if (path !== null) {
-              const refused = yield* placesForWorkflow(
-                session,
-                path,
-                home,
-                entry.effect !== 'reads',
-              )
-              if (refused !== null) {
-                noted.verdictBy = 'places'
-                return refusal(refused)
-              }
-            }
-          } else {
-            // 6. Local and judged calls: the verdict.
-            const judged: JudgedCall = {
-              session,
-              tool: name,
-              gate: entry.gate,
-              path,
-              command:
-                command === null
-                  ? null
-                  : {
-                      id: command.id,
-                      name: command.name,
-                      line: lineFor(command, process.platform),
-                      check: command.check,
-                      readOnly: command.readOnly,
-                      askBeforeRunning: command.askBeforeRunning,
-                      writeGlobs: command.writeGlobs,
-                    },
-              line: call.tool === 'commands_run' ? (call.args.line ?? null) : null,
-              folder:
-                call.tool === 'commands_run' && call.args.command === undefined
-                  ? (call.args.repository ?? null)
-                  : null,
-              why:
-                call.tool === 'fs_write' || call.tool === 'fs_edit' || call.tool === 'commands_run'
-                  ? (call.args.why ?? null)
-                  : null,
-            }
-            const verdict = yield* Verdicts.use((verdicts) => verdicts.judge(judged))
-            noted.verdict = verdict.verdict
-            noted.verdictBy = verdict.by
-            if (verdict.verdict === 'deny') return refusal(`refused: ${verdict.reason}`)
-            // 7. One human question, answered to the agent at once.
-            if (verdict.verdict === 'ask') {
-              const question = yield* PermissionRequests.use((requests) =>
-                requests.request(judged, verdict.reason),
-              )
-              return refusal(question.answer)
-            }
-          }
-
-          // 9. The execution.
+      /** 9. The execution. */
+      const execute = (grant: Grant, prepared: Prepared) =>
+        Effect.gen(function* () {
+          const { call, path } = prepared
           const fileCall = (resolved: JudgedPath): FileCall => ({
             sessionId: grant.sessionId,
             owner: ownerOf(grant),
@@ -454,13 +473,118 @@ export const toolGateLayer = (settings: GateSettings) =>
             case 'commands_list':
               return yield* commandsList(grant)
             case 'commands_run':
-              return yield* commandsRun({ grant, owner: ownerOf(grant), command, scope }, call.args)
+              return yield* commandsRun(
+                { grant, owner: ownerOf(grant), command: prepared.command, scope },
+                call.args,
+              )
             case 'commands_output':
               return yield* commandsOutput(grant, call.args)
             case 'commands_stop':
               return yield* commandsStop(grant, call.args)
           }
         })
+
+      /** Steps 2 to 7 and 9: the answer of one call, and what its record notes. */
+      const decide = (grant: Grant, asked: ToolCallAsked, noted: Noted) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(grant, asked.tool, asked.arguments, noted)
+          if (Result.isFailure(prepared)) return prepared.failure
+          const { session, path, judged } = prepared.success
+
+          if (judged === null) {
+            // 5. Workflow tools: the places rule, never a question.
+            if (path !== null) {
+              const refused = yield* placesForWorkflow(
+                session,
+                path,
+                home,
+                prepared.success.effect !== 'reads',
+              )
+              if (refused !== null) {
+                noted.verdictBy = 'places'
+                return refusal(refused)
+              }
+            }
+          } else {
+            // 6. Local and judged calls: the verdict.
+            const verdict = yield* Verdicts.use((verdicts) => verdicts.judge(judged))
+            noted.verdict = verdict.verdict
+            noted.verdictBy = verdict.by
+            if (verdict.verdict === 'deny') return refusal(`refused: ${verdict.reason}`)
+            // 7. One human question, answered to the agent at once.
+            if (verdict.verdict === 'ask') {
+              const frozen: FrozenCall['grant'] = {
+                sessionId: grant.sessionId,
+                role: grant.role,
+                tools: grant.tools,
+                place: grant.place,
+                projectId: grant.projectId,
+                missionId: grant.missionId,
+                workspaceId: grant.workspaceId,
+                mainCheckout: grant.mainCheckout,
+              }
+              const question = yield* PermissionRequests.use((requests) =>
+                requests.request({
+                  call: judged,
+                  frozen: {
+                    grant: frozen,
+                    tool: prepared.success.name,
+                    arguments: asked.arguments,
+                  },
+                  reason: verdict.reason,
+                  sensitive: verdict.sensitive ?? false,
+                  key: asked.callKey,
+                }),
+              )
+              return refusal(question.answer)
+            }
+          }
+          return yield* execute(grant, prepared.success)
+        })
+
+      /**
+       * A call the user allowed, acted on by Hemera: its guards, its places and the refusals of the
+       * order checked again, then what the caller checks, then the execution through the same
+       * steps, recorded as allowed by the user. Whatever no longer holds is said, and nothing runs.
+       */
+      const perform = (
+        frozen: FrozenCall,
+        holds: (call: JudgedCall) => Effect.Effect<string | null>,
+      ) =>
+        Effect.gen(function* () {
+          const began = performance.now()
+          const grant: Grant = { ...frozen.grant, id: 'approved' }
+          const noted: Noted = { gateClass: null, verdict: 'allow', verdictBy: 'user' }
+          const performed = yield* Effect.gen(function* () {
+            const prepared = yield* prepare(grant, frozen.tool, frozen.arguments, noted)
+            if (Result.isFailure(prepared)) {
+              return { kind: 'changed', reason: prepared.failure.text } satisfies Performed
+            }
+            const { judged } = prepared.success
+            if (judged === null) {
+              return { kind: 'changed', reason: 'it is not a call that asks' } satisfies Performed
+            }
+            const refused = yield* Verdicts.use((verdicts) => verdicts.refusal(judged))
+            if (refused !== null) {
+              return { kind: 'changed', reason: `refused: ${refused}` } satisfies Performed
+            }
+            const changed = yield* holds(judged)
+            if (changed !== null) return { kind: 'changed', reason: changed } satisfies Performed
+            const answer = yield* execute(grant, prepared.success)
+            return { kind: 'answered', answer } satisfies Performed
+          }).pipe(
+            Effect.catch((failed) =>
+              Effect.succeed<Performed>({
+                kind: 'answered',
+                answer: { ok: false, refused: false, text: `the call failed: ${failed.message}` },
+              }),
+            ),
+          )
+          if (performed.kind === 'answered') {
+            yield* record(grant, frozen.tool, noted, performed.answer, null, began)
+          }
+          return performed
+        }).pipe(Effect.provide(context))
 
       /** One call, decided, executed and recorded once. */
       const decided = (grant: Grant, asked: ToolCallAsked) =>
@@ -528,6 +652,7 @@ export const toolGateLayer = (settings: GateSettings) =>
         })
 
       return {
+        perform,
         call: (asked) =>
           Effect.gen(function* () {
             // 1. A live grant, of a session that exists.

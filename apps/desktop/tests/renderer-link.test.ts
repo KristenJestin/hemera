@@ -175,6 +175,8 @@ const noProjects = {
   'needs.retry': unused,
   'permissions.neverList': unused,
   'permissions.setNeverList': unused,
+  'permissions.grants': unused,
+  'permissions.revoke': unused,
   'agents.list': unused,
   'agents.checkUpdates': unused,
   'agents.update': unused,

@@ -36,19 +36,23 @@ export const verdictsSaying = (answer: (call: JudgedCall) => Verdict) => {
           asked.push(call)
           return answer(call)
         }),
+      refusal: () => Effect.succeed(null),
     }),
   }
 }
 
 export const ALLOW: Verdict = { verdict: 'allow', by: 'suite' }
 
-/** A human question that keeps what it was asked and answers as the default does. */
+/**
+ * A human question that keeps what it was asked and answers with a refusal of its own, so a
+ * suite about the verdict reads what was asked without a request being stored.
+ */
 export const questionsKept = () => {
   const asked: Array<{ readonly call: JudgedCall; readonly reason: string }> = []
   return {
     asked,
     layer: Layer.succeed(PermissionRequests, {
-      request: (call, reason) =>
+      request: ({ call, reason }) =>
         Effect.sync(() => {
           asked.push({ call, reason })
           return { answer: 'refused: approvals are not available yet' }
