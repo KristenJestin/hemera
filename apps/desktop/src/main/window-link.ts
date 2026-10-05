@@ -313,6 +313,25 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       application.hemeraAuto.save(key).pipe(observed('hemeraAuto.saveKey', log)),
     'hemeraAuto.removeKey': () =>
       application.hemeraAuto.remove.pipe(observed('hemeraAuto.removeKey', log)),
+    // A mission's Memory is the engine's alone: forwarded as it is.
+    'memory.now': (request) =>
+      engine['memory.now'](request).pipe(closedAs(gone), observed('memory.now', log)),
+    'memory.journal': (request) =>
+      engine['memory.journal'](request).pipe(closedAs(gone), observed('memory.journal', log)),
+    'memory.notes': (request) =>
+      engine['memory.notes'](request).pipe(closedAs(gone), observed('memory.notes', log)),
+    'memory.evidenceList': (request) =>
+      engine['memory.evidenceList'](request).pipe(
+        closedAs(gone),
+        observed('memory.evidenceList', log),
+      ),
+    'memory.evidence': (request) =>
+      engine['memory.evidence'](request).pipe(closedAs(gone), observed('memory.evidence', log)),
+    'memory.changes': (request) =>
+      engine['memory.changes'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('memory.changes', log),
+      ),
     // The agents and their updates are the engine's alone: forwarded as they are.
     'agents.list': () => engine['agents.list']().pipe(closedAs(gone), observed('agents.list', log)),
     'agents.checkUpdates': () =>

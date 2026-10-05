@@ -108,6 +108,7 @@ const PlaceKind = Schema.Literals(['main-checkout', 'own-worktree', 'workspace']
 const StoredCall = Schema.Struct({
   grant: Schema.Struct({
     sessionId: Schema.String,
+    epoch: Schema.Number,
     role: Role,
     tools: Schema.Array(Schema.Literals(TOOL_NAMES)),
     place: Schema.Struct({ kind: PlaceKind, readOnly: Schema.Boolean, root: Schema.String }),

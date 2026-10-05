@@ -19,6 +19,7 @@ import {
   StorageFailed,
 } from './profile.ts'
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
+import { MemoryRpcs } from './memory.ts'
 import { MissionsRpcs, NeedsRpcs } from './missions.ts'
 import { NoticeFeedRpcs, NotificationSettingsRpcs } from './notifications.ts'
 import { JevKeyRpcs, PermissionsRpcs } from './permissions.ts'
@@ -112,6 +113,7 @@ export const EngineRpcs = RpcGroup.make(
   RunsRpcs,
   MissionsRpcs,
   NeedsRpcs,
+  MemoryRpcs,
   AgentStatesRpcs,
   NotificationSettingsRpcs,
   PermissionsRpcs,

@@ -68,6 +68,13 @@ export interface Mutation<A> {
 const writing = Semaphore.makeUnsafe(1)
 
 /**
+ * Runs what must not overlap a transaction, such as the copy of the database a backup takes:
+ * between two mutations, never during one.
+ */
+export const betweenMutations = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Semaphore.withPermits(writing, 1)(effect)
+
+/**
  * Runs a change and its events as one transaction, then tells the events. The events are written
  * after the body, so they can name what the body has just decided.
  */

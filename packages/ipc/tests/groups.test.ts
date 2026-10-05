@@ -40,6 +40,7 @@ import {
   streamClosedAs,
   Unreadable,
   UpToDateBase,
+  UnknownEvidence,
   type Workspace,
 } from '../src/index.ts'
 
@@ -229,6 +230,31 @@ const missionHandlers = {
   'notifications.setStyle': unused,
 }
 
+/** The Memory of an engine that keeps one piece of evidence, a png, and nothing else. */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 255])
+const evidence = {
+  id: 'e1',
+  missionId: 'm1',
+  sha256: 'ab'.repeat(32),
+  size: PNG.length,
+  mediaType: 'image/png',
+  name: 'the export page',
+  about: null,
+  author: { _tag: 'User' as const },
+  at: '2026-10-05T00:00:00.000Z',
+}
+const memoryHandlers = {
+  'memory.now': unused,
+  'memory.journal': unused,
+  'memory.notes': unused,
+  'memory.evidenceList': unused,
+  'memory.evidence': ({ id }: { readonly id: string }) =>
+    id === evidence.id
+      ? Effect.succeed({ item: evidence, bytes: PNG })
+      : Effect.fail(new UnknownEvidence({ id })),
+  'memory.changes': () => Stream.never,
+}
+
 const claudeState: AgentState = {
   id: 'claude',
   label: 'Claude Code',
@@ -271,6 +297,7 @@ const engineLink = Effect.gen(function* () {
         ...workspaceHandlers,
         ...commandHandlers,
         ...missionHandlers,
+        ...memoryHandlers,
         ...agentHandlers,
       }),
     ),
@@ -481,6 +508,25 @@ describe('The missions on the engine link', () => {
           expect(yield* client['needs.list']()).toEqual([{ projectId: 'p1', needs: [need] }])
           const [first] = yield* Stream.runCollect(Stream.take(client['missions.changes'](), 1))
           expect(first).toEqual(NeedChanged.make({ need }))
+        }),
+      ),
+    ))
+})
+
+describe('The Memory on the engine link', () => {
+  test('a piece of evidence arrives as its bytes, and an unknown one as itself', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client } = yield* engineLink
+          const file = yield* client['memory.evidence']({ missionId: 'm1', id: 'e1' })
+          expect(file.bytes).toBeInstanceOf(Uint8Array)
+          expect([...file.bytes]).toEqual([...PNG])
+          expect(file.item).toEqual(evidence)
+          const unknown = yield* Effect.flip(
+            client['memory.evidence']({ missionId: 'm1', id: 'e2' }),
+          )
+          expect(unknown).toBeInstanceOf(UnknownEvidence)
         }),
       ),
     ))

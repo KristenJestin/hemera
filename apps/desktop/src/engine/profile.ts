@@ -45,7 +45,6 @@ import {
   type LiveMissions,
   type RestoreJournal,
   noLiveMissions,
-  noRestoreJournal,
   pendingRestore,
   reconcile,
   reconciliationStepsLayer,
@@ -85,6 +84,13 @@ import {
   settleLeftActions,
 } from './tools/actions.ts'
 import { type ToolsParts, type ToolAccess, type ToolGate, toolsLayer } from './tools/index.ts'
+import {
+  type Evidence,
+  Memory,
+  type MemoryParts,
+  type MissionDependencies,
+  memoryLayer,
+} from './memory/index.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
 import { assignKeyPrefixes } from './projects.ts'
 
@@ -120,6 +126,8 @@ export interface ProfileParts {
   readonly tools?: ToolsParts
   /** The rules of the actions with an effect outside the database; this version's otherwise. */
   readonly actionRules?: Layer.Layer<ActionRules>
+  /** The ports of the Memory later tickets fill, and its mappers; the defaults otherwise. */
+  readonly memory?: Omit<MemoryParts, 'restoreJournal'>
 }
 
 /**
@@ -147,6 +155,9 @@ export type EngineServices =
   | HemeraEndpoint
   | HemeraAuto
   | SessionTurns
+  | Memory
+  | Evidence
+  | MissionDependencies
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -228,7 +239,6 @@ export const startProfile = (
       backupFoldersLayer(parts.backupFolders),
       reconciliationStepsLayer(parts.reconciliationSteps),
       parts.liveMissions ?? noLiveMissions,
-      parts.restoreJournal ?? noRestoreJournal,
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
       sessionTurnsLayer,
@@ -247,8 +257,12 @@ export const startProfile = (
         ...(parts.missions?.owners ?? []),
       ]),
     }
-    const layers = missionsLayer(missionParts).pipe(
-      Layer.provideMerge(toolsLayer(log, version, parts.tools)),
+    // The Memory stands on the missions, and the tools on the Memory.
+    const layers = toolsLayer(log, version, parts.tools).pipe(
+      Layer.provideMerge(
+        memoryLayer({ ...parts.memory, restoreJournal: parts.restoreJournal }, log),
+      ),
+      Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -294,6 +308,9 @@ export const startProfile = (
         Effect.sync(() => log(`the variables were not registered as secrets: ${said(refusal)}`)),
       ),
     )
+
+    // The Journal catches up with the event log before anything reads the Memory, then follows it.
+    yield* Context.get(context, Memory).start.pipe(Effect.forkScoped)
 
     let reconciliation: Reconciliation = 'none'
     const databaseNow = (): DatabaseStatus =>

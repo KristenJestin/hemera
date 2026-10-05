@@ -278,5 +278,178 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
     },
     "name": "commands_stop",
   },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Read your mission's Memory: Now, the Notes, or a page of the Journal. Your brief already holds Now, the Notes and the end of the Journal; read further back with \`before\`.",
+      "properties": {
+        "all": {
+          "description": "For the notes: true to include the notes a condensed note replaced.",
+          "type": "boolean",
+        },
+        "before": {
+          "description": "For the journal: the line number to read before, as the previous page gave it. A page holds 50 lines.",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "mission": {
+          "description": "The key of a mission yours depends on (\`ACME-3\`), to read its Memory, read-only; your own mission without it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "part": {
+          "description": "Which part to read: \`now\` (where the mission stands), \`notes\` (what was learned) or \`journal\` (what happened, newest first).",
+          "enum": [
+            "now",
+            "notes",
+            "journal",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "part",
+      ],
+      "type": "object",
+    },
+    "name": "memory_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Update Now: your own "doing" line, and the next step when you are the main session of the stage. Write in the language of the user.",
+      "properties": {
+        "doing": {
+          "description": "What you are doing now, in one line: your own line of Now.",
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string",
+        },
+        "next": {
+          "description": "The mission's next step, in one line: only the stage's main session sets it.",
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "now_set",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Add a line to the mission's Journal. Hemera already writes what it knows (stages, answers, checks, runs): write only why you chose, or what you found. Write in the language of the user.",
+      "properties": {
+        "text": {
+          "description": "Why you chose what you chose, or what you found: what Hemera cannot know without you.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "journal_add",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Add a note: something learned on the way that the next agent must know. Write in the language of the user.",
+      "properties": {
+        "text": {
+          "description": "What was learned: a trap of the repository, a test that needs a database.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "topic": {
+          "description": "What the note is about, in a few words (\`tests\`, \`database\`).",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "note_add",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Replace several notes by one. The replaced notes stay readable with memory_read \`all\`. Only the main session of the stage condenses.",
+      "properties": {
+        "replaces": {
+          "description": "The notes the new one replaces.",
+          "items": {
+            "description": "A note, by its number as memory_read gave it.",
+            "minimum": 1,
+            "type": "integer",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "text": {
+          "description": "The note that replaces them.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "topic": {
+          "description": "What the note is about, in a few words (\`tests\`, \`database\`).",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "replaces",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "notes_condense",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Keep a piece of evidence with the mission: a full log, a test output, an image. It is kept as long as the mission, outside the place you work in; a secret in a text is masked.",
+      "properties": {
+        "about": {
+          "description": "What it is evidence of: a scenario, a check, a run.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "content": {
+          "description": "The evidence as text (a full log, a test output).",
+          "minLength": 1,
+          "type": "string",
+        },
+        "name": {
+          "description": "What to call this evidence (\`unit tests output\`).",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "description": "Or a file of your place to keep, relative to it: a text file, or a png, jpeg or webp image.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+      ],
+      "type": "object",
+    },
+    "name": "evidence_add",
+  },
 ]
 `;

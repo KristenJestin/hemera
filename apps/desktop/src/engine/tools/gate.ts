@@ -72,6 +72,15 @@ import {
   refusal,
   search,
 } from './files.ts'
+import type { Evidence, Memory, MissionDependencies } from '../memory/index.ts'
+import {
+  evidenceAdd,
+  journalAdd,
+  memoryRead,
+  noteAdd,
+  notesCondense,
+  nowSet,
+} from '../memory/tools.ts'
 import { resolvePath } from './paths.ts'
 import {
   type CallSession,
@@ -131,6 +140,9 @@ export type GateServices =
   | SensitivePlaces
   | GateGuards
   | EffectfulActions
+  | Memory
+  | Evidence
+  | MissionDependencies
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -176,6 +188,18 @@ const decodeCall = (
       return decoder(tool, TOOLS.commands_output.input)(raw)
     case 'commands_stop':
       return decoder(tool, TOOLS.commands_stop.input)(raw)
+    case 'memory_read':
+      return decoder(tool, TOOLS.memory_read.input)(raw)
+    case 'now_set':
+      return decoder(tool, TOOLS.now_set.input)(raw)
+    case 'journal_add':
+      return decoder(tool, TOOLS.journal_add.input)(raw)
+    case 'note_add':
+      return decoder(tool, TOOLS.note_add.input)(raw)
+    case 'notes_condense':
+      return decoder(tool, TOOLS.notes_condense.input)(raw)
+    case 'evidence_add':
+      return decoder(tool, TOOLS.evidence_add.input)(raw)
   }
 }
 
@@ -208,7 +232,9 @@ const targetOf = (grant: Grant, decoded: Decoded, home: string) =>
         ? { repository: decoded.args.repository, path: decoded.args.path }
         : decoded.tool === 'search'
           ? { repository: decoded.args.repository, path: '.' }
-          : null
+          : decoded.tool === 'evidence_add' && decoded.args.path !== undefined
+            ? { repository: undefined, path: decoded.args.path }
+            : null
     if (named === null) return Result.succeed<JudgedPath | null>(null)
     const base = yield* baseOf(grant, named.repository)
     if (Result.isFailure(base)) return Result.fail(base.failure)
@@ -481,6 +507,18 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* commandsOutput(grant, call.args)
             case 'commands_stop':
               return yield* commandsStop(grant, call.args)
+            case 'memory_read':
+              return yield* memoryRead(grant, call.args)
+            case 'now_set':
+              return yield* nowSet(grant, call.args)
+            case 'journal_add':
+              return yield* journalAdd(grant, call.args)
+            case 'note_add':
+              return yield* noteAdd(grant, call.args)
+            case 'notes_condense':
+              return yield* notesCondense(grant, call.args)
+            case 'evidence_add':
+              return yield* evidenceAdd(grant, call.args, path === null ? null : path.resolved)
           }
         })
 
@@ -515,6 +553,7 @@ export const toolGateLayer = (settings: GateSettings) =>
             if (verdict.verdict === 'ask') {
               const frozen: FrozenCall['grant'] = {
                 sessionId: grant.sessionId,
+                epoch: grant.epoch,
                 role: grant.role,
                 tools: grant.tools,
                 place: grant.place,

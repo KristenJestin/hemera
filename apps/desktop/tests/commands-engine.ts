@@ -34,7 +34,10 @@ export interface Started {
  */
 export function commandsEngine(
   data: string,
-  parts: Pick<ProfileParts, 'askBeforeRunning' | 'missions' | 'secrets' | 'tools' | 'actionRules'> &
+  parts: Pick<
+    ProfileParts,
+    'askBeforeRunning' | 'missions' | 'secrets' | 'tools' | 'actionRules' | 'memory'
+  > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {

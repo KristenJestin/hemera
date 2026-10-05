@@ -650,3 +650,117 @@ export const queuedDeliveries = sqliteTable(
   },
   (table) => [index('queued_by_owner').on(table.ownerKind, table.ownerId, table.queuedAt)],
 )
+
+/**
+ * Where each projection of the domain events stands: the sequence of the last event it projected,
+ * written in the same transaction as what it projected, so a projection that stops in between
+ * starts again from there and never projects an event twice.
+ */
+export const projectionCursors = sqliteTable('projection_cursors', {
+  name: text('name').primaryKey(),
+  cursor: integer('cursor').notNull(),
+})
+
+/**
+ * A mission's Journal: one line per domain event its mapper turns into a line, keyed by that
+ * event's sequence, so the same event never makes two lines. Who wrote it is `hemera`, `user` or
+ * `agent` (then its role and session); `fields` is a flat JSON object and `refs` the JSON of what it
+ * names (a need, a task, a run, an evidence file, a session). Text and fields are masked.
+ */
+export const memoryJournal = sqliteTable(
+  'memory_journal',
+  {
+    sequence: integer('sequence').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    at: text('at').notNull(),
+    kind: text('kind').notNull(),
+    authorKind: text('author_kind').notNull(),
+    authorRole: text('author_role'),
+    authorSession: text('author_session'),
+    text: text('text').$type<Masked<string>>().notNull(),
+    fields: text('fields').$type<Masked<string>>().notNull(),
+    refs: text('refs').notNull(),
+  },
+  (table) => [index('journal_by_mission').on(table.missionId, table.sequence)],
+)
+
+/**
+ * The "doing" lines of Now, one per live session working on a mission, each written by its session
+ * alone at the epoch it held then, and removed when the session stops.
+ */
+export const memoryNowLines = sqliteTable(
+  'memory_now_lines',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    role: text('role').notNull(),
+    epoch: integer('epoch').notNull(),
+    doing: text('doing').$type<Masked<string>>().notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [unique('now_line_once').on(table.missionId, table.sessionId)],
+)
+
+/** The next step of a mission, written by its stage's main session. */
+export const memoryNext = sqliteTable('memory_next', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').notNull(),
+  role: text('role').notNull(),
+  epoch: integer('epoch').notNull(),
+  text: text('text').$type<Masked<string>>().notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/**
+ * A mission's Notes, numbered in the mission. A condensed note keeps its row and the number of the
+ * note that replaced it.
+ */
+export const memoryNotes = sqliteTable(
+  'memory_notes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    topic: text('topic').$type<Masked<string>>(),
+    authorKind: text('author_kind').notNull(),
+    authorRole: text('author_role'),
+    authorSession: text('author_session'),
+    replacedBy: integer('replaced_by'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [unique('note_number_once').on(table.missionId, table.number)],
+)
+
+/**
+ * A mission's evidence, one row per reference: the file is `missions/<key>/evidence/<sha256>.<ext>`,
+ * once per content, however many references it has. `about` is what it is evidence of, an opaque
+ * reference other tickets fill.
+ */
+export const memoryEvidence = sqliteTable(
+  'memory_evidence',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    mediaType: text('media_type').notNull(),
+    name: text('name').$type<Masked<string>>().notNull(),
+    about: text('about'),
+    authorKind: text('author_kind').notNull(),
+    authorRole: text('author_role'),
+    authorSession: text('author_session'),
+    addedAt: text('added_at').notNull(),
+  },
+  (table) => [index('evidence_by_mission').on(table.missionId, table.addedAt)],
+)

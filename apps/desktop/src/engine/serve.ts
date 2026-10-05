@@ -44,6 +44,7 @@ import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
 import { listGrants, revokeGrant } from './permissions/grants.ts'
 import { HemeraAuto, decisionChanges, whoJudgesFor } from './permissions/hemera-auto.ts'
 import { neverList, setNeverList } from './permissions/never-list.ts'
+import { Evidence, Memory } from './memory/index.ts'
 import {
   REGISTRY,
   noticeFeed,
@@ -215,6 +216,38 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(HemeraAuto.use((auto) => auto.restoreKey(key))).pipe(observed('jevKey.restore', log)),
     'jevKey.remove': () =>
       use(HemeraAuto.use((auto) => auto.removeKey)).pipe(observed('jevKey.remove', log)),
+    'memory.now': ({ missionId }) =>
+      use(Memory.use((memory) => memory.now(missionId))).pipe(observed('memory.now', log)),
+    'memory.journal': ({ missionId, before }) =>
+      use(Memory.use((memory) => memory.journal(missionId, before))).pipe(
+        observed('memory.journal', log),
+      ),
+    'memory.notes': ({ missionId, all }) =>
+      use(Memory.use((memory) => memory.notes(missionId, all))).pipe(observed('memory.notes', log)),
+    'memory.evidenceList': ({ missionId, about }) =>
+      use(
+        Memory.use((memory) =>
+          Effect.andThen(
+            Effect.andThen(memory.now(missionId), memory.ready),
+            Evidence.use((evidence) => evidence.list(missionId, about)),
+          ),
+        ),
+      ).pipe(observed('memory.evidenceList', log)),
+    'memory.evidence': ({ missionId, id }) =>
+      use(
+        Memory.use((memory) =>
+          Effect.andThen(
+            memory.ready,
+            Evidence.use((evidence) => evidence.read(missionId, id)),
+          ),
+        ),
+      ).pipe(observed('memory.evidence', log)),
+    'memory.changes': ({ missionId }) =>
+      follow(
+        Stream.unwrap(
+          Memory.use((memory) => Effect.as(memory.now(missionId), memory.changes(missionId))),
+        ),
+      ).pipe(observedStream('memory.changes', log)),
     'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
     'agents.checkUpdates': () =>
       Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),
