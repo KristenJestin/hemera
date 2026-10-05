@@ -18,8 +18,10 @@ import {
   type EnvironmentReport,
   type Preferences,
   type PreferencesChange,
+  type WindowNotice,
 } from '@hemera/ipc'
 import { Effect } from 'effect'
+import type { Stream } from 'effect'
 import type { RpcClient, RpcClientError, RpcGroup } from 'effect/rpc'
 
 import { observed, observedStream, type Log } from './diagnostic.ts'
@@ -39,6 +41,8 @@ export interface Application {
   readonly chooseFolder: Effect.Effect<string | null>
   /** The preferences the engine answered: worn now, and kept for the next start's first frame. */
   readonly display: (preferences: Preferences) => Effect.Effect<void>
+  /** What main tells the window of notifications, from the moment it listens. */
+  readonly notices: Stream.Stream<WindowNotice>
 }
 
 const gone = () => new EngineGone()
@@ -258,6 +262,23 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['agents.checkUpdates']().pipe(closedAs(gone), observed('agents.checkUpdates', log)),
     'agents.update': (request) =>
       engine['agents.update'](request).pipe(closedAs(gone), observed('agents.update', log)),
+    'notifications.settings': () =>
+      engine['notifications.settings']().pipe(
+        closedAs(gone),
+        observed('notifications.settings', log),
+      ),
+    'notifications.setKind': (request) =>
+      engine['notifications.setKind'](request).pipe(
+        closedAs(gone),
+        observed('notifications.setKind', log),
+      ),
+    'notifications.setSound': (request) =>
+      engine['notifications.setSound'](request).pipe(
+        closedAs(gone),
+        observed('notifications.setSound', log),
+      ),
+    'notifications.window': () =>
+      application.notices.pipe(observedStream('notifications.window', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),
     'application.relaunch': () => application.relaunch.pipe(observed('application.relaunch', log)),
     'application.showLog': () => application.showLog.pipe(observed('application.showLog', log)),

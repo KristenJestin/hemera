@@ -11,7 +11,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { maskShapes } from '@hemera/core/domain'
-import { Effect } from 'effect'
+import { closedAs, EngineGone, type WindowNotice } from '@hemera/ipc'
+import { Effect, PubSub, Stream } from 'effect'
 import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, dialog, nativeTheme, screen } from 'electron/main'
 
@@ -20,6 +21,8 @@ import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
 import { applicationOrigin } from './origin.ts'
+import { GROUP_WINDOW } from './notifications.ts'
+import { runNotifier } from './notifier.ts'
 import { installProbe } from './probe.ts'
 import { rendererSource } from './renderer-source.ts'
 import { collectReport } from './report.ts'
@@ -27,6 +30,8 @@ import { refreshDisplay, windowHandlers, type Application } from './window-link.
 import { OPENING_COLORS } from './opening-colors.ts'
 import { headless, windowOptions } from './window-options.ts'
 import { serveWindows } from './window-ports.ts'
+import { soundsFolderOf } from './sounds.ts'
+import { systemNotifierPorts } from './system-notifier.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
@@ -109,6 +114,8 @@ const run = Effect.gen(function* () {
   )
 
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
+  // What main tells the window of notifications: whoever listens hears it from then on.
+  const notices = yield* PubSub.unbounded<WindowNotice>()
   const application: Application = {
     report,
     relaunch: Effect.sync(() => {
@@ -129,6 +136,7 @@ const run = Effect.gen(function* () {
         nativeTheme.themeSource = preferences.theme
         writeSidecar(dataFolder, preferences, log)
       }),
+    notices: Stream.fromPubSub(notices),
   }
   yield* refreshDisplay(engine.client, application).pipe(Effect.ignore, Effect.forkScoped)
   // Served before the page loads: the first thing the page does is hand over its port.
@@ -140,6 +148,18 @@ const run = Effect.gen(function* () {
   if (engine.probe !== undefined) {
     yield* installProbe(engine.probe, engine.process, windows, engine.client, application)
   }
+  // The notices the engine tells, delivered from here: in the window or by the system.
+  yield* runNotifier(
+    engine.client['notifications.feed'](),
+    systemNotifierPorts({
+      settings: engine.client['notifications.settings']().pipe(closedAs(() => new EngineGone())),
+      tell: (notice) => PubSub.publishUnsafe(notices, notice),
+      soundsFolder: soundsFolderOf(main),
+      quiet: underSuite,
+      log,
+    }),
+    GROUP_WINDOW,
+  ).pipe(Effect.forkScoped)
   yield* Effect.promise(() => openWindow(log))
   // The theme changes under the window — chosen in Hemera, or the system's when it follows it.
   nativeTheme.on('updated', () => {

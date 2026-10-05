@@ -44,9 +44,10 @@ import {
   type UpToDateBase,
   type VariableEdit,
   type VariableKey,
+  type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import { Cause, Effect, Exit, Option, Scope, Stream } from 'effect'
+import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
 export interface Link {
@@ -122,6 +123,8 @@ export interface Link {
   readonly runOutput: (id: string) => Promise<RunOutput>
   /** Each run as it changes, for as long as the listener listens. */
   readonly onRunChanges: (listener: (run: Run) => void, onEnd: (error: Error) => void) => () => void
+  /** What main tells the window of notifications, for as long as the listener listens. */
+  readonly onNotices: (listener: (notice: WindowNotice) => void) => () => void
   readonly close: () => void
 }
 
@@ -242,6 +245,14 @@ export function linkOver(port: Port): Link {
         listener,
         (error) => error instanceof StorageFailed || error instanceof EngineGone,
         onEnd,
+      ),
+    onNotices: (listener) =>
+      follow(
+        (ready) => ready['notifications.window'](),
+        listener,
+        // A stream main serves itself: it does not fail.
+        Predicate.isNever,
+        () => undefined,
       ),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))

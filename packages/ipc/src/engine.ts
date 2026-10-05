@@ -20,6 +20,7 @@ import {
 } from './profile.ts'
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
 import { MissionsRpcs, NeedsRpcs } from './missions.ts'
+import { NoticeFeedRpcs, NotificationSettingsRpcs } from './notifications.ts'
 import { ProjectsRpcs, RepositoriesRpcs } from './projects.ts'
 import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 
@@ -111,13 +112,16 @@ export const EngineRpcs = RpcGroup.make(
   MissionsRpcs,
   NeedsRpcs,
   AgentStatesRpcs,
+  NotificationSettingsRpcs,
 )
 
 /**
  * What the engine serves main: everything the window may ask, which main forwards, and what main
- * alone tells it. The window is shown: what waits for the window before it runs (the commands run
- * at each opening) may start now; the engine answers at once and runs them in the background.
+ * alone tells it or follows. The window is shown: what waits for the window before it runs (the
+ * commands run at each opening) may start now; the engine answers at once and runs them in the
+ * background. The notices are main's to deliver, never the window's to follow.
  */
 export const EngineMainRpcs = EngineRpcs.merge(
   RpcGroup.make(Rpc.make('engine.windowShown', { success: Schema.Void, error: EngineGone })),
+  NoticeFeedRpcs,
 )

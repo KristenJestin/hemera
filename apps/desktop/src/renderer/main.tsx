@@ -1,5 +1,5 @@
 import type { ThemePreference } from '@hemera/ipc'
-import { TooltipProvider } from '@hemera/ui'
+import { NoticeStack, TooltipProvider } from '@hemera/ui'
 import { MotionConfig } from 'motion/react'
 import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -9,11 +9,12 @@ import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
 import { AppSettings } from './app-settings.tsx'
 import { connect } from './link.ts'
-import { START, go, show, type Navigation } from './navigation.ts'
+import { START, go, routeOf, show, type Navigation } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useEngine } from './use-engine.ts'
+import { useNotices } from './use-notices.ts'
 import { useProject, useProjects } from './use-projects.ts'
 import { useSettings } from './use-settings.ts'
 
@@ -76,6 +77,9 @@ function Application() {
   const [settingsData, settings] = useSettings(link, ready, settingsOf)
   const dataFolder = engine.kind === 'ready' ? engine.status.dataFolder : ''
   const tools = useMemo(() => settingsTools(dataFolder), [dataFolder])
+  const { notices, open, dismiss } = useNotices(link, (target) =>
+    setNavigation((before) => go(before, routeOf(target))),
+  )
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -109,6 +113,7 @@ function Application() {
           }}
         />
       }
+      notices={<NoticeStack notices={notices} onOpen={open} onDismiss={dismiss} />}
       addProject={
         <AddProjectDialog
           open={adding}

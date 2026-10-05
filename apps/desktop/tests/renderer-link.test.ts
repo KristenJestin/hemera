@@ -20,6 +20,8 @@ import {
   type Run,
   type EnvironmentReport,
   type Project,
+  NeedTarget,
+  OpenTarget,
 } from '@hemera/ipc'
 import { Deferred, Effect, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -85,6 +87,11 @@ const COMMAND: CommandDraft = {
   readOnly: false,
   writeGlobs: [],
 }
+
+/** A system notification clicked: where it leads. */
+const NOTICE = OpenTarget.make({
+  target: NeedTarget.make({ projectId: 'acme', missionKey: 'ACME-12', needId: 'need-1' }),
+})
 
 const SERVICE: Run = {
   id: 'run-1',
@@ -169,6 +176,9 @@ const noProjects = {
   'agents.list': unused,
   'agents.checkUpdates': unused,
   'agents.update': unused,
+  'notifications.settings': unused,
+  'notifications.setKind': unused,
+  'notifications.setSound': unused,
 }
 
 /** A main that answers as told, and says when the window stopped listening. */
@@ -203,6 +213,7 @@ const main = async (engine: 'answers' | 'gone') => {
         logsShown += 1
       }),
     'application.chooseFolder': () => Effect.succeed('/work/acme'),
+    'notifications.window': () => Stream.concat(Stream.make(NOTICE), Stream.never),
     ...noProjects,
     'catalogue.save': () => Effect.fail(new ShellSyntax({ token: '&&' })),
     'variables.reveal': ({ key }) => Effect.succeed(`value of ${key}`),
@@ -292,6 +303,17 @@ describe('The window’s link, for components and hooks', () => {
       )
     })
     expect(heard).toEqual(SERVICE)
+  })
+
+  test('what main tells of notifications reaches the listener', async () => {
+    const { link } = await main('answers')
+    const heard = await new Promise((resolve) => {
+      const stop = link.onNotices((notice) => {
+        stop()
+        resolve(notice)
+      })
+    })
+    expect(heard).toEqual(NOTICE)
   })
 
   test('the preferences are read, and a theme chosen is written', async () => {
