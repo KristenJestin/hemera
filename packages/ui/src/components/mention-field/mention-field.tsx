@@ -222,9 +222,11 @@ export function MentionField({
   const id = useId()
   const [menu, setMenu] = useState<Menu | null>(null)
   const [active, setActive] = useState(0)
-  /** What the editor reads at the moment it reads it: the props and state of this render. */
+  /** What the editor reads at the moment it reads it: the props and state of the last render. */
   const latest = useRef({ mentionables, onSubmit, onValueChange, menu, active })
-  latest.current = { mentionables, onSubmit, onValueChange, menu, active }
+  useLayoutEffect(() => {
+    latest.current = { mentionables, onSubmit, onValueChange, menu, active }
+  })
   /** The text this field last handed back, so a value it wrote is not written back into it. */
   const handed = useRef(value)
 
