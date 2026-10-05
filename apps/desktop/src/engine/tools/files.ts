@@ -383,7 +383,7 @@ export const fsWrite = (call: FileCall, args: ToolArguments<'fs_write'>) =>
   Effect.gen(function* () {
     const current = yield* currentOf(call.path).pipe(Effect.result)
     if (Result.isFailure(current))
-      return failure(`could not read ${call.named}: ${current.failure}`)
+      return failure(`could not read ${call.named}: ${current.failure}; nothing was written`)
     const refused = yield* versionRefusal(call, current.success)
     if (refused !== null) return refused
     const failed = yield* writeVersion(call, current.success.fingerprint, args.content)
@@ -404,7 +404,7 @@ export const fsEdit = (call: FileCall, args: ToolArguments<'fs_edit'>) =>
   Effect.gen(function* () {
     const current = yield* currentOf(call.path).pipe(Effect.result)
     if (Result.isFailure(current))
-      return failure(`could not read ${call.named}: ${current.failure}`)
+      return failure(`could not read ${call.named}: ${current.failure}; nothing was written`)
     if (current.success.text === null) {
       return refusal(`refused: there is no file ${call.named} to edit; write it with fs_write`)
     }

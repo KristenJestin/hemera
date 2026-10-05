@@ -561,7 +561,10 @@ describe('Writing only on the version that was read', () => {
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
     if (answer.ok) expect(now).toBe('after\n')
     else {
-      expect(answer.text).toMatch(/^could not write held\.txt: .*; the file is as it was$/)
+      // A file shared with no one cannot even be read for its version: refused before writing.
+      expect(answer.text).toMatch(
+        /^could not (?:write held\.txt: .*; the file is as it was|read held\.txt: .*; nothing was written)$/,
+      )
       expect(now).toBe('before\n')
     }
     expect(['after\n', 'before\n']).toContain(now)
