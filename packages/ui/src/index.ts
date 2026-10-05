@@ -68,6 +68,19 @@ export {
   type LiveKind,
 } from './components/live-chip/live-chip-glance.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
+export {
+  choiceWords,
+  EFFORTS,
+  EffortGauge,
+  ModelPicker,
+  type Effort,
+  type Judge,
+  type ModelChoice,
+  type ModelPickerProps,
+  type PickerAgent,
+  type PickerMode,
+  type PickerModel,
+} from './components/model-picker/model-picker.tsx'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {
   Select,
