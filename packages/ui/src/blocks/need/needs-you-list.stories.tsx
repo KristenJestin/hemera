@@ -3,6 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Frame } from '../../components/frame/frame.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
+import type { NeedState } from './need-card.tsx'
 import { type NeedRow, NeedsYouList } from './needs-you-list.tsx'
 
 /** Needs you across every Project, in a frame under its head: the application's first. */
@@ -188,4 +189,58 @@ for (const [at, row] of ROWS.slice(1).entries()) {
 /** Many needs across many Projects. */
 export const Dense: Story = {
   args: { projects: ['Acme', 'Hemera', 'Acme Labs'], rows: [...ROWS, ...LABS] },
+}
+
+const SETTLED = new Map<string, NeedState>([
+  ['table', { state: 'applied', answer: 'invoices' }],
+  ['git', { state: 'expired', reason: 'what was missing is there now' }],
+])
+
+/**
+ * Answered and expired needs stay in their place a moment, one faint line each, before they
+ * leave the list; the needs still waiting keep their rows.
+ */
+export const Settled: Story = {
+  args: {
+    rows: ROWS.map((row) =>
+      Object.assign({}, row, {
+        need: Object.assign({}, row.need, {
+          status: SETTLED.get(row.id) ?? row.need.status,
+        }),
+      }),
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Applied')).toBeVisible()
+    await expect(canvas.getByText('Expired')).toBeVisible()
+    await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(2)
+    await expect(canvas.queryByRole('button', { name: 'Retry here' })).toBeNull()
+  },
+}
+
+/** While a mission has no page to open, the unfolded card offers no way to it. */
+export const WithoutMissionLink: StoryObj<typeof NeedsYouList> = {
+  args: { open: 'ssh', onOpenMission: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Open ACME-12/ })).toBeNull()
+  },
+}
+
+/** The keyboard path: a row's button unfolds its card, and Tab reaches the card's choices. */
+export const KeyboardPath: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const retry = canvas.getByRole('button', { name: 'Retry here' })
+    retry.focus()
+    await userEvent.keyboard('{Enter}')
+    await expect(retry).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Retry' })).toBeVisible())
+    await userEvent.tab()
+    await expect(canvas.getAllByRole('img', { name: 'Something missing' })[1]).toHaveFocus()
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Retry' })).toHaveFocus()
+  },
 }

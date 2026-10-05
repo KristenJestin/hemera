@@ -279,6 +279,7 @@ export {
   ProfileSection,
 } from './blocks/app-settings/app-sections.tsx'
 export {
+  APP_SECTIONS,
   AppSettings,
   type AppSection,
   type AppSettingsProps,

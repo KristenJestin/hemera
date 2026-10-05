@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import { HOME_ROWS, denseRows } from '../../shell/shell-fixtures.tsx'
 import { HomePage } from './home-page.tsx'
 
@@ -132,5 +133,81 @@ export const Focused: Story = {
     expect(canvas.getByRole('button', { name: /Run the migration/ })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     expect(args.onOpen).toHaveBeenCalledWith('n1')
+  },
+}
+
+/** What waits across the Projects: Hemera's own first, then Acme's. */
+const NEEDS: readonly NeedRow[] = [
+  {
+    id: 'git',
+    project: 'Hemera',
+    need: {
+      title: 'Git is not on the PATH',
+      text: 'Install Git, then Retry.',
+      when: '2 h',
+      ask: { kind: 'environment' },
+    },
+  },
+  {
+    id: 'table',
+    project: 'Acme',
+    need: {
+      title: 'Which table holds the invoices?',
+      missionKey: 'ACME-14',
+      when: '12 min',
+      role: 'planner',
+      ask: {
+        kind: 'decision',
+        options: [
+          { label: 'invoices', recommended: 'the api already reads it' },
+          { label: 'billing_invoices' },
+        ],
+      },
+    },
+  },
+]
+
+/**
+ * Needs you holds the needs themselves: a row per need, its count in the head, the card unfolded
+ * in place where it is answered.
+ */
+export const NeedsYou: Story = {
+  args: {
+    needs: {
+      rows: NEEDS,
+      projects: ['Acme', 'Hemera'],
+      on: () => ({ onRetry: fn(), onChoose: fn() }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const needs = within(canvas.getByRole('region', { name: 'Needs you' }))
+    expect(needs.getByText('2')).toBeInTheDocument()
+    expect(needs.getAllByRole('listitem')).toHaveLength(2)
+    await userEvent.click(needs.getByRole('button', { name: 'Answer here' }))
+    await expect(needs.getByRole('button', { name: 'invoices' })).toBeVisible()
+  },
+}
+
+/** A need just answered stays a moment, faint, and no longer counts. */
+export const NeedAnswered: Story = {
+  args: {
+    needs: {
+      rows: [
+        NEEDS[0]!,
+        Object.assign({}, NEEDS[1]!, {
+          need: Object.assign({}, NEEDS[1]!.need, {
+            status: { state: 'applied', answer: 'invoices' },
+          }),
+        }),
+      ],
+      projects: ['Acme', 'Hemera'],
+      on: () => ({ onRetry: fn(), onChoose: fn() }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const needs = within(within(canvasElement).getByRole('region', { name: 'Needs you' }))
+    expect(needs.getByText('1')).toBeInTheDocument()
+    expect(needs.getByText('Applied')).toBeInTheDocument()
   },
 }

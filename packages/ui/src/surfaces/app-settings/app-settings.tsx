@@ -37,6 +37,11 @@ const SECTIONS: readonly (Omit<SettingsSection, 'problem'> & { id: AppSection })
   { id: 'developer', label: 'Developer', icon: <IconBug size="sm" /> },
 ]
 
+/** Each section's name, as a link to it says it: "Open Settings › Models by role". */
+export const APP_SECTIONS: ReadonlyMap<AppSection, string> = new Map(
+  SECTIONS.map((section) => [section.id, section.label]),
+)
+
 export interface AppSettingsProps {
   current: AppSection
   onSection: (section: AppSection) => void

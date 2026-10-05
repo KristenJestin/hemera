@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { Ball } from '../../blocks/ball/ball-mark.tsx'
 import { MissionRow, MissionRowSkeleton } from '../../blocks/mission/mission-row.tsx'
+import { NeedsYouList, type NeedsYouListProps } from '../../blocks/need/needs-you-list.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
@@ -44,6 +45,11 @@ export interface HomePageProps {
   /** Whether there is a Project at all: without one, Home is one invitation. */
   hasProjects: boolean
   needsYou: HomeSection
+  /**
+   * The needs themselves, once they are read: Needs you then holds a row per need, answered in
+   * place, and counts those still waiting; without them, it holds `needsYou`'s rows.
+   */
+  needs?: Omit<NeedsYouListProps, 'loading'> | undefined
   questions: HomeSection
   sinceYouLeft: HomeSection
   recent: HomeSection
@@ -53,6 +59,10 @@ export interface HomePageProps {
   onAddProject: () => void
   onRetry: () => void
 }
+
+/** A need still waiting: one answered or expired a moment ago no longer counts. */
+const waiting = (row: NeedsYouListProps['rows'][number]): boolean =>
+  row.need.status === undefined || row.need.status.state === 'waiting'
 
 /** Side by side, each as tall as what it holds: a card never stretches to its neighbour. */
 const TWO = 'grid grid-cols-1 items-start gap-6 lg:grid-cols-2'
@@ -121,6 +131,7 @@ export function HomePage({
   today,
   hasProjects,
   needsYou,
+  needs,
   questions,
   sinceYouLeft,
   recent,
@@ -161,15 +172,21 @@ export function HomePage({
     <Page>
       <PageHeader title="Home" about={<span>{today}</span>} />
       <div className={TWO}>
-        <Section title="Needs you" count={needsYou.rows.length}>
-          <Rows
-            rows={needsYou.rows}
-            label="Needs you"
-            loading={loading}
-            empty="Nothing waits for you."
-            onOpen={onOpen}
-          />
-        </Section>
+        {needs === undefined ? (
+          <Section title="Needs you" count={needsYou.rows.length}>
+            <Rows
+              rows={needsYou.rows}
+              label="Needs you"
+              loading={loading}
+              empty="Nothing waits for you."
+              onOpen={onOpen}
+            />
+          </Section>
+        ) : (
+          <Section title="Needs you" count={needs.rows.filter(waiting).length}>
+            <NeedsYouList {...needs} loading={loading} />
+          </Section>
+        )}
         <Section title="Questions" count={questions.rows.length}>
           <Rows
             rows={questions.rows}

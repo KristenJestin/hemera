@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -16,6 +17,9 @@ import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-c
  * kind's glyph, the title, what the agent wrote cut to the row, and when. Its button, "<action>
  * here", unfolds the whole need card under the row, pushing the rows below it, with a way to the
  * mission under the card. The rows are the same height loading as loaded.
+ *
+ * A need that arrives grows into its place and pushes the rows under it; one answered or expired
+ * becomes its card's faint line where its row was, and folds out of the list when it leaves.
  */
 export interface NeedRow {
   id: string
@@ -43,7 +47,8 @@ export interface NeedsYouListProps {
   loading?: boolean | undefined
   /** Which row is open at first; none unless said. */
   open?: string | undefined
-  onOpenMission: (id: string) => void
+  /** Where a need's mission opens; without it, the unfolded card offers no way to it. */
+  onOpenMission?: ((id: string) => void) | undefined
   /** Every answer a card gives, with the need it answers. */
   on: (
     id: string,
@@ -74,6 +79,8 @@ const TITLE = 'min-w-0 shrink truncate font-medium'
 const DETAIL = 'min-w-0 flex-1 truncate text-muted-foreground'
 const WHEN = 'shrink-0 text-xs text-muted-foreground tabular-nums'
 const RULE = 'border-b border-border last:border-b-0'
+/** A row, clipped while it grows in or folds out. */
+const PLACE = cn(RULE, 'overflow-hidden')
 
 function Row({
   row,
@@ -87,27 +94,41 @@ function Row({
   projects: readonly string[] | undefined
   opened: boolean
   onToggle: () => void
-  onOpenMission: () => void
+  onOpenMission: (() => void) | undefined
   on: ReturnType<NeedsYouListProps['on']>
 }): ReactNode {
   const folding = useTransition(fold)
   const { need } = row
   const kind = need.ask.kind
+  const settled = need.status !== undefined && need.status.state !== 'waiting'
   return (
-    <li className={RULE} data-need={row.id}>
-      <div className={ROW}>
-        <ProjectMark name={row.project} others={projects} legend />
-        <span className={KEY}>{need.missionKey ?? ''}</span>
-        <NeedGlyph kind={kind} />
-        <span className={TITLE}>{need.title}</span>
-        <span className={DETAIL}>{need.text ?? ''}</span>
-        <span className={WHEN}>{need.when}</span>
-        <Button size="sm" aria-expanded={opened} onClick={onToggle}>
-          {ACTIONS[kind]}
-        </Button>
-      </div>
+    <motion.li
+      className={PLACE}
+      data-need={row.id}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
+      {settled ? (
+        <div className="px-4 py-1">
+          <NeedCard {...need} missionKey={undefined} />
+        </div>
+      ) : (
+        <div className={ROW}>
+          <ProjectMark name={row.project} others={projects} legend />
+          <span className={KEY}>{need.missionKey ?? ''}</span>
+          <NeedGlyph kind={kind} />
+          <span className={TITLE}>{need.title}</span>
+          <span className={DETAIL}>{need.text ?? ''}</span>
+          <span className={WHEN}>{need.when}</span>
+          <Button size="sm" aria-expanded={opened} onClick={onToggle}>
+            {ACTIONS[kind]}
+          </Button>
+        </div>
+      )}
       <AnimatePresence initial={false}>
-        {opened && (
+        {opened && !settled && (
           <motion.div
             className="overflow-hidden"
             initial={collapse}
@@ -117,7 +138,7 @@ function Row({
           >
             <div className="flex flex-col gap-2 px-4 pb-4">
               <NeedCard {...need} missionKey={undefined} {...on} />
-              {need.missionKey !== undefined && (
+              {need.missionKey !== undefined && onOpenMission !== undefined && (
                 <Button variant="link" className="self-start" onClick={onOpenMission}>
                   Open {need.missionKey}
                   <IconChevronRight size="sm" aria-hidden="true" />
@@ -127,7 +148,7 @@ function Row({
           </motion.div>
         )}
       </AnimatePresence>
-    </li>
+    </motion.li>
   )
 }
 
@@ -177,17 +198,19 @@ export function NeedsYouList({
   }
   return (
     <ul aria-label="Needs you" className="flex flex-col">
-      {rows.map((row) => (
-        <Row
-          key={row.id}
-          row={row}
-          projects={projects}
-          opened={opened === row.id}
-          onToggle={() => setOpened(opened === row.id ? null : row.id)}
-          onOpenMission={() => onOpenMission(row.id)}
-          on={on(row.id)}
-        />
-      ))}
+      <AnimatePresence initial={false}>
+        {rows.map((row) => (
+          <Row
+            key={row.id}
+            row={row}
+            projects={projects}
+            opened={opened === row.id}
+            onToggle={() => setOpened(opened === row.id ? null : row.id)}
+            onOpenMission={onOpenMission === undefined ? undefined : () => onOpenMission(row.id)}
+            on={on(row.id)}
+          />
+        ))}
+      </AnimatePresence>
     </ul>
   )
 }
