@@ -1,20 +1,21 @@
 /**
  * The notifier's ports on this machine: Electron's `Notification` in main, the window's focus, Do
- * Not Disturb as the desktop says it, and the system's own sound player.
+ * Not Disturb as the desktop says it, and the system's own sound player, which previews too.
  *
  * Under the headless end-to-end suite nothing reaches the desktop of whoever runs it: no system
  * notification, no sound, no window brought forward. What would have been is written to the
  * diagnostic log instead.
  */
 
-import type { NotificationSettings, WindowNotice } from '@hemera/ipc'
+import type { NotificationSettings, Sound, SoundStyle, WindowNotice } from '@hemera/ipc'
 import { Effect } from 'effect'
 import { BrowserWindow, Notification } from 'electron/main'
 
 import type { Log } from './diagnostic.ts'
 import { readDoNotDisturb, systemAsker } from './do-not-disturb.ts'
+import type { DoNotDisturb } from './notifications.ts'
 import type { NotifierPorts } from './notifier.ts'
-import { playSound, soundFile, systemPlayer } from './sounds.ts'
+import { playStyle, systemPlayer } from './sounds.ts'
 
 /** The window, when there is one: the application has one. */
 const theWindow = (): BrowserWindow | undefined => BrowserWindow.getAllWindows()[0]
@@ -33,23 +34,55 @@ function bringForward(): void {
   window.focus()
 }
 
-export interface SystemNotifierOptions {
-  readonly settings: Effect.Effect<NotificationSettings, Error>
-  readonly tell: (notice: WindowNotice) => void
+export interface SystemSoundsOptions {
   readonly soundsFolder: string
   /** Under the headless suite: nothing reaches the desktop. */
   readonly quiet: boolean
   readonly log: Log
 }
 
-export function systemNotifierPorts(options: SystemNotifierOptions): NotifierPorts {
-  const { settings, tell, soundsFolder, quiet, log } = options
+/** Do Not Disturb and the sound player of this machine, shared by notifications and previews. */
+export interface SystemSounds {
+  readonly doNotDisturb: Effect.Effect<DoNotDisturb>
+  /** Plays a sound in a style: whether a player did. */
+  readonly play: (style: SoundStyle, sound: Sound) => Effect.Effect<boolean>
+}
+
+export function systemSounds(options: SystemSoundsOptions): SystemSounds {
+  const { soundsFolder, quiet, log } = options
+  const playing = playStyle(process.platform, soundsFolder, systemPlayer)
   return {
-    focused: hasFocus,
-    settings,
     doNotDisturb: quiet
       ? Effect.succeed('off')
       : Effect.promise(() => readDoNotDisturb(process.platform, process.env, systemAsker)),
+    play: (style, sound) =>
+      Effect.promise(async () => {
+        if (quiet) {
+          log(`a sound was not played: ${style}/${sound}`)
+          return false
+        }
+        const played = await playing(style, sound)
+        if (!played) log(`no player could play the sound ${style}/${sound}`)
+        return played
+      }),
+  }
+}
+
+export interface SystemNotifierOptions {
+  readonly settings: Effect.Effect<NotificationSettings, Error>
+  readonly tell: (notice: WindowNotice) => void
+  readonly sounds: SystemSounds
+  /** Under the headless suite: nothing reaches the desktop. */
+  readonly quiet: boolean
+  readonly log: Log
+}
+
+export function systemNotifierPorts(options: SystemNotifierOptions): NotifierPorts {
+  const { settings, tell, sounds, quiet, log } = options
+  return {
+    focused: hasFocus,
+    settings,
+    doNotDisturb: sounds.doNotDisturb,
     show: (delivery, onClick) => {
       if (quiet || !Notification.isSupported()) {
         log(`a system notification was not shown: ${delivery.body}`)
@@ -66,13 +99,8 @@ export function systemNotifierPorts(options: SystemNotifierOptions): NotifierPor
       notification.show()
       return { close: () => notification.close() }
     },
-    play: (sound) => {
-      if (quiet) return log(`a sound was not played: ${sound}`)
-      void playSound(process.platform, soundFile(soundsFolder, sound), systemPlayer).then(
-        (played) => {
-          if (!played) log(`no player could play the sound ${sound}`)
-        },
-      )
+    play: (sound, style) => {
+      Effect.runFork(sounds.play(style, sound))
     },
     bringForward: () => {
       if (!quiet) bringForward()

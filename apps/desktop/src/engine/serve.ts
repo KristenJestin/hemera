@@ -47,6 +47,7 @@ import {
   readNotificationSettings,
   setNotificationKind,
   setNotificationSound,
+  setSoundStyle,
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import {
@@ -196,6 +197,8 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(setNotificationKind(REGISTRY, id, on)).pipe(observed('notifications.setKind', log)),
     'notifications.setSound': ({ sound, on }) =>
       use(setNotificationSound(REGISTRY, sound, on)).pipe(observed('notifications.setSound', log)),
+    'notifications.setStyle': ({ style }) =>
+      use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
     'notifications.feed': () =>
       follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),

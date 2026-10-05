@@ -18,6 +18,9 @@ import {
   type EnvironmentReport,
   type Preferences,
   type PreferencesChange,
+  type Sound,
+  type SoundPreview,
+  type SoundStyle,
   type WindowNotice,
 } from '@hemera/ipc'
 import { Effect } from 'effect'
@@ -43,6 +46,8 @@ export interface Application {
   readonly display: (preferences: Preferences) => Effect.Effect<void>
   /** What main tells the window of notifications, from the moment it listens. */
   readonly notices: Stream.Stream<WindowNotice>
+  /** Plays one sound of one style once, as a notification would. */
+  readonly preview: (style: SoundStyle, sound: Sound) => Effect.Effect<SoundPreview>
 }
 
 const gone = () => new EngineGone()
@@ -277,6 +282,13 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('notifications.setSound', log),
       ),
+    'notifications.setStyle': (request) =>
+      engine['notifications.setStyle'](request).pipe(
+        closedAs(gone),
+        observed('notifications.setStyle', log),
+      ),
+    'notifications.preview': ({ style, sound }) =>
+      application.preview(style, sound).pipe(observed('notifications.preview', log)),
     'notifications.window': () =>
       application.notices.pipe(observedStream('notifications.window', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),

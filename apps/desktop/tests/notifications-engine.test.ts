@@ -42,6 +42,7 @@ import {
   registryOf,
   setNotificationKind,
   setNotificationSound,
+  setSoundStyle,
 } from '../src/engine/notifications.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { Secrets } from '../src/engine/secrets.ts'
@@ -451,6 +452,37 @@ describe('The switches are the application’s, listed from the registry', () =>
     expect(settings.kinds.find((one) => one.id === 'need')?.on).toBe(false)
     expect(settings.sounds.find((one) => one.sound === 'error')?.on).toBe(false)
     expect(settings.sounds.find((one) => one.sound === 'done')?.on).toBe(true)
+  })
+
+  test('the sound styles: thirteen listed with their names, Hemera’s chosen by default', async () => {
+    const settings = await engine()(({ profile }) =>
+      profile.use(readNotificationSettings(REGISTRY)),
+    )
+    expect(settings.style).toBe('hemera')
+    expect(settings.styles.map((one) => one.label)).toEqual([
+      'Hemera',
+      'Minimal',
+      'Soft',
+      'Glass',
+      'Arcade',
+      'Mechanical',
+      'Organic',
+      'Dreamy',
+      'Sci-fi',
+      'Rubber',
+      'Cinematic',
+      'Studio',
+      'Zen',
+    ])
+  })
+
+  test('the sound style chosen survives a restart', async () => {
+    const chosen = await engine()(({ profile }) => profile.use(setSoundStyle(REGISTRY, 'glass')))
+    expect(chosen.style).toBe('glass')
+    const settings = await engine()(({ profile }) =>
+      profile.use(readNotificationSettings(REGISTRY)),
+    )
+    expect(settings.style).toBe('glass')
   })
 
   test('a kind that is not registered is refused', async () => {

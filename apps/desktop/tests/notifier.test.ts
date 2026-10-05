@@ -6,7 +6,7 @@
  * the machine running the suite.
  */
 
-import type { Notice, NoticeFeed, NotificationSettings, Sound, WindowNotice } from '@hemera/ipc'
+import type { Notice, NoticeFeed, NotificationSettings, WindowNotice } from '@hemera/ipc'
 import {
   InAppNotice,
   NeedEnded,
@@ -29,6 +29,11 @@ const SETTLE = '300 millis'
 const SETTINGS: NotificationSettings = {
   kinds: [{ id: 'need', label: 'A need', on: true, byDefault: true, sound: 'needs-you' }],
   sounds: [{ sound: 'needs-you', label: 'Needs you', on: true }],
+  style: 'glass',
+  styles: [
+    { style: 'hemera', label: 'Hemera' },
+    { style: 'glass', label: 'Glass' },
+  ],
 }
 
 let made = 0
@@ -55,7 +60,8 @@ interface Machine {
   doNotDisturb: DoNotDisturb
   readonly shown: Delivery[]
   readonly closed: string[]
-  readonly played: Sound[]
+  /** Each sound played, in the style it was played in: `glass/needs-you`. */
+  readonly played: string[]
   readonly told: WindowNotice[]
   readonly forward: number[]
   readonly clicks: Map<string, () => void>
@@ -81,7 +87,7 @@ const portsOf = (seen: Machine): NotifierPorts => ({
     seen.clicks.set(delivery.id, onClick)
     return { close: () => seen.closed.push(delivery.id) }
   },
-  play: (sound) => seen.played.push(sound),
+  play: (sound, style) => seen.played.push(`${style}/${sound}`),
   bringForward: () => seen.forward.push(seen.forward.length + 1),
   tell: (notice) => seen.told.push(notice),
   log: () => undefined,
@@ -108,7 +114,7 @@ const notifying = (
 const raised = (notice: Notice) => NoticeRaised.make({ notice })
 
 describe('The window not focused: a system notification created in main', () => {
-  test('what arrives within the window is one notification with one sound', async () => {
+  test('what arrives within the window is one notification with one sound, in the chosen style', async () => {
     const seen = machine(false)
     await notifying(seen, (tell) =>
       Effect.gen(function* () {
@@ -122,7 +128,7 @@ describe('The window not focused: a system notification created in main', () => 
       }),
     )
     expect(seen.shown.map((one) => one.body)).toEqual(['3 things wait for you in Acme'])
-    expect(seen.played).toEqual(['needs-you'])
+    expect(seen.played).toEqual(['glass/needs-you'])
     expect(seen.told).toEqual([])
   })
 
@@ -189,7 +195,7 @@ describe('The window focused: the in-app notification only', () => {
       }),
     )
     expect(seen.shown).toEqual([])
-    expect(seen.played).toEqual(['needs-you'])
+    expect(seen.played).toEqual(['glass/needs-you'])
     expect(seen.told).toEqual([
       InAppNotice.make({
         id: one.id,
