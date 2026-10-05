@@ -43,8 +43,6 @@ const meta = {
     onHide: fn(),
     onAnswer: fn(),
     onOpenMission: fn(),
-    onCreateAnyway: fn(),
-    onCreateMission: fn(),
     onRename: fn(),
     onRetry: fn(),
   },
@@ -254,24 +252,17 @@ export const MissionDrafted: Story = {
   },
 }
 
-/** Something close exists: the close mission as a link, and Create anyway. */
+/** The agent's draft is close to a mission that exists: it drafted none, and says which. */
 export const SomethingClose: Story = {
   args: {
     items: [
       ...CONVERSATION,
-      {
-        kind: 'close',
-        id: 'c1',
-        missionKey: 'ACME-12',
-        title: 'Invoices export to CSV',
-        draft: 'Export invoices as PDF',
-      },
+      { kind: 'close', id: 'c1', missionKey: 'ACME-12', title: 'Invoices export to CSV' },
     ],
   },
   play: async ({ args, canvasElement }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Create anyway' }))
-    await expect(args.onCreateAnyway).toHaveBeenCalledWith('c1')
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'ACME-12' }))
+    await expect(args.onOpenMission).toHaveBeenCalledWith('ACME-12')
   },
 }
 
@@ -291,7 +282,7 @@ export const Restarted: Story = {
   },
 }
 
-/** The Chat's model, changed with the picker in its header. */
+/** The Chat's model, changed with the picker at the foot of the composer. */
 export const ChangingTheModel: Story = {
   play: async ({ args, canvasElement }) => {
     await userEvent.click(

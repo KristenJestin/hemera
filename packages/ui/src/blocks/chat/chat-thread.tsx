@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Face } from '../../components/face/face.tsx'
+import { kindOf, MentionBadge } from '../../components/mention-field/mention-field.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import {
   IconAlertCircle,
@@ -25,8 +26,8 @@ import { collapse, expand, fold, useTransition } from '../../motion.ts'
 /**
  * A Chat's thread: what was said, in order, at a reading measure.
  *
- * - Your messages and the agent's are bubbles, yours at the end of the line. A mention (`@…`) and
- *   code (`` `…` ``) are set in the code face.
+ * - Your messages and the agent's are bubbles, yours at the end of the line. A mention (`@…`) is
+ *   the badge the composer drew, code (`` `…` ``) is set in the code face.
  * - The agent's actions are folded under its answer, "3 actions", and unfold to their list.
  * - What happened rather than what was said is a faint line with its glyph: a turn stopped, an
  *   agent's error in words, a silent turn, a start past its delay, Hemera restarted under a turn,
@@ -58,7 +59,8 @@ export type ChatItem =
   | { kind: 'line'; id: string; tone: ChatLineTone; text?: string | undefined }
   | { kind: 'held'; id: string; command: string; reason: string; answer: HeldAnswer }
   | { kind: 'created'; id: string; missionKey: string; title: string }
-  | { kind: 'close'; id: string; missionKey: string; title: string; draft: string }
+  /** The agent was told a mission close to its draft already exists, and drafted none. */
+  | { kind: 'close'; id: string; missionKey: string; title: string }
 
 export interface ChatThreadProps {
   items: readonly ChatItem[]
@@ -67,7 +69,6 @@ export interface ChatThreadProps {
   /** Whether a turn runs: the agent's face ends the thread. */
   working: boolean
   onOpenMission: (missionKey: string) => void
-  onCreateAnyway: (id: string) => void
   onRetry: () => void
 }
 
@@ -91,10 +92,8 @@ const ACTION_GLYPHS: Record<ChatActionKind, ReactNode> = {
 /** A message's words, its mentions and its code in the code face. */
 function Words({ text }: { text: string }): ReactNode {
   return text.split(/(@\S+|`[^`]+`)/).map((part, at) =>
-    part.startsWith('@') ? (
-      <span key={at} className="font-mono text-xs text-primary-muted-foreground">
-        {part}
-      </span>
+    part.startsWith('@') && part.length > 1 ? (
+      <MentionBadge key={at} kind={kindOf(part.slice(1))} label={part.slice(1)} />
     ) : part.startsWith('`') && part.endsWith('`') && part.length > 1 ? (
       <code key={at} className={CODE}>
         {part.slice(1, -1)}
@@ -200,7 +199,6 @@ function Item({
   item,
   agent,
   onOpenMission,
-  onCreateAnyway,
   onRetry,
 }: { item: ChatItem } & Omit<ChatThreadProps, 'items' | 'working'>): ReactNode {
   switch (item.kind) {
@@ -250,20 +248,17 @@ function Item({
       )
     case 'close':
       return (
-        <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
-          <p className="text-muted-foreground">
-            Close to “{item.draft}”: <span className="font-mono">{item.missionKey}</span> ·{' '}
-            <span className="text-foreground">{item.title}</span>
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => onOpenMission(item.missionKey)}>
-              Open {item.missionKey}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onCreateAnyway(item.id)}>
-              Create anyway
-            </Button>
-          </div>
-        </div>
+        <Line icon={<IconListCheck size="sm" />}>
+          Not drafted: close to{' '}
+          <Button
+            variant="link"
+            className="font-mono"
+            onClick={() => onOpenMission(item.missionKey)}
+          >
+            {item.missionKey}
+          </Button>{' '}
+          · {item.title}
+        </Line>
       )
   }
 }

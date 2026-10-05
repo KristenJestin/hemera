@@ -595,8 +595,6 @@ function ChatFixture({ title }: { title: string }): ReactNode {
       onHide={none}
       onAnswer={none}
       onOpenMission={none}
-      onCreateAnyway={none}
-      onCreateMission={none}
       onRename={none}
       onRetry={none}
     />

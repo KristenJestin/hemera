@@ -15,25 +15,17 @@ import {
 } from '../../components/model-picker/model-picker.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import {
-  IconArrowUp,
-  IconListCheck,
-  IconLock,
-  IconMessages,
-  IconPencil,
-  IconPlayerStop,
-} from '../../icons.ts'
+import { IconArrowUp, IconLock, IconMessages, IconPencil, IconPlayerStop } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 
 /**
  * A Chat: a conversation with an agent about a Project, outside any mission.
  *
  * - The header: the Chat's title and its rename, then what it talks about — the Project, its
- *   main checkout — and with which agent and model, the model picker itself; at the end, "Create
- *   a mission from this Chat".
+ *   main checkout. A mission is drafted by the agent when asked to, never by a button here.
  * - The thread scrolls between a header and a composer that stay where they are.
- * - The composer is the mention field. Send appears once something is written; while a turn runs
- *   it is Stop.
+ * - The composer is the mention field, with the Chat's model picker at the start of its foot and
+ *   Send at its end, once something is written; while a turn runs, Stop.
  * - A call the agent wants to make waits in a card over the composer: the command, the agent's
  *   reason, Allow once or Deny — a Chat has no mission to allow it for. Answered, the card goes
  *   and its line in the thread says how.
@@ -64,8 +56,6 @@ export interface ChatPageProps {
   /** The answer to a held call. */
   onAnswer: (id: string, answer: 'allow' | 'deny') => void
   onOpenMission: (missionKey: string) => void
-  onCreateAnyway: (id: string) => void
-  onCreateMission: () => void
   onRename: (title: string) => void
   onRetry: () => void
 }
@@ -193,8 +183,6 @@ export function ChatPage({
   onHide,
   onAnswer,
   onOpenMission,
-  onCreateAnyway,
-  onCreateMission,
   onRename,
   onRetry,
 }: ChatPageProps): ReactNode {
@@ -216,12 +204,6 @@ export function ChatPage({
           <div className={TITLE_LINE}>
             <h1 className={TITLE}>{title}</h1>
             <Rename title={title} onRename={onRename} />
-            <div className="ml-auto flex shrink-0 items-center">
-              <Button size="sm" onClick={onCreateMission}>
-                <IconListCheck size="sm" aria-hidden="true" />
-                Create a mission from this Chat
-              </Button>
-            </div>
           </div>
           <div className={ABOUT}>
             <ProjectMark name={project.name} identity={project.identity} />
@@ -230,19 +212,6 @@ export function ChatPage({
             <span className="shrink-0">Chat</span>
             <span aria-hidden="true">·</span>
             <span className="min-w-0 shrink truncate font-mono text-xs">{checkout}</span>
-            <span aria-hidden="true">·</span>
-            <span className="flex min-w-0 shrink-0">
-              <ModelPicker
-                label="Model of this Chat"
-                agents={agents}
-                value={model}
-                fallback={fallback}
-                judge={judge}
-                onChange={onModel}
-                onFavourite={onFavourite}
-                onHide={onHide}
-              />
-            </span>
           </div>
         </header>
       </div>
@@ -258,7 +227,6 @@ export function ChatPage({
             agent={agent}
             working={working}
             onOpenMission={onOpenMission}
-            onCreateAnyway={onCreateAnyway}
             onRetry={onRetry}
           />
         )}
@@ -278,6 +246,19 @@ export function ChatPage({
             onValueChange={onDraft}
             mentionables={mentionables}
             onSubmit={send}
+            leading={
+              <ModelPicker
+                label="Model of this Chat"
+                bare
+                agents={agents}
+                value={model}
+                fallback={fallback}
+                judge={judge}
+                onChange={onModel}
+                onFavourite={onFavourite}
+                onHide={onHide}
+              />
+            }
             autoFocus={items.length === 0}
             trailing={
               working ? (
