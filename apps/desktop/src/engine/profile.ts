@@ -73,6 +73,15 @@ import { supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 import { type MissionParts, type MissionServices, missionsLayer, runStops } from './missions.ts'
 import { deliverAnswers, recheckNeeds } from './needs.ts'
+import {
+  type ActionRules,
+  type EffectfulActions,
+  actionRulesLayer,
+  handleIndeterminate,
+  settleLeftActions,
+} from './tools/actions.ts'
+import { type ToolsParts, type ToolAccess, type ToolGate, toolsLayer } from './tools/index.ts'
+import type { HemeraEndpoint } from './agents/endpoint.ts'
 import { assignKeyPrefixes } from './projects.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
@@ -103,6 +112,10 @@ export interface ProfileParts {
    * too; a registry of its own otherwise.
    */
   readonly secrets?: SecretsRegistry
+  /** The ports of the tools' gate later tickets fill; the defaults otherwise. */
+  readonly tools?: ToolsParts
+  /** The rules of the actions with an effect outside the database; this version's otherwise. */
+  readonly actionRules?: Layer.Layer<ActionRules>
 }
 
 /** How often the pending environment needs are checked again while they wait. */
@@ -112,7 +125,16 @@ const RECHECK_EVERY = '5 minutes'
  * What the calls on the Profile stand on: the Projects, their Workspaces, their runs and their
  * missions.
  */
-export type EngineServices = WorkspaceServices | RunServices | MissionServices | Secrets
+export type EngineServices =
+  | WorkspaceServices
+  | RunServices
+  | MissionServices
+  | Secrets
+  | ActionRules
+  | EffectfulActions
+  | ToolGate
+  | ToolAccess
+  | HemeraEndpoint
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -203,6 +225,7 @@ export const startProfile = (
     // The commands: the supervisor (its registry in the database, its children's standard error
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
     const layers = missionsLayer(parts.missions).pipe(
+      Layer.provideMerge(toolsLayer(log, version, parts.tools)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -211,7 +234,7 @@ export const startProfile = (
           parts.askBeforeRunning ?? nobodyToAskLayer(log),
         ),
       ),
-      Layer.provideMerge(profileLayers),
+      Layer.provideMerge(Layer.merge(profileLayers, parts.actionRules ?? actionRulesLayer())),
     )
     const opened = yield* Layer.build(layers).pipe(
       Effect.flatMap((context) =>
@@ -287,6 +310,25 @@ export const startProfile = (
       )
     }
 
+    // An action a stopped engine left without an outcome is perhaps done: it becomes indeterminate,
+    // and what its post-condition finds is written, before anything acts.
+    yield* run(settleLeftActions).pipe(
+      Effect.tap((left) =>
+        left.length === 0
+          ? Effect.void
+          : Effect.sync(() =>
+              log(
+                `left ${String(left.length)} action(s) indeterminate: ${left.map((one) => one.kind).join(', ')}`,
+              ),
+            ),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() =>
+          log(`the actions a stopped engine left were not settled: ${said(refusal)}`),
+        ),
+      ),
+    )
+
     // What a stopped engine left running is ended and marked interrupted before anything starts;
     // what is still going when this engine ends is written stopped.
     yield* run(recoverRuns).pipe(
@@ -326,6 +368,7 @@ export const startProfile = (
     yield* gate.pass.pipe(
       Effect.andThen(step('stopping what cancelled missions left', runStops(null))),
       Effect.andThen(step('handing over the answers left', deliverAnswers)),
+      Effect.andThen(step('handing the indeterminate actions over', handleIndeterminate)),
       Effect.andThen(
         step('checking the environment needs again', recheckNeeds).pipe(
           Effect.repeat(Schedule.spaced(RECHECK_EVERY)),

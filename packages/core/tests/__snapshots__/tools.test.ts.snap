@@ -1,0 +1,282 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Every input schema is generated from its Schema > the whole list, as an agent reads it 1`] = `
+[
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Read one page of a file, by bytes: at most 262144 bytes, ending on a line end when it can. The answer gives the page with its line numbers, the offset of the next page, and the file's total size.",
+      "properties": {
+        "path": {
+          "description": "The file, relative to the repository or to your place.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "range": {
+          "additionalProperties": true,
+          "description": "The page to read, by bytes.",
+          "properties": {
+            "length": {
+              "description": "How many bytes at most; 262144 without it.",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "offset": {
+              "description": "The byte to start at; 0 without it.",
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "repository": {
+          "description": "A repository of the Project, by its path as the Project names it (\`api\`); the root of your place without it. A path is relative to it.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "fs_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "List a folder: each entry with its kind and size, at most 1000 entries. What could not be read is named, never left out.",
+      "properties": {
+        "depth": {
+          "description": "How many levels to list, 1 without it, 5 at most.",
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "path": {
+          "description": "The folder, relative to the repository or to your place: \`.\` for its root.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "A repository of the Project, by its path as the Project names it (\`api\`); the root of your place without it. A path is relative to it.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "fs_list",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Search the files for a piece of text, \`.gitignore\` respected. One call returns at most 200 matches and scans at most 1048576 bytes: the answer says which limit stopped it, gives the cursor to resume from, and names the files it did not read.",
+      "properties": {
+        "cursor": {
+          "description": "Where to resume, as the previous answer gave it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "glob": {
+          "description": "Only the files whose path matches this glob (\`src/**/*.ts\`), relative to where it searches.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "pattern": {
+          "description": "The text to look for, as it is written; case does not matter.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "A repository of the Project, by its path as the Project names it (\`api\`); the root of your place without it. A path is relative to it.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "pattern",
+      ],
+      "type": "object",
+    },
+    "name": "search",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write a whole file. An existing file is written only if it is still the version you last read or wrote: read it first; a file that changed since is refused with what changed.",
+      "properties": {
+        "content": {
+          "description": "What the whole file becomes.",
+          "type": "string",
+        },
+        "path": {
+          "description": "The file, relative to the repository or to your place; its folders are created.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "A repository of the Project, by its path as the Project names it (\`api\`); the root of your place without it. A path is relative to it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "why": {
+          "description": "Why you make this call, in one sentence: shown to the user if Hemera asks them about it.",
+          "maxLength": 500,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "fs_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Edit a file with anchored replacements, applied in order, all or none. The file must still be the version you last read or wrote: read it first.",
+      "properties": {
+        "edits": {
+          "description": "The edits, applied in order: all of them, or none.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "new": {
+                "description": "What replaces it; empty to remove it.",
+                "type": "string",
+              },
+              "old": {
+                "description": "The text to replace: it must appear exactly once in the file as it then stands.",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "old",
+              "new",
+            ],
+            "type": "object",
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "type": "array",
+        },
+        "path": {
+          "description": "The file, relative to the repository or to your place.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "A repository of the Project, by its path as the Project names it (\`api\`); the root of your place without it. A path is relative to it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "why": {
+          "description": "Why you make this call, in one sentence: shown to the user if Hemera asks them about it.",
+          "maxLength": 500,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+        "edits",
+      ],
+      "type": "object",
+    },
+    "name": "fs_edit",
+  },
+  {
+    "inputSchema": {
+      "description": "The commands of the Project's catalogue you may run: id, name, type, where each runs, and its line.",
+      "properties": {},
+      "type": "object",
+    },
+    "name": "commands_list",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Run a command of the catalogue, by its id, or a command line. The answer comes when it ends, or after the timeout (30 s without one) with its run id: it keeps going, and commands_output reads it. The answer carries the end of its output.",
+      "properties": {
+        "command": {
+          "description": "A command of the catalogue, by its id from commands_list.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "line": {
+          "description": "A command line to run instead, without shell syntax (no \`>\`, \`|\`, \`&&\`, \`;\`, \`$(…)\` or glob).",
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "For a line: the repository it runs in, by its path as the Project names it; the root of your place without it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "timeout": {
+          "description": "How long to wait for it to end, in seconds: 30 without it, 600 at most.",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "why": {
+          "description": "Why you make this call, in one sentence: shown to the user if Hemera asks them about it.",
+          "maxLength": 500,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "commands_run",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "The state of a run you started, its exit code once it ended, and the end of its output.",
+      "properties": {
+        "run": {
+          "description": "The run, by the id commands_run answered.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "tail": {
+          "description": "How many of its last lines; 40 without it.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "run",
+      ],
+      "type": "object",
+    },
+    "name": "commands_output",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Stop a run you started, and everything it started.",
+      "properties": {
+        "run": {
+          "description": "The run, by the id commands_run answered.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "run",
+      ],
+      "type": "object",
+    },
+    "name": "commands_stop",
+  },
+]
+`;

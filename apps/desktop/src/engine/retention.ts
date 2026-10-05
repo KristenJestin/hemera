@@ -57,6 +57,9 @@ export const TABLE_CLASSES = {
   need_deliveries: 'permanent',
   mission_stops: 'permanent',
   agent_sessions: 'permanent',
+  effectful_actions: 'permanent',
+  tool_calls: 'permanent',
+  session_files: 'state',
 } as const satisfies Record<string, RetentionClass>
 
 /**

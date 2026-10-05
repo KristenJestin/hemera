@@ -70,7 +70,7 @@ export type AgentDied = typeof AgentDied.Type
 
 /** What a session's system prompt is, until the briefs of #40 write it. */
 const SYSTEM_PROMPT =
-  'You work for Hemera. Every read, write and command goes through Hemera’s tools, the only ones you have.'
+  'You work for Hemera. Every read, write and command goes through Hemera’s tools, the only ones you have. A refusal from Hemera is an answer: it says what was refused and why; do not try to reach the same effect another way.'
 
 /** The bare `_meta` as the JSON object it travels as. */
 const asJson = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))
