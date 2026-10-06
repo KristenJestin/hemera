@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { PermissionAnswer, VALUE_FORGOTTEN, sensitivePlace } from '@hemera/core/domain'
 import { Effect, Predicate, References, type Schema } from 'effect'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import { AcpTraces } from '../src/engine/agents/trace.ts'
@@ -132,16 +132,12 @@ describe('The test case: a repository nobody declared', () => {
         }),
       ),
     )
-    // The setup reports done once the card is stored; the fake agent records the tool's answer just
-    // after, so wait for it rather than read it at once.
-    await vi.waitFor(() =>
-      expect(world.agents[0]?.answers.toolAnswers.length ?? 0).toBeGreaterThanOrEqual(2),
-    )
-    const [read, proposed] = world.agents[0]?.answers.toolAnswers ?? []
+    // The setup ends its session once the card is stored, which can stop the fake agent before it
+    // records the proposal's answer: the proposal is checked on the card below, not on the agent.
+    const [read] = world.agents[0]?.answers.toolAnswers ?? []
     expect(read?.text).toContain(
       'no repository in main: the Project folder is not a Git repository and no repository is declared',
     )
-    expect(proposed?.text).toContain('- Declare the repository web')
     expect(seen.before.repositories).toEqual([])
     expect(seen.card).toMatchObject({ state: 'pending', title: 'Declare the repository web' })
     expect(seen.accepted.state).toBe('accepted')
