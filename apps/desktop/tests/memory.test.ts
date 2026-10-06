@@ -849,6 +849,8 @@ describe("The brief's Memory block", () => {
         Effect.gen(function* () {
           const { mission, main } = yield* building
           const memory = yield* Memory
+          // The Journal is a projection of the events: it is read once it has caught up.
+          yield* memory.catchUp
           const before = yield* memory.briefBlock(mission.id)
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           yield* callTool(builder.grantId, 'note_add', { text: 'Dates are UTC' })

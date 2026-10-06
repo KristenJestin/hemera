@@ -113,6 +113,8 @@ export const Now = Schema.Struct({
   ball: Schema.NullOr(Ball),
   waiting: Schema.Array(NowWaiting),
   running: Schema.Array(NowRunning),
+  /** A Hemera phase waiting for a free slot of the Project's cap, said as Now says it (#41). */
+  slotWait: Schema.NullOr(Schema.String),
   next: Schema.NullOr(NowNext),
   doing: Schema.Array(NowDoing),
 })

@@ -330,7 +330,13 @@ export const createMission = (asked: NewMission) =>
           .update(projects)
           .set({ nextMission: sql`${projects.nextMission} + 1` })
           .where(eq(projects.id, project.id))
-          .returning({ keyPrefix: projects.keyPrefix, next: projects.nextMission })
+          .returning({
+            keyPrefix: projects.keyPrefix,
+            next: projects.nextMission,
+            budgetLaunches: projects.budgetLaunches,
+            budgetAttempts: projects.budgetAttempts,
+            budgetRounds: projects.budgetRounds,
+          })
           .pipe(Effect.mapError(refusedWhile('numbering the mission')))
         if (counter === undefined) return yield* new UnknownProject({ id: project.id })
         // A Project the start could not give its prefix to is given it now.
@@ -354,6 +360,10 @@ export const createMission = (asked: NewMission) =>
             stage: 'planning',
             round: 0,
             cleanup: null,
+            // The budget it starts with is its Project's now (#41); a raise is its own.
+            budgetLaunches: counter.budgetLaunches,
+            budgetAttempts: counter.budgetAttempts,
+            budgetRounds: counter.budgetRounds,
             createdAt: at,
             updatedAt: at,
           })

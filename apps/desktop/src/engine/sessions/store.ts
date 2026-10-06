@@ -10,7 +10,9 @@ import {
   AGENT_PROVIDERS,
   type AgentProvider,
   SESSION_STATES,
+  SETTING_LEVELS,
   type SessionState,
+  type SettingLevel,
 } from '@hemera/core/domain'
 import { and, asc, eq, inArray, notInArray } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
@@ -20,6 +22,7 @@ import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import { agentSessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import type { ModelSetting } from './ports.ts'
 import type { SessionOwner } from './roles.ts'
 
 export interface RoleSession {
@@ -45,6 +48,8 @@ export interface RoleSession {
     readonly effort: string | null
     readonly mode: string | null
   }
+  /** The level of the cascade its agent and model came from; null when its opener named them. */
+  readonly modelLevel: SettingLevel | null
 }
 
 /** The session asked for is not one Hemera knows. */
@@ -84,6 +89,7 @@ export const sessionOf = (row: Row): RoleSession => ({
   updatedAt: row.updatedAt,
   endedAt: row.endedAt,
   chosen: { model: row.chosenModel, effort: row.chosenEffort, mode: row.chosenMode },
+  modelLevel: SETTING_LEVELS.find((level) => level === row.modelLevel) ?? null,
 })
 
 const now = (): string => new Date().toISOString()
@@ -113,6 +119,8 @@ export const sessionEvent = (
 })
 
 export interface SessionAsked {
+  /** Its id, when its opener needed it before it was written; a new one otherwise. */
+  readonly id?: string
   readonly provider: AgentProvider
   readonly owner: SessionOwner
   readonly role: string
@@ -123,13 +131,14 @@ export interface SessionAsked {
   readonly lineage?: string
   readonly epoch?: number
   readonly chosen?: RoleSession['chosen']
+  readonly modelLevel?: SettingLevel | null
 }
 
 /** The row a new session is written as, inside a transaction. */
 export const insertSession = (transaction: EngineTransaction, asked: SessionAsked) =>
   Effect.gen(function* () {
     // A UUID: the session's trace file is named after it, so it must be safe as a file name.
-    const id = crypto.randomUUID()
+    const id = asked.id ?? crypto.randomUUID()
     const at = now()
     const [row] = yield* transaction
       .insert(agentSessions)
@@ -148,6 +157,7 @@ export const insertSession = (transaction: EngineTransaction, asked: SessionAske
         chosenModel: asked.chosen?.model ?? null,
         chosenEffort: asked.chosen?.effort ?? null,
         chosenMode: asked.chosen?.mode ?? null,
+        modelLevel: asked.modelLevel ?? null,
         createdAt: at,
         updatedAt: at,
       })
@@ -196,6 +206,34 @@ export const sessionsIn = (states: ReadonlyArray<SessionState>, owner?: SessionO
       .pipe(Effect.mapError(refusedWhile('reading the sessions')))
     return rows.map(sessionOf)
   })
+
+/**
+ * The agent, model and effort the cascade gives a session that has not started its agent yet,
+ * with the level they came from: what a successor of its lineage starts on.
+ */
+export const applySetting = (sessionId: string, setting: ModelSetting) =>
+  mutate('writing a session’s model', (transaction) =>
+    transaction
+      .update(agentSessions)
+      .set({
+        provider: setting.agent,
+        chosenModel: setting.model,
+        chosenEffort: setting.effort,
+        modelLevel: setting.level,
+        updatedAt: now(),
+      })
+      .where(eq(agentSessions.id, sessionId))
+      .returning()
+      .pipe(
+        Effect.mapError(refusedWhile('writing a session’s model')),
+        // Read a moment ago by its start: a session not there now is a defect.
+        Effect.flatMap(([row]) =>
+          row === undefined
+            ? Effect.die(new UnknownSession({ id: sessionId }))
+            : Effect.succeed({ result: sessionOf(row), events: [] }),
+        ),
+      ),
+  )
 
 /** The states a session never leaves. */
 const FINAL_STATES = ['ended', 'replaced', 'failed'] as const

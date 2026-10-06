@@ -57,6 +57,7 @@ const TAGS = [
   'OptionsChanged',
   'Compacted',
   'ProviderWait',
+  'ProviderLimit',
 ] as const
 
 /** The kind of an event, by its tag. */
@@ -387,6 +388,23 @@ describe('A turn', () => {
     )
     expect(events.map(tagOf)).toEqual(['Compacted', 'ProviderWait'])
     expect(events[1]).toMatchObject({ title: 'Retrying Claude, attempt 1 of 10.' })
+  })
+
+  test('a limit the provider holds after the agent’s own retries arrives as its own event', async () => {
+    const events = await run(
+      Effect.gen(function* () {
+        const { connection, session } = yield* opened({
+          steps: [
+            { does: 'waits', title: 'Claude is temporarily rate limited.' },
+            { does: 'limits', title: 'The Claude account has no available quota.' },
+          ],
+        })
+        yield* session.prompt([TextBlock.make({ text: 'go on' })])
+        return yield* next(connection, 2)
+      }),
+    )
+    expect(events.map(tagOf)).toEqual(['ProviderWait', 'ProviderLimit'])
+    expect(events[1]).toMatchObject({ title: 'The Claude account has no available quota.' })
   })
 
   test('the client announces it reads the agent’s notices of a failing provider', async () => {

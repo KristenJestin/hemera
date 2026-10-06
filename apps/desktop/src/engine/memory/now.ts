@@ -18,7 +18,7 @@ import type { EventPayload, NewEvent } from '../journal.ts'
 import { getMission } from '../missions.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import { memoryNext, memoryNowLines } from '../storage/schema.ts'
-import { RunningSessions } from './ports.ts'
+import { RunningSessions, SlotWaits } from './ports.ts'
 
 /** What a need waits on, in one sentence of its own fields. */
 export const needSentence = (need: Need): string =>
@@ -56,6 +56,7 @@ export const nowOf = (mission: Mission) =>
       .where(eq(memoryNext.missionId, mission.id))
       .pipe(Effect.mapError(refusedWhile('reading Now')))
     const running = yield* RunningSessions.use((sessions) => sessions(mission.id))
+    const slotWait = yield* SlotWaits.use((waits) => waits(mission.id))
     const main = mainRoleOf(mission.stage)
     const doing = lines.map((line) => ({
       sessionId: line.sessionId,
@@ -77,6 +78,7 @@ export const nowOf = (mission: Mission) =>
         sentence: needSentence(need),
       })),
       running: running.map((session) => ({ sessionId: session.sessionId, role: session.role })),
+      slotWait,
       next:
         next === undefined
           ? null

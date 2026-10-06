@@ -7,6 +7,7 @@
 
 import { Context, Deferred, Effect, Layer, PubSub, Stream } from 'effect'
 
+import type { NeedHandler } from '../needs.ts'
 import type { SessionOwner } from './roles.ts'
 
 /** An urgent delivery, as a session's next tool result carries it. */
@@ -45,6 +46,15 @@ export class SessionPost extends Context.Service<
     ) => Effect.Effect<void>
     /** Whether a session of the mission is in a turn now. */
     readonly working: (missionId: string) => Effect.Effect<boolean>
+    /**
+     * The owner of the needs a session gives (#41): the needs register it below the sessions,
+     * which put their handler here once they run.
+     */
+    readonly needs: NeedHandler
+    readonly needsWith: (handler: NeedHandler) => Effect.Effect<void>
+    /** A Hemera phase of a mission waits for a slot of the cap, said for Now; null once it has one. */
+    readonly slotWait: (missionId: string, sentence: string | null) => Effect.Effect<void>
+    readonly slotWaitOf: (missionId: string) => Effect.Effect<string | null>
   }
 >()('SessionPost') {}
 
@@ -55,6 +65,8 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
   const pinned = new Map<string, PinnedNote>()
   const stopper = yield* Deferred.make<(owner: SessionOwner) => Effect.Effect<void>>()
   const turns = new Map<string, string | null>()
+  const handler = yield* Deferred.make<NeedHandler>()
+  const waits = new Map<string, string>()
   return {
     ring: Effect.asVoid(PubSub.publish(rings, undefined)),
     rings: Stream.fromPubSub(rings),
@@ -76,6 +88,22 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
         else turns.delete(sessionId)
       }),
     working: (missionId) => Effect.sync(() => [...turns.values()].includes(missionId)),
+    needs: {
+      deliver: (need, transaction) =>
+        Effect.flatMap(Deferred.await(handler), (one) => one.deliver(need, transaction)),
+      recheck: (need, retried) =>
+        Effect.flatMap(
+          Deferred.await(handler),
+          (one) => one.recheck?.(need, retried) ?? Effect.succeed(true),
+        ),
+    },
+    needsWith: (one) => Effect.asVoid(Deferred.succeed(handler, one)),
+    slotWait: (missionId, sentence) =>
+      Effect.sync(() => {
+        if (sentence === null) waits.delete(missionId)
+        else waits.set(missionId, sentence)
+      }),
+    slotWaitOf: (missionId) => Effect.sync(() => waits.get(missionId) ?? null),
   }
 })
 

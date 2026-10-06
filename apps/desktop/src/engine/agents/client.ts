@@ -249,11 +249,17 @@ export const Compacted = Schema.TaggedStruct('Compacted', { replay })
  * the session's own silence.
  */
 export const ProviderWait = Schema.TaggedStruct('ProviderWait', { title: Schema.String, replay })
+/**
+ * The provider holds a limit the agent's own retries did not outlast: a quota reached, a rate
+ * limit. The turn cannot go on; what the session did so far stands.
+ */
+export const ProviderLimit = Schema.TaggedStruct('ProviderLimit', { title: Schema.String, replay })
 
 /** What an agent reports while it works. */
 export const AgentEvent = Schema.Union([
   Compacted,
   ProviderWait,
+  ProviderLimit,
   MessageChunk,
   ThoughtChunk,
   ToolCall,
@@ -578,17 +584,34 @@ const readCompaction = Schema.decodeUnknownOption(
 
 /**
  * A notice of a failing provider, as the adapter sends it to a client that announced the
- * `sessionFailure` extension: a warning is a wait (a retry in progress); an error is not.
+ * `sessionFailure` extension: a warning is a wait (a retry in progress); an error of the `limit`
+ * category is a limit its retries did not outlast; any other error is not read here.
  */
 const readProviderNotice = Schema.decodeUnknownOption(
   Schema.Struct({
     jetbrains: Schema.Struct({
       air: Schema.Struct({
-        sessionFailure: Schema.Struct({ severity: Schema.String, title: Schema.String }),
+        sessionFailure: Schema.Struct({
+          severity: Schema.String,
+          category: Schema.optionalKey(Schema.String),
+          title: Schema.String,
+        }),
       }),
     }),
   }),
 )
+
+/** A provider's notice as an event: a wait, a limit, or nothing Hemera reads. */
+const noticeEvent = (
+  failure: { readonly severity: string; readonly category?: string; readonly title: string },
+  replaying: boolean,
+): AgentEvent | null => {
+  if (failure.severity === 'warning')
+    return ProviderWait.make({ title: failure.title, replay: replaying })
+  return failure.severity === 'error' && failure.category === 'limit'
+    ? ProviderLimit.make({ title: failure.title, replay: replaying })
+    : null
+}
 
 /** A notification, as an event, or null for what Hemera does not read. */
 const eventOf = (notification: SessionNotification, replaying: boolean): AgentEvent | null => {
@@ -606,10 +629,7 @@ const eventOf = (notification: SessionNotification, replaying: boolean): AgentEv
     case 'session_info_update':
       return Option.match(readProviderNotice(meta), {
         onNone: () => null,
-        onSome: ({ jetbrains }) =>
-          jetbrains.air.sessionFailure.severity === 'warning'
-            ? ProviderWait.make({ title: jetbrains.air.sessionFailure.title, replay: replaying })
-            : null,
+        onSome: ({ jetbrains }) => noticeEvent(jetbrains.air.sessionFailure, replaying),
       })
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {

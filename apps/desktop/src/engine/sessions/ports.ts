@@ -2,14 +2,15 @@
  * What the role sessions ask of later tickets, each with the default this version runs on:
  *
  * - `ReplacementGuard`: before a session is replaced (#41 counts the technical retries of CT-14
- *   and turns a refusal into an error need); allowed by default;
+ *   and turns a refusal into an error need);
  * - `SpecLanguage`: the Project's Spec language (Planning, P2, adds the setting); English;
  * - `TesterMode`: the paragraph the tester mode adds to the base layer when it is on (#45); none.
  */
 
-import type { AgentProvider } from '@hemera/core/domain'
+import type { AgentProvider, NeedFields, SettingLevel } from '@hemera/core/domain'
 import { Context, Effect, Layer } from 'effect'
 
+import type { DatabaseError } from '../storage/database.ts'
 import type { SessionOwner } from './roles.ts'
 import type { RoleSession } from './store.ts'
 
@@ -20,7 +21,7 @@ export interface ModelSetting {
   readonly model: string | null
   /** Null: the model's own default effort, or a model that has none. */
   readonly effort: string | null
-  readonly level: 'app' | 'project' | 'mission'
+  readonly level: SettingLevel
 }
 
 /**
@@ -29,30 +30,28 @@ export interface ModelSetting {
  */
 export class ModelChoice extends Context.Service<
   ModelChoice,
-  { readonly of: (owner: SessionOwner, role: string) => Effect.Effect<ModelSetting> }
+  {
+    readonly of: (owner: SessionOwner, role: string) => Effect.Effect<ModelSetting, DatabaseError>
+  }
 >()('ModelChoice') {}
-
-/** Until the cascade: Claude Code on its own default model and effort, as the app's setting. */
-export const agentDefaults = Layer.succeed(ModelChoice, {
-  of: () => Effect.succeed({ agent: 'claude', model: null, effort: null, level: 'app' }),
-})
 
 export class ReplacementGuard extends Context.Service<
   ReplacementGuard,
   {
-    /** Whether a session may be replaced now; a refusal says why, in words. */
+    /**
+     * Whether a session may be replaced now; a refusal says why, in words, and the need its owner
+     * gets, which stands for the session until the user answers it.
+     */
     readonly allows: (
       session: RoleSession,
       reason: string,
     ) => Effect.Effect<
-      { readonly allowed: true } | { readonly allowed: false; readonly why: string }
+      | { readonly allowed: true }
+      | { readonly allowed: false; readonly why: string; readonly need: NeedFields },
+      DatabaseError
     >
   }
 >()('ReplacementGuard') {}
-
-export const everyReplacementAllowed = Layer.succeed(ReplacementGuard, {
-  allows: () => Effect.succeed({ allowed: true }),
-})
 
 export class SpecLanguage extends Context.Service<
   SpecLanguage,

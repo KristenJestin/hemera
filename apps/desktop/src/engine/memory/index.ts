@@ -73,14 +73,16 @@ import {
   MissionDependencies,
   RunningSessions,
   SessionEpochs,
+  SlotWaits,
   epochsInMemory,
   noDependencies,
   noRunningSessions,
+  noSlotWaits,
 } from './ports.ts'
 import { linesText, notesText, nowText, sections } from './render.ts'
 
 export { dropSessionLines } from './now.ts'
-export { MissionDependencies, RunningSessions, SessionEpochs }
+export { MissionDependencies, RunningSessions, SessionEpochs, SlotWaits }
 export type { JournalMapper }
 
 /** How long after a change the markdown files of its mission are written again. */
@@ -184,6 +186,8 @@ export interface MemoryParts {
   readonly epochs?: Layer.Layer<SessionEpochs, never, Database>
   /** The sub-agents running for a mission (#40); none otherwise. */
   readonly running?: Layer.Layer<RunningSessions, never, Database>
+  /** A Hemera phase of the mission waiting for a slot of the cap (#41); none otherwise. */
+  readonly slotWaits?: Layer.Layer<SlotWaits>
   /** The accepted dependencies of a mission (P9); none otherwise. */
   readonly dependencies?: MissionDependencies['Service']
   /** The Journal mappers of later tickets, beside this one's. */
@@ -204,6 +208,7 @@ type Services =
   | MissionActivity
   | SessionEpochs
   | RunningSessions
+  | SlotWaits
   | MissionDependencies
 
 /** The Memory of a mission's markdown files, as text. */
@@ -578,6 +583,7 @@ export const memoryLayer = (parts: MemoryParts, log: Log) =>
       Layer.mergeAll(
         parts.epochs ?? epochsInMemory().layer,
         parts.running ?? noRunningSessions,
+        parts.slotWaits ?? noSlotWaits,
         parts.dependencies === undefined
           ? noDependencies
           : Layer.succeed(MissionDependencies, parts.dependencies),

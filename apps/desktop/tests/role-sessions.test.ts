@@ -6,27 +6,19 @@
  * the start's order, `stopTree`, and #71's results reaching their session.
  */
 
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { realpathSync } from 'node:fs'
 
-import type { AgentProvider } from '@hemera/core/domain'
-import { AgentNotSignedIn } from '@hemera/ipc'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
-import { Discovery } from '../src/engine/agents/discovery.ts'
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
-import { type FakeAgent, type FakeScript, fakeAgent } from '../src/engine/agents/fake.ts'
-import { AgentStarter } from '../src/engine/agents/runtime.ts'
-import { createMission, moveMission, type MissionParts } from '../src/engine/missions.ts'
+import type { FakeScript } from '../src/engine/agents/fake.ts'
+import { createMission } from '../src/engine/missions.ts'
 import { Delivery } from '../src/engine/permissions/delivery.ts'
-import { createProject } from '../src/engine/projects.ts'
 import { startRun, stopRun } from '../src/engine/runs.ts'
 import { assignWork, holdsWork, leaseOf } from '../src/engine/sessions/leases.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
-import { ModelChoice, agentDefaults } from '../src/engine/sessions/ports.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { type RoleSession, getSession, sessionsIn } from '../src/engine/sessions/store.ts'
@@ -39,15 +31,24 @@ import {
   sessionDeliveries,
   supervisedProcesses,
 } from '../src/engine/storage/schema.ts'
-import { ProcessSupervisor } from '../src/engine/supervisor.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
-import { STAYS_UP, commandsEngine, nodeLine, script } from './commands-engine.ts'
-import { repository } from './repositories.ts'
+import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
 import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
+import {
+  BUILDER,
+  HELPER,
+  REVIEWER,
+  acmeIn,
+  agentsFound,
+  held,
+  sessionsEngine,
+  text,
+  until,
+  within,
+} from './sessions-world.ts'
 import { asc, eq } from 'drizzle-orm'
-import type { EngineServices, ProfileParts, StartedProfile } from '../src/engine/profile.ts'
 
 let data: string
 let work: string
@@ -58,152 +59,12 @@ beforeEach(() => {
 })
 afterEach(removeFolders)
 
-/** The moves are the stages' to allow: every guard passes. */
-const PASSING: MissionParts['guards'] = {
-  freeze: () => Effect.succeed([]),
-  launch: () => Effect.succeed([]),
-  fix: () => Effect.succeed([]),
-  ship: () => Effect.succeed([]),
-}
-
-/** A Builder, a helper and a reviewer, shaped as their tickets will register them. */
-const BUILDER: RoleEntry = {
-  ...TEST_ROLE,
-  id: 'builder',
-  displayName: 'the Builder',
-  mainOf: 'building',
-  brief: () => Effect.succeed([{ label: 'Your task', text: 'Export the invoices as CSV.' }]),
-}
-const HELPER: RoleEntry = { ...TEST_ROLE, id: 'helper', displayName: 'a helper' }
-const REVIEWER: RoleEntry = {
-  ...TEST_ROLE,
-  id: 'code-reviewer',
-  displayName: 'the code reviewer',
-  readsMemory: false,
-  writes: false,
-}
-
-/** Short bounds: a note waits 300 ms, a turn may be silent 400 ms, swept every 100 ms. */
-const FAST = {
-  notePickup: Duration.millis(300),
-  stuckAfter: Duration.millis(400),
-  sweepEvery: Duration.millis(100),
-}
-
-/** What a world started: one fake agent per process, and the real children of some. */
-interface World {
-  readonly agents: FakeAgent[]
-  readonly pids: number[]
-}
-
-/**
- * The engine over `data`, its agents the fake one, scripted by the order they start in. With
- * `children`, each agent's start also starts a real child under the supervisor, ended with it.
- */
 const engine = (
   scriptOf: (index: number) => FakeScript,
-  options: {
-    readonly children?: boolean
-    readonly memory?: ProfileParts['memory']
-    readonly modelChoice?: Layer.Layer<ModelChoice>
-    /** Runs as each agent starts, after its child and before the agent answers. */
-    readonly starting?: () => Effect.Effect<void>
-    /** Agents that cannot be started: not signed in. */
-    readonly unusable?: ReadonlyArray<AgentProvider>
-    /** Roles registered beside the Builder, the helper and the reviewer. */
-    readonly roles?: ReadonlyArray<RoleEntry>
-  } = {},
-) => {
-  const world: World = { agents: [], pids: [] }
-  const starter = Layer.effect(
-    AgentStarter,
-    Effect.gen(function* () {
-      const supervisor = yield* ProcessSupervisor
-      return {
-        start: (_resolved, _environment, sessionId) =>
-          Effect.gen(function* () {
-            if (options.children === true) {
-              const child = yield* supervisor
-                .start(process.execPath, [script(STAYS_UP)], {
-                  owner: { kind: 'session', id: sessionId },
-                  graceMillis: 200,
-                })
-                .pipe(Effect.orDie)
-              world.pids.push(child.pid)
-            }
-            if (options.starting !== undefined) yield* options.starting()
-            const agent = fakeAgent(scriptOf(world.agents.length))
-            world.agents.push(agent)
-            return agent.process
-          }),
-      }
-    }),
-  )
-  const discovery = Layer.succeed(Discovery, {
-    list: Effect.succeed([]),
-    probe: () => Effect.succeed(null),
-    resolve: (id) =>
-      options.unusable?.includes(id) === true
-        ? Effect.fail(new AgentNotSignedIn({ agent: id, label: id, loginHint: `${id} login` }))
-        : Effect.succeed({
-            adapter: ADAPTERS[id],
-            from: 'bundled' as const,
-            program: '/adapters/fake.mjs',
-            args: [],
-            env: {},
-            own: {},
-          }),
-  })
-  const parts = {
-    missions: { guards: PASSING },
-    sessions: {
-      roles: [BUILDER, HELPER, REVIEWER, ...(options.roles ?? [])],
-      starter,
-      discovery,
-      timings: FAST,
-      modelChoice: options.modelChoice ?? agentDefaults,
-    },
-  }
-  const run = commandsEngine(
-    data,
-    options.memory === undefined ? parts : { ...parts, memory: options.memory },
-  )
-  return { world, run }
-}
+  options: Parameters<typeof sessionsEngine>[2] = {},
+) => sessionsEngine(data, scriptOf, options)
 
-/** Acme, its repository `api` with its instruction files, and a mission in Building. */
-const acme = Effect.gen(function* () {
-  const main = join(work, 'acme')
-  mkdirSync(main, { recursive: true })
-  repository(join(main, 'api'))
-  writeFileSync(join(main, 'api', 'CLAUDE.md'), 'api: run pnpm test before saying done.')
-  writeFileSync(join(main, 'api', 'AGENTS.md'), 'api: agents read this.')
-  const project = yield* createProject({ name: 'Acme', mainCheckout: main, repositories: ['api'] })
-  const mission = yield* createMission({
-    projectId: project.id,
-    idea: { sentence: 'Export the invoices as CSV', ticket: null },
-  })
-  yield* moveMission(mission.id, 'freeze', 'user')
-  yield* moveMission(mission.id, 'launch', 'user')
-  return { project, mission, main, owner: { kind: 'mission' as const, missionId: mission.id } }
-})
-
-/** Waits, on the real clock, until a check holds; fails after five seconds. */
-const until = <E, R>(check: Effect.Effect<boolean, E, R>) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      if (yield* check) return
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('the condition never held'))
-  })
-
-const text = (blocks: ReadonlyArray<{ readonly type: string; readonly text?: string }>) =>
-  blocks.map((block) => block.text ?? '').join('')
-
-/** Runs a program on the engine's services, its failures as defects. */
-const within = <A, E>(profile: StartedProfile, program: Effect.Effect<A, E, EngineServices>) =>
-  profile.use(program).pipe(Effect.orDie)
+const acme = Effect.suspend(() => acmeIn(work))
 
 const opened = (
   owner: { readonly kind: 'mission'; readonly missionId: string },
@@ -304,12 +165,6 @@ describe('The three layers are set once, at the session’s start, then the brie
 
 /** A text as a column of masked text keeps it: these hold no secret. */
 const secretless = secretsRegistry().mask
-
-/** A promise a test resolves when it chooses: what a held step of a turn waits on. */
-const held = () => {
-  const { promise, resolve } = Promise.withResolvers<void>()
-  return { promise, release: () => resolve() }
-}
 
 /**
  * A script whose first turn waits before its step number `at` until `hold` is released, then goes
@@ -1033,54 +888,6 @@ describe('The hidden thread', () => {
   })
 })
 
-describe('A role’s agent and model come from the ModelChoice port', () => {
-  test('a session opened with no agent named takes the role’s setting, its model applied', async () => {
-    const MODELS = {
-      configOptions: [
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select' as const,
-          currentValue: 'large',
-          options: [
-            { value: 'large', name: 'large' },
-            { value: 'small', name: 'small' },
-          ],
-        },
-      ],
-      steps: [{ does: 'says' as const, text: 'done' }],
-    }
-    const asked: string[] = []
-    const { world, run } = engine(() => MODELS, {
-      modelChoice: Layer.succeed(ModelChoice, {
-        of: (_owner, role) =>
-          Effect.sync(() => {
-            asked.push(role)
-            return { agent: 'codex', model: 'small', effort: null, level: 'project' }
-          }),
-      }),
-    })
-    const session = await run(({ profile }) =>
-      within(
-        profile,
-        Effect.gen(function* () {
-          const { owner, main } = yield* acme
-          const fromSetting = yield* Sessions.use((sessions) =>
-            sessions.open({ owner, role: 'builder', folder: main }),
-          )
-          yield* settled(fromSetting.id)
-          return yield* getSession(fromSetting.id)
-        }),
-      ),
-    )
-    expect(asked).toEqual(['builder'])
-    expect(session.provider).toBe('codex')
-    expect(session.chosen.model).toBe('small')
-    expect(world.agents[0]?.answers.choices).toContain('model=small')
-  })
-})
-
 describe('deliverOrStart', () => {
   test('opens a session of the role for its own owner, even when another mission runs that role', async () => {
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
@@ -1218,7 +1025,7 @@ describe('deliverOrStart, twice at once', () => {
 describe('A session that fails before its agent took the turn', () => {
   test('gives its deliveries back: the next session of the role gets them', async () => {
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
-      unusable: ['codex'],
+      sessions: { discovery: agentsFound(['codex']) },
     })
     const [stateAfterFailure, received] = await run(({ profile }) =>
       within(
@@ -1262,7 +1069,7 @@ describe('A session whose start fails', () => {
         Effect.fail(new DatabaseError({ doing: 'reading the brief', reason: 'disk I/O error' })),
     }
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
-      roles: [BROKEN],
+      roles: [BUILDER, HELPER, REVIEWER, BROKEN],
     })
     const [child, told] = await run(({ profile }) =>
       within(
@@ -1291,7 +1098,7 @@ describe('A restart ends the sessions of a role this version no longer registers
   test('ended at the rebuild, said why; the others rebuilt', async () => {
     const RETIRED: RoleEntry = { ...HELPER, id: 'retired', displayName: 'a retired role' }
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
-      roles: [RETIRED],
+      roles: [BUILDER, HELPER, REVIEWER, RETIRED],
     })
     const before = await run(({ profile }) =>
       within(

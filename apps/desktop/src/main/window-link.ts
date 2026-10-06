@@ -318,6 +318,20 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['sessions.list'](request).pipe(closedAs(gone), observed('sessions.list', log)),
     'sessions.thread': (request) =>
       engine['sessions.thread'](request).pipe(closedAs(gone), observed('sessions.thread', log)),
+    'models.roles': (request) =>
+      engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
+    'models.setRole': (request) =>
+      engine['models.setRole'](request).pipe(closedAs(gone), observed('models.setRole', log)),
+    'models.marks': () =>
+      engine['models.marks']().pipe(closedAs(gone), observed('models.marks', log)),
+    'models.mark': (request) =>
+      engine['models.mark'](request).pipe(closedAs(gone), observed('models.mark', log)),
+    'limits.project': (request) =>
+      engine['limits.project'](request).pipe(closedAs(gone), observed('limits.project', log)),
+    'limits.setProject': (request) =>
+      engine['limits.setProject'](request).pipe(closedAs(gone), observed('limits.setProject', log)),
+    'limits.mission': (request) =>
+      engine['limits.mission'](request).pipe(closedAs(gone), observed('limits.mission', log)),
     'sessions.instructionFiles': (request) =>
       engine['sessions.instructionFiles'](request).pipe(
         closedAs(gone),

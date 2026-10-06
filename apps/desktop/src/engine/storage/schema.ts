@@ -16,6 +16,8 @@ import {
   check,
   index,
   integer,
+  primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
@@ -96,6 +98,12 @@ export const projects = sqliteTable(
     branchPrefix: text('branch_prefix'),
     keyPrefix: text('key_prefix'),
     nextMission: integer('next_mission').notNull().default(1),
+    /** How many sub-agents run at once in this Project (CT-13), 1 to 6. */
+    subAgentCap: integer('sub_agent_cap').notNull().default(3),
+    /** The budget a new mission of this Project starts with (#41). */
+    budgetLaunches: integer('budget_launches').notNull().default(8),
+    budgetAttempts: integer('budget_attempts').notNull().default(30),
+    budgetRounds: integer('budget_rounds').notNull().default(3),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),
@@ -365,6 +373,10 @@ export const missions = sqliteTable(
     ideaTicket: text('idea_ticket'),
     type: text('type').notNull(),
     ticketProvider: text('ticket_provider'),
+    /** The mission's budget, copied from its Project at its creation, raised by the user. */
+    budgetLaunches: integer('budget_launches'),
+    budgetAttempts: integer('budget_attempts'),
+    budgetRounds: integer('budget_rounds'),
     ticketKey: text('ticket_key'),
     ticketUrl: text('ticket_url'),
     stage: text('stage').notNull(),
@@ -496,6 +508,8 @@ export const agentSessions = sqliteTable('agent_sessions', {
   /** Why it stuck, ended, was replaced or failed, in words, masked. */
   stateReason: text('state_reason').$type<Masked<string>>(),
   endedAt: text('ended_at'),
+  /** The level of the cascade its agent and model came from: app, Project or mission (#41). */
+  modelLevel: text('model_level'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -838,3 +852,80 @@ export const memoryEvidence = sqliteTable(
   },
   (table) => [index('evidence_by_mission').on(table.missionId, table.addedAt)],
 )
+
+/**
+ * A role's agent, model and effort at one level of the cascade (#41): the app (scope ''), a
+ * Project (its id) or a mission (its id). A level that is not set has no row: it inherits, and a
+ * default is never stored as a copy of the level above.
+ */
+export const roleModels = sqliteTable(
+  'role_models',
+  {
+    level: text('level').notNull(),
+    scopeId: text('scope_id').notNull(),
+    role: text('role').notNull(),
+    agent: text('agent').notNull(),
+    model: text('model'),
+    effort: text('effort'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.level, table.scopeId, table.role] })],
+)
+
+/** The user's favourite and hidden models, per agent, which the model picker reads. */
+export const modelMarks = sqliteTable(
+  'model_marks',
+  {
+    agent: text('agent').notNull(),
+    model: text('model').notNull(),
+    favourite: integer('favourite', { mode: 'boolean' }).notNull(),
+    hidden: integer('hidden', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agent, table.model] })],
+)
+
+/** What a mission has spent of each counter of its budget. */
+export const missionSpent = sqliteTable(
+  'mission_spent',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    counter: text('counter').notNull(),
+    spent: integer('spent').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.counter] })],
+)
+
+/** The business attempts of a task, whoever ran them (CT-14). */
+export const taskAttempts = sqliteTable('task_attempts', {
+  taskId: text('task_id').primaryKey(),
+  missionId: text('mission_id'),
+  count: integer('count').notNull(),
+})
+
+/**
+ * What a session's agent reported it used, or an estimate when it reported nothing: tokens in and
+ * out, the cost when given, and whether it was measured.
+ */
+export const sessionUsage = sqliteTable('session_usage', {
+  sessionId: text('session_id').primaryKey(),
+  ownerKind: text('owner_kind').notNull(),
+  ownerId: text('owner_id').notNull(),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  costAmount: real('cost_amount'),
+  costCurrency: text('cost_currency'),
+  measured: integer('measured', { mode: 'boolean' }).notNull(),
+})
+
+/** Which session a need about a session stands for: what its Retry starts again. */
+export const sessionNeeds = sqliteTable('session_needs', {
+  needId: text('need_id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  /** `start` (the model or the agent), `failing` (CT-14), `limit` (a provider's quota). */
+  reason: text('reason').notNull(),
+  /** The agent and model it was about, to see at a Retry whether the setting changed. */
+  agent: text('agent').notNull(),
+  model: text('model'),
+})

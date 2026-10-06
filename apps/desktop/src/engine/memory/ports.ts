@@ -62,6 +62,14 @@ export class RunningSessions extends Context.Service<
 
 export const noRunningSessions = Layer.succeed(RunningSessions, () => Effect.succeed([]))
 
+/** What a Hemera phase of the mission waiting for a slot of the cap says, or null (#41). */
+export class SlotWaits extends Context.Service<
+  SlotWaits,
+  (missionId: string) => Effect.Effect<string | null>
+>()('SlotWaits') {}
+
+export const noSlotWaits = Layer.succeed(SlotWaits, () => Effect.succeed(null))
+
 /** The missions a mission depends on, accepted dependencies only, by identifier; P9 fills it. */
 export class MissionDependencies extends Context.Service<
   MissionDependencies,

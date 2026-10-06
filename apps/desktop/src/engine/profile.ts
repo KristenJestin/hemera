@@ -90,6 +90,7 @@ import {
   Memory,
   type MemoryParts,
   type MissionDependencies,
+  SlotWaits,
   memoryLayer,
 } from './memory/index.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
@@ -108,19 +109,20 @@ import {
   sessionNotesLayer,
   sessionsDelivery,
 } from './sessions/bridges.ts'
-import {
-  type ModelChoice,
-  type ReplacementGuard,
-  type SpecLanguage,
-  type TesterMode,
-  agentDefaults,
-  englishSpecs,
-  everyReplacementAllowed,
-  noTesterMode,
-} from './sessions/ports.ts'
+import { modelChoiceLayer, seedAppSettings } from './sessions/cascade.ts'
+import { type Cap, capLayer } from './sessions/cap.ts'
+import { replacementGuardLayer } from './sessions/guard.ts'
+import { SESSION_NEEDS } from './sessions/needs.ts'
+import { BUDGET_NEEDS, budgetHandler } from './budget.ts'
+import { type SpecLanguage, type TesterMode, englishSpecs, noTesterMode } from './sessions/ports.ts'
 import { SessionPost, sessionPostLayer } from './sessions/post.ts'
-import { replacedLine, sessionInstructionsLayer } from './sessions/provider.ts'
-import { ROLES_REGISTERED, type RoleEntry, roleRegistryLayer } from './sessions/roles.ts'
+import { refusedLine, replacedLine, sessionInstructionsLayer } from './sessions/provider.ts'
+import {
+  ROLES_REGISTERED,
+  type RoleEntry,
+  type RoleRegistry,
+  roleRegistryLayer,
+} from './sessions/roles.ts'
 import { type SessionTimings, Sessions, sessionsLayer } from './sessions/service.ts'
 import type { ProcessSupervisor } from './supervisor.ts'
 
@@ -170,9 +172,6 @@ export interface SessionsParts {
   readonly starter?: Layer.Layer<AgentStarter, never, ProcessSupervisor>
   /** Where the agents are found; this machine's otherwise. */
   readonly discovery?: Layer.Layer<Discovery>
-  readonly replacementGuard?: Layer.Layer<ReplacementGuard>
-  /** Which agent and model a role's next session gets (#41); Claude Code's defaults otherwise. */
-  readonly modelChoice?: Layer.Layer<ModelChoice>
   readonly specLanguage?: Layer.Layer<SpecLanguage>
   readonly testerMode?: Layer.Layer<TesterMode>
   /** Shorter bounds for the suites; the ticket's otherwise. */
@@ -214,6 +213,8 @@ export type EngineServices =
   | MissionDependencies
   | Sessions
   | Delivery
+  | RoleRegistry
+  | Cap
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -314,6 +315,8 @@ export const startProfile = (
       ...parts.missions,
       owners: new Map([
         [RUN_CONSENT, consent.handler],
+        [SESSION_NEEDS, post.needs],
+        [BUDGET_NEEDS, budgetHandler],
         [PERMISSION_REQUESTS, requestsHandler],
         ...(parts.missions?.owners ?? []),
       ]),
@@ -342,13 +345,20 @@ export const startProfile = (
       restoreJournal: parts.restoreJournal,
       epochs: parts.memory?.epochs ?? sessionEpochsLayer,
       running: parts.memory?.running ?? runningSessionsLayer,
-      mappers: new Map([['session.replaced', replacedLine], ...(parts.memory?.mappers ?? [])]),
+      slotWaits: Layer.succeed(SlotWaits, post.slotWaitOf),
+      mappers: new Map([
+        ['session.replaced', replacedLine],
+        ['session.refused', refusedLine],
+        ['budget.refused', refusedLine],
+        ...(parts.memory?.mappers ?? []),
+      ]),
     }
     const toolsParts: ToolsParts = {
       ...parts.tools,
       notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
     }
+    const roles = roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])])
     // The role sessions, over the agents' runtime, over the tools.
     const sessionsLayers = sessionsLayer({ log, timings: parts.sessions?.timings }).pipe(
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
@@ -365,9 +375,10 @@ export const startProfile = (
       ),
       Layer.provideMerge(
         Layer.mergeAll(
-          roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])]),
-          parts.sessions?.replacementGuard ?? everyReplacementAllowed,
-          parts.sessions?.modelChoice ?? agentDefaults,
+          roles,
+          replacementGuardLayer.pipe(Layer.provide(roles)),
+          capLayer.pipe(Layer.provide(postLayer)),
+          modelChoiceLayer,
           parts.sessions?.specLanguage ?? englishSpecs,
           parts.sessions?.testerMode ?? noTesterMode,
           postLayer,
@@ -517,6 +528,18 @@ export const startProfile = (
       ),
       Effect.catch((refusal) =>
         Effect.sync(() => log(`the Projects were not given their key prefix: ${said(refusal)}`)),
+      ),
+    )
+
+    // Every registered role has an app setting before any session opens (#41, open point 62).
+    yield* run(seedAppSettings).pipe(
+      Effect.tap((given) =>
+        given === 0
+          ? Effect.void
+          : Effect.sync(() => log(`gave ${String(given)} role(s) an agent at the app level`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the roles were not given an agent: ${said(refusal)}`)),
       ),
     )
 
