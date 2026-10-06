@@ -59,6 +59,8 @@ import {
   type Run,
   type RunOutput,
   type RunStart,
+  type SetupCard,
+  type SetupStanding,
   type Sound,
   type SoundPreview,
   type SoundStyle,
@@ -208,6 +210,21 @@ export interface Link {
   readonly restoreProfile: (folder: string) => Promise<void>
   readonly retention: () => Promise<DiagnosticsRetention>
   readonly testerFindings: () => Promise<ReadonlyArray<TesterFinding>>
+  /** A Project's setup cards, the pending first. */
+  readonly setupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  /** A click the use case refuses answers the card still pending, with the use case's reason. */
+  readonly acceptSetupCard: (cardId: string) => Promise<SetupCard>
+  readonly declineSetupCard: (cardId: string) => Promise<SetupCard>
+  /** Accepts the pending cards in their order, stopping at the first refusal. */
+  readonly acceptAllSetupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  /** Starts a setup proposal; rejects with `SetupRefused` while one is being made. */
+  readonly proposeSetup: (projectId: string) => Promise<void>
+  readonly setupStanding: (projectId: string) => Promise<SetupStanding>
+  /** The Projects whose cards or setup session changed, as they change. */
+  readonly onSetupChanges: (
+    listener: (change: { readonly projectId: string }) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** Every decision on a call from now on, as it is recorded. */
   readonly onDecisions: (
     listener: (decision: PermissionDecision) => void,
@@ -387,6 +404,19 @@ export function linkOver(port: Port): Link {
     restoreProfile: (folder) => call((ready) => ready['profile.restore']({ folder })),
     retention: () => call((ready) => ready['diagnostics.retention']()),
     testerFindings: () => call((ready) => ready['tester.findings']()),
+    setupCards: (projectId) => call((ready) => ready['setup.cards']({ projectId })),
+    acceptSetupCard: (cardId) => call((ready) => ready['setup.accept']({ cardId })),
+    declineSetupCard: (cardId) => call((ready) => ready['setup.decline']({ cardId })),
+    acceptAllSetupCards: (projectId) => call((ready) => ready['setup.acceptAll']({ projectId })),
+    proposeSetup: (projectId) => call((ready) => ready['setup.propose']({ projectId })),
+    setupStanding: (projectId) => call((ready) => ready['setup.standing']({ projectId })),
+    onSetupChanges: (listener, onEnd) =>
+      follow(
+        (ready) => ready['setup.changes'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
     onDecisions: (listener, onEnd) =>
       follow(
         (ready) => ready['permissions.decisions'](),

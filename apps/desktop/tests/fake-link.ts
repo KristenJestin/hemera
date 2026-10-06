@@ -87,5 +87,12 @@ export const SILENT_LINK: Link = {
   retention: never,
   testerFindings: never,
   onDecisions: silent,
+  setupCards: never,
+  acceptSetupCard: never,
+  declineSetupCard: never,
+  acceptAllSetupCards: never,
+  proposeSetup: never,
+  setupStanding: never,
+  onSetupChanges: silent,
   close: () => undefined,
 }
