@@ -207,7 +207,9 @@ describe('A mission is created in Planning, with its key', () => {
   test('a Profile from before missions keeps its Projects and repositories, and they get a prefix', async () => {
     // The migrations as they were before missions: the data folder of a build of tranche 0.
     const before = temporaryFolder('missions-before')
-    for (const shipped of readdirSync(SHIPPED).filter((name) => !name.endsWith('_missions'))) {
+    const shippedNames = readdirSync(SHIPPED).toSorted()
+    const missionsAt = shippedNames.findIndex((name) => name.endsWith('_missions'))
+    for (const shipped of shippedNames.slice(0, missionsAt)) {
       cpSync(join(SHIPPED, shipped), join(before, shipped), { recursive: true })
     }
     await on(data, openProfile(data, before, '1.0.0'))

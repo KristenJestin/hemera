@@ -54,6 +54,8 @@ import {
   setSoundStyle,
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
+import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
+import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
@@ -244,6 +246,18 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(instructionFilesOf(projectId, process.platform)).pipe(
         observed('sessions.instructionFiles', log),
       ),
+    'models.roles': ({ projectId, missionId }) =>
+      use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
+    'models.setRole': ({ level, scopeId, role, setting }) =>
+      use(setRoleModel(level, scopeId, role, setting)).pipe(observed('models.setRole', log)),
+    'models.marks': () => use(modelMarksOf).pipe(observed('models.marks', log)),
+    'models.mark': (mark) => use(markModel(mark)).pipe(observed('models.mark', log)),
+    'limits.project': ({ projectId }) =>
+      use(projectLimits(projectId)).pipe(observed('limits.project', log)),
+    'limits.setProject': ({ projectId, limits }) =>
+      use(setProjectLimits(projectId, limits)).pipe(observed('limits.setProject', log)),
+    'limits.mission': ({ missionId }) =>
+      use(missionBudget(missionId)).pipe(observed('limits.mission', log)),
     'memory.now': ({ missionId }) =>
       use(Memory.use((memory) => memory.now(missionId))).pipe(observed('memory.now', log)),
     'memory.journal': ({ missionId, before }) =>

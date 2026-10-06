@@ -84,8 +84,11 @@ export interface NeedHandler {
     need: Need,
     transaction: EngineTransaction,
   ) => Effect.Effect<ReadonlyArray<NewEvent>, DeliveryFailed | DatabaseError>
-  /** Whether what an environment need says is missing still is: false withdraws it. */
-  readonly recheck?: (need: Need) => Effect.Effect<boolean>
+  /**
+   * Whether what an environment need says is missing still is: false withdraws it. `retried` is
+   * the user's Retry, which tries again whatever changed; otherwise Hemera looks again by itself.
+   */
+  readonly recheck?: (need: Need, retried: boolean) => Effect.Effect<boolean>
 }
 
 export class NeedOwners extends Context.Service<
@@ -664,7 +667,7 @@ export const retryNeed = (id: string) =>
     const owners = yield* NeedOwners
     const recheck = owners.handlers.get(row.service)?.recheck
     if (recheck === undefined) return need
-    return (yield* recheck(need)) ? need : yield* withdrawNeed(id, RESOLVED)
+    return (yield* recheck(need, true)) ? need : yield* withdrawNeed(id, RESOLVED)
   })
 
 /**
@@ -683,6 +686,6 @@ export const recheckNeeds = Effect.gen(function* () {
     const recheck = owners.handlers.get(row.service)?.recheck
     const need = needOf(row)
     if (recheck === undefined || need === null) continue
-    if (!(yield* recheck(need))) yield* withdrawNeed(row.id, RESOLVED)
+    if (!(yield* recheck(need, false))) yield* withdrawNeed(row.id, RESOLVED)
   }
 })

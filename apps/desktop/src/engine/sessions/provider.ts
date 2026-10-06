@@ -4,7 +4,8 @@
  * idle release, a death of the process) is handed the same text. A later change of a template
  * applies to the next session.
  *
- * And the Journal's line of a replacement.
+ * And the Journal's lines of a replacement and of a refusal: a launch above the cap, a counter of
+ * the budget spent.
  */
 
 import { AGENT_PROVIDERS } from '@hemera/core/domain'
@@ -153,6 +154,36 @@ export const replacedLine: JournalMapper = (event) =>
         author: HemeraAuthor.make({}),
         text: `${payload.roleName.charAt(0).toUpperCase()}${payload.roleName.slice(1)}’s session was replaced: ${payload.reason}`,
         refs: { session: payload.lineage },
+      }),
+    }),
+  )
+
+const RefusedPayload = Schema.Struct({
+  missionId: Schema.String,
+  what: Schema.optionalKey(Schema.String),
+  counter: Schema.optionalKey(Schema.String),
+  sentence: Schema.String,
+})
+const readRefused = Schema.decodeUnknownOption(RefusedPayload)
+
+/** What a refused call was, as the Journal says it. */
+const refusedWhat = (payload: typeof RefusedPayload.Type): string => {
+  if (payload.what !== undefined) return payload.what
+  if (payload.counter === 'attempts') return 'An attempt was refused'
+  return payload.counter === 'rounds' ? 'A round was refused' : 'A launch was refused'
+}
+
+/** "A launch of a helper was refused: 3 sub-agents already run in this Project (the cap is 3)…" */
+export const refusedLine: JournalMapper = (event) =>
+  Effect.succeed(
+    Option.match(readRefused(event.payload), {
+      onNone: () => null,
+      onSome: (payload) => ({
+        missionId: payload.missionId,
+        kind: 'budget',
+        author: HemeraAuthor.make({}),
+        text: `${refusedWhat(payload)}: ${payload.sentence}`,
+        refs: {},
       }),
     }),
   )

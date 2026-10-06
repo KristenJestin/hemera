@@ -114,6 +114,11 @@ export type FakeStep =
    */
   | { readonly does: 'waits'; readonly title: string }
   /**
+   * The provider holds a limit Claude Code's adapter's own retries did not outlast: a
+   * `session_info_update` with an error of the `limit` category.
+   */
+  | { readonly does: 'limits'; readonly title: string }
+  /**
    * One of Hemera's tools called over the MCP server the session was handed, as a real agent
    * calls it: the answer is kept in `toolAnswers` and reported as the tool call's content.
    */
@@ -255,6 +260,25 @@ function updateOf(step: FakeStep): SessionUpdate | null {
                 revision: 1,
                 category: 'service',
                 severity: 'warning',
+                title: step.title,
+                actions: [],
+              },
+            },
+          },
+        },
+      }
+    case 'limits':
+      return {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          jetbrains: {
+            air: {
+              version: 1,
+              sessionFailure: {
+                id: 'quota_exhausted',
+                revision: 1,
+                category: 'limit',
+                severity: 'error',
                 title: step.title,
                 actions: [],
               },

@@ -29,6 +29,7 @@ import {
   LIVE_RUN_STATES,
   NOTE_PICKUP_SECONDS,
   STUCK_AFTER_MINUTES,
+  type NeedFields,
   deliveryBlock,
   hemeraNote,
   saturates,
@@ -52,11 +53,13 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { ADAPTERS } from '../agents/adapters/index.ts'
-import { type AgentEvent, TextBlock } from '../agents/client.ts'
-import { AgentRuntime } from '../agents/runtime.ts'
+import { type AgentEvent, type ImageNotAccepted, TextBlock } from '../agents/client.ts'
+import { Discovery } from '../agents/discovery.ts'
+import { type AgentFailure, AgentRuntime } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import { Memory } from '../memory/index.ts'
+import type { Need } from '@hemera/ipc'
 import type { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import { commandRuns, missions, runnerLeases } from '../storage/schema.ts'
@@ -74,12 +77,27 @@ import {
   storeDelivery,
   supersedeAll,
 } from './deliveries.ts'
+import { spendBudget } from '../budget.ts'
+import { Cap, type RequestedBy } from './cap.ts'
 import { assignWork } from './leases.ts'
+import {
+  CHANGE_THE_MODEL,
+  agentUnavailable,
+  limitReached,
+  modelToChange,
+  modelUnavailable,
+  sessionNeedIn,
+  sessionOfNeed,
+  stopWithNeed,
+} from './needs.ts'
+import { RESTARTED } from './guard.ts'
 import { ModelChoice, ReplacementGuard } from './ports.ts'
 import { SessionPost } from './post.ts'
 import { RoleRegistry, type RoleEntry, type SessionOwner, roleNamed } from './roles.ts'
 import {
   type RoleSession,
+  type SessionAsked,
+  applySetting,
   endSession,
   getSession,
   insertSession,
@@ -89,6 +107,7 @@ import {
   setState,
 } from './store.ts'
 import { addToThread, instructionsKept } from './thread.ts'
+import { addUsage, estimatedTokens, setCost } from './usage.ts'
 
 /** A session refused before it opens: a role no ticket registered, or not its owner's kind. */
 export class SessionRefused extends Schema.TaggedError<SessionRefused>()('SessionRefused', {
@@ -110,6 +129,11 @@ export interface OpenAsked {
   /** The session that starts it, for a child: a helper, a Probe. */
   readonly parent?: RoleSession | undefined
   readonly chosen?: RoleSession['chosen']
+  /**
+   * Who asks for it: an agent's call, which the Project's cap refuses above it and which spends
+   * the mission's launches; or Hemera, whose phases wait for a slot. Hemera unless said.
+   */
+  readonly requestedBy?: RequestedBy | undefined
 }
 
 export class Sessions extends Context.Service<
@@ -182,6 +206,8 @@ interface Driver {
   readonly pinned: Map<string, Fiber.Fiber<void>>
   /** Set once it is replaced, ended or failed: nothing is driven on it any more. */
   gone: boolean
+  /** The provider limit its agent reported, in the provider's words: its turn is its last. */
+  limit: string | null
 }
 
 const LIVE_OR_STUCK = ['starting', 'working', 'idle', 'stuck'] as const
@@ -192,6 +218,46 @@ const TOOK_THE_TURN = ['MessageChunk', 'ThoughtChunk', 'ToolCall', 'Plan', 'Prov
 /** The mission a session belongs to, or null for a Project's. */
 const missionOf = (session: RoleSession): string | null =>
   session.owner.kind === 'mission' ? session.owner.missionId : null
+
+/** The next session of a lineage: same role, owner, place and parent, at the next epoch. */
+const successorOf = (session: RoleSession): SessionAsked => ({
+  provider: session.provider,
+  owner: session.owner,
+  role: session.role,
+  folder: session.folder,
+  parent: session.parent === null ? null : { lineage: session.parent, depth: session.depth - 1 },
+  lineage: session.lineage,
+  epoch: session.epoch + 1,
+  chosen: session.chosen,
+  modelLevel: session.modelLevel,
+})
+
+/** The failures that say the agent itself cannot be had here. */
+const UNUSABLE_AGENT = [
+  'AgentNotInstalled',
+  'AgentNotSignedIn',
+  'AgentAdapterMissing',
+  'BareModeNotQualified',
+] as const
+
+/**
+ * Whether a role's sessions take a slot of the cap: the registry says so, and the main session of
+ * a stage never does.
+ */
+const counts = (entry: RoleEntry): boolean => entry.countsInCap && entry.mainOf === null
+
+/** The Project an owner belongs to. */
+const projectOf = (owner: SessionOwner) =>
+  Effect.gen(function* () {
+    if (owner.kind === 'project') return owner.projectId
+    const database = yield* Database
+    const [mission] = yield* database
+      .select({ projectId: missions.projectId })
+      .from(missions)
+      .where(eq(missions.id, owner.missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission')))
+    return mission?.projectId ?? ''
+  })
 
 /** What a replacement says in the Journal, from the role's own name. */
 const capitalized = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
@@ -210,6 +276,8 @@ type Needs =
   | ReplacementGuard
   | ModelChoice
   | ToolAccess
+  | Discovery
+  | Cap
 
 export const sessionsLayer = (settings: SessionsSettings) =>
   Layer.effect(
@@ -219,6 +287,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const runtime = yield* AgentRuntime
       const registry = yield* RoleRegistry
       const post = yield* SessionPost
+      const cap = yield* Cap
       const scope = yield* Effect.scope
       const lock = yield* Semaphore.make(1)
       const timings = { ...SESSION_TIMINGS, ...settings.timings }
@@ -250,10 +319,27 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           const spoken = driver.said.join('')
           driver.said = []
           if (spoken.trim() !== '') yield* addToThread(driver.session.id, 'said', spoken)
+          if (Result.isSuccess(outcome)) {
+            const usage = outcome.success.usage
+            yield* addUsage(
+              driver.session,
+              usage === null
+                ? { input: estimatedTokens(text), output: estimatedTokens(spoken) }
+                : { input: usage.inputTokens, output: usage.outputTokens },
+              usage !== null,
+            )
+          }
           if (driver.gone) return
+          if (driver.limit !== null) {
+            yield* stopAtLimit(driver, driver.limit)
+            return
+          }
           if (Result.isFailure(outcome)) {
+            const unavailable = unavailableOf(driver, outcome.failure)
+            // Never another agent or model: the owner is asked, the session stops before it works.
+            if (unavailable !== null) yield* stopUnavailable(driver, unavailable)
             // The agent could not be started or spoken to: the session fails, in words.
-            yield* fail(driver, outcome.failure.message)
+            else yield* fail(driver, outcome.failure.message)
             // What its agent never took is queued again, for the next session that may take it.
             if (!driver.took && deliveries.length > 0) {
               yield* mutate('giving deliveries back', (transaction) =>
@@ -401,6 +487,15 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             yield* endQuietly(session, 'failed', `no role ${session.role} is registered`)
             return
           }
+          if (counts(entry)) {
+            const projectId = yield* projectOf(session.owner)
+            yield* cap.acquire({
+              projectId,
+              lineage: session.lineage,
+              missionId: missionOf(session),
+              requestedBy: 'hemera',
+            })
+          }
           const brief = yield* briefOf(entry, session.owner, predecessor)
           const lastSign = yield* Clock.currentTimeMillis
           // Stopped or replaced while it waited: nothing of it starts.
@@ -414,7 +509,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               )
               if (now?.state !== 'starting') return null
               const one: Driver = {
-                session,
+                session: yield* takeSetting(session),
                 entry,
                 brief,
                 turn: null,
@@ -423,12 +518,15 @@ export const sessionsLayer = (settings: SessionsSettings) =>
                 took: false,
                 pinned: new Map(),
                 gone: false,
+                limit: null,
               }
               drivers.set(session.id, one)
               return one
             }),
           )
           if (driver !== null) yield* pump(driver)
+          // Stopped while it waited for its slot: the slot goes to the next one.
+          else if (counts(entry)) yield* cap.release(session.lineage)
         }).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause) ? Effect.void : startFailed(session, cause),
@@ -456,14 +554,34 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           ),
         )
 
-      /** Ends a session that has no driver, with its event. */
+      /**
+       * A session whose agent and model came from the cascade takes the setting as it stands when
+       * its agent is about to start: a successor gets a change made since its predecessor opened.
+       */
+      const takeSetting = (session: RoleSession) =>
+        Effect.gen(function* () {
+          if (session.modelLevel === null) return session
+          const setting = yield* ModelChoice.use((choice) => choice.of(session.owner, session.role))
+          const same =
+            setting.agent === session.provider &&
+            setting.model === session.chosen.model &&
+            setting.effort === session.chosen.effort &&
+            setting.level === session.modelLevel
+          return same ? session : yield* applySetting(session.id, setting)
+        })
+
+      /** Ends a session that has no driver, with its event; its lineage's slot is freed. */
       const endQuietly = (session: RoleSession, state: 'ended' | 'failed', reason: string) =>
         mutate('ending a session', (transaction) =>
           Effect.map(endSession(transaction, session, state, reason), (event) => ({
             result: undefined,
             events: [event],
           })),
-        ).pipe(run)
+        ).pipe(Effect.andThen(cap.release(session.lineage)), run)
+
+      /** Stops a session with a need about it; its lineage's slot is freed. */
+      const stopNeeding = (...stopped: Parameters<typeof stopWithNeed>) =>
+        stopWithNeed(...stopped).pipe(Effect.andThen(cap.release(stopped[0].lineage)), run)
 
       /** Lets a driver go: no turn, even one whose agent still starts, no pending note, no process. */
       const letGo = (driver: Driver) =>
@@ -503,6 +621,56 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           )
         }).pipe(run)
 
+      /** The need an agent or a model that cannot be had gives, or null for another failure. */
+      const unavailableOf = (driver: Driver, failure: AgentFailure | ImageNotAccepted) => {
+        const roleName = driver.entry.displayName
+        if (Predicate.isTagged(failure, 'ModelUnavailable')) {
+          return modelUnavailable(driver.session, roleName, failure.reason)
+        }
+        return UNUSABLE_AGENT.some((tag) => Predicate.isTagged(failure, tag))
+          ? agentUnavailable(driver.session, roleName, failure.message)
+          : null
+      }
+
+      /** Its agent or its model cannot be had: it fails, its owner gets an environment need. */
+      const stopUnavailable = (driver: Driver, fields: NeedFields) =>
+        Effect.gen(function* () {
+          yield* letGo(driver)
+          const why = Predicate.isTagged(fields, 'Environment') ? fields.missing : 'unavailable'
+          yield* stopNeeding(
+            driver.session,
+            { state: 'failed', reason: why },
+            { reason: 'start', fields },
+          )
+          yield* addToThread(driver.session.id, 'state', `failed: ${why}`)
+          yield* tellParent(driver.session, `${why}. The user is asked.`)
+        }).pipe(run)
+
+      /**
+       * Its provider holds a limit: the session ends where it stands, its work and its leases kept,
+       * and its owner gets an environment need. Retry starts its lineage again.
+       */
+      const stopAtLimit = (driver: Driver, title: string) =>
+        Effect.gen(function* () {
+          // Its turn's end and the agent's report may both get here: the first one stops it.
+          if (driver.gone) return
+          yield* letGo(driver)
+          const reason = `provider limit: ${title}`
+          yield* stopNeeding(
+            driver.session,
+            { state: 'ended', reason },
+            {
+              reason: 'limit',
+              fields: limitReached(driver.session, driver.entry.displayName, title),
+            },
+          )
+          yield* addToThread(driver.session.id, 'state', `ended: ${reason}`)
+          yield* tellParent(
+            driver.session,
+            `Your ${driver.entry.displayName} session stopped at a provider limit: ${title}. The user is asked.`,
+          )
+        }).pipe(run)
+
       /** The leases a session held, now its successor's. */
       const passLeases = (from: RoleSession, to: RoleSession) =>
         Effect.gen(function* () {
@@ -523,19 +691,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         mutate('replacing a session', (transaction) =>
           Effect.gen(function* () {
             const stopped = yield* endSession(transaction, session, 'replaced', reason)
-            const successor = yield* insertSession(transaction, {
-              provider: session.provider,
-              owner: session.owner,
-              role: session.role,
-              folder: session.folder,
-              parent:
-                session.parent === null
-                  ? null
-                  : { lineage: session.parent, depth: session.depth - 1 },
-              lineage: session.lineage,
-              epoch: session.epoch + 1,
-              chosen: session.chosen,
-            })
+            const successor = yield* insertSession(transaction, successorOf(session))
             const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
             return {
               result: successor,
@@ -567,8 +723,17 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             const verdict = yield* ReplacementGuard.use((guard) => guard.allows(session, reason))
             if (!verdict.allowed) {
               if (driver !== undefined) yield* letGo(driver)
-              yield* endQuietly(session, 'failed', verdict.why)
-              yield* tellParent(session, `Your session of ${session.role} stopped: ${verdict.why}`)
+              else yield* runtime.release(sessionId)
+              yield* stopNeeding(
+                session,
+                { state: 'failed', reason: verdict.why },
+                { reason: 'failing', fields: verdict.need },
+              )
+              yield* addToThread(session.id, 'state', `failed: ${verdict.why}`)
+              yield* tellParent(
+                session,
+                `Your session of ${session.role} stopped: ${verdict.why}. The user is asked.`,
+              )
               return null
             }
             if (driver !== undefined) yield* letGo(driver)
@@ -602,6 +767,9 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             driver.took = true
           }
           const adapter = ADAPTERS[driver.session.provider]
+          if (Predicate.isTagged(event, 'Usage') && event.cost !== null && !event.replay) {
+            yield* setCost(driver.session, event.cost)
+          }
           if (Predicate.isTagged(event, 'MessageChunk') && !event.replay) {
             driver.said.push(event.text)
           } else if (Predicate.isTagged(event, 'ToolCall') && event.call.status === 'completed') {
@@ -616,6 +784,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             )
           } else if (Predicate.isTagged(event, 'Compacted') && adapter.signalsCompaction) {
             yield* instructAgain(driver)
+          } else if (Predicate.isTagged(event, 'ProviderLimit') && !event.replay) {
+            // The turn ends here; its end stops the session with the need. A report that comes
+            // after the end of its turn stops it at once.
+            driver.limit = event.title
+            if (driver.turn === null) yield* stopAtLimit(driver, event.title)
+            else yield* runtime.cancel(sessionId)
           }
         }).pipe(
           run,
@@ -726,6 +900,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           (session) => session.createdAt < startedAt,
         )
         const rebuilt: RoleSession[] = []
+        const starts: Array<() => Effect.Effect<void>> = []
         // Top-down: parents before their children, which find them by lineage.
         for (const session of left) {
           // A role this version does not register: nothing can drive its session any more.
@@ -737,13 +912,95 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             yield* endQuietly(session, 'ended', 'its owner no longer runs')
             continue
           }
-          const successor = yield* succeed(session, 'Hemera restarted')
+          const successor = yield* succeed(session, RESTARTED)
           yield* passLeases(session, successor)
           rebuilt.push(successor)
-          yield* start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt })
+          starts.push(() =>
+            start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
+          )
         }
+        // Every successor is written first, then each starts on its own, as a replacement does:
+        // one waiting for its slot of the cap holds back none of the others.
+        for (const one of starts) yield* one().pipe(Effect.forkIn(scope))
         return rebuilt
       }).pipe(run)
+
+      /**
+       * Starts a stopped lineage again: a session that failed or ended with a need, and has no
+       * live successor. Its successor takes its leases and the resume block; the cascade gives
+       * it the setting as it stands now. It counts in no counter.
+       */
+      const resume = (sessionId: string) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            const session = yield* getSession(sessionId).pipe(
+              Effect.catchTag('UnknownSession', () => Effect.succeed(null)),
+            )
+            if (session === null || (session.state !== 'failed' && session.state !== 'ended')) {
+              return null
+            }
+            const live = yield* sessionsIn([...LIVE_OR_STUCK], session.owner)
+            if (live.some((one) => one.lineage === session.lineage)) return null
+            if (!(yield* active(session.owner))) return null
+            const successor = yield* mutate('starting a lineage again', (transaction) =>
+              Effect.map(insertSession(transaction, successorOf(session)), (next) => ({
+                result: next,
+                events: [sessionEvent('session.resumed', next, { predecessor: session.id })],
+              })),
+            )
+            yield* passLeases(session, successor)
+            yield* said(`started ${session.lineage} again with ${successor.id}`)
+            yield* start(successor, {
+              lineage: session.lineage,
+              stoppedAt: session.endedAt ?? session.updatedAt,
+            }).pipe(Effect.forkIn(scope))
+            return successor
+          }),
+        ).pipe(run)
+
+      /**
+       * Whether what a start need said is missing still is. The user's Retry always starts the
+       * lineage again; by itself, Hemera starts it again once the setting the cascade gives now
+       * is another, or the agent can now be started; never for a provider limit.
+       */
+      const stillMissing = (need: Need, retried: boolean) =>
+        Effect.gen(function* () {
+          const row = yield* sessionOfNeed(need.id)
+          if (row === null) return true
+          const session = yield* getSession(row.sessionId)
+          if (row.reason !== 'start' && row.reason !== 'limit') return true
+          if (retried) {
+            yield* resume(session.id)
+            return false
+          }
+          // A provider limit is lifted when the provider says so: only the user tries again.
+          if (row.reason === 'limit') return true
+          const setting =
+            session.modelLevel === null
+              ? null
+              : yield* ModelChoice.use((choice) => choice.of(session.owner, session.role))
+          const changed =
+            setting !== null && (setting.agent !== row.agent || setting.model !== row.model)
+          const agentNeed =
+            Predicate.isTagged(need.fields, 'Environment') &&
+            need.fields.settingsSection === 'agents'
+          const agentBack =
+            agentNeed &&
+            (yield* Discovery.use((discovery) =>
+              discovery.resolve(session.provider).pipe(Effect.isSuccess),
+            ))
+          if (!changed && !agentBack) return true
+          yield* resume(session.id)
+          return false
+        }).pipe(
+          run,
+          Effect.catchCause((cause) =>
+            Effect.as(said(`a session need was not checked again: ${String(cause)}`), true),
+          ),
+        )
 
       // --- the service ----------------------------------------------------------------------
 
@@ -758,11 +1015,14 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               reason: `${entry.displayName} belongs to a ${entry.ownerKind}`,
             })
           }
+          const id = crypto.randomUUID()
+          if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
           const setting =
             asked.provider === undefined
               ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
               : null
           const session = yield* openSession({
+            id,
             provider: asked.provider ?? setting?.agent ?? 'claude',
             owner: asked.owner,
             role: asked.role,
@@ -776,10 +1036,68 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               effort: setting?.effort ?? null,
               mode: null,
             },
+            modelLevel: setting?.level ?? null,
           })
           yield* start(session, null).pipe(Effect.forkIn(scope))
           return session
         }).pipe(run)
+
+      /**
+       * A launch an agent asks for: a slot of the cap at once, or refused with the sentence it
+       * reads; then one of its mission's launches, or refused the same way. Each refusal is a
+       * line of the Journal.
+       */
+      const launchAllowed = (asked: OpenAsked, entry: RoleEntry, lineage: string) =>
+        Effect.gen(function* () {
+          const missionId = asked.owner.kind === 'mission' ? asked.owner.missionId : null
+          if (counts(entry)) {
+            const slot = yield* cap.acquire({
+              projectId: yield* projectOf(asked.owner),
+              lineage,
+              missionId,
+              requestedBy: 'agent',
+            })
+            if (!slot.held) {
+              yield* refused(
+                missionId,
+                `A launch of ${entry.displayName} was refused`,
+                slot.sentence,
+              )
+              return yield* new SessionRefused({ reason: slot.sentence })
+            }
+          }
+          if (missionId === null) return
+          const verdict = yield* spendBudget(missionId, 'launches').pipe(
+            Effect.catchTags({
+              NeedRefused: (refusal) => Effect.fail(new SessionRefused({ reason: refusal.reason })),
+              UnknownMission: () => Effect.fail(new SessionRefused({ reason: 'no such mission' })),
+              UnknownProject: () => Effect.fail(new SessionRefused({ reason: 'no such Project' })),
+            }),
+          )
+          if (verdict.spent) return
+          yield* cap.release(lineage)
+          return yield* new SessionRefused({ reason: verdict.sentence })
+        })
+
+      /** A launch refused above the cap, as the mission's Journal says it. */
+      const refused = (missionId: string | null, what: string, sentence: string) =>
+        missionId === null
+          ? Effect.void
+          : mutate('refusing a launch', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [
+                  {
+                    type: 'session.refused',
+                    entityKind: 'mission',
+                    entityId: missionId,
+                    source: 'system' as const,
+                    author: 'hemera' as const,
+                    payload: { missionId, what, sentence },
+                  },
+                ],
+              }),
+            )
 
       const deliver = (asked: DeliveryAsked) =>
         Effect.gen(function* () {
@@ -809,6 +1127,40 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (driver.turn === null) return
           }
         }).pipe(run)
+
+      // The needs a session gives come back here: an answer or a Retry starts its lineage again.
+      yield* post.needsWith({
+        deliver: (need, transaction) =>
+          Effect.gen(function* () {
+            const row = yield* sessionOfNeed(need.id)
+            if (row === null || row.reason !== 'failing') return []
+            const answer = need.answer
+            if (Predicate.isTagged(answer, 'Chosen') && answer.option === CHANGE_THE_MODEL) {
+              // It waits for another model: a need of its own, which starts it once that changed.
+              const session = yield* getSession(row.sessionId)
+              const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
+              const write = yield* sessionNeedIn(session, {
+                reason: 'start',
+                fields: modelToChange(session, roleName),
+              })
+              const written = yield* write(transaction).pipe(
+                Effect.catchTags({
+                  NeedRefused: () => Effect.succeed(null),
+                  UnknownMission: () => Effect.succeed(null),
+                  UnknownProject: () => Effect.succeed(null),
+                }),
+              )
+              return written?.events ?? []
+            }
+            // Started once the answer's transaction is written: its own waits for it.
+            yield* resume(row.sessionId).pipe(Effect.ignore, Effect.forkIn(scope))
+            return []
+          }).pipe(
+            run,
+            Effect.catchTag('UnknownSession', () => Effect.succeed([])),
+          ),
+        recheck: stillMissing,
+      })
 
       // Who listens: the rings of stored deliveries, the agents' reports and deaths, the sweep.
       yield* post.rings.pipe(
