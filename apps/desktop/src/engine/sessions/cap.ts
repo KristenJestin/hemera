@@ -45,6 +45,8 @@ export class Cap extends Context.Service<
     readonly release: (lineage: string) => Effect.Effect<void, DatabaseError>
     /** The cap of a Project changed: the phases waiting take the slots it frees. */
     readonly wake: (projectId: string) => Effect.Effect<void, DatabaseError>
+    /** What a lineage waiting for a slot reads (a Project's own phase), or null when it waits for none. */
+    readonly waiting: (lineage: string) => Effect.Effect<string | null, DatabaseError>
   }
 >()('Cap') {}
 
@@ -160,6 +162,15 @@ export const capLayer = Layer.effect(
           yield* grant(projectId)
         }).pipe(Semaphore.withPermits(lock, 1)),
       wake: (projectId) => grant(projectId).pipe(Semaphore.withPermits(lock, 1)),
+      waiting: (lineage) =>
+        Effect.gen(function* () {
+          const found = [...queues.entries()].find(([, queue]) =>
+            queue.some((one) => one.asked.lineage === lineage),
+          )
+          if (found === undefined) return null
+          const [projectId] = found
+          return slotWaitSentence(holding(projectId).size, yield* capOf(projectId))
+        }),
     }
   }),
 )

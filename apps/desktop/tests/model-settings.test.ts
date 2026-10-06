@@ -54,7 +54,13 @@ describe('Models by role', () => {
         }),
       ),
     )
-    expect(roles.map((role) => role.role)).toEqual(['chat', 'builder', 'helper', 'code-reviewer'])
+    expect(roles.map((role) => role.role)).toEqual([
+      'chat',
+      'setup',
+      'builder',
+      'helper',
+      'code-reviewer',
+    ])
     expect(roles.find((role) => role.role === 'builder')).toEqual({
       role: 'builder',
       displayName: 'the Builder',

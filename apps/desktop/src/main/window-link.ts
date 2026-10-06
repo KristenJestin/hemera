@@ -334,6 +334,20 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['chats.transcript'](request).pipe(closedAs(gone), observed('chats.transcript', log)),
     'chats.changes': () =>
       engine['chats.changes']().pipe(streamClosedAs(gone), observedStream('chats.changes', log)),
+    'setup.cards': (request) =>
+      engine['setup.cards'](request).pipe(closedAs(gone), observed('setup.cards', log)),
+    'setup.accept': (request) =>
+      engine['setup.accept'](request).pipe(closedAs(gone), observed('setup.accept', log)),
+    'setup.decline': (request) =>
+      engine['setup.decline'](request).pipe(closedAs(gone), observed('setup.decline', log)),
+    'setup.acceptAll': (request) =>
+      engine['setup.acceptAll'](request).pipe(closedAs(gone), observed('setup.acceptAll', log)),
+    'setup.propose': (request) =>
+      engine['setup.propose'](request).pipe(closedAs(gone), observed('setup.propose', log)),
+    'setup.standing': (request) =>
+      engine['setup.standing'](request).pipe(closedAs(gone), observed('setup.standing', log)),
+    'setup.changes': () =>
+      engine['setup.changes']().pipe(streamClosedAs(gone), observedStream('setup.changes', log)),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

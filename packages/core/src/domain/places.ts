@@ -55,7 +55,19 @@ interface SensitiveEntry {
   /** Its segments, found anywhere along a path unless `anchored` to the root. */
   readonly segments: readonly Segment[]
   readonly anchored?: boolean
+  /** A name of the place a read tool reads freely, though the place is sensitive. */
+  readonly readFreely?: (name: string) => boolean
 }
+
+/**
+ * The endings of an `.env`'s template (`.env.example`, `.env.local.sample`…): a file a project
+ * keeps to show which variables it needs, not their values. A read tool reads it without asking;
+ * writing it, or a command naming it, still asks.
+ */
+export const ENV_TEMPLATE_ENDINGS = ['.example', '.sample', '.template', '.dist'] as const
+
+const envTemplate = (name: string): boolean =>
+  ENV_TEMPLATE_ENDINGS.some((ending) => name.toLowerCase().endsWith(ending))
 
 const named = (...names: readonly string[]): Segment[] => names.map((name) => ({ name }))
 
@@ -85,7 +97,7 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '/etc/sudoers', segments: named('etc', 'sudoers'), anchored: true },
   { listed: '/etc/sudoers.d', segments: named('etc', 'sudoers.d'), anchored: true },
   { listed: '.env', segments: named('.env') },
-  { listed: '.env.*', segments: [{ prefix: '.env.' }] },
+  { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate },
 ]
 
 /** Whether names differ only by case on this system. */
@@ -133,11 +145,13 @@ function segmentsOf(path: string): string[] {
 
 /**
  * The sensitive place a path is in, shown from the home when it is under it, and null when it is
- * in none. `path` is absolute; a segment that is a glob counts when it may name the place.
+ * in none. `path` is absolute; a segment that is a glob counts when it may name the place. A read
+ * tool's path (`reading`) may name what its place lets it read freely, by its very name.
  */
 export function sensitivePlace(
   path: string,
   context: Pick<PlaceContext, 'home' | 'platform'>,
+  asked: { readonly reading: boolean } = { reading: false },
 ): string | null {
   const parts = segmentsOf(path)
   for (const entry of SENSITIVE_PLACES) {
@@ -150,6 +164,9 @@ export function sensitivePlace(
       )
       if (!matches) continue
       if (entry.anchored === true && parts[0] !== '') continue
+      const last = parts[start + length - 1] ?? ''
+      const free = entry.readFreely
+      if (asked.reading && free !== undefined && globOf(last) === null && free(last)) continue
       return shownFromHome(prefixOf(path, start + length), context)
     }
   }

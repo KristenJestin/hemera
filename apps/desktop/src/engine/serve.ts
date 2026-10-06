@@ -6,7 +6,13 @@
  * window is shown.
  */
 
-import { ChatRefused, EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
+import {
+  ChatRefused,
+  EngineMainRpcs,
+  type EngineStart,
+  type EngineStatus,
+  SetupRefused,
+} from '@hemera/ipc'
 import { Layer, Stream, SubscriptionRef } from 'effect'
 import { Effect } from 'effect'
 
@@ -57,6 +63,8 @@ import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
 import { Chats } from './chat/service.ts'
 import { type Chat, chatChanges, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
+import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
+import { Setup } from './setup/service.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
@@ -291,6 +299,29 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'chats.transcript': ({ chatId, before }) =>
       use(transcriptOf(chatId, before)).pipe(observed('chats.transcript', log)),
     'chats.changes': () => follow(chatChanges).pipe(observedStream('chats.changes', log)),
+    'setup.cards': ({ projectId }) =>
+      use(Effect.andThen(getProject(projectId), cardsOf(projectId))).pipe(
+        observed('setup.cards', log),
+      ),
+    'setup.accept': ({ cardId }) => use(acceptCard(cardId)).pipe(observed('setup.accept', log)),
+    'setup.decline': ({ cardId }) => use(declineCard(cardId)).pipe(observed('setup.decline', log)),
+    'setup.acceptAll': ({ projectId }) =>
+      use(Effect.andThen(getProject(projectId), acceptAll(projectId))).pipe(
+        observed('setup.acceptAll', log),
+      ),
+    'setup.propose': ({ projectId }) =>
+      use(
+        Setup.use((setup) => setup.start(projectId)).pipe(
+          Effect.asVoid,
+          Effect.catchTags({
+            SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
+            SessionRefused: (refused) => Effect.fail(new SetupRefused({ reason: refused.reason })),
+          }),
+        ),
+      ).pipe(observed('setup.propose', log)),
+    'setup.standing': ({ projectId }) =>
+      use(Setup.use((setup) => setup.standing(projectId))).pipe(observed('setup.standing', log)),
+    'setup.changes': () => follow(setupChanges).pipe(observedStream('setup.changes', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

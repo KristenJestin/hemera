@@ -1,7 +1,7 @@
 /**
  * The sensitive places, for file tools, command arguments and workflow tools alike: the list of
- * `@hemera/core` (credentials, keys, every `.env`), and Hemera's actual data folder wherever it
- * is, with the narrow exemption of CT-17.
+ * `@hemera/core` (credentials, keys, every `.env` but the templates a read tool reads), and
+ * Hemera's actual data folder wherever it is, with the narrow exemption of CT-17.
  *
  * Below the session's own place (a Workspace Hemera made in its data folder, a Probe's folder),
  * only what sits below counts: a `.env` there is sensitive, the place itself is not. In the data
@@ -48,19 +48,20 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
       const said = (place: string) =>
         `sensitive place: ${place.startsWith('~') ? place.replaceAll('\\', '/') : place}`
       /** The sensitive place below a folder, shown from the home with the folder before it. */
-      const below = (root: string, path: string) => {
-        const found = sensitivePlace(relative(root, path), context)
+      const below = (root: string, path: string, reading: boolean) => {
+        const found = sensitivePlace(relative(root, path), context, { reading })
         return found === null ? null : said(shownFromHome(join(root, found), context))
       }
       const dataFolders = spellings(dataFolder)
       return {
         sensitive: (path, asked) =>
           Effect.gen(function* () {
+            const reading = !asked.writes
             const root = spellings(asked.session.place.root).find((one) => containedIn(one, path))
-            if (root !== undefined) return below(root, path)
+            if (root !== undefined) return below(root, path, reading)
             const data = dataFolders.find((one) => containedIn(one, path))
             if (data === undefined) {
-              const found = sensitivePlace(path, context)
+              const found = sensitivePlace(path, context, { reading })
               return found === null ? null : said(found)
             }
             const [first = '', second = ''] = relative(data, path).split(sep)
@@ -68,7 +69,7 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
               const folders = yield* places.foldersOf(asked.session.missionId)
               const reachable =
                 second === folders.own || (!asked.writes && folders.dependencies.includes(second))
-              if (reachable) return below(join(data, first, second), path)
+              if (reachable) return below(join(data, first, second), path, reading)
             }
             const shown = join(data, ...[first, second].filter((one) => one !== ''))
             return said(shownFromHome(shown, context))

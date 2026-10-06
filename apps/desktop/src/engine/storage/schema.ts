@@ -987,3 +987,32 @@ export const chatEntries = sqliteTable(
   },
   (table) => [index('chat_entries_by_chat').on(table.chatId, table.sequence)],
 )
+
+/**
+ * The setup agent's proposals (#44): one card per change, the changes of one call one batch, in
+ * the order proposed. A card is decided once; a refusal at the click keeps it pending with the
+ * use case's reason. A variable's value is never here: the engine holds it in memory only.
+ */
+export const setupCards = sqliteTable(
+  'setup_cards',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    batch: text('batch').notNull(),
+    position: integer('position').notNull(),
+    /** The change, as `SetupChange` writes it: never a value. */
+    change: text('change').notNull(),
+    title: text('title').notNull(),
+    /** Its details, as their lines, in JSON. */
+    details: text('details').notNull(),
+    state: text('state').notNull(),
+    /** Why the last click was refused, by the use case, masked; null otherwise. */
+    refusal: text('refusal').$type<Masked<string>>(),
+    createdAt: text('created_at').notNull(),
+    decidedAt: text('decided_at'),
+  },
+  (table) => [index('setup_cards_by_project').on(table.projectId, table.createdAt, table.position)],
+)

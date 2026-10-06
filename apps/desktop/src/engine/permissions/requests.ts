@@ -443,6 +443,33 @@ const wakes = (event: { readonly type: string; readonly payload: EventPayload })
   event.type === 'need.withdrawn' ||
   (event.type === 'permission.decided' && event.payload['by'] === 'user')
 
+/**
+ * Inside the transaction that ends a session nothing will take up again: its requests still
+ * waiting on the user end "not executed", and their needs expire, with the same reason.
+ */
+export const expireSessionRequestsIn = (
+  transaction: EngineTransaction,
+  sessionId: string,
+  reason: string,
+) =>
+  Effect.gen(function* () {
+    const pending = yield* transaction
+      .select()
+      .from(permissionRequests)
+      .where(
+        and(eq(permissionRequests.sessionId, sessionId), eq(permissionRequests.state, 'pending')),
+      )
+      .pipe(Effect.mapError(refusedWhile('reading the session’s requests')))
+    const events: NewEvent[] = []
+    for (const row of pending) {
+      events.push(
+        ...(yield* endedWith(transaction, row, ['pending'], 'not-executed', maskText(reason, []))),
+      )
+      events.push(...(yield* expireNeedIn(transaction, row.needId, reason)))
+    }
+    return events
+  })
+
 export const approvalsLayer = (settings: RequestsSettings) =>
   Layer.effect(
     Approvals,

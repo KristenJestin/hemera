@@ -134,16 +134,18 @@ describe('Each role has exactly its tools', () => {
         'spec_create_draft',
       ],
     ],
+    ['setup', ['fs_list', 'fs_read', 'search', 'setup_propose', 'setup_read']],
   ])('%s', (role, tools) => {
     expect(toolsFor(role)).toEqual(tools)
   })
 
-  test('every role has a place, and the read-only ones are the Planner, the cold read and the reviewers', () => {
+  test('every role has a place, and the read-only ones are the Planner, the cold read, the reviewers and the setup agent', () => {
     expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
       'planner',
       'cold-read',
       'spec-reviewer',
       'code-reviewer',
+      'setup',
     ])
     expect(ROLE_PLACES.planner.kind).toBe('main-checkout')
     expect(ROLE_PLACES.probe.kind).toBe('own-worktree')
@@ -177,6 +179,7 @@ describe('The table says what each tool does to the world', () => {
       'memory_read',
       'missions_list',
       'search',
+      'setup_read',
     ])
   })
 

@@ -13,6 +13,7 @@ import { Context, type Effect, Layer } from 'effect'
 
 import { CHAT_ROLE } from '../chat/role.ts'
 import type { MissionActivity } from '../missions.ts'
+import { SETUP_ROLE } from '../setup/role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -75,7 +76,7 @@ export const roleNamed = (entries: ReadonlyArray<RoleEntry>, id: string): RoleEn
   entries.find((entry) => entry.id === id)
 
 /** The roles this version registers. */
-export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [CHAT_ROLE]
+export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [CHAT_ROLE, SETUP_ROLE]
 
 /**
  * The tools that read or write the Memory: `memory_read` and every tool that records in it. The
