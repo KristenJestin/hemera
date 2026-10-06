@@ -6,7 +6,7 @@
  * port.
  */
 
-import { ApplicationOwner, EnvironmentFields } from '@hemera/core/domain'
+import { NeedFields, NeedOwner } from '@hemera/core/domain'
 import { AgentsProcessGone, LaunchFailed, StorageFailed, type AgentLine } from '@hemera/ipc'
 import { Deferred, Effect, Predicate, Schema, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -66,8 +66,12 @@ export const ProbeRpcs = RpcGroup.make(
     success: Item,
     stream: true,
   }),
-  /** Creates a pending environment need of the application, as an engine service would. */
-  Rpc.make('probe.need', { success: Schema.String, error: StorageFailed }),
+  /** Creates a pending need of that owner, with those fields, as an engine service would. */
+  Rpc.make('probe.need', {
+    payload: { owner: NeedOwner, fields: NeedFields },
+    success: Schema.String,
+    error: StorageFailed,
+  }),
   /**
    * A fake agent at work: a mission of a Project over `folder`, and a Builder session that writes
    * `count` lines in its Journal through the real gate, one after the other, in the background.
@@ -199,27 +203,15 @@ export const probeHandlers = (launch: Launch, profile: StartedProfile, dataFolde
         Stream.map((index) => Item.make({ index, text: 'x'.repeat(size) })),
         Stream.rechunk(1),
       ),
-    'probe.need': () =>
-      profile
-        .use(
-          createNeed(
-            SUITE,
-            ApplicationOwner.make({}),
-            EnvironmentFields.make({
-              missing: 'Docker is not running',
-              action: 'Start Docker',
-              settingsSection: null,
-            }),
-          ),
-        )
-        .pipe(
-          Effect.map((need) => need.id),
-          Effect.mapError((refusal) =>
-            refusal instanceof StorageFailed
-              ? refusal
-              : new StorageFailed({ sentence: refusal.message }),
-          ),
+    'probe.need': ({ owner, fields }) =>
+      profile.use(createNeed(SUITE, owner, fields)).pipe(
+        Effect.map((need) => need.id),
+        Effect.mapError((refusal) =>
+          refusal instanceof StorageFailed
+            ? refusal
+            : new StorageFailed({ sentence: refusal.message }),
         ),
+      ),
     'probe.agentWrites': ({ folder, count }) =>
       agentWrites(profile, folder, count).pipe(Effect.mapError(storageFailed)),
     'probe.memory': () => memoryState(profile, dataFolder).pipe(Effect.mapError(storageFailed)),

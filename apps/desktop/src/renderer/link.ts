@@ -22,6 +22,11 @@ import {
   type EnvironmentReport,
   type LineCheck,
   type MaskedVariable,
+  type Mission,
+  type MissionsChange,
+  type Need,
+  type NeedAnswerAsked,
+  type NeedGroup,
   type NewProject,
   type Preferences,
   type PreferencesChange,
@@ -123,6 +128,18 @@ export interface Link {
   readonly runOutput: (id: string) => Promise<RunOutput>
   /** Each run as it changes, for as long as the listener listens. */
   readonly onRunChanges: (listener: (run: Run) => void, onEnd: (error: Error) => void) => () => void
+  /** Every pending need of the Profile, by owner: the application's first, then each Project's. */
+  readonly needs: () => Promise<ReadonlyArray<NeedGroup>>
+  /** Answers a need once, under the answer's key; a need no longer pending answers as it ended. */
+  readonly answerNeed: (asked: NeedAnswerAsked) => Promise<Need>
+  /** Checks a need of something missing again: withdrawn when it is there now. */
+  readonly retryNeed: (id: string) => Promise<Need>
+  readonly mission: (id: string) => Promise<Mission>
+  /** Each mission and each need as a change left it, for as long as the listener listens. */
+  readonly onMissionChanges: (
+    listener: (change: MissionsChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** What main tells the window of notifications, for as long as the listener listens. */
   readonly onNotices: (listener: (notice: WindowNotice) => void) => () => void
   readonly close: () => void
@@ -242,6 +259,17 @@ export function linkOver(port: Port): Link {
     onRunChanges: (listener, onEnd) =>
       follow(
         (ready) => ready['runs.changes'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
+    needs: () => call((ready) => ready['needs.list']()),
+    answerNeed: (asked) => call((ready) => ready['needs.answer'](asked)),
+    retryNeed: (id) => call((ready) => ready['needs.retry']({ id })),
+    mission: (id) => call((ready) => ready['missions.get']({ id })),
+    onMissionChanges: (listener, onEnd) =>
+      follow(
+        (ready) => ready['missions.changes'](),
         listener,
         (error) => error instanceof StorageFailed || error instanceof EngineGone,
         onEnd,

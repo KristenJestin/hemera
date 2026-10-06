@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { Ball } from '../../blocks/ball/ball-mark.tsx'
 import { MissionRow, MissionRowSkeleton } from '../../blocks/mission/mission-row.tsx'
+import { NeedsYouList, type NeedsYouListProps } from '../../blocks/need/needs-you-list.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
@@ -12,9 +13,10 @@ import { Page, PageHeader } from '../page.tsx'
 /**
  * Home: the page the window opens on, and the frame of four lists whose content comes later.
  *
- * - **Needs you** and **Questions**, side by side: what blocks and waits for the user across every
- *   Project, and the Planning questions that wait too. The two that call, so they are first and
- *   their counts are in the header.
+ * - **Needs you** and **Questions**: what blocks and waits for the user across every Project, and
+ *   the Planning questions that wait too. The two that call, so they are first and their counts
+ *   are in the header. Side by side when questions wait; otherwise Needs you takes the whole
+ *   width and Questions, empty, sits under it.
  * - **Since you left**: what happened while the window was away, in the order it happened.
  * - **Recent**: what was worked on last.
  *
@@ -44,6 +46,11 @@ export interface HomePageProps {
   /** Whether there is a Project at all: without one, Home is one invitation. */
   hasProjects: boolean
   needsYou: HomeSection
+  /**
+   * The needs themselves, once they are read: Needs you then holds a row per need, answered in
+   * place, and counts those still waiting; without them, it holds `needsYou`'s rows.
+   */
+  needs?: Omit<NeedsYouListProps, 'loading'> | undefined
   questions: HomeSection
   sinceYouLeft: HomeSection
   recent: HomeSection
@@ -54,8 +61,14 @@ export interface HomePageProps {
   onRetry: () => void
 }
 
+/** A need still waiting: one answered or expired a moment ago no longer counts. */
+const waiting = (row: NeedsYouListProps['rows'][number]): boolean =>
+  row.need.status === undefined || row.need.status.state === 'waiting'
+
 /** Side by side, each as tall as what it holds: a card never stretches to its neighbour. */
 const TWO = 'grid grid-cols-1 items-start gap-6 lg:grid-cols-2'
+/** One under the other, each the page's whole width. */
+const ONE = 'flex flex-col gap-6'
 
 const EMPTY = 'px-4 py-3 text-sm text-muted-foreground'
 
@@ -121,6 +134,7 @@ export function HomePage({
   today,
   hasProjects,
   needsYou,
+  needs,
   questions,
   sinceYouLeft,
   recent,
@@ -160,16 +174,23 @@ export function HomePage({
   return (
     <Page>
       <PageHeader title="Home" about={<span>{today}</span>} />
-      <div className={TWO}>
-        <Section title="Needs you" count={needsYou.rows.length}>
-          <Rows
-            rows={needsYou.rows}
-            label="Needs you"
-            loading={loading}
-            empty="Nothing waits for you."
-            onOpen={onOpen}
-          />
-        </Section>
+      {/* Needs you takes the whole width unless questions wait beside it: its titles need the room. */}
+      <div className={questions.rows.length > 0 ? TWO : ONE}>
+        {needs === undefined ? (
+          <Section title="Needs you" count={needsYou.rows.length}>
+            <Rows
+              rows={needsYou.rows}
+              label="Needs you"
+              loading={loading}
+              empty="Nothing waits for you."
+              onOpen={onOpen}
+            />
+          </Section>
+        ) : (
+          <Section title="Needs you" count={needs.rows.filter(waiting).length}>
+            <NeedsYouList {...needs} loading={loading} />
+          </Section>
+        )}
         <Section title="Questions" count={questions.rows.length}>
           <Rows
             rows={questions.rows}

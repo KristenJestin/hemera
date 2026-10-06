@@ -63,13 +63,19 @@ export type NeedAsk =
   | {
       kind: 'permission'
       command: string
-      agentReason: string
+      /** Left out when the title already says it. */
+      agentReason?: string | undefined
       hemeraReason: string
       /** The choices offered: Allow for this mission only on an ordinary place of a mission. */
       choices: readonly PermissionChoice[]
     }
   | { kind: 'decision'; options: readonly DecisionOption[] }
-  | { kind: 'error'; attempts: readonly Attempt[]; proposed: string }
+  | {
+      kind: 'error'
+      attempts: readonly Attempt[]
+      /** What is proposed now, applied by Apply; none when nothing is. */
+      proposed?: string | undefined
+    }
   | {
       kind: 'environment'
       /** Its action, Retry unless the need names another. */
@@ -98,11 +104,17 @@ export interface NeedCardProps {
   status?: NeedState | undefined
   /** Whether the mission is in Planning: only then can a need be discussed. */
   planning?: boolean | undefined
+  /** The label of the answer on its way: its button waits, the other choices are quiet. */
+  answering?: string | undefined
+  /** Why the last answer did not go through, in words: the card stays to answer again. */
+  failure?: string | undefined
   onOpenMission?: (() => void) | undefined
   onPermission?: ((choice: PermissionChoice) => void) | undefined
   onChoose?: ((option: string) => void) | undefined
+  /** An answer of one's own to a decision; without it, a decision is answered by its options. */
   onWrite?: ((answer: string) => void) | undefined
   onApply?: (() => void) | undefined
+  /** Where to look at an error oneself; without it, Let me look is not offered. */
   onLook?: (() => void) | undefined
   onRetry?: (() => void) | undefined
   onSettings?: (() => void) | undefined
@@ -119,6 +131,8 @@ const LABEL = 'text-xs font-medium text-muted-foreground'
 // A command or an output wraps rather than scrolls: a scrolled block is a stop the keyboard must make.
 const CODE =
   'rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre-wrap break-words'
+const FAILURE =
+  'flex items-start gap-2 rounded-md border border-border bg-destructive-muted px-3 py-2 text-sm text-destructive-muted-foreground'
 const FAINT =
   'flex h-control-md min-w-0 items-center gap-2 rounded-lg border border-border px-3 text-sm text-muted-foreground'
 
@@ -233,16 +247,18 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
           <pre className={CODE}>
             <code>{ask.command}</code>
           </pre>
-          <Part label="Agent’s reason">
-            <p className={PROSE}>{ask.agentReason}</p>
-          </Part>
+          {ask.agentReason !== undefined && (
+            <Part label="Agent’s reason">
+              <p className={PROSE}>{ask.agentReason}</p>
+            </Part>
+          )}
           <Part label="Why Hemera asks">
             <p className={PROSE}>{ask.hemeraReason}</p>
           </Part>
         </>
       )
     case 'decision':
-      return <OwnAnswer onWrite={onWrite} />
+      return onWrite === undefined ? null : <OwnAnswer onWrite={onWrite} />
     case 'error':
       return (
         <>
@@ -258,9 +274,11 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
               ))}
             </ol>
           </Part>
-          <Part label="Proposed">
-            <p className={PROSE}>{ask.proposed}</p>
-          </Part>
+          {ask.proposed !== undefined && (
+            <Part label="Proposed">
+              <p className={PROSE}>{ask.proposed}</p>
+            </Part>
+          )}
         </>
       )
     case 'environment':
@@ -271,11 +289,13 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
 function Actions({
   ask,
   planning,
+  answering,
   ...on
 }: Pick<
   NeedCardProps,
   | 'ask'
   | 'planning'
+  | 'answering'
   | 'onPermission'
   | 'onChoose'
   | 'onApply'
@@ -284,8 +304,13 @@ function Actions({
   | 'onSettings'
   | 'onDiscuss'
 >): ReactNode {
+  // While an answer is on its way, its button waits and every other choice is quiet.
+  const waits = (label: string) => ({
+    state: answering === label ? ('loading' as const) : undefined,
+    disabled: answering !== undefined && answering !== label,
+  })
   const discuss = planning === true && (
-    <Button variant="ghost" onClick={on.onDiscuss}>
+    <Button variant="ghost" onClick={on.onDiscuss} {...waits('Discuss')}>
       Discuss
     </Button>
   )
@@ -298,6 +323,7 @@ function Actions({
               key={choice}
               variant={choice === 'allow-once' ? 'primary' : 'secondary'}
               onClick={() => on.onPermission?.(choice)}
+              {...waits(PERMISSION_LABELS[choice])}
             >
               {PERMISSION_LABELS[choice]}
             </Button>
@@ -310,13 +336,21 @@ function Actions({
         <>
           {ask.options.map((option) =>
             option.recommended === undefined ? (
-              <Button key={option.label} onClick={() => on.onChoose?.(option.label)}>
+              <Button
+                key={option.label}
+                onClick={() => on.onChoose?.(option.label)}
+                {...waits(option.label)}
+              >
                 {option.label}
               </Button>
             ) : (
               // The recommended option is the primary, marked, its reason quoted under the hand.
               <Tooltip key={option.label} label={`Recommended: ${option.recommended}`} quote>
-                <Button variant="primary" onClick={() => on.onChoose?.(option.label)}>
+                <Button
+                  variant="primary"
+                  onClick={() => on.onChoose?.(option.label)}
+                  {...waits(option.label)}
+                >
                   <IconCheck size="sm" aria-hidden="true" />
                   {option.label}
                 </Button>
@@ -329,16 +363,22 @@ function Actions({
     case 'error':
       return (
         <>
-          <Button variant="primary" onClick={on.onApply}>
-            Apply
-          </Button>
-          <Button onClick={on.onLook}>Let me look</Button>
+          {ask.proposed !== undefined && (
+            <Button variant="primary" onClick={on.onApply} {...waits('Apply')}>
+              Apply
+            </Button>
+          )}
+          {on.onLook !== undefined && (
+            <Button onClick={on.onLook} {...waits('Let me look')}>
+              Let me look
+            </Button>
+          )}
         </>
       )
     case 'environment':
       return (
         <>
-          <Button variant="primary" onClick={on.onRetry}>
+          <Button variant="primary" onClick={on.onRetry} {...waits(ask.action ?? 'Retry')}>
             {ask.action ?? 'Retry'}
           </Button>
           {ask.settings !== undefined && (
@@ -360,6 +400,8 @@ export function NeedCard({
   role,
   status = { state: 'waiting' },
   planning = false,
+  answering,
+  failure,
   onOpenMission,
   onWrite,
   ...on
@@ -367,7 +409,7 @@ export function NeedCard({
   if (status.state !== 'waiting') {
     const applied = status.state === 'applied'
     return (
-      <div className={FAINT} data-need-state={status.state}>
+      <div role="status" className={FAINT} data-need-state={status.state}>
         <NeedGlyph kind={ask.kind} />
         <span className="inline-flex shrink-0 items-center gap-1 font-medium">
           {applied ? (
@@ -395,7 +437,7 @@ export function NeedCard({
       }
       footer={
         <FrameFooter>
-          <Actions ask={ask} planning={planning} {...on} />
+          <Actions ask={ask} planning={planning} answering={answering} {...on} />
         </FrameFooter>
       }
     >
@@ -403,6 +445,14 @@ export function NeedCard({
         <h3 className={TITLE}>{title}</h3>
         {text !== undefined && <p className={PROSE}>{text}</p>}
         <Ask ask={ask} onWrite={onWrite} />
+        {failure !== undefined && (
+          <p role="alert" className={FAILURE}>
+            <span className="flex shrink-0 pt-0.5 text-destructive">
+              <IconAlertTriangle size="sm" aria-hidden="true" />
+            </span>
+            <span className="min-w-0">{failure}</span>
+          </p>
+        )}
       </article>
     </Frame>
   )

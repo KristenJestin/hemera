@@ -217,3 +217,88 @@ export const KeyboardPath: Story = {
     await expect(canvas.getByRole('button', { name: 'Deny' })).toHaveFocus()
   },
 }
+
+/** An answer on its way: its button waits, the other choices are quiet until it is back. */
+export const Answering: Story = {
+  args: { answering: 'Allow once' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // The answer on its way keeps its place in the keyboard path, quiet, while it waits.
+    await expect(canvas.getByRole('button', { name: /Allow once/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await expect(canvas.getByRole('button', { name: 'Allow for this mission' })).toBeDisabled()
+    await expect(canvas.getByRole('button', { name: 'Deny' })).toBeDisabled()
+  },
+}
+
+/** An answer that did not go through: why, in words, and the card stays to answer again. */
+export const AnswerFailed: Story = {
+  args: { failure: 'Hemera could not write your answer: the data folder refused it.' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent('the data folder refused it')
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeEnabled()
+  },
+}
+
+/** A decision answered by its options alone: no answer of one's own is offered. */
+export const DecisionOptionsOnly: StoryObj<typeof NeedCard> = {
+  args: { ...Decision.args, onWrite: undefined },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByRole('textbox', { name: 'Your own answer' })).toBeNull()
+    await expect(canvas.getAllByRole('button').at(1)).toHaveAccessibleName('invoices')
+    await userEvent.click(canvas.getByRole('button', { name: 'billing_invoices' }))
+    await expect(args.onChoose).toHaveBeenCalledWith('billing_invoices')
+  },
+}
+
+/** An error with nothing proposed and no place to look: nothing to press but what is there. */
+export const ErrorWithoutProposal: StoryObj<typeof NeedCard> = {
+  args: {
+    ...Error.args,
+    onLook: undefined,
+    ask: {
+      kind: 'error',
+      attempts: [{ what: 'Built shared', output: 'error TS2307: Cannot find module "./money"' }],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByRole('button', { name: 'Apply' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Let me look' })).toBeNull()
+    await expect(canvas.queryByText('Proposed')).toBeNull()
+  },
+}
+
+/** A permission whose title is already the agent's reason: the reason is not said twice. */
+export const PermissionReasonAsTitle: Story = {
+  args: {
+    title: 'The deploy step needs the staging host and its user.',
+    text: undefined,
+    ask: {
+      kind: 'permission',
+      command: 'cat ~/.ssh/config',
+      hemeraReason: 'Outside the Workspace: ~/.ssh/config',
+      choices: ['allow-once', 'allow-for-mission', 'deny'],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByText('Agent’s reason')).toBeNull()
+    await expect(canvas.getByText('Why Hemera asks')).toBeVisible()
+  },
+}
+
+/** Something missing that a setting answers: the link opens that section. */
+export const EnvironmentOpensSettings: Story = {
+  args: { ...EnvironmentInSettings.args },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: 'Open Settings › Models' }),
+    )
+    await expect(args.onSettings).toHaveBeenCalled()
+  },
+}
