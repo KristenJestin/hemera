@@ -26,6 +26,7 @@ import {
   NOTE_TOPIC_MAX,
   NOW_TEXT_MAX,
 } from './memory.ts'
+import { SetupProposal } from './setup.ts'
 
 /** The roles of an agent session at this version; later tickets add theirs. */
 export const ROLES = [
@@ -38,6 +39,7 @@ export const ROLES = [
   'spec-reviewer',
   'code-reviewer',
   'chat',
+  'setup',
 ] as const
 export const Role = Schema.Literals(ROLES)
 export type Role = typeof Role.Type
@@ -53,6 +55,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   'spec-reviewer': 'the Spec reviewer',
   'code-reviewer': 'the code reviewer',
   chat: 'the Chat',
+  setup: 'the setup agent',
 }
 
 /** The kinds of place a role works in. */
@@ -81,15 +84,17 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   'spec-reviewer': { kind: 'workspace', readOnly: true },
   'code-reviewer': { kind: 'workspace', readOnly: true },
   chat: { kind: 'main-checkout', readOnly: false },
+  setup: { kind: 'main-checkout', readOnly: true },
 }
 
 export type GateClass = 'local' | 'judged' | 'workflow'
 
 /**
- * What a tool does to the world: reads it, writes files, runs (or stops) a command, or records
- * in Hemera's own Memory of the mission, which writes nothing in the role's place.
+ * What a tool does to the world: reads it, writes files, runs (or stops) a command, records in
+ * Hemera's own Memory of the mission, which writes nothing in the role's place, or proposes a
+ * change the user accepts or declines (the setup agent's cards), which changes nothing itself.
  */
-export type ToolEffect = 'reads' | 'writes' | 'runs' | 'records'
+export type ToolEffect = 'reads' | 'writes' | 'runs' | 'records' | 'proposes'
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
@@ -413,6 +418,23 @@ const SpecCreateDraft = Schema.Struct({
     "Create a mission in Planning in this Project, from this conversation. Call missions_list first. The answer gives the new mission's key and the missions whose titles look like it.",
 })
 
+const SetupRead = Schema.Struct({}).annotate({
+  description:
+    "The Project's setup as its settings show it: its folder, its repositories with their remote, base branch and Git state, the catalogue with each command's roles, the preparation recipe, and the variables by name only.",
+})
+
+/** The most changes one `setup_propose` carries. */
+export const SETUP_CHANGES_MAX = 50
+
+const SetupPropose = Schema.Struct({
+  changes: Schema.Array(SetupProposal)
+    .check(Schema.isNonEmpty(), Schema.isMaxLength(SETUP_CHANGES_MAX))
+    .annotate({ description: 'The changes, one concern per call: they are one batch of cards.' }),
+}).annotate({
+  description:
+    'Propose changes to the setup. Nothing changes until the user accepts a card. A call with one change the settings would refuse is refused whole, with their reason: correct it and propose again.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -445,6 +467,7 @@ const READERS: ReadonlyArray<Role> = [
   'helper',
   'documenter',
   'chat',
+  'setup',
 ]
 const WRITERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'documenter', 'chat']
 const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
@@ -591,6 +614,22 @@ export const TOOLS = {
     input: SpecCreateDraft,
     label: { label: 'Create a mission', mark: 'create-mission', doing: 'Creating a mission' },
   }),
+  setup_read: tool({
+    roles: ['setup'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: SetupRead,
+    label: { label: 'Read the setup', mark: 'setup-read', doing: 'Reading the setup' },
+  }),
+  setup_propose: tool({
+    roles: ['setup'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: SetupPropose,
+    label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
+  }),
 }
 
 export type ToolName = keyof typeof TOOLS
@@ -614,6 +653,8 @@ export const TOOL_NAMES = [
   'evidence_add',
   'missions_list',
   'spec_create_draft',
+  'setup_read',
+  'setup_propose',
 ] as const satisfies ReadonlyArray<ToolName>
 
 /** The arguments of a tool once decoded. */

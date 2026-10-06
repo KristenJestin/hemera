@@ -70,6 +70,7 @@ export const TABLE_CLASSES = {
   session_needs: 'state',
   chats: 'permanent',
   chat_entries: 'permanent',
+  setup_cards: 'state',
   effectful_actions: 'permanent',
   tool_calls: 'permanent',
   session_files: 'state',

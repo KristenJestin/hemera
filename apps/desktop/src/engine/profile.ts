@@ -100,7 +100,7 @@ import { defaultPermissionAnswerLayer } from './agents/client.ts'
 import { type Discovery, discoveryLayer, machineLayer } from './agents/discovery.ts'
 import { idleAgentsLayer } from './agents/idle.ts'
 import { AgentStarter, agentRuntimeLayer } from './agents/runtime.ts'
-import { acpTracesLayer } from './agents/trace.ts'
+import { type AcpTraces, acpTracesLayer } from './agents/trace.ts'
 import { memoryBriefSources } from './sessions/brief.ts'
 import {
   drainQueuedResults,
@@ -112,6 +112,9 @@ import {
 import { type Chats, chatsLayer, markInterruptedChats } from './chat/service.ts'
 import { modelChoiceLayer, seedAppSettings } from './sessions/cascade.ts'
 import { type Cap, capLayer } from './sessions/cap.ts'
+import { setupDeskLayer } from './setup/desk.ts'
+import { Setup, setupLayer } from './setup/service.ts'
+import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { replacementGuardLayer } from './sessions/guard.ts'
 import { SESSION_NEEDS } from './sessions/needs.ts'
 import { BUDGET_NEEDS, budgetHandler } from './budget.ts'
@@ -217,6 +220,9 @@ export type EngineServices =
   | RoleRegistry
   | Cap
   | Chats
+  | Setup
+  | SetupValues
+  | AcpTraces
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -303,6 +309,7 @@ export const startProfile = (
       sessionTurnsLayer,
       repositoryStatusesLayer,
       preparationsLayer(log),
+      setupValuesLayer.pipe(Layer.provide(Layer.succeed(Secrets, secrets))),
     )
     // The commands: the supervisor (its registry in the database, its children's standard error
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
@@ -359,10 +366,11 @@ export const startProfile = (
       ...parts.tools,
       notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
+      setup: setupDeskLayer,
     }
     const roles = roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])])
-    // The Chats over the role sessions, over the agents' runtime, over the tools.
-    const sessionsLayers = chatsLayer.pipe(
+    // The Chats and the setup's runs over the role sessions, over the agents' runtime, over the tools.
+    const sessionsLayers = Layer.mergeAll(chatsLayer, setupLayer).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
@@ -565,6 +573,12 @@ export const startProfile = (
       Effect.andThen(step('handing the queued results to the sessions', drainQueuedResults)),
       // A Chat whose turn a stop interrupted says so before its session is ended (#43).
       Effect.andThen(step('marking the Chats a stop interrupted', markInterruptedChats)),
+      Effect.andThen(
+        step(
+          'ending the setup proposals a restart interrupted',
+          Setup.use((setup) => setup.endInterrupted),
+        ),
+      ),
       Effect.andThen(
         step(
           'rebuilding the sessions',

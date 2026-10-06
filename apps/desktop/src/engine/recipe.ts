@@ -78,7 +78,7 @@ const underBase = (path: string) =>
  * Project's, its path stays under it, its templates name what Hemera fills, and the source of a
  * copy or a link is in the main checkout now.
  */
-const checkedStep = (project: Project, draft: RecipeStepDraft, position: number) =>
+export const checkedStep = (project: Project, draft: RecipeStepDraft, position: number) =>
   Effect.gen(function* () {
     const repository =
       draft.repositoryId === null

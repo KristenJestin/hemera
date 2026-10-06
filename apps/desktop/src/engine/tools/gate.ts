@@ -98,6 +98,7 @@ import {
   PermissionRequests,
   SensitivePlaces,
   SessionNotes,
+  SetupDesk,
   Verdicts,
   outsideReason,
 } from './ports.ts'
@@ -154,6 +155,7 @@ export type GateServices =
   | SessionEpochs
   | SessionNotes
   | MissionActivity
+  | SetupDesk
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -215,6 +217,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.missions_list.input)(raw)
     case 'spec_create_draft':
       return decoder(tool, TOOLS.spec_create_draft.input)(raw)
+    case 'setup_read':
+      return decoder(tool, TOOLS.setup_read.input)(raw)
+    case 'setup_propose':
+      return decoder(tool, TOOLS.setup_propose.input)(raw)
   }
 }
 
@@ -392,6 +398,8 @@ export const toolGateLayer = (settings: GateSettings) =>
           }
           const entry = TOOLS[name]
           noted.gateClass = entry.gate
+          // A proposal's values are masked before its arguments are read, even when they do not.
+          if (name === 'setup_propose') yield* SetupDesk.use((desk) => desk.heard(raw))
           // 3. The arguments decode with its schema.
           const decoded = yield* decodeCall(name, raw).pipe(Effect.result)
           if (Result.isFailure(decoded)) {
@@ -538,6 +546,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* missionsList(grant, call.args)
             case 'spec_create_draft':
               return yield* specCreateDraft(grant, call.args)
+            case 'setup_read':
+              return yield* SetupDesk.use((desk) => desk.read(grant))
+            case 'setup_propose':
+              return yield* SetupDesk.use((desk) => desk.propose(grant, call.args))
           }
         })
 
@@ -671,7 +683,14 @@ export const toolGateLayer = (settings: GateSettings) =>
           )
           yield* record(grant, asked.tool, noted, answer, asked.callKey, began)
           return answer
-        })
+        }).pipe(
+          // A proposal recorded or refused: its values are masked as asked no longer.
+          Effect.ensuring(
+            asked.tool === 'setup_propose'
+              ? SetupDesk.use((desk) => desk.passed(asked.arguments))
+              : Effect.void,
+          ),
+        )
 
       /** 8. A call under a key: answered once, a retry given the same answer. */
       const keyed = (grant: Grant, asked: ToolCallAsked, key: string) =>

@@ -28,6 +28,7 @@ import { RecipeRpcs, VariablesRpcs, WorkspacesRpcs } from './workspaces.ts'
 import { SessionsRpcs } from './sessions.ts'
 import { ModelsRpcs } from './models.ts'
 import { ChatsRpcs } from './chats.ts'
+import { SetupRpcs } from './setup.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -123,6 +124,7 @@ export const EngineRpcs = RpcGroup.make(
   SessionsRpcs,
   ModelsRpcs,
   ChatsRpcs,
+  SetupRpcs,
 )
 
 /**

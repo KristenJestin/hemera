@@ -92,7 +92,7 @@ export function within(folder: string, path: string): boolean {
 }
 
 /** A repository's path, refused when it leaves the main checkout, by `..` or through a link. */
-const checkedPath = (mainCheckout: string, candidate: string) =>
+export const checkedPath = (mainCheckout: string, candidate: string) =>
   Effect.gen(function* () {
     const path = yield* Effect.fromResult(repositoryPath(candidate))
     if (!within(canonical(mainCheckout), whereItLeads(join(mainCheckout, path)))) {

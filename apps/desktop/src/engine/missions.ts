@@ -47,7 +47,18 @@ import {
   UnknownProject,
 } from '@hemera/ipc'
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
-import { Context, Crypto, Effect, Layer, Option, Predicate, Result, Schema, Stream } from 'effect'
+import {
+  Context,
+  Crypto,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Result,
+  Schema,
+  Semaphore,
+  Stream,
+} from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
 import type { DomainEvent, EventPayload, NewEvent } from './journal.ts'
@@ -394,6 +405,9 @@ const movedMeanwhile = (move: Move, stage: Stage) =>
 
 const CANCELLED = 'the mission was cancelled'
 
+/** The stops are run one round at a time: two rounds at once would call a stopper twice. */
+const stopping = Semaphore.makeUnsafe(1)
+
 /**
  * Calls the stoppers a mission's cancel owes, all of them when no mission is named: a stopper
  * that stopped what it held is done with; one that failed keeps its reason and waits for the next
@@ -429,7 +443,7 @@ export const runStops = (missionId: string | null) =>
         ),
       )
     }
-  })
+  }).pipe(Semaphore.withPermits(stopping, 1))
 
 /** Cancel: the stage, the pending needs and the stops owed in one transaction, then the stops. */
 const cancel = (mission: Mission) =>

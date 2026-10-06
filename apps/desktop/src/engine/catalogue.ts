@@ -121,7 +121,7 @@ const runnableLine = (line: string) =>
   })
 
 /** The command as it will be written, or the first thing wrong with it. */
-const checkedCommand = (project: Project, draft: CommandDraft) =>
+export const checkedCommand = (project: Project, draft: CommandDraft) =>
   Effect.gen(function* () {
     const name = draft.name.trim()
     if (name === '') return yield* refused('its name is empty')

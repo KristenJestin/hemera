@@ -57,11 +57,16 @@ import {
   type PermissionRequests,
   type SensitivePlaces,
   type SessionNotes,
+  type SetupDesk,
   type Verdicts,
   noGateGuards,
   noSessionNotes,
+  noSetupDesk,
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
+import type { ProjectServices } from '../repositories.ts'
+import type { SetupValues } from '../setup/values.ts'
+import type { Preparations } from '../workspaces.ts'
 
 export { HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
@@ -87,6 +92,12 @@ export interface ToolsParts {
   readonly commitRights?: Layer.Layer<CommitRights>
   /** The urgent notes of the role sessions (#40); none otherwise. */
   readonly notes?: Layer.Layer<SessionNotes, never, Database | DomainEvents | Secrets>
+  /** The setup agent's reading and proposals (#44); refused otherwise. */
+  readonly setup?: Layer.Layer<
+    SetupDesk,
+    never,
+    ProjectServices | Preparations | Secrets | SetupValues
+  >
   /** What `~` stands for; the user's home folder otherwise. */
   readonly home?: string
 }
@@ -189,6 +200,7 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
         parts.permissionRequests ?? permissionRequestsLayer({ log, home, platform }),
         parts.guards ?? noGateGuards,
         parts.notes ?? noSessionNotes,
+        parts.setup ?? noSetupDesk,
         effectfulActionsLayer,
         parts.delivery ?? queuedDelivery,
         parts.taskStates ?? everyTaskHolds,

@@ -131,6 +131,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'session_needs',
       'session_threads',
       'session_usage',
+      'setup_cards',
+      'setup_cards_by_project',
       'supervised_processes',
       'task_attempts',
       'threads_by_session',

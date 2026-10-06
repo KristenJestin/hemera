@@ -10,6 +10,7 @@
  */
 
 import {
+  type ToolArguments,
   PLACE_NAMES,
   type GateClass,
   type PlaceKind,
@@ -19,7 +20,8 @@ import {
 import { Context, Effect, Layer } from 'effect'
 import type { Schema } from 'effect'
 
-import type { GrantAsked } from './access.ts'
+import type { Grant, GrantAsked } from './access.ts'
+import type { ToolAnswer } from './files.ts'
 import { shownPath } from './paths.ts'
 
 /** The session a call comes from, as its grant holds it. */
@@ -167,3 +169,35 @@ export class SessionNotes extends Context.Service<
 >()('SessionNotes') {}
 
 export const noSessionNotes = Layer.succeed(SessionNotes, { take: () => Effect.succeed([]) })
+
+/**
+ * The setup agent's two tools (#44), which read and propose through the Project settings' use
+ * cases above the tools: the setup fills it. `heard` sees a proposal's raw arguments before
+ * anything reads or records them, so the values they carry are masked everywhere.
+ */
+export class SetupDesk extends Context.Service<
+  SetupDesk,
+  {
+    readonly read: (grant: Grant) => Effect.Effect<ToolAnswer>
+    readonly propose: (
+      grant: Grant,
+      args: ToolArguments<'setup_propose'>,
+    ) => Effect.Effect<ToolAnswer>
+    readonly heard: (raw: Schema.Json) => Effect.Effect<void>
+    /** The proposal is recorded or refused: what it carried is no longer masked as asked. */
+    readonly passed: (raw: Schema.Json) => Effect.Effect<void>
+  }
+>()('SetupDesk') {}
+
+const NO_SETUP: ToolAnswer = {
+  ok: false,
+  refused: true,
+  text: 'refused: the setup cannot be read or proposed here',
+}
+
+export const noSetupDesk = Layer.succeed(SetupDesk, {
+  read: () => Effect.succeed(NO_SETUP),
+  propose: () => Effect.succeed(NO_SETUP),
+  heard: () => Effect.void,
+  passed: () => Effect.void,
+})

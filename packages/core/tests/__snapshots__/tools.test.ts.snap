@@ -505,5 +505,226 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
     },
     "name": "spec_create_draft",
   },
+  {
+    "inputSchema": {
+      "description": "The Project's setup as its settings show it: its folder, its repositories with their remote, base branch and Git state, the catalogue with each command's roles, the preparation recipe, and the variables by name only.",
+      "properties": {},
+      "type": "object",
+    },
+    "name": "setup_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Propose changes to the setup. Nothing changes until the user accepts a card. A call with one change the settings would refuse is refused whole, with their reason: correct it and propose again.",
+      "properties": {
+        "changes": {
+          "description": "The changes, one concern per call: they are one batch of cards.",
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "baseBranch": {
+                    "description": "The branch missions start from, when you read it.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "kind": {
+                    "enum": [
+                      "repository",
+                    ],
+                    "type": "string",
+                  },
+                  "path": {
+                    "description": "The repository’s folder, relative to the Project folder (\`api\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "remote": {
+                    "description": "The remote Hemera fetches and compares with, when you read it (\`origin\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "path",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "askBeforeRunning": {
+                    "description": "Whether nobody runs it without the user’s permission: anything that migrates, seeds, resets or touches a shared resource. False without it.",
+                    "type": "boolean",
+                  },
+                  "atOpen": {
+                    "description": "Whether it runs once each time Hemera opens. False without it.",
+                    "type": "boolean",
+                  },
+                  "check": {
+                    "description": "Whether it may be used as a check. False without it.",
+                    "type": "boolean",
+                  },
+                  "folder": {
+                    "description": "A folder under that repository it runs in.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "kind": {
+                    "enum": [
+                      "command",
+                    ],
+                    "type": "string",
+                  },
+                  "line": {
+                    "description": "The command line, without shell syntax (no \`|\`, \`>\`, \`&&\`, \`;\`, \`$(…)\` or glob).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "lineLinux": {
+                    "description": "Its own line on Linux, when it differs.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "lineWindows": {
+                    "description": "Its own line on Windows, when it differs.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "name": {
+                    "description": "Its name in the catalogue: a rewrite when the catalogue already holds it.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "readOnly": {
+                    "description": "Whether it writes nothing in the repository. False without it.",
+                    "type": "boolean",
+                  },
+                  "repository": {
+                    "description": "The declared repository it runs under, by its path; the Project folder without it.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "What it is for: \`serve\` for a service, \`test\`, \`lint\`, \`typecheck\`, \`build\`…",
+                    "enum": [
+                      "serve",
+                      "test",
+                      "lint",
+                      "typecheck",
+                      "build",
+                      "e2e",
+                      "configure",
+                      "debug",
+                      "script",
+                    ],
+                    "type": "string",
+                  },
+                  "writeGlobs": {
+                    "description": "The files it rewrites: a formatter’s, a generated client, the lockfile.",
+                    "items": {
+                      "description": "A glob of files it may write, relative to its folder.",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "name",
+                  "type",
+                  "line",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "command": {
+                    "description": "For a run: the catalogue command it starts, by its name.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "kind": {
+                    "enum": [
+                      "step",
+                    ],
+                    "type": "string",
+                  },
+                  "line": {
+                    "description": "For a run of its own: the line, without shell syntax.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "path": {
+                    "description": "What a copy or a link places, or the folder a run runs in, under its repository.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "repository": {
+                    "description": "The declared repository it applies under, by its path; the root without it.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "step": {
+                    "description": "\`copy\` or \`link\` a file or folder into a fresh Workspace, or \`run\` a command.",
+                    "enum": [
+                      "copy",
+                      "link",
+                      "run",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "step",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "variable",
+                    ],
+                    "type": "string",
+                  },
+                  "name": {
+                    "description": "The variable’s name (\`DATABASE_URL\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "value": {
+                    "description": "Its value: only a safe default a repository gives (an example file meant to be copied), never one from a secret file.",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "name",
+                  "value",
+                ],
+                "type": "object",
+              },
+            ],
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "type": "array",
+        },
+      },
+      "required": [
+        "changes",
+      ],
+      "type": "object",
+    },
+    "name": "setup_propose",
+  },
 ]
 `;
