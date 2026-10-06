@@ -38,6 +38,8 @@ export interface BaseValues {
   readonly readsMemory: boolean
   /** The tester mode's paragraph when that mode is on (#45); nothing otherwise. */
   readonly testerMode: string | null
+  /** Whether only Hemera writes to it: every role but the Chat, where the user writes too. */
+  readonly hemeraOnly: boolean
 }
 
 /** A language tag as its English name: `fr` is French; a tag it cannot name stays as it is. */
@@ -59,9 +61,13 @@ const kept = (template: string, name: string, keep: boolean): string =>
 /** Hemera's base, its placeholders filled and its conditional blocks kept or dropped. */
 export function renderBase(values: BaseValues, template: string = BASE): string {
   const blocks = kept(
-    kept(template, 'readsMemory', values.readsMemory),
-    'testerMode',
-    values.testerMode !== null,
+    kept(
+      kept(template, 'readsMemory', values.readsMemory),
+      'testerMode',
+      values.testerMode !== null,
+    ),
+    'hemeraOnly',
+    values.hemeraOnly,
   )
   return blocks
     .replaceAll('{owner}', values.owner)
@@ -130,13 +136,18 @@ export function projectLayer(files: ReadonlyArray<InstructionFile>): string {
   ].join('\n\n')
 }
 
-/** The three layers, in their order, an empty one left out. */
+/**
+ * The three layers, in their order, an empty one left out. The role's layer takes the user's
+ * language where it names it.
+ */
 export function instructionsText(
   base: string,
   role: RoleEntry,
   files: ReadonlyArray<InstructionFile>,
+  userLanguage: string,
 ): string {
-  return [base, role.template.trim(), role.projectLayer ? projectLayer(files) : '']
+  const template = role.template.replaceAll('{user.language}', languageName(userLanguage)).trim()
+  return [base, template, role.projectLayer ? projectLayer(files) : '']
     .filter((layer) => layer !== '')
     .join('\n\n---\n\n')
 }

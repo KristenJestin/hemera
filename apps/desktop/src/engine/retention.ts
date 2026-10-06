@@ -68,6 +68,8 @@ export const TABLE_CLASSES = {
   task_attempts: 'permanent',
   session_usage: 'permanent',
   session_needs: 'state',
+  chats: 'permanent',
+  chat_entries: 'permanent',
   effectful_actions: 'permanent',
   tool_calls: 'permanent',
   session_files: 'state',

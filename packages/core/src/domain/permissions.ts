@@ -392,6 +392,28 @@ export function missionRefusal(
   return null
 }
 
+/**
+ * What the Chat always asks the user before, whatever the judge says (#43, open question 65): a
+ * push, a forge CLI's write, a package publication, read at every word of every command the line
+ * holds, so through any wrapper. The reason says which; null when none.
+ */
+export function chatMustAsk(sequences: ReadonlyArray<ReadonlyArray<string>>): string | null {
+  for (const words of sequences) {
+    for (const [at, word] of words.entries()) {
+      const name = programName(word)
+      const args = words.slice(at + 1)
+      if (name === 'git' && gitSubcommand(args).sub === 'push') {
+        return 'the Chat always asks before git push'
+      }
+      if ((name === 'gh' || name === 'glab' || name === 'bkt') && !forgeReads(name, args)) {
+        return `the Chat always asks before ${name} writes to the forge`
+      }
+      if (publishes(name, args)) return `the Chat always asks before publishing a package (${name})`
+    }
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------------------------
 // The "never" list.
 

@@ -48,10 +48,15 @@ const acme = Effect.suspend(() => acmeIn(work))
 
 /** A fixed phase of Hemera's that counts in the cap: the documenter, as its ticket will register it. */
 const DOCUMENTER: RoleEntry = { ...TEST_ROLE, id: 'documenter', displayName: 'the documenter' }
-/** A Chat, led by the user: never counted. */
-const CHAT: RoleEntry = { ...TEST_ROLE, id: 'chat', displayName: 'a Chat', countsInCap: false }
+/** A role registered as not counting, as the Chat is (#43, which tests the Chat itself). */
+const UNCOUNTED: RoleEntry = {
+  ...TEST_ROLE,
+  id: 'uncounted',
+  displayName: 'a role outside the cap',
+  countsInCap: false,
+}
 
-const ROLES = [BUILDER, HELPER, DOCUMENTER, CHAT]
+const ROLES = [BUILDER, HELPER, DOCUMENTER, UNCOUNTED]
 
 const SAYS_DONE = { steps: [{ does: 'says' as const, text: 'done' }] }
 
@@ -95,7 +100,7 @@ describe('The cap of sub-agents (CT-13)', () => {
         Effect.gen(function* () {
           const { owner, main, mission } = yield* acme
           const builder = yield* launched(owner, main, 'builder', 'hemera')
-          const chat = yield* launched(owner, main, 'chat', 'hemera')
+          const chat = yield* launched(owner, main, 'uncounted', 'hemera')
           const helpers = yield* Effect.forEach([1, 2, 3], () =>
             launched(owner, main, 'helper', 'agent'),
           )

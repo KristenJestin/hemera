@@ -6,7 +6,7 @@
  * window is shown.
  */
 
-import { EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
+import { ChatRefused, EngineMainRpcs, type EngineStart, type EngineStatus } from '@hemera/ipc'
 import { Layer, Stream, SubscriptionRef } from 'effect'
 import { Effect } from 'effect'
 
@@ -55,6 +55,8 @@ import {
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
+import { Chats } from './chat/service.ts'
+import { type Chat, chatChanges, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
@@ -68,6 +70,16 @@ import {
   workspaceChanges,
   workspaceStatus,
 } from './workspaces.ts'
+
+/** A Chat as its Project's list shows it. */
+const chatSummary = (chat: Chat) => ({
+  id: chat.id,
+  projectId: chat.projectId,
+  title: chat.title,
+  setting: chat.setting,
+  createdAt: chat.createdAt,
+  lastActivityAt: chat.lastActivityAt,
+})
 
 export const engineHandlers = (start: EngineStart, profile: StartedProfile, log: Log) => {
   const { dataFolder, channel, version } = start
@@ -246,6 +258,39 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(instructionFilesOf(projectId, process.platform)).pipe(
         observed('sessions.instructionFiles', log),
       ),
+    'chats.list': ({ projectId }) =>
+      use(
+        Effect.gen(function* () {
+          yield* getProject(projectId)
+          return (yield* chatsOf(projectId)).map(chatSummary)
+        }),
+      ).pipe(observed('chats.list', log)),
+    'chats.create': ({ projectId }) =>
+      use(Chats.use((chats) => chats.create(projectId))).pipe(
+        Effect.map(chatSummary),
+        observed('chats.create', log),
+      ),
+    'chats.rename': ({ chatId, title }) =>
+      use(renameChat(chatId, title)).pipe(observed('chats.rename', log)),
+    'chats.send': ({ chatId, text, mentions }) =>
+      use(
+        Chats.use((chats) => chats.send(chatId, text, mentions)).pipe(
+          Effect.catchTags({
+            SessionRefused: (refused) => Effect.fail(new ChatRefused({ reason: refused.reason })),
+            DeliveryKindRefused: (refused) =>
+              Effect.fail(new ChatRefused({ reason: refused.reason })),
+          }),
+        ),
+      ).pipe(observed('chats.send', log)),
+    'chats.stop': ({ chatId }) =>
+      use(Chats.use((chats) => chats.stop(chatId))).pipe(observed('chats.stop', log)),
+    'chats.setModel': ({ chatId, setting }) =>
+      use(Chats.use((chats) => chats.setSetting(chatId, setting))).pipe(
+        observed('chats.setModel', log),
+      ),
+    'chats.transcript': ({ chatId, before }) =>
+      use(transcriptOf(chatId, before)).pipe(observed('chats.transcript', log)),
+    'chats.changes': () => follow(chatChanges).pipe(observedStream('chats.changes', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

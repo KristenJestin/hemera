@@ -7,6 +7,7 @@ import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { openProfile } from '../src/engine/migrate.ts'
+import { MissionActivity } from '../src/engine/missions.ts'
 import { BriefSources, briefOf } from '../src/engine/sessions/brief.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
@@ -21,6 +22,7 @@ beforeEach(async () => {
 afterEach(removeFolders)
 
 const MISSION = { kind: 'mission', missionId: 'mission-1' } as const
+const SESSION = { lineage: 'lineage-1', epoch: 0, createdAt: '2026-10-06T10:00:00.000Z' }
 
 const role = (readsMemory: boolean): RoleEntry => ({
   ...TEST_ROLE,
@@ -34,7 +36,7 @@ const role = (readsMemory: boolean): RoleEntry => ({
 })
 
 /** The brief, its Memory read from a fixed block and a fixed last line. */
-const briefed = (entry: RoleEntry, predecessor: Parameters<typeof briefOf>[2]) => {
+const briefed = (entry: RoleEntry, predecessor: Parameters<typeof briefOf>[3]) => {
   const asked: string[] = []
   const sources = Layer.succeed(BriefSources, {
     memoryBlock: (missionId) =>
@@ -48,9 +50,13 @@ const briefed = (entry: RoleEntry, predecessor: Parameters<typeof briefOf>[2]) =
         return 'Ran pnpm --filter api test'
       }),
   })
-  return on(data, briefOf(entry, MISSION, predecessor).pipe(Effect.provide(sources))).then(
-    (text) => ({ text, asked }),
+  const idle = Layer.succeed(MissionActivity, () =>
+    Effect.succeed({ sessionWorking: false, questionWaiting: false }),
   )
+  return on(
+    data,
+    briefOf(entry, MISSION, SESSION, predecessor).pipe(Effect.provide(Layer.merge(sources, idle))),
+  ).then((text) => ({ text, asked }))
 }
 
 describe('The brief', () => {

@@ -357,7 +357,8 @@ describe("The refusals of a mission's agents, on the effective action", () => {
   test("the Chat's commands are not refused by the mission rules: they go through the order", async () => {
     const { answer, questions } = await withBuilder(({ chat }) => run(chat, 'git push'))
     expect(answer.text).toBe('refused: approvals are not available yet')
-    expect(questions).toEqual(['no judge could rate it: no judge is set up'])
+    // The Chat always asks before a push (#43), before any judge.
+    expect(questions).toEqual(['the Chat always asks before git push'])
   })
 })
 

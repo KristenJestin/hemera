@@ -477,42 +477,51 @@ export const missionStops = sqliteTable(
  * Hemera chose for it (model, effort, mode) beside what the agent reported it took. What was
  * chosen is what every restart of the agent applies again.
  */
-export const agentSessions = sqliteTable('agent_sessions', {
-  id: text('id').primaryKey(),
-  provider: text('provider').notNull(),
-  ownerKind: text('owner_kind').notNull(),
-  ownerId: text('owner_id').notNull(),
-  role: text('role').notNull(),
-  folder: text('folder').notNull(),
-  nativeId: text('native_id'),
-  chosenModel: text('chosen_model'),
-  chosenEffort: text('chosen_effort'),
-  chosenMode: text('chosen_mode'),
-  takenModel: text('taken_model'),
-  takenEffort: text('taken_effort'),
-  takenMode: text('taken_mode'),
-  /**
-   * The role session's line: the same across the replacements of a session, so what was meant
-   * for it reaches whichever session holds it. Null for a session opened before role sessions,
-   * which is its own lineage.
-   */
-  lineage: text('lineage'),
-  /** The session that started this one, for a child session (a helper, a Probe). */
-  parentId: text('parent_id'),
-  /** How far down the tree of its owner it stands: 0 for a session with no parent. */
-  depth: integer('depth').notNull().default(0),
-  /** Raised at each replacement of its lineage: a call carrying an older epoch is refused. */
-  epoch: integer('epoch').notNull().default(0),
-  /** `starting`, `working`, `idle`, `stuck`, `ended`, `replaced` or `failed`. */
-  state: text('state').notNull().default('idle'),
-  /** Why it stuck, ended, was replaced or failed, in words, masked. */
-  stateReason: text('state_reason').$type<Masked<string>>(),
-  endedAt: text('ended_at'),
-  /** The level of the cascade its agent and model came from: app, Project or mission (#41). */
-  modelLevel: text('model_level'),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-})
+export const agentSessions = sqliteTable(
+  'agent_sessions',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider').notNull(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    role: text('role').notNull(),
+    folder: text('folder').notNull(),
+    nativeId: text('native_id'),
+    chosenModel: text('chosen_model'),
+    chosenEffort: text('chosen_effort'),
+    chosenMode: text('chosen_mode'),
+    takenModel: text('taken_model'),
+    takenEffort: text('taken_effort'),
+    takenMode: text('taken_mode'),
+    /**
+     * The role session's line: the same across the replacements of a session, so what was meant
+     * for it reaches whichever session holds it. Null for a session opened before role sessions,
+     * which is its own lineage.
+     */
+    lineage: text('lineage'),
+    /** The session that started this one, for a child session (a helper, a Probe). */
+    parentId: text('parent_id'),
+    /** How far down the tree of its owner it stands: 0 for a session with no parent. */
+    depth: integer('depth').notNull().default(0),
+    /** Raised at each replacement of its lineage: a call carrying an older epoch is refused. */
+    epoch: integer('epoch').notNull().default(0),
+    /** `starting`, `working`, `idle`, `stuck`, `ended`, `replaced` or `failed`. */
+    state: text('state').notNull().default('idle'),
+    /** Why it stuck, ended, was replaced or failed, in words, masked. */
+    stateReason: text('state_reason').$type<Masked<string>>(),
+    endedAt: text('ended_at'),
+    /** The level of the cascade its agent and model came from: app, Project or mission (#41). */
+    modelLevel: text('model_level'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    // One live session per lineage at most: a second one is refused rather than run beside it.
+    uniqueIndex('one_live_session_per_lineage')
+      .on(table.lineage)
+      .where(sql`${table.state} in ('starting', 'working', 'idle', 'stuck')`),
+  ],
+)
 
 /**
  * What Hemera hands a role session, stored before it is sent so it survives a restart and reaches
@@ -929,3 +938,52 @@ export const sessionNeeds = sqliteTable('session_needs', {
   agent: text('agent').notNull(),
   model: text('model'),
 })
+
+/**
+ * The Chats of a Project (#43): free conversations with an agent beside its missions. Each keeps
+ * its own agent, model and effort (the cascade's for the `chat` role when it was made), and the
+ * lineage its sessions run on, null before its first message.
+ */
+export const chats = sqliteTable(
+  'chats',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** Set once the user renamed it: its first message no longer names it. */
+    renamed: integer('renamed', { mode: 'boolean' }).notNull(),
+    agent: text('agent').notNull(),
+    model: text('model'),
+    effort: text('effort'),
+    lineage: text('lineage'),
+    createdAt: text('created_at').notNull(),
+    lastActivityAt: text('last_activity_at').notNull(),
+  },
+  (table) => [index('chats_by_project').on(table.projectId, table.lastActivityAt)],
+)
+
+/**
+ * A Chat's transcript, in order: the user's messages, the agent's, each of its tool calls folded
+ * to one line (with its outcome and, when it was held, the approval request), and Hemera's own
+ * notices. Masked; permanent until the Chat is deleted.
+ */
+export const chatEntries = sqliteTable(
+  'chat_entries',
+  {
+    sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    /** For an action: the tool, and how it ended (`completed`, `failed`, `held`). */
+    tool: text('tool'),
+    outcome: text('outcome'),
+    /** For an action held for the user: the approval request's number. */
+    request: integer('request'),
+    at: text('at').notNull(),
+  },
+  (table) => [index('chat_entries_by_chat').on(table.chatId, table.sequence)],
+)

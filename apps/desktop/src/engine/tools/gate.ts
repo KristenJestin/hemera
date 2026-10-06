@@ -86,6 +86,8 @@ import {
   notesCondense,
   nowSet,
 } from '../memory/tools.ts'
+import { missionsList, specCreateDraft } from '../chat/tools.ts'
+import type { MissionActivity } from '../missions.ts'
 import { resolvePath } from './paths.ts'
 import {
   type CallSession,
@@ -151,6 +153,7 @@ export type GateServices =
   | MissionDependencies
   | SessionEpochs
   | SessionNotes
+  | MissionActivity
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -208,6 +211,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.notes_condense.input)(raw)
     case 'evidence_add':
       return decoder(tool, TOOLS.evidence_add.input)(raw)
+    case 'missions_list':
+      return decoder(tool, TOOLS.missions_list.input)(raw)
+    case 'spec_create_draft':
+      return decoder(tool, TOOLS.spec_create_draft.input)(raw)
   }
 }
 
@@ -527,6 +534,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* notesCondense(grant, call.args)
             case 'evidence_add':
               return yield* evidenceAdd(grant, call.args, path === null ? null : path.resolved)
+            case 'missions_list':
+              return yield* missionsList(grant, call.args)
+            case 'spec_create_draft':
+              return yield* specCreateDraft(grant, call.args)
           }
         })
 

@@ -21,7 +21,12 @@ import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
-import { type RoleSession, getSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import {
+  type RoleSession,
+  getSession,
+  openSession,
+  sessionsIn,
+} from '../src/engine/sessions/store.ts'
 import { Database, DatabaseError } from '../src/engine/storage/database.ts'
 import {
   domainEvents,
@@ -603,6 +608,37 @@ describe('Leases and epochs (CT-11)', () => {
     expect(answer).toMatchObject({ ok: false, refused: true })
     expect(lease?.epoch).toBe(1)
     expect(stillHolds).toBe(false)
+  })
+})
+
+describe('A lineage has one live session at most', () => {
+  test('the database refuses a second live session on a lineage, and takes one once the first ended', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const [second, third] = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* settled(session.id)
+          const next = {
+            provider: session.provider,
+            owner,
+            role: session.role,
+            folder: main,
+            parent: null,
+            lineage: session.lineage,
+            epoch: session.epoch + 1,
+          }
+          const refused = yield* openSession(next).pipe(Effect.flip)
+          yield* Sessions.use((sessions) => sessions.end(session.lineage, 'a test'))
+          const taken = yield* openSession(next)
+          return [refused, taken] as const
+        }),
+      ),
+    )
+    expect(second).toBeInstanceOf(DatabaseError)
+    expect(third.epoch).toBe(1)
   })
 })
 

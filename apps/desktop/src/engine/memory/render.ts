@@ -15,7 +15,7 @@ const roleSaid = (role: string): string => {
   return known === undefined ? role : capitalised(ROLE_NAMES[known])
 }
 
-const ballSaid = Match.type<Ball>().pipe(
+export const ballSaid = Match.type<Ball>().pipe(
   Match.tagsExhaustive({
     AgentWorking: () => 'an agent is working',
     WaitingOnYou: () => 'waiting on the user',

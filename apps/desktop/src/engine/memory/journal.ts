@@ -246,7 +246,12 @@ export const DEFAULT_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map<strin
       missionId: event.entityId,
       kind: 'mission',
       author: byAuthor(event),
-      text: `Mission started: ${stringOf(event.payload, 'title') ?? ''}`,
+      text: [
+        `Mission started: ${stringOf(event.payload, 'title') ?? ''}`,
+        ...[stringOf(event.payload, 'fromChat')].flatMap((chat) =>
+          chat === null ? [] : [`(created from the Chat “${chat}”)`],
+        ),
+      ].join(' '),
       fields: { key: stringOf(event.payload, 'key'), type: stringOf(event.payload, 'type') },
     })),
   ],

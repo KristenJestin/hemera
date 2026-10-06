@@ -19,4 +19,5 @@ export const TEST_ROLE: RoleEntry = {
   template: '# The test role\n\nDo what each delivery asks, and nothing else.',
   brief: () => Effect.succeed([]),
   countsInCap: true,
+  ledByUser: false,
 }

@@ -59,6 +59,7 @@ import { type AgentFailure, AgentRuntime } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import { Memory } from '../memory/index.ts'
+import type { MissionActivity } from '../missions.ts'
 import type { Need } from '@hemera/ipc'
 import type { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
@@ -104,6 +105,7 @@ import {
   openSession,
   sessionEvent,
   sessionsIn,
+  sessionsOfLineage,
   setState,
 } from './store.ts'
 import { addToThread, instructionsKept } from './thread.ts'
@@ -141,6 +143,16 @@ export class Sessions extends Context.Service<
   {
     /** Opens a session of a role and starts it: its brief is its first turn. */
     readonly open: (asked: OpenAsked) => Effect.Effect<RoleSession, SessionRefused | DatabaseError>
+    /**
+     * Opens the next session of a lineage, under the lock: every session of it still live or
+     * starting is ended first, and the new one takes the highest epoch + 1 as the rows say it now,
+     * with what was queued for the lineage (a Chat's fresh session after its model changed).
+     */
+    readonly reopen: (
+      lineage: string,
+      asked: OpenAsked,
+      reason: string,
+    ) => Effect.Effect<RoleSession, SessionRefused | DatabaseError>
     /** Stores a delivery, then hands it over on its channel when its session lives. */
     readonly deliver: (
       asked: DeliveryAsked,
@@ -164,6 +176,10 @@ export class Sessions extends Context.Service<
     readonly rebuild: Effect.Effect<ReadonlyArray<RoleSession>, DatabaseError>
     /** Waits until a session is between turns with nothing queued for it. */
     readonly settled: (sessionId: string) => Effect.Effect<void, DatabaseError>
+    /** Cancels the turn a lineage's live session is in; its conversation stays. */
+    readonly cancelTurn: (lineage: string) => Effect.Effect<void>
+    /** Ends a lineage's live sessions, a starting one too, their processes with them. */
+    readonly end: (lineage: string, reason: string) => Effect.Effect<void, DatabaseError>
   }
 >()('Sessions') {}
 
@@ -278,6 +294,7 @@ type Needs =
   | ToolAccess
   | Discovery
   | Cap
+  | MissionActivity
 
 export const sessionsLayer = (settings: SessionsSettings) =>
   Layer.effect(
@@ -296,6 +313,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const startedAt = new Date().toISOString()
       const run = <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.provide(effect, context)
       const said = (line: string) => Effect.sync(() => settings.log(`sessions: ${line}`))
+
+      /** The driver of a lineage's live session, if one runs. */
+      const liveOfLineage = (lineage: string): Driver | undefined =>
+        [...drivers.values()].find((driver) => !driver.gone && driver.session.lineage === lineage)
 
       const liveDriver = (sessionId: string): Driver | undefined => {
         const driver = drivers.get(sessionId)
@@ -496,7 +517,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               requestedBy: 'hemera',
             })
           }
-          const brief = yield* briefOf(entry, session.owner, predecessor)
+          const brief = yield* briefOf(entry, session.owner, session, predecessor)
           const lastSign = yield* Clock.currentTimeMillis
           // Stopped or replaced while it waited: nothing of it starts.
           const driver = yield* Semaphore.withPermits(
@@ -578,6 +599,24 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             events: [event],
           })),
         ).pipe(Effect.andThen(cap.release(session.lineage)), run)
+
+      /**
+       * Ends every session of a lineage still live or starting, with or without a driver: one
+       * still starting has none yet, and its start's check of `starting` then stops it.
+       */
+      const endLive = (rows: ReadonlyArray<RoleSession>, reason: string) =>
+        Effect.forEach(
+          rows.filter((one) => LIVE_OR_STUCK.some((state) => state === one.state)),
+          (session) =>
+            Effect.gen(function* () {
+              const driver = drivers.get(session.id)
+              if (driver !== undefined) yield* letGo(driver)
+              else yield* runtime.release(session.id)
+              yield* endQuietly(session, 'ended', reason)
+              yield* addToThread(session.id, 'state', `ended: ${reason}`)
+            }),
+          { discard: true },
+        ).pipe(run)
 
       /** Stops a session with a need about it; its lineage's slot is freed. */
       const stopNeeding = (...stopped: Parameters<typeof stopWithNeed>) =>
@@ -800,7 +839,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const instructAgain = (driver: Driver) =>
         Effect.gen(function* () {
           const instructions = (yield* instructionsKept(driver.session.id)) ?? ''
-          driver.brief = yield* briefOf(driver.entry, driver.session.owner, null)
+          driver.brief = yield* briefOf(driver.entry, driver.session.owner, driver.session, null)
           yield* storeDelivery({
             owner: driver.session.owner,
             target: { lineage: driver.session.lineage },
@@ -904,8 +943,14 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         // Top-down: parents before their children, which find them by lineage.
         for (const session of left) {
           // A role this version does not register: nothing can drive its session any more.
-          if (roleNamed(registry, session.role) === undefined) {
+          const entry = roleNamed(registry, session.role)
+          if (entry === undefined) {
             yield* endQuietly(session, 'ended', `no role ${session.role} is registered`)
+            continue
+          }
+          // The user leads it: nothing starts it again on its own; their next message will.
+          if (entry.ledByUser) {
+            yield* endQuietly(session, 'ended', RESTARTED)
             continue
           }
           if (!(yield* active(session.owner))) {
@@ -1004,7 +1049,13 @@ export const sessionsLayer = (settings: SessionsSettings) =>
 
       // --- the service ----------------------------------------------------------------------
 
-      const open = (asked: OpenAsked) =>
+      const open = (asked: OpenAsked) => openAt(asked, null)
+
+      /** Opens a session, on a lineage at an epoch when it follows earlier ones. */
+      const openAt = (
+        asked: OpenAsked,
+        at: { readonly lineage: string; readonly epoch: number } | null,
+      ) =>
         Effect.gen(function* () {
           const entry = roleNamed(registry, asked.role)
           if (entry === undefined) {
@@ -1023,6 +1074,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               : null
           const session = yield* openSession({
             id,
+            lineage: at?.lineage,
+            epoch: at?.epoch,
             provider: asked.provider ?? setting?.agent ?? 'claude',
             owner: asked.owner,
             role: asked.role,
@@ -1206,10 +1259,37 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (live) yield* dispatch
             return id
           }).pipe(run),
+        reopen: (lineage, asked, reason) =>
+          Semaphore.withPermits(
+            lock,
+            1,
+          )(
+            Effect.gen(function* () {
+              // Read again under the lock: a replacement may have moved the lineage on since.
+              const rows = yield* sessionsOfLineage(lineage)
+              yield* endLive(rows, reason)
+              const epoch = Math.max(-1, ...rows.map((one) => one.epoch)) + 1
+              return yield* openAt(asked, { lineage, epoch })
+            }),
+          ).pipe(run),
         replace,
         stopTree,
         rebuild,
         settled,
+        cancelTurn: (lineage) =>
+          Effect.suspend(() => {
+            const driver = liveOfLineage(lineage)
+            return driver === undefined || driver.turn === null
+              ? Effect.void
+              : runtime.cancel(driver.session.id)
+          }),
+        end: (lineage, reason) =>
+          Semaphore.withPermits(
+            lock,
+            1,
+          )(sessionsOfLineage(lineage).pipe(Effect.flatMap((rows) => endLive(rows, reason)))).pipe(
+            run,
+          ),
       }
     }),
   )

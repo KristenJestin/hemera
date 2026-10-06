@@ -318,6 +318,22 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['sessions.list'](request).pipe(closedAs(gone), observed('sessions.list', log)),
     'sessions.thread': (request) =>
       engine['sessions.thread'](request).pipe(closedAs(gone), observed('sessions.thread', log)),
+    'chats.list': (request) =>
+      engine['chats.list'](request).pipe(closedAs(gone), observed('chats.list', log)),
+    'chats.create': (request) =>
+      engine['chats.create'](request).pipe(closedAs(gone), observed('chats.create', log)),
+    'chats.rename': (request) =>
+      engine['chats.rename'](request).pipe(closedAs(gone), observed('chats.rename', log)),
+    'chats.send': (request) =>
+      engine['chats.send'](request).pipe(closedAs(gone), observed('chats.send', log)),
+    'chats.stop': (request) =>
+      engine['chats.stop'](request).pipe(closedAs(gone), observed('chats.stop', log)),
+    'chats.setModel': (request) =>
+      engine['chats.setModel'](request).pipe(closedAs(gone), observed('chats.setModel', log)),
+    'chats.transcript': (request) =>
+      engine['chats.transcript'](request).pipe(closedAs(gone), observed('chats.transcript', log)),
+    'chats.changes': () =>
+      engine['chats.changes']().pipe(streamClosedAs(gone), observedStream('chats.changes', log)),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

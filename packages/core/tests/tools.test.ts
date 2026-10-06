@@ -128,7 +128,10 @@ describe('Each role has exactly its tools', () => {
         'fs_list',
         'fs_read',
         'fs_write',
+        'memory_read',
+        'missions_list',
         'search',
+        'spec_create_draft',
       ],
     ],
   ])('%s', (role, tools) => {
@@ -172,6 +175,7 @@ describe('The table says what each tool does to the world', () => {
       'fs_list',
       'fs_read',
       'memory_read',
+      'missions_list',
       'search',
     ])
   })

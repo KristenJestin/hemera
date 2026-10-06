@@ -384,6 +384,35 @@ const EvidenceAdd = Schema.Struct({
     }),
   )
 
+/** How many missions one `missions_list` answers at most. */
+export const MISSIONS_LISTED_MAX = 100
+
+const MissionsList = Schema.Struct({
+  stage: Schema.optionalKey(
+    Bounded(
+      40,
+      'Only the missions in this stage, by its name as missions_list gives it (`building`).',
+    ),
+  ),
+  text: Schema.optionalKey(
+    Bounded(200, 'Only the missions whose key or title holds these words, case aside.'),
+  ),
+}).annotate({
+  description: `The Project's missions, read-only: key, title, stage, who has the ball and the last thing that happened, at most ${String(MISSIONS_LISTED_MAX)}.`,
+})
+
+const SpecCreateDraft = Schema.Struct({
+  title: Bounded(120, 'The mission’s title, in a few words.'),
+  idea: Bounded(
+    2000,
+    'What a Planner starts from without this conversation: what the user wants, why, and what you found in the code.',
+  ),
+  ticket: Schema.optionalKey(Bounded(200, 'A ticket reference, as the user gave it.')),
+}).annotate({
+  description:
+    "Create a mission in Planning in this Project, from this conversation. Call missions_list first. The answer gives the new mission's key and the missions whose titles look like it.",
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -499,7 +528,7 @@ export const TOOLS = {
     label: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
   }),
   memory_read: tool({
-    roles: ['planner', 'probe', 'builder'],
+    roles: ['planner', 'probe', 'builder', 'chat'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -546,6 +575,22 @@ export const TOOLS = {
     input: EvidenceAdd,
     label: { label: 'Add evidence', mark: 'evidence-add', doing: 'Keeping evidence' },
   }),
+  missions_list: tool({
+    roles: ['chat'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: MissionsList,
+    label: { label: 'List missions', mark: 'list-missions', doing: 'Listing the missions' },
+  }),
+  spec_create_draft: tool({
+    roles: ['chat'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: SpecCreateDraft,
+    label: { label: 'Create a mission', mark: 'create-mission', doing: 'Creating a mission' },
+  }),
 }
 
 export type ToolName = keyof typeof TOOLS
@@ -567,6 +612,8 @@ export const TOOL_NAMES = [
   'note_add',
   'notes_condense',
   'evidence_add',
+  'missions_list',
+  'spec_create_draft',
 ] as const satisfies ReadonlyArray<ToolName>
 
 /** The arguments of a tool once decoded. */

@@ -12,6 +12,7 @@ import {
   NeverProgram,
   PERMISSION_POLICY,
   type PlaceContext,
+  chatMustAsk,
   deletesGit,
   effectiveAction,
   missionRefusal,
@@ -339,5 +340,36 @@ describe('A plain listing inside is the only command allowed by the rules', () =
     expect(plainListing({ program: 'ls', args: [], shell: true, resolved: '/usr/bin/ls' })).toBe(
       false,
     )
+  })
+})
+
+describe('What the Chat always asks before, through any wrapper (#43)', () => {
+  const askedOf = (words: ReadonlyArray<string>) =>
+    chatMustAsk(effectiveAction(words, LINUX).sequences)
+
+  test.each([
+    [['git', 'push'], 'the Chat always asks before git push'],
+    [['git', '-C', 'api', 'push', 'origin', 'main'], 'the Chat always asks before git push'],
+    [['sh', '-c', 'git push'], 'the Chat always asks before git push'],
+    [['env', 'GIT_TRACE=1', 'git', 'push'], 'the Chat always asks before git push'],
+    [['npx', 'gh', 'pr', 'create'], 'the Chat always asks before gh writes to the forge'],
+    [
+      ['pnpm', 'exec', 'glab', 'mr', 'merge'],
+      'the Chat always asks before glab writes to the forge',
+    ],
+    [['npm', 'publish'], 'the Chat always asks before publishing a package (npm)'],
+    [['cargo', 'publish'], 'the Chat always asks before publishing a package (cargo)'],
+  ])('%j asks', (words, reason) => {
+    expect(askedOf(words)).toBe(reason)
+  })
+
+  test.each([
+    [['git', 'commit', '-m', 'Export as JSON']],
+    [['git', 'status']],
+    [['gh', 'pr', 'view', '3']],
+    [['gh', 'api', 'repos/acme/api/pulls']],
+    [['npm', 'test']],
+  ])('%j is left to the rest of the order', (words) => {
+    expect(askedOf(words)).toBeNull()
   })
 })

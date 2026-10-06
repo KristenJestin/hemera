@@ -1,7 +1,8 @@
 /**
  * The agents' Memory tools, as the gate executes them once it has let a call through: reading the
- * Memory of the session's mission (or, read-only, of a mission it depends on), and writing only
- * what the agent alone knows. No write takes a mission: a session writes its own mission's Memory.
+ * Memory of the session's mission (or, read-only, of a mission it depends on; a Project's session,
+ * the Chat, reads any mission of its Project), and writing only what the agent alone knows. No
+ * write takes a mission: a session writes its own mission's Memory.
  */
 
 import { readFile } from 'node:fs/promises'
@@ -52,10 +53,18 @@ const settled = <A, R>(
     Effect.catch((failed) => Effect.succeed(failure(`the call failed: ${failed.message}`))),
   )
 
-/** The mission `memory_read` reads: the session's own, or a dependency named by its key. */
-const readTarget = (grant: Grant, caller: MemoryCaller, key: string | undefined) =>
+/**
+ * The mission `memory_read` reads: the session's own, a dependency named by its key, or, for a
+ * Project's session, any mission of its Project named by its key.
+ */
+const readTarget = (grant: Grant, key: string | undefined) =>
   Effect.gen(function* () {
-    if (key === undefined) return { missionId: caller.missionId } as const
+    const own = grant.missionId
+    if (key === undefined) {
+      return own === null
+        ? ({ refused: 'name the mission to read by its key (`ACME-3`)' } as const)
+        : ({ missionId: own } as const)
+    }
     const parts = missionKeyParts(key)
     const database = yield* Database
     const [found] =
@@ -67,15 +76,14 @@ const readTarget = (grant: Grant, caller: MemoryCaller, key: string | undefined)
             .where(and(eq(missions.keyPrefix, parts.prefix), eq(missions.keyNumber, parts.number)))
             .pipe(Effect.mapError(refusedWhile('reading a mission')))
     if (found === undefined) return { refused: `no mission is ${key}` } as const
-    if (found.id === caller.missionId) return { missionId: found.id } as const
+    if (found.id === own) return { missionId: found.id } as const
     if (found.projectId !== grant.projectId) {
       return {
         refused: `${key} is a mission of another Project, and nothing crosses Projects`,
       } as const
     }
-    const accepted = yield* MissionDependencies.use((dependencies) =>
-      dependencies(caller.missionId),
-    )
+    if (own === null) return { missionId: found.id } as const
+    const accepted = yield* MissionDependencies.use((dependencies) => dependencies(own))
     if (!accepted.includes(found.id)) {
       return { refused: `this mission does not depend on ${key}` } as const
     }
@@ -84,9 +92,7 @@ const readTarget = (grant: Grant, caller: MemoryCaller, key: string | undefined)
 
 export const memoryRead = (grant: Grant, args: ToolArguments<'memory_read'>) =>
   Effect.gen(function* () {
-    const caller = callerOf(grant)
-    if (caller === null) return NO_MISSION
-    const target = yield* readTarget(grant, caller, args.mission)
+    const target = yield* readTarget(grant, args.mission)
     if ('refused' in target) return refusal(`refused: ${target.refused}`)
     const memory = yield* Memory
     switch (args.part) {
