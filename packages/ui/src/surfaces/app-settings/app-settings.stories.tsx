@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import {
   AgentsSection,
@@ -262,6 +262,9 @@ export const SoundStyleChosen: Story = {
     await userEvent.click(select)
     await userEvent.click(await within(document.body).findByRole('option', { name: 'Zen' }))
     await expect(onStyle).toHaveBeenCalledWith('zen')
+    // The choice closes the list: the accessibility check that follows the play would otherwise
+    // read it half way through its exit, a scrolling box with nothing left to focus.
+    await waitFor(() => expect(within(document.body).queryByRole('listbox')).toBeNull())
   },
 }
 
