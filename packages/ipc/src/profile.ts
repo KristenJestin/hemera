@@ -23,16 +23,26 @@ export const UserLanguage = Schema.String.check(
 export const Preferences = Schema.Struct({
   theme: ThemePreference,
   userLanguage: UserLanguage,
+  /**
+   * Whether every role's agent also tests Hemera and reports what it finds there (#45), a
+   * development tool off by default; it applies to the sessions that start afterwards.
+   */
+  testerMode: Schema.Boolean,
 })
 export type Preferences = typeof Preferences.Type
 
 /** What a key that was never written, or cannot be read, answers. */
-export const DEFAULT_PREFERENCES: Preferences = { theme: 'system', userLanguage: 'en' }
+export const DEFAULT_PREFERENCES: Preferences = {
+  theme: 'system',
+  userLanguage: 'en',
+  testerMode: false,
+}
 
 /** A change of the preferences: only the keys it names are written. */
 export const PreferencesChange = Schema.Struct({
   theme: Schema.optionalKey(ThemePreference),
   userLanguage: Schema.optionalKey(UserLanguage),
+  testerMode: Schema.optionalKey(Schema.Boolean),
 })
 export type PreferencesChange = typeof PreferencesChange.Type
 

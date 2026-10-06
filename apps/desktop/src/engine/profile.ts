@@ -8,6 +8,7 @@
  * says why in a sentence the window shows, and every call on the Profile is refused with it.
  */
 
+import { release, type } from 'node:os'
 import { join } from 'node:path'
 
 import {
@@ -115,10 +116,12 @@ import { type Cap, capLayer } from './sessions/cap.ts'
 import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
+import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
+import { testerModeLayer } from './tester/mode.ts'
 import { replacementGuardLayer } from './sessions/guard.ts'
 import { SESSION_NEEDS } from './sessions/needs.ts'
 import { BUDGET_NEEDS, budgetHandler } from './budget.ts'
-import { type SpecLanguage, type TesterMode, englishSpecs, noTesterMode } from './sessions/ports.ts'
+import { type SpecLanguage, type TesterMode, englishSpecs } from './sessions/ports.ts'
 import { SessionPost, sessionPostLayer } from './sessions/post.ts'
 import { refusedLine, replacedLine, sessionInstructionsLayer } from './sessions/provider.ts'
 import {
@@ -223,11 +226,14 @@ export type EngineServices =
   | Setup
   | SetupValues
   | AcpTraces
+  | TesterFindings
 
 export interface ProfileStart {
   readonly dataFolder: string
   readonly version: string
   readonly migrations: string
+  /** The channel this build is on, as a finding of the tester mode records it; `dev` otherwise. */
+  readonly channel?: string | undefined
 }
 
 export interface StartedProfile {
@@ -310,6 +316,12 @@ export const startProfile = (
       repositoryStatusesLayer,
       preparationsLayer(log),
       setupValuesLayer.pipe(Layer.provide(Layer.succeed(Secrets, secrets))),
+      testerFindingsLayer({
+        dataFolder,
+        version: start.version,
+        channel: start.channel ?? 'dev',
+        os: `${type()} ${release()} (${process.platform}-${process.arch})`,
+      }).pipe(Layer.provide(Layer.succeed(Secrets, secrets))),
     )
     // The commands: the supervisor (its registry in the database, its children's standard error
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
@@ -391,7 +403,7 @@ export const startProfile = (
           capLayer.pipe(Layer.provide(postLayer)),
           modelChoiceLayer,
           parts.sessions?.specLanguage ?? englishSpecs,
-          parts.sessions?.testerMode ?? noTesterMode,
+          parts.sessions?.testerMode ?? testerModeLayer,
           postLayer,
         ),
       ),

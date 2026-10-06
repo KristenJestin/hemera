@@ -16,12 +16,17 @@ import {
   type Role,
   admitTool,
   hemeraToolNamed,
+  TESTER_TOOLS,
   readOnlyHint,
   toolsOf,
 } from '../src/domain/index.ts'
 import { toToolInputSchema } from '../src/schema/index.ts'
 
-const toolsFor = (role: Role) => [...toolsOf(role)].sort()
+/** A role's tools, the tester mode's two left out: every role has them, tested on their own. */
+const toolsFor = (role: Role) =>
+  toolsOf(role)
+    .filter((tool) => !TESTER_TOOLS.includes(tool))
+    .toSorted()
 
 const MEMORY_TOOLS = [
   'memory_read',
@@ -176,6 +181,7 @@ describe('The table says what each tool does to the world', () => {
       'commands_output',
       'fs_list',
       'fs_read',
+      'hemera_reports',
       'memory_read',
       'missions_list',
       'search',

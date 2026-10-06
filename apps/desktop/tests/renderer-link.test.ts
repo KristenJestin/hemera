@@ -208,6 +208,8 @@ const noProjects = {
   'setup.propose': unused,
   'setup.standing': unused,
   'setup.changes': unused,
+  'tester.findings': unused,
+  'tester.folder': unused,
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,

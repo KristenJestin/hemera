@@ -11,7 +11,7 @@
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
-import { ROLE_PLACES, Role, toolsOf } from '@hemera/core/domain'
+import { ROLE_PLACES, Role, TESTER_TOOLS, toolsOf } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
 import { Effect, Layer, Option, Schema } from 'effect'
 
@@ -67,6 +67,7 @@ import { ToolServer, toolServerLayer } from './server.ts'
 import type { ProjectServices } from '../repositories.ts'
 import type { SetupValues } from '../setup/values.ts'
 import type { Preparations } from '../workspaces.ts'
+import { readPreferences } from '../preferences.ts'
 
 export { HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
@@ -121,6 +122,8 @@ const grantOf = (sessionId: string) =>
             .where(eq(missions.id, missionId))
             .pipe(Effect.mapError(refusedWhile('reading the mission'))))[0]?.projectId ?? '')
     const project = yield* getProject(projectId)
+    // The tester mode's tools are handed only while the mode is on (#45).
+    const testing = (yield* readPreferences).testerMode
     const folder = resolve(session.folder)
     const [workspace] = yield* database
       .select({ id: workspaces.id })
@@ -136,7 +139,7 @@ const grantOf = (sessionId: string) =>
           sessionId,
           epoch,
           role: known,
-          tools: toolsOf(known),
+          tools: toolsOf(known).filter((tool) => testing || !TESTER_TOOLS.includes(tool)),
           place: { ...ROLE_PLACES[known], root: folder },
           projectId,
           missionId,

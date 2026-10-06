@@ -27,6 +27,7 @@ import {
   NOW_TEXT_MAX,
 } from './memory.ts'
 import { SetupProposal } from './setup.ts'
+import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
 
 /** The roles of an agent session at this version; later tickets add theirs. */
 export const ROLES = [
@@ -91,10 +92,12 @@ export type GateClass = 'local' | 'judged' | 'workflow'
 
 /**
  * What a tool does to the world: reads it, writes files, runs (or stops) a command, records in
- * Hemera's own Memory of the mission, which writes nothing in the role's place, or proposes a
- * change the user accepts or declines (the setup agent's cards), which changes nothing itself.
+ * Hemera's own Memory of the mission, which writes nothing in the role's place; proposes a
+ * change the user accepts or declines (the setup agent's cards), which changes nothing itself; or
+ * reports a problem with Hemera itself into the tester's own folder (#45), which writes nothing in
+ * the place either.
  */
-export type ToolEffect = 'reads' | 'writes' | 'runs' | 'records' | 'proposes'
+export type ToolEffect = 'reads' | 'writes' | 'runs' | 'records' | 'proposes' | 'reports'
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
@@ -435,6 +438,22 @@ const SetupPropose = Schema.Struct({
     'Propose changes to the setup. Nothing changes until the user accepts a card. A call with one change the settings would refuse is refused whole, with their reason: correct it and propose again.',
 })
 
+const HemeraReport = ReportedFinding.annotate({
+  description:
+    'Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.',
+})
+
+const HemeraReports = Schema.Struct({
+  page: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+      description: `The page to read, from 1: ${String(FINDINGS_PAGE)} findings a page, the latest seen first.`,
+    }),
+  ),
+}).annotate({
+  description:
+    'The problems with Hemera already reported: number, title, kind, place, severity, occurrences, last seen.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -630,6 +649,22 @@ export const TOOLS = {
     input: SetupPropose,
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
+  hemera_report: tool({
+    roles: ROLES,
+    gate: 'workflow',
+    effect: 'reports',
+    path: null,
+    input: HemeraReport,
+    label: { label: 'Report to Hemera', mark: 'hemera-report', doing: 'Reporting a problem' },
+  }),
+  hemera_reports: tool({
+    roles: ROLES,
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: HemeraReports,
+    label: { label: 'Read reports', mark: 'hemera-reports', doing: 'Reading the reports' },
+  }),
 }
 
 export type ToolName = keyof typeof TOOLS
@@ -655,7 +690,12 @@ export const TOOL_NAMES = [
   'spec_create_draft',
   'setup_read',
   'setup_propose',
+  'hemera_report',
+  'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
+
+/** The tester mode's two tools (#45): offered to every role, only while the mode is on. */
+export const TESTER_TOOLS: ReadonlyArray<ToolName> = ['hemera_report', 'hemera_reports']
 
 /** The arguments of a tool once decoded. */
 export type ToolArguments<Name extends ToolName> = (typeof TOOLS)[Name]['input']['Type']
