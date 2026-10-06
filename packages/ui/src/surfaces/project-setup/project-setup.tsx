@@ -54,14 +54,17 @@ export interface ProjectSetupProps {
   onCreate: () => void
   onRetry: () => void
   onAccept: (kind: SetupKind) => void
-  onEdit: (kind: SetupKind) => void
+  /** Left out where the agent takes no edit. */
+  onEdit?: ((kind: SetupKind) => void) | undefined
   onDraft: (kind: SetupKind, draft: Proposal) => void
-  onDiscuss: (kind: SetupKind) => void
+  /** Left out where the agent takes no discussion. */
+  onDiscuss?: ((kind: SetupKind) => void) | undefined
   onDecline: (kind: SetupKind) => void
   onSave: (kind: SetupKind) => void
   onCancel: (kind: SetupKind) => void
   onSend: (kind: SetupKind, note: string) => void
-  onProposeAgain: (kind: SetupKind) => void
+  /** Left out where the agent writes no new proposal. */
+  onProposeAgain?: ((kind: SetupKind) => void) | undefined
 }
 
 const ABOUT = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
@@ -183,13 +186,15 @@ export function ProjectSetup({
             draft={card.draft}
             onDraft={(draft) => onDraft(card.kind, draft)}
             onAccept={() => onAccept(card.kind)}
-            onEdit={() => onEdit(card.kind)}
-            onDiscuss={() => onDiscuss(card.kind)}
+            onEdit={onEdit === undefined ? undefined : () => onEdit(card.kind)}
+            onDiscuss={onDiscuss === undefined ? undefined : () => onDiscuss(card.kind)}
             onDecline={() => onDecline(card.kind)}
             onSave={() => onSave(card.kind)}
             onCancel={() => onCancel(card.kind)}
             onSend={(note) => onSend(card.kind, note)}
-            onProposeAgain={() => onProposeAgain(card.kind)}
+            onProposeAgain={
+              onProposeAgain === undefined ? undefined : () => onProposeAgain(card.kind)
+            }
           />
         ))}
       </div>
