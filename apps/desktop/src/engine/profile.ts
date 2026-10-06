@@ -109,6 +109,7 @@ import {
   sessionNotesLayer,
   sessionsDelivery,
 } from './sessions/bridges.ts'
+import { type Chats, chatsLayer, markInterruptedChats } from './chat/service.ts'
 import { modelChoiceLayer, seedAppSettings } from './sessions/cascade.ts'
 import { type Cap, capLayer } from './sessions/cap.ts'
 import { replacementGuardLayer } from './sessions/guard.ts'
@@ -215,6 +216,7 @@ export type EngineServices =
   | Delivery
   | RoleRegistry
   | Cap
+  | Chats
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -359,8 +361,9 @@ export const startProfile = (
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
     }
     const roles = roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])])
-    // The role sessions, over the agents' runtime, over the tools.
-    const sessionsLayers = sessionsLayer({ log, timings: parts.sessions?.timings }).pipe(
+    // The Chats over the role sessions, over the agents' runtime, over the tools.
+    const sessionsLayers = chatsLayer.pipe(
+      Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -560,6 +563,8 @@ export const startProfile = (
       // What #71 queued before the sessions existed becomes their deliveries; then the sessions a
       // stopped engine left are rebuilt, by this supervisor alone (CT-11).
       Effect.andThen(step('handing the queued results to the sessions', drainQueuedResults)),
+      // A Chat whose turn a stop interrupted says so before its session is ended (#43).
+      Effect.andThen(step('marking the Chats a stop interrupted', markInterruptedChats)),
       Effect.andThen(
         step(
           'rebuilding the sessions',

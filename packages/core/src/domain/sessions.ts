@@ -66,15 +66,23 @@ export type DeliveryState = typeof DeliveryState.Type
 export const deliveryMarker = (kind: string): string => `[hemera:${kind}]`
 
 /**
+ * The user's own message to a Chat (#43): the one delivery that carries no marker, because it is
+ * the user's words, not Hemera's. Only a Chat's session is ever handed one.
+ */
+export const USER_MESSAGE = 'user'
+
+/**
  * A body as it travels: a marker at the start of one of its lines and a note's tags are escaped,
  * so what a session, a command or a file wrote never reads as something Hemera says.
  */
 export const neutralised = (body: string): string =>
   body.replace(/^(\s*)\[hemera:/gim, '$1\\[hemera:').replace(/<(\/?hemera-note)/gi, '&lt;$1')
 
-/** One delivery as the agent reads it: its marker, then its body. */
-export const deliveryBlock = (kind: string, body: string): string =>
-  body === '' ? deliveryMarker(kind) : `${deliveryMarker(kind)}\n${neutralised(body)}`
+/** One delivery as the agent reads it: its marker, then its body; the user's message unmarked. */
+export const deliveryBlock = (kind: string, body: string): string => {
+  if (kind === USER_MESSAGE) return neutralised(body)
+  return body === '' ? deliveryMarker(kind) : `${deliveryMarker(kind)}\n${neutralised(body)}`
+}
 
 /** What an urgent delivery travels as, appended to a tool's result. */
 export const hemeraNote = (id: string, body: string): string =>

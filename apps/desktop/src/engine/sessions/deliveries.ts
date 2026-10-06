@@ -11,6 +11,7 @@ import {
   type DeliveryState,
   DELIVERY_STATES,
   DELIVERY_URGENCIES,
+  USER_MESSAGE,
 } from '@hemera/core/domain'
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
@@ -47,13 +48,16 @@ export interface StoredDelivery {
   readonly sentTo: string | null
 }
 
-/** A kind that is not a lowercase word would break the marker it travels under. */
+/**
+ * A kind that is not a lowercase word would break the marker it travels under; the user's own
+ * message reaches no mission's session (nobody chats with a mission's agents).
+ */
 export class DeliveryKindRefused extends Schema.TaggedError<DeliveryKindRefused>()(
   'DeliveryKindRefused',
-  { kind: Schema.String },
+  { kind: Schema.String, reason: Schema.String },
 ) {
   override get message(): string {
-    return `"${this.kind}" is not a delivery kind: a kind is a lowercase word.`
+    return `"${this.kind}" cannot be delivered: ${this.reason}.`
   }
 }
 
@@ -79,7 +83,18 @@ const storedOf = (row: Row): StoredDelivery => ({
 /** Stores a delivery, queued; one already stored under the same id is left as it is. */
 export const storeDelivery = (asked: DeliveryAsked) =>
   Effect.gen(function* () {
-    if (!isKind(asked.kind)) return yield* new DeliveryKindRefused({ kind: asked.kind })
+    if (!isKind(asked.kind)) {
+      return yield* new DeliveryKindRefused({
+        kind: asked.kind,
+        reason: 'a kind is a lowercase word',
+      })
+    }
+    if (asked.kind === USER_MESSAGE && asked.owner.kind === 'mission') {
+      return yield* new DeliveryKindRefused({
+        kind: asked.kind,
+        reason: 'nobody writes to a mission’s sessions',
+      })
+    }
     const secrets = yield* Secrets
     const id = asked.id ?? crypto.randomUUID()
     yield* mutate('storing a delivery', (transaction) =>

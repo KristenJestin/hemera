@@ -31,6 +31,7 @@ import {
   concernSaid,
   deletesGit,
   effectiveAction,
+  chatMustAsk,
   missionRefusal,
   neverMatch,
   neverSaid,
@@ -185,6 +186,13 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           return null
         })
 
+      /** What the Chat always asks before, read on the effective action; null otherwise. */
+      const chatMustAskOf = (call: JudgedCall): string | null => {
+        if (call.tool !== 'commands_run' || call.session.role !== 'chat') return null
+        const line = call.command?.line ?? call.line ?? ''
+        return chatMustAsk(effectiveAction(wordsOf(line), context).sequences)
+      }
+
       /** Step 3: what the call points at, sensitive or not, and what may be lifted by a grant. */
       const places = (call: JudgedCall) =>
         Effect.gen(function* () {
@@ -297,6 +305,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
         Effect.gen(function* () {
           const refused = yield* refusals(call)
           if (refused !== null) return refused
+          // The Chat always asks before a push, a forge write or a publication (#43).
+          const chatAsks = chatMustAskOf(call)
+          if (chatAsks !== null) return decided('ask', [chatAsks])
           const pointed = yield* places(call)
           // A sensitive place always asks, and no grant lifts it: every concern is said.
           if (pointed.sensitive.length > 0) {

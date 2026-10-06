@@ -128,8 +128,8 @@ export interface SessionAsked {
   /** The parent's lineage, for a child session. */
   readonly parent: { readonly lineage: string; readonly depth: number } | null
   /** The lineage it takes over, for a replacement; a new one otherwise. */
-  readonly lineage?: string
-  readonly epoch?: number
+  readonly lineage?: string | undefined
+  readonly epoch?: number | undefined
   readonly chosen?: RoleSession['chosen']
   readonly modelLevel?: SettingLevel | null
 }
@@ -204,6 +204,19 @@ export const sessionsIn = (states: ReadonlyArray<SessionState>, owner?: SessionO
       )
       .orderBy(asc(agentSessions.depth), asc(agentSessions.createdAt))
       .pipe(Effect.mapError(refusedWhile('reading the sessions')))
+    return rows.map(sessionOf)
+  })
+
+/** Every session of a lineage, whatever its state, by epoch. */
+export const sessionsOfLineage = (lineage: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const rows = yield* database
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.lineage, lineage))
+      .orderBy(asc(agentSessions.epoch))
+      .pipe(Effect.mapError(refusedWhile('reading a lineage’s sessions')))
     return rows.map(sessionOf)
   })
 

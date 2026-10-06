@@ -46,6 +46,8 @@ export class SessionPost extends Context.Service<
     ) => Effect.Effect<void>
     /** Whether a session of the mission is in a turn now. */
     readonly working: (missionId: string) => Effect.Effect<boolean>
+    /** Each turn as it begins and ends, by its session: what a Chat's transcript follows. */
+    readonly turns: Stream.Stream<{ readonly sessionId: string; readonly on: boolean }>
     /**
      * The owner of the needs a session gives (#41): the needs register it below the sessions,
      * which put their handler here once they run.
@@ -65,6 +67,7 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
   const pinned = new Map<string, PinnedNote>()
   const stopper = yield* Deferred.make<(owner: SessionOwner) => Effect.Effect<void>>()
   const turns = new Map<string, string | null>()
+  const turned = yield* PubSub.unbounded<{ readonly sessionId: string; readonly on: boolean }>()
   const handler = yield* Deferred.make<NeedHandler>()
   const waits = new Map<string, string>()
   return {
@@ -83,11 +86,13 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
     stopTree: (owner) => Effect.flatMap(Deferred.await(stopper), (stop) => stop(owner)),
     stopWith: (stop) => Effect.asVoid(Deferred.succeed(stopper, stop)),
     turning: (sessionId, missionId, on) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         if (on) turns.set(sessionId, missionId)
         else turns.delete(sessionId)
+        return Effect.asVoid(PubSub.publish(turned, { sessionId, on }))
       }),
     working: (missionId) => Effect.sync(() => [...turns.values()].includes(missionId)),
+    turns: Stream.fromPubSub(turned),
     needs: {
       deliver: (need, transaction) =>
         Effect.flatMap(Deferred.await(handler), (one) => one.deliver(need, transaction)),

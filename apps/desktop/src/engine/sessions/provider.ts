@@ -66,6 +66,7 @@ const unknownRole = (id: string): RoleEntry => ({
   template: '',
   brief: () => Effect.succeed([]),
   countsInCap: false,
+  ledByUser: false,
 })
 
 /** A session's three layers, written once, kept in its thread. */
@@ -88,6 +89,7 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
       specLanguage,
       readsMemory: role.readsMemory,
       testerMode,
+      hemeraOnly: !role.ledByUser,
     })
     const provider = AGENT_PROVIDERS.find((one) => one === session.provider) ?? 'claude'
     const files =
@@ -100,7 +102,7 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
             ),
           )
         : []
-    const text = instructionsText(base, role, files)
+    const text = instructionsText(base, role, files, preferences.userLanguage)
     yield* addToThread(sessionId, 'instructions', text)
     return text
   })
@@ -127,6 +129,7 @@ export const sessionInstructionsLayer = (platform: NodeJS.Platform = process.pla
                   specLanguage: 'en',
                   readsMemory: false,
                   testerMode: null,
+                  hemeraOnly: true,
                 }),
               ),
             ),

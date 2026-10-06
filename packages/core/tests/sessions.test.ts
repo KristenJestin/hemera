@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   DeliveryKindName,
   START_AGAIN,
+  USER_MESSAGE,
   deliveryBlock,
   deliveryMarker,
   hemeraNote,
@@ -81,5 +82,14 @@ describe('Saturation and the resume', () => {
     expect(isLiveSession('working')).toBe(true)
     expect(isLiveSession('stuck')).toBe(false)
     expect(isLiveSession('replaced')).toBe(false)
+  })
+})
+
+describe('The user’s own message (#43)', () => {
+  test('carries no marker; every other delivery keeps its own', () => {
+    expect(deliveryBlock(USER_MESSAGE, 'Where are the invoices exported?')).toBe(
+      'Where are the invoices exported?',
+    )
+    expect(deliveryBlock('approval', 'Allowed.')).toBe('[hemera:approval]\nAllowed.')
   })
 })

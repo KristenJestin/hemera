@@ -451,5 +451,59 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
     },
     "name": "evidence_add",
   },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "The Project's missions, read-only: key, title, stage, who has the ball and the last thing that happened, at most 100.",
+      "properties": {
+        "stage": {
+          "description": "Only the missions in this stage, by its name as missions_list gives it (\`building\`).",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "Only the missions whose key or title holds these words, case aside.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "missions_list",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Create a mission in Planning in this Project, from this conversation. Call missions_list first. The answer gives the new mission's key and the missions whose titles look like it.",
+      "properties": {
+        "idea": {
+          "description": "What a Planner starts from without this conversation: what the user wants, why, and what you found in the code.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "ticket": {
+          "description": "A ticket reference, as the user gave it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "title": {
+          "description": "The mission’s title, in a few words.",
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "title",
+        "idea",
+      ],
+      "type": "object",
+    },
+    "name": "spec_create_draft",
+  },
 ]
 `;

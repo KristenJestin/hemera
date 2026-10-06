@@ -44,6 +44,7 @@ const VALUES = {
   specLanguage: 'en',
   readsMemory: true,
   testerMode: null,
+  hemeraOnly: true,
 }
 
 describe('Hemera’s base layer', () => {
@@ -72,6 +73,14 @@ describe('Hemera’s base layer', () => {
     ).toMatch(/Tester mode is on: report what you find\.$/)
   })
 
+  test('only Hemera writes to a role but the Chat: the user writes to the Chat directly', () => {
+    expect(renderBase(VALUES)).toContain('In a mission no human writes to you')
+    const chat = renderBase({ ...VALUES, hemeraOnly: false })
+    expect(chat).not.toContain('no human writes to you')
+    expect(chat).toContain('## How information reaches you')
+    expect(chat).not.toMatch(/\{[a-zA-Z#/]/)
+  })
+
   test('a language Hemera cannot name is said as its tag', () => {
     expect(languageName('de')).toBe('German')
     expect(languageName('not a tag')).toBe('not a tag')
@@ -81,15 +90,19 @@ describe('Hemera’s base layer', () => {
 describe('The three layers', () => {
   test('base, then the role, then the Project’s files, an empty layer left out', () => {
     const files = [{ repository: 'api', file: 'CLAUDE.md' as const, text: 'Run pnpm test.' }]
-    const text = instructionsText('BASE', TEST_ROLE, files)
+    const text = instructionsText('BASE', TEST_ROLE, files, 'en')
     expect(text.split('\n\n---\n\n')).toEqual([
       'BASE',
       TEST_ROLE.template,
       '# The Project’s own instructions\n\n## api/CLAUDE.md\n\nRun pnpm test.',
     ])
-    expect(instructionsText('BASE', TEST_ROLE, []).split('\n\n---\n\n')).toHaveLength(2)
+    expect(instructionsText('BASE', TEST_ROLE, [], 'en').split('\n\n---\n\n')).toHaveLength(2)
+    const speaking = { ...TEST_ROLE, template: 'Answer in {user.language}, briefly.' }
+    expect(instructionsText('BASE', speaking, [], 'fr')).toContain('Answer in French, briefly.')
     expect(
-      instructionsText('BASE', { ...TEST_ROLE, projectLayer: false }, files).split('\n\n---\n\n'),
+      instructionsText('BASE', { ...TEST_ROLE, projectLayer: false }, files, 'en').split(
+        '\n\n---\n\n',
+      ),
     ).toHaveLength(2)
   })
 })

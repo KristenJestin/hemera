@@ -304,9 +304,9 @@ const titleOf = (idea: string): string => {
 
 /**
  * Creates a mission in Planning: its key is its Project's prefix and next number, and
- * `mission.started` is written with it.
+ * `mission.started` is written with it, naming the Chat it was created from, if one (#43).
  */
-export const createMission = (asked: NewMission) =>
+export const createMission = (asked: NewMission, fromChat: string | null = null) =>
   Effect.gen(function* () {
     const sentence = given(asked.idea.sentence)
     const ticket = given(asked.idea.ticket)
@@ -371,11 +371,12 @@ export const createMission = (asked: NewMission) =>
         return {
           result: undefined,
           events: [
-            missionEvent('mission.started', id, BY_THE_USER, {
+            missionEvent('mission.started', id, fromChat === null ? BY_THE_USER : BY_HEMERA, {
               projectId: project.id,
               key: missionKey(prefix, number),
               type,
               title,
+              fromChat,
             }),
           ],
         }

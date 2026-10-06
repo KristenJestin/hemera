@@ -11,12 +11,21 @@
 import { ROLES, type PlaceKind, type Role, TOOLS, TOOL_NAMES, toolsOf } from '@hemera/core/domain'
 import { Context, type Effect, Layer } from 'effect'
 
+import { CHAT_ROLE } from '../chat/role.ts'
+import type { MissionActivity } from '../missions.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
 export type SessionOwner =
   | { readonly kind: 'mission'; readonly missionId: string }
   | { readonly kind: 'project'; readonly projectId: string }
+
+/** The session a brief is written for: which lineage, at which epoch, opened when. */
+export interface BriefedSession {
+  readonly lineage: string
+  readonly epoch: number
+  readonly createdAt: string
+}
 
 /** One field of a role's brief: a field with no text is left out of the brief, never "none". */
 export interface BriefField {
@@ -40,12 +49,18 @@ export interface RoleEntry {
   readonly mainOf: string | null
   /** Its layer of the instructions, set once at the session's start. */
   readonly template: string
-  /** The fields of its brief, from what its owner holds now. */
+  /** The fields of its brief, from what its owner holds now, for this session of a lineage. */
   readonly brief: (
     owner: SessionOwner,
-  ) => Effect.Effect<ReadonlyArray<BriefField>, DatabaseError, Database>
+    session: BriefedSession,
+  ) => Effect.Effect<ReadonlyArray<BriefField>, DatabaseError, Database | MissionActivity>
   /** Whether its sessions count in the Project's cap of simultaneous sub-agents (#41 reads it). */
   readonly countsInCap: boolean
+  /**
+   * Whether the user leads its sessions (the Chat, #43): the user writes to them directly, with
+   * no marker, and a restart does not start them again.
+   */
+  readonly ledByUser: boolean
 }
 
 export class RoleRegistry extends Context.Service<RoleRegistry, ReadonlyArray<RoleEntry>>()(
@@ -60,22 +75,27 @@ export const roleNamed = (entries: ReadonlyArray<RoleEntry>, id: string): RoleEn
   entries.find((entry) => entry.id === id)
 
 /** The roles this version registers. */
-export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = []
+export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [CHAT_ROLE]
 
-/** The tools that read or write the Memory: `memory_read` and every tool that records in it. */
+/**
+ * The tools that read or write the Memory: `memory_read` and every tool that records in it. The
+ * Chat's mission draft records a new mission, not into any mission's Memory.
+ */
 export const MEMORY_TOOLS = TOOL_NAMES.filter(
-  (name) => name === 'memory_read' || TOOLS[name].effect === 'records',
+  (name) =>
+    name === 'memory_read' || (TOOLS[name].effect === 'records' && name !== 'spec_create_draft'),
 )
 
 const readRole = (id: string): Role | undefined => ROLES.find((role) => role === id)
 
 /**
- * CT-06: every registered role that does not read the Memory yet has a Memory tool in the role
- * table, said in words. Empty when the contract holds.
+ * CT-06: every registered role of a mission that does not read the Memory yet has a Memory tool in
+ * the role table, said in words. Empty when the contract holds. A Project's role has no mission
+ * Memory of its own: what it reads of missions, it reads read-only (the Chat, #43).
  */
 export const memoryContractBroken = (entries: ReadonlyArray<RoleEntry>): ReadonlyArray<string> =>
   entries.flatMap((entry) => {
-    if (entry.readsMemory) return []
+    if (entry.readsMemory || entry.ownerKind === 'project') return []
     const role = readRole(entry.id)
     const held =
       role === undefined ? [] : toolsOf(role).filter((tool) => MEMORY_TOOLS.includes(tool))

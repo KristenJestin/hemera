@@ -13,7 +13,7 @@ import { START_AGAIN, deliveryBlock, resumeSaid } from '@hemera/core/domain'
 import { Context, Effect, Layer } from 'effect'
 
 import { Memory } from '../memory/index.ts'
-import type { BriefField, RoleEntry, SessionOwner } from './roles.ts'
+import type { BriefField, BriefedSession, RoleEntry, SessionOwner } from './roles.ts'
 
 /** What the brief reads of the Memory. */
 export class BriefSources extends Context.Service<
@@ -60,10 +60,15 @@ export const fieldsText = (fields: ReadonlyArray<BriefField>): string =>
     .join('\n\n')
 
 /** The first message of a session after its instructions. */
-export const briefOf = (role: RoleEntry, owner: SessionOwner, predecessor: Predecessor | null) =>
+export const briefOf = (
+  role: RoleEntry,
+  owner: SessionOwner,
+  session: BriefedSession,
+  predecessor: Predecessor | null,
+) =>
   Effect.gen(function* () {
     const sources = yield* BriefSources
-    const fields = fieldsText(yield* role.brief(owner))
+    const fields = fieldsText(yield* role.brief(owner, session))
     const missionId = owner.kind === 'mission' ? owner.missionId : null
     const memory =
       role.readsMemory && missionId !== null ? (yield* sources.memoryBlock(missionId)).trim() : ''
@@ -71,7 +76,8 @@ export const briefOf = (role: RoleEntry, owner: SessionOwner, predecessor: Prede
       'brief',
       [fields, memory].filter((part) => part !== '').join('\n\n'),
     )
-    if (predecessor === null) return brief
+    // A session the user leads is handed the end of its conversation instead, in its fields.
+    if (predecessor === null || role.ledByUser) return brief
     const resume =
       role.readsMemory && missionId !== null
         ? resumeSaid(predecessor.stoppedAt, yield* sources.lastLine(missionId, predecessor.lineage))
