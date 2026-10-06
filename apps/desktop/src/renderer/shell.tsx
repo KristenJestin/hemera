@@ -63,6 +63,8 @@ export interface ShellProps {
   under?: (projectId: string) => ReactNode
   /** The page of the Chat the route shows, drawn by its own hooks. */
   chat?: ReactNode
+  /** The setup page of the Project the route shows, drawn by its own hooks. */
+  projectSetup?: ReactNode
   /** A Chat's title, when the window knows it: the last crumb of its page. */
   chatTitle?: (id: string) => string | undefined
   /** Today, as Home's header says it. */
@@ -148,6 +150,7 @@ interface RoutePageProps {
   projectSettings: ReactNode
   appSettings: ReactNode
   chat: ReactNode
+  projectSetup: ReactNode
   actions: ShellActions
 }
 
@@ -163,6 +166,7 @@ function RoutePage({
   projectSettings,
   appSettings,
   chat,
+  projectSetup,
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
@@ -225,6 +229,8 @@ function RoutePage({
       return appSettings
     case 'chat':
       return chat
+    case 'projectSetup':
+      return projectSetup
     case 'mission':
       return null
   }
@@ -246,6 +252,7 @@ export function Shell({
   under,
   chat,
   chatTitle,
+  projectSetup,
   today,
   now,
   projectSettings,
@@ -321,6 +328,7 @@ export function Shell({
             projectSettings={projectSettings}
             appSettings={appSettings}
             chat={chat}
+            projectSetup={projectSetup}
             actions={actions}
           />
         )}

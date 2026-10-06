@@ -41,6 +41,8 @@ export type Route =
   /** The settings of a Project: its own page, entered from the Project page's header. */
   | { readonly kind: 'projectSettings'; readonly id: string }
   | { readonly kind: 'mission'; readonly projectId: string; readonly key: string }
+  /** What the setup agent proposes for a Project just added, and the user's answers. */
+  | { readonly kind: 'projectSetup'; readonly id: string }
   /** A Chat of a Project: listed under it in the sidebar. */
   | { readonly kind: 'chat'; readonly projectId: string; readonly id: string }
 
@@ -118,6 +120,7 @@ export function placeOf(route: Route): SidebarPlace {
       return { kind: 'settings' }
     case 'project':
     case 'projectSettings':
+    case 'projectSetup':
       return { kind: 'project', id: route.id }
     case 'mission':
       return { kind: 'mission', key: route.key }
@@ -184,6 +187,15 @@ export function trailOf(navigation: Navigation, names: Names): Trail[] {
           step: { go: { kind: 'project', id: route.id } },
         },
         { id: 'settings', label: 'Settings' },
+      ]
+    case 'projectSetup':
+      return [
+        {
+          id: 'project',
+          label: project(route.id),
+          step: { go: { kind: 'project', id: route.id } },
+        },
+        { id: 'setup', label: 'Setup' },
       ]
     case 'chat':
       return [

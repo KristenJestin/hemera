@@ -21,6 +21,7 @@ import {
   type Route,
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
+import { SetupRoute } from './setup-route.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useChats } from './use-chats.ts'
@@ -81,7 +82,7 @@ function Application() {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const { route } = navigation
   const shownProject =
-    route.kind === 'project' || route.kind === 'projectSettings'
+    route.kind === 'project' || route.kind === 'projectSettings' || route.kind === 'projectSetup'
       ? route.id
       : route.kind === 'chat'
         ? route.projectId
@@ -146,6 +147,17 @@ function Application() {
           onOpen={(id) => openChat(projectId, id)}
         />
       )}
+      projectSetup={
+        route.kind === 'projectSetup' && project.kind === 'ready' ? (
+          <SetupRoute
+            key={route.id}
+            link={link}
+            engineReady={ready}
+            project={project.project}
+            onDone={() => goTo({ kind: 'project', id: route.id })}
+          />
+        ) : null
+      }
       chat={
         route.kind === 'chat' && project.kind === 'ready' ? (
           <ChatRoute
@@ -187,9 +199,7 @@ function Application() {
           open={adding}
           onOpenChange={setAdding}
           tools={ADDING}
-          onCreated={(created) =>
-            setNavigation((before) => go(before, { kind: 'project', id: created.id }))
-          }
+          onCreated={(created) => goTo({ kind: 'project', id: created.id })}
         />
       }
       actions={{

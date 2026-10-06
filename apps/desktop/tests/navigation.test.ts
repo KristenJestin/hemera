@@ -81,6 +81,14 @@ describe('The window’s routes', () => {
     expect(placeOf(settings.route)).toEqual({ kind: 'project', id: 'acme' })
   })
 
+  test('a new Project’s setup is a page under it: the Project, then Setup; the Project marked', () => {
+    const setup = go(START, { kind: 'projectSetup', id: 'acme' })
+    const trail = trailOf(setup, names)
+    expect(trail.map((crumb) => crumb.label)).toEqual(['Acme', 'Setup'])
+    expect(trail[0]?.step).toEqual({ go: { kind: 'project', id: 'acme' } })
+    expect(placeOf(setup.route)).toEqual({ kind: 'project', id: 'acme' })
+  })
+
   test('a Chat is a page under its Project: its title after the Project’s, its row marked', () => {
     const chat = go(START, { kind: 'chat', projectId: 'acme', id: 'invoices' })
     const trail = trailOf(chat, names)

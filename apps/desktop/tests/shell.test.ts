@@ -103,6 +103,7 @@ const drawn = ({
     },
     under: (id) => (id === 'acme' ? createElement('p', null, 'The Chats of Acme') : null),
     chat: createElement('p', null, 'The Chat on its page'),
+    projectSetup: createElement('p', null, 'The setup of the Project'),
     chatTitle: (id) => (id === 'invoices' ? 'Invoices export' : undefined),
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
@@ -249,6 +250,12 @@ describe('The pages', () => {
     expect(markup).toMatch(
       /aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Invoices export/,
     )
+  })
+
+  test('a new Project’s setup: its page, its trail the Project then Setup', () => {
+    const markup = drawn({ route: { kind: 'projectSetup', id: 'acme' } })
+    expect(markup).toContain('The setup of the Project')
+    expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Setup/)
   })
 })
 
