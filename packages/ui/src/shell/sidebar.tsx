@@ -29,7 +29,8 @@ import { collapse, expand, fold, useTransition } from '../motion.ts'
  * the `fold` kind, pushing what stands under them.
  *
  * A Project added or removed while the window is open grows into the list or folds out of it on
- * the same `fold` kind, pushing what stands after it.
+ * the same `fold` kind, pushing what stands after it. Opened while it grows in, its row and what
+ * stands under it each grow on their own journey, and its row is never scrolled inside its box.
  *
  * Every place is a button in the tab order, Home first and Settings last. The current one says so
  * (`aria-current`). Nothing here knows where a place leads: it says which was chosen.
@@ -89,13 +90,23 @@ const CHEVRON =
  * a whole — the fade it travels on is a filter, which makes it a stacking context of its own, and
  * a row raised inside it would still be under the mark drawn after the list.
  */
-const UNDER = 'relative z-1 flex flex-col gap-0.5 overflow-hidden pl-2'
+const UNDER = 'relative z-1 flex flex-col gap-0.5 overflow-clip pl-2'
 
 /**
- * A Project's place and what stands under it, clipped while it grows in or folds out, and over the
- * mark as a whole, for the reason `UNDER` gives: the fade it travels on is a filter.
+ * A Project's place and what stands under it, clipped while it folds out, and over the mark as a
+ * whole, for the reason `UNDER` gives: the fade it travels on is a filter.
+ *
+ * Clipped, never scrollable (`overflow-clip`, not `hidden`): a box that hides its overflow can
+ * still be scrolled by whatever brings a control of it into view — a focus, a click from a
+ * driver — and the row would then slide up inside its box and stay drawn by half.
  */
-const PROJECT = 'relative z-1 flex shrink-0 flex-col gap-0.5 overflow-hidden'
+const PROJECT = 'relative z-1 flex shrink-0 flex-col gap-0.5 overflow-clip'
+
+/**
+ * A Project's row as it grows into the list: the row alone, so what opens under it while it grows
+ * grows on its own journey rather than inside a height measured before it was there.
+ */
+const ENTERING = 'flex shrink-0 flex-col overflow-clip'
 
 const ROW =
   'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm whitespace-nowrap text-muted-foreground outline-none select-none hover:bg-accent hover:text-foreground focus-ring hover-motion aria-[current=page]:text-foreground'
@@ -221,38 +232,45 @@ export function Sidebar({
               <motion.div
                 key={project.id}
                 className={PROJECT}
-                initial={collapse}
+                initial={false}
                 animate={expand}
                 exit={collapse}
                 transition={folding}
               >
-                <Place
-                  folded={folded}
-                  mark={`project:${project.id}`}
-                  current={current.kind === 'project' && current.id === project.id}
-                  name={project.name}
-                  icon={
-                    <ProjectMark name={project.name} others={names} identity={project.identity} />
-                  }
-                  onPress={() => onProject(project.id)}
-                  control={
-                    project.under === undefined ? undefined : (
-                      <button
-                        type="button"
-                        className={CHEVRON}
-                        aria-expanded={open}
-                        aria-label={`${open ? 'Fold' : 'Open'} the missions of ${project.name}`}
-                        tabIndex={folded ? -1 : 0}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onOpen(project.id, !open)
-                        }}
-                      >
-                        <IconChevronRight size="sm" />
-                      </button>
-                    )
-                  }
-                />
+                <motion.div
+                  className={ENTERING}
+                  initial={collapse}
+                  animate={expand}
+                  transition={folding}
+                >
+                  <Place
+                    folded={folded}
+                    mark={`project:${project.id}`}
+                    current={current.kind === 'project' && current.id === project.id}
+                    name={project.name}
+                    icon={
+                      <ProjectMark name={project.name} others={names} identity={project.identity} />
+                    }
+                    onPress={() => onProject(project.id)}
+                    control={
+                      project.under === undefined ? undefined : (
+                        <button
+                          type="button"
+                          className={CHEVRON}
+                          aria-expanded={open}
+                          aria-label={`${open ? 'Fold' : 'Open'} the missions of ${project.name}`}
+                          tabIndex={folded ? -1 : 0}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onOpen(project.id, !open)
+                          }}
+                        >
+                          <IconChevronRight size="sm" />
+                        </button>
+                      )
+                    }
+                  />
+                </motion.div>
                 <AnimatePresence initial={false}>
                   {open && project.under !== undefined && (
                     <motion.div
