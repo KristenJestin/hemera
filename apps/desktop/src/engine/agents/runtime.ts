@@ -15,7 +15,7 @@
  * a process again and resumes it.
  */
 
-import { Context, Effect, Exit, Layer, PubSub, Schema, Scope, Stream } from 'effect'
+import { Context, Deferred, Effect, Exit, Layer, PubSub, Schema, Scope, Stream } from 'effect'
 
 import type { LaunchFailed } from '@hemera/ipc'
 
@@ -27,7 +27,8 @@ import type { Database, DatabaseError } from '../storage/database.ts'
 import { agentDirectoryOf } from './bare.ts'
 import {
   type AgentConnection,
-  type AgentGone,
+  type AgentEvent,
+  AgentGone,
   type AgentOption,
   type AgentPermissionAnswer,
   type AgentProtocolError,
@@ -69,9 +70,23 @@ export class AgentStarter extends Context.Service<
 export const AgentDied = Schema.TaggedStruct('AgentDied', { sessionId: Schema.String })
 export type AgentDied = typeof AgentDied.Type
 
-/** What a session's system prompt is, until the briefs of #40 write it. */
-const SYSTEM_PROMPT =
-  'You work for Hemera. Every read, write and command goes through Hemera’s tools, the only ones you have. A refusal from Hemera is an answer: it says what was refused and why; do not try to reach the same effect another way.'
+/**
+ * A session's instructions, set once when its agent opens it: Claude Code's custom system prompt,
+ * the others' first-message resource. The role sessions write them (base, role, Project).
+ */
+export class SessionInstructions extends Context.Service<
+  SessionInstructions,
+  { readonly of: (sessionId: string) => Effect.Effect<string> }
+>()('SessionInstructions') {}
+
+/** What a session's agent reported, as it reported it. */
+export interface SessionActivity {
+  readonly sessionId: string
+  readonly event: AgentEvent
+}
+
+/** The address the instructions travel under, as a first-message resource. */
+const INSTRUCTIONS_URI = 'hemera://instructions'
 
 /** The bare `_meta` as the JSON object it travels as. */
 const asJson = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))
@@ -129,8 +144,12 @@ export class AgentRuntime extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<AgentOption>, AgentFailure, Database | DomainEvents>
     /** Lets a session's process go (idle release, or the session's end): its token is revoked. */
     readonly release: (sessionId: string) => Effect.Effect<void>
+    /** Cancels the turn a session's agent is in, when one runs; nothing otherwise. */
+    readonly cancel: (sessionId: string) => Effect.Effect<void>
     /** Each death of an agent's process, as it happens. */
     readonly deaths: Stream.Stream<AgentDied>
+    /** What every session's agent reports, as it reports it. */
+    readonly activity: Stream.Stream<SessionActivity>
   }
 >()('AgentRuntime') {}
 
@@ -146,11 +165,16 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
         | AcpTraces
         | AgentPermissionAnswer
         | SessionTurns
+        | SessionInstructions
         | Scope.Scope
       >()
       const scope = yield* Effect.scope
       const deaths = yield* PubSub.unbounded<AgentDied>()
+      const activity = yield* PubSub.unbounded<SessionActivity>()
+      const instructions = Context.get(context, SessionInstructions)
       const live = new Map<string, Live>()
+      /** The starts under way, each with what lets it go before its process is up. */
+      const starting = new Map<string, Deferred.Deferred<void>>()
       const endpoint = Context.get(context, HemeraEndpoint)
       const idle = Context.get(context, IdleAgents)
       const turns = Context.get(context, SessionTurns)
@@ -170,13 +194,16 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
           const resolved = yield* Discovery.use((discovery) => discovery.resolve(record.provider))
           const url = yield* endpoint.url
           const token = yield* endpoint.mint(sessionId)
+          const systemPrompt = yield* instructions.of(sessionId)
           const bare = resolved.adapter.bareOptions({
             agentDirectory: agentDirectoryOf(settings.dataFolder, record.provider),
-            systemPrompt: SYSTEM_PROMPT,
+            systemPrompt,
             hemera: { url, token },
             own: resolved.own,
           })
           const processScope = yield* Scope.fork(scope)
+          const released = yield* Deferred.make<void>()
+          starting.set(sessionId, released)
           const started = yield* Effect.gen(function* () {
             const agent = yield* AgentStarter.use((starter) =>
               starter.start(resolved, { ...resolved.env, ...bare.env }, sessionId),
@@ -201,15 +228,24 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
                   ? yield* connection.loadSession(nativeId, opening)
                   : yield* connection.newSession(opening)
             return { connection, session }
-          }).pipe(Effect.provideService(Scope.Scope, processScope), Effect.provide(context))
+          }).pipe(
+            Effect.provideService(Scope.Scope, processScope),
+            Effect.provide(context),
+            // Released before its process is up: the start stops there, its process with it.
+            Effect.raceFirst(
+              Effect.andThen(Deferred.await(released), Effect.fail(new AgentGone())),
+            ),
+            Effect.onError(() => Scope.close(processScope, Exit.void)),
+            Effect.ensuring(Effect.sync(() => starting.delete(sessionId))),
+          )
           // Codex and OpenCode take the system prompt as the first message's resource.
           const firstBlocks =
             bare.systemPromptAs === 'embedded-resource' && record.nativeId === null
               ? [
                   ResourceBlock.make({
-                    uri: 'hemera://system-prompt',
-                    mimeType: 'text/plain',
-                    text: SYSTEM_PROMPT,
+                    uri: INSTRUCTIONS_URI,
+                    mimeType: 'text/markdown',
+                    text: systemPrompt,
                   }),
                 ]
               : []
@@ -222,6 +258,11 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
             firstBlocks,
           }
           live.set(sessionId, one)
+          // Every event of this process is told with the session it belongs to, while it runs.
+          yield* started.connection.events.pipe(
+            Stream.runForEach((event) => PubSub.publish(activity, { sessionId, event })),
+            Effect.forkIn(processScope),
+          )
           yield* recordNativeSession(sessionId, started.session.nativeSessionId)
           yield* reapplyChoices(sessionId, started.session)
           // A death is an end nobody asked for: the turn closes as interrupted (the client does
@@ -255,7 +296,10 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
       const release = (sessionId: string): Effect.Effect<void> =>
         Effect.suspend(() => {
           const one = live.get(sessionId)
-          if (one === undefined) return Effect.void
+          if (one === undefined) {
+            const pending = starting.get(sessionId)
+            return pending === undefined ? Effect.void : Deferred.done(pending, Exit.void)
+          }
           one.letGo = true
           return Effect.andThen(forget(sessionId, one), Scope.close(one.scope, Exit.void))
         })
@@ -290,7 +334,15 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
             Effect.provide(context),
           ),
         release,
+        cancel: (sessionId) =>
+          Effect.suspend(() => {
+            const one = live.get(sessionId)
+            return one === undefined || !one.turning
+              ? Effect.void
+              : Effect.ignore(one.session.cancel)
+          }),
         deaths: Stream.fromPubSub(deaths),
+        activity: Stream.fromPubSub(activity),
       }
     }),
   )

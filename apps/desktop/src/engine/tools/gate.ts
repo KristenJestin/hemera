@@ -72,7 +72,12 @@ import {
   refusal,
   search,
 } from './files.ts'
-import type { Evidence, Memory, MissionDependencies } from '../memory/index.ts'
+import {
+  type Evidence,
+  type Memory,
+  type MissionDependencies,
+  SessionEpochs,
+} from '../memory/index.ts'
 import {
   evidenceAdd,
   journalAdd,
@@ -90,6 +95,7 @@ import {
   type JudgedPath,
   PermissionRequests,
   SensitivePlaces,
+  SessionNotes,
   Verdicts,
   outsideReason,
 } from './ports.ts'
@@ -143,6 +149,8 @@ export type GateServices =
   | Memory
   | Evidence
   | MissionDependencies
+  | SessionEpochs
+  | SessionNotes
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -704,9 +712,20 @@ export const toolGateLayer = (settings: GateSettings) =>
               Effect.orElseSucceed(() => false),
             )
             if (!exists) return refusal('refused: this session no longer exists')
-            return asked.callKey === null
-              ? yield* decided(grant, asked)
-              : yield* keyed(grant, asked, asked.callKey)
+            // A session replaced, or holding an older epoch than its lineage's, acts no more.
+            const current = yield* SessionEpochs.use((epochs) =>
+              epochs.isCurrent(grant.sessionId, grant.epoch),
+            )
+            if (!current) return refusal('refused: this session has been replaced')
+            const answer =
+              asked.callKey === null
+                ? yield* decided(grant, asked)
+                : yield* keyed(grant, asked, asked.callKey)
+            // What cannot wait for the end of the turn travels in this answer, once.
+            const notes = yield* SessionNotes.use((pinned) => pinned.take(grant.sessionId))
+            return notes.length === 0
+              ? answer
+              : { ...answer, text: [answer.text, ...notes].join('\n\n') }
           }).pipe(Effect.provide(context)),
       }
     }),

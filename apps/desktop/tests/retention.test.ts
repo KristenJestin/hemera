@@ -201,6 +201,61 @@ describe('The diagnostic class rotates by age and size, never under a live missi
     expect(after).toEqual(before)
   })
 
+  test('a session’s hidden thread older than 30 days goes, unless its mission or itself still runs', async () => {
+    const left = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const folder = join(work, 'acme')
+          mkdirSync(folder, { recursive: true })
+          const project = yield* createProject({
+            name: 'Acme',
+            mainCheckout: folder,
+            repositories: [],
+          })
+          const live = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'live', ticket: null },
+          })
+          const ended = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'ended', ticket: null },
+          })
+          yield* moveMission(ended.id, 'cancel', 'user')
+          const database = yield* Database
+          const session = (id: string, missionId: string, state: string) =>
+            database.insert(schema.agentSessions).values({
+              id,
+              provider: 'claude',
+              ownerKind: 'mission',
+              ownerId: missionId,
+              role: 'builder',
+              folder,
+              state,
+              createdAt: daysAgo(40),
+              updatedAt: daysAgo(40),
+            })
+          const line = (sessionId: string, age: number) =>
+            database.insert(schema.sessionThreads).values({
+              sessionId,
+              at: daysAgo(age),
+              kind: 'sent',
+              text: maskText('[hemera:brief]', []),
+            })
+          yield* session('of-ended-mission', ended.id, 'ended')
+          yield* session('of-live-mission', live.id, 'ended')
+          yield* session('recent', ended.id, 'ended')
+          yield* line('of-ended-mission', 40)
+          yield* line('of-live-mission', 40)
+          yield* line('recent', 2)
+          yield* sweepDiagnostics(data, { now, maxTotalBytes: 1_000_000_000 })
+          const rows = yield* database.select().from(schema.sessionThreads)
+          return [...new Set(rows.map((row) => row.sessionId))].toSorted()
+        }),
+      ),
+    )
+    expect(left).toEqual(['of-live-mission', 'recent'])
+  })
+
   test('past the total size, the oldest go first, and a live mission’s still stay', async () => {
     const left = await commandsEngine(data)(({ profile }) =>
       profile.use(

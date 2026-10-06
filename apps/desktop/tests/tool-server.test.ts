@@ -20,7 +20,12 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { callOverMcp, fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
-import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/agents/runtime.ts'
+import {
+  AgentRuntime,
+  AgentStarter,
+  SessionInstructions,
+  agentRuntimeLayer,
+} from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
 import { commandsEngine } from './commands-engine.ts'
@@ -225,6 +230,7 @@ describe('An agent started bare reaches Hemera’s tools over real MCP', () => {
               }),
               acpTracesLayer(data),
               defaultPermissionAnswerLayer,
+              Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
             )
             yield* AgentRuntime.use((runtime) =>
               runtime.prompt(session.id, [TextBlock.make({ text: 'say hello to Acme' })]),

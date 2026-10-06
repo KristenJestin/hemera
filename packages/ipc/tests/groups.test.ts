@@ -244,6 +244,9 @@ const evidence = {
   at: '2026-10-05T00:00:00.000Z',
 }
 const memoryHandlers = {
+  'sessions.list': unused,
+  'sessions.thread': unused,
+  'sessions.instructionFiles': unused,
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,
@@ -479,8 +482,20 @@ describe('Errors that can reach a screen', () => {
 describe('The preferences', () => {
   test('the theme is the system’s, light or dark, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(Preferences)
-    for (const theme of ['system', 'light', 'dark']) expect(decode({ theme })).toEqual({ theme })
-    expect(() => decode({ theme: 'sepia' })).toThrow()
+    for (const theme of ['system', 'light', 'dark']) {
+      expect(decode({ theme, userLanguage: 'en' })).toEqual({ theme, userLanguage: 'en' })
+    }
+    expect(() => decode({ theme: 'sepia', userLanguage: 'en' })).toThrow()
+  })
+
+  test('the agents’ language is a language tag, and nothing else', () => {
+    const decode = Schema.decodeUnknownSync(Preferences)
+    for (const userLanguage of ['en', 'fr', 'pt-BR', 'zh-Hant-TW']) {
+      expect(decode({ theme: 'system', userLanguage }).userLanguage).toBe(userLanguage)
+    }
+    for (const userLanguage of ['', 'French', 'en_US', '../etc']) {
+      expect(() => decode({ theme: 'system', userLanguage })).toThrow()
+    }
   })
 
   test('a refused restore reaches the caller as itself', () =>

@@ -5,7 +5,7 @@
  */
 
 import type { SessionConfigOption } from '@agentclientprotocol/sdk'
-import { Effect, Fiber, Layer, Stream } from 'effect'
+import { Effect, Fiber, Layer, Predicate, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -15,7 +15,12 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { type FakeAgent, type FakeScript, fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
-import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/agents/runtime.ts'
+import {
+  AgentRuntime,
+  AgentStarter,
+  SessionInstructions,
+  agentRuntimeLayer,
+} from '../src/engine/agents/runtime.ts'
 import { getAgentSession, openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
 import { openProfile } from '../src/engine/migrate.ts'
@@ -91,6 +96,9 @@ const world = (scripts: ReadonlyArray<FakeScript>) => {
       drop: () => Effect.void,
     }),
     defaultPermissionAnswerLayer,
+    Layer.succeed(SessionInstructions, {
+      of: (session) => Effect.succeed(`# Instructions of ${session}`),
+    }),
   )
   return { agents, tokens, layers }
 }
@@ -110,9 +118,9 @@ const run = <A, E>(
     ),
   )
 
-const session = () =>
+const session = (provider: 'claude' | 'codex' = 'claude') =>
   openAgentSession({
-    provider: 'claude',
+    provider,
     ownerKind: 'mission',
     ownerId: 'mission-1',
     role: 'builder',
@@ -137,6 +145,113 @@ describe('An agent is started bare, with Hemera’s server and nothing else', ()
     const meta = built.agents[0]?.answers.metas[0] ?? ''
     expect(meta).toContain('"tools":[]')
     expect(meta).not.toContain('mcp__hemera__*')
+  })
+})
+
+describe('A session’s instructions are set once, at its start', () => {
+  test('Claude Code takes them as its custom system prompt, and the first message is the caller’s', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }])
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('next')))
+        return opened.id
+      }),
+    )
+    const meta = JSON.parse(built.agents[0]?.answers.metas[0] ?? '{}')
+    expect(meta.claudeCode.options.systemPrompt).toMatchObject({
+      type: 'custom',
+      prompt: `# Instructions of ${id}`,
+    })
+    expect(built.agents[0]?.answers.prompts).toEqual([
+      [{ type: 'text', text: '[hemera:brief]' }],
+      [{ type: 'text', text: 'next' }],
+    ])
+  })
+
+  test('Codex takes them as an embedded resource before its first message, and never again', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }])
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('codex')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('next')))
+        return opened.id
+      }),
+    )
+    const [first, second] = built.agents[0]?.answers.prompts ?? []
+    expect(first).toEqual([
+      {
+        type: 'resource',
+        resource: {
+          uri: 'hemera://instructions',
+          mimeType: 'text/markdown',
+          text: `# Instructions of ${id}`,
+        },
+      },
+      { type: 'text', text: '[hemera:brief]' },
+    ])
+    expect(second).toEqual([{ type: 'text', text: 'next' }])
+  })
+})
+
+describe('What an agent does is told as it happens', () => {
+  test('each event of a session’s agent reaches the activity stream with the session’s id', async () => {
+    const built = world([
+      {
+        steps: [
+          { does: 'says', text: 'reading' },
+          { does: 'spends', used: 10, size: 100 },
+        ],
+      },
+    ])
+    const seen = await run(
+      built,
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const { id } = yield* session()
+        const watching = yield* runtime.activity.pipe(
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkScoped,
+        )
+        yield* Effect.yieldNow
+        yield* runtime.prompt(id, say('go'))
+        const events = yield* Fiber.join(watching)
+        return [...events].map((one) => [
+          one.sessionId === id,
+          Predicate.isTagged(one.event, 'MessageChunk') ? 'MessageChunk' : 'other',
+        ])
+      }),
+    )
+    expect(seen).toEqual([
+      [true, 'MessageChunk'],
+      [true, 'other'],
+    ])
+  })
+
+  test('a turn is cancelled on the session’s agent', async () => {
+    const release = Promise.withResolvers<void>()
+    const built = world([
+      { between: () => release.promise, steps: [{ does: 'says', text: 'long work' }] },
+    ])
+    const outcome = await run(
+      built,
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const { id } = yield* session()
+        const turn = yield* runtime.prompt(id, say('go')).pipe(Effect.forkScoped)
+        yield* Effect.sleep('20 millis')
+        yield* runtime.cancel(id)
+        release.resolve()
+        return yield* Fiber.join(turn)
+      }),
+    )
+    expect(outcome.stopReason).toBe('cancelled')
+    expect(built.agents[0]?.answers.cancels).toBe(1)
   })
 })
 

@@ -479,9 +479,83 @@ export const agentSessions = sqliteTable('agent_sessions', {
   takenModel: text('taken_model'),
   takenEffort: text('taken_effort'),
   takenMode: text('taken_mode'),
+  /**
+   * The role session's line: the same across the replacements of a session, so what was meant
+   * for it reaches whichever session holds it. Null for a session opened before role sessions,
+   * which is its own lineage.
+   */
+  lineage: text('lineage'),
+  /** The session that started this one, for a child session (a helper, a Probe). */
+  parentId: text('parent_id'),
+  /** How far down the tree of its owner it stands: 0 for a session with no parent. */
+  depth: integer('depth').notNull().default(0),
+  /** Raised at each replacement of its lineage: a call carrying an older epoch is refused. */
+  epoch: integer('epoch').notNull().default(0),
+  /** `starting`, `working`, `idle`, `stuck`, `ended`, `replaced` or `failed`. */
+  state: text('state').notNull().default('idle'),
+  /** Why it stuck, ended, was replaced or failed, in words, masked. */
+  stateReason: text('state_reason').$type<Masked<string>>(),
+  endedAt: text('ended_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
+
+/**
+ * What Hemera hands a role session, stored before it is sent so it survives a restart and reaches
+ * a replacement: its owner (a mission or a Project), its target (a session's lineage, or a role of
+ * the owner when none is named), its kind (the marker it travels under), its body, how urgent it
+ * is, and where it stands. A delivery belongs to its owner and lineage, never to one session:
+ * `sent_to` records the session that took it, once.
+ */
+export const sessionDeliveries = sqliteTable(
+  'session_deliveries',
+  {
+    id: text('id').primaryKey(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    targetLineage: text('target_lineage'),
+    targetRole: text('target_role'),
+    kind: text('kind').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    urgency: text('urgency').notNull(),
+    state: text('state').notNull(),
+    createdAt: text('created_at').notNull(),
+    sentAt: text('sent_at'),
+    sentTo: text('sent_to'),
+  },
+  (table) => [
+    index('deliveries_by_target').on(table.ownerKind, table.ownerId, table.state, table.createdAt),
+  ],
+)
+
+/**
+ * Who runs a piece of work (a task, later): the lineage, the session holding it now, and the
+ * epoch it holds it at. Reassigning the work raises the epoch in the same transaction that names
+ * the new session (CT-11), so two sessions never hold the same work.
+ */
+export const runnerLeases = sqliteTable('runner_leases', {
+  workItem: text('work_item').primaryKey(),
+  lineage: text('lineage').notNull(),
+  sessionId: text('session_id').notNull(),
+  epoch: integer('epoch').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/**
+ * A session's hidden thread, for diagnosis only: what it was sent, what it said, the tools it
+ * called and the notes it received, in order, masked. Diagnostic class: rotated with the rest.
+ */
+export const sessionThreads = sqliteTable(
+  'session_threads',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessionId: text('session_id').notNull(),
+    at: text('at').notNull(),
+    kind: text('kind').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+  },
+  (table) => [index('threads_by_session').on(table.sessionId, table.id)],
+)
 
 /**
  * The actions with an effect outside the database (a file written, a command run, and later a

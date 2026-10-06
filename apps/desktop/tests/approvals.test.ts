@@ -34,7 +34,12 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { type FakeStep, fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
-import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/agents/runtime.ts'
+import {
+  AgentRuntime,
+  AgentStarter,
+  SessionInstructions,
+  agentRuntimeLayer,
+} from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
@@ -47,7 +52,11 @@ import { RESTORED_REQUESTS, TaskStates } from '../src/engine/permissions/request
 import type { EngineServices } from '../src/engine/profile.ts'
 import { startRun } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { domainEvents, permissionRequests, queuedDeliveries } from '../src/engine/storage/schema.ts'
+import {
+  domainEvents,
+  permissionRequests,
+  sessionDeliveries,
+} from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { type Started, commandsEngine, nodeLine, script, until } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -126,7 +135,8 @@ const eventsOf = (type: string) =>
     database.select().from(domainEvents).where(eq(domainEvents.type, type)),
   ).pipe(Effect.map((rows) => rows.map((row) => ({ ...row, payload: readPayload(row.payload) }))))
 
-const queued = Effect.flatMap(Database, (database) => database.select().from(queuedDeliveries))
+/** The results handed over: deliveries to the session that asked (#40). */
+const queued = Effect.flatMap(Database, (database) => database.select().from(sessionDeliveries))
 
 const draft = (name: string, line: string, more: Partial<CommandDraft> = {}): CommandDraft => ({
   name,
@@ -310,7 +320,8 @@ describe('Allow once runs the call once through the executor; Deny runs nothing'
       'Request #1 (commands_run) was approved by the user, and Hemera has now done it.',
     )
     expect(seen.queued).toHaveLength(1)
-    expect(seen.queued[0]?.text).toBe(seen.ended?.resultText)
+    expect(seen.queued[0]?.kind).toBe('approval')
+    expect(seen.queued[0]?.body).toBe(seen.ended?.resultText)
     expect(seen.decided).toHaveLength(1)
     expect(seen.decided[0]?.payload).toMatchObject({ by: 'user', choice: 'allow-once' })
   })
@@ -764,6 +775,7 @@ describe('An agent over real MCP is never held by a question', () => {
         }),
         acpTracesLayer(data),
         defaultPermissionAnswerLayer,
+        Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
       )
       const began = performance.now()
       yield* AgentRuntime.use((runtime) =>

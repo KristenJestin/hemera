@@ -22,7 +22,11 @@ import type { Log } from './diagnostic.ts'
  */
 export const SIDECAR_FILE = 'display-1.json'
 
-const Sidecar = Schema.fromJsonString(Schema.toCodecJson(Preferences))
+/** What paints the first frame: the theme alone, of all the preferences. */
+export const DisplayHint = Schema.Struct({ theme: Preferences.fields.theme })
+export type DisplayHint = typeof DisplayHint.Type
+
+const Sidecar = Schema.fromJsonString(Schema.toCodecJson(DisplayHint))
 const readHint = Schema.decodeUnknownOption(Sidecar)
 const writeHint = Schema.encodeSync(Sidecar)
 
@@ -30,7 +34,7 @@ const writeHint = Schema.encodeSync(Sidecar)
 let writes = 0
 
 /** What the last start left, or null when there is nothing to go on. Read synchronously. */
-export function readSidecar(dataFolder: string): Preferences | null {
+export function readSidecar(dataFolder: string): DisplayHint | null {
   let written = ''
   try {
     written = readFileSync(join(dataFolder, SIDECAR_FILE), 'utf8')
@@ -44,12 +48,12 @@ export function readSidecar(dataFolder: string): Preferences | null {
  * Writes the hint whole, or leaves the previous one: through a temporary file and a rename, which
  * is atomic. A hint that cannot be written is logged and nothing more.
  */
-export function writeSidecar(dataFolder: string, preferences: Preferences, log: Log): void {
+export function writeSidecar(dataFolder: string, preferences: DisplayHint, log: Log): void {
   const file = join(dataFolder, SIDECAR_FILE)
   writes += 1
   const meanwhile = `${file}.${String(writes)}.writing`
   try {
-    writeFileSync(meanwhile, `${writeHint(preferences)}\n`)
+    writeFileSync(meanwhile, `${writeHint({ theme: preferences.theme })}\n`)
     renameSync(meanwhile, file)
   } catch (failed) {
     rmSync(meanwhile, { force: true })

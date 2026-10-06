@@ -54,6 +54,10 @@ import {
   setSoundStyle,
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
+import { instructionFilesOf } from './sessions/instructions.ts'
+import { ownerOf, sessionsIn } from './sessions/store.ts'
+import { threadOf } from './sessions/thread.ts'
+import { SESSION_STATES } from '@hemera/core/domain'
 import {
   createWorkspace,
   getWorkspace,
@@ -216,6 +220,30 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(HemeraAuto.use((auto) => auto.restoreKey(key))).pipe(observed('jevKey.restore', log)),
     'jevKey.remove': () =>
       use(HemeraAuto.use((auto) => auto.removeKey)).pipe(observed('jevKey.remove', log)),
+    // The sessions are read for diagnosis only: nothing here writes to one.
+    'sessions.list': ({ ownerKind, ownerId }) =>
+      use(
+        Effect.map(sessionsIn(SESSION_STATES, ownerOf(ownerKind, ownerId)), (sessions) =>
+          sessions.map((session) => ({
+            id: session.id,
+            provider: session.provider,
+            role: session.role,
+            lineage: session.lineage,
+            parent: session.parent,
+            depth: session.depth,
+            epoch: session.epoch,
+            state: session.state,
+            stateReason: session.stateReason,
+            createdAt: session.createdAt,
+            endedAt: session.endedAt,
+          })),
+        ),
+      ).pipe(observed('sessions.list', log)),
+    'sessions.thread': ({ id }) => use(threadOf(id)).pipe(observed('sessions.thread', log)),
+    'sessions.instructionFiles': ({ projectId }) =>
+      use(instructionFilesOf(projectId, process.platform)).pipe(
+        observed('sessions.instructionFiles', log),
+      ),
     'memory.now': ({ missionId }) =>
       use(Memory.use((memory) => memory.now(missionId))).pipe(observed('memory.now', log)),
     'memory.journal': ({ missionId, before }) =>

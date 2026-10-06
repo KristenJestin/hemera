@@ -65,6 +65,23 @@ export interface AgentAdapter {
   readonly bareOptions: (input: BareInput) => BareOptions
   /** For an agent whose bare options move its configuration away: what of the user's it keeps. */
   readonly ownSettings?: OwnSettings
+  /** The instruction file of a repository this agent reads when it reads one itself. */
+  readonly instructionFile: 'CLAUDE.md' | 'AGENTS.md'
+  /**
+   * Whether, run bare, it reads the repositories' instruction files by itself on this OS: Hemera
+   * then never sends them too. The value is the one the real-system proof found.
+   */
+  readonly readsInstructionFiles: (platform: NodeJS.Platform) => boolean
+  /**
+   * Whether it tells when it compacts its conversation: then the instructions are sent again
+   * after a compaction; otherwise a session past 80 % of its window is replaced (CT-15).
+   */
+  readonly signalsCompaction: boolean
+  /**
+   * Whether it obeys a note in a tool's result (`<hemera-note>`): otherwise an urgent delivery
+   * cancels the turn and is sent as a message at once.
+   */
+  readonly obeysNotes: boolean
 }
 
 /** The version in a line an agent printed for `--version`, wherever it sits, or null. */

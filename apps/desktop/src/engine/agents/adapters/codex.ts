@@ -65,6 +65,11 @@ const BARE_CONFIG = {
 export const codex: AgentAdapter = {
   id: 'codex',
   label: 'Codex',
+  instructionFile: 'AGENTS.md',
+  // Codex reads the AGENTS.md of the folder it runs in, bare or not (the old adapter's value).
+  readsInstructionFiles: () => true,
+  signalsCompaction: false,
+  obeysNotes: true,
   command: 'codex',
   package: '@openai/codex',
   installHint: 'npm install -g @openai/codex',

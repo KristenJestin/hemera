@@ -26,7 +26,12 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
 import { AGENT_MODES } from '../src/engine/agents/modes.ts'
-import { AgentRuntime, AgentStarter, agentRuntimeLayer } from '../src/engine/agents/runtime.ts'
+import {
+  AgentRuntime,
+  AgentStarter,
+  SessionInstructions,
+  agentRuntimeLayer,
+} from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
 import { Memory } from '../src/engine/memory/index.ts'
@@ -626,6 +631,7 @@ describe('One human question per call: the agent’s own requests are Hemera’s
             }),
             acpTracesLayer(data),
             defaultPermissionAnswerLayer,
+            Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
           )
           yield* AgentRuntime.use((runtime) =>
             runtime.prompt(session.id, [TextBlock.make({ text: 'write the notes' })]),

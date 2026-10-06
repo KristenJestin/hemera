@@ -30,6 +30,12 @@ const LOGINS: ReadonlySet<string> = new Set(['claude-ai-login', 'console-login']
 export const claude: AgentAdapter = {
   id: 'claude',
   label: 'Claude Code',
+  instructionFile: 'CLAUDE.md',
+  // Started with `settingSources: []`, it reads no CLAUDE.md of its own: Hemera sends it.
+  readsInstructionFiles: () => false,
+  // Its adapter reports a compaction as a tool call marked `_meta.contextCompaction`.
+  signalsCompaction: true,
+  obeysNotes: true,
   command: 'claude',
   package: '@anthropic-ai/claude-code',
   installHint: 'npm install -g @anthropic-ai/claude-code',

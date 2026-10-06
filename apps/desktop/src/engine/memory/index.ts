@@ -181,9 +181,9 @@ export class Evidence extends Context.Service<
 /** What later tickets plug into the Memory; the defaults otherwise. */
 export interface MemoryParts {
   /** The sessions' epochs (#40); every session at its first epoch otherwise. */
-  readonly epochs?: Layer.Layer<SessionEpochs>
+  readonly epochs?: Layer.Layer<SessionEpochs, never, Database>
   /** The sub-agents running for a mission (#40); none otherwise. */
-  readonly running?: RunningSessions['Service']
+  readonly running?: Layer.Layer<RunningSessions, never, Database>
   /** The accepted dependencies of a mission (P9); none otherwise. */
   readonly dependencies?: MissionDependencies['Service']
   /** The Journal mappers of later tickets, beside this one's. */
@@ -577,9 +577,7 @@ export const memoryLayer = (parts: MemoryParts, log: Log) =>
     Layer.provideMerge(
       Layer.mergeAll(
         parts.epochs ?? epochsInMemory().layer,
-        parts.running === undefined
-          ? noRunningSessions
-          : Layer.succeed(RunningSessions, parts.running),
+        parts.running ?? noRunningSessions,
         parts.dependencies === undefined
           ? noDependencies
           : Layer.succeed(MissionDependencies, parts.dependencies),

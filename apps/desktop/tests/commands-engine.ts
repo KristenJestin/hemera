@@ -36,7 +36,7 @@ export function commandsEngine(
   data: string,
   parts: Pick<
     ProfileParts,
-    'askBeforeRunning' | 'missions' | 'secrets' | 'tools' | 'actionRules' | 'memory'
+    'askBeforeRunning' | 'missions' | 'secrets' | 'tools' | 'actionRules' | 'memory' | 'sessions'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {

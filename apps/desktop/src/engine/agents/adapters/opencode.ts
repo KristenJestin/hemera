@@ -93,6 +93,11 @@ const configFolder = (home: string, env: Environment) =>
 export const opencode: AgentAdapter = {
   id: 'opencode',
   label: 'OpenCode',
+  instructionFile: 'AGENTS.md',
+  // Its configuration is moved away and the project's ignored: it reads no AGENTS.md itself.
+  readsInstructionFiles: () => false,
+  signalsCompaction: false,
+  obeysNotes: true,
   command: 'opencode',
   package: 'opencode-ai',
   installHint: 'npm install -g opencode-ai',

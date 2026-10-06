@@ -26,6 +26,7 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import { openDiagnosticLog, type Log } from '../main/diagnostic.ts'
 import { headless } from '../main/window-options.ts'
 import { agentsLauncher } from './agents.ts'
+import { agentStarterLayer } from './agents/starter.ts'
 import { portHandovers } from './handovers.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
@@ -64,10 +65,25 @@ const engine = (
       }
     })
 
-    // The Profile first: its database is opened, migrated and reconciled before anything is served.
+    // Main's own group first: the agents' processes are launched through it, and the Profile's
+    // sessions start their agents that way.
+    const host = yield* RpcClient.make(HostRpcs).pipe(
+      Effect.provideServiceEffect(
+        RpcClient.Protocol,
+        makeClientProtocol(fromMessagePortMain(hostPort), 'main'),
+      ),
+    )
+    const launch = agentsLauncher(host, handovers, fromMessagePortMain, log)
+
+    // The Profile: its database is opened, migrated and reconciled before anything is served.
     const profile = yield* startProfile(
       start,
-      { backupFolders: BACKUP_FOLDERS, reconciliationSteps: RECONCILIATION_STEPS, secrets },
+      {
+        backupFolders: BACKUP_FOLDERS,
+        reconciliationSteps: RECONCILIATION_STEPS,
+        secrets,
+        sessions: { starter: agentStarterLayer(launch) },
+      },
       log,
     )
 
@@ -76,14 +92,6 @@ const engine = (
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),
       Effect.forkScoped,
     )
-
-    const host = yield* RpcClient.make(HostRpcs).pipe(
-      Effect.provideServiceEffect(
-        RpcClient.Protocol,
-        makeClientProtocol(fromMessagePortMain(hostPort), 'main'),
-      ),
-    )
-    const launch = agentsLauncher(host, handovers, fromMessagePortMain, log)
 
     if (probePort !== undefined && headless(process.env)) {
       yield* RpcServer.make(ProbeRpcs, { disableFatalDefects: true }).pipe(
