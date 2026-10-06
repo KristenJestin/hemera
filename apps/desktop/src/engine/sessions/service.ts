@@ -812,7 +812,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (Predicate.isTagged(event, 'MessageChunk') && !event.replay) {
             driver.said.push(event.text)
           } else if (Predicate.isTagged(event, 'ToolCall') && event.call.status === 'completed') {
-            yield* addToThread(sessionId, 'tool', event.call.title ?? event.call.id)
+            // Its id with it, so what refers to the call (a tester's report, #45) finds it.
+            yield* addToThread(
+              sessionId,
+              'tool',
+              event.call.title === null ? event.call.id : `${event.call.title} · ${event.call.id}`,
+            )
           } else if (
             Predicate.isTagged(event, 'Usage') &&
             !adapter.signalsCompaction &&

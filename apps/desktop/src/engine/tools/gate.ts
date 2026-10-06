@@ -88,6 +88,8 @@ import {
 } from '../memory/tools.ts'
 import { missionsList, specCreateDraft } from '../chat/tools.ts'
 import type { MissionActivity } from '../missions.ts'
+import type { TesterFindings } from '../tester/findings.ts'
+import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import { resolvePath } from './paths.ts'
 import {
   type CallSession,
@@ -156,6 +158,7 @@ export type GateServices =
   | SessionNotes
   | MissionActivity
   | SetupDesk
+  | TesterFindings
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -221,6 +224,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.setup_read.input)(raw)
     case 'setup_propose':
       return decoder(tool, TOOLS.setup_propose.input)(raw)
+    case 'hemera_report':
+      return decoder(tool, TOOLS.hemera_report.input)(raw)
+    case 'hemera_reports':
+      return decoder(tool, TOOLS.hemera_reports.input)(raw)
   }
 }
 
@@ -550,6 +557,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* SetupDesk.use((desk) => desk.read(grant))
             case 'setup_propose':
               return yield* SetupDesk.use((desk) => desk.propose(grant, call.args))
+            case 'hemera_report':
+              return yield* hemeraReport(grant, call.args)
+            case 'hemera_reports':
+              return yield* hemeraReports(call.args)
           }
         })
 

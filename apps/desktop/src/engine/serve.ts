@@ -12,6 +12,7 @@ import {
   type EngineStart,
   type EngineStatus,
   SetupRefused,
+  TesterFolderUnreadable,
 } from '@hemera/ipc'
 import { Layer, Stream, SubscriptionRef } from 'effect'
 import { Effect } from 'effect'
@@ -65,6 +66,7 @@ import { Chats } from './chat/service.ts'
 import { type Chat, chatChanges, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
 import { Setup } from './setup/service.ts'
+import { TesterFindings } from './tester/findings.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
@@ -322,6 +324,28 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'setup.standing': ({ projectId }) =>
       use(Setup.use((setup) => setup.standing(projectId))).pipe(observed('setup.standing', log)),
     'setup.changes': () => follow(setupChanges).pipe(observedStream('setup.changes', log)),
+    'tester.findings': () =>
+      use(
+        TesterFindings.use((findings) => findings.list).pipe(
+          Effect.map((all) =>
+            all.map(({ head, file }) => ({
+              number: head.number,
+              title: head.title,
+              kind: head.kind,
+              place: head.place,
+              severity: head.severity,
+              occurrences: head.occurrences,
+              lastSeen: head.lastSeen,
+              file,
+            })),
+          ),
+          Effect.mapError((failed) => new TesterFolderUnreadable({ reason: failed.message })),
+        ),
+      ).pipe(observed('tester.findings', log)),
+    'tester.folder': () =>
+      use(TesterFindings.use((findings) => Effect.succeed(findings.folder))).pipe(
+        observed('tester.folder', log),
+      ),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

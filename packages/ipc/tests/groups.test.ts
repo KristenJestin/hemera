@@ -269,6 +269,8 @@ const memoryHandlers = {
   'setup.propose': unused,
   'setup.standing': unused,
   'setup.changes': unused,
+  'tester.findings': unused,
+  'tester.folder': unused,
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,
@@ -505,18 +507,24 @@ describe('The preferences', () => {
   test('the theme is the system’s, light or dark, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(Preferences)
     for (const theme of ['system', 'light', 'dark']) {
-      expect(decode({ theme, userLanguage: 'en' })).toEqual({ theme, userLanguage: 'en' })
+      expect(decode({ theme, userLanguage: 'en', testerMode: false })).toEqual({
+        theme,
+        userLanguage: 'en',
+        testerMode: false,
+      })
     }
-    expect(() => decode({ theme: 'sepia', userLanguage: 'en' })).toThrow()
+    expect(() => decode({ theme: 'sepia', userLanguage: 'en', testerMode: false })).toThrow()
   })
 
   test('the agents’ language is a language tag, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(Preferences)
     for (const userLanguage of ['en', 'fr', 'pt-BR', 'zh-Hant-TW']) {
-      expect(decode({ theme: 'system', userLanguage }).userLanguage).toBe(userLanguage)
+      expect(decode({ theme: 'system', userLanguage, testerMode: false }).userLanguage).toBe(
+        userLanguage,
+      )
     }
     for (const userLanguage of ['', 'French', 'en_US', '../etc']) {
-      expect(() => decode({ theme: 'system', userLanguage })).toThrow()
+      expect(() => decode({ theme: 'system', userLanguage, testerMode: false })).toThrow()
     }
   })
 

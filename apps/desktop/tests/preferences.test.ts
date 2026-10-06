@@ -30,11 +30,22 @@ const keys = Effect.gen(function* () {
   return yield* client<{ key: string; value: string }>`SELECT key, value FROM app_preferences`
 })
 
+describe('The tester mode is a preference, off by default (#45)', () => {
+  test('turned on, it is read back on; turned off, off', async () => {
+    expect((await on(data, readPreferences)).testerMode).toBe(false)
+    await on(data, writePreferences({ testerMode: true }))
+    expect((await on(data, readPreferences)).testerMode).toBe(true)
+    await on(data, writePreferences({ testerMode: false }))
+    expect((await on(data, readPreferences)).testerMode).toBe(false)
+  })
+})
+
 describe('The theme is kept in the Profile', () => {
   test('a Profile where nothing was chosen answers the defaults', async () => {
     expect(await on(data, readPreferences)).toEqual({
       theme: DEFAULT_PREFERENCES.theme,
       userLanguage: systemLanguage(),
+      testerMode: false,
     })
     expect(DEFAULT_PREFERENCES.theme).toBe('system')
   })

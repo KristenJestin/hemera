@@ -9,7 +9,15 @@
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { ROLES, type Role, TOOLS, type ToolName, readOnlyHint, toolsOf } from '@hemera/core/domain'
+import {
+  ROLES,
+  type Role,
+  TESTER_TOOLS,
+  TOOLS,
+  type ToolName,
+  readOnlyHint,
+  toolsOf,
+} from '@hemera/core/domain'
 import { toToolInputSchema } from '@hemera/core/schema'
 import { Effect, Layer, Option, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -86,7 +94,10 @@ describe('Each request is served with only the tools its grant offers', () => {
       expect(Option.isSome(read), role).toBe(true)
       if (Option.isNone(read)) continue
       const tools = read.value.result.tools
-      expect(tools.map((tool) => tool.name)).toEqual(toolsOf(role))
+      // The tester mode is off: its two tools are not listed (#45).
+      expect(tools.map((tool) => tool.name)).toEqual(
+        toolsOf(role).filter((tool) => !TESTER_TOOLS.includes(tool)),
+      )
       for (const tool of tools) {
         // SAFETY: the names listed were just checked to be the role's tools, every one a ToolName.
         const name = tool.name as ToolName

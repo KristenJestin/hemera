@@ -348,6 +348,10 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['setup.standing'](request).pipe(closedAs(gone), observed('setup.standing', log)),
     'setup.changes': () =>
       engine['setup.changes']().pipe(streamClosedAs(gone), observedStream('setup.changes', log)),
+    'tester.findings': () =>
+      engine['tester.findings']().pipe(closedAs(gone), observed('tester.findings', log)),
+    'tester.folder': () =>
+      engine['tester.folder']().pipe(closedAs(gone), observed('tester.folder', log)),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

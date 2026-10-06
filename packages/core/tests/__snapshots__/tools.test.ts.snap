@@ -726,5 +726,127 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
     },
     "name": "setup_propose",
   },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
+      "properties": {
+        "callId": {
+          "description": "The id of the call it is about, as you know it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "code": {
+          "description": "An exit code or an HTTP status.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "error": {
+          "description": "The error text, if one was given.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "expected": {
+          "description": "What you expected.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "files": {
+          "description": "The files concerned, by their paths only.",
+          "items": {
+            "description": "A path relative to your place: never a file’s content.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "happened": {
+          "description": "What happened.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "What kind of problem it is.",
+          "enum": [
+            "hemera_bug",
+            "missing_capability",
+            "tool_error",
+            "permission_decision",
+            "mcp",
+            "interface",
+            "other",
+          ],
+          "type": "string",
+        },
+        "place": {
+          "description": "Where: the tool, the screen or the feature (\`fs_edit\`, \`memory_read\`).",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "severity": {
+          "description": "How much it gets in the way: \`blocks\`, \`hurts\` or \`cosmetic\`.",
+          "enum": [
+            "blocks",
+            "hurts",
+            "cosmetic",
+          ],
+          "type": "string",
+        },
+        "steps": {
+          "description": "The steps to reproduce it, as you understand them.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "title": {
+          "description": "The problem in one line.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "trying": {
+          "description": "What you were trying to do.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "title",
+        "kind",
+        "place",
+        "severity",
+        "trying",
+        "happened",
+        "expected",
+        "steps",
+        "files",
+      ],
+      "type": "object",
+    },
+    "name": "hemera_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "The problems with Hemera already reported: number, title, kind, place, severity, occurrences, last seen.",
+      "properties": {
+        "page": {
+          "description": "The page to read, from 1: 20 findings a page, the latest seen first.",
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "hemera_reports",
+  },
 ]
 `;
