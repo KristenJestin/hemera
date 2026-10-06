@@ -141,6 +141,58 @@ export const Arriving: Story = {
   },
 }
 
+/**
+ * A Project opened while its row is still growing in: the row lands whole and what stands under
+ * it grows after, pushing Add a Project down. Add a Project plays it here, and again.
+ */
+export const OpenedArriving: Story = {
+  args: { projects: [PROJECTS[1]!] },
+  render: (args) => {
+    const [projects, setProjects] = useState(args.projects)
+    const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
+    return (
+      <div className="flex h-screen bg-surface-page">
+        <Sidebar
+          {...args}
+          projects={projects}
+          opened={opened}
+          onOpen={(id, open) => {
+            setOpened(open ? new Set([id]) : new Set())
+            args.onOpen(id, open)
+          }}
+          onAddProject={() => {
+            setProjects(
+              projects.length === 1
+                ? [{ ...PROJECTS[0]!, under: UNDER_ACME }, PROJECTS[1]!]
+                : [PROJECTS[1]!],
+            )
+            setOpened(new Set())
+            args.onAddProject()
+          }}
+        />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a Project' }))
+    // At once, while its row grows in: not once it has landed.
+    await userEvent.click(canvas.getByRole('button', { name: 'Open the missions of Acme' }))
+    await waitFor(() => {
+      const acme = canvas.getByRole('button', { name: 'Acme' }).getBoundingClientRect()
+      const last = canvas.getByRole('button', { name: /ACME-15/ }).getBoundingClientRect()
+      const add = canvas.getByRole('button', { name: 'Add a Project' }).getBoundingClientRect()
+      // The row whole, under the heading rather than slid up into it…
+      expect(acme.top).toBeGreaterThanOrEqual(
+        canvas.getByText('Projects').getBoundingClientRect().bottom,
+      )
+      // …every row under it shown, and what follows pushed past them.
+      expect(canvas.getByRole('button', { name: /ACME-15/ })).toBeVisible()
+      expect(add.top).toBeGreaterThanOrEqual(last.bottom)
+    })
+  },
+}
+
 /** No Project at all, and nothing waiting: Home without a count, and the way to add one. */
 export const Empty: Story = {
   args: { projects: [], waiting: 0 },

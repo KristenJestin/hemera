@@ -12,12 +12,27 @@ export function field(within: ReturnType<typeof $>, label: string) {
   return within.$(`aria/${label}`)
 }
 
-/** Writes in a field what is given, in place of what it held. */
+/**
+ * Writes in a field what is given, in place of what it held.
+ *
+ * The keys go to whatever holds the focus, so the field is emptied only once it holds it, and
+ * again until it reads empty: a click made while the dialog still grows to take in a field that
+ * just came (the base branch, once the remotes are read) can land beside it, and the text added
+ * after would then follow the old value, `main` and `dev` written `maindev`.
+ */
 export async function write(input: ReturnType<typeof $>, text: string): Promise<void> {
-  await input.click()
-  await browser.keys(['Control', 'a'])
-  await browser.keys('Backspace')
+  await browser.waitUntil(
+    async () => {
+      await input.click()
+      if (!(await input.isFocused())) return false
+      await browser.keys(['Control', 'a'])
+      await browser.keys('Backspace')
+      return (await input.getValue()) === ''
+    },
+    { timeoutMsg: 'the field never held the focus empty' },
+  )
   await input.addValue(text)
+  await expect(input).toHaveValue(text)
 }
 
 /** Chooses in a select of a dialog, by the select's name and the option's words. */
