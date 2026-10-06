@@ -127,7 +127,9 @@ const modeOn = Effect.map(readPreferences, (preferences) => preferences.testerMo
 const shownFile = (file: string, root: string): string => {
   if (!isAbsolute(file)) return file
   if (containedIn(root, file)) return relative(root, file).replaceAll('\\', '/')
-  return shownFromHome(file, { home: homedir(), platform: process.platform })
+  const shown = shownFromHome(file, { home: homedir(), platform: process.platform })
+  // Written the same way on every system once it no longer names the home.
+  return shown.startsWith('~') ? shown.replaceAll('\\', '/') : shown
 }
 
 export const hemeraReport = (grant: Grant, args: ToolArguments<'hemera_report'>) =>
