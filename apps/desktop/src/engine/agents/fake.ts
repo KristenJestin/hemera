@@ -104,6 +104,16 @@ export type FakeStep =
   /** The process ends on the spot, in the middle of the turn, which is never answered. */
   | { readonly does: 'dies' }
   /**
+   * The conversation compacted, as Claude Code's adapter reports it: a synthetic tool call marked
+   * `_meta.contextCompaction`, ended.
+   */
+  | { readonly does: 'compacts'; readonly id: string }
+  /**
+   * The provider is retried or rate-limited, as Claude Code's adapter reports it to a client that
+   * announced the `sessionFailure` extension: a `session_info_update` with a warning.
+   */
+  | { readonly does: 'waits'; readonly title: string }
+  /**
    * One of Hemera's tools called over the MCP server the session was handed, as a real agent
    * calls it: the answer is kept in `toolAnswers` and reported as the tool call's content.
    */
@@ -223,6 +233,34 @@ function updateOf(step: FakeStep): SessionUpdate | null {
         used: step.used,
         size: step.size,
         cost: step.cost ?? null,
+      }
+    case 'compacts':
+      return {
+        sessionUpdate: 'tool_call',
+        toolCallId: step.id,
+        title: 'Compact conversation',
+        kind: 'think',
+        status: 'completed',
+        _meta: { contextCompaction: { version: 1 } },
+      }
+    case 'waits':
+      return {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          jetbrains: {
+            air: {
+              version: 1,
+              sessionFailure: {
+                id: 'retry',
+                revision: 1,
+                category: 'service',
+                severity: 'warning',
+                title: step.title,
+                actions: [],
+              },
+            },
+          },
+        },
       }
     case 'asks':
     case 'switches':

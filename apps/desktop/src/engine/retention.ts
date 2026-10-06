@@ -18,14 +18,14 @@
 import { readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { LIVE_RUN_STATES } from '@hemera/core/domain'
-import { type Table, getTableName, inArray, notInArray, sql } from 'drizzle-orm'
+import { LIVE_RUN_STATES, LIVE_SESSION_STATES } from '@hemera/core/domain'
+import { type Table, eq, getTableName, inArray, notInArray, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import { DIAGNOSTIC_FILE, DIAGNOSTIC_GENERATION, TRACES_FOLDER } from '../main/diagnostic.ts'
 import { MISSIONS_FOLDER } from './memory/files.ts'
 import { Database, refusedWhile } from './storage/database.ts'
-import { commandRuns, missions } from './storage/schema.ts'
+import { agentSessions, commandRuns, missions, sessionThreads } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 
 /** How old a diagnostic file or row may get, and how much the diagnostic class may weigh. */
@@ -59,6 +59,9 @@ export const TABLE_CLASSES = {
   need_deliveries: 'permanent',
   mission_stops: 'permanent',
   agent_sessions: 'permanent',
+  session_deliveries: 'state',
+  runner_leases: 'state',
+  session_threads: 'diagnostic',
   effectful_actions: 'permanent',
   tool_calls: 'permanent',
   session_files: 'state',
@@ -100,6 +103,8 @@ export interface SweepLimits {
 export interface Swept {
   readonly files: ReadonlyArray<string>
   readonly runs: ReadonlyArray<string>
+  /** The sessions whose hidden thread went. */
+  readonly threads: ReadonlyArray<string>
 }
 
 /**
@@ -132,6 +137,21 @@ export const sweepDiagnostics = (dataFolder: string, limits: Partial<SweepLimits
       })
       .from(commandRuns)
       .pipe(Effect.mapError(refusedWhile('reading the runs')))
+
+    // A session's hidden thread is one piece: its weight and its last line's date.
+    const threads = yield* database
+      .select({
+        id: sessionThreads.sessionId,
+        at: sql<string>`max(${sessionThreads.at})`,
+        bytes: sql<number>`sum(length(cast(${sessionThreads.text} as blob)))`,
+        ownerKind: agentSessions.ownerKind,
+        ownerId: agentSessions.ownerId,
+        state: agentSessions.state,
+      })
+      .from(sessionThreads)
+      .leftJoin(agentSessions, eq(agentSessions.id, sessionThreads.sessionId))
+      .groupBy(sessionThreads.sessionId)
+      .pipe(Effect.mapError(refusedWhile('reading the sessions’ threads')))
 
     const listed = (folder: string) => {
       try {
@@ -166,6 +186,17 @@ export const sweepDiagnostics = (dataFolder: string, limits: Partial<SweepLimits
         bytes: file.bytes,
         at: file.at,
         held: false,
+      })),
+      ...threads.map((thread) => ({
+        kind: 'thread' as const,
+        key: thread.id,
+        bytes: thread.bytes,
+        at: Date.parse(thread.at),
+        held:
+          LIVE_SESSION_STATES.some((state) => state === thread.state) ||
+          (thread.ownerKind === 'mission' &&
+            thread.ownerId !== null &&
+            liveMissions.has(thread.ownerId)),
       })),
       ...runs.map((run) => ({
         kind: 'run' as const,
@@ -203,5 +234,19 @@ export const sweepDiagnostics = (dataFolder: string, limits: Partial<SweepLimits
           ),
       )
     }
-    return { files: removedFiles, runs: removedRuns } satisfies Swept
+    const removedThreads = [...gone]
+      .filter((piece) => piece.kind === 'thread')
+      .map((piece) => piece.key)
+    if (removedThreads.length > 0) {
+      yield* mutate('rotating the sessions’ threads', (transaction) =>
+        transaction
+          .delete(sessionThreads)
+          .where(inArray(sessionThreads.sessionId, removedThreads))
+          .pipe(
+            Effect.mapError(refusedWhile('rotating the sessions’ threads')),
+            Effect.as({ result: undefined, events: [] }),
+          ),
+      )
+    }
+    return { files: removedFiles, runs: removedRuns, threads: removedThreads } satisfies Swept
   })

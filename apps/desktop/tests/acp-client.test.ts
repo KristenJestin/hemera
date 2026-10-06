@@ -55,6 +55,8 @@ const TAGS = [
   'Usage',
   'ModeChanged',
   'OptionsChanged',
+  'Compacted',
+  'ProviderWait',
 ] as const
 
 /** The kind of an event, by its tag. */
@@ -367,6 +369,35 @@ describe('A turn', () => {
     expect(ended).toEqual({
       stopReason: 'end_turn',
       usage: { totalTokens: 120, inputTokens: 100, outputTokens: 20, thoughtTokens: null },
+    })
+  })
+
+  test('a compaction and a wait on the provider arrive as their own events', async () => {
+    const events = await run(
+      Effect.gen(function* () {
+        const { connection, session } = yield* opened({
+          steps: [
+            { does: 'compacts', id: 'compact-1' },
+            { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
+          ],
+        })
+        yield* session.prompt([TextBlock.make({ text: 'go on' })])
+        return yield* next(connection, 2)
+      }),
+    )
+    expect(events.map(tagOf)).toEqual(['Compacted', 'ProviderWait'])
+    expect(events[1]).toMatchObject({ title: 'Retrying Claude, attempt 1 of 10.' })
+  })
+
+  test('the client announces it reads the agent’s notices of a failing provider', async () => {
+    const advertised = await run(
+      Effect.gen(function* () {
+        const { fake } = yield* opened({})
+        return fake.answers.advertised
+      }),
+    )
+    expect(JSON.parse(advertised[0] ?? '{}')).toMatchObject({
+      _meta: { jetbrains: { air: { capabilities: ['recommendedValue', 'sessionFailure'] } } },
     })
   })
 

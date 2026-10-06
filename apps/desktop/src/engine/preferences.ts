@@ -23,8 +23,22 @@ import { appPreferences } from './storage/schema.ts'
 const stored = Schema.fromJsonString(Schema.toCodecJson(PreferencesSchema.fields.theme))
 const readTheme = Schema.decodeUnknownOption(stored)
 const writeTheme = Schema.encodeSync(stored)
+const storedLanguage = Schema.fromJsonString(
+  Schema.toCodecJson(PreferencesSchema.fields.userLanguage),
+)
+const readLanguage = Schema.decodeUnknownOption(storedLanguage)
+const writeLanguage = Schema.encodeSync(storedLanguage)
 
 export const THEME_KEY = 'theme'
+export const USER_LANGUAGE_KEY = 'user.language'
+
+/** The system's language, the default of the agents' one: its tag, English when it has none. */
+export const systemLanguage = (): string => {
+  const locale = Intl.DateTimeFormat().resolvedOptions().locale
+  return Option.isSome(Schema.decodeUnknownOption(PreferencesSchema.fields.userLanguage)(locale))
+    ? locale
+    : DEFAULT_PREFERENCES.userLanguage
+}
 
 /** The preferences, each key decoded or its default. */
 export const readPreferences: Effect.Effect<PreferencesValue, DatabaseError, Database> = Effect.gen(
@@ -37,6 +51,7 @@ export const readPreferences: Effect.Effect<PreferencesValue, DatabaseError, Dat
     const kept = new Map(rows.map(({ key, value }) => [key, value]))
     return {
       theme: Option.getOrElse(readTheme(kept.get(THEME_KEY)), () => DEFAULT_PREFERENCES.theme),
+      userLanguage: Option.getOrElse(readLanguage(kept.get(USER_LANGUAGE_KEY)), systemLanguage),
     }
   },
 )
@@ -49,6 +64,8 @@ export const writePreferences = (
     const written: Array<{ key: string; value: string }> = []
     if (change.theme !== undefined)
       written.push({ key: THEME_KEY, value: writeTheme(change.theme) })
+    if (change.userLanguage !== undefined)
+      written.push({ key: USER_LANGUAGE_KEY, value: writeLanguage(change.userLanguage) })
     if (written.length === 0) return
     const database = yield* Database
     yield* database

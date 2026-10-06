@@ -284,8 +284,8 @@ describe('The window reaches the engine through main', () => {
       Effect.gen(function* () {
         const { window, displayed } = yield* chain
         yield* window['preferences.write']({ theme: 'dark' })
-        expect(yield* window['preferences.read']()).toEqual({ theme: 'dark' })
-        expect(displayed).toEqual([{ theme: 'dark' }, { theme: 'dark' }])
+        expect(yield* window['preferences.read']()).toMatchObject({ theme: 'dark' })
+        expect(displayed.map((one) => one.theme)).toEqual(['dark', 'dark'])
       }),
     ))
 

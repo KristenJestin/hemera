@@ -55,6 +55,7 @@ import { applyStagedRestore, clearStagedRestore, stageRestore } from './restore.
 import type { AskBeforeRunning } from './ask-before-running.ts'
 import { RUN_CONSENT, hemeraRunConsent, withdrawLeftConsents } from './permissions/consent.ts'
 import { Approvals, PERMISSION_REQUESTS, requestsHandler } from './permissions/requests.ts'
+import type { Delivery } from './permissions/delivery.ts'
 import type { HemeraAuto } from './permissions/hemera-auto.ts'
 import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
@@ -93,6 +94,35 @@ import {
 } from './memory/index.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
 import { assignKeyPrefixes } from './projects.ts'
+import { LaunchFailed } from '@hemera/ipc'
+import { defaultPermissionAnswerLayer } from './agents/client.ts'
+import { type Discovery, discoveryLayer, machineLayer } from './agents/discovery.ts'
+import { idleAgentsLayer } from './agents/idle.ts'
+import { AgentStarter, agentRuntimeLayer } from './agents/runtime.ts'
+import { acpTracesLayer } from './agents/trace.ts'
+import { memoryBriefSources } from './sessions/brief.ts'
+import {
+  drainQueuedResults,
+  runningSessionsLayer,
+  sessionEpochsLayer,
+  sessionNotesLayer,
+  sessionsDelivery,
+} from './sessions/bridges.ts'
+import {
+  type ModelChoice,
+  type ReplacementGuard,
+  type SpecLanguage,
+  type TesterMode,
+  agentDefaults,
+  englishSpecs,
+  everyReplacementAllowed,
+  noTesterMode,
+} from './sessions/ports.ts'
+import { SessionPost, sessionPostLayer } from './sessions/post.ts'
+import { replacedLine, sessionInstructionsLayer } from './sessions/provider.ts'
+import { ROLES_REGISTERED, type RoleEntry, roleRegistryLayer } from './sessions/roles.ts'
+import { type SessionTimings, Sessions, sessionsLayer } from './sessions/service.ts'
+import type { ProcessSupervisor } from './supervisor.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -128,7 +158,31 @@ export interface ProfileParts {
   readonly actionRules?: Layer.Layer<ActionRules>
   /** The ports of the Memory later tickets fill, and its mappers; the defaults otherwise. */
   readonly memory?: Omit<MemoryParts, 'restoreJournal'>
+  /** The role sessions: the roles later tickets register, and how agents are started. */
+  readonly sessions?: SessionsParts
 }
+
+/** What the role sessions are built with; this version's defaults otherwise. */
+export interface SessionsParts {
+  /** The roles later tickets register, beside this version's `test` role. */
+  readonly roles?: ReadonlyArray<RoleEntry>
+  /** How an agent's process starts; none here, so no agent is started outside the engine. */
+  readonly starter?: Layer.Layer<AgentStarter, never, ProcessSupervisor>
+  /** Where the agents are found; this machine's otherwise. */
+  readonly discovery?: Layer.Layer<Discovery>
+  readonly replacementGuard?: Layer.Layer<ReplacementGuard>
+  /** Which agent and model a role's next session gets (#41); Claude Code's defaults otherwise. */
+  readonly modelChoice?: Layer.Layer<ModelChoice>
+  readonly specLanguage?: Layer.Layer<SpecLanguage>
+  readonly testerMode?: Layer.Layer<TesterMode>
+  /** Shorter bounds for the suites; the ticket's otherwise. */
+  readonly timings?: Partial<SessionTimings>
+}
+
+/** No way to start an agent: a Profile started without the engine's link to main. */
+const noStarter = Layer.succeed(AgentStarter, {
+  start: () => Effect.fail(new LaunchFailed({ reason: 'agents cannot be started here' })),
+})
 
 /**
  * The empty folder, in the data folder, the forge CLIs of agents' commands read their
@@ -158,6 +212,8 @@ export type EngineServices =
   | Memory
   | Evidence
   | MissionDependencies
+  | Sessions
+  | Delivery
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -249,6 +305,11 @@ export const startProfile = (
     // in the diagnostic), the runs, the "ask before running" port, and the recipe's runner on them.
     // Hemera's own runs of a command marked "ask before running" ask through a permission need.
     const consent = hemeraRunConsent(log)
+    // The post the role sessions share with the parts below them: a mission's cancel stops its
+    // tree through it, its activity reads it, the gate takes the urgent notes from it.
+    const postContext = yield* Layer.build(sessionPostLayer)
+    const post = Context.get(postContext, SessionPost)
+    const postLayer = Layer.succeedContext(postContext)
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -256,12 +317,67 @@ export const startProfile = (
         [PERMISSION_REQUESTS, requestsHandler],
         ...(parts.missions?.owners ?? []),
       ]),
+      // The session tree's stopper, unless a part brings its own under that name.
+      stoppers: [
+        ...(parts.missions?.stoppers?.some((one) => one.name === 'sessions')
+          ? []
+          : [
+              {
+                name: 'sessions',
+                stop: (missionId: string) => post.stopTree({ kind: 'mission', missionId }),
+              },
+            ]),
+        ...(parts.missions?.stoppers ?? []),
+      ],
+      activity:
+        parts.missions?.activity ??
+        ((missionId) =>
+          Effect.map(post.working(missionId), (sessionWorking) => ({
+            sessionWorking,
+            questionWaiting: false,
+          }))),
     }
-    // The Memory stands on the missions, and the tools on the Memory.
-    const layers = toolsLayer(log, version, parts.tools).pipe(
+    const memoryParts: MemoryParts = {
+      ...parts.memory,
+      restoreJournal: parts.restoreJournal,
+      epochs: parts.memory?.epochs ?? sessionEpochsLayer,
+      running: parts.memory?.running ?? runningSessionsLayer,
+      mappers: new Map([['session.replaced', replacedLine], ...(parts.memory?.mappers ?? [])]),
+    }
+    const toolsParts: ToolsParts = {
+      ...parts.tools,
+      notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
+      delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
+    }
+    // The role sessions, over the agents' runtime, over the tools.
+    const sessionsLayers = sessionsLayer({ log, timings: parts.sessions?.timings }).pipe(
+      Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
-        memoryLayer({ ...parts.memory, restoreJournal: parts.restoreJournal }, log),
+        Layer.mergeAll(
+          sessionInstructionsLayer(process.platform),
+          memoryBriefSources,
+          parts.sessions?.starter ?? noStarter,
+          parts.sessions?.discovery ?? discoveryLayer.pipe(Layer.provide(machineLayer())),
+          idleAgentsLayer,
+          acpTracesLayer(dataFolder),
+          defaultPermissionAnswerLayer,
+        ),
       ),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])]),
+          parts.sessions?.replacementGuard ?? everyReplacementAllowed,
+          parts.sessions?.modelChoice ?? agentDefaults,
+          parts.sessions?.specLanguage ?? englishSpecs,
+          parts.sessions?.testerMode ?? noTesterMode,
+          postLayer,
+        ),
+      ),
+    )
+    // The Memory stands on the missions, and the tools on the Memory.
+    const layers = sessionsLayers.pipe(
+      Layer.provideMerge(toolsLayer(log, version, toolsParts)),
+      Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
@@ -418,6 +534,15 @@ export const startProfile = (
       Effect.andThen(step('stopping what cancelled missions left', runStops(null))),
       Effect.andThen(step('handing over the answers left', deliverAnswers)),
       Effect.andThen(step('handing the indeterminate actions over', handleIndeterminate)),
+      // What #71 queued before the sessions existed becomes their deliveries; then the sessions a
+      // stopped engine left are rebuilt, by this supervisor alone (CT-11).
+      Effect.andThen(step('handing the queued results to the sessions', drainQueuedResults)),
+      Effect.andThen(
+        step(
+          'rebuilding the sessions',
+          Sessions.use((sessions) => sessions.rebuild),
+        ),
+      ),
       Effect.andThen(
         step('checking the environment needs again', recheckNeeds).pipe(
           Effect.repeat(Schedule.spaced(RECHECK_EVERY)),

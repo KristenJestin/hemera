@@ -16,8 +16,8 @@ import {
   type Role,
   type ToolName,
 } from '@hemera/core/domain'
-import { Context, Layer } from 'effect'
-import type { Effect, Schema } from 'effect'
+import { Context, Effect, Layer } from 'effect'
+import type { Schema } from 'effect'
 
 import type { GrantAsked } from './access.ts'
 import { shownPath } from './paths.ts'
@@ -156,3 +156,14 @@ export type Guard = (call: GuardedCall) => Effect.Effect<string | null>
 export class GateGuards extends Context.Service<GateGuards, ReadonlyArray<Guard>>()('GateGuards') {}
 
 export const noGateGuards = Layer.succeed(GateGuards, [])
+
+/**
+ * The urgent notes waiting for a session, taken by the gate when it answers the session's next
+ * Hemera tool call: each is appended to that answer, once. The role sessions fill it (#40).
+ */
+export class SessionNotes extends Context.Service<
+  SessionNotes,
+  { readonly take: (sessionId: string) => Effect.Effect<ReadonlyArray<string>> }
+>()('SessionNotes') {}
+
+export const noSessionNotes = Layer.succeed(SessionNotes, { take: () => Effect.succeed([]) })

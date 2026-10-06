@@ -19,6 +19,8 @@ import type { Log } from '../../main/diagnostic.ts'
 import { HemeraEndpoint } from '../agents/endpoint.ts'
 import { getAgentSession } from '../agents/sessions.ts'
 import { getProject } from '../projects.ts'
+import type { DomainEvents } from '../domain-events.ts'
+import type { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions, workspaces } from '../storage/schema.ts'
 import { Memory, SessionEpochs } from '../memory/index.ts'
@@ -54,8 +56,10 @@ import {
   type GateGuards,
   type PermissionRequests,
   type SensitivePlaces,
+  type SessionNotes,
   type Verdicts,
   noGateGuards,
+  noSessionNotes,
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
 
@@ -76,11 +80,13 @@ export interface ToolsParts {
   /** The grants of "Allow for this mission"; the mission's stored grants otherwise. */
   readonly grants?: Layer.Layer<MissionGrants>
   /** Where the result of an answered request goes (#40); queued for its owner otherwise. */
-  readonly delivery?: Layer.Layer<Delivery>
+  readonly delivery?: Layer.Layer<Delivery, never, Database | DomainEvents | Secrets>
   /** Whether a request's task still holds (later tickets); every task does otherwise. */
   readonly taskStates?: Layer.Layer<TaskStates>
   /** The Project's "who commits" rule (B4, R5). */
   readonly commitRights?: Layer.Layer<CommitRights>
+  /** The urgent notes of the role sessions (#40); none otherwise. */
+  readonly notes?: Layer.Layer<SessionNotes, never, Database | DomainEvents | Secrets>
   /** What `~` stands for; the user's home folder otherwise. */
   readonly home?: string
 }
@@ -182,6 +188,7 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
         parts.verdicts ?? decisionOrderLayer({ log, home, platform }),
         parts.permissionRequests ?? permissionRequestsLayer({ log, home, platform }),
         parts.guards ?? noGateGuards,
+        parts.notes ?? noSessionNotes,
         effectfulActionsLayer,
         parts.delivery ?? queuedDelivery,
         parts.taskStates ?? everyTaskHolds,

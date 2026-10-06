@@ -242,8 +242,18 @@ export const OptionsChanged = Schema.TaggedStruct('OptionsChanged', {
   replay,
 })
 
+/** The conversation compacted: what was said earlier is now a summary of it. */
+export const Compacted = Schema.TaggedStruct('Compacted', { replay })
+/**
+ * The agent waits on its provider (a retry, a rate limit, a connection lost): a pause that is not
+ * the session's own silence.
+ */
+export const ProviderWait = Schema.TaggedStruct('ProviderWait', { title: Schema.String, replay })
+
 /** What an agent reports while it works. */
 export const AgentEvent = Schema.Union([
+  Compacted,
+  ProviderWait,
   MessageChunk,
   ThoughtChunk,
   ToolCall,
@@ -410,7 +420,9 @@ const responseOf = (
  * value, which asks the Claude adapter to resolve its own `Default` entries and name, in each
  * option's `_meta`, the value it recommends. An agent that does not know it ignores it.
  */
-const CLIENT_META = { jetbrains: { air: { version: 1, capabilities: ['recommendedValue'] } } }
+const CLIENT_META = {
+  jetbrains: { air: { version: 1, capabilities: ['recommendedValue', 'sessionFailure'] } },
+}
 
 const readRecommended = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -556,10 +568,49 @@ const rawOf = (raw: Option.Option<Schema.Json>): string | null =>
     onSome: (json) => (json === null ? null : bounded(JSON.stringify(json))),
   })
 
+/**
+ * Claude Code's adapter reports a compaction as a synthetic tool call marked
+ * `_meta.contextCompaction`; it is a compaction once it completed.
+ */
+const readCompaction = Schema.decodeUnknownOption(
+  Schema.Struct({ contextCompaction: Schema.Struct({}) }),
+)
+
+/**
+ * A notice of a failing provider, as the adapter sends it to a client that announced the
+ * `sessionFailure` extension: a warning is a wait (a retry in progress); an error is not.
+ */
+const readProviderNotice = Schema.decodeUnknownOption(
+  Schema.Struct({
+    jetbrains: Schema.Struct({
+      air: Schema.Struct({
+        sessionFailure: Schema.Struct({ severity: Schema.String, title: Schema.String }),
+      }),
+    }),
+  }),
+)
+
 /** A notification, as an event, or null for what Hemera does not read. */
 const eventOf = (notification: SessionNotification, replaying: boolean): AgentEvent | null => {
   const update = notification.update
+  // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+  const meta = '_meta' in update ? update._meta : undefined
+  if (
+    (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') &&
+    update.status === 'completed' &&
+    Option.isSome(readCompaction(meta))
+  ) {
+    return Compacted.make({ replay: replaying })
+  }
   switch (update.sessionUpdate) {
+    case 'session_info_update':
+      return Option.match(readProviderNotice(meta), {
+        onNone: () => null,
+        onSome: ({ jetbrains }) =>
+          jetbrains.air.sessionFailure.severity === 'warning'
+            ? ProviderWait.make({ title: jetbrains.air.sessionFailure.title, replay: replaying })
+            : null,
+      })
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
       const text = textOf(update.content)

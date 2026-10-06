@@ -313,7 +313,8 @@ describe('Now: Hemera owns its fields, each session its own line', () => {
         }),
       ),
     )
-    expect(answer.text).toBe('refused: this session has been replaced; nothing was written')
+    // The gate refuses it before the Memory is reached (#40): its epoch is no longer current.
+    expect(answer.text).toBe('refused: this session has been replaced')
     expect(now.doing).toEqual([])
   })
 

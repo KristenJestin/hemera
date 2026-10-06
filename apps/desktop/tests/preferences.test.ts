@@ -7,7 +7,13 @@ import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { openProfile } from '../src/engine/migrate.ts'
-import { THEME_KEY, readPreferences, writePreferences } from '../src/engine/preferences.ts'
+import {
+  THEME_KEY,
+  USER_LANGUAGE_KEY,
+  systemLanguage,
+  readPreferences,
+  writePreferences,
+} from '../src/engine/preferences.ts'
 import { SqliteClient } from '../src/engine/storage/database.ts'
 import { SHIPPED, on, removeFolders, temporaryFolder } from './storage.ts'
 
@@ -26,7 +32,10 @@ const keys = Effect.gen(function* () {
 
 describe('The theme is kept in the Profile', () => {
   test('a Profile where nothing was chosen answers the defaults', async () => {
-    expect(await on(data, readPreferences)).toEqual(DEFAULT_PREFERENCES)
+    expect(await on(data, readPreferences)).toEqual({
+      theme: DEFAULT_PREFERENCES.theme,
+      userLanguage: systemLanguage(),
+    })
     expect(DEFAULT_PREFERENCES.theme).toBe('system')
   })
 
@@ -51,6 +60,15 @@ describe('The theme is kept in the Profile', () => {
   })
 })
 
+describe('The language the agents speak to the user', () => {
+  test('is the system’s until one is chosen, then the one chosen', async () => {
+    expect((await on(data, readPreferences)).userLanguage).toBe(systemLanguage())
+    await on(data, writePreferences({ userLanguage: 'fr' }))
+    expect((await on(data, readPreferences)).userLanguage).toBe('fr')
+    expect(await on(data, keys)).toEqual([{ key: USER_LANGUAGE_KEY, value: '"fr"' }])
+  })
+})
+
 describe('An unreadable preference never holds the window shut', () => {
   test.each([
     ['a theme this version does not know', '"sepia"'],
@@ -64,6 +82,6 @@ describe('An unreadable preference never holds the window shut', () => {
         yield* client`INSERT INTO app_preferences (key, value) VALUES (${THEME_KEY}, ${value})`
       }),
     )
-    expect(await on(data, readPreferences)).toEqual(DEFAULT_PREFERENCES)
+    expect((await on(data, readPreferences)).theme).toBe(DEFAULT_PREFERENCES.theme)
   })
 })

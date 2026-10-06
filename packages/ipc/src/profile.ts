@@ -10,17 +10,29 @@ export const ThemePreference = Schema.Literals(['system', 'light', 'dark'])
 export type ThemePreference = typeof ThemePreference.Type
 
 /** The preferences, one `Schema` per key. */
+/**
+ * The language the agents speak to the user, as a BCP 47 tag (`fr`, `en-GB`); the system's own
+ * language until one is chosen.
+ */
+export const UserLanguage = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/, {
+    message: 'a language is a tag such as en, fr or pt-BR',
+  }),
+)
+
 export const Preferences = Schema.Struct({
   theme: ThemePreference,
+  userLanguage: UserLanguage,
 })
 export type Preferences = typeof Preferences.Type
 
 /** What a key that was never written, or cannot be read, answers. */
-export const DEFAULT_PREFERENCES: Preferences = { theme: 'system' }
+export const DEFAULT_PREFERENCES: Preferences = { theme: 'system', userLanguage: 'en' }
 
 /** A change of the preferences: only the keys it names are written. */
 export const PreferencesChange = Schema.Struct({
   theme: Schema.optionalKey(ThemePreference),
+  userLanguage: Schema.optionalKey(UserLanguage),
 })
 export type PreferencesChange = typeof PreferencesChange.Type
 

@@ -313,6 +313,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       application.hemeraAuto.save(key).pipe(observed('hemeraAuto.saveKey', log)),
     'hemeraAuto.removeKey': () =>
       application.hemeraAuto.remove.pipe(observed('hemeraAuto.removeKey', log)),
+    // The sessions are the engine's alone, read for diagnosis: forwarded as they are.
+    'sessions.list': (request) =>
+      engine['sessions.list'](request).pipe(closedAs(gone), observed('sessions.list', log)),
+    'sessions.thread': (request) =>
+      engine['sessions.thread'](request).pipe(closedAs(gone), observed('sessions.thread', log)),
+    'sessions.instructionFiles': (request) =>
+      engine['sessions.instructionFiles'](request).pipe(
+        closedAs(gone),
+        observed('sessions.instructionFiles', log),
+      ),
     // A mission's Memory is the engine's alone: forwarded as it is.
     'memory.now': (request) =>
       engine['memory.now'](request).pipe(closedAs(gone), observed('memory.now', log)),
