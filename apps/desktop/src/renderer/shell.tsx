@@ -77,6 +77,8 @@ export interface ShellProps {
   addProject?: ReactNode
   /** What the application's Settings page holds under its title. */
   appSettings?: ReactNode
+  /** Home before the first Project, while nothing waits: the agents and the ways in. */
+  firstLaunch?: ReactNode
   /** The in-app notifications, over the sheet's bottom corner. */
   notices?: ReactNode
   actions: ShellActions
@@ -149,6 +151,7 @@ interface RoutePageProps {
   today: string
   projectSettings: ReactNode
   appSettings: ReactNode
+  firstLaunch: ReactNode
   chat: ReactNode
   projectSetup: ReactNode
   actions: ShellActions
@@ -165,6 +168,7 @@ function RoutePage({
   today,
   projectSettings,
   appSettings,
+  firstLaunch,
   chat,
   projectSetup,
   actions,
@@ -173,6 +177,15 @@ function RoutePage({
     case 'home': {
       const listed = projects.kind === 'ready' ? projects.projects : []
       const rows = needRowsOf(needs, listed, now, route.projectId)
+      // Something waiting is read on Home, which says it; otherwise the first launch's ways in.
+      if (
+        projects.kind === 'ready' &&
+        needs.kind === 'ready' &&
+        listed.length === 0 &&
+        rows.length === 0
+      ) {
+        return firstLaunch
+      }
       const failure =
         projects.kind === 'failed'
           ? projects.sentence
@@ -258,6 +271,7 @@ export function Shell({
   projectSettings,
   addProject,
   appSettings,
+  firstLaunch,
   notices,
   actions,
 }: ShellProps): ReactNode {
@@ -327,6 +341,7 @@ export function Shell({
             today={today}
             projectSettings={projectSettings}
             appSettings={appSettings}
+            firstLaunch={firstLaunch}
             chat={chat}
             projectSetup={projectSetup}
             actions={actions}
