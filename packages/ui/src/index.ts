@@ -274,9 +274,17 @@ export {
   AppearanceSection,
   DeveloperSection,
   HemeraAutoSection,
+  JevKeyForm,
   ModelsSection,
   NotificationsSection,
   ProfileSection,
+  type AgentRow,
+  type Decision,
+  type JevKey,
+  type RoleModel,
+  type RowErrors,
+  type SoundStyleChoice,
+  type Toggle,
 } from './blocks/app-settings/app-sections.tsx'
 export {
   APP_SECTIONS,

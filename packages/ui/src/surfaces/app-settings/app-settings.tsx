@@ -9,7 +9,11 @@ import {
   IconShieldLock,
   IconTerminal,
 } from '../../icons.ts'
-import { SettingsPage, type SettingsSection } from '../settings/settings-page.tsx'
+import {
+  SettingsPage,
+  type SettingsForm,
+  type SettingsSection,
+} from '../settings/settings-page.tsx'
 
 /**
  * The application's settings: one page, its sections down the left, the one chosen beside them —
@@ -49,16 +53,32 @@ export interface AppSettingsProps {
   problems?: Partial<Record<AppSection, string>> | undefined
   /** Whether the section was opened by a link: its heading takes the focus. */
   focus?: boolean | undefined
+  /** The form open over the page, in the settings' dialog: the Jev key's. */
+  form?: SettingsForm | null | undefined
+  onCloseForm?: (() => void) | undefined
   /** The section chosen. */
   children: ReactNode
 }
 
-/** Gives the focus to the first heading of the section a link opened. */
-const focusHeading = (node: HTMLDivElement | null): void => {
-  const heading = node?.querySelector<HTMLElement>('h2, h3')
-  if (heading === null || heading === undefined) return
-  heading.tabIndex = -1
-  heading.focus()
+/**
+ * Gives the focus to the first heading of the section a link opened, once it is drawn: a section
+ * still being read draws its heading later, and the focus waits for it.
+ */
+const focusHeading = (node: HTMLDivElement | null): (() => void) | undefined => {
+  if (node === null) return undefined
+  const focused = (): boolean => {
+    const heading = node.querySelector<HTMLElement>('h2, h3')
+    if (heading === null) return false
+    heading.tabIndex = -1
+    heading.focus()
+    return true
+  }
+  if (focused()) return undefined
+  const watching = new MutationObserver(() => {
+    if (focused()) watching.disconnect()
+  })
+  watching.observe(node, { childList: true, subtree: true })
+  return () => watching.disconnect()
 }
 
 export function AppSettings({
@@ -66,6 +86,8 @@ export function AppSettings({
   onSection,
   problems = {},
   focus = false,
+  form = null,
+  onCloseForm = () => undefined,
   children,
 }: AppSettingsProps): ReactNode {
   return (
@@ -78,7 +100,8 @@ export function AppSettings({
         const chosen = SECTIONS.find((section) => section.id === id)
         if (chosen !== undefined) onSection(chosen.id)
       }}
-      onCloseForm={() => undefined}
+      form={form}
+      onCloseForm={onCloseForm}
     >
       <div key={current} ref={focus ? focusHeading : undefined} className="flex flex-col gap-8">
         {children}

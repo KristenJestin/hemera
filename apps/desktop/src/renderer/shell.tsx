@@ -15,7 +15,14 @@ import { Schema } from 'effect'
 import type { ReactNode } from 'react'
 
 import { ENGINE_START_LIMIT, type EngineState } from './engine-start.ts'
-import { placeOf, trailOf, type Navigation, type Route, type Step } from './navigation.ts'
+import {
+  linkedSettings,
+  placeOf,
+  trailOf,
+  type Navigation,
+  type Route,
+  type Step,
+} from './navigation.ts'
 import { handlersFor, needRowsOf, waitingCount, type NeedsState } from './needs.ts'
 import type { ProjectState, ProjectsState } from './projects.ts'
 
@@ -100,25 +107,6 @@ function repositoryName(project: Project, path: string): string {
   return folder.split(/[\\/]/).findLast((part) => part !== '') ?? folder
 }
 
-/** A page's frame with its title, for the page whose sections later tickets add. */
-function TitledPage({
-  title,
-  section,
-  children,
-}: {
-  title: string
-  /** The section a link opened it at, which the settings' own page (#50) shows. */
-  section?: string | undefined
-  children?: ReactNode
-}): ReactNode {
-  return (
-    <div className="flex flex-col gap-6 py-6" data-settings-section={section}>
-      <h1 className="px-8 text-2xl font-semibold tracking-tight">{title}</h1>
-      {children}
-    </div>
-  )
-}
-
 interface ProjectRouteProps {
   id: string
   state: ProjectState
@@ -190,7 +178,7 @@ function RoutePage({
       const tools = {
         answer: actions.answer,
         recheck: actions.recheck,
-        openSettings: (section: AppSection) => actions.go({ kind: 'settings', section }),
+        openSettings: (section: AppSection) => actions.go(linkedSettings(section)),
       }
       return (
         <HomePage
@@ -234,11 +222,7 @@ function RoutePage({
     case 'projectSettings':
       return projectSettings
     case 'settings':
-      return (
-        <TitledPage title="Settings" section={route.section}>
-          {appSettings}
-        </TitledPage>
-      )
+      return appSettings
     case 'chat':
       return chat
     case 'mission':

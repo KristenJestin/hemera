@@ -15,11 +15,15 @@ import {
   StorageFailed,
   WindowRpcs,
   type AgentState,
+  type AgentUpdate,
+  type AutomaticBackups,
   type BaseBranchEdit,
   type ChatChanged,
   type ChatLine,
   type ChatPage,
   type ChatSummary,
+  type DiagnosticsRetention,
+  type HemeraAutoStatus,
   type BranchPrefixEdit,
   type Command,
   type CommandSave,
@@ -33,6 +37,8 @@ import {
   type Need,
   type NeedAnswerAsked,
   type NeedGroup,
+  type NotificationSettings,
+  type PermissionDecision,
   type NewProject,
   type Preferences,
   type PreferencesChange,
@@ -49,16 +55,21 @@ import {
   type RepositoryRemoval,
   type RepositoryStatus,
   type RepositoryStatusChange,
+  type RoleModels,
   type Run,
   type RunOutput,
   type RunStart,
+  type Sound,
+  type SoundPreview,
+  type SoundStyle,
+  type TesterFinding,
   type UpToDateBase,
   type VariableEdit,
   type VariableKey,
   type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import type { ChatMention, ModelSettingValue } from '@hemera/core/domain'
+import type { AgentProvider, ChatMention, ModelSettingValue } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -174,6 +185,34 @@ export interface Link {
   /** The models the user marked, favourite or hidden. */
   readonly modelMarks: () => Promise<ReadonlyArray<ModelMark>>
   readonly markModel: (mark: ModelMark) => Promise<void>
+  /** Each role's model at every level, for a Project, or the app's alone with null. */
+  readonly roleModels: (projectId: string | null) => Promise<ReadonlyArray<RoleModels>>
+  readonly setAppRoleModel: (role: string, setting: ModelSettingValue) => Promise<void>
+  /** Asks every installed agent's registry for its latest version, now. */
+  readonly checkAgentUpdates: () => Promise<ReadonlyArray<AgentState>>
+  readonly updateAgent: (agent: AgentProvider) => Promise<AgentUpdate>
+  readonly hemeraAuto: () => Promise<HemeraAutoStatus>
+  readonly setConsent: (consent: boolean) => Promise<void>
+  /** The key goes to main to be protected by the system; nothing echoes it back. */
+  readonly saveJevKey: (key: string) => Promise<HemeraAutoStatus>
+  readonly removeJevKey: () => Promise<HemeraAutoStatus>
+  readonly notificationSettings: () => Promise<NotificationSettings>
+  readonly setNotificationKind: (id: string, on: boolean) => Promise<NotificationSettings>
+  readonly setNotificationSound: (sound: Sound, on: boolean) => Promise<NotificationSettings>
+  readonly setSoundStyle: (style: SoundStyle) => Promise<NotificationSettings>
+  readonly previewSound: (style: SoundStyle, sound: Sound) => Promise<SoundPreview>
+  readonly backups: () => Promise<AutomaticBackups>
+  /** Backs the profile up into a folder; answers where. */
+  readonly backUp: (folder: string) => Promise<string>
+  /** Restores the backup in `folder`: Hemera starts again on it. */
+  readonly restoreProfile: (folder: string) => Promise<void>
+  readonly retention: () => Promise<DiagnosticsRetention>
+  readonly testerFindings: () => Promise<ReadonlyArray<TesterFinding>>
+  /** Every decision on a call from now on, as it is recorded. */
+  readonly onDecisions: (
+    listener: (decision: PermissionDecision) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   readonly close: () => void
 }
 
@@ -326,6 +365,35 @@ export function linkOver(port: Port): Link {
     agents: () => call((ready) => ready['agents.list']()),
     modelMarks: () => call((ready) => ready['models.marks']()),
     markModel: (mark) => call((ready) => ready['models.mark'](mark)),
+    roleModels: (projectId) =>
+      call((ready) => ready['models.roles']({ projectId, missionId: null })),
+    setAppRoleModel: (role, setting) =>
+      call((ready) => ready['models.setRole']({ level: 'app', scopeId: null, role, setting })),
+    checkAgentUpdates: () => call((ready) => ready['agents.checkUpdates']()),
+    updateAgent: (agent) => call((ready) => ready['agents.update']({ agent })),
+    hemeraAuto: () => call((ready) => ready['hemeraAuto.status']()),
+    setConsent: (consent) => call((ready) => ready['hemeraAuto.setConsent']({ consent })),
+    saveJevKey: (key) => call((ready) => ready['hemeraAuto.saveKey']({ key })),
+    removeJevKey: () => call((ready) => ready['hemeraAuto.removeKey']()),
+    notificationSettings: () => call((ready) => ready['notifications.settings']()),
+    setNotificationKind: (id, on) => call((ready) => ready['notifications.setKind']({ id, on })),
+    setNotificationSound: (sound, on) =>
+      call((ready) => ready['notifications.setSound']({ sound, on })),
+    setSoundStyle: (style) => call((ready) => ready['notifications.setStyle']({ style })),
+    previewSound: (style, sound) =>
+      call((ready) => ready['notifications.preview']({ style, sound })),
+    backups: () => call((ready) => ready['profile.backups']()),
+    backUp: (folder) => call((ready) => ready['profile.backup']({ folder })),
+    restoreProfile: (folder) => call((ready) => ready['profile.restore']({ folder })),
+    retention: () => call((ready) => ready['diagnostics.retention']()),
+    testerFindings: () => call((ready) => ready['tester.findings']()),
+    onDecisions: (listener, onEnd) =>
+      follow(
+        (ready) => ready['permissions.decisions'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
     onNotices: (listener) =>
       follow(
         (ready) => ready['notifications.window'](),
