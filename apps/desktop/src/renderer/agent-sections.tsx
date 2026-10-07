@@ -343,8 +343,7 @@ function InstructionsPart({ link, engineReady, projectId }: PartProps): ReactNod
       repositories={shown.repositories}
       agents={shown.agents}
       loading={rows === null || agents === null}
-      // No call of the engine opens a file yet.
-      onOpen={nothing}
+      // No call of the engine opens a file yet: each file is said by its name.
     />
   )
 }
