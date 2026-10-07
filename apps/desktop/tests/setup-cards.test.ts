@@ -1,6 +1,6 @@
 /** The setup agent's cards (#44) as the new-Project page draws them (#53): one card per kind. */
 
-import type { SetupCard } from '@hemera/ipc'
+import type { SetupCard, SetupStanding } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { Route } from '../src/renderer/navigation.ts'
@@ -9,6 +9,7 @@ import {
   nothingProposed,
   pendingOf,
   setupAgentOf,
+  setUpAgain,
   setupEntriesOf,
   startSetup,
 } from '../src/renderer/setup-cards.ts'
@@ -177,5 +178,41 @@ describe('The setup agent’s time, as its chip counts it', () => {
       endedAt: null,
     })
     expect(agentTimesOf(working, 'working', 60_000)).toBe(working)
+  })
+})
+
+describe('Setting a Project up again, from its settings', () => {
+  const asked = (standing: SetupStanding, cards: SetupCard[]) => {
+    const proposed: string[] = []
+    const gone: Route[] = []
+    const tools = {
+      setupStanding: async () => standing,
+      setupCards: async () => cards,
+      proposeSetup: async (projectId: string) => {
+        proposed.push(projectId)
+      },
+    }
+    return { tools, proposed, gone, go: (route: Route) => gone.push(route) }
+  }
+
+  test('an agent at work, or a card still waiting, opens what it proposed without asking again', async () => {
+    const worlds = [
+      asked({ state: 'working', sentence: null }, []),
+      asked({ state: 'done', sentence: null }, CARDS),
+    ]
+    await Promise.all(worlds.map((world) => setUpAgain(world.tools, 'acme', world.go)))
+    for (const world of worlds) {
+      expect(world.proposed).toEqual([])
+      expect(world.gone).toEqual([{ kind: 'projectSetup', id: 'acme' }])
+    }
+  })
+
+  test('everything answered: a new proposal is asked for, then its page opens', async () => {
+    const world = asked({ state: 'done', sentence: null }, [
+      card('r1', { kind: 'repository', path: 'web' }, { state: 'accepted' }),
+    ])
+    await setUpAgain(world.tools, 'acme', world.go)
+    expect(world.proposed).toEqual(['acme'])
+    expect(world.gone).toEqual([{ kind: 'projectSetup', id: 'acme' }])
   })
 })

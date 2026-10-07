@@ -87,6 +87,8 @@ export interface SettingsPageProps {
    * shows its dialog over the page.
    */
   agentSection?: (id: AgentSectionId, show: (form: SettingsForm | null) => void) => ReactNode
+  /** Asks the setup agent again, or opens what it proposed. */
+  onSetUp?: (() => void) | undefined
 }
 
 type SectionId =
@@ -306,6 +308,7 @@ export function SettingsPage({
   settings,
   tools,
   agentSection,
+  onSetUp,
 }: SettingsPageProps): ReactNode {
   const [current, setCurrent] = useState<SectionId>('repositories')
   /** The dialog an agent section shows over the page. */
@@ -796,6 +799,7 @@ export function SettingsPage({
       }}
       error={unread?.kind === 'failed' ? unread.sentence : undefined}
       onRetry={() => settings?.retry()}
+      onSetUp={onSetUp}
       form={form ?? agentForm}
       onCloseForm={() => {
         close()

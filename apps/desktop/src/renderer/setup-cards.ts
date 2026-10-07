@@ -176,3 +176,31 @@ const STEPS: Record<SetupAgent, string> = {
   done: 'Proposed the setup',
   failed: 'Stopped',
 }
+
+/** What setting a Project up again asks of the link. */
+export interface SetUpTools {
+  readonly setupStanding: (projectId: string) => Promise<SetupStanding>
+  readonly setupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  readonly proposeSetup: (projectId: string) => Promise<void>
+}
+
+/**
+ * Sets a Project up again from its settings: an agent still at work, or a card still waiting,
+ * opens what it proposed; otherwise a new proposal is asked for, then its page opens.
+ */
+export async function setUpAgain(
+  tools: SetUpTools,
+  projectId: string,
+  go: (route: Route) => void,
+): Promise<void> {
+  const [standing, cards] = await Promise.all([
+    tools.setupStanding(projectId),
+    tools.setupCards(projectId),
+  ])
+  const going = standing.state === 'waiting' || standing.state === 'working'
+  if (going || cards.some((card) => card.state === 'pending')) {
+    go({ kind: 'projectSetup', id: projectId })
+    return
+  }
+  await startSetup(tools.proposeSetup, projectId, go)
+}

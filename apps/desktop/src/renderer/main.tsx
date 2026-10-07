@@ -1,7 +1,7 @@
 import type { ThemePreference } from '@hemera/ipc'
 import { NoticeStack, TooltipProvider } from '@hemera/ui'
 import { MotionConfig } from 'motion/react'
-import { StrictMode, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 // oxlint-disable-next-line import/no-unassigned-import
@@ -23,7 +23,7 @@ import {
   type Route,
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
-import { startSetup } from './setup-cards.ts'
+import { setUpAgain, startSetup } from './setup-cards.ts'
 import { SetupRoute } from './setup-route.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
@@ -96,6 +96,8 @@ function Application() {
   const now = useMinute()
   const routeChats = useChats(link, ready, route.kind === 'chat' ? route.projectId : null)
   const [adding, setAdding] = useState(false)
+  /** Whether the setup agent is being asked again from a Project's settings. */
+  const settingUp = useRef(false)
   const [theme, setTheme] = useState<ThemePreference | null>(null)
   useEffect(() => {
     if (!ready) return
@@ -182,6 +184,14 @@ function Application() {
             data={settingsData}
             settings={settings}
             tools={tools}
+            onSetUp={() => {
+              // One at a time: a second press while the first asks the engine does nothing.
+              if (settingUp.current) return
+              settingUp.current = true
+              setUpAgain(link, settingsOf, goTo).finally(() => {
+                settingUp.current = false
+              })
+            }}
             agentSection={(section, showForm) => (
               <AgentSection
                 section={section}
