@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { Route } from '../src/renderer/navigation.ts'
 import {
+  agentTimesOf,
   nothingProposed,
   pendingOf,
   setupAgentOf,
@@ -158,5 +159,23 @@ describe('A new Project’s setup, from the dialog that adds it', () => {
     expect(nothingProposed({ state: 'done', sentence: null }, CARDS)).toBe(false)
     expect(nothingProposed({ state: 'none', sentence: null }, [])).toBe(false)
     expect(nothingProposed({ state: 'working', sentence: null }, [])).toBe(false)
+  })
+})
+
+describe('The setup agent’s time, as its chip counts it', () => {
+  const working = { startedAt: 1_000, endedAt: null }
+
+  test('stops when the agent ends, and keeps that end while it stays ended', () => {
+    const ended = agentTimesOf(working, 'done', 43_000)
+    expect(ended).toEqual({ startedAt: 1_000, endedAt: 43_000 })
+    expect(agentTimesOf(ended, 'done', 90_000)).toBe(ended)
+  })
+
+  test('starts again when the agent works again', () => {
+    expect(agentTimesOf({ startedAt: 1_000, endedAt: 43_000 }, 'working', 60_000)).toEqual({
+      startedAt: 60_000,
+      endedAt: null,
+    })
+    expect(agentTimesOf(working, 'working', 60_000)).toBe(working)
   })
 })

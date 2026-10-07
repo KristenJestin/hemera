@@ -6,7 +6,14 @@
  */
 
 import type { SetupCard, SetupStanding } from '@hemera/ipc'
-import type { CardStatus, Proposal, SetupAgent, SetupCardEntry, SetupKind } from '@hemera/ui'
+import type {
+  CardStatus,
+  LiveGlance,
+  Proposal,
+  SetupAgent,
+  SetupCardEntry,
+  SetupKind,
+} from '@hemera/ui'
 
 import type { Route } from './navigation.ts'
 
@@ -138,3 +145,34 @@ export const startSetup = (
 /** The agent ended with nothing for the user to answer: the setup page has nothing to show. */
 export const nothingProposed = (standing: SetupStanding, cards: ReadonlyArray<SetupCard>) =>
   standing.state === 'done' && cards.length === 0
+
+/** When the setup agent started and ended, as its chip counts it. */
+export interface AgentTimes {
+  readonly startedAt: number
+  readonly endedAt: number | null
+}
+
+/**
+ * The agent's times once it stands as `agent` at `now`: its end kept from the moment it ended, a
+ * new start when it works again. The same times when nothing changed.
+ */
+export function agentTimesOf(times: AgentTimes, agent: SetupAgent, now: number): AgentTimes {
+  const ended = agent === 'done' || agent === 'failed'
+  if (ended && times.endedAt === null) return { startedAt: times.startedAt, endedAt: now }
+  if (!ended && times.endedAt !== null) return { startedAt: now, endedAt: null }
+  return times
+}
+
+/** What the agent's chip opens: who it is, and the step it stands at. */
+export const setupGlanceOf = (standing: SetupStanding): LiveGlance => ({
+  kind: 'helper',
+  type: 'Setup agent',
+  step: standing.sentence ?? STEPS[setupAgentOf(standing)],
+})
+
+const STEPS: Record<SetupAgent, string> = {
+  waiting: 'Waiting for a free slot',
+  working: 'Reading the Project folder',
+  done: 'Proposed the setup',
+  failed: 'Stopped',
+}

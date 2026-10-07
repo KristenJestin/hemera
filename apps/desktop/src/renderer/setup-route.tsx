@@ -13,7 +13,15 @@ import { ProjectSetup, type SetupKind } from '@hemera/ui'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { Link } from './link.ts'
-import { nothingProposed, pendingOf, setupAgentOf, setupEntriesOf } from './setup-cards.ts'
+import {
+  type AgentTimes,
+  agentTimesOf,
+  nothingProposed,
+  pendingOf,
+  setupAgentOf,
+  setupEntriesOf,
+  setupGlanceOf,
+} from './setup-cards.ts'
 
 interface Seen {
   readonly cards: ReadonlyArray<SetupCard>
@@ -71,9 +79,12 @@ interface SetupRouteProps {
 
 export function SetupRoute({ link, engineReady, project, onDone }: SetupRouteProps): ReactNode {
   const [seen, reread] = useSetup(link, engineReady, project.id)
-  const [startedAt] = useState(() => Date.now())
   const agent = setupAgentOf(seen.standing)
-  const ended = agent === 'done' || agent === 'failed'
+  const [times, setTimes] = useState<AgentTimes>(() => ({ startedAt: Date.now(), endedAt: null }))
+  // Its end is kept once seen: the chip's count stops there.
+  useEffect(() => {
+    setTimes((before) => agentTimesOf(before, agent, Date.now()))
+  }, [agent])
   const answer = (work: Promise<unknown>): void => {
     work.then(reread, reread)
   }
@@ -90,8 +101,9 @@ export function SetupRoute({ link, engineReady, project, onDone }: SetupRoutePro
     <ProjectSetup
       folder={project.mainCheckout}
       agent={agent}
-      startedAt={startedAt}
-      endedAt={ended ? Date.now() : null}
+      startedAt={times.startedAt}
+      endedAt={times.endedAt}
+      glance={setupGlanceOf(seen.standing)}
       failure={agent === 'failed' ? (seen.standing.sentence ?? undefined) : undefined}
       cards={setupEntriesOf(seen.cards)}
       onAcceptAll={() => answer(link.acceptAllSetupCards(project.id))}
