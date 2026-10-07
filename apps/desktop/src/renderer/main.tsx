@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 // oxlint-disable-next-line import/no-unassigned-import
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
+import { AgentSection } from './agent-sections.tsx'
 import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
 import { FirstLaunchRoute } from './first-launch-route.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
@@ -176,7 +177,24 @@ function Application() {
       now={now}
       projectSettings={
         settingsOf === null ? null : (
-          <SettingsPage key={settingsOf} data={settingsData} settings={settings} tools={tools} />
+          <SettingsPage
+            key={settingsOf}
+            data={settingsData}
+            settings={settings}
+            tools={tools}
+            agentSection={(section, showForm) => (
+              <AgentSection
+                section={section}
+                link={link}
+                engineReady={ready}
+                projectId={settingsOf}
+                catalogue={
+                  settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
+                }
+                show={showForm}
+              />
+            )}
+          />
         )
       }
       firstLaunch={

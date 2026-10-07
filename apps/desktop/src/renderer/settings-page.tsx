@@ -23,6 +23,10 @@ import {
   type VariableDraft,
 } from '@hemera/ui'
 import {
+  IconAdjustments,
+  IconBan,
+  IconFileText,
+  IconGauge,
   IconGitBranch,
   IconListNumbers,
   IconPlayerPlay,
@@ -46,6 +50,7 @@ import {
 } from '@hemera/ipc'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import { type AgentSectionId, isAgentSection } from './agent-sections.tsx'
 import type { Settings, SettingsData } from './settings-data.ts'
 import {
   commandDraftOf,
@@ -77,6 +82,11 @@ export interface SettingsPageProps {
   /** Null while the engine has not answered. */
   settings: Settings | null
   tools: SettingsTools
+  /**
+   * The agent and permission sections (#53), drawn by their own hooks: the section, and how it
+   * shows its dialog over the page.
+   */
+  agentSection?: (id: AgentSectionId, show: (form: SettingsForm | null) => void) => ReactNode
 }
 
 type SectionId =
@@ -86,6 +96,7 @@ type SectionId =
   | 'preparation'
   | 'variables'
   | 'services'
+  | AgentSectionId
 
 const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'repositories', label: 'Repositories', icon: <IconGitBranch size="sm" /> },
@@ -94,6 +105,10 @@ const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'preparation', label: 'Preparation', icon: <IconListNumbers size="sm" /> },
   { id: 'variables', label: 'Variables', icon: <IconVariable size="sm" /> },
   { id: 'services', label: 'Services', icon: <IconPlayerPlay size="sm" /> },
+  { id: 'never', label: 'Never run', icon: <IconBan size="sm" /> },
+  { id: 'models', label: 'Models by role', icon: <IconAdjustments size="sm" /> },
+  { id: 'budget', label: 'Cap and budget', icon: <IconGauge size="sm" /> },
+  { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
 ]
 
 /** What a dialog writes, and the draft it holds. */
@@ -286,8 +301,15 @@ function Workspaces({ project, settings, tools }: WorkspacesProps): ReactNode {
  * engine answers, and every dialog's save sent to it, its refusal said next to the field it
  * concerns.
  */
-export function SettingsPage({ data, settings, tools }: SettingsPageProps): ReactNode {
+export function SettingsPage({
+  data,
+  settings,
+  tools,
+  agentSection,
+}: SettingsPageProps): ReactNode {
   const [current, setCurrent] = useState<SectionId>('repositories')
+  /** The dialog an agent section shows over the page. */
+  const [agentForm, setAgentForm] = useState<SettingsForm | null>(null)
   const [writing, setWriting] = useState<Writing | null>(null)
   const [refusals, setRefusals] = useState<Refusals>({})
   const [saving, setSaving] = useState(false)
@@ -653,6 +675,7 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
   })()
 
   const body = ((): ReactNode => {
+    if (isAgentSection(current)) return agentSection?.(current, setAgentForm) ?? null
     switch (current) {
       case 'repositories':
         return (
@@ -773,8 +796,11 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
       }}
       error={unread?.kind === 'failed' ? unread.sentence : undefined}
       onRetry={() => settings?.retry()}
-      form={form}
-      onCloseForm={close}
+      form={form ?? agentForm}
+      onCloseForm={() => {
+        close()
+        setAgentForm(null)
+      }}
     >
       {body}
     </ProjectSettings>

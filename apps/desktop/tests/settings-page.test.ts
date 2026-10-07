@@ -56,6 +56,10 @@ describe('A Project’s settings page', () => {
       'Preparation',
       'Variables',
       'Services',
+      'Never run',
+      'Models by role',
+      'Cap and budget',
+      'Instructions',
     ]) {
       expect(markup).toContain(`>${section}<`)
     }
