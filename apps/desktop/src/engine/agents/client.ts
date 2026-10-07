@@ -725,9 +725,14 @@ export interface AgentSession {
     optionId: string,
     value: string,
   ) => Effect.Effect<ReadonlyArray<AgentOption>, AgentProtocolError | ModelUnavailable | AgentGone>
-  /** One turn, answered once the agent is done with it, or `interrupted` if it died first. */
+  /**
+   * One turn, answered once the agent is done with it, or `interrupted` if it died first.
+   * `stopped` is asked once the prompt is sent: true cancels the turn there, after the prompt, as
+   * `cancel` does (a stop asked before the agent had the turn).
+   */
   readonly prompt: (
     blocks: ReadonlyArray<PromptBlock>,
+    stopped?: () => boolean,
   ) => Effect.Effect<PromptOutcome, AgentProtocolError | ImageNotAccepted | AgentGone>
   /** Asks the agent to stop the turn; any permission request still standing is cancelled. */
   readonly cancel: Effect.Effect<void, AgentGone>
@@ -920,6 +925,12 @@ export const connect = <E>(
     ): AgentSession => {
       defaults.clear()
       announced = optionsOf(configOptions, defaults)
+      const cancel = Effect.gen(function* () {
+        yield* cancelStanding
+        yield* request('session/cancel', () =>
+          connection.cancel({ sessionId: nativeSessionId }),
+        ).pipe(Effect.catchTag('AgentProtocolError', () => Effect.void))
+      })
       return {
         nativeSessionId,
         modes: modesOf(modes),
@@ -964,29 +975,27 @@ export const connect = <E>(
             return announced
           }),
 
-        prompt: (blocks) =>
+        prompt: (blocks, stopped = () => false) =>
           Effect.gen(function* () {
             if (!handshake.images && blocks.some(Predicate.isTagged('Image'))) {
               return yield* new ImageNotAccepted()
             }
             if (connection.signal.aborted) return yield* new AgentGone()
-            const answered = yield* request('session/prompt', () =>
-              connection.prompt({
-                sessionId: nativeSessionId,
-                prompt: blocks.map((block) => blockOf(block, handshake.embeddedContext)),
-              }),
-            ).pipe(Effect.catchTag('AgentGone', () => Effect.succeed(null)))
+            // Written now: a cancel written after it reaches the agent after it.
+            const sent = connection.prompt({
+              sessionId: nativeSessionId,
+              prompt: blocks.map((block) => blockOf(block, handshake.embeddedContext)),
+            })
+            if (stopped()) yield* Effect.forkChild(Effect.ignore(cancel))
+            const answered = yield* request('session/prompt', () => sent).pipe(
+              Effect.catchTag('AgentGone', () => Effect.succeed(null)),
+            )
             // The agent died with the turn open: the turn ends, interrupted.
             if (answered === null) return { stopReason: 'interrupted' as const, usage: null }
             return { stopReason: answered.stopReason, usage: usageOf(answered.usage) }
           }),
 
-        cancel: Effect.gen(function* () {
-          yield* cancelStanding
-          yield* request('session/cancel', () =>
-            connection.cancel({ sessionId: nativeSessionId }),
-          ).pipe(Effect.catchTag('AgentProtocolError', () => Effect.void))
-        }),
+        cancel,
       }
     }
 

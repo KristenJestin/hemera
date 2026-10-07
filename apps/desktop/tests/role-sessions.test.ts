@@ -8,7 +8,7 @@
 
 import { realpathSync } from 'node:fs'
 
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
@@ -28,6 +28,7 @@ import {
   sessionsIn,
 } from '../src/engine/sessions/store.ts'
 import { Database, DatabaseError } from '../src/engine/storage/database.ts'
+import { betweenMutations } from '../src/engine/transaction.ts'
 import {
   domainEvents,
   memoryJournal,
@@ -45,6 +46,7 @@ import {
   BUILDER,
   HELPER,
   REVIEWER,
+  SILENCE,
   acmeIn,
   agentsFound,
   held,
@@ -195,6 +197,49 @@ const deliveryRow = (id: string) =>
   Effect.flatMap(Database, (database) =>
     database.select().from(sessionDeliveries).where(eq(sessionDeliveries.id, id)),
   ).pipe(Effect.map(([row]) => row))
+
+describe('A session is settled once what it has to send is sent and answered', () => {
+  test('a session whose brief waits to be sent is not settled: its first turn runs first', async () => {
+    const writes = held()
+    // Its brief is made as every write starts to wait: the driver is registered with the brief
+    // unsent, and the brief cannot be marked sent until the writes go on.
+    const holdingWrites: RoleEntry = {
+      ...BUILDER,
+      brief: () =>
+        Effect.gen(function* () {
+          const holds = yield* Deferred.make<void>()
+          yield* betweenMutations(
+            Effect.andThen(
+              Deferred.succeed(holds, undefined),
+              Effect.promise(() => writes.promise),
+            ),
+          ).pipe(Effect.forkDetach)
+          yield* Deferred.await(holds)
+          return [{ label: 'Your task', text: 'Export the invoices as CSV.' }]
+        }),
+    }
+    const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
+      roles: [holdingWrites],
+    })
+    const promptsWhenSettled = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          const settling = yield* settled(session.id).pipe(
+            Effect.andThen(Effect.sync(() => world.agents[0]?.answers.prompts.length ?? 0)),
+            Effect.forkChild,
+          )
+          yield* Effect.sleep('300 millis')
+          writes.release()
+          return yield* Fiber.join(settling)
+        }),
+      ),
+    )
+    expect(promptsWhenSettled).toBe(1)
+  })
+})
 
 describe('Deliveries between turns (channel 1)', () => {
   test('what is queued during a turn arrives as one message at its end, each block under its marker', async () => {
@@ -396,8 +441,9 @@ describe('A redirect cancels the turn, then sends (channel 3)', () => {
 describe('Silence, waiting and stuck (CT-12)', () => {
   test('a session silent mid-turn past the bound is stuck, then replaced, with one Journal line', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0 ? holding(hold, 0, [{ does: 'says', text: 'never' }]) : {},
+    const { world, run } = engine(
+      (index) => (index === 0 ? holding(hold, 0, [{ does: 'says', text: 'never' }]) : {}),
+      { timings: SILENCE },
     )
     const [first, lines] = await run(({ profile }) =>
       within(
@@ -436,8 +482,10 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose own command runs, silent, is not stuck', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+    const { world, run } = engine(
+      (index) =>
+        index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+      { timings: SILENCE },
     )
     const state = await run(({ profile }) =>
       within(
@@ -468,7 +516,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
   })
 
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
-    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }))
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
+      timings: SILENCE,
+    })
     const state = await run(({ profile }) =>
       within(
         profile,
@@ -486,16 +536,19 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a provider’s wait keeps a long turn alive', async () => {
     const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 150))
-    const { world, run } = engine(() => ({
-      between: pause,
-      steps: [
-        { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
-        { does: 'says', text: 'done' },
-      ],
-    }))
+    const { world, run } = engine(
+      () => ({
+        between: pause,
+        steps: [
+          { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
+          { does: 'says', text: 'done' },
+        ],
+      }),
+      { timings: SILENCE },
+    )
     const state = await run(({ profile }) =>
       within(
         profile,

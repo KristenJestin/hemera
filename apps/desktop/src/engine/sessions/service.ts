@@ -1180,7 +1180,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               yield* Fiber.await(driver.turn)
               continue
             }
-            if ((yield* queuedFor(driver.session)).length === 0) return
+            // Through the pump, under its lock: a pump under way (the start's, with the brief)
+            // ends first, and what still waits (the brief, a delivery) is sent now.
             yield* pump(driver)
             if (driver.turn === null) return
           }

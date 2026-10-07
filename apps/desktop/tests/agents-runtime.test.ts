@@ -4,6 +4,8 @@
  * interrupted and revoking its token, and its idle release not ending the session.
  */
 
+import { setTimeout as sleep } from 'node:timers/promises'
+
 import type { SessionConfigOption } from '@agentclientprotocol/sdk'
 import { Effect, Fiber, Layer, Predicate, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -55,18 +57,24 @@ const OFFERED: FakeScript = {
   steps: [{ does: 'says', text: 'done' }],
 }
 
-/** The world the runtime runs in: one fake agent per process started, and the endpoint's log. */
-const world = (scripts: ReadonlyArray<FakeScript>) => {
+/**
+ * The world the runtime runs in: one fake agent per process started, and the endpoint's log. Each
+ * start goes through `starting` first: what holds an agent's process before it is up.
+ */
+const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void> = Effect.void) => {
   const agents: FakeAgent[] = []
   const tokens: string[] = []
   const layers = Layer.mergeAll(
     Layer.succeed(AgentStarter, {
       start: () =>
-        Effect.sync(() => {
-          const agent = fakeAgent(scripts[agents.length] ?? scripts.at(-1) ?? {})
-          agents.push(agent)
-          return agent.process
-        }),
+        Effect.andThen(
+          starting,
+          Effect.sync(() => {
+            const agent = fakeAgent(scripts[agents.length] ?? scripts.at(-1) ?? {})
+            agents.push(agent)
+            return agent.process
+          }),
+        ),
     }),
     Layer.succeed(Discovery, {
       list: Effect.succeed([]),
@@ -198,6 +206,25 @@ describe('A session’s instructions are set once, at its start', () => {
   })
 })
 
+/** A step that lasts: what a turn does while its cancel is on its way. */
+const LONG_WORK = { does: 'says', text: 'long work' } as const
+
+/** Holds the first agent's turn until that agent has heard a cancel, however late it comes. */
+const cancelHeard = async (built: ReturnType<typeof world>) => {
+  while ((built.agents[0]?.answers.cancels ?? 0) === 0) {
+    // oxlint-disable-next-line no-await-in-loop -- the agent's side is looked at again until it heard
+    await sleep(5)
+  }
+}
+
+/** Waits until the first agent has received a prompt. */
+const prompted = async (built: ReturnType<typeof world>) => {
+  while ((built.agents[0]?.answers.prompts.length ?? 0) === 0) {
+    // oxlint-disable-next-line no-await-in-loop -- the agent's side is looked at again until it has it
+    await sleep(5)
+  }
+}
+
 describe('What an agent does is told as it happens', () => {
   test('each event of a session’s agent reaches the activity stream with the session’s id', async () => {
     const built = world([
@@ -234,24 +261,66 @@ describe('What an agent does is told as it happens', () => {
   })
 
   test('a turn is cancelled on the session’s agent', async () => {
-    const release = Promise.withResolvers<void>()
-    const built = world([
-      { between: () => release.promise, steps: [{ does: 'says', text: 'long work' }] },
-    ])
+    const built = world([{ between: () => cancelHeard(built), steps: [LONG_WORK] }])
     const outcome = await run(
       built,
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const { id } = yield* session()
         const turn = yield* runtime.prompt(id, say('go')).pipe(Effect.forkScoped)
-        yield* Effect.sleep('20 millis')
+        // Once the agent has the turn: before, there is no turn to cancel yet.
+        yield* Effect.promise(() => prompted(built))
         yield* runtime.cancel(id)
-        release.resolve()
         return yield* Fiber.join(turn)
       }),
     )
     expect(outcome.stopReason).toBe('cancelled')
     expect(built.agents[0]?.answers.cancels).toBe(1)
+  })
+
+  test('a turn cancelled while its agent starts ends cancelled, the cancel reaching the agent after the prompt', async () => {
+    const asked = Promise.withResolvers<void>()
+    const up = Promise.withResolvers<void>()
+    const built = world(
+      [{ between: () => cancelHeard(built), steps: [LONG_WORK] }],
+      Effect.andThen(
+        Effect.sync(() => asked.resolve()),
+        Effect.promise(() => up.promise),
+      ),
+    )
+    const outcome = await run(
+      built,
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const { id } = yield* session()
+        const turn = yield* runtime.prompt(id, say('go')).pipe(Effect.forkScoped)
+        yield* Effect.promise(() => asked.promise)
+        yield* runtime.cancel(id)
+        up.resolve()
+        return yield* Fiber.join(turn)
+      }),
+    )
+    expect(outcome.stopReason).toBe('cancelled')
+    expect(built.agents[0]?.answers.prompts).toHaveLength(1)
+    expect(built.agents[0]?.answers.cancels).toBe(1)
+  })
+
+  test('a cancel between turns stops nothing: the next turn ends as the agent ends it', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }])
+    const outcomes = await run(
+      built,
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const { id } = yield* session()
+        yield* runtime.cancel(id)
+        const first = yield* runtime.prompt(id, say('go'))
+        yield* runtime.cancel(id)
+        const second = yield* runtime.prompt(id, say('again'))
+        return [first.stopReason, second.stopReason]
+      }),
+    )
+    expect(outcomes).toEqual(['end_turn', 'end_turn'])
+    expect(built.agents[0]?.answers.cancels).toBe(0)
   })
 })
 

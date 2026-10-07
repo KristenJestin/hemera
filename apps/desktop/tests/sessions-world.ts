@@ -24,7 +24,7 @@ import type {
 } from '../src/engine/profile.ts'
 import { createProject } from '../src/engine/projects.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
-import type { SessionTimings } from '../src/engine/sessions/service.ts'
+import { SESSION_TIMINGS, type SessionTimings } from '../src/engine/sessions/service.ts'
 import { ProcessSupervisor } from '../src/engine/supervisor.ts'
 import { STAYS_UP, commandsEngine, script } from './commands-engine.ts'
 import { repository } from './repositories.ts'
@@ -55,12 +55,19 @@ export const REVIEWER: RoleEntry = {
   writes: false,
 }
 
-/** Short bounds: a note waits 300 ms, a turn may be silent 400 ms, swept every 100 ms. */
+/**
+ * Short bounds: a note waits 300 ms, swept every 100 ms. A turn may be silent as long as the
+ * product lets it: under load, an ordinary first turn (its agent started, a tool called) stays
+ * silent for more than a short bound, and the sweep would replace its session under the suite.
+ */
 export const FAST = {
   notePickup: Duration.millis(300),
-  stuckAfter: Duration.millis(400),
+  stuckAfter: SESSION_TIMINGS.stuckAfter,
   sweepEvery: Duration.millis(100),
 }
+
+/** The silence bound of the suites about silence (CT-12): a turn held past 400 ms is stuck. */
+export const SILENCE = { stuckAfter: Duration.millis(400) }
 
 /** What a world started: one fake agent per process, and the real children of some. */
 export interface World {

@@ -104,6 +104,12 @@ interface Live {
   firstBlocks: ReadonlyArray<PromptBlock>
 }
 
+/** A turn asked of a session: whether its prompt is sent, and whether a cancel was asked. */
+interface TurnAsked {
+  sent: boolean
+  cancelled: boolean
+}
+
 /** Why a session's agent could not be started or spoken to. */
 export type AgentFailure =
   | DatabaseError
@@ -175,6 +181,11 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
       const live = new Map<string, Live>()
       /** The starts under way, each with what lets it go before its process is up. */
       const starting = new Map<string, Deferred.Deferred<void>>()
+      /**
+       * The turn of each session, from the moment it is asked, its agent started or not: a cancel
+       * asked before its prompt is sent is kept here, and sent right after the prompt.
+       */
+      const turnsAsked = new Map<string, TurnAsked>()
       const endpoint = Context.get(context, HemeraEndpoint)
       const idle = Context.get(context, IdleAgents)
       const turns = Context.get(context, SessionTurns)
@@ -304,25 +315,42 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
           return Effect.andThen(forget(sessionId, one), Scope.close(one.scope, Exit.void))
         })
 
+      /** One turn of a session's agent, started first if none runs. */
+      const turn = (sessionId: string, blocks: ReadonlyArray<PromptBlock>, asked: TurnAsked) =>
+        Effect.gen(function* () {
+          const one = yield* running(sessionId)
+          const first = one.firstBlocks
+          one.firstBlocks = []
+          one.turning = true
+          // A new turn: a verdict of the judge from the last one is not reused in it.
+          yield* turns.begin(sessionId)
+          const outcome = yield* one.session
+            .prompt([...first, ...blocks], () => {
+              asked.sent = true
+              return asked.cancelled
+            })
+            .pipe(Effect.ensuring(Effect.sync(() => void (one.turning = false))))
+          // A turn the agent's death interrupted returns once its token is revoked.
+          if (outcome.stopReason === 'interrupted' && !one.letGo) {
+            yield* one.connection.gone
+            yield* forget(sessionId, one)
+          }
+          yield* idle.touch(sessionId)
+          return outcome
+        })
+
       return {
         prompt: (sessionId, blocks) =>
           Effect.gen(function* () {
-            const one = yield* running(sessionId)
-            const first = one.firstBlocks
-            one.firstBlocks = []
-            one.turning = true
-            // A new turn: a verdict of the judge from the last one is not reused in it.
-            yield* turns.begin(sessionId)
-            const outcome = yield* one.session
-              .prompt([...first, ...blocks])
-              .pipe(Effect.ensuring(Effect.sync(() => void (one.turning = false))))
-            // A turn the agent's death interrupted returns once its token is revoked.
-            if (outcome.stopReason === 'interrupted' && !one.letGo) {
-              yield* one.connection.gone
-              yield* forget(sessionId, one)
-            }
-            yield* idle.touch(sessionId)
-            return outcome
+            const asked: TurnAsked = { sent: false, cancelled: false }
+            turnsAsked.set(sessionId, asked)
+            return yield* turn(sessionId, blocks, asked).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (turnsAsked.get(sessionId) === asked) turnsAsked.delete(sessionId)
+                }),
+              ),
+            )
           }).pipe(Effect.provide(context)),
         choose: (sessionId, choice, value) =>
           Effect.gen(function* () {
@@ -336,10 +364,12 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
         release,
         cancel: (sessionId) =>
           Effect.suspend(() => {
+            const asked = turnsAsked.get(sessionId)
+            if (asked === undefined) return Effect.void
+            asked.cancelled = true
+            // Not sent yet: the prompt carries the cancel after it.
             const one = live.get(sessionId)
-            return one === undefined || !one.turning
-              ? Effect.void
-              : Effect.ignore(one.session.cancel)
+            return asked.sent && one !== undefined ? Effect.ignore(one.session.cancel) : Effect.void
           }),
         deaths: Stream.fromPubSub(deaths),
         activity: Stream.fromPubSub(activity),
