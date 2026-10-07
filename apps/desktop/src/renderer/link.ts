@@ -34,6 +34,8 @@ import {
   type Mission,
   type MissionsChange,
   type ModelMark,
+  type ProjectLimits,
+  type RepositoryInstructions,
   type Need,
   type NeedAnswerAsked,
   type NeedGroup,
@@ -71,7 +73,7 @@ import {
   type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import type { AgentProvider, ChatMention, ModelSettingValue } from '@hemera/core/domain'
+import type { AgentProvider, ChatMention, ModelSettingValue, NeverEntry } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -190,6 +192,24 @@ export interface Link {
   /** Each role's model at every level, for a Project, or the app's alone with null. */
   readonly roleModels: (projectId: string | null) => Promise<ReadonlyArray<RoleModels>>
   readonly setAppRoleModel: (role: string, setting: ModelSettingValue) => Promise<void>
+  /** A role's model in a Project; null takes it back to the application's. */
+  readonly setProjectRoleModel: (
+    projectId: string,
+    role: string,
+    setting: ModelSettingValue | null,
+  ) => Promise<void>
+  /** The commands never run in a Project. */
+  readonly neverList: (projectId: string) => Promise<ReadonlyArray<NeverEntry>>
+  /** Replaces the list whole; answers it as written. */
+  readonly setNeverList: (
+    projectId: string,
+    entries: ReadonlyArray<NeverEntry>,
+  ) => Promise<ReadonlyArray<NeverEntry>>
+  /** A Project's cap of sub-agents and the budget its new missions start with. */
+  readonly projectLimits: (projectId: string) => Promise<ProjectLimits>
+  readonly setProjectLimits: (projectId: string, limits: ProjectLimits) => Promise<ProjectLimits>
+  /** The instruction files of a Project's repositories, and how each agent gets them. */
+  readonly instructionFiles: (projectId: string) => Promise<ReadonlyArray<RepositoryInstructions>>
   /** Asks every installed agent's registry for its latest version, now. */
   readonly checkAgentUpdates: () => Promise<ReadonlyArray<AgentState>>
   readonly updateAgent: (agent: AgentProvider) => Promise<AgentUpdate>
@@ -386,6 +406,18 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['models.roles']({ projectId, missionId: null })),
     setAppRoleModel: (role, setting) =>
       call((ready) => ready['models.setRole']({ level: 'app', scopeId: null, role, setting })),
+    setProjectRoleModel: (projectId, role, setting) =>
+      call((ready) =>
+        ready['models.setRole']({ level: 'project', scopeId: projectId, role, setting }),
+      ),
+    neverList: (projectId) => call((ready) => ready['permissions.neverList']({ projectId })),
+    setNeverList: (projectId, entries) =>
+      call((ready) => ready['permissions.setNeverList']({ projectId, entries })),
+    projectLimits: (projectId) => call((ready) => ready['limits.project']({ projectId })),
+    setProjectLimits: (projectId, limits) =>
+      call((ready) => ready['limits.setProject']({ projectId, limits })),
+    instructionFiles: (projectId) =>
+      call((ready) => ready['sessions.instructionFiles']({ projectId })),
     checkAgentUpdates: () => call((ready) => ready['agents.checkUpdates']()),
     updateAgent: (agent) => call((ready) => ready['agents.update']({ agent })),
     hemeraAuto: () => call((ready) => ready['hemeraAuto.status']()),
