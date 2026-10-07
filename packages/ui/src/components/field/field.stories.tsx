@@ -203,3 +203,16 @@ export const Focused: Story = {
     expect(args.onValueChange).toHaveBeenCalledWith('Acme')
   },
 }
+
+/** A secret: what is typed is masked, never shown back, and no browser keeps or checks it. */
+export const Secret: Story = {
+  args: { label: 'Jev key', secret: true, placeholder: undefined },
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByLabelText('Jev key')
+    await userEvent.type(field, 'jev_live_0123456789')
+    expect(field).toHaveAttribute('type', 'password')
+    expect(field).toHaveAttribute('autocomplete', 'off')
+    expect(field).toHaveAttribute('spellcheck', 'false')
+    expect(canvasElement).not.toHaveTextContent('jev_live_0123456789')
+  },
+}

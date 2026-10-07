@@ -5,10 +5,13 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   START,
   close,
+  focusOf,
   frameOf,
   go,
+  linkedSettings,
   open,
   placeOf,
+  sectionOf,
   show,
   trailOf,
   type Names,
@@ -35,6 +38,21 @@ describe('The window’s routes', () => {
     const settings = go(START, { kind: 'settings' })
     expect(labels(settings)).toEqual(['Settings'])
     expect(placeOf(settings.route)).toEqual({ kind: 'settings' })
+    expect(sectionOf(settings.route)).toBe('appearance')
+  })
+
+  test('a link opens Settings at its section', () => {
+    const agents = go(START, { kind: 'settings', section: 'agents' })
+    expect(labels(agents)).toEqual(['Settings'])
+    expect(sectionOf(agents.route)).toBe('agents')
+  })
+
+  test('a link opens Settings with the focus on its section’s heading; the list moves no focus', () => {
+    const linked = go(START, linkedSettings('hemera-auto'))
+    expect(sectionOf(linked.route)).toBe('hemera-auto')
+    expect(focusOf(linked.route)).toBe(true)
+    expect(focusOf(go(START, { kind: 'settings', section: 'models' }).route)).toBe(false)
+    expect(focusOf(go(START, { kind: 'settings' }).route)).toBe(false)
   })
 
   test('Home filtered to a Project says it after Home, which leads back to every need', () => {

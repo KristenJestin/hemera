@@ -28,8 +28,15 @@ export type Route =
       /** The need unfolded in Needs you, as its notification leads to it. */
       readonly need?: string | undefined
     }
-  /** At a section, when a need or a notification about a setting opens it. */
-  | { readonly kind: 'settings'; readonly section?: AppSection | undefined }
+  /**
+   * At a section, when a need or a notification about a setting opens it: `linked`, its heading
+   * takes the focus.
+   */
+  | {
+      readonly kind: 'settings'
+      readonly section?: AppSection | undefined
+      readonly linked?: boolean | undefined
+    }
   | { readonly kind: 'project'; readonly id: string }
   /** The settings of a Project: its own page, entered from the Project page's header. */
   | { readonly kind: 'projectSettings'; readonly id: string }
@@ -118,6 +125,20 @@ export function placeOf(route: Route): SidebarPlace {
       return { kind: 'chat', id: route.id }
   }
 }
+
+/** Settings at a section a link names: a need's "Open Settings", a notification's. */
+export const linkedSettings = (section: AppSection): Route => ({
+  kind: 'settings',
+  section,
+  linked: true,
+})
+
+/** Whether the section a route shows was opened by a link, so its heading takes the focus. */
+export const focusOf = (route: Route): boolean => route.kind === 'settings' && route.linked === true
+
+/** The section of Settings a route shows: Appearance unless it names one. */
+export const sectionOf = (route: Route): AppSection =>
+  route.kind === 'settings' ? (route.section ?? 'appearance') : 'appearance'
 
 /** Where a crumb leads: to a page, or within the mission shown, to a view or back to its base. */
 export type Step = { readonly go: Route } | { readonly show: string | null }

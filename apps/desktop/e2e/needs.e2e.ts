@@ -100,6 +100,12 @@ describe('Needs created while Hemera runs', () => {
     await row(id).$('button=Open Settings › Models by role').click()
     await expect($('main h1')).toHaveText('Settings')
     await expect($('[data-settings-section="models"]')).toBeExisting()
+    // The link leads the keyboard where it leads the eye: to the section's heading.
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => document.activeElement?.textContent ?? '')) ===
+        'Models by role',
+    )
     await home(2).click()
     await expect(row(id)).toBeDisplayed()
   })

@@ -7,10 +7,19 @@ import { createRoot } from 'react-dom/client'
 // oxlint-disable-next-line import/no-unassigned-import
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
-import { AppSettings } from './app-settings.tsx'
+import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
 import { connect } from './link.ts'
-import { START, go, routeOf, show, type Navigation, type Route } from './navigation.ts'
+import {
+  START,
+  focusOf,
+  go,
+  routeOf,
+  sectionOf,
+  show,
+  type Navigation,
+  type Route,
+} from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
@@ -52,6 +61,13 @@ const settingsTools = (dataFolder: string): SettingsTools => ({
   open: (url) => void window.open(url, '_blank', 'noopener'),
   dataFolder,
 })
+
+/** What the application's settings ask of the window besides the engine. */
+const SETTINGS_TOOLS: AppSettingsTools = {
+  copy: (text) => void navigator.clipboard.writeText(text),
+  chooseFolder: () => link.chooseFolder(),
+  showLog: () => void link.showLog(),
+}
 
 /** The keystroke that folds and opens the sidebar, as its button's tooltip says: Ctrl+B. */
 const isFoldKey = (event: KeyboardEvent): boolean =>
@@ -150,12 +166,19 @@ function Application() {
         )
       }
       appSettings={
-        <AppSettings
+        <AppSettingsPage
+          link={link}
+          engineReady={ready}
+          section={sectionOf(route)}
+          focus={focusOf(route)}
+          onSection={(section) => goTo({ kind: 'settings', section })}
           theme={theme}
           onTheme={(chosen) => {
             setTheme(chosen)
             void link.writePreferences({ theme: chosen }).catch(() => undefined)
           }}
+          dataFolder={dataFolder}
+          tools={SETTINGS_TOOLS}
         />
       }
       notices={<NoticeStack notices={notices} onOpen={open} onDismiss={dismiss} />}

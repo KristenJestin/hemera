@@ -221,9 +221,8 @@ describe('The pages', () => {
     expect(failed).toContain('This Project no longer exists.')
   })
 
-  test('the Settings page, its place marked at the foot of the sidebar', () => {
+  test('the Settings page, drawn by its own hooks, its place marked at the foot of the sidebar', () => {
     const markup = drawn({ route: { kind: 'settings' } })
-    expect(markup).toMatch(/<h1[^>]*>Settings<\/h1>/)
     expect(markup).toContain('The choice of theme')
     expect(markup).toMatch(/<button[^>]*aria-current="page"[^>]*>.*?Settings/)
   })
@@ -330,10 +329,5 @@ describe('Needs you, on Home and in the sidebar', () => {
       needs: { kind: 'failed', sentence: 'The data folder refused while reading the needs.' },
     })
     expect(failed).toContain('The data folder refused while reading the needs.')
-  })
-
-  test('Settings opened by a need’s link is opened at its section', () => {
-    const markup = drawn({ route: { kind: 'settings', section: 'models' } })
-    expect(markup).toContain('data-settings-section="models"')
   })
 })

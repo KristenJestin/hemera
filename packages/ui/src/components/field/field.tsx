@@ -115,6 +115,8 @@ export interface InputProps extends Omit<FieldShellProps, 'children'> {
   onBlur?: (() => void) | undefined
   onFocus?: (() => void) | undefined
   onKeyDown?: ((event: KeyboardEvent<HTMLInputElement>) => void) | undefined
+  /** A secret: what is typed is masked, and no browser keeps it or checks its spelling. */
+  secret?: boolean | undefined
   /**
    * A control that belongs to the field, drawn on the same line as the box.
    *
@@ -142,6 +144,7 @@ export function Input({
   onBlur,
   onFocus,
   onKeyDown,
+  secret = false,
   action,
 }: InputProps) {
   return (
@@ -160,6 +163,9 @@ export function Input({
             </span>
           )}
           <Field.Control
+            type={secret ? 'password' : undefined}
+            autoComplete={secret ? 'off' : undefined}
+            spellCheck={secret ? false : undefined}
             placeholder={placeholder}
             defaultValue={defaultValue}
             value={value}
