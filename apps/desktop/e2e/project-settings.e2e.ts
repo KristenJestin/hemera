@@ -36,7 +36,8 @@ describe('A Project added and set up from its settings', () => {
       adding.$('[data-found="services/billing"]').$('[role="checkbox"]'),
     ).toHaveAttribute('aria-checked', 'true')
     await adding.$('button=Add acme').click()
-    await expect(adding).not.toBeExisting()
+    // The add dialog closes; the setup's takeover, a dialog too, may stand in its place.
+    await expect($('[role="dialog"]:not([data-setup-takeover])')).not.toBeExisting()
     await expect($('main h1')).toHaveText('acme', { containing: true })
     // The suite's agent proposes nothing: its setup leaves the window on its own.
     await expect($('[data-setup-takeover]')).not.toBeExisting()

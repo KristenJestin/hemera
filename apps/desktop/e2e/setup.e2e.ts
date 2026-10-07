@@ -91,7 +91,8 @@ describe('A first launch, and a new Project set up by its agent', () => {
     await expect(adding).toHaveText(expect.stringContaining('None in this folder'))
     await adding.$('button=Add acme').waitForClickable()
     await adding.$('button=Add acme').click()
-    await expect(adding).not.toBeExisting()
+    // The add dialog closes; the setup's takeover, a dialog too, may stand in its place.
+    await expect($('[role="dialog"]:not([data-setup-takeover])')).not.toBeExisting()
     // The setup takes the window over, named after the Project; not a page of it.
     await expect($('[data-setup-takeover]')).toHaveText(expect.stringContaining('Setting up acme'))
     const card = $('[data-setup-card="repositories"]')
