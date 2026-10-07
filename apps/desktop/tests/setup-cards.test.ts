@@ -59,6 +59,26 @@ const CARDS: SetupCard[] = [
   ),
 ]
 
+describe('A repository the setup agent proposes', () => {
+  test('says only the remote and the base branch the proposal gives', () => {
+    const repositories = setupEntriesOf([
+      card('r1', { kind: 'repository', path: 'api', remote: 'upstream', baseBranch: 'develop' }),
+      card('r2', { kind: 'repository', path: 'web', baseBranch: 'develop' }),
+      card('r3', { kind: 'repository', path: 'shared', remote: 'upstream' }),
+      card('r4', { kind: 'repository', path: 'billing' }),
+    ])[0]?.proposal
+    expect(repositories).toEqual({
+      kind: 'repositories',
+      items: [
+        { id: 'r1', path: 'api', base: 'upstream/develop' },
+        { id: 'r2', path: 'web', base: 'develop' },
+        { id: 'r3', path: 'shared', base: 'upstream' },
+        { id: 'r4', path: 'billing', base: '' },
+      ],
+    })
+  })
+})
+
 describe('The cards of a new Project', () => {
   test('one per kind proposed, in the settings’ order, each with what it proposes', () => {
     const entries = setupEntriesOf(CARDS)

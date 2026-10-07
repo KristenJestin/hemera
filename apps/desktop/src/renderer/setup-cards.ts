@@ -56,7 +56,9 @@ const proposalOf = (kind: SetupKind, cards: ReadonlyArray<SetupCard>): Proposal 
                 {
                   id,
                   path: change.path,
-                  base: `${change.remote ?? 'origin'}/${change.baseBranch ?? 'main'}`,
+                  base: [change.remote, change.baseBranch]
+                    .filter((part) => part !== undefined)
+                    .join('/'),
                 },
               ]
             : [],
