@@ -91,11 +91,10 @@ describe('The window’s routes', () => {
     expect(placeOf(settings.route)).toEqual({ kind: 'project', id: 'acme' })
   })
 
-  test('a new Project’s setup is a page under it: the Project, then Setup; the Project marked', () => {
+  test('a new Project’s setup stands over the Project, never in its trail; the Project marked', () => {
     const setup = go(START, { kind: 'projectSetup', id: 'acme' })
     const trail = trailOf(setup, names)
-    expect(trail.map((crumb) => crumb.label)).toEqual(['Acme', 'Setup'])
-    expect(trail[0]?.step).toEqual({ go: { kind: 'project', id: 'acme' } })
+    expect(trail.map((crumb) => crumb.label)).toEqual(['Acme'])
     expect(placeOf(setup.route)).toEqual({ kind: 'project', id: 'acme' })
   })
 

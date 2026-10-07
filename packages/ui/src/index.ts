@@ -336,4 +336,9 @@ export {
   type SetupAgent,
   type SetupCardEntry,
 } from './surfaces/project-setup/project-setup.tsx'
+export {
+  SetupTakeover,
+  SetupWaiting,
+  type SetupTakeoverProps,
+} from './surfaces/project-setup/setup-takeover.tsx'
 export { FirstLaunch, type FirstLaunchProps } from './surfaces/first-launch/first-launch.tsx'

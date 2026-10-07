@@ -200,15 +200,9 @@ export function trailOf(navigation: Navigation, names: Names): Trail[] {
         },
         { id: 'settings', label: 'Settings' },
       ]
+    // The setup is onboarding over the Project, never a page of it: the trail is the Project's.
     case 'projectSetup':
-      return [
-        {
-          id: 'project',
-          label: project(route.id),
-          step: { go: { kind: 'project', id: route.id } },
-        },
-        { id: 'setup', label: 'Setup' },
-      ]
+      return [{ id: 'project', label: project(route.id) }]
     case 'chat':
       return [
         {

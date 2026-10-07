@@ -38,6 +38,8 @@ describe('A Project added and set up from its settings', () => {
     await adding.$('button=Add acme').click()
     await expect(adding).not.toBeExisting()
     await expect($('main h1')).toHaveText('acme', { containing: true })
+    // The suite's agent proposes nothing: its setup leaves the window on its own.
+    await expect($('[data-setup-takeover]')).not.toBeExisting()
   })
 
   it('lists the three repositories in the Project’s settings', async () => {

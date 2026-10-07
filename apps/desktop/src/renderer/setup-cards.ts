@@ -34,6 +34,10 @@ export const pendingOf = (cards: ReadonlyArray<SetupCard>, kind: SetupKind): Set
     .filter((card) => kindOf(card) === kind && card.state === 'pending')
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
 
+/** How many changes the agent proposes still wait for an answer. */
+export const waitingProposals = (cards: ReadonlyArray<SetupCard>): number =>
+  cards.filter((card) => card.state === 'pending').length
+
 const statusOf = (cards: ReadonlyArray<SetupCard>): CardStatus => {
   const waiting = cards.filter((card) => card.state === 'pending')
   if (waiting.length > 0) {

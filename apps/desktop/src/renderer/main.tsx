@@ -1,5 +1,5 @@
 import type { ThemePreference } from '@hemera/ipc'
-import { NoticeStack, TooltipProvider } from '@hemera/ui'
+import { NoticeStack, SetupWaiting, TooltipProvider } from '@hemera/ui'
 import { MotionConfig } from 'motion/react'
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -25,7 +25,7 @@ import {
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { setUpAgain, startSetup } from './setup-cards.ts'
-import { SetupRoute } from './setup-route.tsx'
+import { SetupRoute, useWaitingProposals } from './setup-route.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useChats } from './use-chats.ts'
@@ -109,6 +109,7 @@ function Application() {
   }, [ready])
   const settingsOf = route.kind === 'projectSettings' ? route.id : null
   const [settingsData, settings] = useSettings(link, ready, settingsOf)
+  const waitingProposals = useWaitingProposals(link, ready, settingsOf)
   const dataFolder = engine.kind === 'ready' ? engine.status.dataFolder : ''
   const tools = useMemo(() => settingsTools(dataFolder), [dataFolder])
   const { notices, open, dismiss } = useNotices(link, (target) =>
@@ -191,6 +192,14 @@ function Application() {
             data={settingsData}
             settings={settings}
             tools={tools}
+            banner={
+              waitingProposals === 0 ? undefined : (
+                <SetupWaiting
+                  proposals={waitingProposals}
+                  onReview={() => goTo({ kind: 'projectSetup', id: settingsOf })}
+                />
+              )
+            }
             onSetUp={() => {
               // One at a time: a second press while the first asks the engine does nothing.
               if (settingUp.current) return

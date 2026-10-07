@@ -242,8 +242,20 @@ function RoutePage({
       return appSettings
     case 'chat':
       return chat
+    // The setup takes the window over, the Project's own page behind it.
     case 'projectSetup':
-      return projectSetup
+      return (
+        <>
+          <ProjectRoute
+            key={route.id}
+            id={route.id}
+            state={project}
+            fallback={nameOf(route.id) ?? ''}
+            actions={actions}
+          />
+          {projectSetup}
+        </>
+      )
     case 'mission':
       return null
   }

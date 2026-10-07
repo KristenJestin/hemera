@@ -246,10 +246,15 @@ describe('The pages', () => {
     )
   })
 
-  test('a new Project’s setup: its page, its trail the Project then Setup', () => {
-    const markup = drawn({ route: { kind: 'projectSetup', id: 'acme' } })
+  test('a new Project’s setup over the Project’s page, which the trail names alone', () => {
+    const markup = drawn({
+      route: { kind: 'projectSetup', id: 'acme' },
+      project: { kind: 'ready', project: ACME },
+    })
     expect(markup).toContain('The setup of the Project')
-    expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Setup/)
+    // The Project's own page stands behind it.
+    expect(markup).toContain('<h1')
+    expect(markup).not.toMatch(/aria-label="Where you are".*Setup/)
   })
 })
 

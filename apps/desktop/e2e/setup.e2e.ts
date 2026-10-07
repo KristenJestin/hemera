@@ -92,7 +92,8 @@ describe('A first launch, and a new Project set up by its agent', () => {
     await adding.$('button=Add acme').waitForClickable()
     await adding.$('button=Add acme').click()
     await expect(adding).not.toBeExisting()
-    await expect($('main h1')).toHaveText('New Project')
+    // The setup takes the window over, named after the Project; not a page of it.
+    await expect($('[data-setup-takeover]')).toHaveText(expect.stringContaining('Setting up acme'))
     const card = $('[data-setup-card="repositories"]')
     await expect(card).toHaveText(expect.stringContaining('services/web'))
     await expect(card).toHaveAttribute('data-card-state', 'proposed')
@@ -104,7 +105,8 @@ describe('A first launch, and a new Project set up by its agent', () => {
       'data-card-state',
       'accepted',
     )
-    await $('button=Create the Project').click()
+    await $('[data-setup-takeover]').$('button=Done').click()
+    await expect($('[data-setup-takeover]')).not.toBeExisting()
     await expect($('main h1')).toHaveText('acme', { containing: true })
     await settingsOf('acme')
     await expect($('[data-repository="services/web"]')).toBeDisplayed()

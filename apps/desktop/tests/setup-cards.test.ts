@@ -10,6 +10,7 @@ import {
   pendingOf,
   setupAgentOf,
   answerSaid,
+  waitingProposals,
   setUpAgain,
   setupEntriesOf,
   startSetup,
@@ -59,6 +60,13 @@ const CARDS: SetupCard[] = [
     },
   ),
 ]
+
+describe('A setup left for later, in the Project’s settings', () => {
+  test('counts the changes the agent proposes that still wait for an answer', () => {
+    expect(waitingProposals(CARDS)).toBe(3)
+    expect(waitingProposals([])).toBe(0)
+  })
+})
 
 describe('A repository the setup agent proposes', () => {
   test('says only the remote and the base branch the proposal gives', () => {

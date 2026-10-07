@@ -35,6 +35,8 @@ export interface SetupTakeoverProps extends Omit<ProjectSetupProps, 'creating' |
   onFinishLater: () => void
   /** Every proposal answered: the Project's page. */
   onDone: () => void
+  /** It has left the window, once closed: where the window goes next. */
+  onClosed?: (() => void) | undefined
 }
 
 /** How many of the proposals shown have their answer, of how many. */
@@ -172,13 +174,16 @@ const TAKEOVER =
 const SECTION = 'shrink-0 px-8'
 
 export function SetupTakeover(props: SetupTakeoverProps): ReactNode {
-  const { project, open, onFinishLater } = props
+  const { project, open, onFinishLater, onClosed } = props
   const container = useOverlayContainer()
   return (
     <BaseDialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!next) onFinishLater()
+      }}
+      onOpenChangeComplete={(next) => {
+        if (!next) onClosed?.()
       }}
     >
       <BaseDialog.Portal container={container}>
