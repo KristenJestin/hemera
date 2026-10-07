@@ -82,9 +82,12 @@ export const LIMITS: readonly BudgetLimit[] = [
   { id: 'rounds', label: 'Automatic rounds', value: null, fallback: 5 },
 ]
 
-/** What the engine refuses in a limit, in words. */
-export function limitRefusal(value: string | null): string | undefined {
+/** What the engine refuses in a limit, in words: the cap is from 1 to 6. */
+export function limitRefusal(id: string, value: string | null): string | undefined {
   if (value === null) return undefined
+  if (id === 'cap') {
+    return /^[1-6]$/.test(value.trim()) ? undefined : 'Write a whole number from 1 to 6.'
+  }
   return /^[1-9]\d{0,2}$/.test(value.trim()) ? undefined : 'Write a whole number from 1 to 999.'
 }
 

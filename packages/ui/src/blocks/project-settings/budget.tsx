@@ -34,8 +34,8 @@ export interface BudgetSectionProps {
   loading?: boolean | undefined
   /** What a field now holds; null once it is emptied. */
   onLimit: (id: string, value: string | null) => void
-  /** What the engine refuses in a value, in words; undefined for nothing. */
-  refusalOf: (value: string | null) => string | undefined
+  /** What the engine refuses in a field's value, in words; undefined for nothing. */
+  refusalOf: (id: string, value: string | null) => string | undefined
 }
 
 const GROUP = 'flex flex-col gap-3 p-4'
@@ -53,14 +53,14 @@ function LimitField({
 }: {
   limit: BudgetLimit
   onLimit: (id: string, value: string | null) => void
-  refusalOf: (value: string | null) => string | undefined
+  refusalOf: (id: string, value: string | null) => string | undefined
 }): ReactNode {
   return (
     <Input
       label={limit.label}
       placeholder={String(limit.fallback)}
       value={limit.value ?? ''}
-      error={refusalOf(limit.value)}
+      error={refusalOf(limit.id, limit.value)}
       onValueChange={(value) => onLimit(limit.id, value.trim() === '' ? null : value)}
       trailing={
         limit.value === null ? undefined : (

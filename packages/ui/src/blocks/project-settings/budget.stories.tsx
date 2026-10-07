@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { LIMITS, limitRefusal } from './agent-settings-fixtures.ts'
 import { type BudgetLimit, BudgetSection, type BudgetSectionProps } from './budget.tsx'
@@ -66,6 +66,16 @@ export const Refused: Story = {
     const rounds = canvas.getByRole('textbox', { name: 'Automatic rounds' })
     await userEvent.type(rounds, 'many')
     expect(await canvas.findByText('Write a whole number from 1 to 999.')).toBeVisible()
+  },
+}
+
+/** The cap has its own bounds: from one to six sub-agents at once. */
+export const CapRefused: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Sub-agents at once' }), '7')
+    // The refusal grows in under its field.
+    await waitFor(() => expect(canvas.getByText('Write a whole number from 1 to 6.')).toBeVisible())
   },
 }
 
