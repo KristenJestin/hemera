@@ -1,7 +1,7 @@
 /**
  * A first launch and a new Project's setup in the real application (#53), with the headless
- * suite's agent as the setup agent: the first launch with no Project, the agents of this machine
- * and the ways in; Acme added from a folder that is not a repository and holds one Hemera does not
+ * suite's agent as the setup agent: the first launch with no Project, its empty state and the two
+ * ways in; Acme added from a folder that is not a repository and holds one Hemera does not
  * find; the setup agent's card for it, which Accept all declares; a command added to Never run,
  * which the agent is then refused in a Chat; and the cap set to one, which
  * `setup.restarted.e2e.ts` finds again after Hemera starts anew.
@@ -70,7 +70,7 @@ describe('A first launch, and a new Project set up by its agent', () => {
     if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
   })
 
-  it('opens on the first launch: the agents of this machine and the ways in', async () => {
+  it('opens on the first launch: the empty state and the two ways in', async () => {
     repository(join(ACME, 'services', 'web'))
     await waitForEngine()
     await designSize()
@@ -78,11 +78,9 @@ describe('A first launch, and a new Project set up by its agent', () => {
       async (_, script) => await globalThis.hemeraProbe?.scriptAgent(script),
       PROPOSES,
     )
-    await expect($('main h1')).toHaveText('Welcome to Hemera')
-    await expect($('section[aria-label="Agents on this machine"]')).toHaveText(
-      expect.stringContaining('Claude Code'),
-    )
+    await expect($('main')).toHaveText(expect.stringContaining('No Project yet'))
     await expect($('button*=Add a Project folder')).toBeDisplayed()
+    await expect($('button*=Create a new Project')).toBeDisplayed()
   })
 
   it('adds Acme from its folder, and its setup page opens with the agent’s card', async () => {

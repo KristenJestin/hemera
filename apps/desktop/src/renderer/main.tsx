@@ -198,13 +198,7 @@ function Application() {
         )
       }
       firstLaunch={
-        <FirstLaunchRoute
-          link={link}
-          engineReady={ready}
-          copy={SETTINGS_TOOLS.copy}
-          onAddProject={() => setAdding(true)}
-          onAddKey={() => goTo({ kind: 'settings', section: 'hemera-auto' })}
-        />
+        <FirstLaunchRoute link={link} engineReady={ready} onAddProject={() => setAdding(true)} />
       }
       appSettings={
         <AppSettingsPage
