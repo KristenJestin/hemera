@@ -41,7 +41,7 @@ import {
   withoutNever,
   type LatestWrite,
 } from './project-agents.ts'
-import { useRead } from './use-read.ts'
+import { refusedOf, Unread, useRead, valueOf } from './use-read.tsx'
 
 export const AGENT_SECTIONS = ['never', 'models', 'budget', 'instructions'] as const
 export type AgentSectionId = (typeof AGENT_SECTIONS)[number]
@@ -151,7 +151,12 @@ function NeverFoot({
 
 function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartProps): ReactNode {
   const read = useCallback((ready: Link) => ready.neverList(projectId), [projectId])
-  const [entries, setEntries, reread] = useRead<ReadonlyArray<NeverEntry>>(link, engineReady, read)
+  const [entriesRead, setEntries, reread] = useRead<ReadonlyArray<NeverEntry>>(
+    link,
+    engineReady,
+    read,
+  )
+  const entries = valueOf(entriesRead)
   const written = useLatest()
   /** Why the engine refused the last change, in words. */
   const [error, setError] = useState<string | undefined>(undefined)
@@ -217,6 +222,9 @@ function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartP
   // A dialog left open over a section that is no longer shown closes with it.
   useEffect(() => () => show(null), [show])
 
+  if (entriesRead.kind === 'failed') {
+    return <Unread title="Never run" sentence={entriesRead.sentence} onRetry={reread} />
+  }
   return (
     <NeverSection
       lines={neverLinesOf(entries ?? [], catalogue)}
@@ -230,10 +238,26 @@ function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartP
 
 function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const readRoles = useCallback((ready: Link) => ready.roleModels(projectId), [projectId])
-  const [roles, , rereadRoles] = useRead<ReadonlyArray<RoleModels>>(link, engineReady, readRoles)
-  const [appRoles] = useRead<ReadonlyArray<RoleModels>>(link, engineReady, readAppRoles)
-  const [agents] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
-  const [marks, , rereadMarks] = useRead<ReadonlyArray<ModelMark>>(link, engineReady, readMarks)
+  const [rolesRead, , rereadRoles] = useRead<ReadonlyArray<RoleModels>>(
+    link,
+    engineReady,
+    readRoles,
+  )
+  const [appRolesRead, , rereadAppRoles] = useRead<ReadonlyArray<RoleModels>>(
+    link,
+    engineReady,
+    readAppRoles,
+  )
+  const [agentsRead, , rereadAgents] = useRead<ReadonlyArray<AgentState>>(
+    link,
+    engineReady,
+    readAgents,
+  )
+  const [marksRead, , rereadMarks] = useRead<ReadonlyArray<ModelMark>>(link, engineReady, readMarks)
+  const roles = valueOf(rolesRead)
+  const appRoles = valueOf(appRolesRead)
+  const agents = valueOf(agentsRead)
+  const marks = valueOf(marksRead)
   const written = useLatest()
   /** Why the engine refused the last change, in words. */
   const [error, setError] = useState<string | undefined>(undefined)
@@ -258,6 +282,21 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
       )
   }
   const roleOf = (displayName: string) => roles?.find((one) => one.displayName === displayName)
+  const unread = refusedOf([rolesRead, appRolesRead, agentsRead, marksRead])
+  if (unread !== null) {
+    return (
+      <Unread
+        title="The models by role"
+        sentence={unread}
+        onRetry={() => {
+          rereadRoles()
+          rereadAppRoles()
+          rereadAgents()
+          rereadMarks()
+        }}
+      />
+    )
+  }
   return (
     <RoleModelsSection
       roles={projectRoleModelsOf(roles ?? [], appRoles ?? [])}
@@ -302,7 +341,8 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
 
 function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const read = useCallback((ready: Link) => ready.projectLimits(projectId), [projectId])
-  const [limits, setLimits] = useRead<ProjectLimits>(link, engineReady, read)
+  const [limitsRead, setLimits, reread] = useRead<ProjectLimits>(link, engineReady, read)
+  const limits = valueOf(limitsRead)
   /** What each field holds while it is typed in, before it is written. */
   const [typed, setTyped] = useState<ReadonlyMap<string, string | null>>(new Map())
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -321,6 +361,9 @@ function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
   // Leaving the section writes what was typed rather than dropping it.
   useEffect(() => () => flush(), [])
   const rows = limits === null ? [] : limitRowsOf(limits)
+  if (limitsRead.kind === 'failed') {
+    return <Unread title="Cap and budget" sentence={limitsRead.sentence} onRetry={reread} />
+  }
   return (
     <BudgetSection
       limits={rows.map((row) =>
@@ -376,8 +419,27 @@ function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
 
 function InstructionsPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const read = useCallback((ready: Link) => ready.instructionFiles(projectId), [projectId])
-  const [rows] = useRead(link, engineReady, read)
-  const [agents] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
+  const [rowsRead, , rereadRows] = useRead(link, engineReady, read)
+  const [agentsRead, , rereadAgents] = useRead<ReadonlyArray<AgentState>>(
+    link,
+    engineReady,
+    readAgents,
+  )
+  const rows = valueOf(rowsRead)
+  const agents = valueOf(agentsRead)
+  const unread = refusedOf([rowsRead, agentsRead])
+  if (unread !== null) {
+    return (
+      <Unread
+        title="The instruction files"
+        sentence={unread}
+        onRetry={() => {
+          rereadRows()
+          rereadAgents()
+        }}
+      />
+    )
+  }
   const shown = instructionsOf(rows ?? [], agents ?? [])
   return (
     <InstructionsSection

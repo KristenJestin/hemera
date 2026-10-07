@@ -10,7 +10,7 @@ import { FirstLaunch } from '@hemera/ui'
 import type { ReactNode } from 'react'
 
 import type { Link } from './link.ts'
-import { useRead } from './use-read.ts'
+import { useRead, valueOf } from './use-read.tsx'
 
 const readAgents = (link: Link) => link.agents()
 
@@ -26,7 +26,8 @@ export function FirstLaunchRoute({
   engineReady,
   onAddProject,
 }: FirstLaunchRouteProps): ReactNode {
-  const [agents, , reread] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
+  const [read, , reread] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
+  const agents = valueOf(read)
   return (
     <FirstLaunch
       git
