@@ -90,17 +90,21 @@ describe('Hemera’s base layer', () => {
 describe('The three layers', () => {
   test('base, then the role, then the Project’s files, an empty layer left out', () => {
     const files = [{ repository: 'api', file: 'CLAUDE.md' as const, text: 'Run pnpm test.' }]
-    const text = instructionsText('BASE', TEST_ROLE, files, 'en')
+    const text = instructionsText('BASE', TEST_ROLE, files, 'en', 'en')
     expect(text.split('\n\n---\n\n')).toEqual([
       'BASE',
       TEST_ROLE.template,
       '# The Project’s own instructions\n\n## api/CLAUDE.md\n\nRun pnpm test.',
     ])
-    expect(instructionsText('BASE', TEST_ROLE, [], 'en').split('\n\n---\n\n')).toHaveLength(2)
+    expect(instructionsText('BASE', TEST_ROLE, [], 'en', 'en').split('\n\n---\n\n')).toHaveLength(2)
     const speaking = { ...TEST_ROLE, template: 'Answer in {user.language}, briefly.' }
-    expect(instructionsText('BASE', speaking, [], 'fr')).toContain('Answer in French, briefly.')
+    expect(instructionsText('BASE', speaking, [], 'fr', 'en')).toContain(
+      'Answer in French, briefly.',
+    )
+    const writing = { ...TEST_ROLE, template: 'Write in {project.specLanguage}.' }
+    expect(instructionsText('BASE', writing, [], 'en', 'de')).toContain('Write in German.')
     expect(
-      instructionsText('BASE', { ...TEST_ROLE, projectLayer: false }, files, 'en').split(
+      instructionsText('BASE', { ...TEST_ROLE, projectLayer: false }, files, 'en', 'en').split(
         '\n\n---\n\n',
       ),
     ).toHaveLength(2)

@@ -82,7 +82,12 @@ const engine = (
         backupFolders: BACKUP_FOLDERS,
         reconciliationSteps: RECONCILIATION_STEPS,
         secrets,
-        sessions: { starter: agentStarterLayer(launch) },
+        sessions: {
+          starter: agentStarterLayer(launch),
+          // A new mission starts its Planner on its own (#85); the headless end-to-end suite's
+          // missions are fixtures of other tickets, and never start a real agent.
+          plannerStarts: !headless(process.env),
+        },
       },
       log,
     )

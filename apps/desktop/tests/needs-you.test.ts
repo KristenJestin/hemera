@@ -122,6 +122,7 @@ const mission = (id: string, key: string, updatedAt: string): Mission => ({
   needs: [],
   cleanup: null,
   unstopped: [],
+  triage: null,
   createdAt: '2026-10-05T08:00:00.000Z',
   updatedAt,
 })

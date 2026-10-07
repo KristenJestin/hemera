@@ -57,6 +57,7 @@ describe('Models by role', () => {
     expect(roles.map((role) => role.role)).toEqual([
       'chat',
       'setup',
+      'planner',
       'builder',
       'helper',
       'code-reviewer',

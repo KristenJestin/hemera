@@ -73,6 +73,14 @@ import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
 import { SESSION_STATES } from '@hemera/core/domain'
 import { createStart, searchStart } from './start/field.ts'
+import { giveVision, keepPlanning, specChanges } from './planning/calls.ts'
+import {
+  changesSince,
+  markRead,
+  readSpec,
+  setSpecLanguage,
+  specLanguageOf,
+} from './planning/store.ts'
 import {
   createWorkspace,
   getWorkspace,
@@ -411,6 +419,23 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'start.search': ({ projectId, text }) =>
       follow(searchStart(projectId, text)).pipe(observedStream('start.search', log)),
     'start.create': (asked) => use(createStart(asked)).pipe(observed('start.create', log)),
+    // Planning (#85): the Spec the Planner writes, and the user's side of it.
+    'planning.spec': ({ missionId }) =>
+      use(readSpec(missionId)).pipe(observed('planning.spec', log)),
+    'planning.changesSince': ({ missionId, version: since }) =>
+      use(changesSince(missionId, since)).pipe(observed('planning.changesSince', log)),
+    'planning.markRead': ({ missionId, version: read }) =>
+      use(markRead(missionId, read)).pipe(observed('planning.markRead', log)),
+    'planning.addVision': ({ missionId, text }) =>
+      use(giveVision(missionId, text)).pipe(observed('planning.addVision', log)),
+    'planning.keepAfterTriage': ({ missionId }) =>
+      use(keepPlanning(missionId)).pipe(observed('planning.keepAfterTriage', log)),
+    'planning.changed': ({ missionId }) =>
+      follow(specChanges(missionId)).pipe(observedStream('planning.changed', log)),
+    'planning.specLanguage': ({ projectId }) =>
+      use(specLanguageOf(projectId)).pipe(observed('planning.specLanguage', log)),
+    'planning.setSpecLanguage': ({ projectId, language }) =>
+      use(setSpecLanguage(projectId, language)).pipe(observed('planning.setSpecLanguage', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(machineAgentsLayer()))
 }

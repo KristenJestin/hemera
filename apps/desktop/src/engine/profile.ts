@@ -116,13 +116,17 @@ import { type Cap, capLayer } from './sessions/cap.ts'
 import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
 import { type TicketSearch, noTicketSearch } from './start/tickets.ts'
+import { type SpecBoard, specBoardLayer } from './planning/board.ts'
+import { PLANNING_MAPPERS } from './planning/journal.ts'
+import { projectSpecLanguages } from './planning/store.ts'
+import { type PlannerWake, plannerLayer } from './planning/wake.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
 import { replacementGuardLayer } from './sessions/guard.ts'
 import { SESSION_NEEDS } from './sessions/needs.ts'
 import { BUDGET_NEEDS, budgetHandler } from './budget.ts'
-import { type SpecLanguage, type TesterMode, englishSpecs } from './sessions/ports.ts'
+import type { SpecLanguage, TesterMode } from './sessions/ports.ts'
 import { SessionPost, sessionPostLayer } from './sessions/post.ts'
 import { refusedLine, replacedLine, sessionInstructionsLayer } from './sessions/provider.ts'
 import {
@@ -186,6 +190,8 @@ export interface SessionsParts {
   readonly testerMode?: Layer.Layer<TesterMode>
   /** Shorter bounds for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings>
+  /** Whether a new mission starts its Planner on its own (#85); off unless said. */
+  readonly plannerStarts?: boolean
 }
 
 /** No way to start an agent: a Profile started without the engine's link to main. */
@@ -231,6 +237,8 @@ export type EngineServices =
   | AcpTraces
   | TesterFindings
   | TicketSearch
+  | PlannerWake
+  | SpecBoard
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -315,6 +323,7 @@ export const startProfile = (
       reconciliationStepsLayer(parts.reconciliationSteps),
       parts.liveMissions ?? noLiveMissions,
       parts.tickets ?? noTicketSearch,
+      specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
       sessionTurnsLayer,
@@ -376,6 +385,7 @@ export const startProfile = (
         ['session.replaced', replacedLine],
         ['session.refused', refusedLine],
         ['budget.refused', refusedLine],
+        ...PLANNING_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -387,7 +397,11 @@ export const startProfile = (
     }
     const roles = roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])])
     // The Chats and the setup's runs over the role sessions, over the agents' runtime, over the tools.
-    const sessionsLayers = Layer.mergeAll(chatsLayer, setupLayer).pipe(
+    const sessionsLayers = Layer.mergeAll(
+      chatsLayer,
+      setupLayer,
+      plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false }),
+    ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
@@ -407,7 +421,7 @@ export const startProfile = (
           replacementGuardLayer.pipe(Layer.provide(roles)),
           capLayer.pipe(Layer.provide(postLayer)),
           modelChoiceLayer,
-          parts.sessions?.specLanguage ?? englishSpecs,
+          parts.sessions?.specLanguage ?? projectSpecLanguages,
           parts.sessions?.testerMode ?? testerModeLayer,
           postLayer,
         ),

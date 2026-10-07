@@ -138,15 +138,19 @@ export function projectLayer(files: ReadonlyArray<InstructionFile>): string {
 
 /**
  * The three layers, in their order, an empty one left out. The role's layer takes the user's
- * language where it names it.
+ * language and the Spec language where it names them.
  */
 export function instructionsText(
   base: string,
   role: RoleEntry,
   files: ReadonlyArray<InstructionFile>,
   userLanguage: string,
+  specLanguage: string,
 ): string {
-  const template = role.template.replaceAll('{user.language}', languageName(userLanguage)).trim()
+  const template = role.template
+    .replaceAll('{user.language}', languageName(userLanguage))
+    .replaceAll('{project.specLanguage}', languageName(specLanguage))
+    .trim()
   return [base, template, role.projectLayer ? projectLayer(files) : '']
     .filter((layer) => layer !== '')
     .join('\n\n---\n\n')

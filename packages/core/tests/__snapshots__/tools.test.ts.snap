@@ -729,6 +729,260 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Read your mission's Spec, with the version of every section, requirement and scenario: what a write names as its base_version. Long Specs come in pages with a cursor.",
+      "properties": {
+        "cursor": {
+          "description": "Where to resume, as the previous page gave it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "section": {
+          "description": "Only this section (\`why\`, \`goals\`, \`impact\`, \`requirements\`, \`decisions\`, \`risks\`, \`migration\`, \`open_questions\`); the whole Spec without it.",
+          "enum": [
+            "why",
+            "goals",
+            "impact",
+            "decisions",
+            "risks",
+            "migration",
+            "open_questions",
+            "requirements",
+          ],
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "spec_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write one prose section of the Spec, whole. Refused on a stale base_version, outside Planning, and once the Spec is frozen.",
+      "properties": {
+        "base_version": {
+          "description": "The version of the section you read (0 for one never written): a section changed since is refused with its current text.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "content": {
+          "description": "What the whole section becomes, in Markdown, in the Spec language. Write "None." when there is nothing to say.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "section": {
+          "description": "The prose section: \`why\`, \`goals\`, \`impact\`, \`decisions\`, \`risks\`, \`migration\` or \`open_questions\`.",
+          "enum": [
+            "why",
+            "goals",
+            "impact",
+            "decisions",
+            "risks",
+            "migration",
+            "open_questions",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "section",
+        "content",
+        "base_version",
+      ],
+      "type": "object",
+    },
+    "name": "spec_write_section",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write one requirement and its scenarios as a whole: a delta against the living spec, each scenario WHEN … THEN ….",
+      "properties": {
+        "base_version": {
+          "description": "For an existing requirement: its version as you read it.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "delta": {
+          "description": "What it does to the living spec: \`added\`, \`modified\` or \`removed\`.",
+          "enum": [
+            "added",
+            "modified",
+            "removed",
+          ],
+          "type": "string",
+        },
+        "domain": {
+          "description": "The domain of the living spec it belongs to (\`invoices\`).",
+          "minLength": 1,
+          "type": "string",
+        },
+        "id": {
+          "description": "The requirement (\`R2\`) to change; a new one without it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "living_ref": {
+          "description": "For \`modified\` or \`removed\`: the living requirement it changes.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "living_version": {
+          "description": "The version of that living requirement when you read it.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "scenarios": {
+          "description": "Its scenarios, in order, as a whole: one without id is new, one left out is removed. Ids are never reused.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "description": "The scenario (\`R1.S2\`) to keep or change; a new one without it.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "then": {
+                "description": "THEN: the observable result.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "when": {
+                "description": "WHEN: the situation and the action, concrete enough to become a test.",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "when",
+              "then",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "text": {
+          "description": "The requirement, in one or two sentences, in the Spec language.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "domain",
+        "delta",
+        "text",
+        "scenarios",
+      ],
+      "type": "object",
+    },
+    "name": "requirement_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Mark a requirement removed from the Spec. Its id is never reused.",
+      "properties": {
+        "base_version": {
+          "description": "Its version as you read it.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "id": {
+          "description": "The requirement (\`R2\`).",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "base_version",
+      ],
+      "type": "object",
+    },
+    "name": "requirement_remove",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Set the mission's title and its type.",
+      "properties": {
+        "title": {
+          "description": "What the mission delivers, in a few words.",
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string",
+        },
+        "type": {
+          "description": "The type, information only: \`feature\`, \`bug\` or \`maintenance\`.",
+          "enum": [
+            "feature",
+            "bug",
+            "maintenance",
+          ],
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "mission_describe",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Answer that the input is not new work, instead of drafting. The user then opens the other mission, drops this one, or keeps planning it. End your turn after it.",
+      "properties": {
+        "kind": {
+          "description": "\`existing_mission\` (another mission of this Project holds it), \`delivered\` (already in the product) or \`too_small\` (to do in the Chat).",
+          "enum": [
+            "existing_mission",
+            "delivered",
+            "too_small",
+          ],
+          "type": "string",
+        },
+        "ref": {
+          "description": "The mission key (\`ACME-3\`), or what already delivers it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "Why, in a few sentences, in the language of the user.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "triage_answer",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Declare the Spec complete. Hemera checks it: a refusal lists everything to fix, and nothing is recorded.",
+      "properties": {
+        "why": {
+          "description": "Why a Builder could build it without guessing, in the language of the user.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "why",
+      ],
+      "type": "object",
+    },
+    "name": "declare_complete",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

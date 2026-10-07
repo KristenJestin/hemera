@@ -105,6 +105,8 @@ export const projects = sqliteTable(
     budgetLaunches: integer('budget_launches').notNull().default(8),
     budgetAttempts: integer('budget_attempts').notNull().default(30),
     budgetRounds: integer('budget_rounds').notNull().default(3),
+    /** The language its Specs are written in, a BCP 47 tag (#85); copied into each new Spec. */
+    specLanguage: text('spec_language').notNull().default('en'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),
@@ -391,6 +393,15 @@ export const missions = sqliteTable(
       onDelete: 'set null',
     }),
     idempotencyKey: text('idempotency_key'),
+    /**
+     * The Planner's triage answer (#85), when the input was not new work: its kind, what it points
+     * to, why, and whether it still waits on the user (`pending`) or they kept the mission (`kept`).
+     */
+    triageKind: text('triage_kind'),
+    triageRef: text('triage_ref').$type<Masked<string>>(),
+    triageText: text('triage_text').$type<Masked<string>>(),
+    triageState: text('triage_state'),
+    triagedAt: text('triaged_at'),
     stage: text('stage').notNull(),
     round: integer('round').notNull(),
     cleanup: text('cleanup'),
@@ -1029,4 +1040,132 @@ export const setupCards = sqliteTable(
     decidedAt: text('decided_at'),
   },
   (table) => [index('setup_cards_by_project').on(table.projectId, table.createdAt, table.position)],
+)
+
+/**
+ * A mission's Spec (#85), one per mission: its version, bumped by every write; its language, copied
+ * from its Project's when the mission was created; the version last declared complete; whether it
+ * is frozen (#92); the next number its requirements take, never reused; and whether the Planner set
+ * the mission's title and type.
+ */
+export const specs = sqliteTable('specs', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull().default(0),
+  language: text('language').notNull(),
+  declaredCompleteVersion: integer('declared_complete_version'),
+  frozen: integer('frozen', { mode: 'boolean' }).notNull().default(false),
+  frozenAt: text('frozen_at'),
+  nextRequirement: integer('next_requirement').notNull().default(1),
+  describedAt: text('described_at'),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** A prose section of a Spec, once written: its Markdown, its own version, who wrote it, when. */
+export const specSections = sqliteTable(
+  'spec_sections',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.name] })],
+)
+
+/**
+ * A requirement of a Spec: `R1`, `R2`… in the order written, never reused; a delta against the
+ * living spec's domain, the living requirement it changes and its version then (#93 checks both);
+ * its own version; removed or not; and the next number its scenarios take.
+ */
+export const specRequirements = sqliteTable(
+  'spec_requirements',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    rank: integer('rank').notNull(),
+    domain: text('domain').$type<Masked<string>>().notNull(),
+    delta: text('delta').notNull(),
+    livingRef: text('living_ref').$type<Masked<string>>(),
+    livingVersion: integer('living_version'),
+    text: text('text').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull().default(false),
+    nextScenario: integer('next_scenario').notNull().default(1),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A scenario of a requirement: `R1.S1`… never reused; WHEN and THEN; its rank and version. A
+ * scenario left out of a write is kept, removed. Its Proof block is #90's.
+ */
+export const specScenarios = sqliteTable(
+  'spec_scenarios',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    requirementId: text('requirement_id').notNull(),
+    id: text('id').notNull(),
+    whenText: text('when_text').$type<Masked<string>>().notNull(),
+    thenText: text('then_text').$type<Masked<string>>().notNull(),
+    rank: integer('rank').notNull(),
+    version: integer('version').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * One row per item a write changed: the Spec version it made, the item (a section's name, a
+ * requirement's or a scenario's id), its text before and after (null for none), the session.
+ */
+export const specChanges = sqliteTable(
+  'spec_changes',
+  {
+    sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    item: text('item').notNull(),
+    before: text('before').$type<Masked<string>>(),
+    after: text('after').$type<Masked<string>>(),
+    sessionId: text('session_id').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('spec_changes_by_mission').on(table.missionId, table.version)],
+)
+
+/** The Spec version the user last marked read. */
+export const specReads = sqliteTable('spec_reads', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  readAt: text('read_at').notNull(),
+})
+
+/** The user's vision of a mission, given at any time in Planning, delivered to the Planner. */
+export const specVisions = sqliteTable(
+  'spec_visions',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    text: text('text').$type<Masked<string>>().notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('spec_visions_by_mission').on(table.missionId, table.at)],
 )

@@ -54,14 +54,21 @@ describe('Each role has exactly its tools', () => {
         'commands_list',
         'commands_output',
         'commands_run',
+        'declare_complete',
         'fs_list',
         'fs_read',
         'journal_add',
         'memory_read',
+        'mission_describe',
         'note_add',
         'notes_condense',
         'now_set',
+        'requirement_remove',
+        'requirement_write',
         'search',
+        'spec_read',
+        'spec_write_section',
+        'triage_answer',
       ],
     ],
     [
@@ -186,6 +193,7 @@ describe('The table says what each tool does to the world', () => {
       'missions_list',
       'search',
       'setup_read',
+      'spec_read',
     ])
   })
 

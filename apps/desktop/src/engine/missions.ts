@@ -96,6 +96,7 @@ import {
 } from './storage/database.ts'
 import { memoryNext, missionMarks, missionStops, missions, projects } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
+import { newSpec, triageOf } from './planning/store.ts'
 
 /** The longest idea sentence a mission keeps. */
 export const MAX_IDEA_LENGTH = 2000
@@ -282,12 +283,14 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
             stage,
             pendingNeeds: needs.length,
             sessionWorking: activity.sessionWorking,
-            questionWaiting: activity.questionWaiting,
+            // A triage answer waits on the user until they keep, open or cancel (#85).
+            questionWaiting: activity.questionWaiting || row.triageState === 'pending',
             marks: own.map((one) => one.mark),
           }),
           needs,
           cleanup: row.cleanup === 'awaiting-confirmation' ? row.cleanup : null,
           unstopped: stops.filter((stop) => stop.missionId === row.id).map((stop) => stop.stopper),
+          triage: triageOf(row),
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
         } satisfies Mission
@@ -499,6 +502,8 @@ export const createMission = (asked: NewMission, creation: MissionCreation = {})
             updatedAt: at,
           })
           .pipe(Effect.mapError(refusedWhile('writing the mission')))
+        // Its Spec, in the Project's Spec language as it is now (#85).
+        yield* newSpec(transaction, id, project.id)
         const next = MaskedText.make(PLANNING_STARTS)
         yield* transaction
           .insert(memoryNext)

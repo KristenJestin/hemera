@@ -80,7 +80,7 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
     const owner = yield* ownerNamed(session)
     const preferences = yield* readPreferences
     const specLanguage =
-      owner.projectId === null ? 'en' : yield* (yield* SpecLanguage)(owner.projectId)
+      owner.projectId === null ? 'en' : yield* (yield* SpecLanguage)(session.owner)
     const testerMode = owner.projectId === null ? null : yield* (yield* TesterMode)(owner.projectId)
     const base = renderBase({
       owner: owner.said,
@@ -102,7 +102,7 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
             ),
           )
         : []
-    const text = instructionsText(base, role, files, preferences.userLanguage)
+    const text = instructionsText(base, role, files, preferences.userLanguage, specLanguage)
     yield* addToThread(sessionId, 'instructions', text)
     return text
   })

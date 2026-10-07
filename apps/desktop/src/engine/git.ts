@@ -19,6 +19,7 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+import { basename, dirname } from 'node:path'
 
 import { type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
@@ -241,6 +242,8 @@ export interface GitService {
   readonly worktrees: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
   /** The files a removal would lose: changed, staged, unmerged or untracked, relative to it. */
   readonly changedFiles: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
+  /** Whether a file is modified, added or untracked in its repository; false outside one. */
+  readonly fileChanged: (path: string) => Effect.Effect<boolean, GitRefusal>
   /** How many commits HEAD has that `base` has not, and the other way round. */
   readonly aheadBehind: (folder: string, base: string) => Effect.Effect<AheadBehind, GitRefusal>
 }
@@ -396,6 +399,23 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--no-renames'],
         'read',
       ).pipe(Effect.map(changedFilesOf)),
+    fileChanged: (path) =>
+      run(
+        dirname(path),
+        [
+          '--no-optional-locks',
+          'status',
+          '--porcelain=v1',
+          '-z',
+          '--untracked-files=all',
+          '--',
+          basename(path),
+        ],
+        'read',
+      ).pipe(
+        Effect.map((printed) => printed !== ''),
+        Effect.catchTag('GitFailed', () => Effect.succeed(false)),
+      ),
     aheadBehind: (folder, base) =>
       run(
         folder,
