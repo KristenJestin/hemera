@@ -394,6 +394,17 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('planning.setSpecLanguage', log),
       ),
+    'resources.list': (request) =>
+      engine['resources.list'](request).pipe(closedAs(gone), observed('resources.list', log)),
+    'resources.save': (request) =>
+      engine['resources.save'](request).pipe(closedAs(gone), observed('resources.save', log)),
+    'resources.holders': () =>
+      engine['resources.holders']().pipe(closedAs(gone), observed('resources.holders', log)),
+    'resources.changed': () =>
+      engine['resources.changed']().pipe(
+        streamClosedAs(gone),
+        observedStream('resources.changed', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

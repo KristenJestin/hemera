@@ -67,6 +67,8 @@ import { type Chat, chatChanges, chatsOf, renameChat, transcriptOf } from './cha
 import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
 import { Setup } from './setup/service.ts'
 import { TesterFindings } from './tester/findings.ts'
+import { listResources, saveResources } from './resources/declarations.ts'
+import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
@@ -355,6 +357,18 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(TesterFindings.use((findings) => Effect.succeed(findings.folder))).pipe(
         observed('tester.folder', log),
       ),
+    'resources.list': ({ projectId }) =>
+      use(listResources(projectId)).pipe(observed('resources.list', log)),
+    'resources.save': ({ projectId, resources }) =>
+      use(saveResources(projectId, resources)).pipe(observed('resources.save', log)),
+    'resources.holders': () =>
+      use(ExclusiveResources.use((reservations) => reservations.holders)).pipe(
+        observed('resources.holders', log),
+      ),
+    'resources.changed': () =>
+      follow(
+        Stream.unwrap(ExclusiveResources.useSync((reservations) => reservations.changes)),
+      ).pipe(observedStream('resources.changed', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

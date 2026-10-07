@@ -11,7 +11,9 @@
  *
  * A command marked "ask before running" passes through the `AskBeforeRunning` port first, whoever
  * starts it, and waits for permission meanwhile. A run is never Hemera's agents' gate's to judge:
- * the user starts it, or a rule the user recorded does.
+ * the user starts it, or a rule the user recorded does. A run of a mission whose command is declared
+ * on an exclusive resource then waits, `starting`, until its mission holds the resource and it is
+ * ready (#88); a stop meanwhile takes it out of the queue.
  *
  * The runs going now are held in memory; their rows are written at each change of state, so a
  * list read after a restart shows what ran and how it ended. A run an engine that stopped left
@@ -148,6 +150,28 @@ interface RunsState {
   readonly settings: RunsSettings
   /** What a run printed, masked as the engine's registry of known secrets masks it. */
   readonly mask: (text: string) => Masked<string>
+  /** The reservations of the exclusive resources, once they are built (#88); none until then. */
+  readonly reservations: { current: RunReservations }
+}
+
+/** The reservation a run waited for was lost before it was ready, and why. */
+export class ReservationLost extends Schema.TaggedError<ReservationLost>()('ReservationLost', {
+  reason: Schema.String,
+}) {}
+
+/** What a run of a declared command waits for: its mission's reservations, left at its end. */
+export interface RunReservation {
+  /**
+   * Waits until its mission holds every resource its command is declared on, each ready. Each one
+   * taken is left once `ended` is done, promised in the very step that takes it, so no stop can
+   * come in between.
+   */
+  readonly wait: (ended: Effect.Effect<void>) => Effect.Effect<void, ReservationLost>
+}
+
+/** The port the reservations fill: what a run waits for, or null when it waits for nothing. */
+export interface RunReservations {
+  readonly enter: (run: Run) => Effect.Effect<RunReservation | null, DatabaseError>
 }
 
 export class Runs extends Context.Service<Runs, RunsState>()('Runs') {}
@@ -215,6 +239,7 @@ export const runsLayer = (log: Log, settings: Partial<RunsSettings> = {}) =>
             settings.agentConfigFolder ?? join(tmpdir(), 'hemera-agents-no-forge-login'),
         },
         mask: secrets.mask,
+        reservations: { current: { enter: () => Effect.succeed(null) } },
       }
     }),
   )
@@ -482,6 +507,13 @@ const launch = (live: Live, asked: Launch) =>
     if (live.stopping) yield* child.stop
   })
 
+/** A run that could not be started once it no longer waited: said, and ended `failed`. */
+const notStarted = <E>(runs: RunsState, live: Live, failure: E) =>
+  Effect.andThen(
+    Effect.sync(() => runs.log(`the run ${live.run.id} was not started: ${said(failure)}`)),
+    endRun(live, 'failed', null, said(failure)),
+  )
+
 /** What a run is asked with: a catalogue command, or a free line in a folder under the place. */
 export interface RunAsked {
   readonly projectId: string
@@ -497,6 +529,13 @@ export interface RunAsked {
   readonly missionId?: string | null
   /** Run at opening: a permission it needs is asked at Project level. */
   readonly atOpen?: boolean
+  /** The reset of a reservation its mission has just taken: it does not wait for it (#88). */
+  readonly reserved?: boolean
+  /**
+   * The intent of the action the run is (CT-09), written as its process launches, in the same
+   * step: a run that waited and never launched leaves none, so nothing is "maybe done" for it.
+   */
+  readonly intent?: Effect.Effect<void, DatabaseError>
 }
 
 /** A line checked for a run: no shell syntax, only template names Hemera fills. */
@@ -616,6 +655,8 @@ export const startRun = (asked: RunAsked) =>
       asked.startedBy === 'agent' && (asked.missionId ?? null) !== null
         ? defended(yield* environmentAt(place), runs.settings.agentConfigFolder)
         : yield* environmentAt(place)
+    const reservation =
+      asked.reserved === true ? null : yield* runs.reservations.current.enter(live.run)
     yield* mutate('recording a run', (transaction) =>
       transaction
         .insert(commandRuns)
@@ -648,10 +689,53 @@ export const startRun = (asked: RunAsked) =>
         ),
     )
     runs.live.set(live.run.id, live)
-    const launching = launch(live, { words, folder, environment, portless })
+    const launched = launch(live, { words, folder, environment, portless })
+    const launching =
+      asked.intent === undefined
+        ? launched
+        : asked.intent.pipe(
+            Effect.matchEffect({
+              onFailure: (failure) => notStarted(runs, live, failure),
+              onSuccess: () => launched,
+            }),
+          )
+    /**
+     * What a run waiting for permission or for its reservation does once it may start: it no
+     * longer waits and starts, at once and whole, so a stop finds it either waiting or started.
+     */
+    const started = Effect.uninterruptible(
+      Effect.andThen(
+        Effect.sync(() => {
+          live.waiting = null
+        }),
+        launching,
+      ),
+    )
+    const proceed =
+      reservation === null
+        ? started
+        : reservation.wait(Deferred.await(live.ended)).pipe(
+            Effect.matchEffect({
+              onFailure: (lost) =>
+                Effect.andThen(
+                  Effect.sync(() => {
+                    live.waiting = null
+                  }),
+                  endRun(live, 'failed', null, `It was not started: ${lost.reason}.`),
+                ),
+              onSuccess: () => started,
+            }),
+          )
 
-    if (command === null || !ask) {
+    if (command === null || (!ask && reservation === null)) {
       yield* launching
+      return live.run
+    }
+    if (!ask) {
+      live.waiting = yield* proceed.pipe(
+        Effect.catch((failure) => notStarted(runs, live, failure)),
+        Effect.forkIn(runs.scope),
+      )
       return live.run
     }
 
@@ -671,20 +755,15 @@ export const startRun = (asked: RunAsked) =>
       .pipe(
         Effect.flatMap((answer) =>
           Effect.gen(function* () {
-            live.waiting = null
             if (answer === 'denied') {
+              live.waiting = null
               return yield* endRun(live, 'failed', null, 'The user did not allow it to run.')
             }
             live.run = { ...live.run, state: 'starting' }
-            yield* launching
+            yield* proceed
           }),
         ),
-        Effect.catch((failure) =>
-          Effect.andThen(
-            Effect.sync(() => runs.log(`the run ${live.run.id} was not started: ${said(failure)}`)),
-            endRun(live, 'failed', null, said(failure)),
-          ),
-        ),
+        Effect.catch((failure) => notStarted(runs, live, failure)),
         Effect.forkIn(runs.scope),
       )
     return live.run
@@ -741,12 +820,10 @@ export const stopRun = (id: string) =>
     if (live === undefined) return yield* getRun(id)
     live.stopping = true
     const waiting = live.waiting
-    if (waiting !== null) {
-      yield* Fiber.interrupt(waiting)
-      yield* endRun(live, 'stopped', null, null)
-    } else if (live.process !== null) {
-      yield* live.process.stop
-    }
+    // A run waiting is interrupted; one that was starting meanwhile has its process to stop.
+    if (waiting !== null) yield* Fiber.interrupt(waiting)
+    if (live.process !== null) yield* live.process.stop
+    else if (waiting !== null) yield* endRun(live, 'stopped', null, null)
     yield* Deferred.await(live.ended)
     return live.run
   })

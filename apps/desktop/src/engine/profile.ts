@@ -81,7 +81,6 @@ import { deliverAnswers, recheckNeeds } from './needs.ts'
 import {
   type ActionRules,
   type EffectfulActions,
-  actionRulesLayer,
   handleIndeterminate,
   settleLeftActions,
 } from './tools/actions.ts'
@@ -136,6 +135,14 @@ import {
   roleRegistryLayer,
 } from './sessions/roles.ts'
 import { type SessionTimings, Sessions, sessionsLayer } from './sessions/service.ts'
+import {
+  ExclusiveResources,
+  RESOURCE_EVENTS,
+  RESOURCE_NEEDS,
+  exclusiveReservations,
+  resourceActionRules,
+  resourceLine,
+} from './resources/reservations.ts'
 import type { ProcessSupervisor } from './supervisor.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
@@ -239,6 +246,7 @@ export type EngineServices =
   | TicketSearch
   | PlannerWake
   | SpecBoard
+  | ExclusiveResources
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -346,6 +354,8 @@ export const startProfile = (
     const postContext = yield* Layer.build(sessionPostLayer)
     const post = Context.get(postContext, SessionPost)
     const postLayer = Layer.succeedContext(postContext)
+    // The reservations of the exclusive resources, and where their needs' answers go (#88).
+    const resources = exclusiveReservations(log)
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -353,6 +363,7 @@ export const startProfile = (
         [SESSION_NEEDS, post.needs],
         [BUDGET_NEEDS, budgetHandler],
         [PERMISSION_REQUESTS, requestsHandler],
+        [RESOURCE_NEEDS, resources.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -386,6 +397,7 @@ export const startProfile = (
         ['session.refused', refusedLine],
         ['budget.refused', refusedLine],
         ...PLANNING_MAPPERS,
+        ...RESOURCE_EVENTS.map((event) => [event, resourceLine] as const),
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -431,6 +443,7 @@ export const startProfile = (
     const layers = sessionsLayers.pipe(
       Layer.provideMerge(toolsLayer(log, version, toolsParts)),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
+      Layer.provideMerge(resources.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
@@ -443,7 +456,9 @@ export const startProfile = (
           parts.askBeforeRunning ?? consent.layer,
         ),
       ),
-      Layer.provideMerge(Layer.merge(profileLayers, parts.actionRules ?? actionRulesLayer())),
+      Layer.provideMerge(
+        (parts.actionRules ?? resourceActionRules(log)).pipe(Layer.provideMerge(profileLayers)),
+      ),
     )
     const opened = yield* Layer.build(layers).pipe(
       Effect.flatMap((context) =>
@@ -554,6 +569,17 @@ export const startProfile = (
       ),
     )
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
+    // The reservations a stop left: those whose mission is no longer in Building are released.
+    yield* run(ExclusiveResources.use((reservations) => reservations.atStart)).pipe(
+      Effect.tap((released) =>
+        released === 0
+          ? Effect.void
+          : Effect.sync(() => log(`released ${String(released)} reservation(s) at start`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the reservations a stop left were not released: ${said(refusal)}`)),
+      ),
+    )
     // No run waits across a restart: the questions of "ask before running" it left are withdrawn.
     yield* run(withdrawLeftConsents).pipe(
       Effect.catch((refusal) =>
@@ -627,6 +653,13 @@ export const startProfile = (
     // answer, and their results handed over; what a stopped engine left is finished first.
     yield* gate.pass.pipe(
       Effect.andThen(run(Effect.scoped(Approvals.use((approvals) => approvals.watch)))),
+      Effect.forkScoped,
+    )
+    // Once automations may run: the reservations are settled, then again at each change (#88).
+    yield* gate.pass.pipe(
+      Effect.andThen(
+        run(Effect.scoped(ExclusiveResources.use((reservations) => reservations.watch))),
+      ),
       Effect.forkScoped,
     )
     // The diagnostic class rotates at the start, then every hour.

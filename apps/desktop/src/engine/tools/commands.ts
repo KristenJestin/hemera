@@ -100,12 +100,17 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       command === null && args.repository !== undefined && args.repository !== ROOT_REPOSITORY
         ? args.repository
         : null
-    const intent = yield* actions.begin('command.run', call.owner, {
-      command: command?.id ?? null,
-      line,
-      folder,
-      sessionId: grant.sessionId,
+    const details = { command: command?.id ?? null, line, folder, sessionId: grant.sessionId }
+    // Written as the process launches: a run that waits for a reservation and is stopped first
+    // never ran, and leaves no intent to be "maybe done" at a restart, only its record.
+    let intent: string | null = null
+    const begin = Effect.map(actions.begin('command.run', call.owner, details), (id) => {
+      intent = id
     })
+    const neverLaunched = (reason: string) =>
+      Effect.flatMap(actions.begin('command.run', call.owner, details), (id) =>
+        actions.failed(id, reason),
+      )
     const started = yield* startRun({
       projectId: grant.projectId,
       workspaceId: grant.workspaceId,
@@ -115,10 +120,11 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       startedBy: 'agent',
       sessionId: grant.sessionId,
       missionId: grant.missionId,
+      intent: begin,
     }).pipe(Effect.result)
     if (Result.isFailure(started)) {
       const reason = started.failure.message
-      yield* actions.failed(intent, reason)
+      yield* intent === null ? neverLaunched(reason) : actions.failed(intent, reason)
       return Predicate.isTagged(started.failure, 'ShellSyntax') ||
         Predicate.isTagged(started.failure, 'InvalidCommand')
         ? refusal(`refused: ${reason}`)
@@ -128,14 +134,16 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
     // The outcome is written when the run ends, whenever that is: the call may answer before.
     yield* awaitRun(run.id).pipe(
       Effect.flatMap((ended) =>
-        ended.exitCode === null && ended.state === 'failed'
-          ? actions.failed(intent, 'it did not run')
-          : actions.done(
-              intent,
-              ended.exitCode === null
-                ? ended.state
-                : `${ended.state}, exit code ${String(ended.exitCode)}`,
-            ),
+        intent === null
+          ? neverLaunched(`it never launched: ${ended.state}`)
+          : ended.exitCode === null && ended.state === 'failed'
+            ? actions.failed(intent, 'it did not run')
+            : actions.done(
+                intent,
+                ended.exitCode === null
+                  ? ended.state
+                  : `${ended.state}, exit code ${String(ended.exitCode)}`,
+              ),
       ),
       Effect.ignore,
       Effect.forkIn(call.scope),

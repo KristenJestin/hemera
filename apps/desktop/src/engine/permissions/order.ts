@@ -7,9 +7,11 @@
  *     touches `.git`; for every agent of a mission, a write to a remote or to the history, a forge
  *     CLI's write, a package publication, `git commit` without the right). The only steps that
  *     may refuse;
- *  3. places: a sensitive place always asks; then the grants hook (a live "Allow for this
- *     mission" grant for the same action allows it); then a path outside the role's place, or
- *     words that do not read, ask, and so does a catalogue command marked "ask before running";
+ *  3. places: a sensitive place always asks, and so does a catalogue command that changes an
+ *     exclusive resource (#88), whatever the judge would say; then the grants hook (a live "Allow
+ *     for this mission" grant for the same action allows it); then a path outside the role's
+ *     place, or words that do not read, ask, and so does a catalogue command marked "ask before
+ *     running";
  *  4. the local allows, only for what is fully understood: a read inside, a plain listing, a
  *     catalogue command of the place that does not go through a shell;
  *  5. the judge, which allows or asks;
@@ -49,6 +51,7 @@ import { findOnPath, hostLookup, invocationOf } from '../command-line.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
 import { mutate } from '../transaction.ts'
+import { changedBy } from '../resources/declarations.ts'
 import { resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
@@ -241,6 +244,12 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           }
           if (call.command?.askBeforeRunning === true) {
             concerns.push({ kind: 'ask-before-running', command: call.command.name })
+          }
+          // An action on a shared resource asks every time, as a sensitive place does (#88).
+          if (call.tool === 'commands_run' && call.command !== null) {
+            for (const name of yield* changedBy(call.session.projectId, call.command.id)) {
+              sensitive.push(`action on a shared resource: ${name}`)
+            }
           }
           return { sensitive: [...new Set(sensitive)], concerns }
         })
