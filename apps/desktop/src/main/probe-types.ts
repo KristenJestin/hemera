@@ -2,6 +2,8 @@
 
 import type { NeedFields, NeedOwner } from '@hemera/core/domain'
 
+import type { FakeScript } from '../engine/agents/fake.ts'
+
 export interface LoadMeasure {
   readonly items: number
   readonly millis: number
@@ -49,6 +51,11 @@ export interface HemeraProbe {
   readonly agentWrites: (folder: string, count: number) => Promise<void>
   /** What the Memory holds: the agent's events and lines, and each mission's files. */
   readonly memory: () => Promise<MemoryState>
+  /**
+   * What every agent's session started from now on does: the fake agent's script, the agent of
+   * the headless suite. A script crosses as JSON: `between` is left out.
+   */
+  readonly scriptAgent: (script: FakeScript) => Promise<void>
 }
 
 export interface MemoryState {

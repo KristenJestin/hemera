@@ -24,9 +24,9 @@ import type { MessagePortMain, ParentPort } from 'electron'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
 import { openDiagnosticLog, type Log } from '../main/diagnostic.ts'
-import { headless } from '../main/window-options.ts'
 import { agentsLauncher } from './agents.ts'
 import { agentStarterLayer } from './agents/starter.ts'
+import { suiteFor } from './agents/suite-agent.ts'
 import { portHandovers } from './handovers.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
@@ -74,6 +74,9 @@ const engine = (
       ),
     )
     const launch = agentsLauncher(host, handovers, fromMessagePortMain, log)
+    // Under the headless suite, every agent is the suite's fake, scripted through the probe: only
+    // when main handed over the probe's port, which it never does for an installed Hemera.
+    const suite = yield* suiteFor(probePort)
 
     // The Profile: its database is opened, migrated and reconciled before anything is served.
     const profile = yield* startProfile(
@@ -83,10 +86,10 @@ const engine = (
         reconciliationSteps: RECONCILIATION_STEPS,
         secrets,
         sessions: {
-          starter: agentStarterLayer(launch),
-          // A new mission starts its Planner on its own (#85); the headless end-to-end suite's
-          // missions are fixtures of other tickets, and never start a real agent.
-          plannerStarts: !headless(process.env),
+          ...(suite?.sessions ?? { starter: agentStarterLayer(launch) }),
+          // A new mission starts its Planner on its own (#85); under the suite (its probe handed
+          // over) missions are fixtures of other tickets, and never start an agent.
+          plannerStarts: suite === null,
         },
       },
       log,
@@ -98,9 +101,9 @@ const engine = (
       Effect.forkScoped,
     )
 
-    if (probePort !== undefined && headless(process.env)) {
+    if (probePort !== undefined && suite !== null) {
       yield* RpcServer.make(ProbeRpcs, { disableFatalDefects: true }).pipe(
-        Effect.provide(probeHandlers(launch, profile, start.dataFolder)),
+        Effect.provide(probeHandlers(launch, profile, start.dataFolder, suite)),
         Effect.provideServiceEffect(RpcServer.Protocol, serveOn(probePort)),
         Effect.forkScoped,
       )

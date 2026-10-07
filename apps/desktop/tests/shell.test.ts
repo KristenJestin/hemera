@@ -66,6 +66,7 @@ interface Drawn {
   route?: Route
   folded?: boolean
   needs?: NeedsState
+  opened?: ReadonlySet<string>
 }
 
 const drawn = ({
@@ -75,6 +76,7 @@ const drawn = ({
   route = { kind: 'home' },
   folded = false,
   needs = { kind: 'ready', needs: [], missions: new Map(), answers: new Map() },
+  opened = new Set(),
 }: Drawn): string => {
   const props: ShellProps = {
     engine,
@@ -83,6 +85,7 @@ const drawn = ({
     needs,
     navigation: go(START, route),
     folded,
+    opened,
     today: 'Saturday 4 October',
     now: new Date('2026-10-04T12:00:00.000Z'),
     actions: {
@@ -96,7 +99,11 @@ const drawn = ({
       addProject: nothing,
       answer: nothing,
       recheck: nothing,
+      open: nothing,
     },
+    under: (id) => (id === 'acme' ? createElement('p', null, 'The Chats of Acme') : null),
+    chat: createElement('p', null, 'The Chat on its page'),
+    chatTitle: (id) => (id === 'invoices' ? 'Invoices export' : undefined),
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
     appSettings: createElement('p', null, 'The choice of theme'),
@@ -228,6 +235,21 @@ describe('The pages', () => {
     })
     expect(markup).toContain('The settings of the Project')
     expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Settings/)
+  })
+
+  test('an opened Project has its Chats under it in the sidebar; a closed one offers to open', () => {
+    expect(drawn({ opened: new Set(['acme']) })).toContain('The Chats of Acme')
+    const closed = drawn({})
+    expect(closed).not.toContain('The Chats of Acme')
+    expect(closed).toContain('aria-label="Open the missions of Acme"')
+  })
+
+  test('a Chat’s page, its trail the Project then the Chat’s title', () => {
+    const markup = drawn({ route: { kind: 'chat', projectId: 'acme', id: 'invoices' } })
+    expect(markup).toContain('The Chat on its page')
+    expect(markup).toMatch(
+      /aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Invoices export/,
+    )
   })
 })
 

@@ -428,29 +428,48 @@ export interface SidebarChatRowProps {
   id: string
   title: string
   current?: boolean | undefined
+  /** What it starts is on its way: it takes no second press until then. */
+  pending?: boolean | undefined
+  /** What it could not do, in words, under it. */
+  error?: string | undefined
   onPress: () => void
 }
 
-/** A Chat's row under its Project: the Chat's glyph where a mission has its key, and its title. */
+/**
+ * A Chat's row under its Project: the Chat's glyph where a mission has its key, and its title.
+ * "New Chat" is one too, which starts a Chat: once pressed it waits for the engine, and says in
+ * words under it a Chat that could not be started.
+ */
 export function SidebarChatRow({
   id,
   title,
   current = false,
+  pending = false,
+  error,
   onPress,
 }: SidebarChatRowProps): ReactNode {
   return (
-    <button
-      type="button"
-      data-mark={`chat:${id}`}
-      aria-current={current ? 'page' : undefined}
-      className={cn(ROW, current && OVER_MARK)}
-      onClick={onPress}
-    >
-      <span className={cn(OVER_MARK, 'flex shrink-0')} aria-hidden="true">
-        <IconMessages size="sm" />
-      </span>
-      <span className={cn(OVER_MARK, NAME)}>{title}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        data-mark={`chat:${id}`}
+        aria-current={current ? 'page' : undefined}
+        aria-busy={pending || undefined}
+        disabled={pending}
+        className={cn(ROW, current && OVER_MARK, 'disabled:opacity-50')}
+        onClick={onPress}
+      >
+        <span className={cn(OVER_MARK, 'flex shrink-0')} aria-hidden="true">
+          <IconMessages size="sm" />
+        </span>
+        <span className={cn(OVER_MARK, NAME)}>{title}</span>
+      </button>
+      {error !== undefined && (
+        <p role="alert" className="px-2 py-1 text-sm text-destructive-muted-foreground">
+          {error}
+        </p>
+      )}
+    </>
   )
 }
 

@@ -34,6 +34,19 @@ export const CHAT_CONTINUE =
 /** The line a restart leaves in a Chat whose turn was running: nothing resumes on its own. */
 export const CHAT_INTERRUPTED = "Hemera restarted; the agent's turn was interrupted"
 
+/** The line the user's Stop leaves in a Chat whose turn was running. */
+export const CHAT_STOPPED = "The agent's turn was stopped"
+
+/** The line a mission drafted from the Chat leaves in its transcript. */
+export const draftNotice = (key: string, title: string): string =>
+  `Mission ${key} created: ${title}`
+
+/** The mission a transcript's line says was drafted, or null for any other line. */
+export const draftOf = (text: string): { key: string; title: string } | null => {
+  const found = /^Mission ([A-Z][A-Z0-9]*-\d+) created: (.+)$/s.exec(text)
+  return found === null ? null : { key: found[1] ?? '', title: found[2] ?? '' }
+}
+
 /** A reference the user's message carries: a file, a mission, a catalogue command. */
 export const ChatMention = Schema.Struct({
   kind: Schema.Literals(['file', 'mission', 'command']),

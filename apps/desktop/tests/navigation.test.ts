@@ -17,6 +17,7 @@ import {
 const names: Names = {
   project: (id) => (id === 'acme' ? 'Acme' : undefined),
   view: (id) => ({ spec: 'Spec', 'round:1': 'Round 1' })[id] ?? id,
+  chat: (id) => (id === 'invoices' ? 'Invoices export' : undefined),
 }
 
 const labels = (navigation: typeof START) => trailOf(navigation, names).map((crumb) => crumb.label)
@@ -60,6 +61,16 @@ describe('The window’s routes', () => {
     expect(trail[0]?.step).toEqual({ go: { kind: 'project', id: 'acme' } })
     expect(trail[1]?.step).toBeUndefined()
     expect(placeOf(settings.route)).toEqual({ kind: 'project', id: 'acme' })
+  })
+
+  test('a Chat is a page under its Project: its title after the Project’s, its row marked', () => {
+    const chat = go(START, { kind: 'chat', projectId: 'acme', id: 'invoices' })
+    const trail = trailOf(chat, names)
+    expect(trail.map((crumb) => crumb.label)).toEqual(['Acme', 'Invoices export'])
+    expect(trail[0]?.step).toEqual({ go: { kind: 'project', id: 'acme' } })
+    expect(placeOf(chat.route)).toEqual({ kind: 'chat', id: 'invoices' })
+    const unknown = go(START, { kind: 'chat', projectId: 'acme', id: 'elsewhere' })
+    expect(trailOf(unknown, names).at(-1)?.label).toBe('Chat')
   })
 })
 

@@ -37,6 +37,8 @@ export interface ShellActions {
   answer: (id: string, label: string, answer: NeedAnswer) => void
   /** Checks a need of something missing again. */
   recheck: (id: string) => void
+  /** Opens or closes a Project in the sidebar: what stands under it shows while it is open. */
+  open: (id: string, open: boolean) => void
 }
 
 export interface ShellProps {
@@ -48,6 +50,14 @@ export interface ShellProps {
   needs: NeedsState
   navigation: Navigation
   folded: boolean
+  /** The Projects open in the sidebar. */
+  opened: ReadonlySet<string>
+  /** What stands under an open Project in the sidebar: its Chats. */
+  under?: (projectId: string) => ReactNode
+  /** The page of the Chat the route shows, drawn by its own hooks. */
+  chat?: ReactNode
+  /** A Chat's title, when the window knows it: the last crumb of its page. */
+  chatTitle?: (id: string) => string | undefined
   /** Today, as Home's header says it. */
   today: string
   /** Now, which each need's "when" is counted from. */
@@ -149,6 +159,7 @@ interface RoutePageProps {
   today: string
   projectSettings: ReactNode
   appSettings: ReactNode
+  chat: ReactNode
   actions: ShellActions
 }
 
@@ -163,6 +174,7 @@ function RoutePage({
   today,
   projectSettings,
   appSettings,
+  chat,
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
@@ -227,6 +239,8 @@ function RoutePage({
           {appSettings}
         </TitledPage>
       )
+    case 'chat':
+      return chat
     case 'mission':
       return null
   }
@@ -244,6 +258,10 @@ export function Shell({
   needs,
   navigation,
   folded,
+  opened,
+  under,
+  chat,
+  chatTitle,
   today,
   now,
   projectSettings,
@@ -260,14 +278,13 @@ export function Shell({
   const { route } = navigation
   const stepTo = (step: Step): void =>
     'go' in step ? actions.go(step.go) : actions.show(step.show)
-  const crumbs: Crumb[] = trailOf(navigation, { project: nameOf, view: (id) => id }).map(
-    ({ id, label, mono, step }) => ({
-      id,
-      label,
-      mono,
-      onPress: step === undefined ? undefined : () => stepTo(step),
-    }),
-  )
+  const names = { project: nameOf, view: (id: string) => id, chat: (id: string) => chatTitle?.(id) }
+  const crumbs: Crumb[] = trailOf(navigation, names).map(({ id, label, mono, step }) => ({
+    id,
+    label,
+    mono,
+    onPress: step === undefined ? undefined : () => stepTo(step),
+  }))
   const failure = projects.kind === 'failed' ? projects.sentence : undefined
   return (
     <div data-engine={engine.kind} className="contents">
@@ -276,9 +293,14 @@ export function Shell({
           <Sidebar
             folded={folded}
             waiting={waitingCount(needs)}
-            projects={listed.map(({ id, name }) => ({ id, name }))}
-            opened={new Set()}
-            onOpen={() => undefined}
+            projects={listed.map(({ id, name }) => ({
+              id,
+              name,
+              // Mounted by the sidebar only while the Project is open.
+              under: under?.(id),
+            }))}
+            opened={opened}
+            onOpen={actions.open}
             loading={engine.kind !== 'ready' || projects.kind === 'loading'}
             error={failure}
             current={placeOf(route)}
@@ -314,6 +336,7 @@ export function Shell({
             today={today}
             projectSettings={projectSettings}
             appSettings={appSettings}
+            chat={chat}
             actions={actions}
           />
         )}

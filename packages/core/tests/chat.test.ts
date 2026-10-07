@@ -5,7 +5,15 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import { CHAT_TITLE_MAX, UNTITLED_CHAT, chatTitleOf, mentionsText } from '../src/domain/chat.ts'
+import {
+  CHAT_INTERRUPTED,
+  CHAT_TITLE_MAX,
+  UNTITLED_CHAT,
+  chatTitleOf,
+  draftNotice,
+  draftOf,
+  mentionsText,
+} from '../src/domain/chat.ts'
 
 describe('A Chat’s title', () => {
   test('is the first line of the first message, cut to 60 characters', () => {
@@ -36,5 +44,15 @@ describe('The mentions of a message', () => {
       ].join('\n'),
     )
     expect(mentionsText([])).toBe('')
+  })
+})
+
+describe('What the transcript says of a mission drafted from the Chat', () => {
+  test('is read back as its key and title; any other line is none', () => {
+    const said = draftNotice('ACME-16', 'Export the invoices as JSON')
+    expect(said).toBe('Mission ACME-16 created: Export the invoices as JSON')
+    expect(draftOf(said)).toEqual({ key: 'ACME-16', title: 'Export the invoices as JSON' })
+    expect(draftOf(CHAT_INTERRUPTED)).toBeNull()
+    expect(draftOf('The Mission ACME-16 created: nothing')).toBeNull()
   })
 })

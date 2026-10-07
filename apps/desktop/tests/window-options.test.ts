@@ -5,7 +5,12 @@ import { roleIn } from '@hemera/ui/tokens'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { OPENING_COLORS } from '../src/main/opening-colors.ts'
-import { HEADLESS_VARIABLE, OFF_SCREEN, windowOptions } from '../src/main/window-options.ts'
+import {
+  HEADLESS_VARIABLE,
+  OFF_SCREEN,
+  suiteRuns,
+  windowOptions,
+} from '../src/main/window-options.ts'
 
 const theme = readFileSync(fileURLToPath(import.meta.resolve('@hemera/ui/theme.css')), 'utf8')
 
@@ -59,5 +64,19 @@ describe('The window opens sandboxed, on the opening colour of the theme', () =>
     const options = windowOptions(main, OPENING_COLORS.light, {})
     expect(options.x).toBeUndefined()
     expect(options.focusable).toBeUndefined()
+  })
+})
+
+describe('The end-to-end suite runs only an application that is not packaged', () => {
+  test('the variable runs the suite in the built application the suite drives', () => {
+    expect(suiteRuns({ [HEADLESS_VARIABLE]: '1' }, false)).toBe(true)
+  })
+
+  test('an installed Hemera started with the variable is not under the suite', () => {
+    expect(suiteRuns({ [HEADLESS_VARIABLE]: '1' }, true)).toBe(false)
+  })
+
+  test('without the variable nothing runs the suite', () => {
+    expect(suiteRuns({}, false)).toBe(false)
   })
 })

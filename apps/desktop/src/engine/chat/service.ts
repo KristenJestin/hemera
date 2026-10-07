@@ -18,6 +18,7 @@
 
 import {
   CHAT_INTERRUPTED,
+  CHAT_STOPPED,
   type ChatMention,
   type ModelSettingValue,
   TOOLS,
@@ -26,8 +27,19 @@ import {
   mentionsText,
   waitingText,
 } from '@hemera/core/domain'
-import type { UnknownChat, UnknownProject } from '@hemera/ipc'
-import { Context, Effect, Layer, Option, Predicate, Schema, Semaphore, Stream } from 'effect'
+import type { ChatChanged, UnknownChat, UnknownProject } from '@hemera/ipc'
+import {
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  PubSub,
+  Schema,
+  type Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 
 import type { AgentEvent, ToolCallReport } from '../agents/client.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
@@ -44,6 +56,7 @@ import {
   type Chat,
   type ChatEntry,
   addEntry,
+  chatChanges,
   chatOfLineage,
   getChat,
   insertChat,
@@ -53,6 +66,11 @@ import {
 import { sessionBook } from './words.ts'
 
 type ChatFailure = DatabaseError | UnknownChat
+
+/** How a session ended, as its `session.stopped` event says it. */
+const readStopped = Schema.decodeUnknownOption(
+  Schema.Struct({ state: Schema.String, reason: Schema.String }),
+)
 
 export class Chats extends Context.Service<
   Chats,
@@ -72,6 +90,10 @@ export class Chats extends Context.Service<
       chatId: string,
       setting: ModelSettingValue,
     ) => Effect.Effect<void, ChatFailure>
+    /** Whether the Chat's agent is in a turn now. */
+    readonly working: (chat: Chat) => Effect.Effect<boolean, DatabaseError>
+    /** Each turn of a Chat begun or ended, from the moment the subscription is taken. */
+    readonly turns: Effect.Effect<Stream.Stream<ChatChanged>, never, Scope.Scope>
   }
 >()('Chats') {}
 
@@ -150,9 +172,14 @@ export const chatsLayer = Layer.effect(
     const scope = yield* Effect.scope
     /** What is kept about each session while it runs: its Chat, its words, its turns. */
     const book = sessionBook()
+    /** A Chat's turn begun or ended: a change its page follows. */
+    const turnsOfChats = yield* PubSub.unbounded<ChatChanged>()
     /** What each call in progress is about, by its id, as its first report said it. */
     const calls = new Map<string, Called>()
-    /** One message or setting change at a time per Chat: two at once never open two sessions. */
+    /**
+     * One message, stop or setting change at a time per Chat: two at once never open two sessions,
+     * and a stop is written before the message that follows it.
+     */
     const chatLocks = new Map<string, Semaphore.Semaphore>()
     const oneAtATime = (chatId: string) => {
       const found = chatLocks.get(chatId) ?? Semaphore.makeUnsafe(1)
@@ -221,7 +248,12 @@ export const chatsLayer = Layer.effect(
       Effect.gen(function* () {
         const chatId = yield* chatOf(sessionId)
         if (chatId === null) return
+        // Known before the page is told, which reads it again at once: the session's state is
+        // written after its turn's end is told.
+        book.turning(sessionId, on)
         yield* flush(sessionId, chatId)
+        const chat = yield* getChat(chatId)
+        yield* PubSub.publish(turnsOfChats, { chatId, projectId: chat.projectId })
         if (on) {
           book.turnBegan(sessionId)
           return
@@ -247,12 +279,18 @@ export const chatsLayer = Layer.effect(
       Effect.forkIn(scope),
     )
 
-    /** A session that ended: what it said last is written, then nothing of it is kept. */
-    const ended = (sessionId: string) =>
+    /**
+     * A session that ended: what it said last is written, then nothing of it is kept. One that
+     * failed (its agent not signed in, its model refused) says why in the conversation.
+     */
+    const ended = (sessionId: string, failed: string | null) =>
       Effect.gen(function* () {
         const chatId = book.chatOf(sessionId)
         if (Predicate.isString(chatId)) yield* flush(sessionId, chatId)
         book.forget(sessionId)
+        if (failed === null) return
+        const failedIn = yield* chatOf(sessionId)
+        if (failedIn !== null) yield* addEntry(failedIn, { kind: 'notice', text: failed })
       }).pipe(
         run,
         Effect.catchCause(() => Effect.sync(() => book.forget(sessionId))),
@@ -261,7 +299,15 @@ export const chatsLayer = Layer.effect(
     const committed = yield* DomainEvents.use((events) => events.subscribe)
     yield* committed.pipe(
       Stream.runForEach((event) =>
-        event.type === 'session.stopped' ? ended(event.entityId) : Effect.void,
+        event.type === 'session.stopped'
+          ? ended(
+              event.entityId,
+              Option.match(readStopped(event.payload), {
+                onNone: () => null,
+                onSome: ({ state, reason }) => (state === 'failed' ? reason : null),
+              }),
+            )
+          : Effect.void,
       ),
       Effect.forkIn(scope),
     )
@@ -347,12 +393,26 @@ export const chatsLayer = Layer.effect(
       stop: (chatId) =>
         Effect.gen(function* () {
           const chat = yield* getChat(chatId)
-          if (chat.lineage !== null) yield* sessions.cancelTurn(chat.lineage)
-        }).pipe(run),
+          const { live } = yield* sessionsOf(chat)
+          if (live === null || live.state !== 'working') return
+          yield* sessions.cancelTurn(live.lineage)
+          // What it said so far, then that the user stopped it.
+          yield* flush(live.id, chatId)
+          yield* addEntry(chatId, { kind: 'notice', text: CHAT_STOPPED })
+        }).pipe(oneAtATime(chatId), run),
       setSetting: (chatId, setting) =>
         setChatSetting(chatId, setting).pipe(oneAtATime(chatId), run),
+      working: (chat) =>
+        Effect.map(sessionsOf(chat), ({ live }) => live !== null && book.inTurn(live.id)).pipe(run),
+      turns: Effect.map(PubSub.subscribe(turnsOfChats), Stream.fromSubscription),
     }
   }),
+)
+
+/** Each change of a Chat its page follows: its title, its model, its transcript, its turns. */
+export const chatsChanges = Stream.merge(
+  chatChanges,
+  Stream.unwrap(Chats.use((chats) => chats.turns)),
 )
 
 /**

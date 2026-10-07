@@ -157,6 +157,19 @@ export const OtherAgent: Story = {
   },
 }
 
+/** An agent with no model to offer: said as such, never as a search that found nothing. */
+export const NoModel: Story = {
+  args: {
+    open: true,
+    agents: [{ id: 'claude', name: 'Claude Code', models: [] }],
+    value: { agent: 'claude', model: 'sonnet' },
+  },
+  play: async () => {
+    await expect(await body().findByText('No model to choose yet')).toBeVisible()
+    await expect(body().queryByText(/No model matches/)).toBeNull()
+  },
+}
+
 /** A search nothing matches: said once, in the list's own room. */
 export const NoMatch: Story = {
   args: { open: true },

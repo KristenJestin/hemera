@@ -34,6 +34,8 @@ export type Route =
   /** The settings of a Project: its own page, entered from the Project page's header. */
   | { readonly kind: 'projectSettings'; readonly id: string }
   | { readonly kind: 'mission'; readonly projectId: string; readonly key: string }
+  /** A Chat of a Project: listed under it in the sidebar. */
+  | { readonly kind: 'chat'; readonly projectId: string; readonly id: string }
 
 export interface Navigation {
   readonly route: Route
@@ -112,6 +114,8 @@ export function placeOf(route: Route): SidebarPlace {
       return { kind: 'project', id: route.id }
     case 'mission':
       return { kind: 'mission', key: route.key }
+    case 'chat':
+      return { kind: 'chat', id: route.id }
   }
 }
 
@@ -131,6 +135,8 @@ export interface Names {
   readonly project: (id: string) => string | undefined
   /** A view's title, as the view declares it. */
   readonly view: (id: string) => string
+  /** A Chat's title, when the window knows it. */
+  readonly chat: (id: string) => string | undefined
 }
 
 /** The window's one breadcrumb: the page, then for a mission its key and the views over it. */
@@ -157,6 +163,15 @@ export function trailOf(navigation: Navigation, names: Names): Trail[] {
           step: { go: { kind: 'project', id: route.id } },
         },
         { id: 'settings', label: 'Settings' },
+      ]
+    case 'chat':
+      return [
+        {
+          id: 'project',
+          label: project(route.projectId),
+          step: { go: { kind: 'project', id: route.projectId } },
+        },
+        { id: 'chat', label: names.chat(route.id) ?? 'Chat' },
       ]
     case 'mission': {
       const { open: views } = frameOf(navigation, route.key)

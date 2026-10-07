@@ -42,6 +42,15 @@ export function headless(environment: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Whether this start runs under the end-to-end suite, with its probe and its fake agent: the
+ * variable, in an application that is not packaged. An installed Hemera started with the variable
+ * is an ordinary Hemera.
+ */
+export function suiteRuns(environment: NodeJS.ProcessEnv, packaged: boolean): boolean {
+  return headless(environment) && !packaged
+}
+
+/**
  * The options of the one window: frameless with the system's own buttons drawn over the page
  * (Window Controls Overlay), shown at once on the opening colour, sandboxed and isolated.
  */

@@ -654,19 +654,30 @@ describe('Opening a session', () => {
 })
 
 describe('The fake agent stays out of the application', () => {
-  test('no file of the application imports the fake agent', () => {
-    const source = join(import.meta.dirname, '..', 'src')
-    const files = (folder: string): string[] =>
-      readdirSync(folder, { withFileTypes: true }).flatMap((entry) =>
-        entry.isDirectory()
-          ? files(join(folder, entry.name))
-          : /\.tsx?$/.test(entry.name)
-            ? [join(folder, entry.name)]
-            : [],
-      )
-    const importers = files(source).filter((file) =>
-      /from '[^']*\/fake(?:\.ts)?'/.test(readFileSync(file, 'utf8')),
+  const source = join(import.meta.dirname, '..', 'src')
+  const files = (folder: string): string[] =>
+    readdirSync(folder, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? files(join(folder, entry.name))
+        : /\.tsx?$/.test(entry.name)
+          ? [join(folder, entry.name)]
+          : [],
     )
-    expect(importers.map((file) => relative(source, file))).toEqual([])
+  const importing = (pattern: RegExp) =>
+    files(source)
+      .filter((file) => pattern.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(source, file))
+
+  test('no file of the application imports the fake agent', () => {
+    // A type-only import brings nothing of the fake into a bundle.
+    expect(
+      importing(/^import (?!type )(?:(?!\nimport )[^])*?from '[^']*\/fake(?:\.ts)?'/m),
+    ).toEqual([])
+  })
+
+  test('only the suite’s agent loads the fake, and only once it is built', () => {
+    expect(importing(/import\('[^']*\/fake(?:\.ts)?'\)/)).toEqual([
+      join('engine', 'agents', 'suite-agent.ts'),
+    ])
   })
 })
