@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   instructionsOf,
+  latestWrites,
   limitRefusal,
   limitRowsOf,
   limitsWith,
@@ -185,5 +186,49 @@ describe('Instructions', () => {
       { agent: 'Claude Code', reads: ['CLAUDE.md'] },
       { agent: 'Codex', reads: ['AGENTS.md'] },
     ])
+  })
+})
+
+describe('A Project’s agent setting written', () => {
+  /** A write the test settles by hand. */
+  const held = <A>() => {
+    const { promise, resolve, reject } = Promise.withResolvers<A>()
+    return { promise, settle: { resolve, reject } }
+  }
+  const settled = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+  test('a write the engine refuses is said, for what is shown to go back to what it keeps', async () => {
+    const write = latestWrites()
+    const kept: number[] = []
+    const refused: string[] = []
+    write(
+      () => Promise.reject(new Error('Hemera could not write to its profile.')),
+      (answer: number) => kept.push(answer),
+      (failure) => refused.push(failure.message),
+    )
+    await settled()
+    expect(kept).toEqual([])
+    expect(refused).toEqual(['Hemera could not write to its profile.'])
+  })
+
+  test('only the latest write is heard: an earlier one answered or refused after it is not', async () => {
+    const write = latestWrites()
+    const first = held<number>()
+    const second = held<number>()
+    const heard: string[] = []
+    write(
+      () => first.promise,
+      (answer) => heard.push(`kept ${String(answer)}`),
+      (failure) => heard.push(`refused ${failure.message}`),
+    )
+    write(
+      () => second.promise,
+      (answer) => heard.push(`kept ${String(answer)}`),
+      (failure) => heard.push(`refused ${failure.message}`),
+    )
+    second.settle.resolve(2)
+    first.settle.reject(new Error('too late'))
+    await settled()
+    expect(heard).toEqual(['kept 2'])
   })
 })

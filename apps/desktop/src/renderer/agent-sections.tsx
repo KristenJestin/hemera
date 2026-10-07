@@ -30,6 +30,7 @@ import { pickerAgentsOf } from './chat-items.ts'
 import type { Link } from './link.ts'
 import {
   instructionsOf,
+  latestWrites,
   limitRefusal,
   limitRowsOf,
   limitsWith,
@@ -38,6 +39,7 @@ import {
   projectRoleModelsOf,
   withNever,
   withoutNever,
+  type LatestWrite,
 } from './project-agents.ts'
 import { useRead } from './use-read.ts'
 
@@ -57,16 +59,10 @@ const readAppRoles = (link: Link) => link.roleModels(null)
 /** How long a limit's field waits for the typing to settle before it is written. */
 const TYPING_SETTLES_MS = 600
 
-/** Runs writes one after the other's answer is known: only the latest one's answer is kept. */
-function useLatest(): <A>(write: () => Promise<A>, kept: (answer: A) => void) => void {
-  const latest = useRef(0)
-  return (write, kept) => {
-    latest.current += 1
-    const mine = latest.current
-    write().then((answer) => {
-      if (mine === latest.current) kept(answer)
-    }, nothing)
-  }
+/** Writes one after the other: only the latest one's answer, or its refusal, is heard. */
+function useLatest(): LatestWrite {
+  const [written] = useState(latestWrites)
+  return written
 }
 
 interface PartProps {
@@ -155,8 +151,10 @@ function NeverFoot({
 
 function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartProps): ReactNode {
   const read = useCallback((ready: Link) => ready.neverList(projectId), [projectId])
-  const [entries, setEntries] = useRead<ReadonlyArray<NeverEntry>>(link, engineReady, read)
+  const [entries, setEntries, reread] = useRead<ReadonlyArray<NeverEntry>>(link, engineReady, read)
   const written = useLatest()
+  /** Why the engine refused the last change, in words. */
+  const [error, setError] = useState<string | undefined>(undefined)
   /** The list as last changed here, so two quick changes build on each other. */
   const current = useRef<ReadonlyArray<NeverEntry> | null>(null)
   const catalogueNow = useRef(catalogue)
@@ -171,17 +169,23 @@ function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartP
     done: () => void,
     refused: (sentence: string) => void,
   ): void => {
+    const before = current.current
     current.current = next
     setEntries(next)
     written(
-      () =>
-        link.setNeverList(projectId, next).catch((failure: Error) => {
-          refused(failure.message)
-          throw failure
-        }),
+      () => link.setNeverList(projectId, next),
       (answer) => {
+        setError(undefined)
         setEntries(answer)
         done()
+      },
+      (failure) => {
+        // Back to the list as the engine keeps it, and why it would not take this one.
+        current.current = before
+        if (before !== null) setEntries(before)
+        reread()
+        setError(`The list could not be changed: ${failure.message}`)
+        refused(failure.message)
       },
     )
   }
@@ -217,6 +221,7 @@ function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartP
     <NeverSection
       lines={neverLinesOf(entries ?? [], catalogue)}
       loading={entries === null}
+      error={error}
       onAdd={open}
       onRemove={(id) => write(withoutNever(current.current ?? [], id), nothing, nothing)}
     />
@@ -230,6 +235,8 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const [agents] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
   const [marks, , rereadMarks] = useRead<ReadonlyArray<ModelMark>>(link, engineReady, readMarks)
   const written = useLatest()
+  /** Why the engine refused the last change, in words. */
+  const [error, setError] = useState<string | undefined>(undefined)
   const mark = (agent: string, model: string, change: Partial<ModelMark>): void => {
     const known = agents?.find((one) => one.id === agent)
     if (known === undefined) return
@@ -242,7 +249,13 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
         hidden: before?.hidden ?? false,
         ...change,
       })
-      .then(rereadMarks, nothing)
+      .then(
+        () => {
+          setError(undefined)
+          rereadMarks()
+        },
+        (failure: Error) => setError(`The model could not be marked: ${failure.message}`),
+      )
   }
   const roleOf = (displayName: string) => roles?.find((one) => one.displayName === displayName)
   return (
@@ -254,6 +267,7 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
         effort: null,
       })}
       loading={roles === null || appRoles === null}
+      error={error}
       onChange={(displayName, choice) => {
         const role = roleOf(displayName)
         if (role === undefined) return
@@ -267,7 +281,18 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
                 effort: choice.effort ?? null,
               }
         if (choice !== null && setting === null) return
-        written(() => link.setProjectRoleModel(projectId, role.role, setting), rereadRoles)
+        written(
+          () => link.setProjectRoleModel(projectId, role.role, setting),
+          () => {
+            setError(undefined)
+            rereadRoles()
+          },
+          (failure) => {
+            // The rows are read again as the engine keeps them.
+            rereadRoles()
+            setError(`The model could not be changed: ${failure.message}`)
+          },
+        )
       }}
       onFavourite={(agent, model, favourite) => mark(agent, model, { favourite })}
       onHide={(agent, model, hidden) => mark(agent, model, { hidden })}
@@ -284,6 +309,8 @@ function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
   /** The write waiting for the typing to settle: done at once when the section is left. */
   const pending = useRef<(() => void) | null>(null)
   const written = useLatest()
+  /** Why the engine refused the last write, in words. */
+  const [error, setError] = useState<string | undefined>(undefined)
   const flush = (): void => {
     if (timer.current !== null) clearTimeout(timer.current)
     timer.current = null
@@ -300,6 +327,7 @@ function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
         typed.has(row.id) ? Object.assign(row, { value: typed.get(row.id) ?? null }) : row,
       )}
       loading={limits === null}
+      error={error}
       onLimit={(id, value) => {
         const next = new Map(typed).set(id, value)
         setTyped(next)
@@ -320,12 +348,22 @@ function BudgetPart({ link, engineReady, projectId }: PartProps): ReactNode {
                       ),
                     ),
                   (answer) => {
+                    setError(undefined)
                     setLimits(answer)
                     setTyped((before) => {
                       const left = new Map(before)
                       for (const [field] of valid) left.delete(field)
                       return left
                     })
+                  },
+                  (failure) => {
+                    // The fields go back to what the engine last answered.
+                    setTyped((before) => {
+                      const left = new Map(before)
+                      for (const [field] of valid) left.delete(field)
+                      return left
+                    })
+                    setError(`The limits could not be kept: ${failure.message}`)
                   },
                 )
         if (timer.current !== null) clearTimeout(timer.current)

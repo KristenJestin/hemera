@@ -162,3 +162,30 @@ export function instructionsOf(
     })),
   }
 }
+
+/** Runs a write; `kept` hears its answer, `refused` why the engine would not take it. */
+export type LatestWrite = <A>(
+  write: () => Promise<A>,
+  kept: (answer: A) => void,
+  refused: (failure: Error) => void,
+) => void
+
+/**
+ * Writes one after the other: only the latest one's answer, or its refusal, is heard, so the last
+ * change made is the one shown, and a refusal is never dropped.
+ */
+export function latestWrites(): LatestWrite {
+  let latest = 0
+  return (write, kept, refused) => {
+    latest += 1
+    const mine = latest
+    write().then(
+      (answer) => {
+        if (mine === latest) kept(answer)
+      },
+      (failure: Error) => {
+        if (mine === latest) refused(failure)
+      },
+    )
+  }
+}
