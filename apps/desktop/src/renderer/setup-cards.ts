@@ -131,8 +131,8 @@ export const setupAgentOf = (standing: SetupStanding): SetupAgent =>
 
 /**
  * A new Project's setup, once the dialog has created it: the proposal asked for, then its page,
- * which reads the agent under way rather than one never asked. A proposal the engine refuses
- * leads to the Project's page.
+ * which reads the agent under way rather than one never asked. A proposal the engine refuses (no
+ * agent installed) opens the page too, which says why, with Try again.
  */
 export const startSetup = (
   propose: (projectId: string) => Promise<void>,
@@ -141,8 +141,25 @@ export const startSetup = (
 ): Promise<void> =>
   propose(projectId).then(
     () => go({ kind: 'projectSetup', id: projectId }),
-    () => go({ kind: 'project', id: projectId }),
+    (failure: Error) =>
+      go({
+        kind: 'projectSetup',
+        id: projectId,
+        refused: `The setup agent could not start: ${failure.message}`,
+      }),
   )
+
+/** An answer to the cards: they are read again either way, and a refusal is said in words. */
+export const answerSaid = (
+  work: Promise<unknown>,
+  reread: () => void,
+  say: (sentence: string) => void,
+): void => {
+  work.then(reread, (failure: Error) => {
+    say(`Your answer could not be given: ${failure.message}`)
+    reread()
+  })
+}
 
 /** The agent ended with nothing for the user to answer: the setup page has nothing to show. */
 export const nothingProposed = (standing: SetupStanding, cards: ReadonlyArray<SetupCard>) =>
@@ -188,17 +205,30 @@ export interface SetUpTools {
 
 /**
  * Sets a Project up again from its settings: an agent still at work, or a card still waiting,
- * opens what it proposed; otherwise a new proposal is asked for, then its page opens.
+ * opens what it proposed; otherwise a new proposal is asked for, then its page opens. What could
+ * not be read opens the page too, which says why.
  */
 export async function setUpAgain(
   tools: SetUpTools,
   projectId: string,
   go: (route: Route) => void,
 ): Promise<void> {
-  const [standing, cards] = await Promise.all([
+  const read = await Promise.all([
     tools.setupStanding(projectId),
     tools.setupCards(projectId),
-  ])
+  ]).then(
+    (answered) => answered,
+    (failure: Error) => {
+      go({
+        kind: 'projectSetup',
+        id: projectId,
+        refused: `The setup could not be read: ${failure.message}`,
+      })
+      return null
+    },
+  )
+  if (read === null) return
+  const [standing, cards] = read
   const going = standing.state === 'waiting' || standing.state === 'working'
   if (going || cards.some((card) => card.state === 'pending')) {
     go({ kind: 'projectSetup', id: projectId })

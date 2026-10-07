@@ -9,6 +9,7 @@ import {
   nothingProposed,
   pendingOf,
   setupAgentOf,
+  answerSaid,
   setUpAgain,
   setupEntriesOf,
   startSetup,
@@ -165,14 +166,35 @@ describe('A new Project’s setup, from the dialog that adds it', () => {
     expect(gone).toEqual([{ kind: 'projectSetup', id: 'acme' }])
   })
 
-  test('a proposal the engine refuses leads to the Project’s page', async () => {
+  test('a proposal the engine refuses opens the setup page, which says why', async () => {
     const gone: Route[] = []
     await startSetup(
-      () => Promise.reject(new Error('The setup agent is not available.')),
+      () => Promise.reject(new Error('No agent is installed.')),
       'acme',
       (route) => gone.push(route),
     )
-    expect(gone).toEqual([{ kind: 'project', id: 'acme' }])
+    expect(gone).toEqual([
+      {
+        kind: 'projectSetup',
+        id: 'acme',
+        refused: 'The setup agent could not start: No agent is installed.',
+      },
+    ])
+  })
+
+  test('an answer the engine refuses is said, and the cards read again', async () => {
+    const said: string[] = []
+    let rereads = 0
+    answerSaid(
+      Promise.reject(new Error('Hemera could not write to its profile.')),
+      () => {
+        rereads += 1
+      },
+      (sentence) => said.push(sentence),
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(said).toEqual(['Your answer could not be given: Hemera could not write to its profile.'])
+    expect(rereads).toBe(1)
   })
 
   test('an agent done with nothing proposed has nothing to answer; one never asked is not done', () => {
@@ -225,6 +247,26 @@ describe('Setting a Project up again, from its settings', () => {
       expect(world.proposed).toEqual([])
       expect(world.gone).toEqual([{ kind: 'projectSetup', id: 'acme' }])
     }
+  })
+
+  test('what the engine could not read opens the setup page, which says why', async () => {
+    const gone: Route[] = []
+    await setUpAgain(
+      {
+        setupStanding: () => Promise.reject(new Error('Hemera could not read its profile.')),
+        setupCards: async () => [],
+        proposeSetup: async () => undefined,
+      },
+      'acme',
+      (route) => gone.push(route),
+    )
+    expect(gone).toEqual([
+      {
+        kind: 'projectSetup',
+        id: 'acme',
+        refused: 'The setup could not be read: Hemera could not read its profile.',
+      },
+    ])
   })
 
   test('everything answered: a new proposal is asked for, then its page opens', async () => {

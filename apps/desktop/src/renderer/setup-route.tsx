@@ -9,13 +9,14 @@
  */
 
 import type { Project, SetupCard, SetupStanding } from '@hemera/ipc'
-import { ProjectSetup, type SetupKind } from '@hemera/ui'
+import { ErrorState, ProjectSetup, type SetupKind } from '@hemera/ui'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { Link } from './link.ts'
 import {
   type AgentTimes,
   agentTimesOf,
+  answerSaid,
   nothingProposed,
   pendingOf,
   setupAgentOf,
@@ -26,9 +27,15 @@ import {
 interface Seen {
   readonly cards: ReadonlyArray<SetupCard>
   readonly standing: SetupStanding
+  /** Why the setup could not be read, in words; null once it is. */
+  readonly unread: string | null
 }
 
-const NOTHING_YET: Seen = { cards: [], standing: { state: 'working', sentence: null } }
+const NOTHING_YET: Seen = {
+  cards: [],
+  standing: { state: 'working', sentence: null },
+  unread: null,
+}
 
 const nothing = (): void => undefined
 
@@ -39,17 +46,20 @@ function useSetup(link: Link, engineReady: boolean, projectId: string): [Seen, (
   useEffect(() => {
     if (!engineReady) return undefined
     let stopped = false
+    const unread = (failure: Error): void => {
+      if (!stopped) setSeen((before) => ({ ...before, unread: failure.message }))
+    }
     const read = (): void => {
       Promise.all([link.setupCards(projectId), link.setupStanding(projectId)]).then(
         ([cards, standing]) => {
-          if (!stopped) setSeen({ cards, standing })
+          if (!stopped) setSeen({ cards, standing, unread: null })
         },
-        nothing,
+        unread,
       )
     }
     const unsubscribe = link.onSetupChanges((change) => {
       if (change.projectId === projectId) read()
-    }, nothing)
+    }, unread)
     read()
     return () => {
       stopped = true
@@ -75,21 +85,35 @@ interface SetupRouteProps {
   project: Project
   /** The user is done with the setup: the Project's page. */
   onDone: () => void
+  /** Why the setup could not start or be read, as the page was opened with it. */
+  refused?: string | undefined
 }
 
-export function SetupRoute({ link, engineReady, project, onDone }: SetupRouteProps): ReactNode {
+export function SetupRoute({
+  link,
+  engineReady,
+  project,
+  onDone,
+  refused,
+}: SetupRouteProps): ReactNode {
   const [seen, reread] = useSetup(link, engineReady, project.id)
-  const agent = setupAgentOf(seen.standing)
+  /** Why it could not start, until Try again asks once more. */
+  const [startRefused, setStartRefused] = useState(refused)
+  /** Why the last answer was not taken, in words. */
+  const [said, setSaid] = useState<string | undefined>(undefined)
+  const agent = startRefused === undefined ? setupAgentOf(seen.standing) : 'failed'
   const [times, setTimes] = useState<AgentTimes>(() => ({ startedAt: Date.now(), endedAt: null }))
   // Its end is kept once seen: the chip's count stops there.
   useEffect(() => {
     setTimes((before) => agentTimesOf(before, agent, Date.now()))
   }, [agent])
   const answer = (work: Promise<unknown>): void => {
-    work.then(reread, reread)
+    setSaid(undefined)
+    answerSaid(work, reread, setSaid)
   }
   const ofKind = (kind: SetupKind) => pendingOf(seen.cards, kind)
-  const empty = nothingProposed(seen.standing, seen.cards)
+  // A setup that could not start has nothing proposed either: the page stays to say why.
+  const empty = startRefused === undefined && nothingProposed(seen.standing, seen.cards)
   const left = useRef(false)
   // Nothing to answer: the Project's page, once, as Create the Project would lead there.
   useEffect(() => {
@@ -97,6 +121,11 @@ export function SetupRoute({ link, engineReady, project, onDone }: SetupRoutePro
     left.current = true
     onDone()
   }, [empty, onDone])
+  if (seen.unread !== null) {
+    return (
+      <ErrorState title="The setup could not be read" description={seen.unread} onRetry={reread} />
+    )
+  }
   return (
     <ProjectSetup
       folder={project.mainCheckout}
@@ -104,11 +133,17 @@ export function SetupRoute({ link, engineReady, project, onDone }: SetupRoutePro
       startedAt={times.startedAt}
       endedAt={times.endedAt}
       glance={setupGlanceOf(seen.standing)}
-      failure={agent === 'failed' ? (seen.standing.sentence ?? undefined) : undefined}
+      failure={
+        agent === 'failed' ? (startRefused ?? seen.standing.sentence ?? undefined) : undefined
+      }
+      refused={said}
       cards={setupEntriesOf(seen.cards)}
       onAcceptAll={() => answer(link.acceptAllSetupCards(project.id))}
       onCreate={onDone}
-      onRetry={() => answer(link.proposeSetup(project.id))}
+      onRetry={() => {
+        setStartRefused(undefined)
+        answer(link.proposeSetup(project.id))
+      }}
       onAccept={(kind) => answer(acceptInOrder(link, ofKind(kind)))}
       onDecline={(kind) =>
         answer(Promise.all(ofKind(kind).map((card) => link.declineSetupCard(card.id))))

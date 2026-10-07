@@ -155,7 +155,8 @@ function Application() {
       projectSetup={
         route.kind === 'projectSetup' && project.kind === 'ready' ? (
           <SetupRoute
-            key={route.id}
+            key={`${route.id}:${route.refused ?? ''}`}
+            refused={route.refused}
             link={link}
             engineReady={ready}
             project={project.project}

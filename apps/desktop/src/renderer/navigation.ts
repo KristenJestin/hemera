@@ -42,7 +42,12 @@ export type Route =
   | { readonly kind: 'projectSettings'; readonly id: string }
   | { readonly kind: 'mission'; readonly projectId: string; readonly key: string }
   /** What the setup agent proposes for a Project just added, and the user's answers. */
-  | { readonly kind: 'projectSetup'; readonly id: string }
+  | {
+      readonly kind: 'projectSetup'
+      readonly id: string
+      /** Why the setup could not start or be read, in words: the page says it, with Try again. */
+      readonly refused?: string | undefined
+    }
   /** A Chat of a Project: listed under it in the sidebar. */
   | { readonly kind: 'chat'; readonly projectId: string; readonly id: string }
 
