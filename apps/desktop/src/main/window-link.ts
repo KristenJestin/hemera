@@ -352,6 +352,14 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['tester.findings']().pipe(closedAs(gone), observed('tester.findings', log)),
     'tester.folder': () =>
       engine['tester.folder']().pipe(closedAs(gone), observed('tester.folder', log)),
+    // The field's search: the window typing again interrupts it here, which interrupts the engine.
+    'start.search': (request) =>
+      engine['start.search'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('start.search', log),
+      ),
+    'start.create': (request) =>
+      engine['start.create'](request).pipe(closedAs(gone), observed('start.create', log)),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

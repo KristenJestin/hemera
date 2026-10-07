@@ -13,6 +13,7 @@
 import type { Masked } from '@hemera/core/domain'
 import { sql } from 'drizzle-orm'
 import {
+  type AnySQLiteColumn,
   check,
   index,
   integer,
@@ -358,6 +359,11 @@ export const supervisedProcesses = sqliteTable('supervised_processes', {
  * it started from is a sentence, a ticket reference, or both; the remote ticket, when there is
  * one, is its provider, key and address. `round` is the number of the last review round, 0 before
  * the first. `cleanup` is null while there is nothing to clean up.
+ *
+ * Starting from the Project's field (#84): `ticket_reference` is the ticket's canonical form, once
+ * per Project; `search_text` is the key, title and idea, lower case without accents, written with
+ * the mission; `origin_id` the mission it was started from; `idempotency_key` the key of the
+ * user's choice that created it, so that a double click creates one mission.
  */
 export const missions = sqliteTable(
   'missions',
@@ -379,6 +385,12 @@ export const missions = sqliteTable(
     budgetRounds: integer('budget_rounds'),
     ticketKey: text('ticket_key'),
     ticketUrl: text('ticket_url'),
+    ticketReference: text('ticket_reference'),
+    searchText: text('search_text').notNull().default(''),
+    originId: text('origin_id').references((): AnySQLiteColumn => missions.id, {
+      onDelete: 'set null',
+    }),
+    idempotencyKey: text('idempotency_key'),
     stage: text('stage').notNull(),
     round: integer('round').notNull(),
     cleanup: text('cleanup'),
@@ -388,6 +400,8 @@ export const missions = sqliteTable(
   (table) => [
     unique('mission_key_once').on(table.keyPrefix, table.keyNumber),
     index('missions_by_project').on(table.projectId, table.keyNumber),
+    uniqueIndex('mission_ticket_once').on(table.projectId, table.ticketReference),
+    uniqueIndex('mission_choice_once').on(table.projectId, table.idempotencyKey),
   ],
 )
 

@@ -88,6 +88,7 @@ import {
 } from '../memory/tools.ts'
 import { missionsList, specCreateDraft } from '../chat/tools.ts'
 import type { MissionActivity } from '../missions.ts'
+import type { MissionStarts } from '../start/started.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import { resolvePath } from './paths.ts'
@@ -159,6 +160,7 @@ export type GateServices =
   | MissionActivity
   | SetupDesk
   | TesterFindings
+  | MissionStarts
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the

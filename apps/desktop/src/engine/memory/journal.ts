@@ -241,7 +241,7 @@ const permissionDecided = (event: DomainEvent): JournalDraft | null => {
  */
 export const DEFAULT_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map<string, JournalMapper>([
   [
-    'mission.started',
+    'mission.created',
     fromEvent((event) => ({
       missionId: event.entityId,
       kind: 'mission',

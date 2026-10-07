@@ -113,6 +113,7 @@ const mission = (id: string, key: string, updatedAt: string): Mission => ({
   idea: { sentence: 'Add roles', ticket: null },
   type: 'feature',
   ticketLink: null,
+  origin: null,
   stage: 'building',
   round: 0,
   frozen: true,

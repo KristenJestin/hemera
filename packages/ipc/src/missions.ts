@@ -9,6 +9,7 @@
 
 import {
   Ball,
+  CanonicalTicket,
   InvalidKeyPrefix,
   Mark,
   MissionType,
@@ -30,11 +31,15 @@ import { UnknownProject } from './projects.ts'
 
 export { InvalidKeyPrefix, MoveRefused, NeedAnswerRefused }
 
-/** A remote ticket a mission is linked to. */
+/**
+ * The remote ticket a mission came from: its provider, its canonical form (once per Project), its
+ * own key (`acme/shop#41`, `SHOP-7`), and its page, null for a bare key no provider resolved yet.
+ */
 export const TicketLink = Schema.Struct({
   provider: Schema.String,
+  reference: CanonicalTicket,
   key: Schema.String,
-  url: Schema.String,
+  url: Schema.NullOr(Schema.String),
 })
 export type TicketLink = typeof TicketLink.Type
 
@@ -85,6 +90,8 @@ export const Mission = Schema.Struct({
   /** Information only: Hemera behaves the same for every type. */
   type: MissionType,
   ticketLink: Schema.NullOr(TicketLink),
+  /** The mission it was started from, if one. */
+  origin: Schema.NullOr(Schema.String),
   stage: Stage,
   /** The last review round, 0 before the first: Building · round N. */
   round: Schema.Number,
@@ -107,7 +114,6 @@ export const NewMission = Schema.Struct({
   projectId: Schema.String,
   idea: MissionIdea,
   type: Schema.optionalKey(MissionType),
-  ticketLink: Schema.optionalKey(Schema.NullOr(TicketLink)),
 })
 export type NewMission = typeof NewMission.Type
 
@@ -159,6 +165,16 @@ export class InvalidMissionIdea extends Schema.TaggedError<InvalidMissionIdea>()
   }
 }
 
+/** One ticket gives one mission in a Project: a second one from it is refused. */
+export class TicketAlreadyLinked extends Schema.TaggedError<TicketAlreadyLinked>()(
+  'TicketAlreadyLinked',
+  { ticket: Schema.String, missionKey: Schema.String },
+) {
+  override get message(): string {
+    return `${this.ticket} is already ${this.missionKey}.`
+  }
+}
+
 /** A prefix another Project holds, or one keys of another Project's missions still carry. */
 export class KeyPrefixTaken extends Schema.TaggedError<KeyPrefixTaken>()('KeyPrefixTaken', {
   prefix: Schema.String,
@@ -200,7 +216,7 @@ export const MissionsRpcs = RpcGroup.make(
   Rpc.make('missions.create', {
     payload: NewMission,
     success: Mission,
-    error: failing(...always, UnknownProject, InvalidMissionIdea),
+    error: failing(...always, UnknownProject, InvalidMissionIdea, TicketAlreadyLinked),
   }),
   humanMove('missions.freeze'),
   /** The user chooses to update the Spec: it is unfrozen until the next Freeze. */

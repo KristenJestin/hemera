@@ -4,7 +4,15 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
@@ -98,10 +106,12 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'memory_next',
       'memory_notes',
       'memory_now_lines',
+      'mission_choice_once',
       'mission_grants',
       'mission_marks',
       'mission_spent',
       'mission_stops',
+      'mission_ticket_once',
       'missions',
       'missions_by_project',
       'model_marks',
@@ -213,6 +223,48 @@ describe('A data folder one migration behind', () => {
     backup.close()
     expect(tables.map((row) => row.name)).not.toContain('added')
     expect(tables.map((row) => row.name)).toContain('profile')
+  })
+})
+
+describe('A data folder from before the start field', () => {
+  test('its missions get the search text the field searches', async () => {
+    const data = temporaryFolder('before-start')
+    const before = temporaryFolder('migrations-before-start')
+    for (const shipped of readdirSync(SHIPPED).filter((name) => name < '20261007073703')) {
+      cpSync(join(SHIPPED, shipped), join(before, shipped), { recursive: true })
+    }
+    await on(data, openProfile(data, before, '1.0.0'))
+    const at = '2026-10-01T10:00:00.000Z'
+    const file = new DatabaseSync(join(data, DATABASE_FILE))
+    file
+      .prepare(
+        'INSERT INTO projects (id, name, main_checkout, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('project-1', 'Acme', '/acme', at, at, 1)
+    file
+      .prepare(
+        'INSERT INTO missions (id, project_id, key_prefix, key_number, title, idea_sentence, type, stage, round, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        'mission-1',
+        'project-1',
+        'ACME',
+        4,
+        'Export Notes',
+        'As Markdown',
+        'feature',
+        'planning',
+        0,
+        at,
+        at,
+      )
+    file.close()
+
+    await on(data, openProfile(data, SHIPPED, '1.0.0'))
+    const after = new DatabaseSync(join(data, DATABASE_FILE))
+    const row = after.prepare("SELECT search_text FROM missions WHERE id = 'mission-1'").get()
+    after.close()
+    expect(row?.search_text).toBe('acme-4 export notes as markdown')
   })
 })
 

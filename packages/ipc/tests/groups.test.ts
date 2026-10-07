@@ -271,6 +271,8 @@ const memoryHandlers = {
   'setup.changes': unused,
   'tester.findings': unused,
   'tester.folder': unused,
+  'start.search': unused,
+  'start.create': unused,
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,

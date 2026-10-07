@@ -94,7 +94,7 @@ describe('The Memory survives a crash between an event and its projection', () =
         ] as const
       }),
     )
-    expect(events.map((event) => event.type)).toEqual(['mission.started'])
+    expect(events.map((event) => event.type)).toEqual(['mission.created'])
     expect(before).toEqual([])
 
     const [after, total, replayed] = await commandsEngine(data)(({ profile }) =>

@@ -72,6 +72,7 @@ import { instructionFilesOf } from './sessions/instructions.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
 import { SESSION_STATES } from '@hemera/core/domain'
+import { createStart, searchStart } from './start/field.ts'
 import {
   createWorkspace,
   getWorkspace,
@@ -406,6 +407,10 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
     'notifications.feed': () =>
       follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
+    // The field searches first and creates only on the user's explicit choice (#84).
+    'start.search': ({ projectId, text }) =>
+      follow(searchStart(projectId, text)).pipe(observedStream('start.search', log)),
+    'start.create': (asked) => use(createStart(asked)).pipe(observed('start.create', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(machineAgentsLayer()))
 }

@@ -25,14 +25,26 @@ import {
   MoveRefused,
   STAGES,
   type Stage,
+  CanonicalTicket,
   Mark as MarkSchema,
   ballOf,
   checkedMove,
   isFrozen,
   isLive,
   markIdentity,
+  MaskedText,
+  type TicketReference,
+  GITHUB_HOST,
+  GithubIssue,
+  canonicalTicket,
   markSentence,
   missionKey,
+  parseTicketReference,
+  provisionalTitleOf,
+  searchTextOf,
+  ticketKeyOf,
+  ticketProviderOf,
+  ticketUrlOf,
 } from '@hemera/core/domain'
 import {
   InvalidMissionIdea,
@@ -43,6 +55,7 @@ import {
   type Need,
   NeedChanged,
   type NewMission,
+  TicketAlreadyLinked,
   UnknownMission,
   UnknownProject,
 } from '@hemera/ipc'
@@ -74,13 +87,21 @@ import {
 } from './needs.ts'
 import { getProject, givePrefix } from './projects.ts'
 import { type RunServices, stopMissionRuns } from './runs.ts'
-import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
-import { missionMarks, missionStops, missions, projects } from './storage/schema.ts'
+import { MissionStarts, missionStartsLayer } from './start/started.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from './storage/database.ts'
+import { memoryNext, missionMarks, missionStops, missions, projects } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 
-/** The longest idea sentence a mission keeps, and the longest title made of it. */
+/** The longest idea sentence a mission keeps. */
 export const MAX_IDEA_LENGTH = 2000
-export const MAX_TITLE_LENGTH = 120
+
+/** Where a new mission stands in its Now until the Planner says otherwise. */
+export const PLANNING_STARTS = 'Planning starts'
 
 /** The moves a later ticket guards: Freeze (P9), Launch (B1), Fix (R2) and Ship (R9). */
 export type GuardedMove = 'freeze' | 'launch' | 'fix' | 'ship'
@@ -170,10 +191,16 @@ export const missionsLayer = (parts: Partial<MissionParts> = {}) =>
     ),
     needOwnersLayer(parts.owners ?? new Map()),
     parts.grants === undefined ? noGrants : Layer.succeed(SessionGrants, parts.grants),
+    missionStartsLayer,
   )
 
 /** What the calls on missions stand on. */
-export type MissionServices = NeedServices | MoveGuards | MissionStoppers | MissionActivity
+export type MissionServices =
+  | NeedServices
+  | MoveGuards
+  | MissionStoppers
+  | MissionActivity
+  | MissionStarts
 
 /** Mission identifiers: ULIDs from the system's own secure random source. */
 const identifiers = Crypto.make({
@@ -204,7 +231,7 @@ const markOf = (row: MarkRow): ReadonlyArray<MissionMark> =>
 const stageOf = (row: MissionRow): Stage => STAGES.find((one) => one === row.stage) ?? 'cancelled'
 
 /** The missions of these rows, read whole: marks, pending needs, stops owed, and the ball. */
-const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
+export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
   Effect.gen(function* () {
     if (rows.length === 0) return []
     const ids = rows.map((row) => row.id)
@@ -229,7 +256,7 @@ const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
         const own = marks.filter((mark) => mark.missionId === row.id).flatMap(markOf)
         const needs: ReadonlyArray<Need> = pending.get(row.id) ?? []
         const activity = yield* activityOf(row.id)
-        const { ticketProvider, ticketKey, ticketUrl } = row
+        const { ticketProvider, ticketKey, ticketReference } = row
         return {
           id: row.id,
           projectId: row.projectId,
@@ -238,9 +265,15 @@ const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
           idea: { sentence: row.ideaSentence, ticket: row.ideaTicket },
           type: MISSION_TYPES.find((one) => one === row.type) ?? 'feature',
           ticketLink:
-            ticketProvider === null || ticketKey === null || ticketUrl === null
+            ticketProvider === null || ticketKey === null || ticketReference === null
               ? null
-              : { provider: ticketProvider, key: ticketKey, url: ticketUrl },
+              : {
+                  provider: ticketProvider,
+                  reference: CanonicalTicket.make(ticketReference),
+                  key: ticketKey,
+                  url: row.ticketUrl,
+                },
+          origin: row.originId,
           stage,
           round: row.round,
           frozen: isFrozen(stage),
@@ -307,22 +340,70 @@ const given = (text: string | null): string | null => {
   return trimmed === '' ? null : trimmed
 }
 
-/** The title a mission starts with: the first line of its idea, cut to a title's length. */
-const titleOf = (idea: string): string => {
-  const line = idea.split('\n')[0]?.trim() ?? idea
-  return line.length > MAX_TITLE_LENGTH ? `${line.slice(0, MAX_TITLE_LENGTH - 1)}…` : line
+/** How a mission is created beyond its idea: where from, and under which choice of the user. */
+export interface MissionCreation {
+  /** The title of the Chat it was created from (#43). */
+  readonly fromChat?: string | undefined
+  /** The ticket it came from, as recognised; read from the idea's ticket otherwise. */
+  readonly reference?: TicketReference | undefined
+  /** The host a short form `owner/repo#n` resolved to, through the Project's GitHub providers. */
+  readonly githubHost?: string | undefined
+  /** The ticket's title, when its provider answered it. */
+  readonly ticketTitle?: string | undefined
+  /** The mission it was started from, checked by the caller. */
+  readonly origin?: string | undefined
+  /** The key of the user's choice: the same key twice creates one mission. */
+  readonly idempotencyKey?: string | undefined
 }
 
 /**
- * Creates a mission in Planning: its key is its Project's prefix and next number, and
- * `mission.started` is written with it, naming the Chat it was created from, if one (#43).
+ * The missions of a Project linked to a ticket. Jira keys are one ticket when their keys are equal
+ * and their hosts are, or one of them is not known: a bare key and a browse URL name the same. A
+ * GitHub short form names no host: it is the issue of that repository and number on any host.
  */
-export const createMission = (asked: NewMission, fromChat: string | null = null) =>
+export const linkedTo = (projectId: string, reference: TicketReference) => {
+  const canonical = canonicalTicket(reference)
+  const sameTicket = Predicate.isTagged(reference, 'JiraKey')
+    ? and(
+        eq(missions.ticketProvider, 'jira'),
+        eq(missions.ticketKey, reference.key),
+        reference.host === null
+          ? undefined
+          : inArray(missions.ticketReference, [canonical, `jira:/${reference.key}`]),
+      )
+    : reference.host === null
+      ? and(eq(missions.ticketProvider, 'github'), eq(missions.ticketKey, ticketKeyOf(reference)))
+      : eq(missions.ticketReference, canonical)
+  return and(eq(missions.projectId, projectId), sameTicket)
+}
+
+/** The key of the mission of a Project linked to a ticket, or null when none is. */
+export const linkedMission = (
+  database: EngineTransaction | Database['Service'],
+  projectId: string,
+  reference: TicketReference,
+) =>
+  database
+    .select({ keyPrefix: missions.keyPrefix, keyNumber: missions.keyNumber })
+    .from(missions)
+    .where(linkedTo(projectId, reference))
+    .limit(1)
+    .pipe(
+      Effect.mapError(refusedWhile('reading the tickets of the missions')),
+      Effect.map(([row]) => (row === undefined ? null : missionKey(row.keyPrefix, row.keyNumber))),
+    )
+
+/**
+ * Creates a mission in Planning: its key is its Project's prefix and next number, its title the
+ * provisional one, its Now "Planning starts", and `mission.created` is written with it. A ticket
+ * already linked to a mission of the Project is refused; a choice already made answers the mission
+ * it made. Once committed, `mission.started` is told.
+ */
+export const createMission = (asked: NewMission, creation: MissionCreation = {}) =>
   Effect.gen(function* () {
     const sentence = given(asked.idea.sentence)
     const ticket = given(asked.idea.ticket)
-    const idea = sentence ?? ticket
-    if (idea === null) {
+    if (sentence === null && ticket === null) {
       return yield* new InvalidMissionIdea({ reason: 'give it a sentence or a ticket' })
     }
     if (sentence !== null && sentence.length > MAX_IDEA_LENGTH) {
@@ -333,10 +414,44 @@ export const createMission = (asked: NewMission, fromChat: string | null = null)
     const project = yield* getProject(asked.projectId)
     const id = yield* identifiers.randomULID.pipe(Effect.orDie)
     const type = asked.type ?? 'feature'
-    const title = titleOf(idea)
-    const link = asked.ticketLink ?? null
-    yield* mutate('creating a mission', (transaction) =>
+    const reference = creation.reference ?? (ticket === null ? null : parseTicketReference(ticket))
+    // What is stored names the host a short form resolved to; the check for a ticket already
+    // linked uses the reference as given, so that a short form matches its issue on any host.
+    const stored =
+      reference !== null && Predicate.isTagged(reference, 'GithubIssue') && reference.host === null
+        ? GithubIssue.make({ ...reference, host: creation.githubHost ?? GITHUB_HOST })
+        : reference
+    const canonical = stored === null ? null : canonicalTicket(stored)
+    const title = provisionalTitleOf(
+      sentence ??
+        creation.ticketTitle ??
+        (reference === null ? (ticket ?? '') : ticketKeyOf(reference)),
+    )
+    const fromChat = creation.fromChat ?? null
+    const origin = creation.origin ?? null
+    const choice = creation.idempotencyKey ?? null
+    // The commit and `mission.started` are one step: an interruption between them would leave a
+    // mission no retry starts, since the retry of the same choice finds it already made.
+    const made = yield* mutate('creating a mission', (transaction) =>
       Effect.gen(function* () {
+        if (choice !== null) {
+          const [already] = yield* transaction
+            .select({ id: missions.id })
+            .from(missions)
+            .where(and(eq(missions.projectId, project.id), eq(missions.idempotencyKey, choice)))
+            .pipe(Effect.mapError(refusedWhile('reading the missions')))
+          if (already !== undefined)
+            return { result: { id: already.id, created: false }, events: [] }
+        }
+        if (reference !== null) {
+          const linked = yield* linkedMission(transaction, project.id, reference)
+          if (linked !== null) {
+            return yield* new TicketAlreadyLinked({
+              ticket: ticketKeyOf(reference),
+              missionKey: linked,
+            })
+          }
+        }
         const [counter] = yield* transaction
           .update(projects)
           .set({ nextMission: sql`${projects.nextMission} + 1` })
@@ -354,6 +469,7 @@ export const createMission = (asked: NewMission, fromChat: string | null = null)
         const prefix = counter.keyPrefix ?? (yield* givePrefix(transaction, project))
         const at = now()
         const number = counter.next - 1
+        const key = missionKey(prefix, number)
         yield* transaction
           .insert(missions)
           .values({
@@ -363,11 +479,15 @@ export const createMission = (asked: NewMission, fromChat: string | null = null)
             keyNumber: number,
             title,
             ideaSentence: sentence,
-            ideaTicket: ticket,
+            ideaTicket: reference === null ? ticket : ticketKeyOf(reference),
             type,
-            ticketProvider: link?.provider ?? null,
-            ticketKey: link?.key ?? null,
-            ticketUrl: link?.url ?? null,
+            ticketProvider: reference === null ? null : ticketProviderOf(reference),
+            ticketKey: reference === null ? null : ticketKeyOf(reference),
+            ticketUrl: stored === null ? null : ticketUrlOf(stored),
+            ticketReference: canonical,
+            searchText: searchTextOf([key, title, sentence, ticket]),
+            originId: origin,
+            idempotencyKey: choice,
             stage: 'planning',
             round: 0,
             cleanup: null,
@@ -379,22 +499,52 @@ export const createMission = (asked: NewMission, fromChat: string | null = null)
             updatedAt: at,
           })
           .pipe(Effect.mapError(refusedWhile('writing the mission')))
+        const next = MaskedText.make(PLANNING_STARTS)
+        yield* transaction
+          .insert(memoryNext)
+          .values({
+            missionId: id,
+            sessionId: '',
+            role: 'hemera',
+            epoch: 0,
+            text: next,
+            updatedAt: at,
+          })
+          .pipe(Effect.mapError(refusedWhile('writing Now')))
+        const by = fromChat === null ? BY_THE_USER : BY_HEMERA
         return {
-          result: undefined,
+          result: { id, created: true },
           events: [
-            missionEvent('mission.started', id, fromChat === null ? BY_THE_USER : BY_HEMERA, {
+            missionEvent('mission.created', id, by, {
               projectId: project.id,
-              key: missionKey(prefix, number),
+              key,
               type,
               title,
+              sentence,
+              ticket: canonical ?? ticket,
+              origin,
               fromChat,
+            }),
+            missionEvent('memory.now_set', id, BY_HEMERA, {
+              sessionId: '',
+              role: 'hemera',
+              epoch: 0,
+              doing: null,
+              next,
             }),
           ],
         }
       }),
+    ).pipe(
+      Effect.tap((committed) =>
+        committed.created
+          ? MissionStarts.use((starts) => starts.started({ missionId: committed.id }))
+          : Effect.void,
+      ),
+      Effect.uninterruptible,
     )
     // Written a moment ago: a mission that is not there now is a defect, not a refusal.
-    return yield* getMission(id).pipe(Effect.catchTag('UnknownMission', Effect.die))
+    return yield* getMission(made.id).pipe(Effect.catchTag('UnknownMission', Effect.die))
   })
 
 const isGuarded = (move: Move): move is GuardedMove =>
