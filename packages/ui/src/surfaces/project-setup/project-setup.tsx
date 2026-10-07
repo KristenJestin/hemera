@@ -74,6 +74,8 @@ const ABOUT = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
 
 const GRID = 'grid grid-cols-1 items-start gap-6 xl:grid-cols-2'
 
+const COLUMN = 'flex flex-col gap-6'
+
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
 
 /** Whether every card has its answer. */
@@ -85,7 +87,7 @@ export function allAnswered(cards: readonly SetupCardEntry[]): boolean {
 const CHIP_STATES = { working: 'running', done: 'finished', failed: 'failed' } as const
 
 /** What the setup agent is doing, at the end of the header. */
-function AgentMark({
+export function AgentMark({
   agent,
   startedAt,
   endedAt,
@@ -112,18 +114,42 @@ function AgentMark({
   )
 }
 
-export function ProjectSetup({
-  folder,
+/** The cards shown: once the agent stopped, those it had not written are not drawn. */
+export const shownCards = (
+  agent: SetupAgent,
+  cards: readonly SetupCardEntry[],
+): readonly SetupCardEntry[] =>
+  agent === 'failed' ? cards.filter((card) => card.status.state !== 'reading') : cards
+
+/** What the cards' answers and the agent's state say, under a setup's header: shared by its views. */
+export type SetupBodyProps = Pick<
+  ProjectSetupProps,
+  | 'agent'
+  | 'failure'
+  | 'cards'
+  | 'refused'
+  | 'onRetry'
+  | 'onAccept'
+  | 'onEdit'
+  | 'onDraft'
+  | 'onDiscuss'
+  | 'onDecline'
+  | 'onSave'
+  | 'onCancel'
+  | 'onSend'
+  | 'onProposeAgain'
+> & {
+  /** One column, where the view is narrow; two by two where the window is wide otherwise. */
+  narrow?: boolean | undefined
+}
+
+/** The refusal of the last answer, the agent stopped, then the cards. */
+export function SetupBody({
   agent,
-  startedAt,
-  endedAt,
   failure,
-  glance,
   cards,
-  creating = false,
   refused,
-  onAcceptAll,
-  onCreate,
+  narrow = false,
   onRetry,
   onAccept,
   onEdit,
@@ -134,8 +160,63 @@ export function ProjectSetup({
   onCancel,
   onSend,
   onProposeAgain,
-}: ProjectSetupProps): ReactNode {
-  const shown = agent === 'failed' ? cards.filter((card) => card.status.state !== 'reading') : cards
+}: SetupBodyProps): ReactNode {
+  return (
+    <>
+      {refused !== undefined && (
+        <p role="alert" className={REFUSAL}>
+          {refused}
+        </p>
+      )}
+      {agent === 'failed' && (
+        <NeedCard
+          ask={{ kind: 'environment', action: 'Try again' }}
+          title="The setup agent stopped"
+          text={failure}
+          when="now"
+          role="Setup agent"
+          onRetry={onRetry}
+        />
+      )}
+      <div className={narrow ? COLUMN : GRID}>
+        {shownCards(agent, cards).map((card) => (
+          <SetupCard
+            key={card.kind}
+            kind={card.kind}
+            status={card.status}
+            proposal={card.proposal}
+            draft={card.draft}
+            onDraft={(draft) => onDraft(card.kind, draft)}
+            onAccept={() => onAccept(card.kind)}
+            onEdit={onEdit === undefined ? undefined : () => onEdit(card.kind)}
+            onDiscuss={onDiscuss === undefined ? undefined : () => onDiscuss(card.kind)}
+            onDecline={() => onDecline(card.kind)}
+            onSave={() => onSave(card.kind)}
+            onCancel={() => onCancel(card.kind)}
+            onSend={(note) => onSend(card.kind, note)}
+            onProposeAgain={
+              onProposeAgain === undefined ? undefined : () => onProposeAgain(card.kind)
+            }
+          />
+        ))}
+      </div>
+    </>
+  )
+}
+
+export function ProjectSetup(props: ProjectSetupProps): ReactNode {
+  const {
+    folder,
+    agent,
+    startedAt,
+    endedAt,
+    glance,
+    cards,
+    creating = false,
+    onAcceptAll,
+    onCreate,
+  } = props
+  const shown = shownCards(agent, cards)
   const waiting = shown.some((card) => card.status.state === 'proposed')
   const answered =
     agent !== 'waiting' && agent !== 'working' && shown.length > 0 && allAnswered(shown)
@@ -167,43 +248,7 @@ export function ProjectSetup({
           </>
         }
       />
-      {refused !== undefined && (
-        <p role="alert" className={REFUSAL}>
-          {refused}
-        </p>
-      )}
-      {agent === 'failed' && (
-        <NeedCard
-          ask={{ kind: 'environment', action: 'Try again' }}
-          title="The setup agent stopped"
-          text={failure}
-          when="now"
-          role="Setup agent"
-          onRetry={onRetry}
-        />
-      )}
-      <div className={GRID}>
-        {shown.map((card) => (
-          <SetupCard
-            key={card.kind}
-            kind={card.kind}
-            status={card.status}
-            proposal={card.proposal}
-            draft={card.draft}
-            onDraft={(draft) => onDraft(card.kind, draft)}
-            onAccept={() => onAccept(card.kind)}
-            onEdit={onEdit === undefined ? undefined : () => onEdit(card.kind)}
-            onDiscuss={onDiscuss === undefined ? undefined : () => onDiscuss(card.kind)}
-            onDecline={() => onDecline(card.kind)}
-            onSave={() => onSave(card.kind)}
-            onCancel={() => onCancel(card.kind)}
-            onSend={(note) => onSend(card.kind, note)}
-            onProposeAgain={
-              onProposeAgain === undefined ? undefined : () => onProposeAgain(card.kind)
-            }
-          />
-        ))}
-      </div>
+      <SetupBody {...props} />
     </Page>
   )
 }

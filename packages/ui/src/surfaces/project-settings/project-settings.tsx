@@ -49,6 +49,8 @@ export interface ProjectSettingsProps {
    * button at the header's end. Left out, it is not drawn.
    */
   onSetUp?: (() => void) | undefined
+  /** What waits above the section chosen, whatever it is: a setup left for later. */
+  banner?: ReactNode
   /** The section chosen. */
   children: ReactNode
 }
@@ -67,6 +69,7 @@ export function ProjectSettings({
   form = null,
   onCloseForm,
   onSetUp,
+  banner,
   children,
 }: ProjectSettingsProps): ReactNode {
   return (
@@ -95,6 +98,7 @@ export function ProjectSettings({
       form={form}
       onCloseForm={onCloseForm}
     >
+      {banner}
       {error === undefined ? (
         children
       ) : (

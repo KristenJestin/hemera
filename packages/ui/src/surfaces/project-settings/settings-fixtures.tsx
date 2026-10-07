@@ -162,6 +162,8 @@ export interface SettingsFixtureProps {
   project?: 'acme' | 'hemera' | undefined
   /** Asks the setup agent again: its button at the header's end. */
   onSetUp?: (() => void) | undefined
+  /** What waits above the section: a setup left for later. */
+  banner?: ReactNode
 }
 
 function draftOfRepository(repository: SettingsRepository): RepositoryDraft {
@@ -194,6 +196,7 @@ export function SettingsFixture({
   runs: givenRuns,
   project = 'acme',
   onSetUp,
+  banner,
 }: SettingsFixtureProps): ReactNode {
   const name = project === 'hemera' ? 'Hemera' : 'Acme'
   const firstRepositories = (): SettingsRepository[] => {
@@ -731,6 +734,7 @@ export function SettingsFixture({
       />
       <ProjectSettings
         onSetUp={onSetUp}
+        banner={banner}
         name={name}
         mainCheckout={project === 'hemera' ? '~/work/hemera' : long ? LONG_PATH : MAIN_CHECKOUT}
         sections={sections}
