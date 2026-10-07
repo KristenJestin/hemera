@@ -16,6 +16,7 @@ import {
   START,
   focusOf,
   go,
+  goIfStill,
   routeOf,
   sectionOf,
   show,
@@ -125,6 +126,11 @@ function Application() {
   }, [])
 
   const goTo = (to: Route): void => setNavigation((before) => go(before, to))
+  /** Where an answer leads once it comes, unless the user has left `from` meanwhile. */
+  const goOnceFrom =
+    (from: Route) =>
+    (to: Route): void =>
+      setNavigation((before) => goIfStill(before, from, to))
   const openChat = (projectId: string, id: string): void => {
     setOpened((before) => new Set([...before, projectId]))
     goTo({ kind: 'chat', projectId, id })
@@ -189,7 +195,7 @@ function Application() {
               // One at a time: a second press while the first asks the engine does nothing.
               if (settingUp.current) return
               settingUp.current = true
-              setUpAgain(link, settingsOf, goTo).finally(() => {
+              setUpAgain(link, settingsOf, goOnceFrom(route)).finally(() => {
                 settingUp.current = false
               })
             }}
@@ -233,7 +239,7 @@ function Application() {
           open={adding}
           onOpenChange={setAdding}
           tools={ADDING}
-          onCreated={(created) => void startSetup(link.proposeSetup, created.id, goTo)}
+          onCreated={(created) => void startSetup(link.proposeSetup, created.id, goOnceFrom(route))}
         />
       }
       actions={{

@@ -8,6 +8,7 @@ import {
   focusOf,
   frameOf,
   go,
+  goIfStill,
   linkedSettings,
   open,
   placeOf,
@@ -53,6 +54,15 @@ describe('The window’s routes', () => {
     expect(focusOf(linked.route)).toBe(true)
     expect(focusOf(go(START, { kind: 'settings', section: 'models' }).route)).toBe(false)
     expect(focusOf(go(START, { kind: 'settings' }).route)).toBe(false)
+  })
+
+  test('a page an answer leads to opens only if the user is still where it was asked', () => {
+    const settings = go(START, { kind: 'projectSettings', id: 'acme' })
+    const asked = settings.route
+    const setup = { kind: 'projectSetup', id: 'acme' } as const
+    expect(goIfStill(settings, asked, setup).route).toEqual(setup)
+    const elsewhere = go(settings, { kind: 'home' })
+    expect(goIfStill(elsewhere, asked, setup)).toBe(elsewhere)
   })
 
   test('Home filtered to a Project says it after Home, which leads back to every need', () => {

@@ -134,6 +134,13 @@ export function placeOf(route: Route): SidebarPlace {
   }
 }
 
+/**
+ * Where an answer of the engine leads, if the user is still on the page it was asked from: one who
+ * moved to another page meanwhile stays there.
+ */
+export const goIfStill = (navigation: Navigation, from: Route, to: Route): Navigation =>
+  navigation.route === from ? go(navigation, to) : navigation
+
 /** Settings at a section a link names: a need's "Open Settings", a notification's. */
 export const linkedSettings = (section: AppSection): Route => ({
   kind: 'settings',
