@@ -4,8 +4,21 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { BallMark } from '../blocks/ball/ball-mark.tsx'
 import { ContentHeader } from './content-header.tsx'
-import { LONG_NAME, MANY_PROJECTS, MARKED_PROJECTS, MISSION, PROJECTS } from './shell-fixtures.tsx'
-import { Sidebar, type SidebarPlace, SidebarRow } from './sidebar.tsx'
+import {
+  CHATS,
+  LONG_NAME,
+  MANY_PROJECTS,
+  MARKED_PROJECTS,
+  MISSION,
+  PROJECTS,
+} from './shell-fixtures.tsx'
+import {
+  Sidebar,
+  SidebarChatRow,
+  type SidebarChatRowProps,
+  type SidebarPlace,
+  SidebarRow,
+} from './sidebar.tsx'
 
 /**
  * The sidebar alone, on the page surface it stands on: Hemera's head, Home and its count, the
@@ -328,5 +341,61 @@ export const Marked: Story = {
   play: async ({ canvasElement }) => {
     expect(canvasElement.querySelector('[data-mark-icon="rocket"]')).not.toBeNull()
     expect(canvasElement.querySelector('[data-mark-image]')).not.toBeNull()
+  },
+}
+
+/** "New Chat" pressed: what the stories below check it was asked. */
+const startChat = fn()
+
+/** Acme's Chats under it, the latest first, then the row that starts a new one. */
+const chatsOfAcme = (newChat: Partial<SidebarChatRowProps> = {}) => [
+  {
+    ...PROJECTS[0]!,
+    under: (
+      <>
+        {CHATS.map((chat) => (
+          <SidebarChatRow key={chat.id} id={chat.id} title={chat.title} onPress={fn()} />
+        ))}
+        <SidebarChatRow id="new:acme" title="New Chat" onPress={startChat} {...newChat} />
+      </>
+    ),
+  },
+  PROJECTS[1]!,
+]
+
+/** A Project opened on its Chats: each with the Chat's glyph and its title, then "New Chat". */
+export const WithChats: Story = {
+  args: { projects: chatsOfAcme(), opened: new Set(['acme']) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: 'Invoices export' })).toBeVisible()
+    startChat.mockClear()
+    await userEvent.click(canvas.getByRole('button', { name: 'New Chat' }))
+    expect(startChat).toHaveBeenCalledOnce()
+  },
+}
+
+/** A Chat being started: "New Chat" takes no second press until the engine answers. */
+export const NewChatStarting: Story = {
+  args: { projects: chatsOfAcme({ pending: true }), opened: new Set(['acme']) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: 'New Chat' })).toBeDisabled()
+    expect(canvas.getByRole('button', { name: 'New Chat' })).toHaveAttribute('aria-busy', 'true')
+  },
+}
+
+/** A Chat the engine could not start: said in words under "New Chat", which can be pressed again. */
+export const NewChatRefused: Story = {
+  args: {
+    projects: chatsOfAcme({
+      error: 'The Chat could not be started: Hemera could not write to its profile.',
+    }),
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('alert')).toHaveTextContent('could not be started')
+    expect(canvas.getByRole('button', { name: 'New Chat' })).toBeEnabled()
   },
 }

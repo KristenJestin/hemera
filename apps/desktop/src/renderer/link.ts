@@ -14,7 +14,12 @@ import {
   EngineGone,
   StorageFailed,
   WindowRpcs,
+  type AgentState,
   type BaseBranchEdit,
+  type ChatChanged,
+  type ChatLine,
+  type ChatPage,
+  type ChatSummary,
   type BranchPrefixEdit,
   type Command,
   type CommandSave,
@@ -24,6 +29,7 @@ import {
   type MaskedVariable,
   type Mission,
   type MissionsChange,
+  type ModelMark,
   type Need,
   type NeedAnswerAsked,
   type NeedGroup,
@@ -52,6 +58,7 @@ import {
   type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
+import type { ChatMention, ModelSettingValue } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -142,6 +149,31 @@ export interface Link {
   ) => () => void
   /** What main tells the window of notifications, for as long as the listener listens. */
   readonly onNotices: (listener: (notice: WindowNotice) => void) => () => void
+  /** A Project's Chats, the latest active first as the engine lists them. */
+  readonly chats: (projectId: string) => Promise<ReadonlyArray<ChatSummary>>
+  readonly createChat: (projectId: string) => Promise<ChatSummary>
+  readonly renameChat: (chatId: string, title: string) => Promise<void>
+  /** Rejects with `ChatRefused` when the message could not be handed to the agent. */
+  readonly sendToChat: (
+    chatId: string,
+    text: string,
+    mentions: ReadonlyArray<ChatMention>,
+  ) => Promise<ChatLine>
+  readonly stopChat: (chatId: string) => Promise<void>
+  readonly setChatModel: (chatId: string, setting: ModelSettingValue) => Promise<void>
+  /** A page of a Chat's transcript, oldest first; the newest page without `before`. */
+  readonly transcript: (chatId: string, before: number | null) => Promise<ChatPage>
+  /** Each change of a Chat: its title, its model, its transcript, its turns. */
+  readonly onChatChanges: (
+    listener: (change: ChatChanged) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly missions: (projectId: string) => Promise<ReadonlyArray<Mission>>
+  /** The agents this machine knows, installed or not. */
+  readonly agents: () => Promise<ReadonlyArray<AgentState>>
+  /** The models the user marked, favourite or hidden. */
+  readonly modelMarks: () => Promise<ReadonlyArray<ModelMark>>
+  readonly markModel: (mark: ModelMark) => Promise<void>
   readonly close: () => void
 }
 
@@ -274,6 +306,26 @@ export function linkOver(port: Port): Link {
         (error) => error instanceof StorageFailed || error instanceof EngineGone,
         onEnd,
       ),
+    chats: (projectId) => call((ready) => ready['chats.list']({ projectId })),
+    createChat: (projectId) => call((ready) => ready['chats.create']({ projectId })),
+    renameChat: (chatId, title) => call((ready) => ready['chats.rename']({ chatId, title })),
+    sendToChat: (chatId, text, mentions) =>
+      call((ready) => ready['chats.send']({ chatId, text, mentions })),
+    stopChat: (chatId) => call((ready) => ready['chats.stop']({ chatId })),
+    setChatModel: (chatId, setting) =>
+      call((ready) => ready['chats.setModel']({ chatId, setting })),
+    transcript: (chatId, before) => call((ready) => ready['chats.transcript']({ chatId, before })),
+    onChatChanges: (listener, onEnd) =>
+      follow(
+        (ready) => ready['chats.changes'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
+    missions: (projectId) => call((ready) => ready['missions.list']({ projectId })),
+    agents: () => call((ready) => ready['agents.list']()),
+    modelMarks: () => call((ready) => ready['models.marks']()),
+    markModel: (mark) => call((ready) => ready['models.mark'](mark)),
     onNotices: (listener) =>
       follow(
         (ready) => ready['notifications.window'](),

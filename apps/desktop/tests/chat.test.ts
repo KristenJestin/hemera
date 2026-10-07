@@ -10,8 +10,13 @@
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { CHAT_CONTINUE, CHAT_INTERRUPTED, PermissionAnswer } from '@hemera/core/domain'
-import { Effect, Predicate, References } from 'effect'
+import {
+  CHAT_CONTINUE,
+  CHAT_INTERRUPTED,
+  CHAT_STOPPED,
+  PermissionAnswer,
+} from '@hemera/core/domain'
+import { Effect, Predicate, References, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -26,7 +31,7 @@ import { Sessions } from '../src/engine/sessions/service.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { acmeIn, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import { acmeIn, agentsFound, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 
 let data: string
 let work: string
@@ -179,13 +184,19 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
           const [need] = yield* pendingNeeds
           if (need === undefined) return yield* Effect.die(new Error('no need'))
           yield* settledChat(chat.id)
+          const waiting = yield* transcriptOf(chat.id, null)
           yield* answerNeed({
             id: need.id,
             key: 'allow',
             answer: PermissionAnswer.make({ choice: 'allow-once' }),
           })
           yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2))
-          return { need, projectId: project.id, transcript: yield* transcriptOf(chat.id, null) }
+          return {
+            need,
+            projectId: project.id,
+            waiting,
+            transcript: yield* transcriptOf(chat.id, null),
+          }
         }),
       ),
     )
@@ -195,6 +206,11 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
     expect(text(world.agents[0]?.answers.prompts[1] ?? [])).toMatch(/^\[hemera:approval\]/)
     const action = seen.transcript.entries.find((entry) => entry.kind === 'action')
     expect(action).toMatchObject({ outcome: 'held', request: 1 })
+    // The card the page draws: what it asks, why, the need it answers, and how it was answered.
+    const before = seen.waiting.entries.find((entry) => entry.kind === 'action')
+    expect(before?.held).toMatchObject({ needId: seen.need.id, answer: 'waiting' })
+    expect(before?.held?.command).toContain('.env')
+    expect(action?.held).toMatchObject({ needId: seen.need.id, answer: 'allowed' })
   })
 
   test('git push, sh -c "git push", npx gh pr create and npm publish always ask, with their reason', async () => {
@@ -416,6 +432,41 @@ describe('Sessions of a Chat come and go; the conversation stays', () => {
     )
     expect(world.agents[0]?.answers.cancels).toBe(1)
     expect(seen.entries[0]).toMatchObject({ kind: 'user', text: 'Count to a million.' })
+    expect(seen.entries.filter((entry) => entry.kind === 'notice')).toMatchObject([
+      { text: CHAT_STOPPED },
+    ])
+  })
+
+  test('a Stop and a message at once: the turn stopped is said before the message that follows', async () => {
+    const hold = held()
+    const { world, run } = sessionsEngine(data, () => ({
+      turns: [[{ does: 'says', text: 'Counting…' }]],
+      steps: [{ does: 'says', text: 'done' }],
+      between: () => hold.promise,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Count to a million.')
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          yield* Effect.all(
+            [Chats.use((chats) => chats.stop(chat.id)), send(chat.id, 'Count to ten instead.')],
+            { concurrency: 'unbounded' },
+          )
+          hold.release()
+          yield* settledChat(chat.id)
+          return yield* transcriptOf(chat.id, null)
+        }),
+      ),
+    )
+    expect(
+      seen.entries
+        .filter((entry) => entry.kind !== 'agent')
+        .map((entry) => (entry.kind === 'notice' ? entry.text : entry.kind)),
+    ).toEqual(['user', CHAT_STOPPED, 'user'])
   })
 
   test('after a restart a Chat whose turn ran says it was interrupted, and nothing resumes on its own', async () => {
@@ -578,5 +629,106 @@ describe('A call folded in the transcript', () => {
     )
     const action = transcript.entries.find((entry) => entry.kind === 'action')
     expect(action).toMatchObject({ outcome: 'completed', request: null })
+  })
+})
+
+describe('A Chat’s turn, as its page follows it', () => {
+  test('the Chat says whether its agent is in a turn, and its turn’s start and end are changes', async () => {
+    const hold = held()
+    const { run } = sessionsEngine(data, () => ({
+      turns: [[{ does: 'thinks', text: 'Reading the export.' }]],
+      steps: [{ does: 'says', text: 'done' }],
+      between: () => hold.promise,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          const working = Effect.flatMap(getChat(chat.id), (now) =>
+            Chats.use((chats) => chats.working(now)),
+          )
+          const turns = yield* Chats.use((chats) => chats.turns)
+          const changed: string[] = []
+          yield* Stream.runForEach(turns, (change) =>
+            Effect.sync(() => changed.push(change.chatId)),
+          ).pipe(Effect.forkScoped)
+          yield* send(chat.id, 'Where are the invoices exported?')
+          yield* until(working)
+          yield* until(Effect.sync(() => changed.length === 1))
+          const during = yield* working
+          hold.release()
+          yield* until(Effect.map(working, (now) => !now))
+          yield* until(Effect.sync(() => changed.length === 2))
+          return { during, changed }
+        }).pipe(Effect.scoped),
+      ),
+    )
+    expect(seen.during).toBe(true)
+    expect(seen.changed).toHaveLength(2)
+  })
+})
+
+describe('A Chat’s turn read again as soon as it changes', () => {
+  test('a read on the turn’s end finds it ended, so Stop never stays after it', async () => {
+    const hold = held()
+    const { run } = sessionsEngine(data, () => ({
+      turns: [[{ does: 'thinks', text: 'Reading the export.' }]],
+      steps: [{ does: 'says', text: 'done' }],
+      between: () => hold.promise,
+    }))
+    const reads = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          const turns = yield* Chats.use((chats) => chats.turns)
+          const read: boolean[] = []
+          // As the page does: each change of the Chat, its summary read again at once.
+          yield* Stream.runForEach(turns, () =>
+            Effect.flatMap(getChat(chat.id), (now) =>
+              Effect.map(
+                Chats.use((chats) => chats.working(now)),
+                (working) => void read.push(working),
+              ),
+            ),
+          ).pipe(Effect.forkScoped)
+          yield* send(chat.id, 'Where are the invoices exported?')
+          yield* until(Effect.sync(() => read.length === 1))
+          hold.release()
+          yield* until(Effect.sync(() => read.length === 2))
+          return read
+        }).pipe(Effect.scoped),
+      ),
+    )
+    expect(reads).toEqual([true, false])
+  })
+})
+
+describe('A Chat whose agent cannot start', () => {
+  test('says why in its conversation, after the message that asked for it', async () => {
+    const { run } = sessionsEngine(data, () => SAYS('never said'), {
+      sessions: { discovery: agentsFound(['claude']) },
+    })
+    const entries = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Where are the invoices exported?')
+          yield* until(
+            Effect.map(transcriptOf(chat.id, null), (page) =>
+              page.entries.some((entry) => entry.kind === 'notice'),
+            ),
+          )
+          return (yield* transcriptOf(chat.id, null)).entries
+        }),
+      ),
+    )
+    expect(entries.map((entry) => entry.kind)).toEqual(['user', 'notice'])
+    expect(entries[1]?.text).toContain('not signed in')
   })
 })

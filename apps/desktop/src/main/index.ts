@@ -30,7 +30,7 @@ import { rendererSource } from './renderer-source.ts'
 import { collectReport } from './report.ts'
 import { refreshDisplay, windowHandlers, type Application } from './window-link.ts'
 import { OPENING_COLORS } from './opening-colors.ts'
-import { headless, windowOptions } from './window-options.ts'
+import { headless, suiteRuns, windowOptions } from './window-options.ts'
 import { serveWindows } from './window-ports.ts'
 import { previewSound, soundsFolderOf } from './sounds.ts'
 import { systemNotifierPorts, systemSounds } from './system-notifier.ts'
@@ -107,7 +107,7 @@ const run = Effect.gen(function* () {
   // corrects the hint if it was missing or out of date.
   nativeTheme.themeSource = readSidecar(dataFolder)?.theme ?? 'system'
 
-  const underSuite = headless(process.env)
+  const underSuite = suiteRuns(process.env, app.isPackaged)
   const engine = yield* startEngine(
     main,
     { dataFolder, migrations: MIGRATIONS, ...identity },

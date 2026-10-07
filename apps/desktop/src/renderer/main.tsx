@@ -8,11 +8,13 @@ import { createRoot } from 'react-dom/client'
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
 import { AppSettings } from './app-settings.tsx'
+import { ChatRoute, ProjectChats } from './chat-route.tsx'
 import { connect } from './link.ts'
-import { START, go, routeOf, show, type Navigation } from './navigation.ts'
+import { START, go, routeOf, show, type Navigation, type Route } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
+import { useChats } from './use-chats.ts'
 import { useEngine } from './use-engine.ts'
 import { useMinute, useNeeds } from './use-needs.ts'
 import { useNotices } from './use-notices.ts'
@@ -60,13 +62,19 @@ function Application() {
   const ready = engine.kind === 'ready'
   const [navigation, setNavigation] = useState<Navigation>(START)
   const [folded, setFolded] = useState(false)
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const { route } = navigation
   const shownProject =
-    route.kind === 'project' || route.kind === 'projectSettings' ? route.id : null
+    route.kind === 'project' || route.kind === 'projectSettings'
+      ? route.id
+      : route.kind === 'chat'
+        ? route.projectId
+        : null
   const [projects, retryProjects] = useProjects(link, ready)
   const [project, retryProject] = useProject(link, ready, shownProject)
   const [needs, answering] = useNeeds(link, ready)
   const now = useMinute()
+  const routeChats = useChats(link, ready, route.kind === 'chat' ? route.projectId : null)
   const [adding, setAdding] = useState(false)
   const [theme, setTheme] = useState<ThemePreference | null>(null)
   useEffect(() => {
@@ -94,6 +102,11 @@ function Application() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const goTo = (to: Route): void => setNavigation((before) => go(before, to))
+  const openChat = (projectId: string, id: string): void => {
+    setOpened((before) => new Set([...before, projectId]))
+    goTo({ kind: 'chat', projectId, id })
+  }
   return (
     <Shell
       engine={engine}
@@ -102,6 +115,33 @@ function Application() {
       needs={needs}
       navigation={navigation}
       folded={folded}
+      opened={opened}
+      chatTitle={(id) =>
+        routeChats.kind === 'ready'
+          ? routeChats.chats.find((chat) => chat.id === id)?.title
+          : undefined
+      }
+      under={(projectId) => (
+        <ProjectChats
+          link={link}
+          engineReady={ready}
+          projectId={projectId}
+          current={route.kind === 'chat' ? route.id : null}
+          onOpen={(id) => openChat(projectId, id)}
+        />
+      )}
+      chat={
+        route.kind === 'chat' && project.kind === 'ready' ? (
+          <ChatRoute
+            key={route.id}
+            link={link}
+            engineReady={ready}
+            project={project.project}
+            chatId={route.id}
+            onOpenMission={(key) => goTo({ kind: 'mission', projectId: route.projectId, key })}
+          />
+        ) : null
+      }
       today={TODAY.format(now)}
       now={now}
       projectSettings={
@@ -130,7 +170,14 @@ function Application() {
         />
       }
       actions={{
-        go: (to) => setNavigation((before) => go(before, to)),
+        go: goTo,
+        open: (id, shown) =>
+          setOpened((before) => {
+            const after = new Set(before)
+            if (shown) after.add(id)
+            else after.delete(id)
+            return after
+          }),
         show: (view) => setNavigation((before) => show(before, view)),
         fold: setFolded,
         retryProjects: () => {

@@ -4,7 +4,7 @@
  * answers its key and the missions whose titles look like it. Nothing here writes into a mission.
  */
 
-import { MISSIONS_LISTED_MAX, type ToolArguments, isLive } from '@hemera/core/domain'
+import { MISSIONS_LISTED_MAX, type ToolArguments, draftNotice, isLive } from '@hemera/core/domain'
 import { Effect } from 'effect'
 
 import { ballSaid } from '../memory/render.ts'
@@ -76,10 +76,7 @@ export const specCreateDraft = (grant: Grant, args: ToolArguments<'spec_create_d
       },
       { fromChat: chat.title },
     )
-    yield* addEntry(chat.id, {
-      kind: 'notice',
-      text: `Mission ${mission.key} created: ${mission.title}`,
-    })
+    yield* addEntry(chat.id, { kind: 'notice', text: draftNotice(mission.key, mission.title) })
     const titled = wordsOf(args.title)
     const similar = before.filter((one) => [...wordsOf(one.title)].some((word) => titled.has(word)))
     return answered(

@@ -473,7 +473,7 @@ function AgentPane({
           </ul>
         ) : entries.length === 0 ? (
           <p id={`${id}-list`} className={cn(QUIET, 'h-picker-list')}>
-            No model matches “{query.trim()}”
+            {query.trim() === '' ? 'No model to choose yet' : `No model matches “${query.trim()}”`}
           </p>
         ) : (
           <div

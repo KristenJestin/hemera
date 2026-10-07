@@ -3,7 +3,7 @@
  * (`HEMERA_E2E_HEADLESS=1`, as `window-options.ts`): it lets the suite crash the engine from
  * inside, have it start an agents' process for the test program, stream at a high rate, and
  * create a need as an engine service would. A run of Hemera outside the suite never opens this
- * port.
+ * port. Its agent is the suite's fake (`agents/suite-agent.ts`), which `probe.script` scripts.
  */
 
 import { NeedFields, NeedOwner } from '@hemera/core/domain'
@@ -19,6 +19,8 @@ import { eq } from 'drizzle-orm'
 
 import type { AgentsProcess } from './agents.ts'
 import { HemeraEndpoint } from './agents/endpoint.ts'
+import type { FakeScript } from './agents/fake.ts'
+import type { SuiteAgent } from './agents/suite-agent.ts'
 import { openAgentSession } from './agents/sessions.ts'
 import { MISSIONS_FOLDER } from './memory/files.ts'
 import { createMission, listMissions } from './missions.ts'
@@ -84,6 +86,8 @@ export const ProbeRpcs = RpcGroup.make(
   }),
   /** What the Memory holds: its agent's events and Journal lines, and each mission's files. */
   Rpc.make('probe.memory', { success: MemoryState, error: StorageFailed }),
+  /** What every agent's session started from now on does: a fake agent's script, as JSON. */
+  Rpc.make('probe.script', { payload: { script: Schema.String } }),
 )
 
 /** The service the suite's needs belong to: none answers them, so nothing ever delivers one. */
@@ -179,7 +183,15 @@ const memoryState = (profile: StartedProfile, dataFolder: string) =>
     }),
   )
 
-export const probeHandlers = (launch: Launch, profile: StartedProfile, dataFolder: string) =>
+/** A script as the suite wrote it, from the suite's own types: read as written. */
+const scriptOf = (json: string): FakeScript => JSON.parse(json)
+
+export const probeHandlers = (
+  launch: Launch,
+  profile: StartedProfile,
+  dataFolder: string,
+  agent: SuiteAgent,
+) =>
   ProbeRpcs.toLayer({
     'probe.crash': () => Effect.sync(() => process.crash()),
     'probe.agents': ({ program, input }) =>
@@ -215,4 +227,5 @@ export const probeHandlers = (launch: Launch, profile: StartedProfile, dataFolde
     'probe.agentWrites': ({ folder, count }) =>
       agentWrites(profile, folder, count).pipe(Effect.mapError(storageFailed)),
     'probe.memory': () => memoryState(profile, dataFolder).pipe(Effect.mapError(storageFailed)),
+    'probe.script': ({ script }) => agent.script(scriptOf(script)),
   })

@@ -62,8 +62,8 @@ import {
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
-import { Chats } from './chat/service.ts'
-import { type Chat, chatChanges, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
+import { Chats, chatsChanges } from './chat/service.ts'
+import { type Chat, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
 import { Setup } from './setup/service.ts'
 import { TesterFindings } from './tester/findings.ts'
@@ -93,13 +93,14 @@ import {
 } from './workspaces.ts'
 
 /** A Chat as its Project's list shows it. */
-const chatSummary = (chat: Chat) => ({
+const chatSummary = (chat: Chat, working: boolean) => ({
   id: chat.id,
   projectId: chat.projectId,
   title: chat.title,
   setting: chat.setting,
   createdAt: chat.createdAt,
   lastActivityAt: chat.lastActivityAt,
+  working,
 })
 
 export const engineHandlers = (start: EngineStart, profile: StartedProfile, log: Log) => {
@@ -283,12 +284,15 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(
         Effect.gen(function* () {
           yield* getProject(projectId)
-          return (yield* chatsOf(projectId)).map(chatSummary)
+          const chats = yield* Chats
+          return yield* Effect.forEach(yield* chatsOf(projectId), (chat) =>
+            Effect.map(chats.working(chat), (working) => chatSummary(chat, working)),
+          )
         }),
       ).pipe(observed('chats.list', log)),
     'chats.create': ({ projectId }) =>
       use(Chats.use((chats) => chats.create(projectId))).pipe(
-        Effect.map(chatSummary),
+        Effect.map((chat) => chatSummary(chat, false)),
         observed('chats.create', log),
       ),
     'chats.rename': ({ chatId, title }) =>
@@ -311,7 +315,7 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       ),
     'chats.transcript': ({ chatId, before }) =>
       use(transcriptOf(chatId, before)).pipe(observed('chats.transcript', log)),
-    'chats.changes': () => follow(chatChanges).pipe(observedStream('chats.changes', log)),
+    'chats.changes': () => follow(chatsChanges).pipe(observedStream('chats.changes', log)),
     'setup.cards': ({ projectId }) =>
       use(Effect.andThen(getProject(projectId), cardsOf(projectId))).pipe(
         observed('setup.cards', log),

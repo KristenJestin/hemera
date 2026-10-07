@@ -20,8 +20,19 @@ export const ChatSummary = Schema.Struct({
   setting: ModelSettingValue,
   createdAt: Schema.String,
   lastActivityAt: Schema.String,
+  /** Whether its agent is in a turn now. */
+  working: Schema.Boolean,
 })
 export type ChatSummary = typeof ChatSummary.Type
+
+/** A call held for the user, as its card shows it: what it asks, why, its need, the answer. */
+export const HeldCall = Schema.Struct({
+  needId: Schema.String,
+  command: Schema.String,
+  reason: Schema.String,
+  answer: Schema.Literals(['waiting', 'allowed', 'denied']),
+})
+export type HeldCall = typeof HeldCall.Type
 
 /** A line of a transcript: a message, a folded action, or Hemera's notice. Masked. */
 export const ChatLine = Schema.Struct({
@@ -32,6 +43,8 @@ export const ChatLine = Schema.Struct({
   tool: Schema.NullOr(Schema.String),
   outcome: Schema.NullOr(Schema.String),
   request: Schema.NullOr(Schema.Number),
+  /** For an action held for the user: its request as it stands now. */
+  held: Schema.NullOr(HeldCall),
   at: Schema.String,
 })
 export type ChatLine = typeof ChatLine.Type
@@ -43,7 +56,7 @@ export const ChatPage = Schema.Struct({
 })
 export type ChatPage = typeof ChatPage.Type
 
-/** Something changed in a Chat: its title, its model, its transcript. */
+/** Something changed in a Chat: its title, its model, its transcript, a turn begun or ended. */
 export const ChatChanged = Schema.Struct({ chatId: Schema.String, projectId: Schema.String })
 export type ChatChanged = typeof ChatChanged.Type
 

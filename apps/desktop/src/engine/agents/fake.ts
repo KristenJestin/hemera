@@ -8,7 +8,8 @@
  *
  * It is handed over as an `AgentsProcess`, the shape the agents' process link gives in
  * production, so whatever starts agents through a port can be given this one instead. The lint
- * refuses module mocking, and the application never imports this file (a test checks it).
+ * refuses module mocking. The application imports this file in one place only, the agent of the
+ * headless end-to-end suite (`suite-agent.ts`), built only when that suite runs (a test checks it).
  */
 
 import {

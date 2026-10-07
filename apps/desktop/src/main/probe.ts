@@ -115,6 +115,8 @@ export const installProbe = (
       agentWrites: (folder, count) =>
         Effect.runPromise(client['probe.agentWrites']({ folder, count })),
       memory: () => Effect.runPromise(client['probe.memory']()),
+      scriptAgent: (script) =>
+        Effect.runPromise(client['probe.script']({ script: JSON.stringify(script) })),
       pendingNeeds: () =>
         Effect.runPromise(
           closedAs(gone)(engineClient['needs.list']()).pipe(

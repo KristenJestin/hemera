@@ -14,14 +14,14 @@ import {
   chatTitleOf,
 } from '@hemera/core/domain'
 import { UnknownChat } from '@hemera/ipc'
-import { and, asc, desc, eq, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm'
 import { Effect, Predicate, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
-import { chatEntries, chats } from '../storage/schema.ts'
+import { chatEntries, chats, permissionRequests } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 
 export interface Chat {
@@ -35,6 +35,14 @@ export interface Chat {
   readonly lastActivityAt: string
 }
 
+/** A held call as its card shows it: what it asks, why, the need it answers, and the answer. */
+export interface HeldCall {
+  readonly needId: string
+  readonly command: string
+  readonly reason: string
+  readonly answer: 'waiting' | 'allowed' | 'denied'
+}
+
 export interface ChatEntry {
   readonly sequence: number
   readonly kind: ChatEntryKind
@@ -42,6 +50,8 @@ export interface ChatEntry {
   readonly tool: string | null
   readonly outcome: string | null
   readonly request: number | null
+  /** For an action held for the user: its request, as it stands now. */
+  readonly held: HeldCall | null
   readonly at: string
 }
 
@@ -61,13 +71,17 @@ const chatOf = (row: ChatRow): Chat => ({
   lastActivityAt: row.lastActivityAt,
 })
 
-const entryOf = (row: typeof chatEntries.$inferSelect): ChatEntry => ({
+const entryOf = (
+  row: typeof chatEntries.$inferSelect,
+  held: HeldCall | null = null,
+): ChatEntry => ({
   sequence: row.sequence,
   kind: CHAT_ENTRY_KINDS.find((one) => one === row.kind) ?? 'notice',
   text: row.text,
   tool: row.tool,
   outcome: row.outcome,
   request: row.request,
+  held,
   at: row.at,
 })
 
@@ -250,7 +264,7 @@ export const TRANSCRIPT_PAGE = 100
 /** A page of a Chat's transcript, oldest first, before a line (the newest page without one). */
 export const transcriptOf = (chatId: string, before: number | null) =>
   Effect.gen(function* () {
-    yield* getChat(chatId)
+    const chat = yield* getChat(chatId)
     const database = yield* Database
     const rows = yield* database
       .select()
@@ -264,7 +278,38 @@ export const transcriptOf = (chatId: string, before: number | null) =>
       .orderBy(desc(chatEntries.sequence))
       .limit(TRANSCRIPT_PAGE)
       .pipe(Effect.mapError(refusedWhile('reading a Chat’s transcript')))
-    const lines = rows.toReversed().map(entryOf)
+    const numbers = rows.flatMap((row) => (row.request === null ? [] : [row.request]))
+    const requests =
+      numbers.length === 0
+        ? []
+        : yield* database
+            .select()
+            .from(permissionRequests)
+            .where(
+              and(
+                eq(permissionRequests.ownerKind, 'project'),
+                eq(permissionRequests.ownerId, chat.projectId),
+                inArray(permissionRequests.number, numbers),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('reading a Chat’s requests')))
+    const heldOf = (number: number | null): HeldCall | null => {
+      const request = requests.find((one) => one.number === number)
+      if (request === undefined) return null
+      const answer =
+        request.state === 'pending'
+          ? 'waiting'
+          : request.choice === null || request.choice === 'deny'
+            ? 'denied'
+            : 'allowed'
+      return {
+        needId: request.needId,
+        command: request.described,
+        reason: request.agentReason,
+        answer,
+      }
+    }
+    const lines = rows.toReversed().map((row) => entryOf(row, heldOf(row.request)))
     return {
       entries: lines,
       before: rows.length === TRANSCRIPT_PAGE ? (lines[0]?.sequence ?? null) : null,
@@ -283,7 +328,7 @@ export const transcriptTail = (chatId: string, exchanges: number) =>
       .pipe(Effect.mapError(refusedWhile('reading a Chat’s transcript')))
     const starts = rows.flatMap((row, at) => (row.kind === 'user' ? [at] : []))
     const from = starts.length > exchanges ? (starts.at(-exchanges) ?? 0) : 0
-    return rows.slice(from).map(entryOf)
+    return rows.slice(from).map((row) => entryOf(row))
   })
 
 /** Each change of a Chat, as committed: its title, its model, a line of its transcript. */
