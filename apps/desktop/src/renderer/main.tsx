@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client'
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
 import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
+import { FirstLaunchRoute } from './first-launch-route.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
 import { connect } from './link.ts'
 import {
@@ -177,6 +178,15 @@ function Application() {
         settingsOf === null ? null : (
           <SettingsPage key={settingsOf} data={settingsData} settings={settings} tools={tools} />
         )
+      }
+      firstLaunch={
+        <FirstLaunchRoute
+          link={link}
+          engineReady={ready}
+          copy={SETTINGS_TOOLS.copy}
+          onAddProject={() => setAdding(true)}
+          onAddKey={() => goTo({ kind: 'settings', section: 'hemera-auto' })}
+        />
       }
       appSettings={
         <AppSettingsPage
