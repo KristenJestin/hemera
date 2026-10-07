@@ -146,6 +146,8 @@ export function AddProjectDialog({
     setFound(null)
     setRefusal({})
     if (!named) setName(folderName(next))
+    // The list holds its rows' shape from the first keystroke, not once the typing settles.
+    setDetecting(next.trim() !== '')
     if (timer.current !== null) clearTimeout(timer.current)
     looking.current += 1
     if (now) look(next)
