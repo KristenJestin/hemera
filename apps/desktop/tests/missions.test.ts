@@ -143,7 +143,7 @@ describe('A mission is created in Planning, with its key', () => {
       frozen: false,
       cleanup: null,
     })
-    expect(events.map((event) => event.type)).toEqual(['mission.started'])
+    expect(events.map((event) => event.type)).toEqual(['mission.created', 'memory.now_set'])
   })
 
   test('a mission with neither a sentence nor a ticket is refused', async () => {

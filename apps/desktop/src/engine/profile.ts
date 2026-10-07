@@ -115,6 +115,7 @@ import { modelChoiceLayer, seedAppSettings } from './sessions/cascade.ts'
 import { type Cap, capLayer } from './sessions/cap.ts'
 import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
+import { type TicketSearch, noTicketSearch } from './start/tickets.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -169,6 +170,8 @@ export interface ProfileParts {
   readonly memory?: Omit<MemoryParts, 'restoreJournal'>
   /** The role sessions: the roles later tickets register, and how agents are started. */
   readonly sessions?: SessionsParts
+  /** The ticket providers the field searches (#95, #96); none otherwise. */
+  readonly tickets?: Layer.Layer<TicketSearch>
 }
 
 /** What the role sessions are built with; this version's defaults otherwise. */
@@ -227,6 +230,7 @@ export type EngineServices =
   | SetupValues
   | AcpTraces
   | TesterFindings
+  | TicketSearch
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -310,6 +314,7 @@ export const startProfile = (
       backupFoldersLayer(parts.backupFolders),
       reconciliationStepsLayer(parts.reconciliationSteps),
       parts.liveMissions ?? noLiveMissions,
+      parts.tickets ?? noTicketSearch,
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
       sessionTurnsLayer,

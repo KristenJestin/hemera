@@ -17,7 +17,7 @@ import { createProject } from '../../src/engine/projects.ts'
 const [dataFolder = '', migrations = '', main = ''] = process.argv.slice(2)
 
 const holdAtTheStart = (events: ReadonlyArray<DomainEvent>) => {
-  const started = events.find((event) => event.type === 'mission.started')
+  const started = events.find((event) => event.type === 'mission.created')
   if (started === undefined) return Effect.void
   return Effect.andThen(
     Effect.sync(() => process.stdout.write(`held ${String(started.sequence)}\n`)),

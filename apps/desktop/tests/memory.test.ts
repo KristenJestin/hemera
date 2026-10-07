@@ -297,7 +297,8 @@ describe('Now: Hemera owns its fields, each session its own line', () => {
       text: 'refused: only the Builder sets the next step of this mission',
     })
     expect(now.doing).toEqual([])
-    expect(now.next).toBeNull()
+    // What the mission's creation set, untouched by the refused write.
+    expect(now.next?.text).toBe('Planning starts')
   })
 
   test('a session with a stale epoch cannot write', async () => {

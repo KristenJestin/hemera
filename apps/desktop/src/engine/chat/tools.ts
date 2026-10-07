@@ -74,7 +74,7 @@ export const specCreateDraft = (grant: Grant, args: ToolArguments<'spec_create_d
         projectId: grant.projectId,
         idea: { sentence: `${args.title}\n\n${args.idea}`, ticket: args.ticket ?? null },
       },
-      chat.title,
+      { fromChat: chat.title },
     )
     yield* addEntry(chat.id, {
       kind: 'notice',
