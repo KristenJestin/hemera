@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FAILED_RUN, RUNS, STALE } from '../../blocks/project-settings/project-settings-fixtures.ts'
 import { SettingsFixture } from './settings-fixtures.tsx'
@@ -33,6 +33,16 @@ export const Filled: Story = {
     const list = canvas.getByRole('list', { name: 'Repositories' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(3)
     expect(list).toHaveTextContent('not fetched since Monday')
+  },
+}
+
+/** The setup agent asked again from the settings: its button at the header's end. */
+export const SetUpAgain: Story = {
+  args: { onSetUp: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Set up with the agent' }))
+    expect(args.onSetUp).toHaveBeenCalled()
   },
 }
 

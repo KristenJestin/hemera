@@ -160,6 +160,8 @@ export interface SettingsFixtureProps {
   runs?: readonly SettingsRun[] | undefined
   /** The Project the settings are of: Acme, or Hemera itself. */
   project?: 'acme' | 'hemera' | undefined
+  /** Asks the setup agent again: its button at the header's end. */
+  onSetUp?: (() => void) | undefined
 }
 
 function draftOfRepository(repository: SettingsRepository): RepositoryDraft {
@@ -191,6 +193,7 @@ export function SettingsFixture({
   refuse = false,
   runs: givenRuns,
   project = 'acme',
+  onSetUp,
 }: SettingsFixtureProps): ReactNode {
   const name = project === 'hemera' ? 'Hemera' : 'Acme'
   const firstRepositories = (): SettingsRepository[] => {
@@ -727,6 +730,7 @@ export function SettingsFixture({
         controls={<SystemControls />}
       />
       <ProjectSettings
+        onSetUp={onSetUp}
         name={name}
         mainCheckout={project === 'hemera' ? '~/work/hemera' : long ? LONG_PATH : MAIN_CHECKOUT}
         sections={sections}

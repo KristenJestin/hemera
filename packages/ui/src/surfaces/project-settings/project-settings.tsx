@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 
+import { Button } from '../../components/button/button.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
-import { IconFolder } from '../../icons.ts'
+import { IconFolder, IconSearch } from '../../icons.ts'
 import {
   type SettingsForm,
   SettingsPage,
@@ -43,6 +44,11 @@ export interface ProjectSettingsProps {
   /** The form open over the page, in a dialog, or null. */
   form?: SettingsForm | null | undefined
   onCloseForm: () => void
+  /**
+   * Asks the setup agent to propose the Project's setup again, or opens what it proposed: the
+   * button at the header's end. Left out, it is not drawn.
+   */
+  onSetUp?: (() => void) | undefined
   /** The section chosen. */
   children: ReactNode
 }
@@ -60,6 +66,7 @@ export function ProjectSettings({
   onRetry,
   form = null,
   onCloseForm,
+  onSetUp,
   children,
 }: ProjectSettingsProps): ReactNode {
   return (
@@ -72,6 +79,14 @@ export function ProjectSettings({
           <span className="sr-only">Main checkout:</span>
           <span className="truncate">{mainCheckout}</span>
         </span>
+      }
+      actions={
+        onSetUp === undefined ? undefined : (
+          <Button onClick={onSetUp}>
+            <IconSearch size="sm" aria-hidden="true" />
+            Set up with the agent
+          </Button>
+        )
       }
       label="Settings of the Project"
       sections={sections}
