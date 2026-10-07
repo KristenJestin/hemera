@@ -10,7 +10,7 @@ import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconBan, IconPlus, IconTerminal, IconTrash } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { Section } from './parts.tsx'
+import { Section, SectionRefusal } from './parts.tsx'
 
 /**
  * The commands never run in a Project: whoever asks — an agent, Hemera Auto — they are refused,
@@ -95,6 +95,8 @@ export interface NeverSectionProps {
   loading?: boolean | undefined
   onAdd: () => void
   onRemove: (id: string) => void
+  /** A change the engine refused, in words: the list stands as the engine keeps it. */
+  error?: string | undefined
 }
 
 export function NeverSection({
@@ -102,6 +104,7 @@ export function NeverSection({
   loading = false,
   onAdd,
   onRemove,
+  error,
 }: NeverSectionProps): ReactNode {
   const add = (
     <Button size="sm" onClick={onAdd}>
@@ -117,6 +120,7 @@ export function NeverSection({
         count={loading || empty ? undefined : lines.length}
         actions={loading || empty ? undefined : add}
       />
+      <SectionRefusal error={error} />
       <Frame>
         {empty ? (
           <Empty icon={<IconBan size="md" />} title="Nothing refused" action={add} />

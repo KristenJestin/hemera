@@ -11,7 +11,7 @@ import {
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconX } from '../../icons.ts'
-import { Section } from './parts.tsx'
+import { Section, SectionRefusal } from './parts.tsx'
 
 /**
  * The model each role runs on in a Project, over the application's: one row per role, its name and
@@ -53,6 +53,8 @@ export interface RoleModelsSectionProps {
   onChange: (role: string, choice: ModelChoice | null) => void
   onFavourite: (agent: string, model: string, favourite: boolean) => void
   onHide: (agent: string, model: string, hidden: boolean) => void
+  /** A change the engine refused, in words: the rows stand as the engine keeps them. */
+  error?: string | undefined
 }
 
 function RoleRow({
@@ -130,10 +132,12 @@ export function RoleModelsSection({
   onChange,
   onFavourite,
   onHide,
+  error,
 }: RoleModelsSectionProps): ReactNode {
   return (
     <Section label="Models by role">
       <SectionHead title="Models by role" />
+      <SectionRefusal error={error} />
       <Frame>
         <ul aria-label="Models by role" aria-busy={loading} className="flex flex-col">
           {loading ? (

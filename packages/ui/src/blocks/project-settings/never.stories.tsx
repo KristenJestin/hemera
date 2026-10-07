@@ -195,3 +195,13 @@ export const Focused: Story = {
     expect(add).toHaveFocus()
   },
 }
+
+/** A change the engine refused: the list is back as the engine keeps it, and why is said. */
+export const ChangeRefused: Story = {
+  args: { error: 'The list could not be changed: Hemera could not write to its profile.' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'The list could not be changed',
+    )
+  },
+}

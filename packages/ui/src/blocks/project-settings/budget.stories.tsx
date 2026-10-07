@@ -112,3 +112,13 @@ export const Focused: Story = {
     expect(canvas.getByRole('textbox', { name: 'Automatic retries' })).toHaveFocus()
   },
 }
+
+/** A value the engine refused: the fields are back as the engine keeps them, and why is said. */
+export const WriteRefused: Story = {
+  args: { error: 'The limits could not be kept: Hemera could not write to its profile.' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'The limits could not be kept',
+    )
+  },
+}
