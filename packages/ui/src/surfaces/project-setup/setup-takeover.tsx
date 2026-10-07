@@ -1,6 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Face } from '../../components/face/face.tsx'
@@ -176,6 +176,9 @@ const SECTION = 'shrink-0 px-8'
 export function SetupTakeover(props: SetupTakeoverProps): ReactNode {
   const { project, open, onFinishLater, onClosed } = props
   const container = useOverlayContainer()
+  // It opens on its heading: the agent's chip, first to take the focus otherwise, would open its
+  // tooltip by itself.
+  const heading = useRef<HTMLHeadingElement>(null)
   return (
     <BaseDialog.Root
       open={open}
@@ -188,12 +191,16 @@ export function SetupTakeover(props: SetupTakeoverProps): ReactNode {
     >
       <BaseDialog.Portal container={container}>
         <BaseDialog.Backdrop className={BACKDROP} />
-        <BaseDialog.Popup className={TAKEOVER} data-setup-takeover="">
+        <BaseDialog.Popup className={TAKEOVER} initialFocus={heading} data-setup-takeover="">
           <div className={cn(SECTION, 'border-b border-border pt-8 pb-5')}>
             <SetupHead
               {...props}
               title={
-                <BaseDialog.Title className="truncate text-2xl font-semibold tracking-tight">
+                <BaseDialog.Title
+                  ref={heading}
+                  tabIndex={-1}
+                  className="truncate text-2xl font-semibold tracking-tight outline-none"
+                >
                   Setting up {project}
                 </BaseDialog.Title>
               }

@@ -139,6 +139,11 @@ export const Takeover: Story = {
     await expect(dialog.getByText('3 of 5 proposals answered')).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Finish later' })).toBeVisible()
     await expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull()
+    // It opens on its heading, not on the agent's chip: no tooltip comes up by itself.
+    await waitFor(() =>
+      expect(dialog.getByRole('heading', { name: 'Setting up Acme' })).toHaveFocus(),
+    )
+    await expect(within(document.body).queryByRole('tooltip')).toBeNull()
   },
 }
 
