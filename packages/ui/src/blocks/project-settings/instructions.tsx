@@ -46,6 +46,9 @@ export function readingOf(repository: RepositoryInstructions, agent: AgentInstru
   return sent === undefined ? null : { by: 'hemera', file: sent }
 }
 
+/** A file said by its name: the room a small button would take, so the rows keep their height. */
+const FILE_NAME = 'inline-flex h-control-sm items-center gap-1.5 px-2 text-muted-foreground'
+
 const TABLE = 'w-full table-fixed border-collapse text-sm'
 
 const HEAD =
@@ -117,8 +120,8 @@ export interface InstructionsSectionProps {
   repositories: readonly RepositoryInstructions[]
   agents: readonly AgentInstructions[]
   loading?: boolean | undefined
-  /** Opens a file of a repository. */
-  onOpen: (repository: string, file: string) => void
+  /** Opens a file of a repository; left out, each file is said by its name only. */
+  onOpen?: ((repository: string, file: string) => void) | undefined
 }
 
 export function InstructionsSection({
@@ -169,18 +172,25 @@ export function InstructionsSection({
                         <span className={NONE}>None</span>
                       ) : (
                         <span className={FILES}>
-                          {repository.files.map((file) => (
-                            <Button
-                              key={file}
-                              size="sm"
-                              variant="ghost"
-                              aria-label={`Open ${file} of ${repository.repository}`}
-                              onClick={() => onOpen(repository.repository, file)}
-                            >
-                              <IconFileText size="sm" aria-hidden="true" />
-                              <span className="font-mono text-xs">{file}</span>
-                            </Button>
-                          ))}
+                          {repository.files.map((file) =>
+                            onOpen === undefined ? (
+                              <span key={file} className={FILE_NAME}>
+                                <IconFileText size="sm" aria-hidden="true" />
+                                <span className="font-mono text-xs">{file}</span>
+                              </span>
+                            ) : (
+                              <Button
+                                key={file}
+                                size="sm"
+                                variant="ghost"
+                                aria-label={`Open ${file} of ${repository.repository}`}
+                                onClick={() => onOpen(repository.repository, file)}
+                              >
+                                <IconFileText size="sm" aria-hidden="true" />
+                                <span className="font-mono text-xs">{file}</span>
+                              </Button>
+                            ),
+                          )}
                         </span>
                       )}
                     </td>

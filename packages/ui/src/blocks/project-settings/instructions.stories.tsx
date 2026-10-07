@@ -53,6 +53,16 @@ export const Filled: Story = {
   },
 }
 
+/** No file can be opened yet: each file is said by its name, not offered as a button. */
+export const NotOpened: Story = {
+  render: (args) => <InstructionsSection repositories={args.repositories} agents={args.agents} />,
+  play: async ({ canvasElement }) => {
+    const table = within(canvasElement).getByRole('table', { name: 'Instructions' })
+    expect(within(table).queryByRole('button', { name: /^Open / })).toBeNull()
+    expect(within(table).getAllByText('AGENTS.md').length).toBeGreaterThan(0)
+  },
+}
+
 /** No repository holds an instruction file: the section says so. */
 export const Empty: Story = {
   args: { repositories: INSTRUCTIONS.map((one) => ({ ...one, files: [] })) },
