@@ -51,6 +51,8 @@ const nothing = (): void => undefined
 
 const readAgents = (link: Link) => link.agents()
 const readMarks = (link: Link) => link.modelMarks()
+/** The roles at the application's level: what a Project's role falls back on. */
+const readAppRoles = (link: Link) => link.roleModels(null)
 
 /** How long a limit's field waits for the typing to settle before it is written. */
 const TYPING_SETTLES_MS = 600
@@ -224,6 +226,7 @@ function NeverPart({ link, engineReady, projectId, catalogue, show }: NeverPartP
 function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const readRoles = useCallback((ready: Link) => ready.roleModels(projectId), [projectId])
   const [roles, , rereadRoles] = useRead<ReadonlyArray<RoleModels>>(link, engineReady, readRoles)
+  const [appRoles] = useRead<ReadonlyArray<RoleModels>>(link, engineReady, readAppRoles)
   const [agents] = useRead<ReadonlyArray<AgentState>>(link, engineReady, readAgents)
   const [marks, , rereadMarks] = useRead<ReadonlyArray<ModelMark>>(link, engineReady, readMarks)
   const written = useLatest()
@@ -244,13 +247,13 @@ function ModelsPart({ link, engineReady, projectId }: PartProps): ReactNode {
   const roleOf = (displayName: string) => roles?.find((one) => one.displayName === displayName)
   return (
     <RoleModelsSection
-      roles={projectRoleModelsOf(roles ?? [])}
+      roles={projectRoleModelsOf(roles ?? [], appRoles ?? [])}
       agents={pickerAgentsOf(agents ?? [], marks ?? [], {
         agent: 'claude',
         model: null,
         effort: null,
       })}
-      loading={roles === null}
+      loading={roles === null || appRoles === null}
       onChange={(displayName, choice) => {
         const role = roleOf(displayName)
         if (role === undefined) return

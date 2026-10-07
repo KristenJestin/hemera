@@ -84,6 +84,36 @@ describe('Cap and budget', () => {
 })
 
 describe('Models by role', () => {
+  test('with the application’s level unset, the default is the application’s, not the override', () => {
+    const inProject: RoleModels[] = [
+      {
+        role: 'builder',
+        displayName: 'the Builder',
+        app: null,
+        project: { agent: 'codex', model: 'gpt-large', effort: null },
+        mission: null,
+        resolved: { agent: 'codex', model: 'gpt-large', effort: null, level: 'project' },
+      },
+    ]
+    const inApp: RoleModels[] = [
+      {
+        role: 'builder',
+        displayName: 'the Builder',
+        app: null,
+        project: null,
+        mission: null,
+        resolved: { agent: 'claude', model: 'sonnet', effort: null, level: 'app' },
+      },
+    ]
+    expect(projectRoleModelsOf(inProject, inApp)).toEqual([
+      {
+        role: 'the Builder',
+        override: { agent: 'codex', model: 'gpt-large', effort: undefined },
+        appDefault: { agent: 'claude', model: 'sonnet', effort: undefined },
+      },
+    ])
+  })
+
   test('the Project’s override, or none, over the application’s model', () => {
     const roles: RoleModels[] = [
       {
@@ -103,7 +133,12 @@ describe('Models by role', () => {
         resolved: { agent: 'claude', model: 'haiku', effort: null, level: 'app' },
       },
     ]
-    expect(projectRoleModelsOf(roles)).toEqual([
+    const inApp: RoleModels[] = roles.map((role) => ({
+      ...role,
+      project: null,
+      resolved: { ...(role.app ?? role.resolved), level: 'app' },
+    }))
+    expect(projectRoleModelsOf(roles, inApp)).toEqual([
       {
         role: 'the Builder',
         override: { agent: 'codex', model: 'default', effort: undefined },

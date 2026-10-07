@@ -118,13 +118,22 @@ export const choiceOf = (setting: ModelSettingValue): ModelChoice => ({
   effort: isEffort(setting.effort) ? setting.effort : undefined,
 })
 
-/** Each role's override in the Project, over the model the application gives it. */
-export const projectRoleModelsOf = (roles: ReadonlyArray<RoleModels>): ProjectRoleModel[] =>
-  roles.map((role) => ({
-    role: role.displayName,
-    override: role.project === null ? null : choiceOf(role.project),
-    appDefault: choiceOf(role.app ?? role.resolved),
-  }))
+/**
+ * Each role's override in the Project, over the model the application gives it: read at the
+ * application's level (`inApp`), since what the Project's role resolves to includes its override.
+ */
+export const projectRoleModelsOf = (
+  roles: ReadonlyArray<RoleModels>,
+  inApp: ReadonlyArray<RoleModels>,
+): ProjectRoleModel[] =>
+  roles.map((role) => {
+    const app = inApp.find((one) => one.role === role.role)
+    return {
+      role: role.displayName,
+      override: role.project === null ? null : choiceOf(role.project),
+      appDefault: choiceOf(app?.resolved ?? role.app ?? role.resolved),
+    }
+  })
 
 /** What the Instructions section shows. */
 export interface InstructionsShown {
