@@ -31,6 +31,7 @@ import { ChatsRpcs } from './chats.ts'
 import { SetupRpcs } from './setup.ts'
 import { TesterRpcs } from './tester.ts'
 import { StartRpcs } from './start.ts'
+import { PlanningRpcs } from './planning.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -129,6 +130,7 @@ export const EngineRpcs = RpcGroup.make(
   SetupRpcs,
   TesterRpcs,
   StartRpcs,
+  PlanningRpcs,
 )
 
 /**

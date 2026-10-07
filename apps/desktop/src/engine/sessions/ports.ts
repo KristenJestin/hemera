@@ -3,7 +3,8 @@
  *
  * - `ReplacementGuard`: before a session is replaced (#41 counts the technical retries of CT-14
  *   and turns a refusal into an error need);
- * - `SpecLanguage`: the Project's Spec language (Planning, P2, adds the setting); English;
+ * - `SpecLanguage`: the Spec language of a session's owner: a mission's own Spec, a Project's
+ *   setting (#85);
  * - `TesterMode`: the paragraph the tester mode adds to the base layer when it is on (#45); none.
  */
 
@@ -55,10 +56,8 @@ export class ReplacementGuard extends Context.Service<
 
 export class SpecLanguage extends Context.Service<
   SpecLanguage,
-  (projectId: string) => Effect.Effect<string>
+  (owner: SessionOwner) => Effect.Effect<string>
 >()('SpecLanguage') {}
-
-export const englishSpecs = Layer.succeed(SpecLanguage, () => Effect.succeed('en'))
 
 export class TesterMode extends Context.Service<
   TesterMode,

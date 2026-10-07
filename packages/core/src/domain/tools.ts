@@ -26,7 +26,9 @@ import {
   NOTE_TOPIC_MAX,
   NOW_TEXT_MAX,
 } from './memory.ts'
+import { MissionType } from './mission.ts'
 import { SetupProposal } from './setup.ts'
+import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
 
 /** The roles of an agent session at this version; later tickets add theirs. */
@@ -454,6 +456,110 @@ const HemeraReports = Schema.Struct({
     'The problems with Hemera already reported: number, title, kind, place, severity, occurrences, last seen.',
 })
 
+const Version = (description: string) =>
+  Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).annotate({ description })
+
+const SpecRead = Schema.Struct({
+  section: Schema.optionalKey(
+    Schema.Literals([...SPEC_SECTIONS, 'requirements']).annotate({
+      description:
+        'Only this section (`why`, `goals`, `impact`, `requirements`, `decisions`, `risks`, `migration`, `open_questions`); the whole Spec without it.',
+    }),
+  ),
+  cursor: Schema.optionalKey(Text('Where to resume, as the previous page gave it.')),
+}).annotate({
+  description:
+    "Read your mission's Spec, with the version of every section, requirement and scenario: what a write names as its base_version. Long Specs come in pages with a cursor.",
+})
+
+const SpecWriteSection = Schema.Struct({
+  section: SpecSectionName.annotate({
+    description:
+      'The prose section: `why`, `goals`, `impact`, `decisions`, `risks`, `migration` or `open_questions`.',
+  }),
+  content: Text(
+    'What the whole section becomes, in Markdown, in the Spec language. Write "None." when there is nothing to say.',
+  ),
+  base_version: Version(
+    'The version of the section you read (0 for one never written): a section changed since is refused with its current text.',
+  ),
+}).annotate({
+  description:
+    'Write one prose section of the Spec, whole. Refused on a stale base_version, outside Planning, and once the Spec is frozen.',
+})
+
+const ScenarioAsked = Schema.Struct({
+  id: Schema.optionalKey(Text('The scenario (`R1.S2`) to keep or change; a new one without it.')),
+  when: Text('WHEN: the situation and the action, concrete enough to become a test.'),
+  then: Text('THEN: the observable result.'),
+})
+
+const RequirementWrite = Schema.Struct({
+  id: Schema.optionalKey(Text('The requirement (`R2`) to change; a new one without it.')),
+  domain: Text('The domain of the living spec it belongs to (`invoices`).'),
+  delta: Delta.annotate({
+    description: 'What it does to the living spec: `added`, `modified` or `removed`.',
+  }),
+  living_ref: Schema.optionalKey(
+    Text('For `modified` or `removed`: the living requirement it changes.'),
+  ),
+  living_version: Schema.optionalKey(
+    Version('The version of that living requirement when you read it.'),
+  ),
+  text: Text('The requirement, in one or two sentences, in the Spec language.'),
+  scenarios: Schema.Array(ScenarioAsked).annotate({
+    description:
+      'Its scenarios, in order, as a whole: one without id is new, one left out is removed. Ids are never reused.',
+  }),
+  base_version: Schema.optionalKey(
+    Version('For an existing requirement: its version as you read it.'),
+  ),
+}).annotate({
+  description:
+    'Write one requirement and its scenarios as a whole: a delta against the living spec, each scenario WHEN … THEN ….',
+})
+
+const RequirementRemove = Schema.Struct({
+  id: Text('The requirement (`R2`).'),
+  base_version: Version('Its version as you read it.'),
+}).annotate({
+  description: 'Mark a requirement removed from the Spec. Its id is never reused.',
+})
+
+const MissionDescribe = Schema.Struct({
+  title: Schema.optionalKey(Bounded(120, 'What the mission delivers, in a few words.')),
+  type: Schema.optionalKey(
+    MissionType.annotate({
+      description: 'The type, information only: `feature`, `bug` or `maintenance`.',
+    }),
+  ),
+})
+  .annotate({ description: "Set the mission's title and its type." })
+  .check(
+    Schema.makeFilter((asked) => asked.title !== undefined || asked.type !== undefined, {
+      expected: 'a title, a type, or both',
+    }),
+  )
+
+const TriageAnswerAsked = Schema.Struct({
+  kind: TriageKind.annotate({
+    description:
+      '`existing_mission` (another mission of this Project holds it), `delivered` (already in the product) or `too_small` (to do in the Chat).',
+  }),
+  ref: Schema.optionalKey(Bounded(200, 'The mission key (`ACME-3`), or what already delivers it.')),
+  text: Bounded(2000, 'Why, in a few sentences, in the language of the user.'),
+}).annotate({
+  description:
+    'Answer that the input is not new work, instead of drafting. The user then opens the other mission, drops this one, or keeps planning it. End your turn after it.',
+})
+
+const DeclareComplete = Schema.Struct({
+  why: Bounded(2000, 'Why a Builder could build it without guessing, in the language of the user.'),
+}).annotate({
+  description:
+    'Declare the Spec complete. Hemera checks it: a refusal lists everything to fix, and nothing is recorded.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -649,6 +755,74 @@ export const TOOLS = {
     input: SetupPropose,
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
+  spec_read: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: SpecRead,
+    label: { label: 'Read the Spec', mark: 'spec-read', doing: 'Reading the Spec' },
+  }),
+  spec_write_section: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: SpecWriteSection,
+    label: { label: 'Write a section', mark: 'spec-write-section', doing: 'Writing the Spec' },
+  }),
+  requirement_write: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RequirementWrite,
+    label: {
+      label: 'Write a requirement',
+      mark: 'requirement-write',
+      doing: 'Writing a requirement',
+    },
+  }),
+  requirement_remove: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RequirementRemove,
+    label: {
+      label: 'Remove a requirement',
+      mark: 'requirement-remove',
+      doing: 'Removing a requirement',
+    },
+  }),
+  mission_describe: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: MissionDescribe,
+    label: { label: 'Name the mission', mark: 'mission-describe', doing: 'Naming the mission' },
+  }),
+  triage_answer: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: TriageAnswerAsked,
+    label: { label: 'Triage', mark: 'triage-answer', doing: 'Answering the triage' },
+  }),
+  declare_complete: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: DeclareComplete,
+    label: {
+      label: 'Declare complete',
+      mark: 'declare-complete',
+      doing: 'Declaring the Spec complete',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -690,6 +864,13 @@ export const TOOL_NAMES = [
   'spec_create_draft',
   'setup_read',
   'setup_propose',
+  'spec_read',
+  'spec_write_section',
+  'requirement_write',
+  'requirement_remove',
+  'mission_describe',
+  'triage_answer',
+  'declare_complete',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

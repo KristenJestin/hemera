@@ -21,6 +21,7 @@ import {
   NeedState,
   PermissionChoice,
   Stage,
+  TriageKind,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
@@ -76,6 +77,19 @@ export const Need = Schema.Struct({
 })
 export type Need = typeof Need.Type
 
+/**
+ * The Planner's answer that the input is not new work (#85): its kind, what it points to, why, and
+ * whether it still waits on the user or they kept the mission anyway.
+ */
+export const TriageAnswer = Schema.Struct({
+  kind: TriageKind,
+  ref: Schema.NullOr(Schema.String),
+  text: Schema.String,
+  state: Schema.Literals(['pending', 'kept']),
+  at: Schema.String,
+})
+export type TriageAnswer = typeof TriageAnswer.Type
+
 /** What is left once a mission is cancelled: its work, kept until the user confirms the cleanup. */
 export const Cleanup = Schema.Literals(['awaiting-confirmation'])
 
@@ -104,6 +118,8 @@ export const Mission = Schema.Struct({
   cleanup: Schema.NullOr(Cleanup),
   /** What a cancel could not stop yet, by stopper; tried again at each start. */
   unstopped: Schema.Array(Schema.String),
+  /** The Planner's triage answer, shown under the start field and on the mission; null for none. */
+  triage: Schema.NullOr(TriageAnswer),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 })

@@ -18,6 +18,7 @@ import { type NeedFields, missionKey } from '@hemera/core/domain'
 import {
   DEFAULT_SOUND_STYLE,
   HomeTarget,
+  MissionTarget,
   type KindSetting,
   NeedEnded,
   NeedTarget,
@@ -279,6 +280,37 @@ const workspaceRoute = (facts: WorkspaceFacts): NotificationTarget =>
     ? HomeTarget.make({ projectId: null })
     : ProjectTarget.make({ projectId: facts.project.id })
 
+interface TriageFacts extends Facts {
+  readonly project: NoticeProject
+  readonly missionKey: string
+  readonly title: string
+}
+
+/** The Planner's triage answer (#85): not a need, but the mission waits on the user. */
+const triaged = (event: DomainEvent) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [row] = yield* database
+      .select({
+        projectId: missions.projectId,
+        prefix: missions.keyPrefix,
+        number: missions.keyNumber,
+        title: missions.title,
+      })
+      .from(missions)
+      .where(eq(missions.id, event.entityId))
+      .pipe(Effect.mapError(refusedWhile('reading a mission')))
+    if (row === undefined) return Option.none<TriageFacts>()
+    const project = yield* projectOf(row.projectId)
+    if (project === null) return Option.none<TriageFacts>()
+    return Option.some<TriageFacts>({
+      project,
+      missionKey: missionKey(row.prefix, row.number),
+      needId: null,
+      title: row.title,
+    })
+  })
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -331,6 +363,19 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     facts: preparationEnded('failed'),
     words: (facts) => ({ subject: facts.workspace, what: 'its preparation failed' }),
     route: workspaceRoute,
+  }),
+  defineKind({
+    id: 'triage-answer',
+    label: 'The Planner answers that an input is not new work',
+    byDefault: true,
+    sound: 'needs-you',
+    importance: IMPORTANCE['needs-you'],
+    tone: 'you',
+    source: 'planning.triaged',
+    facts: triaged,
+    words: (facts) => ({ subject: facts.title, what: 'the Planner answered the triage' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),
 ]
 

@@ -89,6 +89,18 @@ import {
 import { missionsList, specCreateDraft } from '../chat/tools.ts'
 import type { MissionActivity } from '../missions.ts'
 import type { MissionStarts } from '../start/started.ts'
+import { Git } from '../git.ts'
+import type { SpecBoard } from '../planning/board.ts'
+import {
+  declareCompleteTool,
+  missionDescribe,
+  requirementRemove,
+  requirementWrite,
+  specRead,
+  specWriteSection,
+  triageAnswer,
+} from '../planning/tools.ts'
+import type { ProfileHome } from '../profile-home.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import { resolvePath } from './paths.ts'
@@ -161,6 +173,9 @@ export type GateServices =
   | SetupDesk
   | TesterFindings
   | MissionStarts
+  | SpecBoard
+  | Git
+  | ProfileHome
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -226,6 +241,20 @@ const decodeCall = (
       return decoder(tool, TOOLS.setup_read.input)(raw)
     case 'setup_propose':
       return decoder(tool, TOOLS.setup_propose.input)(raw)
+    case 'spec_read':
+      return decoder(tool, TOOLS.spec_read.input)(raw)
+    case 'spec_write_section':
+      return decoder(tool, TOOLS.spec_write_section.input)(raw)
+    case 'requirement_write':
+      return decoder(tool, TOOLS.requirement_write.input)(raw)
+    case 'requirement_remove':
+      return decoder(tool, TOOLS.requirement_remove.input)(raw)
+    case 'mission_describe':
+      return decoder(tool, TOOLS.mission_describe.input)(raw)
+    case 'triage_answer':
+      return decoder(tool, TOOLS.triage_answer.input)(raw)
+    case 'declare_complete':
+      return decoder(tool, TOOLS.declare_complete.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -295,6 +324,22 @@ export const placesForWorkflow = (
       places.sensitive(path.resolved, { session, writes }),
     )
     return sensitive === null ? null : `refused: ${sensitive}`
+  })
+
+/** What a read of a file with an uncommitted change says (CT-23): the base commit may not hold it. */
+export const UNCOMMITTED_CHANGE = 'This file has an uncommitted change in the main checkout.'
+
+/**
+ * A mission's session reading the main checkout (the Planner, every Planning role) is told when
+ * the file it read is modified, added or untracked there; the read itself is never refused.
+ */
+const uncommittedNoted = (grant: Grant, path: string, answer: ToolAnswer) =>
+  Effect.gen(function* () {
+    if (!answer.ok || grant.missionId === null || !grant.mainCheckout) return answer
+    const changed = yield* Git.use((git) => git.fileChanged(path)).pipe(
+      Effect.orElseSucceed(() => false),
+    )
+    return changed ? { ...answer, text: `${answer.text}\n\n${UNCOMMITTED_CHANGE}` } : answer
   })
 
 /** A call past steps 2 to 4: decoded, resolved, its command found, its role's guards passed. */
@@ -518,8 +563,10 @@ export const toolGateLayer = (settings: GateSettings) =>
           const pathOf = (): JudgedPath =>
             path ?? { named: '.', resolved: grant.place.root, inside: true, certain: true }
           switch (call.tool) {
-            case 'fs_read':
-              return yield* fsRead(fileCall(pathOf()), call.args)
+            case 'fs_read': {
+              const read = yield* fsRead(fileCall(pathOf()), call.args)
+              return yield* uncommittedNoted(grant, pathOf().resolved, read)
+            }
             case 'fs_list':
               return yield* fsList(fileCall(pathOf()), call.args)
             case 'search':
@@ -559,6 +606,20 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* SetupDesk.use((desk) => desk.read(grant))
             case 'setup_propose':
               return yield* SetupDesk.use((desk) => desk.propose(grant, call.args))
+            case 'spec_read':
+              return yield* specRead(grant, call.args)
+            case 'spec_write_section':
+              return yield* specWriteSection(grant, call.args)
+            case 'requirement_write':
+              return yield* requirementWrite(grant, call.args)
+            case 'requirement_remove':
+              return yield* requirementRemove(grant, call.args)
+            case 'mission_describe':
+              return yield* missionDescribe(grant, call.args)
+            case 'triage_answer':
+              return yield* triageAnswer(grant, call.args)
+            case 'declare_complete':
+              return yield* declareCompleteTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

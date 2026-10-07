@@ -360,6 +360,40 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       ),
     'start.create': (request) =>
       engine['start.create'](request).pipe(closedAs(gone), observed('start.create', log)),
+    'planning.spec': (request) =>
+      engine['planning.spec'](request).pipe(closedAs(gone), observed('planning.spec', log)),
+    'planning.changesSince': (request) =>
+      engine['planning.changesSince'](request).pipe(
+        closedAs(gone),
+        observed('planning.changesSince', log),
+      ),
+    'planning.markRead': (request) =>
+      engine['planning.markRead'](request).pipe(closedAs(gone), observed('planning.markRead', log)),
+    'planning.addVision': (request) =>
+      engine['planning.addVision'](request).pipe(
+        closedAs(gone),
+        observed('planning.addVision', log),
+      ),
+    'planning.keepAfterTriage': (request) =>
+      engine['planning.keepAfterTriage'](request).pipe(
+        closedAs(gone),
+        observed('planning.keepAfterTriage', log),
+      ),
+    'planning.changed': (request) =>
+      engine['planning.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('planning.changed', log),
+      ),
+    'planning.specLanguage': (request) =>
+      engine['planning.specLanguage'](request).pipe(
+        closedAs(gone),
+        observed('planning.specLanguage', log),
+      ),
+    'planning.setSpecLanguage': (request) =>
+      engine['planning.setSpecLanguage'](request).pipe(
+        closedAs(gone),
+        observed('planning.setSpecLanguage', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>
