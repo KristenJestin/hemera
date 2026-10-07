@@ -46,6 +46,7 @@ import {
   BUILDER,
   HELPER,
   REVIEWER,
+  SILENCE,
   acmeIn,
   agentsFound,
   held,
@@ -440,8 +441,9 @@ describe('A redirect cancels the turn, then sends (channel 3)', () => {
 describe('Silence, waiting and stuck (CT-12)', () => {
   test('a session silent mid-turn past the bound is stuck, then replaced, with one Journal line', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0 ? holding(hold, 0, [{ does: 'says', text: 'never' }]) : {},
+    const { world, run } = engine(
+      (index) => (index === 0 ? holding(hold, 0, [{ does: 'says', text: 'never' }]) : {}),
+      { timings: SILENCE },
     )
     const [first, lines] = await run(({ profile }) =>
       within(
@@ -480,8 +482,10 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose own command runs, silent, is not stuck', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+    const { world, run } = engine(
+      (index) =>
+        index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+      { timings: SILENCE },
     )
     const state = await run(({ profile }) =>
       within(
@@ -512,7 +516,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
   })
 
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
-    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }))
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
+      timings: SILENCE,
+    })
     const state = await run(({ profile }) =>
       within(
         profile,
@@ -530,16 +536,19 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a provider’s wait keeps a long turn alive', async () => {
     const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 150))
-    const { world, run } = engine(() => ({
-      between: pause,
-      steps: [
-        { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
-        { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
-        { does: 'says', text: 'done' },
-      ],
-    }))
+    const { world, run } = engine(
+      () => ({
+        between: pause,
+        steps: [
+          { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
+          { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
+          { does: 'says', text: 'done' },
+        ],
+      }),
+      { timings: SILENCE },
+    )
     const state = await run(({ profile }) =>
       within(
         profile,
