@@ -3,7 +3,14 @@
 import type { SetupCard } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { pendingOf, setupAgentOf, setupEntriesOf } from '../src/renderer/setup-cards.ts'
+import type { Route } from '../src/renderer/navigation.ts'
+import {
+  nothingProposed,
+  pendingOf,
+  setupAgentOf,
+  setupEntriesOf,
+  startSetup,
+} from '../src/renderer/setup-cards.ts'
 
 const card = (
   id: string,
@@ -116,5 +123,40 @@ describe('The setup agent, as the page’s header says it', () => {
     expect(setupAgentOf({ state: 'working', sentence: null })).toBe('working')
     expect(setupAgentOf({ state: 'failed', sentence: 'interrupted by a restart' })).toBe('failed')
     expect(setupAgentOf({ state: 'none', sentence: null })).toBe('done')
+  })
+})
+
+describe('A new Project’s setup, from the dialog that adds it', () => {
+  test('the proposal is asked for, then its page opens', async () => {
+    const asked: string[] = []
+    const gone: Route[] = []
+    await startSetup(
+      async (projectId) => {
+        asked.push(projectId)
+        // The page opens only once the engine has the proposal under way.
+        expect(gone).toEqual([])
+      },
+      'acme',
+      (route) => gone.push(route),
+    )
+    expect(asked).toEqual(['acme'])
+    expect(gone).toEqual([{ kind: 'projectSetup', id: 'acme' }])
+  })
+
+  test('a proposal the engine refuses leads to the Project’s page', async () => {
+    const gone: Route[] = []
+    await startSetup(
+      () => Promise.reject(new Error('The setup agent is not available.')),
+      'acme',
+      (route) => gone.push(route),
+    )
+    expect(gone).toEqual([{ kind: 'project', id: 'acme' }])
+  })
+
+  test('an agent done with nothing proposed has nothing to answer; one never asked is not done', () => {
+    expect(nothingProposed({ state: 'done', sentence: null }, [])).toBe(true)
+    expect(nothingProposed({ state: 'done', sentence: null }, CARDS)).toBe(false)
+    expect(nothingProposed({ state: 'none', sentence: null }, [])).toBe(false)
+    expect(nothingProposed({ state: 'working', sentence: null }, [])).toBe(false)
   })
 })

@@ -21,6 +21,7 @@ import {
   type Route,
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
+import { startSetup } from './setup-cards.ts'
 import { SetupRoute } from './setup-route.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
@@ -199,7 +200,7 @@ function Application() {
           open={adding}
           onOpenChange={setAdding}
           tools={ADDING}
-          onCreated={(created) => goTo({ kind: 'project', id: created.id })}
+          onCreated={(created) => void startSetup(link.proposeSetup, created.id, goTo)}
         />
       }
       actions={{

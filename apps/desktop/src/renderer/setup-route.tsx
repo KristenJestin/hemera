@@ -4,15 +4,16 @@
  * each change of this Project's setup. A kind's Accept accepts its changes still waiting in their
  * order and stops at the first the settings refuse, whose reason the card then says; Decline
  * declines them all. The agent takes no edit, no discussion and no new proposal of one card:
- * those answers are left out. No Effect here: the link's calls are promises.
+ * those answers are left out. An agent done with nothing proposed leads to the Project's page.
+ * No Effect here: the link's calls are promises.
  */
 
 import type { Project, SetupCard, SetupStanding } from '@hemera/ipc'
 import { ProjectSetup, type SetupKind } from '@hemera/ui'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { Link } from './link.ts'
-import { pendingOf, setupAgentOf, setupEntriesOf } from './setup-cards.ts'
+import { nothingProposed, pendingOf, setupAgentOf, setupEntriesOf } from './setup-cards.ts'
 
 interface Seen {
   readonly cards: ReadonlyArray<SetupCard>
@@ -77,6 +78,14 @@ export function SetupRoute({ link, engineReady, project, onDone }: SetupRoutePro
     work.then(reread, reread)
   }
   const ofKind = (kind: SetupKind) => pendingOf(seen.cards, kind)
+  const empty = nothingProposed(seen.standing, seen.cards)
+  const left = useRef(false)
+  // Nothing to answer: the Project's page, once, as Create the Project would lead there.
+  useEffect(() => {
+    if (!empty || left.current) return
+    left.current = true
+    onDone()
+  }, [empty, onDone])
   return (
     <ProjectSetup
       folder={project.mainCheckout}

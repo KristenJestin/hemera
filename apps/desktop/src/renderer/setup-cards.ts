@@ -8,6 +8,8 @@
 import type { SetupCard, SetupStanding } from '@hemera/ipc'
 import type { CardStatus, Proposal, SetupAgent, SetupCardEntry, SetupKind } from '@hemera/ui'
 
+import type { Route } from './navigation.ts'
+
 /** The page's kind of each change the engine proposes, in the settings' order. */
 const KINDS: ReadonlyArray<readonly [SetupCard['change']['kind'], SetupKind]> = [
   ['repository', 'repositories'],
@@ -117,3 +119,22 @@ export function setupEntriesOf(cards: ReadonlyArray<SetupCard>): SetupCardEntry[
 /** What the header says of the setup agent; one never asked for has nothing more to do. */
 export const setupAgentOf = (standing: SetupStanding): SetupAgent =>
   standing.state === 'none' ? 'done' : standing.state
+
+/**
+ * A new Project's setup, once the dialog has created it: the proposal asked for, then its page,
+ * which reads the agent under way rather than one never asked. A proposal the engine refuses
+ * leads to the Project's page.
+ */
+export const startSetup = (
+  propose: (projectId: string) => Promise<void>,
+  projectId: string,
+  go: (route: Route) => void,
+): Promise<void> =>
+  propose(projectId).then(
+    () => go({ kind: 'projectSetup', id: projectId }),
+    () => go({ kind: 'project', id: projectId }),
+  )
+
+/** The agent ended with nothing for the user to answer: the setup page has nothing to show. */
+export const nothingProposed = (standing: SetupStanding, cards: ReadonlyArray<SetupCard>) =>
+  standing.state === 'done' && cards.length === 0
