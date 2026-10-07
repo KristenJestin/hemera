@@ -113,11 +113,18 @@ const actionEvent = (
   payload: { kind, ...payload },
 })
 
-/** Writes the intent of an action, committed before its effect starts; answers its id. */
-export const beginAction = (kind: string, owner: ActionOwner, details: Schema.JsonObject) =>
+/**
+ * Writes the intent of an action, committed before its effect starts; answers its id, the one
+ * given when the caller had to name the action before its intent could be written.
+ */
+export const beginAction = (
+  kind: string,
+  owner: ActionOwner,
+  details: Schema.JsonObject,
+  id: string = crypto.randomUUID(),
+) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
-    const id = crypto.randomUUID()
     yield* mutate('recording the intent of an action', (transaction) =>
       transaction
         .insert(effectfulActions)

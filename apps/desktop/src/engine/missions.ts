@@ -735,25 +735,31 @@ export const setMark = (missionId: string, mark: Mark) =>
     return yield* getMission(missionId)
   })
 
+/**
+ * Clears a mark from a mission inside a change of its owner's, so the mark goes with what it
+ * stood for; answers the events to commit with it.
+ */
+export const clearMarkIn = (transaction: EngineTransaction, missionId: string, mark: Mark) =>
+  Effect.gen(function* () {
+    const identity = markIdentity(mark)
+    const cleared = yield* transaction
+      .delete(missionMarks)
+      .where(and(eq(missionMarks.missionId, missionId), eq(missionMarks.identity, identity)))
+      .returning({ id: missionMarks.id })
+      .pipe(Effect.mapError(refusedWhile('clearing a mark')))
+    return cleared.length === 0
+      ? []
+      : [missionEvent('mission.mark_cleared', missionId, BY_HEMERA, { mark: identity })]
+  })
+
 /** Clears a mark from a mission; a mark it does not carry changes nothing. */
 export const clearMark = (missionId: string, mark: Mark) =>
   Effect.gen(function* () {
-    const identity = markIdentity(mark)
     yield* mutate('clearing a mark', (transaction) =>
-      transaction
-        .delete(missionMarks)
-        .where(and(eq(missionMarks.missionId, missionId), eq(missionMarks.identity, identity)))
-        .returning({ id: missionMarks.id })
-        .pipe(
-          Effect.mapError(refusedWhile('clearing a mark')),
-          Effect.map((cleared) => ({
-            result: undefined,
-            events:
-              cleared.length === 0
-                ? []
-                : [missionEvent('mission.mark_cleared', missionId, BY_HEMERA, { mark: identity })],
-          })),
-        ),
+      Effect.map(clearMarkIn(transaction, missionId, mark), (events) => ({
+        result: undefined,
+        events,
+      })),
     )
     return yield* getMission(missionId)
   })

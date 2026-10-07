@@ -90,6 +90,9 @@ export const TABLE_CLASSES = {
   memory_next: 'permanent',
   memory_notes: 'permanent',
   memory_evidence: 'heavy',
+  exclusive_resources: 'state',
+  exclusive_resource_commands: 'state',
+  resource_claims: 'state',
 } as const satisfies Record<string, RetentionClass>
 
 /**

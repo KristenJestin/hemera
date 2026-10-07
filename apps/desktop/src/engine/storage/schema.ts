@@ -1169,3 +1169,92 @@ export const specVisions = sqliteTable(
   },
   (table) => [index('spec_visions_by_mission').on(table.missionId, table.at)],
 )
+
+/**
+ * A Project's exclusive resources (#88): what several of its Workspaces share and only one mission
+ * at a time may use (a shared development database, a fixed port, a test device). `key` is its
+ * name trimmed and case-folded, its identity on the whole machine: two Projects declaring the same
+ * key share one reservation. Its reset command brings it back to the state a mission expects.
+ */
+export const exclusiveResources = sqliteTable(
+  'exclusive_resources',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    name: text('name').notNull(),
+    key: text('key').notNull(),
+    description: text('description').notNull(),
+    resetCommandId: text('reset_command_id').references(() => projectCommands.id, {
+      onDelete: 'set null',
+    }),
+  },
+  (table) => [
+    unique('resource_once_in_project').on(table.projectId, table.key),
+    index('resources_by_key').on(table.key),
+  ],
+)
+
+/**
+ * The catalogue commands declared on an exclusive resource, each once: `use` runs on it, `change`
+ * changes it (a migration, a seed, its reset), which an agent is always asked about.
+ */
+export const exclusiveResourceCommands = sqliteTable(
+  'exclusive_resource_commands',
+  {
+    resourceId: text('resource_id')
+      .notNull()
+      .references(() => exclusiveResources.id, { onDelete: 'cascade' }),
+    commandId: text('command_id')
+      .notNull()
+      .references(() => projectCommands.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.resourceId, table.commandId] }),
+    index('resource_commands_by_command').on(table.commandId),
+  ],
+)
+
+/**
+ * The reservations of the machine's exclusive resources and their queues, by `key`: one mission
+ * holds a resource (`state` held, at most one per key), the others wait in the order their rows
+ * were written. `lasts` says whether it is held for the mission's Building or only for its runs.
+ * `readiness` is where the taking of a held one stands (`take`, `resetting`, `failed`, `unsure`,
+ * `confirm`, `retry`, `ready`), with the reset's intent and the need it waits on. `blocked_by` is
+ * the holder's key the waiting mission's mark names. `name` is as the mission's Project wrote it.
+ * `round` is the mission's round when a Building's reservation was taken: a later one is another
+ * Building.
+ */
+export const resourceClaims = sqliteTable(
+  'resource_claims',
+  {
+    id: text('id').primaryKey(),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    lasts: text('lasts').notNull(),
+    round: integer('round'),
+    state: text('state').notNull(),
+    readiness: text('readiness'),
+    actionId: text('action_id'),
+    needId: text('need_id'),
+    blockedBy: text('blocked_by'),
+    requestedAt: text('requested_at').notNull(),
+    acquiredAt: text('acquired_at'),
+  },
+  (table) => [
+    unique('claim_once_per_mission').on(table.key, table.missionId),
+    uniqueIndex('one_holder_per_resource')
+      .on(table.key)
+      .where(sql`${table.state} = 'held'`),
+  ],
+)
