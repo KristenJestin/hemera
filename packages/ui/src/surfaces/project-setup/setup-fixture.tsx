@@ -36,6 +36,14 @@ export interface SetupFixtureProps {
   folder?: string | undefined
 }
 
+/** The step the agent's glance says it is on, as it stands. */
+const STEPS: Record<SetupAgent, string> = {
+  waiting: 'Waiting for a free slot',
+  working: 'Reading the folder',
+  done: 'Proposed the setup of 5 parts',
+  failed: 'Stopped',
+}
+
 /** How long a batch takes to arrive, and the agent to write another proposal, in a story. */
 const BEAT = 700
 
@@ -119,6 +127,11 @@ export function SetupFixture({
           startedAt={startedAt}
           endedAt={agent === 'working' || agent === 'waiting' ? null : startedAt + 42_000}
           failure={failure}
+          glance={{
+            kind: 'helper',
+            type: 'Agent · Claude Code',
+            step: agent === 'failed' ? failure : STEPS[agent],
+          }}
           cards={cards}
           creating={creating}
           onAcceptAll={() => {

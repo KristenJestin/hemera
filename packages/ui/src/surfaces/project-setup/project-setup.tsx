@@ -5,6 +5,7 @@ import { type Proposal, type SetupKind } from '../../blocks/setup/proposal.tsx'
 import { type CardStatus, SetupCard } from '../../blocks/setup/setup-card.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import type { LiveGlance } from '../../components/live-chip/live-chip-glance.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconCheck, IconClockPause, IconFolder, IconSearch } from '../../icons.ts'
 import { Page, PageHeader } from '../page.tsx'
@@ -45,6 +46,8 @@ export interface ProjectSetupProps {
   endedAt: number | null
   /** Why the agent stopped, in words. */
   failure?: string | undefined
+  /** What its chip opens: the agent, where it stands and its step. Left out, a tooltip. */
+  glance?: LiveGlance | undefined
   cards: readonly SetupCardEntry[]
   /** Whether the Project is being created. */
   creating?: boolean | undefined
@@ -86,7 +89,8 @@ function AgentMark({
   agent,
   startedAt,
   endedAt,
-}: Pick<ProjectSetupProps, 'agent' | 'startedAt' | 'endedAt'>): ReactNode {
+  glance,
+}: Pick<ProjectSetupProps, 'agent' | 'startedAt' | 'endedAt' | 'glance'>): ReactNode {
   if (agent === 'waiting') {
     return (
       <Legend label="Setup agent, waiting for a free slot">
@@ -103,6 +107,7 @@ function AgentMark({
       state={CHIP_STATES[agent]}
       startedAt={startedAt}
       endedAt={endedAt}
+      glance={glance}
     />
   )
 }
@@ -113,6 +118,7 @@ export function ProjectSetup({
   startedAt,
   endedAt,
   failure,
+  glance,
   cards,
   creating = false,
   refused,
@@ -146,7 +152,7 @@ export function ProjectSetup({
         }
         actions={
           <>
-            <AgentMark agent={agent} startedAt={startedAt} endedAt={endedAt} />
+            <AgentMark agent={agent} startedAt={startedAt} endedAt={endedAt} glance={glance} />
             {waiting && (
               <Button onClick={onAcceptAll}>
                 <IconCheck size="sm" aria-hidden="true" />

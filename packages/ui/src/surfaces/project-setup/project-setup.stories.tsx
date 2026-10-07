@@ -37,6 +37,17 @@ export const Proposed: Story = {
   },
 }
 
+/** The agent's chip opens its glance: who it is, where it stands, and the step it is on. */
+export const AgentGlance: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Setup agent, done' }))
+    const glance = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    expect(within(glance).getByText('Agent · Claude Code')).toBeVisible()
+    expect(within(glance).getByText('Proposed the setup of 5 parts')).toBeVisible()
+  },
+}
+
 /** The agent waits for a free slot: its glyph in the header, every card its own shape. */
 export const Waiting: Story = {
   args: {
