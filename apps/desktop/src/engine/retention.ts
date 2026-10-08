@@ -105,6 +105,10 @@ export const TABLE_CLASSES = {
   probes: 'permanent',
   probe_files: 'permanent',
   probe_contents: 'heavy',
+  // Its blocks hold whole test files and support files: a large piece, kept as long as its mission.
+  spec_proofs: 'heavy',
+  spec_tasks: 'permanent',
+  mission_recommendations: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

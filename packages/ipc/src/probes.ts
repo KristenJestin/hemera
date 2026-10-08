@@ -51,7 +51,7 @@ export type ProbeBase = typeof ProbeBase.Type
 export const ProbeFile = Schema.Struct({
   repository: Schema.String,
   path: Schema.String,
-  status: Schema.Literals(['new', 'modified']),
+  status: Schema.Literals(['new', 'modified', 'deleted']),
   sha256: Schema.String,
   content: Schema.NullOr(Schema.String),
   patch: Schema.NullOr(Schema.String),

@@ -737,7 +737,7 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
           "type": "string",
         },
         "section": {
-          "description": "Only this section (\`why\`, \`goals\`, \`impact\`, \`requirements\`, \`decisions\`, \`risks\`, \`migration\`, \`open_questions\`); the whole Spec without it.",
+          "description": "Only this section (\`why\`, \`goals\`, \`impact\`, \`requirements\`, \`decisions\`, \`risks\`, \`migration\`, \`open_questions\`, \`tasks\`); the whole Spec without it.",
           "enum": [
             "why",
             "goals",
@@ -747,6 +747,7 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
             "migration",
             "open_questions",
             "requirements",
+            "tasks",
           ],
           "type": "string",
         },
@@ -1537,6 +1538,443 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
       "type": "object",
     },
     "name": "probe_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write a scenario's Proof, whole: the exact actions, the starting data, the test or the command, the expected result. Refused, naming the field, when what is seen today lacks its output, key line or base commit, or when a file would not go in at the base commit.",
+      "properties": {
+        "base_version": {
+          "description": "The version of the scenario's proof you read (0 when it has none): a proof changed since is refused.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "probe": {
+          "description": "Instead of \`proof\`: a done Probe (\`#2\`) whose report becomes the proof, its captured files the support files.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "proof": {
+          "additionalProperties": true,
+          "description": "The proof, whole.",
+          "properties": {
+            "actions": {
+              "description": "The exact steps, in order.",
+              "items": {
+                "description": "One action, exact enough to replay word for word.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "base_commit": {
+              "description": "Where it was seen: the commit of each repository it was seen in.",
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "commit": {
+                    "description": "The commit it was seen on.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "repository": {
+                    "description": "The repository, by its path as the Project names it (\`api\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "repository",
+                  "commit",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "command": {
+              "description": "For \`automated\` without a test file: the catalogue command id or the one command line whose output or exit code shows the result.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "evidence": {
+              "description": "The evidence that shows it.",
+              "items": {
+                "description": "Evidence kept with evidence_add, by its name.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "expected": {
+              "description": "The result after the change. For an automated proof, the assertion whose failure is the valid red.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "from_probe": {
+              "description": "The Probe whose report it comes from (\`#2\`).",
+              "minLength": 1,
+              "type": "string",
+            },
+            "key_line": {
+              "description": "The line of \`observed\` that shows the behaviour, copied exactly.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "mode": {
+              "description": "\`automated\` (a test or a command), or \`by_hand\` only for what cannot be automated: a visual result, an animation, readability.",
+              "enum": [
+                "automated",
+                "by_hand",
+              ],
+              "type": "string",
+            },
+            "observed": {
+              "description": "What a real run printed today, verbatim and trimmed: never a paraphrase.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "seen_today": {
+              "description": "True when the scenario describes a wrong behaviour that exists now: \`observed\`, \`key_line\` and \`base_commit\` are then required.",
+              "type": "boolean",
+            },
+            "starting_data": {
+              "type": "string",
+            },
+            "support_files": {
+              "description": "The files the proof needs beside its test.",
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "against": {
+                    "description": "For \`addition\`: the commit the patch was written against.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "content": {
+                    "description": "For \`new_file\`: its whole content (empty for an empty file).",
+                    "type": "string",
+                  },
+                  "from_probe": {
+                    "description": "The Probe that captured it (\`#2\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "insertion": {
+                    "description": "\`new_file\`: the path does not exist at the base commit, and the file is written whole. \`addition\`: the file exists, and \`patch\` adds to it.",
+                    "enum": [
+                      "new_file",
+                      "addition",
+                    ],
+                    "type": "string",
+                  },
+                  "patch": {
+                    "description": "For \`addition\`: a unified patch against the file as it is at the base commit, as \`git diff\` prints it.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "path": {
+                    "description": "Its path, relative to that repository, with forward slashes.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "repository": {
+                    "description": "The repository, by its path as the Project names it (\`api\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "repository",
+                  "path",
+                  "insertion",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "test": {
+              "additionalProperties": true,
+              "description": "For \`automated\`: the test, whole, and what runs it.",
+              "properties": {
+                "against": {
+                  "description": "For \`addition\`: the commit the patch was written against.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "code": {
+                  "description": "The whole code of the test, as it reads once inserted.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "command": {
+                  "description": "What runs it: a catalogue command id, or one command line without shell syntax.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "insertion": {
+                  "description": "\`new_file\`: the path does not exist at the base commit, and the file is written whole. \`addition\`: the file exists, and \`patch\` adds to it.",
+                  "enum": [
+                    "new_file",
+                    "addition",
+                  ],
+                  "type": "string",
+                },
+                "patch": {
+                  "description": "For \`addition\`: a unified patch against the file as it is at the base commit, as \`git diff\` prints it.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "path": {
+                  "description": "Its path, relative to that repository, with forward slashes.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "repository": {
+                  "description": "The repository, by its path as the Project names it (\`api\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "repository",
+                "path",
+                "code",
+                "insertion",
+                "command",
+              ],
+              "type": "object",
+            },
+          },
+          "required": [
+            "mode",
+            "actions",
+            "starting_data",
+            "expected",
+            "seen_today",
+          ],
+          "type": "object",
+        },
+        "scenario": {
+          "description": "The scenario (\`R1.S2\`).",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+        "support_files": {
+          "description": "With \`probe\`: support files of yours, added to those the Probe captured.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "against": {
+                "description": "For \`addition\`: the commit the patch was written against.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "content": {
+                "description": "For \`new_file\`: its whole content (empty for an empty file).",
+                "type": "string",
+              },
+              "from_probe": {
+                "description": "The Probe that captured it (\`#2\`).",
+                "minLength": 1,
+                "type": "string",
+              },
+              "insertion": {
+                "description": "\`new_file\`: the path does not exist at the base commit, and the file is written whole. \`addition\`: the file exists, and \`patch\` adds to it.",
+                "enum": [
+                  "new_file",
+                  "addition",
+                ],
+                "type": "string",
+              },
+              "patch": {
+                "description": "For \`addition\`: a unified patch against the file as it is at the base commit, as \`git diff\` prints it.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "path": {
+                "description": "Its path, relative to that repository, with forward slashes.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "repository": {
+                "description": "The repository, by its path as the Project names it (\`api\`).",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "repository",
+              "path",
+              "insertion",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "scenario",
+        "base_version",
+      ],
+      "type": "object",
+    },
+    "name": "proof_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write the task graph for the Builder, whole: vertical slices, each covering scenarios and naming its targets. Refused, with every problem named and nothing written, on a cycle, a reference to nothing, or a target that is not as its intent says at the base commit.",
+      "properties": {
+        "base_version": {
+          "description": "The version of the task graph as you read it (0 before the first write).",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "tasks": {
+          "description": "The whole graph, in order: a task left out is removed, and its id never reused.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "depends_on": {
+                "items": {
+                  "description": "A task done before it: its id (\`T1\`), or the title of a task new in this write.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "id": {
+                "description": "The task (\`T2\`) to keep; a new task without it.",
+                "maxLength": 12,
+                "minLength": 1,
+                "type": "string",
+              },
+              "requirements": {
+                "items": {
+                  "description": "A requirement it covers (\`R1\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "result": {
+                "description": "What is true once it is done.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "scenarios": {
+                "items": {
+                  "description": "A scenario it covers (\`R1.S2\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "targets": {
+                "description": "The files it creates or changes.",
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "intent": {
+                      "description": "\`create\` (the path does not exist at the base commit) or \`change\` (it does).",
+                      "enum": [
+                        "create",
+                        "change",
+                      ],
+                      "type": "string",
+                    },
+                    "path": {
+                      "description": "Its path, relative to that repository, with forward slashes.",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "repository": {
+                      "description": "The repository, by its path as the Project names it (\`api\`).",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "repository",
+                    "path",
+                    "intent",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "title": {
+                "description": "What the task builds, in a few words.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "title",
+              "result",
+              "requirements",
+              "scenarios",
+              "targets",
+              "depends_on",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "tasks",
+        "base_version",
+      ],
+      "type": "object",
+    },
+    "name": "tasks_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Recommend the model Building runs on, with your reason. The user sees it before Building starts and may change it.",
+      "properties": {
+        "agent": {
+          "description": "The agent: \`claude\`, \`codex\` or \`opencode\`.",
+          "enum": [
+            "claude",
+            "codex",
+            "opencode",
+          ],
+          "type": "string",
+        },
+        "effort": {
+          "description": "The effort, as the agent names it, when it has one.",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "model": {
+          "description": "The model, as the agent names it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reason": {
+          "description": "Why: the size and the risk of the work.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "agent",
+        "model",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "model_recommend",
   },
   {
     "inputSchema": {

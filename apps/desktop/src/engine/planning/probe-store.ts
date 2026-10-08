@@ -192,7 +192,7 @@ const filesOf = (probeId: string) =>
     return rows.map((row): ProbeFile => ({
       repository: row.repository,
       path: row.path,
-      status: row.status === 'new' ? 'new' : 'modified',
+      status: row.status === 'new' || row.status === 'deleted' ? row.status : 'modified',
       sha256: row.sha256,
       content: row.withheld === null ? row.content : null,
       patch: row.patch,

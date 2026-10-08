@@ -834,6 +834,36 @@ describe('Completeness, checked by Hemera', () => {
           ...ALL_SECTIONS,
           R1,
           uses('toolu_describe', 'mission_describe', { title: 'Invoices as CSV', type: 'feature' }),
+          // #90: the scenario's proof, the task graph and the recommended model.
+          uses('toolu_proof', 'proof_write', {
+            scenario: 'R1.S1',
+            proof: {
+              mode: 'by_hand',
+              actions: ['Export the invoices'],
+              starting_data: 'None.',
+              expected: 'A CSV file is saved.',
+              seen_today: false,
+            },
+            base_version: 0,
+          }),
+          uses('toolu_tasks', 'tasks_write', {
+            tasks: [
+              {
+                title: 'Export as CSV',
+                result: 'The invoices export as CSV.',
+                requirements: ['R1'],
+                scenarios: ['R1.S1'],
+                targets: [],
+                depends_on: [],
+              },
+            ],
+            base_version: 0,
+          }),
+          uses('toolu_model', 'model_recommend', {
+            agent: 'codex',
+            model: 'gpt-large',
+            reason: 'A small change.',
+          }),
           uses('toolu_done', 'declare_complete', { why: 'A Builder can build it.' }),
           uses('toolu_again', 'declare_complete', { why: 'Still done.' }),
         ],
@@ -873,15 +903,16 @@ describe('Completeness, checked by Hemera', () => {
       ...SPEC_SECTIONS.map((section) => expect.stringContaining(`- ${section}: `)),
       '- requirements: The Spec has no requirement.',
       '- mission: The mission has no title and type of yours: set them with mission_describe.',
+      '- model: No model is recommended for Building: give one with model_recommend.',
     ])
     expect(seen.before.declaredCompleteVersion).toBeNull()
     expect(answers.at(-2)).toBe(
-      'Declared complete at version 8. The user is told, with your reason.',
+      'Declared complete at version 11. The user is told, with your reason.',
     )
-    expect(answers.at(-1)).toBe('Already declared complete at version 8: nothing changed since.')
-    expect(seen.after.declaredCompleteVersion).toBe(8)
+    expect(answers.at(-1)).toBe('Already declared complete at version 11: nothing changed since.')
+    expect(seen.after.declaredCompleteVersion).toBe(11)
     expect(seen.declared).toEqual(
-      Option.some({ missionId: seen.after.missionId, version: 8, first: true }),
+      Option.some({ missionId: seen.after.missionId, version: 11, first: true }),
     )
     const types = seen.events.map((one) => one.type)
     expect(types.filter((type) => type === 'planning.completeness_refused')).toHaveLength(1)

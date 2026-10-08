@@ -73,6 +73,14 @@ const scenario = (id: string) => ({
   when: 'the user exports',
   then: 'a CSV is saved',
   version: 1,
+  proof: {
+    mode: 'by_hand' as const,
+    actions: ['Export the invoices'],
+    starting_data: 'None.',
+    expected: 'A CSV file is saved.',
+    seen_today: false,
+  },
+  proofVersion: 1,
 })
 
 const written = (): SpecText => ({
@@ -95,6 +103,19 @@ const written = (): SpecText => ({
       scenarios: [scenario('R1.S1')],
     },
   ],
+  tasks: [
+    {
+      id: 'T1',
+      title: 'Export',
+      result: 'Invoices export as CSV.',
+      requirements: ['R1'],
+      scenarios: ['R1.S1'],
+      targets: [],
+      dependsOn: [],
+    },
+  ],
+  tasksVersion: 1,
+  recommendation: { agent: 'claude', model: 'large', effort: null, reason: 'Small.' },
 })
 
 const complete = {
@@ -103,6 +124,7 @@ const complete = {
   pendingInputs: [],
   openQuestions: [],
   livingChanged: [],
+  atBase: [],
 } as const
 
 describe('Completeness', () => {
@@ -200,6 +222,7 @@ describe('Completeness', () => {
     const removed = {
       ...spec,
       requirements: [{ ...spec.requirements[0]!, removed: true }],
+      tasks: [],
     }
     expect(completeness(removed, complete)).toEqual([
       { target: 'requirements', sentence: 'The Spec has no requirement.' },
@@ -220,6 +243,8 @@ describe('The readable file', () => {
       '## Risks & trade-offs',
       '## Migration plan',
       '## Open questions',
+      '## Tasks',
+      '## Model for Building',
     ])
     expect(text).toContain('### R1 · added · invoices')
     expect(text).toContain('- R1.S1: WHEN the user exports THEN a CSV is saved')

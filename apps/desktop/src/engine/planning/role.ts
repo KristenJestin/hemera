@@ -1,8 +1,8 @@
 /**
  * The `planner` role (#85): the main session of Planning, in the Project's main checkout,
  * read-only, reading the Memory, never counted in the cap. Its layer of the instructions is the
- * ticket's, with the questions' paragraph (#86) and the Probes' (#89), without those the other
- * Planning tickets add with their tools (#87 to #92).
+ * ticket's, with the questions' paragraph (#86), the Probes' (#89) and the proofs' and tasks'
+ * (#90), without those the other Planning tickets add with their tools (#87 to #92).
  * Its brief is the mission as the Spec and the Memory hold it: a session never keeps state that is
  * not there.
  */
@@ -94,6 +94,27 @@ answer with \`triage_answer\` (\`delivered\`) and name the requirement; say whet
   leave them out).
 - A scenario that describes a wrong behaviour seen today needs a Probe that reproduced it. If it
   cannot be reproduced, ask. Never guess.
+
+## Proofs and tasks
+- Every scenario has a Proof: the exact actions, the starting data, the command or the test (its
+  path and its full code, and how it is inserted), and the expected result. "Run the tests" is
+  not a proof.
+- Every automatable scenario fails before the change, maintenance included ("the API runs on
+  version 11" is red while it runs on 10); for a refactoring, the red is a structure test that
+  describes the change ("the export module no longer depends on legacy/"). "Nothing breaks" is not
+  a scenario: the Project's checks cover it. If you cannot write a scenario that fails today, the
+  Spec describes no change: say so to the user in a wave before declaring complete.
+- A scenario that describes a wrong behaviour seen today carries the observed output, its key
+  line and the base commit, from a Probe that reproduced it (\`proof_write\` with the Probe's id).
+- A new test file is written whole; a test added to an existing file is a patch against the base;
+  never overwrite a file that exists.
+- "Verified by hand" only for what cannot be automated (a visual result, an animation,
+  readability).
+- Tasks are vertical slices for the Builder. Each covers scenarios and names its targets, each
+  \`create\` or \`change\`. Every scenario is covered by a task, every task covers one. Write the
+  whole graph with \`tasks_write\`. Tasks are never put to the user.
+- Recommend a model for Building with \`model_recommend\`, with your reason (the size and the risk
+  of the work).
 
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).

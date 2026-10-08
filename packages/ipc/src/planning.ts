@@ -2,16 +2,22 @@
  * Planning (#85): a mission's Spec as the Planning page reads it (#103), what changed since the
  * user last read it, the user's vision, keeping a mission the Planner triaged, and the Project's
  * Spec language. Nobody edits the Spec here: the Planner writes it through Hemera's tools.
+ *
+ * #90 adds each scenario's Proof (its support files by reference), the task graph with its
+ * coverage, and the model recommended for Building.
  */
 
 import {
+  AgentProvider,
   Delta,
   InputKind,
   InputState,
   MissionType,
+  ProofSeen,
   QuestionState,
   SpecSectionName,
   Stage,
+  TaskTarget,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
@@ -42,6 +48,10 @@ export const SpecScenario = Schema.Struct({
   when: Schema.String,
   then: Schema.String,
   version: Schema.Number,
+  /** Its Proof block (#90), its support files by reference; null until written. */
+  proof: Schema.NullOr(ProofSeen),
+  /** The version of its proof; 0 until written. */
+  proofVersion: Schema.Number,
 })
 export type SpecScenario = typeof SpecScenario.Type
 
@@ -62,6 +72,41 @@ export const SpecRequirement = Schema.Struct({
   againstProposed: Schema.Boolean,
 })
 export type SpecRequirement = typeof SpecRequirement.Type
+
+/** A task of the graph the Builder follows (#90): never discussed with the user. */
+export const SpecTask = Schema.Struct({
+  /** `T1`, `T2`… per mission, kept by the task, never reused. */
+  id: Schema.String,
+  title: Schema.String,
+  /** What is true once it is done. */
+  result: Schema.String,
+  requirements: Schema.Array(Schema.String),
+  scenarios: Schema.Array(Schema.String),
+  targets: Schema.Array(TaskTarget),
+  dependsOn: Schema.Array(Schema.String),
+})
+export type SpecTask = typeof SpecTask.Type
+
+/** The Planner's recommended setting for Building (#90), with its reason. */
+export const ModelRecommendationSeen = Schema.Struct({
+  agent: AgentProvider,
+  model: Schema.String,
+  effort: Schema.NullOr(Schema.String),
+  reason: Schema.String,
+  /** Whether the model and the effort were found among what the agent offers. */
+  checked: Schema.Boolean,
+  at: Schema.String,
+})
+export type ModelRecommendationSeen = typeof ModelRecommendationSeen.Type
+
+/** The task graph with its coverage: for each live scenario, the tasks that cover it. */
+export const TaskGraph = Schema.Struct({
+  tasks: Schema.Array(SpecTask),
+  coverage: Schema.Array(
+    Schema.Struct({ scenario: Schema.String, tasks: Schema.Array(Schema.String) }),
+  ),
+})
+export type TaskGraph = typeof TaskGraph.Type
 
 /** A mission's Spec, read whole in one transaction. */
 export const Spec = Schema.Struct({
@@ -84,6 +129,12 @@ export const Spec = Schema.Struct({
   /** In order, removed ones included and marked. */
   requirements: Schema.Array(SpecRequirement),
   triage: Schema.NullOr(TriageAnswer),
+  /** The task graph (#90), in its order: folded on the page by default. */
+  tasks: Schema.Array(SpecTask),
+  /** The version of the task graph, what `tasks_write` names as its base. */
+  tasksVersion: Schema.Number,
+  /** The recommended model for Building (#90), once the Planner gave one. */
+  recommendation: Schema.NullOr(ModelRecommendationSeen),
 })
 export type Spec = typeof Spec.Type
 
@@ -303,6 +354,12 @@ export const PlanningRpcs = RpcGroup.make(
   Rpc.make('planning.inputs', {
     payload: ofMission,
     success: Schema.Array(PlanningInput),
+    error: failing(...always, UnknownMission),
+  }),
+  /** The task graph with its targets and its coverage (#90). */
+  Rpc.make('planning.tasks', {
+    payload: ofMission,
+    success: TaskGraph,
     error: failing(...always, UnknownMission),
   }),
   Rpc.make('planning.specLanguage', {

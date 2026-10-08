@@ -220,6 +220,7 @@ const noProjects = {
   'planning.changed': unused,
   'planning.specLanguage': unused,
   'planning.setSpecLanguage': unused,
+  'planning.tasks': unused,
   'resources.list': unused,
   'resources.save': unused,
   'resources.holders': unused,

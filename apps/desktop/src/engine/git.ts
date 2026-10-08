@@ -19,7 +19,9 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { basename, dirname, resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import { type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
@@ -191,10 +193,10 @@ export interface AheadBehind {
   readonly behind: number
 }
 
-/** A file a worktree holds that its commit does not: created, or modified. */
+/** A file a worktree holds that its commit does not, created or modified, or one it deleted. */
 export interface WorktreeChange {
   readonly path: string
-  readonly status: 'new' | 'modified'
+  readonly status: 'new' | 'modified' | 'deleted'
 }
 
 export interface GitRemote {
@@ -276,6 +278,32 @@ export interface GitService {
   readonly fileChanged: (path: string) => Effect.Effect<boolean, GitRefusal>
   /** How many commits HEAD has that `base` has not, and the other way round. */
   readonly aheadBehind: (folder: string, base: string) => Effect.Effect<AheadBehind, GitRefusal>
+  /** Whether a path is committed at a commit; the working tree is never read. */
+  readonly pathAt: (
+    folder: string,
+    commit: string,
+    path: string,
+  ) => Effect.Effect<boolean, GitRefusal>
+  /**
+   * Whether a unified patch applies cleanly to the files of a commit (`git apply --check` on their
+   * blobs, in a scratch folder): null when it does, Git's reason otherwise. No checkout is touched.
+   */
+  readonly patchApplies: (
+    folder: string,
+    commit: string,
+    patch: string,
+  ) => Effect.Effect<string | null, GitRefusal>
+  /**
+   * What a unified patch does, read by `git apply --numstat` and `--summary` without applying it:
+   * the paths it touches, and each file it creates, deletes, renames or copies.
+   */
+  readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
+}
+
+/** What a patch does to the files it touches. */
+export interface PatchShape {
+  readonly paths: ReadonlyArray<string>
+  readonly changes: ReadonlyArray<'create' | 'delete' | 'rename' | 'copy'>
 }
 
 export class Git extends Context.Service<Git, GitService>()('Git') {}
@@ -355,7 +383,7 @@ export function changedFilesOf(printed: string): ReadonlyArray<string> {
 
 /**
  * What `git diff --name-status -z --no-renames <commit>` and `git ls-files --others -z` printed, as
- * the files a worktree created (added, or untracked) or modified; a file it deleted is left out. A
+ * the files a worktree created (added, or untracked), modified or deleted. A
  * repository inside the worktree is listed once, as its folder with a trailing `/`.
  */
 export function worktreeChangesOf(
@@ -367,8 +395,9 @@ export function worktreeChangesOf(
   for (let at = 0; at + 1 < fields.length; at += 2) {
     const code = fields[at] ?? ''
     const path = fields[at + 1] ?? ''
-    if (code === '' || path === '' || code.startsWith('D')) continue
-    changes.push({ path, status: code.startsWith('A') ? 'new' : 'modified' })
+    if (code === '' || path === '') continue
+    const status = code.startsWith('D') ? 'deleted' : code.startsWith('A') ? 'new' : 'modified'
+    changes.push({ path, status })
   }
   for (const path of untracked.split('\0')) {
     if (path !== '') changes.push({ path, status: 'new' })
@@ -471,7 +500,18 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
     fileDiff: (folder, commit, path) =>
       run(
         folder,
-        ['diff', '--no-color', '--no-ext-diff', '--end-of-options', commit, '--', path],
+        [
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          '--end-of-options',
+          commit,
+          '--',
+          path,
+        ],
         'read',
       ),
     repositoryOf: (worktree) =>
@@ -512,4 +552,102 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         ['rev-list', '--left-right', '--count', '--end-of-options', `${base}...HEAD`],
         'read',
       ).pipe(Effect.map(aheadBehindOf)),
+    pathAt: (folder, commit, path) =>
+      run(
+        folder,
+        [
+          '--literal-pathspecs',
+          'ls-tree',
+          '-z',
+          '--name-only',
+          '--end-of-options',
+          commit,
+          '--',
+          path,
+        ],
+        'read',
+      ).pipe(Effect.map((printed) => printed !== '')),
+    patchShape: (folder, patch) =>
+      withPatchFile(patch, (file) =>
+        Effect.gen(function* () {
+          const paths = patchedPathsOf(
+            yield* run(folder, ['apply', '--numstat', '-z', file], 'read'),
+          )
+          const summary = yield* run(folder, ['apply', '--summary', file], 'read')
+          return { paths, changes: patchChangesOf(summary) }
+        }),
+      ),
+    patchApplies: (folder, commit, patch) =>
+      withPatchFile(patch, (file) =>
+        Effect.gen(function* () {
+          // A repository of its own that borrows the objects of this one: its index holds the
+          // commit's tree, and the patch is checked against the blobs themselves, byte for byte.
+          const objects = yield* run(
+            folder,
+            ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
+            'read',
+          )
+          const scratch = join(dirname(file), 'repository')
+          mkdirSync(scratch)
+          yield* run(scratch, ['init', '--quiet'], 'read')
+          const borrowed = join(scratch, '.git', 'objects', 'info')
+          mkdirSync(borrowed, { recursive: true })
+          writeFileSync(join(borrowed, 'alternates'), `${objects.trim()}\n`)
+          yield* run(scratch, ['read-tree', '--end-of-options', commit], 'read')
+          return yield* run(scratch, ['apply', '--cached', '--check', file], 'read').pipe(
+            Effect.as(null),
+            Effect.catchTag('GitFailed', (refused) => Effect.succeed(refused.stderr.trim())),
+          )
+        }),
+      ),
   })
+
+/** A patch written to a scratch file for the time of a use, then removed. */
+const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => mkdtempSync(join(tmpdir(), 'hemera-patch-'))),
+    (scratch) =>
+      Effect.suspend(() => {
+        const file = join(scratch, 'change.patch')
+        writeFileSync(file, patch)
+        return use(file)
+      }),
+    (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
+  )
+
+/**
+ * What `git apply --summary` printed, as the files a patch creates, deletes, renames or copies; a
+ * change of mode alone is none of them.
+ */
+export function patchChangesOf(printed: string): PatchShape['changes'] {
+  return printed.split('\n').flatMap((line): PatchShape['changes'] => {
+    const said = line.trim()
+    if (said.startsWith('create mode ')) return ['create']
+    if (said.startsWith('delete mode ')) return ['delete']
+    if (said.startsWith('rename ')) return ['rename']
+    if (said.startsWith('copy ')) return ['copy']
+    return []
+  })
+}
+
+/**
+ * The paths a patch touches, from what `git apply --numstat -z` printed: each entry is the counts
+ * and the path, or the counts and an empty path followed by the path before and after a rename.
+ */
+export function patchedPathsOf(printed: string): ReadonlyArray<string> {
+  const tokens = printed.split('\0')
+  const paths: string[] = []
+  for (let at = 0; at < tokens.length; at += 1) {
+    const fields = (tokens[at] ?? '').split('\t')
+    if (fields.length < 3) continue
+    const path = fields.slice(2).join('\t')
+    if (path !== '') {
+      paths.push(path)
+      continue
+    }
+    for (const one of [tokens[at + 1], tokens[at + 2]])
+      if (one !== undefined && one !== '') paths.push(one)
+    at += 2
+  }
+  return [...new Set(paths)]
+}

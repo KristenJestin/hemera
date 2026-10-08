@@ -20,6 +20,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -61,7 +62,7 @@ import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
 import { Runs } from '../src/engine/runs.ts'
 import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
-import { RESTORED_PROBES } from '../src/engine/planning/probes.ts'
+import { RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
@@ -937,36 +938,21 @@ describe('probe_report ends the Probe', () => {
     expect(files.get('importer.ts')?.patch).toContain('+// probed')
   })
 
-  test('a nested repository is kept as withheld, and a file gone before it is read is skipped', async () => {
+  test('a nested repository is kept as withheld, and a deleted file as deleted', async () => {
     const hold = held()
     const { run } = probing(() => ({ steps: [says('Waiting.')], between: () => hold.promise }))
     const seen = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
-          const { project, main, api } = yield* acme()
+          const { project, main } = yield* acme()
           const { mission, grantId } = yield* planningMission(project.id, main)
           yield* launch(grantId, 'does the importer keep accents?')
           const row = yield* probeIn(mission.id, 1, ['running'])
           const tree = join(row.folder, 'api')
           // Git lists a repository inside the worktree as one entry, a folder.
           repository(join(tree, 'vendor', 'lib'), DEFAULT_BASE_BRANCH)
-          // The patch of `importer.ts` is read before `z.txt`: reading it removes `z.txt`.
-          const vanished = join(tree, 'z.txt')
-          writeFileSync(vanished, 'gone before it is read\n')
-          writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
-          writeFileSync(join(tree, '.gitattributes'), 'importer.ts diff=vanish\n')
-          const removes = script(`
-import { readFileSync, rmSync } from 'node:fs'
-rmSync(process.argv[2], { force: true })
-process.stdout.write(readFileSync(process.argv[3]))
-`)
-          git(
-            api,
-            'config',
-            'diff.vanish.textconv',
-            nodeLine(removes, vanished).replaceAll('\\', '/'),
-          )
+          rmSync(join(tree, 'importer.ts'))
           const [session] = yield* sessionsOfLineage(row.lineage)
           const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(session?.id ?? ''))
           const probeGrant = yield* ToolAccess.use((access) => access.byToken(token))
@@ -984,8 +970,19 @@ process.stdout.write(readFileSync(process.argv[3]))
       content: null,
       withheld: 'content withheld: a nested repository',
     })
-    expect(files.get('importer.ts')).toMatchObject({ status: 'modified' })
-    expect(files.has('z.txt')).toBe(false)
+    expect(files.get('importer.ts')).toMatchObject({
+      status: 'deleted',
+      content: null,
+      withheld: 'deleted by the Probe',
+    })
+  })
+
+  test('a file gone between Git’s list and its reading is skipped, never a failure', async () => {
+    const gone = join(work, 'gone.txt')
+    expect(await Effect.runPromise(readFound(gone, 1024))).toBeNull()
+    writeFileSync(gone, 'here\n')
+    expect(await Effect.runPromise(readFound(gone, 1024))).toMatchObject({ withheld: null })
+    expect(await Effect.runPromise(readFound(join(gone, 'under.txt'), 1024))).toBeNull()
   })
 })
 

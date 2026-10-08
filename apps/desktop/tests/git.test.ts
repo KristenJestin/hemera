@@ -6,6 +6,7 @@
  * Where a Git that hangs or floods is needed, a stub stands in for it.
  */
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -22,6 +23,7 @@ import {
   type GitSpawn,
   LIMITS,
   gitLayer,
+  patchChangesOf,
   spawnGit,
 } from '../src/engine/git.ts'
 import { SideEffectInTransaction, mutate } from '../src/engine/transaction.ts'
@@ -385,11 +387,27 @@ describe('A Workspace’s worktrees are read with the machine’s git', () => {
     )
     expect([...seen.changes].toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
       { path: 'committed.txt', status: 'new' },
+      { path: 'gone.txt', status: 'deleted' },
       { path: 'tests/fixtures/names.csv', status: 'new' },
       { path: 'tracked.txt', status: 'modified' },
     ])
     expect(seen.patch).toContain('-one')
     expect(seen.patch).toContain('+two')
+  })
+
+  test('a file’s patch is Git’s own, whatever the repository configures: no converter, a/ and b/', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    writeFileSync(join(api, '.gitattributes'), 'tracked.txt diff=upper\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    const commit = git(api, 'rev-parse', 'HEAD')
+    git(api, 'config', 'diff.upper.textconv', 'tr a-z A-Z <')
+    git(api, 'config', 'diff.noprefix', 'true')
+    writeFileSync(join(api, 'tracked.txt'), 'two\n')
+    const patch = await asked(Git.use((one) => one.fileDiff(api, commit, 'tracked.txt')))
+    expect(patch).toContain('--- a/tracked.txt\n+++ b/tracked.txt')
+    expect(patch).toContain('-one\n+two')
   })
 
   test('the files changed are named, tracked and untracked', async () => {
@@ -410,5 +428,130 @@ describe('A Workspace’s worktrees are read with the machine’s git', () => {
     git(api, 'commit', '-q', '--allow-empty', '-m', 'mine again')
     const counted = await asked(Git.use((one) => one.aheadBehind(api, base)))
     expect(counted).toEqual({ ahead: 2, behind: 0 })
+  })
+})
+
+describe('A file and a patch are checked at a commit, no checkout touched (#90)', () => {
+  /** `api` with `importer.ts` at a first commit, then changed at a second, and a loose file. */
+  const twoCommits = () => {
+    const api = repository(join(folder, 'api'))
+    mkdirSync(join(api, 'src'))
+    writeFileSync(join(api, 'src', 'importer.ts'), 'export const one = 1\nexport const two = 2\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'importer')
+    const first = git(api, 'rev-parse', 'HEAD')
+    writeFileSync(join(api, 'src', 'importer.ts'), 'export const one = 1\nexport const deux = 2\n')
+    git(api, 'commit', '-q', '-am', 'renamed')
+    const second = git(api, 'rev-parse', 'HEAD')
+    writeFileSync(join(api, 'loose.ts'), 'not committed\n')
+    return { api, first, second }
+  }
+
+  /** A patch that adds a line after `two`, as `git diff` prints it against the first commit. */
+  const ADDS_THREE = [
+    'diff --git a/src/importer.ts b/src/importer.ts',
+    '--- a/src/importer.ts',
+    '+++ b/src/importer.ts',
+    '@@ -1,2 +1,3 @@',
+    ' export const one = 1',
+    ' export const two = 2',
+    '+export const three = 3',
+    '',
+  ].join('\n')
+
+  test('a path exists at a commit when it is committed there; a loose file does not count', async () => {
+    const { api, first } = twoCommits()
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return {
+          committed: yield* one.pathAt(api, first, 'src/importer.ts'),
+          missing: yield* one.pathAt(api, first, 'src/exporter.ts'),
+          loose: yield* one.pathAt(api, first, 'loose.ts'),
+        }
+      }),
+    )
+    expect(seen).toEqual({ committed: true, missing: false, loose: false })
+  })
+
+  test('a patch that applies at its commit is accepted; at a commit it does not fit, Git says why', async () => {
+    const { api, first, second } = twoCommits()
+    const before = readFileSync(join(api, 'src', 'importer.ts'), 'utf8')
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return {
+          fits: yield* one.patchApplies(api, first, ADDS_THREE),
+          moved: yield* one.patchApplies(api, second, ADDS_THREE),
+        }
+      }),
+    )
+    expect(seen.fits).toBeNull()
+    expect(seen.moved).toMatch(/patch does not apply/)
+    // Nothing in the repository was touched.
+    expect(readFileSync(join(api, 'src', 'importer.ts'), 'utf8')).toBe(before)
+    expect(git(api, 'status', '--porcelain')).toBe('?? loose.ts')
+  })
+
+  test('a patch is checked against the blobs themselves: a binary file that is not UTF-8, and CRLF lines', async () => {
+    const api = repository(join(folder, 'api'))
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0xe9, 0x00, 0x0d, 0x0a, 0x80])
+    writeFileSync(join(api, 'logo.bin'), bytes)
+    writeFileSync(join(api, 'names.csv'), 'name\r\nÉloïse\r\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'fixtures')
+    const commit = git(api, 'rev-parse', 'HEAD')
+    writeFileSync(join(api, 'logo.bin'), Buffer.concat([bytes, Buffer.from([0xc3, 0x28])]))
+    writeFileSync(join(api, 'names.csv'), 'name\r\nÉloïse\r\nAnaïs\r\n')
+    // As Git prints them, untrimmed: a binary patch ends on a blank line, a CRLF line on its CR.
+    const diff = (...args: ReadonlyArray<string>) =>
+      execFileSync('git', ['diff', ...args], { cwd: api, encoding: 'utf8' })
+    const binary = diff('--binary', '--', 'logo.bin')
+    const crlf = diff('--', 'names.csv')
+    git(api, 'checkout', '-q', '--', '.')
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return {
+          binary: yield* one.patchApplies(api, commit, binary),
+          crlf: yield* one.patchApplies(api, commit, crlf),
+        }
+      }),
+    )
+    expect(seen).toEqual({ binary: null, crlf: null })
+  })
+
+  test('what a patch creates, deletes, renames or copies is read from its summary', () => {
+    expect(
+      patchChangesOf(
+        [
+          ' create mode 100644 other.ts',
+          ' delete mode 100644 importer.ts',
+          ' rename importer.ts => names.ts (100%)',
+          ' copy a.ts => b.ts (90%)',
+          ' mode change 100644 => 100755 run.sh',
+        ].join('\n'),
+      ),
+    ).toEqual(['create', 'delete', 'rename', 'copy'])
+  })
+
+  test('each call is a read', async () => {
+    const seen: CallClass[] = []
+    const recording: GitSpawn = (_, _args, kind) => {
+      seen.push(kind)
+      return Effect.succeed('')
+    }
+    await asked(
+      Git.use((one) =>
+        Effect.all([
+          one.pathAt('/r', 'abc', 'a.ts'),
+          one.patchApplies('/r', 'abc', ADDS_THREE),
+          one.patchShape('/r', ADDS_THREE),
+        ]),
+      ),
+      recording,
+    )
+    expect(seen.length).toBeGreaterThan(1)
+    expect(new Set(seen)).toEqual(new Set(['read']))
   })
 })

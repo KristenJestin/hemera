@@ -288,6 +288,9 @@ const worktreesIn = (folder: string) =>
     return found
   })
 
+/** What stands for the hash of a file a worktree deleted: it has no content. */
+const DELETED = 'deleted'
+
 /** The capture's limits: past them a file is listed with its hash, its content withheld. */
 export const CAPTURE_LIMITS = { files: 200, bytes: 5 * 1024 * 1024 } as const
 const PAST_THE_LIMITS = 'content withheld: past the capture’s limit (200 files, 5 MiB)'
@@ -325,7 +328,7 @@ const gone = (cause: Error): boolean =>
  * repository inside the worktree as one entry), a file larger than `room` and a file that cannot
  * be read are withheld, a folder's and an unreadable file's hash that of nothing.
  */
-const readFound = (path: string, room: number): Effect.Effect<Found | null> =>
+export const readFound = (path: string, room: number): Effect.Effect<Found | null> =>
   Effect.try({
     try: (): Found | null => {
       const stat = lstatSync(path, { throwIfNoEntry: false })
@@ -369,7 +372,10 @@ const preparedIn = (row: ProbeRow) =>
     for (const base of basesOf(row)) {
       const worktree = worktreeOf(row.folder, base.repository)
       for (const change of yield* git.worktreeChanges(worktree, base.commit)) {
-        const found = yield* readFound(join(worktree, change.path), 0)
+        const found =
+          change.status === 'deleted'
+            ? { sha256: DELETED }
+            : yield* readFound(join(worktree, change.path), 0)
         if (found !== null) {
           prepared.push({ repository: base.repository, path: change.path, sha256: found.sha256 })
         }
@@ -910,7 +916,7 @@ export const probesLayer = (settings: ProbesSettings) =>
           const files: Array<{
             repository: string
             path: string
-            status: 'new' | 'modified'
+            status: 'new' | 'modified' | 'deleted'
             sha256: string
             content: string | null
             patch: string | null
@@ -925,7 +931,10 @@ export const probesLayer = (settings: ProbesSettings) =>
             for (const change of yield* git.worktreeChanges(worktree, base.commit)) {
               const room =
                 kept.files < CAPTURE_LIMITS.files ? CAPTURE_LIMITS.bytes - kept.bytes : -1
-              const found = yield* readFound(join(worktree, change.path), room)
+              const found =
+                change.status === 'deleted'
+                  ? { sha256: DELETED, bytes: null, withheld: 'deleted by the Probe' }
+                  : yield* readFound(join(worktree, change.path), room)
               // Gone since Git listed it: nothing left to keep.
               if (found === null) continue
               // Left by the preparation, and unchanged since.
