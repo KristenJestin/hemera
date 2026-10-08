@@ -1,7 +1,8 @@
 /**
- * Planning's lines in the Journal (#85): the Planner started, the user's vision, the triage answer
- * and the user keeping the mission, one line per Planner turn that wrote the Spec, and each
- * declaration of completeness, refused or recorded. Each is the projection of the domain event
+ * Planning's lines in the Journal (#85, #86): the Planner started, the user's vision, the triage
+ * answer and the user keeping the mission, one line per Planner turn that wrote the Spec, each
+ * declaration of completeness, refused or recorded; each wave, answer and waiting mark, each
+ * question retired or replaced, each draft, and each input delivered and integrated. Each is the projection of the domain event
  * written in the same transaction as what it records.
  */
 
@@ -38,6 +39,20 @@ const TRIAGE_SAID = {
 const triageSaid = (kind: string): string => {
   const known = TRIAGE_KINDS.find((one) => one === kind)
   return known === undefined ? kind : TRIAGE_SAID[known]
+}
+
+const numberOf = (payload: EventPayload, key: string): number | null =>
+  Option.getOrNull(readNumber(payload[key]))
+
+const stringsOf = (payload: EventPayload, key: string): ReadonlyArray<string> =>
+  Option.getOrElse(readStrings(payload[key]), () => [])
+
+/** A wave as its line says it: each question's id and text. */
+const waveSaid = (payload: EventPayload): string => {
+  const texts = stringsOf(payload, 'texts')
+  return stringsOf(payload, 'questions')
+    .map((id, at) => `${id} ${texts[at] ?? ''}`.trim())
+    .join('; ')
 }
 
 export const PLANNING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
@@ -103,6 +118,92 @@ export const PLANNING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
         fields: { version },
       }
     }),
+  ],
+  [
+    'planning.wave_asked',
+    line((event) => {
+      const questions = stringsOf(event.payload, 'questions')
+      return {
+        kind: 'planning',
+        author: planner(event),
+        text: `The Planner asked wave ${String(numberOf(event.payload, 'number') ?? '?')}: ${waveSaid(event.payload)}`,
+        fields: { wave: numberOf(event.payload, 'number'), questions: questions.length },
+      }
+    }),
+  ],
+  [
+    'planning.answered',
+    line((event) => {
+      const question = stringOf(event.payload, 'question') ?? '?'
+      const version = numberOf(event.payload, 'version')
+      return {
+        kind: 'planning',
+        author: UserAuthor.make({}),
+        text: `The user answered ${question}${version === null || version === 1 ? '' : ` again (version ${String(version)})`}: ${stringOf(event.payload, 'answer') ?? ''}`,
+        fields: { question, version },
+      }
+    }),
+  ],
+  [
+    'planning.waiting_on_someone',
+    line((event) => {
+      const question = stringOf(event.payload, 'question') ?? '?'
+      const note = stringOf(event.payload, 'note')
+      return {
+        kind: 'planning',
+        author: UserAuthor.make({}),
+        text: `${question} waits on someone${note === null ? '' : `: ${note}`}`,
+        fields: { question },
+      }
+    }),
+  ],
+  [
+    'planning.question_withdrawn',
+    line((event) => ({
+      kind: 'planning',
+      author: planner(event),
+      text: `The Planner withdrew ${stringOf(event.payload, 'question') ?? '?'}: ${stringOf(event.payload, 'reason') ?? ''}`,
+    })),
+  ],
+  [
+    'planning.question_moot',
+    line((event) => ({
+      kind: 'planning',
+      author: planner(event),
+      text: `The Planner said ${stringOf(event.payload, 'question') ?? '?'} is moot (${stringOf(event.payload, 'decision') ?? ''}): ${stringOf(event.payload, 'reason') ?? ''}`,
+    })),
+  ],
+  [
+    'planning.question_replaced',
+    line((event) => ({
+      kind: 'planning',
+      author: planner(event),
+      text: `The Planner replaced ${stringOf(event.payload, 'question') ?? '?'} by ${stringOf(event.payload, 'by') ?? '?'}`,
+    })),
+  ],
+  [
+    'planning.draft_message',
+    line((event) => ({
+      kind: 'planning',
+      author: planner(event),
+      text: `The Planner drafted a message for ${stringOf(event.payload, 'question') ?? '?'}, for the user to send`,
+    })),
+  ],
+  [
+    'planning.inputs_delivered',
+    line((event) => ({
+      kind: 'planning',
+      author: HemeraAuthor.make({}),
+      text: `Delivered to the Planner: ${stringsOf(event.payload, 'ids').join(', ')}`,
+    })),
+  ],
+  [
+    'planning.input_integrated',
+    line((event) => ({
+      kind: 'spec',
+      author: planner(event),
+      text: `The Planner integrated ${stringOf(event.payload, 'id') ?? '?'}: ${stringOf(event.payload, 'where') ?? ''}`,
+    })),
   ],
   [
     'planning.completeness_refused',

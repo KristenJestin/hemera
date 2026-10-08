@@ -11,6 +11,7 @@
 import { Schema } from 'effect'
 
 import { type MissionType, type Stage, isFrozen } from './mission.ts'
+import { type InputKind, inputAbout } from './questions.ts'
 
 /** The seven prose sections, in their order; the requirements come after the impact. */
 export const SPEC_SECTIONS = [
@@ -144,6 +145,16 @@ export interface CompletenessContext {
   readonly described: boolean
   /** Whether a triage answer still waits on the user. */
   readonly triagePending: boolean
+  /** The inputs received or delivered and not integrated yet (CT-26). */
+  readonly pendingInputs: ReadonlyArray<{
+    readonly id: string
+    readonly kind: InputKind
+    readonly item: string
+    readonly version: number | null
+    readonly state: 'received' | 'delivered'
+  }>
+  /** The questions open or waiting on someone. */
+  readonly openQuestions: ReadonlyArray<{ readonly id: string; readonly state: 'open' | 'waiting' }>
 }
 
 const blank = (text: string): boolean => text.trim() === ''
@@ -200,6 +211,25 @@ export function completeness(
       target: 'triage',
       sentence:
         'Your triage answer waits on the user: the Spec is complete only once they keep the mission.',
+    })
+  }
+  for (const input of context.pendingInputs) {
+    const named = `Input ${input.id} (${inputAbout(input.kind, input.item, input.version)})`
+    failures.push({
+      target: input.id,
+      sentence:
+        input.state === 'received'
+          ? `${named} has not reached you yet: it comes with your next delivery.`
+          : `${named} is not integrated: integrate it, then call input_integrated.`,
+    })
+  }
+  for (const question of context.openQuestions) {
+    failures.push({
+      target: question.id,
+      sentence:
+        question.state === 'open'
+          ? `${question.id} is open: it waits for the user's answer.`
+          : `${question.id} waits on someone: a complete Spec has no open question.`,
     })
   }
   return failures

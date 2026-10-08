@@ -37,7 +37,7 @@ import { findOnPath, hostLookup, invocationOf } from '../command-line.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
-import { appPreferences, needs } from '../storage/schema.ts'
+import { answers, appPreferences, needs, questions } from '../storage/schema.ts'
 import { shownPath } from '../tools/paths.ts'
 import type { CallSession, JudgedCall } from '../tools/ports.ts'
 import { type JevResult, type JevTransport, askJev } from './jev.ts'
@@ -210,52 +210,107 @@ export class HumanIntent extends Context.Service<
 const readFields = Schema.decodeUnknownOption(Schema.fromJsonString(NeedFields))
 const readAnswer = Schema.decodeUnknownOption(Schema.fromJsonString(NeedAnswer))
 
+const readOptions = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String }))),
+)
+
 /**
- * The user's answers to the Needs you of the session's mission, as this version stores them: the
- * words the user wrote, and an option the user chose (its text, marked as chosen by the user); a
- * question is the agent's, so it is never told. A permission's answer says nothing of intent.
- * The Spec, the waves and the Chat's messages are not stored yet: they add nothing here.
+ * The user's answers in the session's mission, as this version stores them, oldest first:
+ * - to its Needs you: the words the user wrote, and an option the user chose (its text, marked as
+ *   chosen by the user); a question is the agent's, so it is never told, and a permission's answer
+ *   says nothing of intent;
+ * - to its Planning questions (#86): the latest version of each answer to a question still
+ *   answered, as the option the user chose or the words they wrote; the question is the Planner's,
+ *   so it is never told either.
+ * The frozen Spec and the Chat's messages are not stored yet: they add nothing here.
  */
 export const humanIntentLayer = Layer.effect(
   HumanIntent,
   Effect.gen(function* () {
     const database = yield* Database
-    return {
-      of: (session) => {
-        if (session.missionId === null) return Effect.succeed({ items: [], version: 'none' })
-        return database
+    const answered = (missionId: string) =>
+      Effect.gen(function* () {
+        const needRows = yield* database
           .select({ id: needs.id, fields: needs.fields, answer: needs.answer, at: needs.endedAt })
           .from(needs)
           .where(
             and(
-              eq(needs.missionId, session.missionId),
+              eq(needs.missionId, missionId),
               eq(needs.state, 'answered'),
               inArray(needs.kind, ['Decision', 'Error']),
             ),
           )
           .orderBy(asc(needs.endedAt), asc(needs.id))
-          .pipe(
-            Effect.map((rows) => {
-              const items: HumanItem[] = []
-              for (const row of rows) {
-                const answer = Option.getOrNull(readAnswer(row.answer ?? ''))
-                if (answer === null || Option.isNone(readFields(row.fields))) continue
-                if (Predicate.isTagged(answer, 'Written')) {
-                  items.push({ source: 'answer', text: answer.text })
-                } else if (Predicate.isTagged(answer, 'Chosen')) {
-                  items.push({ source: 'chosen-option', text: answer.option })
-                }
-              }
-              const last = rows.at(-1)
-              return {
-                items,
-                version: `${String(rows.length)}:${last?.at ?? ''}:${last?.id ?? ''}`,
-              }
-            }),
-            // What does not read is judged without it: nothing the user said lifts the call.
-            Effect.orElseSucceed(() => ({ items: [], version: 'unreadable' })),
+        const answerRows = yield* database
+          .select({
+            question: questions.id,
+            options: questions.options,
+            version: answers.version,
+            optionId: answers.optionId,
+            written: answers.text,
+            at: answers.at,
+          })
+          .from(answers)
+          .innerJoin(
+            questions,
+            and(eq(questions.missionId, answers.missionId), eq(questions.id, answers.questionId)),
           )
-      },
+          .where(and(eq(answers.missionId, missionId), eq(questions.state, 'answered')))
+          .orderBy(asc(answers.at), asc(answers.version))
+        const told: Array<{ readonly at: string; readonly item: HumanItem }> = []
+        for (const row of needRows) {
+          const answer = Option.getOrNull(readAnswer(row.answer ?? ''))
+          if (answer === null || Option.isNone(readFields(row.fields))) continue
+          const at = row.at ?? ''
+          if (Predicate.isTagged(answer, 'Written')) {
+            told.push({ at, item: { source: 'answer', text: answer.text } })
+          } else if (Predicate.isTagged(answer, 'Chosen')) {
+            told.push({ at, item: { source: 'chosen-option', text: answer.option } })
+          }
+        }
+        // The latest version of each answer only: a changed answer replaces what it said.
+        const latest = answerRows.filter(
+          (row) =>
+            !answerRows.some(
+              (other) => other.question === row.question && other.version > row.version,
+            ),
+        )
+        for (const row of latest) {
+          const chosen = row.optionId
+          if (chosen === null) {
+            told.push({ at: row.at, item: { source: 'answer', text: row.written ?? '' } })
+            continue
+          }
+          const label = Option.match(readOptions(row.options), {
+            onNone: () => chosen,
+            onSome: (options) => options.find((one) => one.id === chosen)?.label ?? chosen,
+          })
+          told.push({ at: row.at, item: { source: 'chosen-option', text: label } })
+        }
+        const items = told
+          .toSorted((one, other) => one.at.localeCompare(other.at))
+          .map((one) => one.item)
+        const lastNeed = needRows.at(-1)
+        const lastAnswer = answerRows.at(-1)
+        return {
+          items,
+          version: [
+            String(needRows.length),
+            lastNeed?.at ?? '',
+            lastNeed?.id ?? '',
+            String(answerRows.length),
+            lastAnswer?.at ?? '',
+          ].join(':'),
+        }
+      })
+    return {
+      of: (session) =>
+        session.missionId === null
+          ? Effect.succeed({ items: [], version: 'none' })
+          : answered(session.missionId).pipe(
+              // What does not read is judged without it: nothing the user said lifts the call.
+              Effect.orElseSucceed(() => ({ items: [], version: 'unreadable' })),
+            ),
     }
   }),
 )

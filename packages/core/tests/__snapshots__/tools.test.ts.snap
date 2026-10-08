@@ -983,6 +983,214 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Ask the user a wave of questions. Your turn goes on: work on what does not depend on the answers, which arrive later as [hemera:answers].",
+      "properties": {
+        "questions": {
+          "description": "Every question you can ask now that does not depend on another one’s answer. Follow-ups go in a later wave.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "from_finding": {
+                "description": "The cold read finding it comes from.",
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string",
+              },
+              "options": {
+                "description": "At least two options, in order; the user may also answer in their own words.",
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "description": "What choosing it implies, from what you read in the code and the ticket.",
+                      "maxLength": 2000,
+                      "type": "string",
+                    },
+                    "label": {
+                      "description": "The option, in a few words.",
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "label",
+                    "detail",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "recommended": {
+                "description": "The index of the option you recommend, from 0.",
+                "type": "integer",
+              },
+              "recommended_reason": {
+                "description": "Why you recommend it, from what you read in the code and the ticket.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "replaces": {
+                "description": "The question (\`Q3\`) it replaces.",
+                "maxLength": 20,
+                "minLength": 1,
+                "type": "string",
+              },
+              "section": {
+                "description": "The Spec item it concerns: a section name, \`R2\` or \`R2.S1\`.",
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string",
+              },
+              "text": {
+                "description": "The question, in the language of the user.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "why": {
+                "description": "Why it matters for the Spec.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "text",
+              "why",
+              "options",
+              "recommended",
+              "recommended_reason",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "questions",
+      ],
+      "type": "object",
+    },
+    "name": "ask_wave",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Withdraw a question, or say a decision made it moot. It stays readable with its reason.",
+      "properties": {
+        "decision": {
+          "description": "For \`moot\`: the decision that made it pointless.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "how": {
+          "description": "\`withdrawn\` (it no longer makes sense) or \`moot\` (a decision made it pointless).",
+          "enum": [
+            "withdrawn",
+            "moot",
+          ],
+          "type": "string",
+        },
+        "question": {
+          "description": "The question (\`Q3\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reason": {
+          "description": "Why, in the language of the user.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "question",
+        "how",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "question_retire",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Draft a message the user may send to the person a question waits on. Nothing is sent: the user writes and sends.",
+      "properties": {
+        "question": {
+          "description": "The question (\`Q3\`) that waits on someone.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "The message, for the user to copy and send themselves.",
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "question",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "question_draft_message",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Mark an input delivered to you as integrated into the Spec, or as changing nothing.",
+      "properties": {
+        "id": {
+          "description": "The input (\`I4\`), as its delivery named it.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "where": {
+          "anyOf": [
+            {
+              "description": "The Spec item it went into: a section name, \`R2\`, or a decision.",
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "no_change": {
+                  "description": "Why it changes nothing in the Spec.",
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "no_change",
+              ],
+              "type": "object",
+            },
+          ],
+          "description": "Where it went in the Spec, or \`{ "no_change": reason }\`.",
+        },
+      },
+      "required": [
+        "id",
+        "where",
+      ],
+      "type": "object",
+    },
+    "name": "input_integrated",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

@@ -11,6 +11,8 @@
  * - At the end of each Planner turn that wrote, one `spec.drafted` says what it wrote.
  * - While a `spec_write_section` call runs, its section is being written (from the agent's live
  *   tool-call events).
+ * - When a Planner's turn begins, the inputs its deliveries carried are delivered (#86, CT-26); at
+ *   the engine's start, the inputs a stopped engine never handed over are delivered again.
  *
  * Every start and wake of one mission's Planner runs under one lock: two at once open one session.
  */
@@ -34,6 +36,8 @@ import { Database, type DatabaseError, refusedWhile } from '../storage/database.
 import { missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { SpecBoard, draftedSaid } from './board.ts'
+import { prepareDeliveries } from './handover.ts'
+import { markDelivered } from './inputs.ts'
 import { hemeraNext } from './store.ts'
 
 /** What Now's next step says once the Planner started, and once a turn wrote the draft. */
@@ -51,6 +55,8 @@ export class PlannerWake extends Context.Service<
       missionId: string,
       kind: string,
       body: string,
+      /** The delivery's id, when the caller stored it already (the inputs of CT-26). */
+      id?: string,
     ) => Effect.Effect<boolean, DatabaseError>
     /** Starts the mission's first Planner; nothing when it had one, or is not in Planning. */
     readonly start: (missionId: string) => Effect.Effect<RoleSession | null, DatabaseError>
@@ -176,7 +182,7 @@ export const plannerLayer = (settings: PlannerSettings) =>
           }),
         ).pipe(run)
 
-      const deliver = (missionId: string, kind: string, body: string) =>
+      const deliver = (missionId: string, kind: string, body: string, id?: string) =>
         Semaphore.withPermits(
           lock,
           1,
@@ -189,7 +195,10 @@ export const plannerLayer = (settings: PlannerSettings) =>
             const first = !(yield* hadPlanner(missionId))
             const owner = { kind: 'mission', missionId } as const
             const delivered = yield* Sessions.use((sessions) =>
-              sessions.deliverOrStart({ owner, target: { role: 'planner' }, kind, body }, asked),
+              sessions.deliverOrStart(
+                { id: id ?? crypto.randomUUID(), owner, target: { role: 'planner' }, kind, body },
+                asked,
+              ),
             ).pipe(
               Effect.as(true),
               Effect.catchTags({
@@ -288,6 +297,23 @@ export const plannerLayer = (settings: PlannerSettings) =>
           owners.set(sessionId, missionId)
           return missionId
         })
+      // A turn that begins took its deliveries: the inputs they carry are delivered (CT-26).
+      yield* post.turns.pipe(
+        Stream.filter((turn) => turn.on),
+        Stream.runForEach((turn) =>
+          Effect.gen(function* () {
+            const missionId = yield* missionOfSession(turn.sessionId)
+            if (missionId !== null) yield* markDelivered(missionId)
+          }).pipe(
+            run,
+            Effect.catchCause((cause) =>
+              said(`the inputs of a turn were not marked delivered: ${String(cause)}`),
+            ),
+          ),
+        ),
+        Effect.forkScoped,
+      )
+
       const runtime = yield* AgentRuntime
       yield* runtime.activity.pipe(
         Stream.runForEach(({ sessionId, event }) =>
@@ -346,7 +372,13 @@ export const plannerLayer = (settings: PlannerSettings) =>
                 .from(missions)
                 .where(eq(missions.stage, 'planning'))
                 .pipe(Effect.mapError(refusedWhile('reading the missions in Planning')))
-              for (const mission of planning) yield* start(mission.id)
+              for (const mission of planning) {
+                yield* start(mission.id)
+                // What a stopped engine received and never handed over goes now (CT-26).
+                for (const one of yield* prepareDeliveries(mission.id)) {
+                  yield* deliver(mission.id, one.kind, one.body, one.id)
+                }
+              }
             }).pipe(run),
           ),
           Effect.catchCause((cause) =>

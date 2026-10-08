@@ -377,6 +377,20 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),
+  defineKind({
+    id: 'questions-asked',
+    label: 'The Planner asks questions',
+    byDefault: true,
+    sound: 'needs-you',
+    importance: IMPORTANCE['needs-you'],
+    tone: 'you',
+    source: 'planning.wave_asked',
+    // A wave is not a need: the mission's facts, as for the triage answer.
+    facts: triaged,
+    words: (facts) => ({ subject: facts.title, what: 'the Planner asks questions' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
 ]
 
 /** The registry of this version, checked when the engine loads: a bad one is a defect. */

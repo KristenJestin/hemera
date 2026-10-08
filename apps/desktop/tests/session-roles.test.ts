@@ -38,7 +38,7 @@ describe('The role registry', () => {
     expect(roleNamed([TEST_ROLE], 'planner')).toBeUndefined()
   })
 
-  test('the Memory tools are memory_read and every tool that writes the Memory, its Spec included', () => {
+  test('the Memory tools are memory_read and every tool that writes the Memory, its Spec and questions included', () => {
     expect([...MEMORY_TOOLS].sort()).toEqual(
       [
         'evidence_add',
@@ -53,6 +53,10 @@ describe('The role registry', () => {
         'mission_describe',
         'triage_answer',
         'declare_complete',
+        'ask_wave',
+        'question_retire',
+        'question_draft_message',
+        'input_integrated',
       ].sort(),
     )
   })

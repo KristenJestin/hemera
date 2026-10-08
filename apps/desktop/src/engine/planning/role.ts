@@ -1,7 +1,8 @@
 /**
  * The `planner` role (#85): the main session of Planning, in the Project's main checkout,
  * read-only, reading the Memory, never counted in the cap. Its layer of the instructions is the
- * ticket's, without the paragraphs the later Planning tickets add with their tools (#86 to #92).
+ * ticket's, with the questions' paragraph (#86) and without those the later Planning tickets add
+ * with their tools (#87 to #92).
  * Its brief is the mission as the Spec and the Memory hold it: a session never keeps state that is
  * not there.
  */
@@ -16,6 +17,7 @@ import { eq } from 'drizzle-orm'
 
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
+import { questionsBriefOf } from './questions.ts'
 import { specIn, visionsOf } from './store.ts'
 
 /** The Planner's layer of the instructions, as the ticket writes it. */
@@ -54,6 +56,26 @@ the Spec language and the user's language. Later inputs arrive as deliveries \`[
 7. **Declare complete** with \`declare_complete\` when a Builder could build it without guessing,
    saying why. If Hemera refuses, fix what it lists.
 
+## Questions
+- Ask in **waves**. One \`ask_wave\` holds every question you can ask now that does not depend on
+  another one's answer. Follow-ups that depend on an answer go in a later wave.
+- Every question has at least two options, your recommendation, and why, from what you read in
+  the code and the ticket. Say what each option implies.
+- Ask about the end state and the big choices. Never about the breakdown or the order of work.
+- Never ask in your reply text: questions go through \`ask_wave\` only. \`ask_wave\` does not end
+  your turn: go on with what does not depend on the answers, and end your turn when nothing is
+  left.
+- Answers arrive as \`[hemera:answers]\`, a few at a time, as the user gives them. Turn each into
+  the Spec as it comes (a decision goes into Decisions: the choice, the alternatives, why, with
+  the question's id), then mark it with \`input_integrated\` (where it went, or "no change" and
+  why). A changed answer arrives as a change: integrate the new version.
+- A question **waiting on someone** reaches you as information: keep it in Open questions and go
+  on. You may draft a message with \`question_draft_message\`; the user sends it, never you.
+- Withdraw a question that no longer makes sense, replace it, or say a decision made it moot,
+  always with the reason. Nothing disappears.
+- The user's vision (\`[hemera:vision]\`) is an input: check it against the code, integrate it, mark
+  it integrated. Never copy it as a decision unchecked.
+
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).
 Hemera wakes you with the next delivery. Your work ends when the user freezes the Spec.
@@ -74,10 +96,10 @@ Hemera wakes you with the next delivery. Your work ends when the user freezes th
   a target that does not exist as stated.`
 
 /**
- * The mode a Planner's session starts in. Only `draft` exists here; #86 to #97 and B1 add theirs
- * (`answers`, `prelaunch`…), each deciding when it applies.
+ * The mode a Planner's session starts in: `answers` while an input waits to be delivered or
+ * integrated (#86), `draft` otherwise. #87 to #97 and B1 add theirs (`prelaunch`…).
  */
-export const plannerMode = (): string => 'draft'
+export const plannerMode = (inputsWaiting: boolean): string => (inputsWaiting ? 'answers' : 'draft')
 
 const TRIAGE_SAID = {
   existing_mission: 'another mission holds it',
@@ -104,6 +126,7 @@ const plannerBrief = (owner: SessionOwner) =>
       .where(eq(missions.id, owner.missionId))
       .pipe(Effect.mapError(refusedWhile('reading the mission')))
     const visions = yield* visionsOf(owner.missionId)
+    const asked = yield* questionsBriefOf(owner.missionId)
     const preferences = yield* readPreferences
     const written =
       spec.version > 0 || spec.requirements.length > 0
@@ -111,7 +134,10 @@ const plannerBrief = (owner: SessionOwner) =>
         : 'none yet'
     const triage = spec.triage
     const fields: ReadonlyArray<BriefField> = [
-      { label: `Planner · ${spec.key} · ${spec.title}`, text: `Mode: ${plannerMode()}` },
+      {
+        label: `Planner · ${spec.key} · ${spec.title}`,
+        text: `Mode: ${plannerMode(asked.pending)}`,
+      },
       { label: 'Input', text: mission?.sentence ?? null },
       {
         label: 'Ticket',
@@ -128,6 +154,14 @@ const plannerBrief = (owner: SessionOwner) =>
             : visions.map((vision) => `- ${vision.at}: ${vision.text}`).join('\n'),
       },
       { label: 'Draft', text: written },
+      { label: 'Questions', text: asked.questions },
+      {
+        label: 'Inputs delivered and not integrated',
+        text:
+          asked.toIntegrate === null
+            ? null
+            : `${asked.toIntegrate}\n\nIntegrate each, then call input_integrated with its id.`,
+      },
       {
         label: 'Triage',
         text:
