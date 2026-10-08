@@ -90,6 +90,9 @@ const engine = (
           // A new mission starts its Planner on its own (#85); under the suite (its probe handed
           // over) missions are fixtures of other tickets, and never start an agent.
           plannerStarts: suite === null,
+          // Adding a Project starts the reading of its living spec (#93); under the suite,
+          // Projects are fixtures of other tickets, and never start an agent.
+          livingSpecStarts: suite === null,
         },
       },
       log,

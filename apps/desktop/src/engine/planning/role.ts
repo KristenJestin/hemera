@@ -8,6 +8,7 @@
  */
 
 import { renderSpecMarkdown } from '@hemera/core/domain'
+import type { LivingDomain } from '@hemera/ipc'
 import { Effect } from 'effect'
 
 import { readPreferences } from '../preferences.ts'
@@ -18,6 +19,7 @@ import { eq } from 'drizzle-orm'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
 import { questionsBriefOf } from './questions.ts'
+import { domainsIn } from '../living-spec/store.ts'
 import { specIn, visionsOf } from './store.ts'
 
 /** The Planner's layer of the instructions, as the ticket writes it. */
@@ -76,6 +78,13 @@ the Spec language and the user's language. Later inputs arrive as deliveries \`[
 - The user's vision (\`[hemera:vision]\`) is an input: check it against the code, integrate it, mark
   it integrated. Never copy it as a decision unchecked.
 
+## The living spec
+Before you draft, read the living spec (\`living_spec_read\`) for the domains the idea touches.
+Your requirements are a delta against it: \`added\`, or \`modified\` / \`removed\` naming the living
+requirement and the version you read. A proposed requirement (not yet validated by the
+user) is a hint, never a fact: if you rely on it, say so. If the idea is already delivered,
+answer with \`triage_answer\` (\`delivered\`) and name the requirement; say whether it is proposed.
+
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).
 Hemera wakes you with the next delivery. Your work ends when the user freezes the Spec.
@@ -107,6 +116,17 @@ const TRIAGE_SAID = {
   too_small: 'it is too small for a mission: to do in the Chat',
 } as const
 
+/**
+ * One domain of the living spec as the brief lists it: its name quoted (an agent wrote it), its
+ * state and its counts (#93).
+ */
+const livingDomainLine = (domain: LivingDomain): string =>
+  `- ${JSON.stringify(domain.name)}: ${domain.state} · ${[
+    `${String(domain.validated)} validated`,
+    `${String(domain.proposed)} proposed`,
+    ...(domain.pending === 0 ? [] : [`${String(domain.pending)} change(s) proposed`]),
+  ].join(', ')}`
+
 /** The Planner's brief, from the mission, its Spec and its visions; empty fields left out. */
 const plannerBrief = (owner: SessionOwner) =>
   Effect.gen(function* () {
@@ -121,12 +141,17 @@ const plannerBrief = (owner: SessionOwner) =>
         sentence: missions.ideaSentence,
         ticketKey: missions.ticketKey,
         ticketUrl: missions.ticketUrl,
+        projectId: missions.projectId,
       })
       .from(missions)
       .where(eq(missions.id, owner.missionId))
       .pipe(Effect.mapError(refusedWhile('reading the mission')))
     const visions = yield* visionsOf(owner.missionId)
     const asked = yield* questionsBriefOf(owner.missionId)
+    const domains =
+      mission === undefined
+        ? []
+        : yield* database.transaction((transaction) => domainsIn(transaction, mission.projectId))
     const preferences = yield* readPreferences
     const written =
       spec.version > 0 || spec.requirements.length > 0
@@ -152,6 +177,13 @@ const plannerBrief = (owner: SessionOwner) =>
           visions.length === 0
             ? null
             : visions.map((vision) => `- ${vision.at}: ${vision.text}`).join('\n'),
+      },
+      {
+        label: 'Living spec, domains',
+        text:
+          domains.length === 0
+            ? 'none yet: the living spec of this Project has not been read.'
+            : domains.map(livingDomainLine).join('\n'),
       },
       { label: 'Draft', text: written },
       { label: 'Questions', text: asked.questions },

@@ -16,6 +16,7 @@ import type { JournalDraft } from '../memory/journal.ts'
 
 const readString = Schema.decodeUnknownOption(Schema.String)
 const readNumber = Schema.decodeUnknownOption(Schema.Number)
+const readBoolean = Schema.decodeUnknownOption(Schema.Boolean)
 const readStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String))
 
 const stringOf = (payload: EventPayload, key: string): string | null =>
@@ -83,11 +84,15 @@ export const PLANNING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     line((event) => {
       const kind = stringOf(event.payload, 'kind') ?? ''
       const ref = stringOf(event.payload, 'ref')
+      // "Already delivered" resting on a proposed requirement is never said as a fact (#93).
+      const proposed = Option.getOrElse(readBoolean(event.payload['basedOnProposed']), () => false)
+      const named =
+        ref === null ? '' : ` (${ref}${proposed ? ', a proposed requirement, not validated' : ''})`
       return {
         kind: 'planning',
         author: planner(event),
-        text: `The Planner answered that ${triageSaid(kind)}${ref === null ? '' : ` (${ref})`}: ${stringOf(event.payload, 'text') ?? ''}`,
-        fields: { triage: kind, ref },
+        text: `The Planner answered that ${triageSaid(kind)}${named}: ${stringOf(event.payload, 'text') ?? ''}`,
+        fields: { triage: kind, ref, basedOnProposed: proposed },
       }
     }),
   ],

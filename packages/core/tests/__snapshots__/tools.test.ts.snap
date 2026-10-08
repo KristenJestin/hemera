@@ -1191,6 +1191,166 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Read the living spec of your Project: what it does today, by domain, each requirement with its id, version, state, origin, uncertainty and scenarios. A requirement marked [proposed] is not validated by the user: a hint, never a fact. A delta names a requirement's id as living_ref and its version as living_version.",
+      "properties": {
+        "domain": {
+          "description": "Only this domain, by its name.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "page": {
+          "description": "The page to read, from 1: 5 domains a page.",
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "living_spec_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Propose a domain of the living spec. It stays proposed until the user validates it. Refused if the Project already has a domain of that name.",
+      "properties": {
+        "name": {
+          "description": "The domain as a user would name it (\`Search\`, \`Export\`), not a code folder: one line.",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+        "summary": {
+          "description": "What the domain covers, in one paragraph, in the Spec language.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "uncertainty": {
+          "description": "What you are not sure of about this domain; leave it out when you are sure.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "summary",
+      ],
+      "type": "object",
+    },
+    "name": "living_domain_propose",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Propose a requirement of the living spec, grounded in code you read. It stays proposed until the user validates its domain.",
+      "properties": {
+        "domain": {
+          "description": "The domain it belongs to, by its name.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "replaces": {
+          "description": "On a run on one domain only: the requirement of that domain (\`LR3\`) this one replaces, where the behaviour differs.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "scenarios": {
+          "description": "One or more scenarios WHEN … THEN … that a test could check.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "then": {
+                "description": "THEN: the observable result, concrete enough for a test to check.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "when": {
+                "description": "WHEN: the situation and the action, as a user would do it.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "when",
+              "then",
+            ],
+            "type": "object",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "text": {
+          "description": "The observable behaviour, in one or two sentences, in the Spec language.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "uncertainty": {
+          "description": "What you are not sure of (dead code, a flag you cannot resolve, data you cannot see); leave it out when you are sure.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "domain",
+        "text",
+        "scenarios",
+      ],
+      "type": "object",
+    },
+    "name": "living_requirement_propose",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "On a run on one domain only: propose that a requirement of that domain is obsolete. Nothing changes until the user validates the domain.",
+      "properties": {
+        "reason": {
+          "description": "What you read that shows it is gone.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "requirement": {
+          "description": "The requirement (\`LR3\`) whose behaviour is gone from the code.",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "requirement",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "living_requirement_obsolete",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "End the reading of the living spec: your summary is kept, and your session ends.",
+      "properties": {
+        "summary": {
+          "description": "Domains proposed, what you left out and why, in the language of the user.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "summary",
+      ],
+      "type": "object",
+    },
+    "name": "living_spec_done",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

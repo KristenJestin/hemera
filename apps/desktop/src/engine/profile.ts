@@ -119,6 +119,7 @@ import { type SpecBoard, specBoardLayer } from './planning/board.ts'
 import { PLANNING_MAPPERS } from './planning/journal.ts'
 import { projectSpecLanguages } from './planning/store.ts'
 import { type PlannerWake, plannerLayer } from './planning/wake.ts'
+import { type LivingSpec, livingSpecLayer } from './living-spec/service.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -199,6 +200,8 @@ export interface SessionsParts {
   readonly timings?: Partial<SessionTimings>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
+  /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
+  readonly livingSpecStarts?: boolean
 }
 
 /** No way to start an agent: a Profile started without the engine's link to main. */
@@ -247,6 +250,7 @@ export type EngineServices =
   | PlannerWake
   | SpecBoard
   | ExclusiveResources
+  | LivingSpec
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -413,6 +417,7 @@ export const startProfile = (
       chatsLayer,
       setupLayer,
       plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false }),
+      livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

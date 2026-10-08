@@ -13,6 +13,7 @@ import { join } from 'node:path'
 
 import {
   type CompletenessFailure,
+  type LivingDrift,
   MISSION_TYPES,
   MaskedText,
   type MissionType,
@@ -25,6 +26,7 @@ import {
   DELTAS,
   canonicalLanguage,
   completeness,
+  livingDeltaRefusal,
   missionKey,
   renderSpecMarkdown,
   searchTextOf,
@@ -62,6 +64,7 @@ import {
   specs,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { domainNamesIn, livingStandingIn, nameKey } from '../living-spec/store.ts'
 import { SpecLanguage } from '../sessions/ports.ts'
 import type { SessionOwner } from '../sessions/roles.ts'
 import { SpecBoard, type Wrote } from './board.ts'
@@ -84,6 +87,9 @@ export type Written<A> = { readonly refused: string } | { readonly done: A }
 
 const refused = <A>(sentence: string): Written<A> => ({ refused: sentence })
 
+/** How a living requirement is named: `LR3`. */
+const LIVING_ID = /^LR\d+$/i
+
 type MissionRow = typeof missions.$inferSelect
 
 const stageOf = (row: MissionRow) => STAGES.find((one) => one === row.stage) ?? 'cancelled'
@@ -102,6 +108,7 @@ export const triageOf = (row: MissionRow): TriageAnswer | null => {
     text: row.triageText,
     state: row.triageState === 'kept' ? 'kept' : 'pending',
     at: row.triagedAt,
+    basedOnProposed: row.triageBasedOnProposed,
   }
 }
 
@@ -214,6 +221,13 @@ export const specIn = (
       .from(specReads)
       .where(eq(specReads.missionId, missionId))
       .pipe(Effect.mapError(refusedWhile('reading the Spec')))
+    const domains = yield* domainNamesIn(transaction, mission.projectId)
+    const proposed = new Set<string>()
+    for (const row of requirements) {
+      if (row.livingRef === null) continue
+      const living = yield* livingStandingIn(transaction, mission.projectId, row.livingRef)
+      if (living?.state === 'proposed') proposed.add(row.id)
+    }
     return {
       missionId,
       key: missionKey(mission.keyPrefix, mission.keyNumber),
@@ -245,6 +259,8 @@ export const specIn = (
         text: row.text,
         version: row.version,
         removed: row.removed,
+        newDomain: !domains.has(nameKey(row.domain)),
+        againstProposed: proposed.has(row.id),
         scenarios: scenarios
           .filter((scenario) => scenario.requirementId === row.id)
           .map((scenario) => ({
@@ -453,6 +469,13 @@ export const writeRequirement = (writer: SpecWriter, asked: RequirementAsked) =>
         })
         const standing = yield* standingOf(transaction, writer)
         if (standing.refusal !== null) return answer(refused(standing.refusal))
+        // CT-57: the delta names the living requirement it changes, at the version read.
+        const living =
+          asked.livingRef === undefined
+            ? null
+            : yield* livingStandingIn(transaction, standing.mission.projectId, asked.livingRef)
+        const deltaRefusal = livingDeltaRefusal(asked, living)
+        if (deltaRefusal !== null) return answer(refused(deltaRefusal))
         let existing: RequirementRow | null = null
         if (asked.id !== undefined) {
           const [row] = yield* transaction
@@ -777,12 +800,33 @@ export const answerTriage = (
         if (standing.refusal !== null) {
           return { result: refused<true>(standing.refusal), events: [] }
         }
+        // "Already delivered" resting on a requirement still proposed says so (#93).
+        const living =
+          asked.kind === 'delivered' && ref !== null
+            ? yield* livingStandingIn(transaction, standing.mission.projectId, ref)
+            : null
+        // A living requirement it names is one of this Project's, still there.
+        if (
+          asked.kind === 'delivered' &&
+          ref !== null &&
+          LIVING_ID.test(ref) &&
+          (living === null || living.removed)
+        ) {
+          return {
+            result: refused<true>(
+              `refused: the living spec of this Project has no requirement ${ref}: read it with living_spec_read, and name the one that delivers it.`,
+            ),
+            events: [],
+          }
+        }
+        const basedOnProposed = living?.state === 'proposed' && !living.removed
         yield* transaction
           .update(missions)
           .set({
             triageKind: asked.kind,
             triageRef: ref,
             triageText: text,
+            triageBasedOnProposed: basedOnProposed,
             triageState: 'pending',
             triagedAt: now(),
             updatedAt: now(),
@@ -796,12 +840,43 @@ export const answerTriage = (
         )
         return {
           result: { done: true as const },
-          events: [plannerEvent(writer, 'planning.triaged', { kind: asked.kind, ref, text }), next],
+          events: [
+            plannerEvent(writer, 'planning.triaged', {
+              kind: asked.kind,
+              ref,
+              text,
+              basedOnProposed,
+            }),
+            next,
+          ],
         }
       }),
     )
     if ('done' in outcome) yield* SpecBoard.use((board) => board.changed(writer.missionId))
     return outcome
+  })
+
+/**
+ * The deltas whose living requirement moved after they were written: a newer version, or removed
+ * since. Before Freeze only; after it, the pre-launch check's and the merge's (#93).
+ */
+const driftIn = (transaction: EngineTransaction, projectId: string, spec: Spec) =>
+  Effect.gen(function* () {
+    const drifts: LivingDrift[] = []
+    for (const requirement of spec.requirements) {
+      if (requirement.removed || requirement.delta === 'added') continue
+      if (requirement.livingRef === null || requirement.livingVersion === null) continue
+      const living = yield* livingStandingIn(transaction, projectId, requirement.livingRef)
+      const current = living === null || living.removed ? null : living.version
+      if (current === requirement.livingVersion) continue
+      drifts.push({
+        requirement: requirement.id,
+        livingRef: requirement.livingRef,
+        recorded: requirement.livingVersion,
+        current,
+      })
+    }
+    return drifts
   })
 
 /** What a declaration of completeness came to. */
@@ -824,10 +899,12 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
           return { result: refused<Declaration>(standing.refusal), events: [] }
         }
         const spec = yield* specIn(transaction, writer.missionId)
+        const livingChanged = yield* driftIn(transaction, standing.mission.projectId, spec)
         const failures = completeness(spec, {
           described: standing.spec.describedAt !== null,
           triagePending: spec.triage?.state === 'pending',
           ...(yield* pendingIn(transaction, writer.missionId)),
+          livingChanged,
         })
         if (failures.length > 0) {
           return {

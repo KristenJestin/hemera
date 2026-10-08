@@ -63,7 +63,7 @@ const WAITING_LOOK = '1 second'
 const ENDING_LOOK = '10 millis'
 
 /** Whether a call of the session waits on the user, or its result is still on its way to it. */
-const waitsOnUser = (sessionId: string) =>
+export const waitsOnUser = (sessionId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     const waiting = yield* database

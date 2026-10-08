@@ -4,8 +4,7 @@
  * reads is generated. And the guarantee that no tool, of this ticket or a later one, reaches Ship.
  */
 
-import { Predicate } from 'effect'
-import type { Schema } from 'effect'
+import { Option, Predicate, Schema } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -46,6 +45,36 @@ describe('The cold read and the two reviewers get no Memory (CT-06)', () => {
   )
 })
 
+describe('The living spec agent reads no Memory, and no tool validates its proposals (#93)', () => {
+  test('it has no Memory tool', () => {
+    expect(
+      toolsOf('living-spec').filter((name) => MEMORY_TOOLS.some((one) => one === name)),
+    ).toEqual([])
+  })
+
+  test('no tool of any role validates, rejects or drops: that is the user’s alone', () => {
+    expect(TOOL_NAMES.filter((name) => /validat|reject|drop/.test(name))).toEqual([])
+    expect(
+      TOOL_NAMES.filter((name) => name.startsWith('living_') && TOOLS[name].effect === 'records'),
+    ).toEqual([])
+  })
+
+  test('only the living spec agent proposes, and the Planner, the Chat and it read', () => {
+    expect(
+      TOOL_NAMES.filter((name) => name.startsWith('living_')).map((name) => [
+        name,
+        TOOLS[name].roles,
+      ]),
+    ).toEqual([
+      ['living_spec_read', ['planner', 'chat', 'living-spec']],
+      ['living_domain_propose', ['living-spec']],
+      ['living_requirement_propose', ['living-spec']],
+      ['living_requirement_obsolete', ['living-spec']],
+      ['living_spec_done', ['living-spec']],
+    ])
+  })
+})
+
 describe('Each role has exactly its tools', () => {
   test.each<[Role, ReadonlyArray<string>]>([
     [
@@ -60,6 +89,7 @@ describe('Each role has exactly its tools', () => {
         'fs_read',
         'input_integrated',
         'journal_add',
+        'living_spec_read',
         'memory_read',
         'mission_describe',
         'note_add',
@@ -144,6 +174,7 @@ describe('Each role has exactly its tools', () => {
         'fs_list',
         'fs_read',
         'fs_write',
+        'living_spec_read',
         'memory_read',
         'missions_list',
         'search',
@@ -151,18 +182,33 @@ describe('Each role has exactly its tools', () => {
       ],
     ],
     ['setup', ['fs_list', 'fs_read', 'search', 'setup_propose', 'setup_read']],
+    [
+      'living-spec',
+      [
+        'fs_list',
+        'fs_read',
+        'living_domain_propose',
+        'living_requirement_obsolete',
+        'living_requirement_propose',
+        'living_spec_done',
+        'living_spec_read',
+        'search',
+      ],
+    ],
   ])('%s', (role, tools) => {
     expect(toolsFor(role)).toEqual(tools)
   })
 
-  test('every role has a place, and the read-only ones are the Planner, the cold read, the reviewers and the setup agent', () => {
+  test('every role has a place, and the read-only ones are the Planner, the cold read, the reviewers, the setup agent and the living spec agent', () => {
     expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
       'planner',
       'cold-read',
       'spec-reviewer',
       'code-reviewer',
       'setup',
+      'living-spec',
     ])
+    expect(ROLE_PLACES['living-spec'].kind).toBe('main-checkout')
     expect(ROLE_PLACES.planner.kind).toBe('main-checkout')
     expect(ROLE_PLACES.probe.kind).toBe('own-worktree')
     expect(ROLE_PLACES.builder.kind).toBe('workspace')
@@ -193,6 +239,7 @@ describe('The table says what each tool does to the world', () => {
       'fs_list',
       'fs_read',
       'hemera_reports',
+      'living_spec_read',
       'memory_read',
       'missions_list',
       'search',
@@ -283,5 +330,19 @@ describe('A tool is admitted for a role or refused with the reason', () => {
       admitted: false,
       reason: 'refused: the Planner has no tool fs_write',
     })
+  })
+})
+
+describe('A domain name the living spec agent proposes is one line (#93)', () => {
+  const propose = Schema.decodeUnknownOption(TOOLS.living_domain_propose.input)
+
+  test('a newline or a control character in a name is refused', () => {
+    expect(Option.isNone(propose({ name: 'Billing\n## Accounts', summary: 'x' }))).toBe(true)
+    expect(Option.isNone(propose({ name: 'Billing\r', summary: 'x' }))).toBe(true)
+    expect(Option.isNone(propose({ name: 'Bill\u0007ing', summary: 'x' }))).toBe(true)
+  })
+
+  test('a plain name passes', () => {
+    expect(Option.isSome(propose({ name: 'Billing · Exports', summary: 'x' }))).toBe(true)
   })
 })

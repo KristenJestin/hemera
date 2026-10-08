@@ -102,6 +102,7 @@ const complete = {
   triagePending: false,
   pendingInputs: [],
   openQuestions: [],
+  livingChanged: [],
 } as const
 
 describe('Completeness', () => {
