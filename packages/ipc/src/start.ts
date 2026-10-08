@@ -8,7 +8,7 @@
  * screen is #102's.
  */
 
-import { CanonicalTicket, TicketReference } from '@hemera/core/domain'
+import { ProviderHit, TicketReference } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
@@ -19,13 +19,7 @@ import { UnknownProject } from './projects.ts'
 
 /** A remote ticket a provider found, and the mission of this Project already linked to it. */
 export const TicketHit = Schema.Struct({
-  provider: Schema.String,
-  reference: TicketReference,
-  canonical: CanonicalTicket,
-  key: Schema.String,
-  title: Schema.String,
-  url: Schema.String,
-  updatedAt: Schema.String,
+  ...ProviderHit.fields,
   /** The key of the mission of this Project linked to it; null when none is. */
   linkedMission: Schema.NullOr(Schema.String),
 })
@@ -46,12 +40,17 @@ export const MissionFound = Schema.TaggedStruct('MissionFound', {
 
 export const TicketFound = Schema.TaggedStruct('TicketFound', { hit: TicketHit })
 
-/** Something the search says once, in words: no provider for a reference, a provider unread. */
+/**
+ * Something the search says once, in words: no provider of the Project reads a reference, or one
+ * provider failed while the others answered.
+ */
 export const SearchNotice = Schema.TaggedStruct('SearchNotice', { sentence: Schema.String })
 
 /**
  * What "Create a mission" would create: its provisional title, and the ticket the text is when it
- * is a reference no mission links. Sent with the local results; drawn last, never the default.
+ * is a reference no mission links. Sent with the local results; drawn last, never the default. A
+ * second one, sent at the end of the stream without the ticket, replaces it: the reference was read
+ * and is not a ticket that can be read (missing, forbidden, a pull request).
  */
 export const CreateChoice = Schema.TaggedStruct('CreateChoice', {
   title: Schema.String,

@@ -105,6 +105,7 @@ import {
 import { mutate } from './transaction.ts'
 import { newSpec, triageOf } from './planning/store.ts'
 import { discussionBalls } from './planning/discussion-store.ts'
+import { type TicketLinkAtCreation, linkMissionTicket } from './tickets/versions.ts'
 
 /** The longest idea sentence a mission keeps. */
 export const MAX_IDEA_LENGTH = 2000
@@ -379,6 +380,8 @@ export interface MissionCreation {
   readonly origin?: string | undefined
   /** The key of the user's choice: the same key twice creates one mission. */
   readonly idempotencyKey?: string | undefined
+  /** The provider that reads its ticket, the Spec mode and the version read (#95). */
+  readonly ticket?: TicketLinkAtCreation | null | undefined
 }
 
 /**
@@ -526,6 +529,10 @@ export const createMission = (asked: NewMission, creation: MissionCreation = {})
           .pipe(Effect.mapError(refusedWhile('writing the mission')))
         // Its Spec, in the Project's Spec language as it is now (#85).
         yield* newSpec(transaction, id, project.id)
+        // Its ticket's snapshot, base and last known, in the same transaction (#95).
+        if (creation.ticket != null && stored !== null) {
+          yield* linkMissionTicket(transaction, id, creation.ticket)
+        }
         const next = MaskedText.make(PLANNING_STARTS)
         yield* transaction
           .insert(memoryNext)

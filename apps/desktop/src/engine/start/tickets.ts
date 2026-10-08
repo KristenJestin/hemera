@@ -1,22 +1,17 @@
 /**
  * The port the field searches remote tickets through: every ticket provider of a Project (GitHub
  * issues #95, Jira #96), merged. It only reads: nothing is ever applied on a remote ticket from
- * here. Until a provider lands, the Project has none and the port answers nothing.
+ * here.
+ *
+ * A provider's failure is an element of the merged stream, never its end (#94, section 2): every
+ * provider runs at once, its hits come as soon as it answers, and its failure comes as one
+ * `ProviderFailed` while the others go on.
  */
 
-import type { TicketReference } from '@hemera/core/domain'
-import type { TicketHit } from '@hemera/ipc'
-import { Context, Effect, Layer, Schema, Stream } from 'effect'
+import type { ProviderFailed, ProviderHit, TicketReference } from '@hemera/core/domain'
+import { Context, type Effect, type Stream } from 'effect'
 
-/** A provider that could not be read (offline, signed out), said in words, shown once. */
-export class TicketSearchError extends Schema.TaggedError<TicketSearchError>()(
-  'TicketSearchError',
-  { provider: Schema.String, reason: Schema.String },
-) {
-  override get message(): string {
-    return `${this.provider} could not be searched: ${this.reason}.`
-  }
-}
+import type { DatabaseError } from '../storage/database.ts'
 
 /** What is searched: the text as typed, and the ticket reference it is, when it is one. */
 export interface TicketQuery {
@@ -27,8 +22,11 @@ export interface TicketQuery {
 export class TicketSearch extends Context.Service<
   TicketSearch,
   {
-    /** The kinds of ticket provider set for a Project (`github`, `jira`); none until #95 and #96. */
-    readonly providers: (projectId: string) => Effect.Effect<ReadonlyArray<string>>
+    /** Whether a provider of the Project reads this reference (a short form resolved first). */
+    readonly reads: (
+      projectId: string,
+      reference: TicketReference,
+    ) => Effect.Effect<boolean, DatabaseError>
     /**
      * The hosts of the Project's GitHub providers that list a repository, the first one first: the
      * host a short form `owner/repo#n` resolves to. Empty when none lists it: it is github.com's.
@@ -37,18 +35,14 @@ export class TicketSearch extends Context.Service<
       projectId: string,
       owner: string,
       repo: string,
-    ) => Effect.Effect<ReadonlyArray<string>>
-    /** The tickets every provider of the Project finds, merged; empty when it has none. */
+    ) => Effect.Effect<ReadonlyArray<string>, DatabaseError>
+    /**
+     * The tickets every provider of the Project finds, merged as they answer; a reference is read
+     * by the providers it can belong to rather than searched. Empty when the Project has none.
+     */
     readonly search: (
       projectId: string,
       query: TicketQuery,
-    ) => Stream.Stream<TicketHit, TicketSearchError>
+    ) => Stream.Stream<ProviderHit | ProviderFailed, DatabaseError>
   }
 >()('TicketSearch') {}
-
-/** No provider for any Project: the field works on the Project's own missions. */
-export const noTicketSearch = Layer.succeed(TicketSearch, {
-  providers: () => Effect.succeed([]),
-  githubHosts: () => Effect.succeed([]),
-  search: () => Stream.empty,
-})

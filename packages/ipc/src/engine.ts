@@ -31,6 +31,7 @@ import { ChatsRpcs } from './chats.ts'
 import { SetupRpcs } from './setup.ts'
 import { TesterRpcs } from './tester.ts'
 import { StartRpcs } from './start.ts'
+import { TicketsRpcs } from './tickets.ts'
 import { PlanningRpcs } from './planning.ts'
 import { ResourcesRpcs } from './resources.ts'
 import { LivingSpecRpcs } from './living-spec.ts'
@@ -139,6 +140,7 @@ export const EngineRpcs = RpcGroup.make(
   LivingSpecRpcs,
   ProbesRpcs,
   DiscussionsRpcs,
+  TicketsRpcs,
 )
 
 /**

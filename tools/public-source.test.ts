@@ -21,6 +21,13 @@ const linesMatching = (pattern: RegExp): string[] =>
       .flatMap((line, at) => (pattern.test(line) ? [`${path}:${String(at + 1)}: ${line}`] : [])),
   )
 
+/**
+ * The French heading names a ticket's tolerant reading recognises (#95): words it reads in tickets
+ * people write, not French written in the code.
+ */
+const isHeadingWord = (line: string): boolean =>
+  /^packages\/core\/src\/domain\/tickets\.ts:\d+: +'pourquoi',$/.test(line)
+
 describe('The public source', () => {
   test('says why the code is as it is without attributing a decision to a person', () => {
     expect(
@@ -34,7 +41,7 @@ describe('The public source', () => {
     expect(
       linesMatching(
         /[«»]|(?<!\p{L})(?:c'est|ça|où|gère|faudrait|truc|vraiment|parce que|je|tu|nous|vous|pourquoi)(?!\p{L})/iu,
-      ),
+      ).filter((line) => !isHeadingWord(line)),
     ).toEqual([])
   })
 })

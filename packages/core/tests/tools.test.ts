@@ -109,6 +109,7 @@ describe('Each role has exactly its tools', () => {
         'spec_read',
         'spec_write_section',
         'tasks_write',
+        'ticket_read',
         'triage_answer',
       ],
     ],
@@ -187,6 +188,7 @@ describe('Each role has exactly its tools', () => {
         'missions_list',
         'search',
         'spec_create_draft',
+        'ticket_read',
       ],
     ],
     ['setup', ['fs_list', 'fs_read', 'search', 'setup_propose', 'setup_read']],
@@ -254,6 +256,7 @@ describe('The table says what each tool does to the world', () => {
       'search',
       'setup_read',
       'spec_read',
+      'ticket_read',
     ])
   })
 

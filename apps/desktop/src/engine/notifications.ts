@@ -333,6 +333,25 @@ const livingSpecReady = (event: DomainEvent) =>
     return Option.some<LivingSpecFacts>({ project, missionKey: null, needId: null })
   })
 
+interface TrackerFacts extends Facts {
+  readonly project: NoticeProject
+  readonly provider: string
+}
+
+/** A ticket provider that became unreachable (#95), with its Project. */
+const trackerDown = (event: DomainEvent) =>
+  Effect.gen(function* () {
+    const projectId = Option.getOrNull(readText(event.payload['projectId']))
+    const project = projectId === null ? null : yield* projectOf(projectId)
+    if (project === null) return Option.none<TrackerFacts>()
+    return Option.some<TrackerFacts>({
+      project,
+      missionKey: null,
+      needId: null,
+      provider: Option.getOrElse(readText(event.payload['provider']), () => 'A tracker'),
+    })
+  })
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -423,6 +442,21 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     source: 'livingSpec.bootstrap_finished',
     facts: livingSpecReady,
     words: (facts) => ({ subject: facts.project.name, what: 'its living spec is ready to review' }),
+    route: (facts) => ProjectTarget.make({ projectId: facts.project.id }),
+  }),
+  defineKind({
+    id: 'tracker-unreachable',
+    label: 'A tracker is unreachable',
+    byDefault: true,
+    sound: 'error',
+    importance: IMPORTANCE.error,
+    tone: 'failed',
+    source: 'tickets.provider_unreachable',
+    facts: trackerDown,
+    words: (facts) => ({
+      subject: facts.provider,
+      what: 'it cannot be read; its tickets keep the version last read',
+    }),
     route: (facts) => ProjectTarget.make({ projectId: facts.project.id }),
   }),
 ]

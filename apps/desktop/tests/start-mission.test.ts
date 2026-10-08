@@ -13,11 +13,14 @@ import { join } from 'node:path'
 
 import {
   JiraKey,
+  type ProviderHit,
+  ProviderFailed,
   type TicketReference,
   canonicalTicket,
   parseTicketReference,
   searchTextOf,
   ticketKeyOf,
+  ticketProviderOf,
 } from '@hemera/core/domain'
 import {
   CreateChoice,
@@ -25,7 +28,6 @@ import {
   SearchNotice,
   type StartCreate,
   type StartResult,
-  type TicketHit,
   TicketAlreadyLinked,
 } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, Layer, Match, Option, Predicate, Result, Stream } from 'effect'
@@ -38,7 +40,7 @@ import { createMission, getMission, listMissions, moveMission } from '../src/eng
 import { createProject } from '../src/engine/projects.ts'
 import { createStart, searchStart } from '../src/engine/start/field.ts'
 import { MissionStarts } from '../src/engine/start/started.ts'
-import { TicketSearch, TicketSearchError } from '../src/engine/start/tickets.ts'
+import { TicketSearch } from '../src/engine/start/tickets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { missions } from '../src/engine/storage/schema.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
@@ -109,20 +111,20 @@ const choiceOf = (results: ReadonlyArray<StartResult>) =>
 
 const sentence = (text: string) => ({ sentence: text, ticket: null })
 
-/** A provider that answers these hits for any query. */
+/** A GitHub provider that answers these hits, or failures, for any query. */
 const providing = (
   answer: (query: {
     readonly text: string
     readonly reference: TicketReference | null
-  }) => Stream.Stream<TicketHit, TicketSearchError>,
+  }) => Stream.Stream<ProviderHit | ProviderFailed>,
 ) =>
   Layer.succeed(TicketSearch, {
-    providers: () => Effect.succeed(['github']),
+    reads: (_, ref) => Effect.succeed(ticketProviderOf(ref) === 'github'),
     githubHosts: () => Effect.succeed([]),
     search: (_, query) => answer(query),
   })
 
-const hitOf = (text: string, title: string): TicketHit => {
+const hitOf = (text: string, title: string): ProviderHit => {
   const ref = reference(text)
   return {
     provider: 'github',
@@ -131,8 +133,8 @@ const hitOf = (text: string, title: string): TicketHit => {
     key: ticketKeyOf(ref),
     title,
     url: `https://github.com/${ticketKeyOf(ref).replace('#', '/issues/')}`,
+    status: { state: 'open', wording: 'open' },
     updatedAt: '2026-10-01T10:00:00.000Z',
-    linkedMission: null,
   }
 }
 
@@ -386,7 +388,7 @@ describe('Tickets: the ones already linked open their mission, the remote ones f
       ),
     )
     expect(byReference).toContainEqual(
-      SearchNotice.make({ sentence: 'No ticket provider is set for this Project.' }),
+      SearchNotice.make({ sentence: 'No ticket provider of this Project reads SHOP-7.' }),
     )
     // No provider reads it: the choice creates from the text, and links no ticket.
     expect(choiceOf(byReference)).toEqual(CreateChoice.make({ title: 'SHOP-7', ticket: null }))
@@ -402,7 +404,7 @@ describe('Tickets: the ones already linked open their mission, the remote ones f
   test('a text shaped like a key is a ticket only for a provider that reads it, never with the Project’s prefix', async () => {
     const queries: Array<TicketReference | null> = []
     const tickets = Layer.succeed(TicketSearch, {
-      providers: () => Effect.succeed(['jira']),
+      reads: (_, ref) => Effect.succeed(ticketProviderOf(ref) === 'jira'),
       githubHosts: () => Effect.succeed([]),
       search: (_, query) =>
         Stream.fromEffect(Effect.sync(() => queries.push(query.reference))).pipe(Stream.drain),
@@ -476,15 +478,15 @@ describe('Tickets: the ones already linked open their mission, the remote ones f
     const hits = results.flatMap((result) =>
       Predicate.isTagged(result, 'TicketFound') ? [result.hit] : [],
     )
-    expect(hits.map((hit) => [hit.key, hit.linkedMission])).toEqual([
-      ['acme/shop#41', 'ACME-1'],
-      ['acme/shop#42', null],
+    expect(hits.map((hit) => [hit.key, hit.linkedMission, hit.status.wording])).toEqual([
+      ['acme/shop#41', 'ACME-1', 'open'],
+      ['acme/shop#42', null, 'open'],
     ])
   })
 
   test('a short form is the GitHub Enterprise ticket of the provider that lists its repository', async () => {
     const tickets = Layer.succeed(TicketSearch, {
-      providers: () => Effect.succeed(['github']),
+      reads: (_, ref) => Effect.succeed(ticketProviderOf(ref) === 'github'),
       githubHosts: (_, owner, repo) =>
         Effect.succeed(owner === 'acme' && repo === 'shop' ? ['git.acme.test'] : []),
       search: () => Stream.empty,
@@ -524,11 +526,15 @@ describe('Tickets: the ones already linked open their mission, the remote ones f
     expect(refused).toBeInstanceOf(TicketAlreadyLinked)
   })
 
-  test('a ticket search that fails says so once and the local results stay', async () => {
+  test('a provider that fails says so once and the local results and the other hits stay', async () => {
     const tickets = providing(() =>
-      Stream.concat(
-        Stream.make(hitOf('acme/shop#42', 'Export notes too')),
-        Stream.fail(new TicketSearchError({ provider: 'GitHub', reason: 'you are offline' })),
+      Stream.make(
+        hitOf('acme/shop#42', 'Export notes too'),
+        ProviderFailed.make({
+          provider: 'Jira',
+          message: 'Jira is unreachable: you are offline.',
+        }),
+        hitOf('acme/shop#43', 'Export notes again'),
       ),
     )
     const results = await engine(tickets)(({ profile }) =>
@@ -540,9 +546,15 @@ describe('Tickets: the ones already linked open their mission, the remote ones f
         }),
       ),
     )
-    expect(tagsOf(results)).toEqual(['MissionFound', 'CreateChoice', 'TicketFound', 'SearchNotice'])
-    expect(results.at(-1)).toEqual(
-      SearchNotice.make({ sentence: 'GitHub could not be searched: you are offline.' }),
+    expect(tagsOf(results)).toEqual([
+      'MissionFound',
+      'CreateChoice',
+      'TicketFound',
+      'SearchNotice',
+      'TicketFound',
+    ])
+    expect(results[3]).toEqual(
+      SearchNotice.make({ sentence: 'Jira is unreachable: you are offline.' }),
     )
   })
 
