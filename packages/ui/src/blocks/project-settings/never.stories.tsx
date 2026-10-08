@@ -108,7 +108,7 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { name: 'Nothing refused' })).toBeVisible()
-    expect(canvas.getByRole('button', { name: 'Add a command' })).toBeVisible()
+    expect(canvas.getByRole('button', { name: 'Refuse a command' })).toBeVisible()
   },
 }
 
@@ -119,7 +119,7 @@ export const Loading: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('list', { busy: true })).toBeInTheDocument()
     expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(3)
-    expect(canvas.queryByRole('button', { name: 'Add a command' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Refuse a command' })).toBeNull()
   },
 }
 
@@ -127,7 +127,7 @@ export const Loading: Story = {
 export const Adding: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Refuse a command' }))
     const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
     const field = within(dialog).getByRole('textbox', { name: 'Command' })
     await userEvent.type(field, 'pnpm publish')
@@ -175,7 +175,7 @@ export const LongText: Story = {
 export const Focused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const add = canvas.getByRole('button', { name: 'Add a command' })
+    const add = canvas.getByRole('button', { name: 'Refuse a command' })
     add.focus()
     await userEvent.tab()
     const first = canvas.getByRole('button', { name: 'Remove git push --force' })
@@ -193,5 +193,15 @@ export const Focused: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(add).toHaveFocus()
+  },
+}
+
+/** A change the engine refused: the list is back as the engine keeps it, and why is said. */
+export const ChangeRefused: Story = {
+  args: { error: 'The list could not be changed: Hemera could not write to its profile.' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'The list could not be changed',
+    )
   },
 }

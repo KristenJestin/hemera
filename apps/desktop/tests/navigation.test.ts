@@ -8,6 +8,7 @@ import {
   focusOf,
   frameOf,
   go,
+  landedAfterSetup,
   linkedSettings,
   open,
   placeOf,
@@ -121,5 +122,19 @@ describe('A mission’s base and the views over it', () => {
   test('outside a mission, opening a view changes nothing', () => {
     const page = go(START, { kind: 'project', id: 'acme' })
     expect(open(page, 'spec')).toBe(page)
+  })
+})
+
+describe('A setup launched from a Project’s settings', () => {
+  test('leads to that Project’s page, where its task shows', () => {
+    const at = go(START, { kind: 'projectSettings', id: 'acme' })
+    expect(landedAfterSetup(at, 'acme').route).toEqual({ kind: 'project', id: 'acme' })
+  })
+
+  test('leaves the window where it is once the user has gone elsewhere meanwhile', () => {
+    const elsewhere = go(START, { kind: 'projectSettings', id: 'web' })
+    expect(landedAfterSetup(elsewhere, 'acme')).toBe(elsewhere)
+    const home = go(START, { kind: 'home' })
+    expect(landedAfterSetup(home, 'acme')).toBe(home)
   })
 })

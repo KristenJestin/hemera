@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FAILED_RUN, RUNS, STALE } from '../../blocks/project-settings/project-settings-fixtures.ts'
 import { SettingsFixture } from './settings-fixtures.tsx'
@@ -36,6 +36,50 @@ export const Filled: Story = {
   },
 }
 
+/** The setup launched from the settings, at any time: its button at the header's end. */
+export const SetUp: Story = {
+  args: { setUp: { onStart: fn() } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Set up with an agent' }))
+    expect(args.setUp?.onStart).toHaveBeenCalled()
+  },
+}
+
+/** No agent can run the setup, or its launch was refused: why, beside the button. */
+export const SetUpRefused: Story = {
+  args: {
+    setUp: { onStart: fn(), refused: 'Claude Code is not signed in', unavailable: true },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Claude Code is not signed in')).toBeVisible()
+    expect(canvas.getByRole('button', { name: 'Set up with an agent' })).toBeDisabled()
+  },
+}
+
+/** A long refusal of the launch: it wraps beside the button, read whole, never cut. */
+export const SetUpRefusedAtLength: Story = {
+  args: {
+    setUp: {
+      onStart: fn(),
+      refused:
+        'The setup agent could not start: Hemera could not write to its profile, the disk holding its data folder is full. Free some room on that disk, or move the data folder to another one from the application’s settings, then launch the setup again.',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const said = canvas.getByRole('status')
+    expect(said).toHaveTextContent(/then launch the setup again\.$/)
+    // Read whole: nothing of it cut, nothing past the window's edge, the button beside it.
+    expect(said.scrollWidth).toBeLessThanOrEqual(said.clientWidth)
+    const edge = document.documentElement.clientWidth
+    expect(said.getBoundingClientRect().right).toBeLessThanOrEqual(edge)
+    const button = canvas.getByRole('button', { name: 'Set up with an agent' })
+    expect(button.getBoundingClientRect().right).toBeLessThanOrEqual(edge)
+  },
+}
+
 /** A Project just added from a folder: one repository, nothing else written; each section says so. */
 export const Empty: Story = {
   args: { empty: true },
@@ -57,7 +101,8 @@ export const Dense: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const nav = canvas.getByRole('navigation', { name: 'Settings of the Project' })
-    expect(within(nav).getAllByRole('button')).toHaveLength(14)
+    // Never run stands under the catalogue, not as a section of its own.
+    expect(within(nav).getAllByRole('button')).toHaveLength(13)
     // The problem is found from any section: its glyph is in the list.
     expect(
       within(nav).getByRole('button', { name: 'Repositories, billing cannot be read' }),
@@ -79,7 +124,8 @@ export const Loading: Story = {
     expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(3)
     await userEvent.click(canvas.getByRole('button', { name: 'Commands' }))
     await waitFor(() => {
-      expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(4)
+      // The catalogue's four rows, then the three of Never run under it.
+      expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(7)
     })
   },
 }
@@ -207,11 +253,17 @@ export const Services: Story = {
   },
 }
 
-/** The commands never run in Acme, whoever asks: a line each, its bin at its end. */
+/**
+ * The commands never run in Acme, whoever asks, under the catalogue in the Commands section, since
+ * they are commands too: a line each, its bin at its end. No section of its own.
+ */
 export const NeverRun: Story = {
-  args: { section: 'never' },
+  args: { section: 'commands' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    const nav = canvas.getByRole('navigation', { name: 'Settings of the Project' })
+    expect(within(nav).queryByRole('button', { name: 'Never run' })).toBeNull()
+    expect(canvas.getByRole('list', { name: 'Commands' })).toBeVisible()
     const list = canvas.getByRole('list', { name: 'Never run' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(4)
   },
@@ -219,10 +271,10 @@ export const NeverRun: Story = {
 
 /** A command added to the list from its dialog; one already refused is said so under its field. */
 export const NeverRunAdd: Story = {
-  args: { section: 'never' },
+  args: { section: 'commands' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Refuse a command' }))
     const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
     const field = within(dialog).getByRole('textbox', { name: 'Command' })
     await userEvent.type(field, 'terraform apply')
@@ -273,16 +325,16 @@ export const Instructions: Story = {
   args: { section: 'instructions' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const table = canvas.getByRole('table', { name: 'Instructions' })
+    const list = canvas.getByRole('list', { name: 'Instructions' })
     expect(
-      within(table).getByRole('img', { name: 'Hemera sends CLAUDE.md of shared to Codex' }),
+      within(list).getByRole('img', { name: 'Codex reads AGENTS.md of api by itself' }),
     ).toBeInTheDocument()
   },
 }
 
 /** The agent sections of a Project just added: nothing refused, every role on the app's model. */
 export const AgentSectionsEmpty: Story = {
-  args: { empty: true, section: 'never' },
+  args: { empty: true, section: 'commands' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { name: 'Nothing refused' })).toBeVisible()

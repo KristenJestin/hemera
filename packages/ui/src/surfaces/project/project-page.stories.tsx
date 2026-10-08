@@ -9,6 +9,12 @@ import {
   STAGE_GROUPS,
 } from '../../shell/shell-fixtures.tsx'
 import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
+import { useState } from 'react'
+
+import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
+import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import { IconFileText } from '../../icons.ts'
+import { ProjectTasks, SetupTask } from '../project-setup/setup-task.tsx'
 import { ProjectPage } from './project-page.tsx'
 
 /**
@@ -197,5 +203,193 @@ export const Marked: Story = {
       'src',
       ACME_LOGO,
     )
+  },
+}
+
+/** The Project's tasks under the field that starts a mission, while one runs: here, the setup. */
+export const WithTasks: Story = {
+  args: {
+    groups: [],
+    tasks: (
+      <ProjectTasks>
+        <SetupTask
+          project="Acme"
+          agent="working"
+          startedAt={Date.now() - 12_000}
+          endedAt={null}
+          cards={[]}
+          open={false}
+          onOpenChange={fn()}
+          onAcceptAll={fn()}
+          onRetry={fn()}
+          onAccept={fn()}
+          onDraft={fn()}
+          onDecline={fn()}
+          onSave={fn()}
+          onCancel={fn()}
+          onSend={fn()}
+        />
+      </ProjectTasks>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('region', { name: 'Tasks' })
+    expect(within(tasks).getByRole('button', { name: 'Setup agent, running' })).toBeVisible()
+    // Under the field that starts a mission.
+    const field = canvas.getByRole('textbox', { name: 'Start a mission in Acme' })
+    expect(field.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  },
+}
+
+/**
+ * The setup's task as the window holds it, done with two proposals waiting: its chip's menu opens
+ * them in its details.
+ */
+function SetupProposalsWaiting() {
+  const [open, setOpen] = useState(false)
+  const [startedAt] = useState(() => Date.now() - 42_000)
+  return (
+    <SetupTask
+      project="Acme"
+      agent="done"
+      startedAt={startedAt}
+      endedAt={startedAt + 38_000}
+      cards={[
+        { kind: 'repositories', status: { state: 'accepted' }, proposal: PROPOSALS.repositories },
+        { kind: 'commands', status: { state: 'proposed' }, proposal: PROPOSALS.commands },
+        { kind: 'variables', status: { state: 'proposed' }, proposal: PROPOSALS.variables },
+      ]}
+      open={open}
+      onOpenChange={setOpen}
+      onAcceptAll={fn()}
+      onRetry={fn()}
+      onAccept={fn()}
+      onDraft={fn()}
+      onDecline={fn()}
+      onSave={fn()}
+      onCancel={fn()}
+      onSend={fn()}
+    />
+  )
+}
+
+/**
+ * A Project lived in, with tasks running for it: the setup's proposals waiting, and another task at
+ * work beside it. The row stands between the field and the missions; what a task asks unfolds there,
+ * pushing the missions down.
+ */
+export const WithTasksAndMissions: Story = {
+  render: (args) => (
+    <ProjectPage
+      {...args}
+      tasks={
+        <ProjectTasks>
+          <SetupProposalsWaiting />
+          <LiveChip
+            name="Living spec"
+            icon={<IconFileText size="sm" />}
+            state="running"
+            startedAt={Date.now() - 95_000}
+            endedAt={null}
+          />
+        </ProjectTasks>
+      }
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('region', { name: 'Tasks' })
+    expect(within(tasks).getByRole('button', { name: 'Living spec, running' })).toBeVisible()
+    // The missions under the row, which the details never push.
+    expect(canvas.getByRole('button', { name: /ACME-12/ })).toBeInTheDocument()
+    await userEvent.click(
+      within(tasks).getByRole('button', { name: 'Setup agent, done, waits for you' }),
+    )
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await userEvent.click(within(menu).getByRole('button', { name: 'Review 2 proposals' }))
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    // The dialog fades in: visible once its entrance has played.
+    await waitFor(() => {
+      expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
+    })
+  },
+}
+
+/**
+ * The setup as the window holds it once its last proposal is answered in its details: the details
+ * close first, the focus goes to the field that starts a mission, then the task leaves the row.
+ */
+function SetupAnsweredLast() {
+  const [open, setOpen] = useState(false)
+  /** Whether its details are open or still closing: the task stays until they have closed. */
+  const [held, setHeld] = useState(false)
+  const [answered, setAnswered] = useState(false)
+  const [startedAt] = useState(() => Date.now() - 42_000)
+  if (answered && !held) return null
+  return (
+    <SetupTask
+      project="Acme"
+      agent="done"
+      startedAt={startedAt}
+      endedAt={startedAt + 38_000}
+      cards={[
+        {
+          kind: 'commands',
+          status: answered ? { state: 'accepted' } : { state: 'proposed' },
+          proposal: PROPOSALS.commands,
+        },
+      ]}
+      leaving={answered}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setHeld(true)
+      }}
+      onClosed={() => setHeld(false)}
+      onAcceptAll={() => setAnswered(true)}
+      onRetry={fn()}
+      onAccept={fn()}
+      onDraft={fn()}
+      onDecline={fn()}
+      onSave={fn()}
+      onCancel={fn()}
+      onSend={fn()}
+    />
+  )
+}
+
+/** The last proposal answered in the details: they close, and the focus lands on the field. */
+export const LastProposalAnswered: Story = {
+  render: (args) => (
+    <ProjectPage
+      {...args}
+      tasks={
+        <ProjectTasks>
+          <SetupAnsweredLast />
+        </ProjectTasks>
+      }
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('region', { name: 'Tasks' })
+    await userEvent.click(
+      within(tasks).getByRole('button', { name: 'Setup agent, done, waits for you' }),
+    )
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await userEvent.click(within(menu).getByRole('button', { name: 'Review 1 proposal' }))
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    await waitFor(() => {
+      expect(within(details).getByRole('button', { name: 'Accept all' })).toBeVisible()
+    })
+    await userEvent.click(within(details).getByRole('button', { name: 'Accept all' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog', { name: 'Setup of Acme' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(canvas.getByRole('textbox', { name: 'Start a mission in Acme' })).toHaveFocus()
+    })
+    expect(within(tasks).queryByRole('button', { name: /^Setup agent/ })).toBeNull()
   },
 }

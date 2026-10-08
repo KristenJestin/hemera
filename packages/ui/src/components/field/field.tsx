@@ -1,7 +1,7 @@
 import { Field } from '@base-ui/react/field'
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode, Ref } from 'react'
 
 import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
 
@@ -126,6 +126,10 @@ export interface InputProps extends Omit<FieldShellProps, 'children'> {
    * has one thing to line up with.
    */
   action?: ReactNode
+  /** A control drawn before the box, on its line: the mark of what the field names. */
+  lead?: ReactNode
+  /** The box's own input, for a page that hands it the focus. */
+  inputRef?: Ref<HTMLInputElement> | undefined
 }
 
 export function Input({
@@ -146,6 +150,8 @@ export function Input({
   onKeyDown,
   secret = false,
   action,
+  lead,
+  inputRef,
 }: InputProps) {
   return (
     <FieldShell
@@ -156,6 +162,7 @@ export function Input({
       className={className}
     >
       <div className="flex items-center gap-2">
+        {lead}
         <div className={BOX[size]} data-input-box="">
           {icon !== undefined && (
             <span className={LEADING} data-slot="leading">
@@ -163,6 +170,7 @@ export function Input({
             </span>
           )}
           <Field.Control
+            ref={inputRef}
             type={secret ? 'password' : undefined}
             autoComplete={secret ? 'off' : undefined}
             spellCheck={secret ? false : undefined}
@@ -188,7 +196,7 @@ export function Input({
   )
 }
 
-export interface TextareaProps extends Omit<InputProps, 'icon'> {
+export interface TextareaProps extends Omit<InputProps, 'icon' | 'lead'> {
   /** How many lines it shows before the box starts following the text. */
   rows?: number | undefined
 }

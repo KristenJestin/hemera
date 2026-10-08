@@ -53,6 +53,11 @@ async function opened(canvasElement: HTMLElement, name: RegExp): Promise<HTMLEle
 }
 
 /** The actions a glance offers, by name, ⓘ included. */
+/** ⓘ stands at the head's end, top right; the actions under the rule, at the bottom. */
+function detailsAtTheHead(glance: HTMLElement): boolean {
+  return glance.querySelector('[data-glance-head] [aria-label="Details"]') !== null
+}
+
 function offered(glance: HTMLElement): string[] {
   return within(glance)
     .queryAllByRole('button')
@@ -117,7 +122,8 @@ export const RunRunning: Story = glanced(
     const height = lines[0]!.getBoundingClientRect().height
     for (const line of lines) expect(line.getBoundingClientRect().height).toBe(height)
     expect(getComputedStyle(lines[0]!).fontFamily).toMatch(/mono|Fira/i)
-    expect(offered(glance)).toEqual(['Restart', 'Stop', 'Details'])
+    expect(offered(glance)).toEqual(['Details', 'Restart', 'Stop'])
+    expect(detailsAtTheHead(glance)).toBe(true)
   },
 )
 
@@ -143,7 +149,7 @@ export const RunFailed: Story = glanced(
   async (glance) => {
     expect(glance).toHaveTextContent('Failed after 12s')
     expect(glance).toHaveTextContent('expected 3 rows, received 2')
-    expect(offered(glance)).toEqual(['Run again', 'Details'])
+    expect(offered(glance)).toEqual(['Details', 'Run again'])
     await userEvent.click(within(glance).getByRole('button', { name: 'Run again' }))
   },
 )
@@ -172,7 +178,7 @@ export const RunFinished: Story = glanced(
   (glance) => {
     expect(glance).toHaveTextContent('Done in 84s')
     expect(tail(glance).length).toBeGreaterThanOrEqual(3)
-    expect(offered(glance)).toEqual(['Run again', 'Details'])
+    expect(offered(glance)).toEqual(['Details', 'Run again'])
   },
 )
 
@@ -200,11 +206,11 @@ export const ServiceRunning: Story = glanced(
     expect(glance).toHaveTextContent('http://localhost:5173')
     expect(tail(glance)).toHaveLength(3)
     expect(offered(glance)).toEqual([
+      'Details',
       'Copy the address',
       'Open the address',
       'Restart',
       'Stop',
-      'Details',
     ])
     await userEvent.click(within(glance).getByRole('button', { name: 'Copy the address' }))
   },
@@ -248,7 +254,7 @@ export const ServiceStopped: Story = glanced(
   },
   (glance) => {
     expect(glance).toHaveTextContent('Stopped after 3s')
-    expect(offered(glance)).toEqual(['Restart', 'Details'])
+    expect(offered(glance)).toEqual(['Details', 'Restart'])
   },
 )
 
@@ -327,7 +333,7 @@ export const ProbeFailed: Story = glanced(
     ...actions(),
   },
   (glance) => {
-    expect(offered(glance)).toEqual(['Run again', 'Details'])
+    expect(offered(glance)).toEqual(['Details', 'Run again'])
   },
 )
 

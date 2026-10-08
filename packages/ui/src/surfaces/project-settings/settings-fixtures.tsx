@@ -86,7 +86,12 @@ import {
 } from '../../icons.ts'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
-import { ProjectSettings, type SettingsForm, type SettingsSection } from './project-settings.tsx'
+import {
+  ProjectSettings,
+  type SetUpAction,
+  type SettingsForm,
+  type SettingsSection,
+} from './project-settings.tsx'
 
 /**
  * A small machine around the settings of Acme, so a story walks what a user walks: a section
@@ -100,7 +105,6 @@ export type SectionId =
   | 'preparation'
   | 'variables'
   | 'services'
-  | 'never'
   | 'models'
   | 'budget'
   | 'instructions'
@@ -112,7 +116,6 @@ export const SECTIONS: readonly SettingsSection[] = [
   { id: 'preparation', label: 'Preparation', icon: <IconListNumbers size="sm" /> },
   { id: 'variables', label: 'Variables', icon: <IconVariable size="sm" /> },
   { id: 'services', label: 'Services', icon: <IconPlayerPlay size="sm" /> },
-  { id: 'never', label: 'Never run', icon: <IconBan size="sm" /> },
   { id: 'models', label: 'Models by role', icon: <IconAdjustments size="sm" /> },
   { id: 'budget', label: 'Cap and budget', icon: <IconGauge size="sm" /> },
   { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
@@ -160,6 +163,8 @@ export interface SettingsFixtureProps {
   runs?: readonly SettingsRun[] | undefined
   /** The Project the settings are of: Acme, or Hemera itself. */
   project?: 'acme' | 'hemera' | undefined
+  /** The setup's launch at the header's end, as the story has it. */
+  setUp?: SetUpAction | undefined
 }
 
 function draftOfRepository(repository: SettingsRepository): RepositoryDraft {
@@ -191,6 +196,7 @@ export function SettingsFixture({
   refuse = false,
   runs: givenRuns,
   project = 'acme',
+  setUp,
 }: SettingsFixtureProps): ReactNode {
   const name = project === 'hemera' ? 'Hemera' : 'Acme'
   const firstRepositories = (): SettingsRepository[] => {
@@ -560,15 +566,23 @@ export function SettingsFixture({
         )
       case 'commands':
         return (
-          <CommandsSection
-            commands={commands}
-            loading={loading}
-            onOpen={(id) => {
-              const found = commands.find((one) => one.id === id)
-              if (found !== undefined) open({ kind: 'command', id, draft: draftOfCommand(found) })
-            }}
-            onAdd={() => open({ kind: 'command', id: null, draft: NEW_COMMAND })}
-          />
+          <>
+            <CommandsSection
+              commands={commands}
+              loading={loading}
+              onOpen={(id) => {
+                const found = commands.find((one) => one.id === id)
+                if (found !== undefined) open({ kind: 'command', id, draft: draftOfCommand(found) })
+              }}
+              onAdd={() => open({ kind: 'command', id: null, draft: NEW_COMMAND })}
+            />
+            <NeverSection
+              lines={neverLines}
+              loading={loading}
+              onAdd={() => open({ kind: 'never', id: null, draft: '' })}
+              onRemove={(id) => setNeverLines((before) => before.filter((one) => one.id !== id))}
+            />
+          </>
         )
       case 'preparation':
         return (
@@ -654,15 +668,6 @@ export function SettingsFixture({
             onDetails={() => {}}
           />
         )
-      case 'never':
-        return (
-          <NeverSection
-            lines={neverLines}
-            loading={loading}
-            onAdd={() => open({ kind: 'never', id: null, draft: '' })}
-            onRemove={(id) => setNeverLines((before) => before.filter((one) => one.id !== id))}
-          />
-        )
       case 'models':
         return (
           <RoleModelsSection
@@ -727,6 +732,7 @@ export function SettingsFixture({
         controls={<SystemControls />}
       />
       <ProjectSettings
+        setUp={setUp}
         name={name}
         mainCheckout={project === 'hemera' ? '~/work/hemera' : long ? LONG_PATH : MAIN_CHECKOUT}
         sections={sections}

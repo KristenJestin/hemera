@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -6,9 +7,10 @@ import { Dialog } from '../../components/dialog/dialog.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
+import { MarkPicker } from '../../components/project-mark/mark-picker.tsx'
 import type { Identity } from '../../components/project-mark/project-mark.tsx'
 import { IconFolderOpen, IconGitBranch, IconPlus } from '../../icons.ts'
-import { IdentityField } from './identity-field.tsx'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 
 /**
  * Adding a Project by hand: a folder, the repositories found in it, a name.
@@ -19,7 +21,8 @@ import { IdentityField } from './identity-field.tsx'
  * Project all the same: the list says none was found, and a repository is added by its path,
  * by hand, from the field under the list. The name is the folder's until the user writes another.
  *
- * While Hemera looks, the list holds the rows' own shape. A folder Hemera cannot use is said
+ * Once a folder is given, the rest grows in under it on `fold`, pushing the dialog's foot down
+ * rather than jumping to its new height. While Hemera looks, the list holds the rows' own shape. A folder Hemera cannot use is said
  * under its field, in words; a Project it refuses to create is said above the buttons.
  */
 export interface FoundRepository {
@@ -43,7 +46,7 @@ export interface AddProjectProps {
   nameError?: string | undefined
   /**
    * How the Project is marked in the sidebar and its header. Left out where a mark cannot be kept
-   * yet: the field is hidden.
+   * yet: no mark is offered before the name.
    */
   identity?: Identity | undefined
   onIdentity?: ((identity: Identity) => void) | undefined
@@ -58,6 +61,14 @@ export interface AddProjectProps {
   onByHand: (path: string) => void
   byHandError?: string | undefined
   onAddByHand: () => void
+  /**
+   * Whether an agent can propose the rest of the setup once the Project is created, or why none
+   * can. Left out, nothing is offered.
+   */
+  setup?: { readonly unavailable?: string | undefined } | undefined
+  /** Whether the user chose to have it proposed. */
+  setUp?: boolean | undefined
+  onSetUp?: ((on: boolean) => void) | undefined
   /** Why the Project was not created, in words. */
   refused?: string | undefined
   creating?: boolean | undefined
@@ -117,6 +128,9 @@ export function AddProject({
   onByHand,
   byHandError,
   onAddByHand,
+  setup,
+  setUp = false,
+  onSetUp,
   refused,
   creating = false,
   onCreate,
@@ -124,6 +138,7 @@ export function AddProject({
   const chosen = found?.filter((one) => one.chosen).length ?? 0
   const looked = found !== null || detecting
   const listId = useId()
+  const folding = useTransition(fold)
   return (
     <Dialog
       title="Add a Project"
@@ -152,7 +167,7 @@ export function AddProject({
         </>
       }
     >
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col">
         <Input
           label="Folder"
           icon={<IconFolderOpen size="sm" />}
@@ -162,81 +177,111 @@ export function AddProject({
           error={folderError}
           action={<Button onClick={onChooseFolder}>Choose…</Button>}
         />
-        {looked && (
-          <>
-            <Input label="Name" value={name} onValueChange={onName} error={nameError} />
-            {identity !== undefined && onIdentity !== undefined && (
-              <IdentityField
-                name={name}
-                identity={identity}
-                onChange={onIdentity}
-                onChooseImage={onChooseImage ?? (() => undefined)}
+        <AnimatePresence initial={false}>
+          {looked && (
+            <motion.div
+              key="found"
+              className="-mx-1 -mb-1 flex flex-col gap-5 overflow-hidden px-1 pt-5 pb-1"
+              initial={collapse}
+              animate={expand}
+              exit={collapse}
+              transition={folding}
+            >
+              <Input
+                label="Name"
+                value={name}
+                onValueChange={onName}
+                error={nameError}
+                lead={
+                  identity !== undefined &&
+                  onIdentity !== undefined && (
+                    <MarkPicker
+                      name={name}
+                      identity={identity}
+                      onChange={onIdentity}
+                      onChooseImage={onChooseImage ?? (() => undefined)}
+                    />
+                  )
+                }
               />
-            )}
-            <div className="flex flex-col gap-2">
-              <span className={LABEL} id={listId}>
-                Repositories
-                {!detecting && <span className={COUNT}>{chosen}</span>}
-              </span>
-              <Frame>
-                <ul aria-labelledby={listId} aria-busy={detecting} className="flex flex-col">
-                  {detecting ? (
-                    <>
-                      <FoundSkeleton />
-                      <FoundSkeleton />
-                      <FoundSkeleton />
-                    </>
-                  ) : found !== null && found.length > 0 ? (
-                    found.map((repository) => (
-                      <li key={repository.path} className={RULE} data-found={repository.path}>
-                        <span className={ROW}>
-                          <Checkbox
-                            checked={repository.chosen}
-                            onCheckedChange={(next) => onChoose(repository.path, next)}
-                            label={
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="flex text-muted-foreground" aria-hidden="true">
-                                  {repository.byHand === true ? (
-                                    <IconPlus size="sm" />
-                                  ) : (
-                                    <IconGitBranch size="sm" />
-                                  )}
+              <div className="flex flex-col gap-2">
+                <span className={LABEL} id={listId}>
+                  Repositories
+                  {!detecting && <span className={COUNT}>{chosen}</span>}
+                </span>
+                <Frame>
+                  <ul aria-labelledby={listId} aria-busy={detecting} className="flex flex-col">
+                    {detecting ? (
+                      <>
+                        <FoundSkeleton />
+                        <FoundSkeleton />
+                        <FoundSkeleton />
+                      </>
+                    ) : found !== null && found.length > 0 ? (
+                      found.map((repository) => (
+                        <li key={repository.path} className={RULE} data-found={repository.path}>
+                          <span className={ROW}>
+                            <Checkbox
+                              checked={repository.chosen}
+                              onCheckedChange={(next) => onChoose(repository.path, next)}
+                              label={
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <span className="flex text-muted-foreground" aria-hidden="true">
+                                    {repository.byHand === true ? (
+                                      <IconPlus size="sm" />
+                                    ) : (
+                                      <IconGitBranch size="sm" />
+                                    )}
+                                  </span>
+                                  <span className={PATH}>{nameOf(repository.path)}</span>
                                 </span>
-                                <span className={PATH}>{nameOf(repository.path)}</span>
-                              </span>
-                            }
-                          />
-                        </span>
-                      </li>
-                    ))
-                  ) : (
-                    <li className={QUIET}>None in this folder</li>
-                  )}
-                </ul>
-              </Frame>
-              {!detecting && (
-                <Input
-                  label="Add a repository by its path"
-                  placeholder="services/billing"
-                  value={byHand}
-                  onValueChange={onByHand}
-                  error={byHandError}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return
-                    event.preventDefault()
-                    onAddByHand()
-                  }}
-                  action={
-                    <Button onClick={onAddByHand}>
-                      <IconPlus size="sm" />
-                      Add
-                    </Button>
-                  }
-                />
-              )}
-            </div>
-          </>
-        )}
+                              }
+                            />
+                          </span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className={QUIET}>None in this folder</li>
+                    )}
+                  </ul>
+                </Frame>
+                {!detecting && (
+                  <Input
+                    label="Add a repository by its path"
+                    placeholder="services/billing"
+                    value={byHand}
+                    onValueChange={onByHand}
+                    error={byHandError}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return
+                      event.preventDefault()
+                      onAddByHand()
+                    }}
+                    action={
+                      <Button onClick={onAddByHand}>
+                        <IconPlus size="sm" />
+                        Add
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+              {setup !== undefined &&
+                (setup.unavailable === undefined ? (
+                  <Checkbox
+                    checked={setUp}
+                    onCheckedChange={(next) => onSetUp?.(next)}
+                    label="Let an agent propose the rest of the setup"
+                    description="Its commands, preparation and variables, as proposals: nothing changes until you answer."
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No agent can propose the rest of the setup: {setup.unavailable}
+                  </p>
+                ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </Dialog>
   )

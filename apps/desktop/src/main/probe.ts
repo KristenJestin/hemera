@@ -117,6 +117,18 @@ export const installProbe = (
       memory: () => Effect.runPromise(client['probe.memory']()),
       scriptAgent: (script) =>
         Effect.runPromise(client['probe.script']({ script: JSON.stringify(script) })),
+      setupStanding: (name) =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const projects = yield* closedAs(gone)(engineClient['projects.list']())
+            const project = projects.find((one) => one.name === name)
+            if (project === undefined) return yield* Effect.die(`no Project is named ${name}`)
+            const standing = yield* closedAs(gone)(
+              engineClient['setup.standing']({ projectId: project.id }),
+            )
+            return standing.state
+          }),
+        ),
       pendingNeeds: () =>
         Effect.runPromise(
           closedAs(gone)(engineClient['needs.list']()).pipe(

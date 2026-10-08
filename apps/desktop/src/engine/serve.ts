@@ -119,7 +119,13 @@ const chatSummary = (chat: Chat, working: boolean) => ({
   working,
 })
 
-export const engineHandlers = (start: EngineStart, profile: StartedProfile, log: Log) => {
+/** `listed`: the agents the window lists, this machine's unless a suite says otherwise. */
+export const engineHandlers = (
+  start: EngineStart,
+  profile: StartedProfile,
+  log: Log,
+  listed: Layer.Layer<Agents> = machineAgentsLayer(),
+) => {
   const { dataFolder, channel, version } = start
   const statusOf = (database: EngineStatus['database']): EngineStatus => ({
     ready: true,
@@ -514,5 +520,5 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
         Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
       ).pipe(observedStream('livingSpec.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
-  }).pipe(Layer.provide(machineAgentsLayer()))
+  }).pipe(Layer.provide(listed))
 }

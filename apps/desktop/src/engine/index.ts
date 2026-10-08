@@ -99,7 +99,8 @@ const engine = (
     )
 
     yield* RpcServer.make(EngineMainRpcs, { disableFatalDefects: true }).pipe(
-      Effect.provide(engineHandlers(start, profile, log)),
+      // Under the suite, the window lists the suite's agents, as its sessions find them.
+      Effect.provide(engineHandlers(start, profile, log, suite?.agents)),
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),
       Effect.forkScoped,
     )

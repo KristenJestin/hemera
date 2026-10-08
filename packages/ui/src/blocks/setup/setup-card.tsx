@@ -64,14 +64,17 @@ export interface SetupCardProps {
   draft?: Proposal | undefined
   onDraft?: ((draft: Proposal) => void) | undefined
   onAccept: () => void
-  onEdit: () => void
-  onDiscuss: () => void
+  /** Left out where the agent takes no edit: no Edit then. */
+  onEdit?: (() => void) | undefined
+  /** Left out where the agent takes no discussion: no Discuss then. */
+  onDiscuss?: (() => void) | undefined
   onDecline: () => void
   onSave: () => void
   onCancel: () => void
   /** Sends what should change to the agent. */
   onSend: (note: string) => void
-  onProposeAgain: () => void
+  /** Left out where the agent writes no new proposal: nothing once declined then. */
+  onProposeAgain?: (() => void) | undefined
 }
 
 const REFUSAL = 'w-full text-sm text-destructive-muted-foreground'
@@ -207,12 +210,16 @@ function Answers({
           >
             Accept
           </Button>
-          <Button size="sm" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onDiscuss}>
-            Discuss
-          </Button>
+          {onEdit !== undefined && (
+            <Button size="sm" onClick={onEdit}>
+              Edit
+            </Button>
+          )}
+          {onDiscuss !== undefined && (
+            <Button variant="ghost" size="sm" onClick={onDiscuss}>
+              Discuss
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="ml-auto" onClick={onDecline}>
             Decline
           </Button>
@@ -235,7 +242,7 @@ function Answers({
         </FrameFooter>
       )
     case 'declined':
-      return (
+      return onProposeAgain === undefined ? undefined : (
         <FrameFooter>
           <Button variant="ghost" size="sm" onClick={onProposeAgain}>
             Propose again
@@ -248,10 +255,9 @@ function Answers({
 }
 
 /** Which answers the card offers, by group; null when it offers none. */
-function answersOf(status: CardStatus): string | null {
-  if (status.state === 'proposed' || status.state === 'editing' || status.state === 'declined') {
-    return status.state
-  }
+function answersOf(status: CardStatus, proposesAgain: boolean): string | null {
+  if (status.state === 'proposed' || status.state === 'editing') return status.state
+  if (status.state === 'declined' && proposesAgain) return status.state
   return null
 }
 
@@ -316,7 +322,7 @@ export function SetupCard({
           />
         }
         footer={
-          <Folding show={answersOf(status)}>
+          <Folding show={answersOf(status, on.onProposeAgain !== undefined)}>
             <Answers status={status} {...on} />
           </Folding>
         }

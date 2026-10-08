@@ -26,6 +26,16 @@ export function Section({
   )
 }
 
+/** What the engine refused of a section, in words, under its head. */
+export function SectionRefusal({ error }: { error: string | undefined }): ReactNode {
+  if (error === undefined) return null
+  return (
+    <p role="alert" className="text-sm text-destructive-muted-foreground">
+      {error}
+    </p>
+  )
+}
+
 /** The names Hemera fills in a value or a line, and what each is filled with. */
 export const TEMPLATE_NAMES = [
   { name: '{workspace}', filled: 'Workspace name' },

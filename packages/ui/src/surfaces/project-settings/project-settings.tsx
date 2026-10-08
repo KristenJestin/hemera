@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { Button } from '../../components/button/button.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { IconFolder } from '../../icons.ts'
@@ -43,8 +44,20 @@ export interface ProjectSettingsProps {
   /** The form open over the page, in a dialog, or null. */
   form?: SettingsForm | null | undefined
   onCloseForm: () => void
+  /** Launches the setup agent, at any time: its button at the header's end. Left out, none. */
+  setUp?: SetUpAction | undefined
   /** The section chosen. */
   children: ReactNode
+}
+
+/** The setup's launch from the settings: why it cannot, or why its last launch was refused. */
+export interface SetUpAction {
+  onStart: () => void
+  /** Whether it is being launched. */
+  starting?: boolean | undefined
+  /** No agent can run it: the button is disabled, `refused` says why. */
+  unavailable?: boolean | undefined
+  refused?: string | undefined
 }
 
 const CHECKOUT = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
@@ -60,6 +73,7 @@ export function ProjectSettings({
   onRetry,
   form = null,
   onCloseForm,
+  setUp,
   children,
 }: ProjectSettingsProps): ReactNode {
   return (
@@ -72,6 +86,28 @@ export function ProjectSettings({
           <span className="sr-only">Main checkout:</span>
           <span className="truncate">{mainCheckout}</span>
         </span>
+      }
+      actions={
+        setUp === undefined ? undefined : (
+          <span className="flex min-w-0 items-center gap-3">
+            {setUp.refused !== undefined && (
+              // It wraps at the reading measure rather than being cut: a reason is read whole.
+              <span
+                role="status"
+                className="max-w-measure min-w-0 text-right text-sm text-pretty text-muted-foreground"
+              >
+                {setUp.refused}
+              </span>
+            )}
+            <Button
+              state={setUp.starting === true ? 'loading' : 'idle'}
+              disabled={setUp.unavailable === true}
+              onClick={setUp.onStart}
+            >
+              Set up with an agent
+            </Button>
+          </span>
+        )
       }
       label="Settings of the Project"
       sections={sections}

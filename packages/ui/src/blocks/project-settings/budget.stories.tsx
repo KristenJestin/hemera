@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { LIMITS, limitRefusal } from './agent-settings-fixtures.ts'
 import { type BudgetLimit, BudgetSection, type BudgetSectionProps } from './budget.tsx'
@@ -65,7 +65,20 @@ export const Refused: Story = {
     const canvas = within(canvasElement)
     const rounds = canvas.getByRole('textbox', { name: 'Automatic rounds' })
     await userEvent.type(rounds, 'many')
-    expect(await canvas.findByText('Write a whole number from 1 to 999.')).toBeVisible()
+    // The refusal grows in under its field.
+    await waitFor(() =>
+      expect(canvas.getByText('Write a whole number from 1 to 999.')).toBeVisible(),
+    )
+  },
+}
+
+/** The cap has its own bounds: from one to six sub-agents at once. */
+export const CapRefused: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Sub-agents at once' }), '7')
+    // The refusal grows in under its field.
+    await waitFor(() => expect(canvas.getByText('Write a whole number from 1 to 6.')).toBeVisible())
   },
 }
 
@@ -100,5 +113,15 @@ export const Focused: Story = {
     expect(canvas.getByRole('button', { name: 'Back to the default launches' })).toHaveFocus()
     await userEvent.tab()
     expect(canvas.getByRole('textbox', { name: 'Automatic retries' })).toHaveFocus()
+  },
+}
+
+/** A value the engine refused: the fields are back as the engine keeps them, and why is said. */
+export const WriteRefused: Story = {
+  args: { error: 'The limits could not be kept: Hemera could not write to its profile.' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'The limits could not be kept',
+    )
   },
 }

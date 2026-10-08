@@ -118,6 +118,53 @@ export const Running: Story = {
 }
 
 /**
+ * Done, two ways: the green check when everything is fine; a bell in
+ * the warning tone when it is done but something waits for the user.
+ */
+export const DoneOrWaiting: Story = {
+  render: () => {
+    const ended = Date.now() - 2_000
+    const started = ended - 42_000
+    return (
+      <div className="flex items-center gap-3 p-8">
+        <LiveChip
+          name="Setup agent"
+          icon={<IconTerminal size="sm" />}
+          state="finished"
+          startedAt={started}
+          endedAt={ended}
+        />
+        <LiveChip
+          name="Setup agent"
+          icon={<IconTerminal size="sm" />}
+          state="finished"
+          startedAt={started}
+          endedAt={ended}
+          calls
+        />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const done = canvas.getByRole('button', { name: 'Setup agent, done' })
+    expect(done.querySelector('[data-end="finished"]')).not.toBeNull()
+    expect(done.querySelector('[data-calls]')).toBeNull()
+    const waits = canvas.getByRole('button', { name: 'Setup agent, done, waits for you' })
+    expect(waits.querySelector('[data-calls]')).not.toBeNull()
+  },
+}
+
+/** What waits for the user: the chip's mark says so, and says so to a screen reader. */
+export const WaitsForYou: Story = {
+  args: { state: 'finished', calls: true, endedAt: Date.now() - 2_000 },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', { name: 'test, done, waits for you' })
+    expect(chip.querySelector('[data-calls]')).not.toBeNull()
+  },
+}
+
+/**
  * Stuck (proposed, to validate): a session with no event for five minutes in the middle of a
  * turn. The breath stops — nothing is moving, so nothing on the chip moves — the seconds go on,
  * and its icon gives way to a paused clock in the warning tone. The legend says it in words.

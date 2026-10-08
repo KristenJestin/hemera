@@ -18,11 +18,15 @@ import {
   type RemoteChoice,
   type RepositoryDraft,
   type SettingsForm,
+  type SetUpAction,
   type SettingsSection,
   type StepDraft,
   type VariableDraft,
 } from '@hemera/ui'
 import {
+  IconAdjustments,
+  IconFileText,
+  IconGauge,
   IconGitBranch,
   IconListNumbers,
   IconPlayerPlay,
@@ -46,6 +50,7 @@ import {
 } from '@hemera/ipc'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import { type AgentSectionId, isAgentSection } from './agent-sections.tsx'
 import type { Settings, SettingsData } from './settings-data.ts'
 import {
   commandDraftOf,
@@ -77,6 +82,13 @@ export interface SettingsPageProps {
   /** Null while the engine has not answered. */
   settings: Settings | null
   tools: SettingsTools
+  /**
+   * The agent and permission sections (#53), drawn by their own hooks: the section, and how it
+   * shows its dialog over the page.
+   */
+  agentSection?: (id: AgentSectionId, show: (form: SettingsForm | null) => void) => ReactNode
+  /** The setup agent's launch, at the header's end. */
+  setUp?: SetUpAction | undefined
 }
 
 type SectionId =
@@ -86,6 +98,7 @@ type SectionId =
   | 'preparation'
   | 'variables'
   | 'services'
+  | AgentSectionId
 
 const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'repositories', label: 'Repositories', icon: <IconGitBranch size="sm" /> },
@@ -94,6 +107,9 @@ const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'preparation', label: 'Preparation', icon: <IconListNumbers size="sm" /> },
   { id: 'variables', label: 'Variables', icon: <IconVariable size="sm" /> },
   { id: 'services', label: 'Services', icon: <IconPlayerPlay size="sm" /> },
+  { id: 'models', label: 'Models by role', icon: <IconAdjustments size="sm" /> },
+  { id: 'budget', label: 'Cap and budget', icon: <IconGauge size="sm" /> },
+  { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
 ]
 
 /** What a dialog writes, and the draft it holds. */
@@ -286,8 +302,16 @@ function Workspaces({ project, settings, tools }: WorkspacesProps): ReactNode {
  * engine answers, and every dialog's save sent to it, its refusal said next to the field it
  * concerns.
  */
-export function SettingsPage({ data, settings, tools }: SettingsPageProps): ReactNode {
+export function SettingsPage({
+  data,
+  settings,
+  tools,
+  agentSection,
+  setUp,
+}: SettingsPageProps): ReactNode {
   const [current, setCurrent] = useState<SectionId>('repositories')
+  /** The dialog an agent section shows over the page. */
+  const [agentForm, setAgentForm] = useState<SettingsForm | null>(null)
   const [writing, setWriting] = useState<Writing | null>(null)
   const [refusals, setRefusals] = useState<Refusals>({})
   const [saving, setSaving] = useState(false)
@@ -653,6 +677,7 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
   })()
 
   const body = ((): ReactNode => {
+    if (isAgentSection(current)) return agentSection?.(current, setAgentForm) ?? null
     switch (current) {
       case 'repositories':
         return (
@@ -683,18 +708,22 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
           <Workspaces key={project.id} project={project} settings={settings} tools={tools} />
         )
       case 'commands':
+        // The commands never run stand under the catalogue: they are commands too.
         return (
-          <CommandsSection
-            commands={catalogue.map((one) => commandRowOf(one, repositories))}
-            loading={data.catalogue.kind !== 'ready' || project === null}
-            onOpen={(id) => {
-              const found = catalogue.find((one) => one.id === id)
-              if (found !== undefined) {
-                open({ kind: 'command', id, draft: commandFormOf(found, repositories) })
-              }
-            }}
-            onAdd={() => open({ kind: 'command', id: null, draft: NEW_COMMAND })}
-          />
+          <>
+            <CommandsSection
+              commands={catalogue.map((one) => commandRowOf(one, repositories))}
+              loading={data.catalogue.kind !== 'ready' || project === null}
+              onOpen={(id) => {
+                const found = catalogue.find((one) => one.id === id)
+                if (found !== undefined) {
+                  open({ kind: 'command', id, draft: commandFormOf(found, repositories) })
+                }
+              }}
+              onAdd={() => open({ kind: 'command', id: null, draft: NEW_COMMAND })}
+            />
+            {agentSection?.('never', setAgentForm)}
+          </>
         )
       case 'preparation':
         return (
@@ -773,8 +802,12 @@ export function SettingsPage({ data, settings, tools }: SettingsPageProps): Reac
       }}
       error={unread?.kind === 'failed' ? unread.sentence : undefined}
       onRetry={() => settings?.retry()}
-      form={form}
-      onCloseForm={close}
+      setUp={setUp}
+      form={form ?? agentForm}
+      onCloseForm={() => {
+        close()
+        setAgentForm(null)
+      }}
     >
       {body}
     </ProjectSettings>

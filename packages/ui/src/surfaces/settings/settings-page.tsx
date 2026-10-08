@@ -41,6 +41,8 @@ export interface SettingsPageProps {
   title: string
   /** The line under the title. */
   about?: ReactNode
+  /** What stands at the header's end. */
+  actions?: ReactNode
   /** What the list of sections is called to a screen reader. */
   label: string
   sections: readonly SettingsSection[]
@@ -90,6 +92,7 @@ export function SettingsPage({
   onSection,
   form = null,
   onCloseForm,
+  actions,
   children,
 }: SettingsPageProps): ReactNode {
   // What the dialog showed last, kept while it closes: its content leaves with it, not before.
@@ -99,7 +102,7 @@ export function SettingsPage({
     <div className={ROOM}>
       <div className={SCROLL} data-settings-page="">
         <Page>
-          <PageHeader lead={lead} title={title} about={about} />
+          <PageHeader lead={lead} title={title} about={about} actions={actions} />
           <div className={SPLIT}>
             <nav aria-label={label} className={NAV}>
               {sections.map((section) => {

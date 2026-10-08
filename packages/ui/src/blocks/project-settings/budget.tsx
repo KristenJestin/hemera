@@ -6,7 +6,7 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconX } from '../../icons.ts'
-import { FieldSkeleton, Section } from './parts.tsx'
+import { FieldSkeleton, Section, SectionRefusal } from './parts.tsx'
 
 /**
  * How much a mission of the Project may run, in a section of its settings: the cap — how many
@@ -34,8 +34,10 @@ export interface BudgetSectionProps {
   loading?: boolean | undefined
   /** What a field now holds; null once it is emptied. */
   onLimit: (id: string, value: string | null) => void
-  /** What the engine refuses in a value, in words; undefined for nothing. */
-  refusalOf: (value: string | null) => string | undefined
+  /** What the engine refuses in a field's value, in words; undefined for nothing. */
+  refusalOf: (id: string, value: string | null) => string | undefined
+  /** A write the engine refused, in words: the fields stand as the engine keeps them. */
+  error?: string | undefined
 }
 
 const GROUP = 'flex flex-col gap-3 p-4'
@@ -53,14 +55,14 @@ function LimitField({
 }: {
   limit: BudgetLimit
   onLimit: (id: string, value: string | null) => void
-  refusalOf: (value: string | null) => string | undefined
+  refusalOf: (id: string, value: string | null) => string | undefined
 }): ReactNode {
   return (
     <Input
       label={limit.label}
       placeholder={String(limit.fallback)}
       value={limit.value ?? ''}
-      error={refusalOf(limit.value)}
+      error={refusalOf(limit.id, limit.value)}
       onValueChange={(value) => onLimit(limit.id, value.trim() === '' ? null : value)}
       trailing={
         limit.value === null ? undefined : (
@@ -84,11 +86,13 @@ export function BudgetSection({
   loading = false,
   onLimit,
   refusalOf,
+  error,
 }: BudgetSectionProps): ReactNode {
   const [cap, ...budget] = limits
   return (
     <Section label="Cap and budget">
       <SectionHead title="Cap and budget" />
+      <SectionRefusal error={error} />
       <Frame>
         <div className={GROUP} aria-busy={loading}>
           <div className={CAP}>

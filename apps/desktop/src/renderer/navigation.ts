@@ -57,6 +57,17 @@ export function go(navigation: Navigation, route: Route): Navigation {
   return { ...navigation, route }
 }
 
+/**
+ * Where a setup launched from a Project's settings leads once it started: that Project's page,
+ * where its task shows, if the window is still on those settings; else where the user went.
+ */
+export function landedAfterSetup(navigation: Navigation, projectId: string): Navigation {
+  const { route } = navigation
+  return route.kind === 'projectSettings' && route.id === projectId
+    ? go(navigation, { kind: 'project', id: projectId })
+    : navigation
+}
+
 /** The base and the views over it of a mission: its base alone until a view is opened. */
 export function frameOf(navigation: Navigation, key: string): MissionFrameState {
   return navigation.missions.get(key) ?? AT_BASE

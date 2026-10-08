@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 
-import { IconCheck, IconClockPause, IconPlayerStop, IconX } from '../../icons.ts'
+import { IconBell, IconCheck, IconClockPause, IconPlayerStop, IconX } from '../../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
 import { Popover } from '../popover/popover.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
@@ -119,12 +119,31 @@ export interface LiveChipProps {
   glance?: LiveGlance | undefined
   /** What pressing a chip without a glance does. */
   onPress?: (() => void) | undefined
+  /**
+   * Whether it waits for the user — proposals to review, a stop to answer: its mark is a bell in
+   * the warning tone, in the room of its state's glyph; done with nothing waiting is the green
+   * check. The mark tells the two apart, so nothing stands beside the chip.
+   */
+  calls?: boolean | undefined
 }
 
+const CALLS_GLYPH = <IconBell size="sm" aria-hidden="true" />
+
+const CALLING = 'absolute inset-0 flex items-center justify-center text-warning'
+
 /** The chip's icon, or the glyph its state shows instead, in the same room. */
-function Mark({ icon, shown }: { icon: ReactNode; shown: LiveState }): ReactNode {
+function Mark({
+  icon,
+  shown,
+  calls,
+}: {
+  icon: ReactNode
+  shown: LiveState
+  /** What waits for the user stands in the glyph's room, in the warning tone. */
+  calls: boolean
+}): ReactNode {
   const fade = useTransition(crossfade)
-  const instead = shown === 'running' ? null : shown
+  const instead = calls ? 'calls' : shown === 'running' ? null : shown
   return (
     <span className={MARK}>
       <motion.span
@@ -139,14 +158,15 @@ function Mark({ icon, shown }: { icon: ReactNode; shown: LiveState }): ReactNode
         {instead !== null && (
           <motion.span
             key={instead}
-            className={ENDED[instead]}
-            data-end={instead}
+            className={instead === 'calls' ? CALLING : ENDED[instead]}
+            data-end={instead === 'calls' ? shown : instead}
+            data-calls={instead === 'calls' ? '' : undefined}
             initial={CROSSFADE.from}
             animate={CROSSFADE.to}
             exit={CROSSFADE.from}
             transition={fade}
           >
-            {GLYPHS[instead]}
+            {instead === 'calls' ? CALLS_GLYPH : GLYPHS[instead]}
           </motion.span>
         )}
       </AnimatePresence>
@@ -162,6 +182,7 @@ export function LiveChip({
   endedAt,
   glance,
   onPress,
+  calls = false,
 }: LiveChipProps): ReactNode {
   const now = useNow(endedAt === null)
   const sweep = useSweep(state)
@@ -171,14 +192,14 @@ export function LiveChip({
     <button
       type="button"
       className={CHIP}
-      aria-label={`${name}, ${LIVE_WORDS[state]}`}
+      aria-label={`${name}, ${LIVE_WORDS[state]}${calls ? ', waits for you' : ''}`}
       data-live-chip=""
       data-state={state}
       data-sweep-tone={sweep.swept ?? undefined}
       onClick={glance === undefined ? () => onPress?.() : undefined}
     >
       <LiveTint state={state} sweep={sweep} />
-      <Mark icon={icon} shown={state} />
+      <Mark icon={icon} shown={state} calls={calls} />
       <span className={NAME} data-name="">
         {name}
       </span>

@@ -103,10 +103,12 @@ const drawn = ({
     },
     under: (id) => (id === 'acme' ? createElement('p', null, 'The Chats of Acme') : null),
     chat: createElement('p', null, 'The Chat on its page'),
+    projectTasks: createElement('p', null, 'The tasks of the Project'),
     chatTitle: (id) => (id === 'invoices' ? 'Invoices export' : undefined),
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
     appSettings: createElement('p', null, 'The choice of theme'),
+    firstLaunch: createElement('p', null, 'Welcome, with the agents of this machine'),
     notices: createElement('p', null, 'The in-app notifications'),
   }
   return renderToStaticMarkup(createElement(Shell, props))
@@ -165,13 +167,6 @@ describe('The sidebar and Home', () => {
     const markup = drawn({ projects: { kind: 'loading' } })
     expect(markup).toContain('data-project-skeleton')
     expect(markup).not.toContain('Add a Project')
-  })
-
-  test('no Project yet: Home is one empty state, Hemera asleep, with the way to add one', () => {
-    const markup = drawn({ projects: { kind: 'ready', projects: [] } })
-    expect(markup).toContain('aria-label="Asleep"')
-    expect(markup).not.toContain('Needs you')
-    expect(markup).toContain('Add a Project')
   })
 
   test('the Projects are listed by name, and Home is the current place', () => {
@@ -250,6 +245,14 @@ describe('The pages', () => {
       /aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Invoices export/,
     )
   })
+
+  test('a Project’s page holds its tasks, under the field that starts a mission', () => {
+    const markup = drawn({
+      route: { kind: 'project', id: 'acme' },
+      project: { kind: 'ready', project: ACME },
+    })
+    expect(markup).toMatch(/Start a mission in Acme.*The tasks of the Project/s)
+  })
 })
 
 const docker = (id: string, owner: Need['owner'], settingsSection: string | null = null): Need => ({
@@ -290,6 +293,12 @@ describe('Needs you, on Home and in the sidebar', () => {
     expect(markup).not.toContain('Nothing waits for you.')
   })
 
+  test('with no Project and nothing waiting, Home is the first launch', () => {
+    const markup = drawn({ projects: { kind: 'ready', projects: [] } })
+    expect(markup).toContain('Welcome, with the agents of this machine')
+    expect(drawn({})).not.toContain('Welcome, with the agents of this machine')
+  })
+
   test('with no Project yet, Hemera’s own needs are still shown on Home', () => {
     const markup = drawn({
       projects: { kind: 'ready', projects: [] },
@@ -297,6 +306,7 @@ describe('Needs you, on Home and in the sidebar', () => {
     })
     expect(markup).toContain('Docker is not running (a)')
     expect(markup).toContain('1 waiting')
+    expect(markup).not.toContain('Welcome, with the agents of this machine')
   })
 
   test('Home led to by a Project’s notification shows that Project’s needs only', () => {
