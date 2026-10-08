@@ -68,8 +68,9 @@ import { domainNamesIn, livingStandingIn, nameKey } from '../living-spec/store.t
 import { SpecLanguage } from '../sessions/ports.ts'
 import type { SessionOwner } from '../sessions/roles.ts'
 import { SpecBoard, type Wrote } from './board.ts'
-import { pendingIn, receiveInput } from './inputs.ts'
+import { receiveInput } from './inputs.ts'
 import { atBaseFailures, planIn } from './plan.ts'
+import { pendingWithDiscussionsIn } from './discussion-store.ts'
 
 /** The file a mission's Spec is readable in, in its Memory's folder. */
 export const SPEC_FILE = 'spec.md'
@@ -922,7 +923,7 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
         const failures = completeness(spec, {
           described: standing.spec.describedAt !== null,
           triagePending: spec.triage?.state === 'pending',
-          ...(yield* pendingIn(transaction, writer.missionId)),
+          ...(yield* pendingWithDiscussionsIn(transaction, writer.missionId)),
           livingChanged,
           atBase: atBase.failures,
         })

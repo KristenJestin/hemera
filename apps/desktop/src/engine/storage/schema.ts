@@ -1644,3 +1644,57 @@ export const missionRecommendations = sqliteTable('mission_recommendations', {
   sessionId: text('session_id').notNull(),
   at: text('at').notNull(),
 })
+
+/**
+ * A Discuss conversation of Planning (#87): the user and the Planner on one item of a mission's
+ * Spec (`question`, `section`, `requirement`, `scenario` or `decision`, named by its id), numbered
+ * `#1`, `#2`… per mission. Open, then closed by the user on a decision or without one; the agent's
+ * pending proposal (a decision in transit) is kept until replaced or closed. At most one open
+ * discussion per item.
+ */
+export const discussions = sqliteTable(
+  'discussions',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    itemKind: text('item_kind').notNull(),
+    itemId: text('item_id').notNull(),
+    state: text('state').notNull(),
+    outcome: text('outcome'),
+    decision: text('decision').$type<Masked<string>>(),
+    proposal: text('proposal').$type<Masked<string>>(),
+    proposedAt: text('proposed_at'),
+    closedBy: text('closed_by'),
+    closedAt: text('closed_at'),
+    openedAt: text('opened_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('discussion_number_once').on(table.missionId, table.number),
+    uniqueIndex('one_open_discussion_per_item')
+      .on(table.missionId, table.itemKind, table.itemId)
+      .where(sql`${table.state} = 'open'`),
+  ],
+)
+
+/**
+ * A message of a discussion, by the user or the agent, a proposal marked; append-only. A user's
+ * message names the session delivery that carries it to the Planner, stored with it.
+ */
+export const discussionMessages = sqliteTable(
+  'discussion_messages',
+  {
+    sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+    discussionId: text('discussion_id')
+      .notNull()
+      .references(() => discussions.id, { onDelete: 'cascade' }),
+    author: text('author').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    proposal: integer('proposal', { mode: 'boolean' }).notNull().default(false),
+    at: text('at').notNull(),
+    deliveryId: text('delivery_id'),
+  },
+  (table) => [index('discussion_messages_by_discussion').on(table.discussionId, table.sequence)],
+)

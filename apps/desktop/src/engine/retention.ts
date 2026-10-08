@@ -87,6 +87,8 @@ export const TABLE_CLASSES = {
   living_requirements: 'permanent',
   living_history: 'permanent',
   living_runs: 'permanent',
+  discussions: 'permanent',
+  discussion_messages: 'permanent',
   effectful_actions: 'permanent',
   tool_calls: 'permanent',
   session_files: 'state',

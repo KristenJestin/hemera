@@ -273,4 +273,42 @@ export const PLANNING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       }
     }),
   ],
+  // The discussions (#87): opened, a decision proposed, closed; their messages stay in them.
+  [
+    'planning.discussion_opened',
+    line((event) => ({
+      kind: 'planning',
+      author: UserAuthor.make({}),
+      text: `The user opened discussion ${stringOf(event.payload, 'discussion') ?? ''} on ${stringOf(event.payload, 'item') ?? ''}`,
+      fields: { discussion: stringOf(event.payload, 'discussion') },
+    })),
+  ],
+  [
+    'planning.decision_proposed',
+    line((event) => ({
+      kind: 'planning',
+      author: planner(event),
+      text: `The Planner proposed a decision in ${stringOf(event.payload, 'discussion') ?? ''}: ${stringOf(event.payload, 'text') ?? ''}`,
+      fields: { discussion: stringOf(event.payload, 'discussion') },
+    })),
+  ],
+  [
+    'planning.discussion_closed',
+    line((event) => {
+      const on = `${stringOf(event.payload, 'discussion') ?? ''} on ${stringOf(event.payload, 'item') ?? ''}`
+      const decision = stringOf(event.payload, 'decision')
+      return {
+        kind: 'planning',
+        author: UserAuthor.make({}),
+        text:
+          decision === null
+            ? `The user closed ${on} without a decision`
+            : `The user closed ${on} on a decision: ${decision}`,
+        fields: {
+          discussion: stringOf(event.payload, 'discussion'),
+          outcome: stringOf(event.payload, 'outcome'),
+        },
+      }
+    }),
+  ],
 ])

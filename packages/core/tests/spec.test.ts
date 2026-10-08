@@ -125,6 +125,7 @@ const complete = {
   openQuestions: [],
   livingChanged: [],
   atBase: [],
+  openDiscussions: [],
 } as const
 
 describe('Completeness', () => {
@@ -215,6 +216,50 @@ describe('Completeness', () => {
       ],
     }
     expect(completeness(none, complete)).toEqual([])
+  })
+
+  test('an open discussion is named, with its item: the user closes it first (#87)', () => {
+    expect(
+      completeness(written(), {
+        ...complete,
+        openDiscussions: [
+          { label: '#1', item: 'R1' },
+          { label: '#2', item: 'Risks & trade-offs' },
+        ],
+      }),
+    ).toEqual([
+      {
+        target: '#1',
+        sentence: '#1 on R1 is still open: the user closes it, with a decision or without.',
+      },
+      {
+        target: '#2',
+        sentence:
+          '#2 on Risks & trade-offs is still open: the user closes it, with a decision or without.',
+      },
+    ])
+  })
+
+  test('a Discuss proposal still pending is an input that waits on the user (#87)', () => {
+    expect(
+      completeness(written(), {
+        ...complete,
+        pendingInputs: [
+          { id: 'I1', kind: 'discuss_decision', item: '#1', version: null, state: 'proposed' },
+        ],
+        openDiscussions: [{ label: '#1', item: 'R1' }],
+      }),
+    ).toEqual([
+      {
+        target: 'I1',
+        sentence:
+          'Input I1 (the decision #1) waits on the user: they accept the proposal, or close the discussion.',
+      },
+      {
+        target: '#1',
+        sentence: '#1 on R1 is still open: the user closes it, with a decision or without.',
+      },
+    ])
   })
 
   test('a Spec with no requirement, or only removed ones, needs one', () => {

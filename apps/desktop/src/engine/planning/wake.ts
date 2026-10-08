@@ -36,7 +36,7 @@ import { Database, type DatabaseError, refusedWhile } from '../storage/database.
 import { missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { SpecBoard, draftedSaid } from './board.ts'
-import { prepareDeliveries } from './handover.ts'
+import { prepareDeliveries, queuedForPlanner } from './handover.ts'
 import { markDelivered } from './inputs.ts'
 import { hemeraNext } from './store.ts'
 
@@ -374,8 +374,13 @@ export const plannerLayer = (settings: PlannerSettings) =>
                 .pipe(Effect.mapError(refusedWhile('reading the missions in Planning')))
               for (const mission of planning) {
                 yield* start(mission.id)
-                // What a stopped engine received and never handed over goes now (CT-26).
-                for (const one of yield* prepareDeliveries(mission.id)) {
+                // What a stopped engine received and never handed over goes now (CT-26), and
+                // what it stored for the Planner beside the inputs (a discussion closed, #87).
+                const prepared = yield* prepareDeliveries(mission.id)
+                const left = (yield* queuedForPlanner(mission.id)).filter(
+                  (one) => !prepared.some((ready) => ready.id === one.id),
+                )
+                for (const one of [...left, ...prepared]) {
                   yield* deliver(mission.id, one.kind, one.body, one.id)
                 }
               }

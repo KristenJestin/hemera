@@ -116,6 +116,7 @@ import {
   livingSpecRead,
 } from '../living-spec/tools.ts'
 import type { ProfileHome } from '../profile-home.ts'
+import { discussionProposeDecision, discussionReply } from '../planning/discussion-store.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import { resolvePath } from './paths.ts'
@@ -303,6 +304,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.tasks_write.input)(raw)
     case 'model_recommend':
       return decoder(tool, TOOLS.model_recommend.input)(raw)
+    case 'discussion_reply':
+      return decoder(tool, TOOLS.discussion_reply.input)(raw)
+    case 'discussion_propose_decision':
+      return decoder(tool, TOOLS.discussion_propose_decision.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -698,6 +703,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* tasksWrite(grant, call.args)
             case 'model_recommend':
               return yield* modelRecommend(grant, call.args)
+            case 'discussion_reply':
+              return yield* discussionReply(grant, call.args)
+            case 'discussion_propose_decision':
+              return yield* discussionProposeDecision(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

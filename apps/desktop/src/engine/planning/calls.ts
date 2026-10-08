@@ -8,19 +8,22 @@ import { Effect, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { SpecBoard } from './board.ts'
-import { prepareDeliveries } from './handover.ts'
+import { type InputsDelivery, prepareDeliveries } from './handover.ts'
 import { recordAnswer, recordWaiting } from './questions.ts'
 import { addVision, keepAfterTriage, readSpec } from './store.ts'
 import { PlannerWake } from './wake.ts'
 
+/** Hands deliveries already stored to the mission's Planner, which starts if none lives. */
+export const handOver = (missionId: string, deliveries: ReadonlyArray<InputsDelivery>) =>
+  Effect.forEach(
+    deliveries,
+    (one) => PlannerWake.use((wake) => wake.deliver(missionId, one.kind, one.body, one.id)),
+    { discard: true },
+  )
+
 /** Hands every received input of the mission to its Planner, which starts if none lives. */
 export const deliverInputs = (missionId: string) =>
-  Effect.gen(function* () {
-    const deliveries = yield* prepareDeliveries(missionId)
-    for (const one of deliveries) {
-      yield* PlannerWake.use((wake) => wake.deliver(missionId, one.kind, one.body, one.id))
-    }
-  })
+  Effect.andThen(prepareDeliveries(missionId), (deliveries) => handOver(missionId, deliveries))
 
 /** The user's vision: stored, then delivered to the Planner, which starts if none lives. */
 export const giveVision = (missionId: string, text: string) =>

@@ -20,6 +20,7 @@ import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
 import { questionsBriefOf } from './questions.ts'
 import { domainsIn } from '../living-spec/store.ts'
+import { discussionsBrief, discussionsIn } from './discussion-store.ts'
 import { specIn, visionsOf } from './store.ts'
 
 /** The Planner's layer of the instructions, as the ticket writes it. */
@@ -116,6 +117,16 @@ answer with \`triage_answer\` (\`delivered\`) and name the requirement; say whet
 - Recommend a model for Building with \`model_recommend\`, with your reason (the size and the risk
   of the work).
 
+## Discussions
+A discussion is the user and you on one item of the Spec. Your brief, or the delivery
+\`[hemera:discuss]\`, names the item and gives the whole exchange.
+- Answer the point with what the code shows. Read or launch a Probe rather than assume.
+- When a decision is in sight, propose it with \`discussion_propose_decision\`, in one or two
+  sentences. The user closes the discussion, not you.
+- When \`[hemera:decision]\` arrives, write it into Decisions (the choice, the alternatives, why,
+  with the discussion's link), or into the requirement it changes, then call \`input_integrated\`.
+- Stay on the item. Anything else goes to your next wave of questions.
+
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).
 Hemera wakes you with the next delivery. Your work ends when the user freezes the Spec.
@@ -136,10 +147,14 @@ Hemera wakes you with the next delivery. Your work ends when the user freezes th
   a target that does not exist as stated.`
 
 /**
- * The mode a Planner's session starts in: `answers` while an input waits to be delivered or
- * integrated (#86), `draft` otherwise. #87 to #97 and B1 add theirs (`prelaunch`…).
+ * The mode a Planner's session starts in: `discuss` while an open discussion waits on it (#87),
+ * `answers` while an input waits to be delivered or integrated (#86), `draft` otherwise. #88 to #97
+ * and B1 add theirs (`prelaunch`…).
  */
-export const plannerMode = (inputsWaiting: boolean): string => (inputsWaiting ? 'answers' : 'draft')
+export const plannerMode = (asked: {
+  readonly discussing: boolean
+  readonly inputsWaiting: boolean
+}): string => (asked.discussing ? 'discuss' : asked.inputsWaiting ? 'answers' : 'draft')
 
 const TRIAGE_SAID = {
   existing_mission: 'another mission holds it',
@@ -183,6 +198,10 @@ const plannerBrief = (owner: SessionOwner) =>
       mission === undefined
         ? []
         : yield* database.transaction((transaction) => domainsIn(transaction, mission.projectId))
+    const open = discussionsBrief(
+      spec,
+      (yield* discussionsIn(database, owner.missionId)).filter((one) => one.state === 'open'),
+    )
     const preferences = yield* readPreferences
     const written =
       spec.version > 0 || spec.requirements.length > 0
@@ -192,7 +211,7 @@ const plannerBrief = (owner: SessionOwner) =>
     const fields: ReadonlyArray<BriefField> = [
       {
         label: `Planner · ${spec.key} · ${spec.title}`,
-        text: `Mode: ${plannerMode(asked.pending)}`,
+        text: `Mode: ${plannerMode({ discussing: open.discussing, inputsWaiting: asked.pending })}`,
       },
       { label: 'Input', text: mission?.sentence ?? null },
       {
@@ -225,6 +244,7 @@ const plannerBrief = (owner: SessionOwner) =>
             ? null
             : `${asked.toIntegrate}\n\nIntegrate each, then call input_integrated with its id.`,
       },
+      { label: 'Open discussions', text: open.text },
       {
         label: 'Triage',
         text:
