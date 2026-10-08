@@ -1,7 +1,8 @@
 /**
- * The Planner's tools (#85), as the gate executes them once it let a call through: reading the
+ * The Planner's tools (#85, #86), as the gate executes them once it let a call through: reading the
  * Spec with every item's version, writing a section or a requirement on the version read, naming
- * the mission, answering the triage and declaring the Spec complete. The mission is always the
+ * the mission, answering the triage and declaring the Spec complete; asking a wave of questions,
+ * retiring one, drafting a message for one, and marking an input integrated. The mission is always the
  * one the session's token works for, never one an argument names.
  */
 
@@ -27,6 +28,7 @@ import {
   writeRequirement,
   writeSection,
 } from './store.ts'
+import { askWave, draftMessage, integrateInput, retireQuestion } from './questions.ts'
 
 /** The writer a grant stands for, when its session works for a mission. */
 const writerOf = (grant: Grant): SpecWriter | null =>
@@ -181,4 +183,67 @@ export const declareCompleteTool = (grant: Grant, args: ToolArguments<'declare_c
         : `Declared complete at version ${String(done.declared)}. The user is told, with your reason.`,
     )
   })
+}
+
+export const askWaveTool = (grant: Grant, args: ToolArguments<'ask_wave'>) => {
+  const writer = writerOf(grant)
+  if (writer === null) return Effect.succeed(NO_MISSION)
+  const asked = args.questions.map((one) => ({
+    text: one.text,
+    why: one.why,
+    options: one.options,
+    recommended: one.recommended,
+    recommendedReason: one.recommended_reason,
+    section: one.section,
+    fromFinding: one.from_finding,
+    replaces: one.replaces,
+  }))
+  return settled(askWave(writer, asked), (done) => {
+    const named = done.ids.map((id) => {
+      const old = done.replaced.find(([, by]) => by === id)
+      return old === undefined ? id : `${id} (it replaces ${old[0]})`
+    })
+    return answered(
+      `Wave ${String(done.number)} asked: ${named.join(', ')}. Your turn goes on: work on what does not depend on the answers; they arrive as [hemera:answers].`,
+    )
+  })
+}
+
+export const questionRetireTool = (grant: Grant, args: ToolArguments<'question_retire'>) => {
+  const writer = writerOf(grant)
+  if (writer === null) return Effect.succeed(NO_MISSION)
+  return settled(
+    retireQuestion(writer, {
+      question: args.question,
+      how: args.how,
+      reason: args.reason,
+      decision: args.decision ?? null,
+    }),
+    (how) => answered(`${args.question} is ${how}. It stays readable with your reason.`),
+  )
+}
+
+export const questionDraftMessageTool = (
+  grant: Grant,
+  args: ToolArguments<'question_draft_message'>,
+) => {
+  const writer = writerOf(grant)
+  if (writer === null) return Effect.succeed(NO_MISSION)
+  return settled(draftMessage(writer, args), () =>
+    answered(
+      `Draft kept under ${args.question}, for the user to copy. Nothing is sent: the user writes and sends it.`,
+    ),
+  )
+}
+
+export const inputIntegratedTool = (grant: Grant, args: ToolArguments<'input_integrated'>) => {
+  const writer = writerOf(grant)
+  if (writer === null) return Effect.succeed(NO_MISSION)
+  return settled(integrateInput(writer, args.id, args.where), (done) =>
+    answered(
+      done.again
+        ? `${args.id} is already integrated (${done.where}): nothing changed.`
+        : `${args.id} is integrated (${done.where}).`,
+    ),
+  )
 }

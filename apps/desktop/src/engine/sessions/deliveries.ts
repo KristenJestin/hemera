@@ -18,7 +18,7 @@ import { Effect, Schema } from 'effect'
 
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
-import { sessionDeliveries } from '../storage/schema.ts'
+import { planningInputs, sessionDeliveries } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import type { SessionOwner } from './roles.ts'
 import { type RoleSession, ownerId } from './store.ts'
@@ -80,8 +80,11 @@ const storedOf = (row: Row): StoredDelivery => ({
   sentTo: row.sentTo,
 })
 
-/** Stores a delivery, queued; one already stored under the same id is left as it is. */
-export const storeDelivery = (asked: DeliveryAsked) =>
+/**
+ * Stores a delivery, queued, in the transaction given; one already stored under the same id is
+ * left as it is. Answers its id.
+ */
+export const storeDeliveryIn = (transaction: EngineTransaction, asked: DeliveryAsked) =>
   Effect.gen(function* () {
     if (!isKind(asked.kind)) {
       return yield* new DeliveryKindRefused({
@@ -97,29 +100,30 @@ export const storeDelivery = (asked: DeliveryAsked) =>
     }
     const secrets = yield* Secrets
     const id = asked.id ?? crypto.randomUUID()
-    yield* mutate('storing a delivery', (transaction) =>
-      transaction
-        .insert(sessionDeliveries)
-        .values({
-          id,
-          ownerKind: asked.owner.kind,
-          ownerId: ownerId(asked.owner),
-          targetLineage: 'lineage' in asked.target ? asked.target.lineage : null,
-          targetRole: 'role' in asked.target ? asked.target.role : null,
-          kind: asked.kind,
-          body: secrets.mask(asked.body),
-          urgency: asked.urgency ?? 'between-turns',
-          state: 'queued',
-          createdAt: new Date().toISOString(),
-        })
-        .onConflictDoNothing()
-        .pipe(
-          Effect.mapError(refusedWhile('storing a delivery')),
-          Effect.as({ result: undefined, events: [] }),
-        ),
-    )
+    yield* transaction
+      .insert(sessionDeliveries)
+      .values({
+        id,
+        ownerKind: asked.owner.kind,
+        ownerId: ownerId(asked.owner),
+        targetLineage: 'lineage' in asked.target ? asked.target.lineage : null,
+        targetRole: 'role' in asked.target ? asked.target.role : null,
+        kind: asked.kind,
+        body: secrets.mask(asked.body),
+        urgency: asked.urgency ?? 'between-turns',
+        state: 'queued',
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoNothing()
+      .pipe(Effect.mapError(refusedWhile('storing a delivery')))
     return id
   })
+
+/** Stores a delivery, queued; one already stored under the same id is left as it is. */
+export const storeDelivery = (asked: DeliveryAsked) =>
+  mutate('storing a delivery', (transaction) =>
+    Effect.map(storeDeliveryIn(transaction, asked), (id) => ({ result: id, events: [] })),
+  )
 
 /** The deliveries queued for a session: for its lineage, or for its role with no lineage named. */
 export const queuedFor = (session: RoleSession) =>
@@ -180,25 +184,68 @@ export const markSent = (
           Effect.map((rows) => rows.map((row) => row.id)),
         )
 
-/** Deliveries sent to a session whose agent never took them: queued again, for whoever comes next. */
+/**
+ * Deliveries sent to a session whose agent never took them: queued again, for whoever comes next.
+ * The Planning inputs they carried (#86) are received again with them, never delivered unseen; one
+ * whose every input was superseded or withdrawn meanwhile is set aside, never said again.
+ */
 export const giveBack = (
   transaction: EngineTransaction,
   ids: ReadonlyArray<string>,
   sessionId: string,
 ) =>
-  ids.length === 0
-    ? Effect.void
-    : transaction
+  Effect.gen(function* () {
+    if (ids.length === 0) return
+    const back = yield* transaction
+      .update(sessionDeliveries)
+      .set({ state: 'queued', sentAt: null, sentTo: null })
+      .where(
+        and(
+          inArray(sessionDeliveries.id, [...ids]),
+          eq(sessionDeliveries.sentTo, sessionId),
+          eq(sessionDeliveries.state, 'sent'),
+        ),
+      )
+      .returning({ id: sessionDeliveries.id })
+      .pipe(Effect.mapError(refusedWhile('giving deliveries back')))
+    if (back.length === 0) return
+    const carried = yield* transaction
+      .select({ deliveryId: planningInputs.deliveryId, state: planningInputs.state })
+      .from(planningInputs)
+      .where(
+        inArray(
+          planningInputs.deliveryId,
+          back.map((one) => one.id),
+        ),
+      )
+      .pipe(Effect.mapError(refusedWhile('reading the inputs given back')))
+    const stale = back
+      .map((one) => one.id)
+      .filter((id) => {
+        const inputs = carried.filter((one) => one.deliveryId === id)
+        return inputs.length > 0 && inputs.every((one) => one.state === 'superseded')
+      })
+    if (stale.length > 0) {
+      yield* transaction
         .update(sessionDeliveries)
-        .set({ state: 'queued', sentAt: null, sentTo: null })
-        .where(
-          and(
-            inArray(sessionDeliveries.id, [...ids]),
-            eq(sessionDeliveries.sentTo, sessionId),
-            eq(sessionDeliveries.state, 'sent'),
+        .set({ state: 'superseded' })
+        .where(inArray(sessionDeliveries.id, stale))
+        .pipe(Effect.mapError(refusedWhile('setting a stale delivery aside')))
+    }
+    yield* transaction
+      .update(planningInputs)
+      .set({ state: 'received', deliveredAt: null })
+      .where(
+        and(
+          inArray(
+            planningInputs.deliveryId,
+            back.map((one) => one.id),
           ),
-        )
-        .pipe(Effect.mapError(refusedWhile('giving deliveries back')), Effect.asVoid)
+          eq(planningInputs.state, 'delivered'),
+        ),
+      )
+      .pipe(Effect.mapError(refusedWhile('receiving inputs again')))
+  })
 
 /** The deliveries of an owner no longer to be sent: its sessions are stopped. */
 export const supersedeAll = (transaction: EngineTransaction, owner: SessionOwner) =>

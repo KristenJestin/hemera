@@ -405,6 +405,27 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('resources.changed', log),
       ),
+    'planning.waves': (request) =>
+      engine['planning.waves'](request).pipe(closedAs(gone), observed('planning.waves', log)),
+    'planning.answer': (request) =>
+      engine['planning.answer'](request).pipe(closedAs(gone), observed('planning.answer', log)),
+    'planning.waitOnSomeone': (request) =>
+      engine['planning.waitOnSomeone'](request).pipe(
+        closedAs(gone),
+        observed('planning.waitOnSomeone', log),
+      ),
+    'planning.openQuestions': (request) =>
+      engine['planning.openQuestions'](request).pipe(
+        closedAs(gone),
+        observed('planning.openQuestions', log),
+      ),
+    'planning.questionsChanged': (request) =>
+      engine['planning.questionsChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('planning.questionsChanged', log),
+      ),
+    'planning.inputs': (request) =>
+      engine['planning.inputs'](request).pipe(closedAs(gone), observed('planning.inputs', log)),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

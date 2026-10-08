@@ -97,7 +97,12 @@ const written = (): SpecText => ({
   ],
 })
 
-const complete = { described: true, triagePending: false } as const
+const complete = {
+  described: true,
+  triagePending: false,
+  pendingInputs: [],
+  openQuestions: [],
+} as const
 
 describe('Completeness', () => {
   test('a complete Spec has no failure', () => {
@@ -125,7 +130,7 @@ describe('Completeness', () => {
           },
         ],
       },
-      { described: false, triagePending: true },
+      { ...complete, described: false, triagePending: true },
     )
     expect(failures).toEqual([
       { target: 'why', sentence: 'Why holds no text: write it, or "None."' },
@@ -141,6 +146,37 @@ describe('Completeness', () => {
         target: 'triage',
         sentence:
           'Your triage answer waits on the user: the Spec is complete only once they keep the mission.',
+      },
+    ])
+  })
+
+  test('an input not integrated and a question open or waiting are refused, each named', () => {
+    const failures = completeness(written(), {
+      ...complete,
+      pendingInputs: [
+        { id: 'I1', kind: 'answer', item: 'Q1', version: 2, state: 'delivered' },
+        { id: 'I2', kind: 'waiting', item: 'Q2', version: null, state: 'received' },
+      ],
+      openQuestions: [
+        { id: 'Q3', state: 'open' },
+        { id: 'Q2', state: 'waiting' },
+      ],
+    })
+    expect(failures).toEqual([
+      {
+        target: 'I1',
+        sentence:
+          'Input I1 (the answer to Q1, version 2) is not integrated: integrate it, then call input_integrated.',
+      },
+      {
+        target: 'I2',
+        sentence:
+          'Input I2 (Q2 waiting on someone) has not reached you yet: it comes with your next delivery.',
+      },
+      { target: 'Q3', sentence: "Q3 is open: it waits for the user's answer." },
+      {
+        target: 'Q2',
+        sentence: 'Q2 waits on someone: a complete Spec has no open question.',
       },
     ])
   })

@@ -94,7 +94,14 @@ import {
   type EngineTransaction,
   refusedWhile,
 } from './storage/database.ts'
-import { memoryNext, missionMarks, missionStops, missions, projects } from './storage/schema.ts'
+import {
+  memoryNext,
+  missionMarks,
+  missionStops,
+  missions,
+  projects,
+  questions,
+} from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 import { newSpec, triageOf } from './planning/store.ts'
 
@@ -250,6 +257,12 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
       .orderBy(asc(missionStops.stopper))
       .pipe(Effect.mapError(refusedWhile('reading the stops')))
     const pending = yield* pendingNeedsOf(ids)
+    // A Planning question open waits on the user (#86); one waiting on someone is a mark.
+    const asking = yield* database
+      .selectDistinct({ missionId: questions.missionId })
+      .from(questions)
+      .where(and(inArray(questions.missionId, ids), eq(questions.state, 'open')))
+      .pipe(Effect.mapError(refusedWhile('reading the questions')))
     const activityOf = yield* MissionActivity
     return yield* Effect.forEach(rows, (row) =>
       Effect.gen(function* () {
@@ -284,7 +297,10 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
             pendingNeeds: needs.length,
             sessionWorking: activity.sessionWorking,
             // A triage answer waits on the user until they keep, open or cancel (#85).
-            questionWaiting: activity.questionWaiting || row.triageState === 'pending',
+            questionWaiting:
+              activity.questionWaiting ||
+              row.triageState === 'pending' ||
+              asking.some((one) => one.missionId === row.id),
             marks: own.map((one) => one.mark),
           }),
           needs,
@@ -703,34 +719,8 @@ export const setMark = (missionId: string, mark: Mark) =>
     if (Predicate.isTagged(mark, 'Fixing') && mission.stage !== 'shipping') {
       return yield* new MarkRefused({ reason: 'a mission is fixing only in Shipping' })
     }
-    const identity = markIdentity(mark)
     yield* mutate('setting a mark', (transaction) =>
-      transaction
-        .insert(missionMarks)
-        .values({
-          id: crypto.randomUUID(),
-          missionId,
-          identity,
-          mark: JSON.stringify(mark),
-          setAt: now(),
-        })
-        .onConflictDoNothing()
-        .returning({ id: missionMarks.id })
-        .pipe(
-          Effect.mapError(refusedWhile('setting a mark')),
-          Effect.map((written) => ({
-            result: undefined,
-            events:
-              written.length === 0
-                ? []
-                : [
-                    missionEvent('mission.mark_set', missionId, BY_HEMERA, {
-                      mark: identity,
-                      sentence: markSentence(mark),
-                    }),
-                  ],
-          })),
-        ),
+      Effect.map(markIn(transaction, missionId, mark), (events) => ({ result: undefined, events })),
     )
     return yield* getMission(missionId)
   })
@@ -751,6 +741,35 @@ export const clearMarkIn = (transaction: EngineTransaction, missionId: string, m
       ? []
       : [missionEvent('mission.mark_cleared', missionId, BY_HEMERA, { mark: identity })]
   })
+
+/** Sets a mark in the transaction given, once; answers its event, or none when it was set. */
+export const markIn = (transaction: EngineTransaction, missionId: string, mark: Mark) => {
+  const identity = markIdentity(mark)
+  return transaction
+    .insert(missionMarks)
+    .values({
+      id: crypto.randomUUID(),
+      missionId,
+      identity,
+      mark: JSON.stringify(mark),
+      setAt: now(),
+    })
+    .onConflictDoNothing()
+    .returning({ id: missionMarks.id })
+    .pipe(
+      Effect.mapError(refusedWhile('setting a mark')),
+      Effect.map((written) =>
+        written.length === 0
+          ? []
+          : [
+              missionEvent('mission.mark_set', missionId, BY_HEMERA, {
+                mark: identity,
+                sentence: markSentence(mark),
+              }),
+            ],
+      ),
+    )
+}
 
 /** Clears a mark from a mission; a mark it does not carry changes nothing. */
 export const clearMark = (missionId: string, mark: Mark) =>

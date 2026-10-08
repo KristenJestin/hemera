@@ -65,6 +65,7 @@ import { mutate } from '../transaction.ts'
 import { SpecLanguage } from '../sessions/ports.ts'
 import type { SessionOwner } from '../sessions/roles.ts'
 import { SpecBoard, type Wrote } from './board.ts'
+import { pendingIn, receiveInput } from './inputs.ts'
 
 /** The file a mission's Spec is readable in, in its Memory's folder. */
 export const SPEC_FILE = 'spec.md'
@@ -104,7 +105,7 @@ export const triageOf = (row: MissionRow): TriageAnswer | null => {
   }
 }
 
-const missionRow = (transaction: EngineTransaction, missionId: string) =>
+export const missionRow = (transaction: EngineTransaction, missionId: string) =>
   Effect.gen(function* () {
     const [row] = yield* transaction
       .select()
@@ -289,7 +290,7 @@ export const writeSpecFile = (missionId: string) =>
   })
 
 /** Where a writer stands: the mission, its Spec, and the rule's refusal, if any. */
-const standingOf = (transaction: EngineTransaction, writer: SpecWriter) =>
+export const standingOf = (transaction: EngineTransaction, writer: SpecWriter) =>
   Effect.gen(function* () {
     const mission = yield* missionRow(transaction, writer.missionId)
     const spec = yield* ensureSpec(transaction, mission)
@@ -674,7 +675,11 @@ export const removeRequirement = (writer: SpecWriter, id: string, base: number) 
   })
 
 /** An event about the mission, by its Planner. */
-const plannerEvent = (writer: SpecWriter, type: string, payload: EventPayload): NewEvent => ({
+export const plannerEvent = (
+  writer: SpecWriter,
+  type: string,
+  payload: EventPayload,
+): NewEvent => ({
   type,
   entityKind: 'mission',
   entityId: writer.missionId,
@@ -822,6 +827,7 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
         const failures = completeness(spec, {
           described: standing.spec.describedAt !== null,
           triagePending: spec.triage?.state === 'pending',
+          ...(yield* pendingIn(transaction, writer.missionId)),
         })
         if (failures.length > 0) {
           return {
@@ -876,7 +882,7 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
   })
 
 /** A mission's stage, refused outside Planning with the user's sentence. */
-const inPlanning = (transaction: EngineTransaction, missionId: string, doing: string) =>
+export const inPlanning = (transaction: EngineTransaction, missionId: string, doing: string) =>
   Effect.gen(function* () {
     const mission = yield* missionRow(transaction, missionId)
     const key = missionKey(mission.keyPrefix, mission.keyNumber)
@@ -888,7 +894,18 @@ const inPlanning = (transaction: EngineTransaction, missionId: string, doing: st
     return { mission, key }
   })
 
-/** The user's vision: stored with `planning.vision`; the caller delivers it to the Planner. */
+/** The vision, as the Planner is handed it. */
+export const visionSaid = (text: string, at: string): string =>
+  [
+    `The user's vision, given ${at}:`,
+    text,
+    'Check it against the code before you use it; never copy it into the Spec as a decision unchecked.',
+  ].join('\n\n')
+
+/**
+ * The user's vision: stored with `planning.vision`, and received as an input (CT-26); the caller
+ * delivers it to the Planner.
+ */
 export const addVision = (missionId: string, text: string) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
@@ -898,10 +915,19 @@ export const addVision = (missionId: string, text: string) =>
     yield* mutate('keeping the vision', (transaction) =>
       Effect.gen(function* () {
         yield* inPlanning(transaction, missionId, 'a vision')
+        const id = crypto.randomUUID()
         yield* transaction
           .insert(specVisions)
-          .values({ id: crypto.randomUUID(), missionId, text: vision, at })
+          .values({ id, missionId, text: vision, at })
           .pipe(Effect.mapError(refusedWhile('keeping the vision')))
+        yield* receiveInput(transaction, {
+          missionId,
+          kind: 'vision',
+          item: id,
+          version: null,
+          said: visionSaid(vision, at),
+          supersedes: false,
+        })
         return {
           result: undefined,
           events: [

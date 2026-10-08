@@ -1,35 +1,50 @@
 /**
  * What the Planning page calls (#103): the user's side of Planning, each gesture stored first and
- * then delivered to the Planner, and the Spec as it changes.
+ * then delivered to the Planner (the vision, answers and waiting marks as inputs, #86), and the
+ * Spec as it changes.
  */
 
 import { Effect, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { SpecBoard } from './board.ts'
+import { prepareDeliveries } from './handover.ts'
+import { recordAnswer, recordWaiting } from './questions.ts'
 import { addVision, keepAfterTriage, readSpec } from './store.ts'
 import { PlannerWake } from './wake.ts'
 
-/** The vision, as the Planner is handed it. */
-export const visionDelivered = (text: string, at: string): string =>
-  [
-    `The user's vision, given ${at}:`,
-    text,
-    'Check it against the code before you use it; never copy it into the Spec as a decision unchecked.',
-  ].join('\n\n')
+/** Hands every received input of the mission to its Planner, which starts if none lives. */
+export const deliverInputs = (missionId: string) =>
+  Effect.gen(function* () {
+    const deliveries = yield* prepareDeliveries(missionId)
+    for (const one of deliveries) {
+      yield* PlannerWake.use((wake) => wake.deliver(missionId, one.kind, one.body, one.id))
+    }
+  })
+
+/** The user's vision: stored, then delivered to the Planner, which starts if none lives. */
+export const giveVision = (missionId: string, text: string) =>
+  Effect.andThen(addVision(missionId, text), deliverInputs(missionId))
+
+/** The user answers a question; a new answer or version is delivered to the Planner. */
+export const answerQuestion = (
+  missionId: string,
+  questionId: string,
+  given: { readonly optionId?: string | undefined; readonly text?: string | undefined },
+) =>
+  Effect.gen(function* () {
+    if (yield* recordAnswer(missionId, questionId, given)) yield* deliverInputs(missionId)
+  })
+
+/** The user says a question waits on someone; the Planner is told. */
+export const waitOnSomeone = (missionId: string, questionId: string, note: string | null) =>
+  Effect.gen(function* () {
+    if (yield* recordWaiting(missionId, questionId, note)) yield* deliverInputs(missionId)
+  })
 
 /** What the Planner is told when the user keeps planning a mission it triaged. */
 export const TRIAGE_KEPT =
   'The user read your triage answer and chose to keep planning this mission: plan it.'
-
-/** The user's vision: stored, then delivered to the Planner, which starts if none lives. */
-export const giveVision = (missionId: string, text: string) =>
-  Effect.gen(function* () {
-    const vision = yield* addVision(missionId, text)
-    yield* PlannerWake.use((wake) =>
-      wake.deliver(missionId, 'vision', visionDelivered(vision.text, vision.at)),
-    )
-  })
 
 /** The user keeps planning a triaged mission: its Planner is told once, however often it is asked. */
 export const keepPlanning = (missionId: string) =>

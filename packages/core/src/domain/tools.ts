@@ -27,6 +27,7 @@ import {
   NOW_TEXT_MAX,
 } from './memory.ts'
 import { MissionType } from './mission.ts'
+import { RetireHow } from './questions.ts'
 import { SetupProposal } from './setup.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
@@ -560,6 +561,78 @@ const DeclareComplete = Schema.Struct({
     'Declare the Spec complete. Hemera checks it: a refusal lists everything to fix, and nothing is recorded.',
 })
 
+const WaveOption = Schema.Struct({
+  label: Bounded(200, 'The option, in a few words.'),
+  detail: Schema.String.check(Schema.isMaxLength(2000)).annotate({
+    description: 'What choosing it implies, from what you read in the code and the ticket.',
+  }),
+})
+
+const WaveQuestion = Schema.Struct({
+  text: Bounded(2000, 'The question, in the language of the user.'),
+  why: Bounded(2000, 'Why it matters for the Spec.'),
+  options: Schema.Array(WaveOption).annotate({
+    description: 'At least two options, in order; the user may also answer in their own words.',
+  }),
+  recommended: Schema.Int.annotate({
+    description: 'The index of the option you recommend, from 0.',
+  }),
+  recommended_reason: Bounded(
+    2000,
+    'Why you recommend it, from what you read in the code and the ticket.',
+  ),
+  section: Schema.optionalKey(
+    Bounded(80, 'The Spec item it concerns: a section name, `R2` or `R2.S1`.'),
+  ),
+  from_finding: Schema.optionalKey(Bounded(80, 'The cold read finding it comes from.')),
+  replaces: Schema.optionalKey(Bounded(20, 'The question (`Q3`) it replaces.')),
+})
+
+const AskWave = Schema.Struct({
+  questions: Schema.Array(WaveQuestion).annotate({
+    description:
+      'Every question you can ask now that does not depend on another one’s answer. Follow-ups go in a later wave.',
+  }),
+}).annotate({
+  description:
+    'Ask the user a wave of questions. Your turn goes on: work on what does not depend on the answers, which arrive later as [hemera:answers].',
+})
+
+const QuestionRetire = Schema.Struct({
+  question: Bounded(20, 'The question (`Q3`).'),
+  how: RetireHow.annotate({
+    description: '`withdrawn` (it no longer makes sense) or `moot` (a decision made it pointless).',
+  }),
+  reason: Bounded(2000, 'Why, in the language of the user.'),
+  decision: Schema.optionalKey(Bounded(2000, 'For `moot`: the decision that made it pointless.')),
+}).annotate({
+  description:
+    'Withdraw a question, or say a decision made it moot. It stays readable with its reason.',
+})
+
+const QuestionDraftMessage = Schema.Struct({
+  question: Bounded(20, 'The question (`Q3`) that waits on someone.'),
+  text: Bounded(10000, 'The message, for the user to copy and send themselves.'),
+}).annotate({
+  description:
+    'Draft a message the user may send to the person a question waits on. Nothing is sent: the user writes and sends.',
+})
+
+const InputIntegrated = Schema.Struct({
+  id: Bounded(20, 'The input (`I4`), as its delivery named it.'),
+  where: Schema.Union([
+    Bounded(200, 'The Spec item it went into: a section name, `R2`, or a decision.'),
+    Schema.Struct({
+      no_change: Bounded(2000, 'Why it changes nothing in the Spec.'),
+    }),
+  ]).annotate({
+    description: 'Where it went in the Spec, or `{ "no_change": reason }`.',
+  }),
+}).annotate({
+  description:
+    'Mark an input delivered to you as integrated into the Spec, or as changing nothing.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -823,6 +896,46 @@ export const TOOLS = {
       doing: 'Declaring the Spec complete',
     },
   }),
+  ask_wave: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: AskWave,
+    label: { label: 'Ask questions', mark: 'ask-wave', doing: 'Asking the user' },
+  }),
+  question_retire: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: QuestionRetire,
+    label: { label: 'Retire a question', mark: 'question-retire', doing: 'Retiring a question' },
+  }),
+  question_draft_message: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: QuestionDraftMessage,
+    label: {
+      label: 'Draft a message',
+      mark: 'question-draft-message',
+      doing: 'Drafting a message',
+    },
+  }),
+  input_integrated: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: InputIntegrated,
+    label: {
+      label: 'Input integrated',
+      mark: 'input-integrated',
+      doing: 'Integrating an input',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -871,6 +984,10 @@ export const TOOL_NAMES = [
   'mission_describe',
   'triage_answer',
   'declare_complete',
+  'ask_wave',
+  'question_retire',
+  'question_draft_message',
+  'input_integrated',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

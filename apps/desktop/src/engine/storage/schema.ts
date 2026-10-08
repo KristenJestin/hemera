@@ -1258,3 +1258,125 @@ export const resourceClaims = sqliteTable(
       .where(sql`${table.state} = 'held'`),
   ],
 )
+
+/** A wave of the Planner's questions (#86): its number in the mission, when, by which session. */
+export const waves = sqliteTable(
+  'waves',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    sessionId: text('session_id').notNull(),
+    askedAt: text('asked_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.number] })],
+)
+
+/**
+ * A question of the Planner: `Q1`, `Q2`… per mission, never reused; its wave, its text and why,
+ * its options as JSON (`[{ id, label, detail }]`), the option it recommends and why, the Spec item
+ * it concerns, the finding it comes from, the question it replaces and the one that replaced it;
+ * its state (`open`, `waiting`, `answered`, `withdrawn`, `replaced`, `moot`), the user's note
+ * while it waits on someone, and the reason or the decision that retired it.
+ */
+export const questions = sqliteTable(
+  'questions',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    wave: integer('wave').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    why: text('why').$type<Masked<string>>().notNull(),
+    options: text('options').$type<Masked<string>>().notNull(),
+    recommended: text('recommended').notNull(),
+    recommendedReason: text('recommended_reason').$type<Masked<string>>().notNull(),
+    section: text('section'),
+    fromFinding: text('from_finding'),
+    replaces: text('replaces'),
+    replacedBy: text('replaced_by'),
+    state: text('state').notNull(),
+    waitingNote: text('waiting_note').$type<Masked<string>>(),
+    retiredReason: text('retired_reason').$type<Masked<string>>(),
+    mootDecision: text('moot_decision').$type<Masked<string>>(),
+    askedAt: text('asked_at').notNull(),
+    changedAt: text('changed_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.missionId, table.id] }),
+    index('questions_by_state').on(table.state, table.missionId),
+  ],
+)
+
+/**
+ * An answer to a question, one row per version (1, 2…): exactly one of an option id and a text
+ * of the user's own, its author and when. A changed answer is a new version; nothing is
+ * overwritten.
+ */
+export const answers = sqliteTable(
+  'answers',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    questionId: text('question_id').notNull(),
+    version: integer('version').notNull(),
+    optionId: text('option_id'),
+    text: text('text').$type<Masked<string>>(),
+    author: text('author').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.questionId, table.version] })],
+)
+
+/** A message the Planner drafted for a question that waits on someone: never sent by Hemera. */
+export const questionDrafts = sqliteTable(
+  'question_drafts',
+  {
+    sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    questionId: text('question_id').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    sessionId: text('session_id').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('question_drafts_by_question').on(table.missionId, table.questionId)],
+)
+
+/**
+ * The human inputs of Planning (CT-26): `I1`, `I2`… per mission; their kind (`answer`, `waiting`,
+ * `vision`, `discuss_decision`, `dismissed_finding`, `triage_kept`), the item they refer to and
+ * its version, what the Planner is told of them; their state (`received` → `delivered` →
+ * `integrated`, or `superseded` by a later version), the session delivery that carries them, and
+ * where the Planner integrated them.
+ */
+export const planningInputs = sqliteTable(
+  'planning_inputs',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    kind: text('kind').notNull(),
+    item: text('item').notNull(),
+    itemVersion: integer('item_version'),
+    said: text('said').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    receivedAt: text('received_at').notNull(),
+    deliveryId: text('delivery_id'),
+    deliveredAt: text('delivered_at'),
+    integratedAt: text('integrated_at'),
+    where: text('where').$type<Masked<string>>(),
+    supersededBy: text('superseded_by'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.missionId, table.id] }),
+    index('planning_inputs_by_state').on(table.missionId, table.state),
+  ],
+)

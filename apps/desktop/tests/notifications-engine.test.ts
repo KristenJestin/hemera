@@ -386,6 +386,7 @@ describe('The registry of event kinds', () => {
       ['workspace-ready', false, null],
       ['workspace-failed', true, 'error'],
       ['triage-answer', true, 'needs-you'],
+      ['questions-asked', true, 'needs-you'],
     ])
   })
 })
@@ -403,6 +404,7 @@ describe('The switches are the application’s, listed from the registry', () =>
       ['workspace-ready', false],
       ['workspace-failed', true],
       ['triage-answer', true],
+      ['questions-asked', true],
     ])
     expect(settings.sounds.map((one) => [one.sound, one.on])).toEqual([
       ['needs-you', true],

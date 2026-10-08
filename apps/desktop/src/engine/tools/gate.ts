@@ -92,8 +92,12 @@ import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import {
+  askWaveTool,
   declareCompleteTool,
+  inputIntegratedTool,
   missionDescribe,
+  questionDraftMessageTool,
+  questionRetireTool,
   requirementRemove,
   requirementWrite,
   specRead,
@@ -255,6 +259,14 @@ const decodeCall = (
       return decoder(tool, TOOLS.triage_answer.input)(raw)
     case 'declare_complete':
       return decoder(tool, TOOLS.declare_complete.input)(raw)
+    case 'ask_wave':
+      return decoder(tool, TOOLS.ask_wave.input)(raw)
+    case 'question_retire':
+      return decoder(tool, TOOLS.question_retire.input)(raw)
+    case 'question_draft_message':
+      return decoder(tool, TOOLS.question_draft_message.input)(raw)
+    case 'input_integrated':
+      return decoder(tool, TOOLS.input_integrated.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -620,6 +632,14 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* triageAnswer(grant, call.args)
             case 'declare_complete':
               return yield* declareCompleteTool(grant, call.args)
+            case 'ask_wave':
+              return yield* askWaveTool(grant, call.args)
+            case 'question_retire':
+              return yield* questionRetireTool(grant, call.args)
+            case 'question_draft_message':
+              return yield* questionDraftMessageTool(grant, call.args)
+            case 'input_integrated':
+              return yield* inputIntegratedTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

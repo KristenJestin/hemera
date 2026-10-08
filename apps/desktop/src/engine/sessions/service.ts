@@ -356,21 +356,31 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             return
           }
           if (Result.isFailure(outcome)) {
-            const unavailable = unavailableOf(driver, outcome.failure)
-            // Never another agent or model: the owner is asked, the session stops before it works.
-            if (unavailable !== null) yield* stopUnavailable(driver, unavailable)
-            // The agent could not be started or spoken to: the session fails, in words.
-            else yield* fail(driver, outcome.failure.message)
-            // What its agent never took is queued again, for the next session that may take it.
-            if (!driver.took && deliveries.length > 0) {
+            // What its agent never took is queued again, for the next session that may take it:
+            // before the session ends, so a session started once it ended finds it queued, and
+            // with nothing sent to this one any more.
+            const back = !driver.took && deliveries.length > 0
+            if (back) {
+              driver.gone = true
+              // A give-back the data folder refuses still lets the session end below: never a
+              // session left live with no driver, holding its slot.
               yield* mutate('giving deliveries back', (transaction) =>
                 Effect.as(giveBack(transaction, deliveries, driver.session.id), {
                   result: undefined,
                   events: [],
                 }),
+              ).pipe(
+                Effect.catchCause((cause) =>
+                  said(`${driver.session.id} could not give its deliveries back: ${String(cause)}`),
+                ),
               )
-              yield* post.ring
             }
+            const unavailable = unavailableOf(driver, outcome.failure)
+            // Never another agent or model: the owner is asked, the session stops before it works.
+            if (unavailable !== null) yield* stopUnavailable(driver, unavailable)
+            // The agent could not be started or spoken to: the session fails, in words.
+            else yield* fail(driver, outcome.failure.message)
+            if (back) yield* post.ring
             return
           }
           // A death closes the turn as interrupted: its replacement is the deaths' to start.

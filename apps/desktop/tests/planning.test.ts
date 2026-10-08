@@ -149,11 +149,19 @@ const settled = (session: RoleSession) =>
     yield* Sessions.use((sessions) => sessions.settled(session.id))
   })
 
-/** A mission of Acme, its Planner started on its own and its first turn over. */
+/**
+ * A mission of Acme, its Planner started on its own and its first turn over: the session is idle
+ * once a turn ended (`settled` alone may answer before the brief's turn is handed over).
+ */
 const missionPlanned = (projectId: string, sentence = 'Export the invoices as CSV') =>
   Effect.gen(function* () {
     const mission = yield* createMission({ projectId, idea: { sentence, ticket: null } })
     const planner = yield* plannerStarted(mission.id)
+    yield* until(
+      Effect.map(plannersOf(mission.id, ['idle']), (rows) =>
+        rows.some((row) => row.id === planner.id),
+      ),
+    )
     yield* settled(planner)
     return { mission, planner }
   })
@@ -975,7 +983,7 @@ describe('The vision reaches the Planner as [hemera:vision]', () => {
       ),
     )
     const second = text(world.agents[0]?.answers.prompts[1] ?? [])
-    expect(second).toMatch(/^\[hemera:vision\]\nThe user's vision, given /)
+    expect(second).toMatch(/^\[hemera:vision\]\nI1 · The user's vision, given /)
     expect(second).toContain('One file per month.')
   })
 

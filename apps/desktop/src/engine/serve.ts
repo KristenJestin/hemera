@@ -75,7 +75,14 @@ import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
 import { SESSION_STATES } from '@hemera/core/domain'
 import { createStart, searchStart } from './start/field.ts'
-import { giveVision, keepPlanning, specChanges } from './planning/calls.ts'
+import {
+  answerQuestion,
+  giveVision,
+  keepPlanning,
+  specChanges,
+  waitOnSomeone,
+} from './planning/calls.ts'
+import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import {
   changesSince,
   markRead,
@@ -454,6 +461,21 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       use(specLanguageOf(projectId)).pipe(observed('planning.specLanguage', log)),
     'planning.setSpecLanguage': ({ projectId, language }) =>
       use(setSpecLanguage(projectId, language)).pipe(observed('planning.setSpecLanguage', log)),
+    // Planning's questions (#86): the waves, the user's answers, the inputs.
+    'planning.waves': ({ missionId }) =>
+      use(wavesOf(missionId)).pipe(observed('planning.waves', log)),
+    'planning.answer': ({ missionId, questionId, optionId, text }) =>
+      use(answerQuestion(missionId, questionId, { optionId, text })).pipe(
+        observed('planning.answer', log),
+      ),
+    'planning.waitOnSomeone': ({ missionId, questionId, note }) =>
+      use(waitOnSomeone(missionId, questionId, note)).pipe(observed('planning.waitOnSomeone', log)),
+    'planning.openQuestions': () =>
+      use(openQuestions).pipe(observed('planning.openQuestions', log)),
+    'planning.questionsChanged': () =>
+      follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
+    'planning.inputs': ({ missionId }) =>
+      use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(machineAgentsLayer()))
 }
