@@ -167,13 +167,16 @@ export interface CompletenessContext {
   readonly described: boolean
   /** Whether a triage answer still waits on the user. */
   readonly triagePending: boolean
-  /** The inputs received or delivered and not integrated yet (CT-26). */
+  /**
+   * The inputs received or delivered and not integrated yet (CT-26); a Discuss decision still a
+   * proposal in its open discussion is `proposed` (#87).
+   */
   readonly pendingInputs: ReadonlyArray<{
     readonly id: string
     readonly kind: InputKind
     readonly item: string
     readonly version: number | null
-    readonly state: 'received' | 'delivered'
+    readonly state: 'received' | 'delivered' | 'proposed'
   }>
   /** The questions open or waiting on someone. */
   readonly openQuestions: ReadonlyArray<{ readonly id: string; readonly state: 'open' | 'waiting' }>
@@ -184,6 +187,17 @@ export interface CompletenessContext {
    * task's target. Git reads it; the Spec alone cannot.
    */
   readonly atBase: ReadonlyArray<CompletenessFailure>
+  /** The discussions still open (#87), by label (`#12`) and the item they are on (`R3`). */
+  readonly openDiscussions: ReadonlyArray<{ readonly label: string; readonly item: string }>
+}
+
+/** What completeness says of an input not integrated, by its state. */
+const PENDING_SAID: Readonly<
+  Record<CompletenessContext['pendingInputs'][number]['state'], string>
+> = {
+  received: 'has not reached you yet: it comes with your next delivery.',
+  delivered: 'is not integrated: integrate it, then call input_integrated.',
+  proposed: 'waits on the user: they accept the proposal, or close the discussion.',
 }
 
 const blank = (text: string): boolean => text.trim() === ''
@@ -249,10 +263,7 @@ export function completeness(
     const named = `Input ${input.id} (${inputAbout(input.kind, input.item, input.version)})`
     failures.push({
       target: input.id,
-      sentence:
-        input.state === 'received'
-          ? `${named} has not reached you yet: it comes with your next delivery.`
-          : `${named} is not integrated: integrate it, then call input_integrated.`,
+      sentence: `${named} ${PENDING_SAID[input.state]}`,
     })
   }
   for (const question of context.openQuestions) {
@@ -262,6 +273,12 @@ export function completeness(
         question.state === 'open'
           ? `${question.id} is open: it waits for the user's answer.`
           : `${question.id} waits on someone: a complete Spec has no open question.`,
+    })
+  }
+  for (const discussion of context.openDiscussions) {
+    failures.push({
+      target: discussion.label,
+      sentence: `${discussion.label} on ${discussion.item} is still open: the user closes it, with a decision or without.`,
     })
   }
   failures.push(...planFailures(spec, live), ...context.atBase)

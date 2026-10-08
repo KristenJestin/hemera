@@ -1979,6 +1979,58 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Answer the user in a discussion on one item of the Spec. Refused once the user has ended it.",
+      "properties": {
+        "discussion": {
+          "description": "The discussion, as its delivery names it (\`#12\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "Your answer on the point, grounded in the code, in the language of the user.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "discussion",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "discussion_reply",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Propose the decision a discussion leads to. It waits for the user, who accepts it, writes another, or ends the discussion without one; a new proposal replaces the pending one.",
+      "properties": {
+        "decision": {
+          "description": "The decision, in one or two sentences, in the language of the user.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "discussion": {
+          "description": "The discussion, as its delivery names it (\`#12\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "discussion",
+        "decision",
+      ],
+      "type": "object",
+    },
+    "name": "discussion_propose_decision",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

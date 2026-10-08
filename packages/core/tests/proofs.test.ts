@@ -356,6 +356,7 @@ const ready = {
   openQuestions: [],
   livingChanged: [],
   atBase: [],
+  openDiscussions: [],
 } as const
 
 describe('Completeness adds the proofs, the tasks and the model', () => {

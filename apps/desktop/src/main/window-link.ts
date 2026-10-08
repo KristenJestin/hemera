@@ -479,6 +479,26 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('probes.changed', log),
       ),
+    'discussions.list': (request) =>
+      engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
+    'discussions.read': (request) =>
+      engine['discussions.read'](request).pipe(closedAs(gone), observed('discussions.read', log)),
+    'discussions.open': (request) =>
+      engine['discussions.open'](request).pipe(closedAs(gone), observed('discussions.open', log)),
+    'discussions.say': (request) =>
+      engine['discussions.say'](request).pipe(closedAs(gone), observed('discussions.say', log)),
+    'discussions.accept': (request) =>
+      engine['discussions.accept'](request).pipe(
+        closedAs(gone),
+        observed('discussions.accept', log),
+      ),
+    'discussions.close': (request) =>
+      engine['discussions.close'](request).pipe(closedAs(gone), observed('discussions.close', log)),
+    'discussions.changed': (request) =>
+      engine['discussions.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('discussions.changed', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

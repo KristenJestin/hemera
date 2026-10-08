@@ -88,6 +88,25 @@ export const receiveInput = (transaction: EngineTransaction, input: InputReceive
   })
 
 /**
+ * Withdraws the Discuss decisions of an item not integrated yet, in the transaction given:
+ * superseded, by nothing (a proposal the user closed without a decision). Nothing is left to
+ * integrate; an input of another kind on the same item is left as it is.
+ */
+export const withdrawInput = (transaction: EngineTransaction, missionId: string, item: string) =>
+  transaction
+    .update(planningInputs)
+    .set({ state: 'superseded', supersededBy: null })
+    .where(
+      and(
+        eq(planningInputs.missionId, missionId),
+        eq(planningInputs.item, item),
+        eq(planningInputs.kind, 'discuss_decision'),
+        inArray(planningInputs.state, ['received', 'delivered']),
+      ),
+    )
+    .pipe(Effect.mapError(refusedWhile('withdrawing an input')), Effect.asVoid)
+
+/**
  * Marks delivered the received inputs of a mission whose delivery a session took, in the
  * transaction given; answers `planning.inputs_delivered` naming them, or nothing.
  */

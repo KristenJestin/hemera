@@ -94,6 +94,14 @@ import {
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
 import { taskGraphOf } from './planning/plan.ts'
+import { discussionsOf, readDiscussion } from './planning/discussion-store.ts'
+import {
+  acceptProposal,
+  closeDiscussion,
+  discussionChanges,
+  openDiscussion,
+  sayInDiscussion,
+} from './planning/discussions.ts'
 import {
   changesSince,
   markRead,
@@ -529,6 +537,21 @@ export const engineHandlers = (
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
+    // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
+    'discussions.list': ({ missionId }) =>
+      use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),
+    'discussions.read': ({ discussionId }) =>
+      use(readDiscussion(discussionId)).pipe(observed('discussions.read', log)),
+    'discussions.open': ({ missionId, item, text }) =>
+      use(openDiscussion(missionId, item, text)).pipe(observed('discussions.open', log)),
+    'discussions.say': ({ discussionId, text }) =>
+      use(sayInDiscussion(discussionId, text)).pipe(observed('discussions.say', log)),
+    'discussions.accept': ({ discussionId, proposedAt }) =>
+      use(acceptProposal(discussionId, proposedAt)).pipe(observed('discussions.accept', log)),
+    'discussions.close': ({ discussionId, closing }) =>
+      use(closeDiscussion(discussionId, closing)).pipe(observed('discussions.close', log)),
+    'discussions.changed': ({ missionId }) =>
+      follow(discussionChanges(missionId)).pipe(observedStream('discussions.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
 }

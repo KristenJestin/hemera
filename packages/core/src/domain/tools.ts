@@ -719,6 +719,27 @@ const LivingSpecDone = Schema.Struct({
   description: 'End the reading of the living spec: your summary is kept, and your session ends.',
 })
 
+const DiscussionNamed = Bounded(20, 'The discussion, as its delivery names it (`#12`).')
+
+const DiscussionReply = Schema.Struct({
+  discussion: DiscussionNamed,
+  text: Bounded(
+    4000,
+    'Your answer on the point, grounded in the code, in the language of the user.',
+  ),
+}).annotate({
+  description:
+    'Answer the user in a discussion on one item of the Spec. Refused once the user has ended it.',
+})
+
+const DiscussionProposeDecision = Schema.Struct({
+  discussion: DiscussionNamed,
+  decision: Bounded(1000, 'The decision, in one or two sentences, in the language of the user.'),
+}).annotate({
+  description:
+    'Propose the decision a discussion leads to. It waits for the user, who accepts it, writes another, or ends the discussion without one; a new proposal replaces the pending one.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -1131,6 +1152,26 @@ export const TOOLS = {
       doing: 'Recommending a model for Building',
     },
   }),
+  discussion_reply: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: DiscussionReply,
+    label: { label: 'Reply', mark: 'discussion-reply', doing: 'Replying in a discussion' },
+  }),
+  discussion_propose_decision: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: DiscussionProposeDecision,
+    label: {
+      label: 'Propose a decision',
+      mark: 'discussion-propose-decision',
+      doing: 'Proposing a decision',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1194,6 +1235,8 @@ export const TOOL_NAMES = [
   'proof_write',
   'tasks_write',
   'model_recommend',
+  'discussion_reply',
+  'discussion_propose_decision',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

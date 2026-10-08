@@ -144,6 +144,7 @@ describe('Completeness refuses a delta whose living requirement changed after it
       triagePending: false,
       pendingInputs: [],
       openQuestions: [],
+      openDiscussions: [],
       atBase: [],
       livingChanged: [
         { requirement: 'R1', livingRef: 'LR3', recorded: 1, current: 2 },
@@ -171,6 +172,7 @@ describe('Completeness refuses a delta whose living requirement changed after it
         triagePending: false,
         pendingInputs: [],
         openQuestions: [],
+        openDiscussions: [],
         livingChanged: [],
         atBase: [],
       }),

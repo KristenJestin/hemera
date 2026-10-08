@@ -47,6 +47,7 @@ import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   answers,
+  discussions,
   missions,
   planningInputs,
   projects,
@@ -392,8 +393,14 @@ export const integrateInput = (writer: SpecWriter, id: string, where: Integrated
           )
         }
         if (row.state === 'superseded') {
-          const by = row.supersededBy ?? 'a later input'
-          return answer(refused(`refused: ${id} is superseded by ${by}: integrate ${by}.`))
+          const by = row.supersededBy
+          return answer(
+            refused(
+              by === null
+                ? `refused: ${id} was withdrawn: nothing to integrate.`
+                : `refused: ${id} is superseded by ${by}: integrate ${by}.`,
+            ),
+          )
         }
         if (row.state === 'integrated') {
           return answer({ done: { where: row.where ?? '', again: true } })
@@ -755,7 +762,8 @@ export const questionsChanged = Stream.unwrap(
 /**
  * What a Planner's brief says of the questions: each with its wave, state, latest answer, note
  * or reason; the inputs delivered to an earlier session and not integrated; and whether any input
- * waits, which puts the Planner in the `answers` mode.
+ * waits on the Planner, which puts it in the `answers` mode (a pending Discuss proposal waits on
+ * the user instead).
  */
 export const questionsBriefOf = (missionId: string) =>
   Effect.gen(function* () {
@@ -768,6 +776,15 @@ export const questionsBriefOf = (missionId: string) =>
       .where(and(eq(planningInputs.missionId, missionId), eq(planningInputs.state, 'delivered')))
       .orderBy(asc(planningInputs.number))
       .pipe(Effect.mapError(refusedWhile('reading the inputs')))
+    // A Discuss proposal still pending in its open discussion (#87) waits on the user, not here.
+    const open = yield* database
+      .select({ number: discussions.number })
+      .from(discussions)
+      .where(and(eq(discussions.missionId, missionId), eq(discussions.state, 'open')))
+      .pipe(Effect.mapError(refusedWhile('reading the open discussions')))
+    const proposed = (input: (typeof inputs)[number]) =>
+      input.kind === 'discuss_decision' &&
+      open.some((one) => input.item === `#${String(one.number)}`)
     const lines = all.flatMap((wave) =>
       wave.questions.map((one) => {
         const last = one.answers.at(-1)
@@ -787,6 +804,8 @@ export const questionsBriefOf = (missionId: string) =>
         delivered.length === 0
           ? null
           : delivered.map((one) => `- ${one.id} · ${one.said}`).join('\n'),
-      pending: inputs.some((one) => one.state === 'received' || one.state === 'delivered'),
+      pending: inputs.some(
+        (one) => (one.state === 'received' || one.state === 'delivered') && !proposed(one),
+      ),
     }
   })

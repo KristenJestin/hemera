@@ -104,6 +104,7 @@ import {
 } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 import { newSpec, triageOf } from './planning/store.ts'
+import { discussionBalls } from './planning/discussion-store.ts'
 
 /** The longest idea sentence a mission keeps. */
 export const MAX_IDEA_LENGTH = 2000
@@ -263,6 +264,7 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
       .from(questions)
       .where(and(inArray(questions.missionId, ids), eq(questions.state, 'open')))
       .pipe(Effect.mapError(refusedWhile('reading the questions')))
+    const discussing = yield* discussionBalls(ids)
     const activityOf = yield* MissionActivity
     return yield* Effect.forEach(rows, (row) =>
       Effect.gen(function* () {
@@ -295,12 +297,16 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
           ball: ballOf({
             stage,
             pendingNeeds: needs.length,
-            sessionWorking: activity.sessionWorking,
-            // A triage answer waits on the user until they keep, open or cancel (#85).
+            // An open discussion whose last message is the user's has the agent working (#87).
+            sessionWorking:
+              activity.sessionWorking || discussing.get(row.id)?.agentWorking === true,
+            // A triage answer waits on the user until they keep, open or cancel (#85); so does an
+            // open discussion whose last message is the agent's, or with a proposal (#87).
             questionWaiting:
               activity.questionWaiting ||
               row.triageState === 'pending' ||
-              asking.some((one) => one.missionId === row.id),
+              asking.some((one) => one.missionId === row.id) ||
+              discussing.get(row.id)?.waitingOnYou === true,
             marks: own.map((one) => one.mark),
           }),
           needs,

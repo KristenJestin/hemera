@@ -85,6 +85,8 @@ describe('Each role has exactly its tools', () => {
         'commands_output',
         'commands_run',
         'declare_complete',
+        'discussion_propose_decision',
+        'discussion_reply',
         'fs_list',
         'fs_read',
         'input_integrated',
