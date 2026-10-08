@@ -1064,6 +1064,8 @@ export const specs = sqliteTable('specs', {
   nextRequirement: integer('next_requirement').notNull().default(1),
   describedAt: text('described_at'),
   updatedAt: text('updated_at').notNull(),
+  /** The version of the task graph (#90), what `tasks_write` names as its base; 0 until written. */
+  tasksVersion: integer('tasks_version').notNull().default(0),
 })
 
 /** A prose section of a Spec, once written: its Markdown, its own version, who wrote it, when. */
@@ -1575,4 +1577,70 @@ export const probeFiles = sqliteTable(
 export const probeContents = sqliteTable('probe_contents', {
   sha256: text('sha256').primaryKey(),
   content: text('content').$type<Masked<string>>().notNull(),
+})
+
+/**
+ * The Proof block of a scenario (#90), kept with it by (mission, scenario id): the JSON of the
+ * block, masked, its support files' contents within; its own version, what `proof_write` names as
+ * its base; the Probe it comes from, by its `#n` in the mission; who wrote it and when.
+ */
+export const specProofs = sqliteTable(
+  'spec_proofs',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    scenarioId: text('scenario_id').notNull(),
+    version: integer('version').notNull(),
+    block: text('block').$type<Masked<string>>().notNull(),
+    fromProbe: text('from_probe'),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.scenarioId] })],
+)
+
+/**
+ * The task graph of a Spec (#90): `T1`, `T2`… per mission, never reused, a task left out of a
+ * write kept as a row marked removed. `requirements`, `scenarios`, `targets` and `depends_on` are
+ * JSON arrays; `rank` is its place in the last write.
+ */
+export const specTasks = sqliteTable(
+  'spec_tasks',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    rank: integer('rank').notNull(),
+    title: text('title').$type<Masked<string>>().notNull(),
+    result: text('result').$type<Masked<string>>().notNull(),
+    requirements: text('requirements').notNull(),
+    scenarios: text('scenarios').notNull(),
+    targets: text('targets').$type<Masked<string>>().notNull(),
+    dependsOn: text('depends_on').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull().default(false),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * The Planner's recommended setting for a mission's Building (#90), with its reason. `checked`
+ * says whether the model and the effort were found among what the agent offers; the pre-launch
+ * check reads it, and the user may change it there.
+ */
+export const missionRecommendations = sqliteTable('mission_recommendations', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  agent: text('agent').notNull(),
+  model: text('model').notNull(),
+  effort: text('effort'),
+  reason: text('reason').$type<Masked<string>>().notNull(),
+  checked: integer('checked', { mode: 'boolean' }).notNull(),
+  sessionId: text('session_id').notNull(),
+  at: text('at').notNull(),
 })

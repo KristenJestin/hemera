@@ -2,7 +2,9 @@
  * Planning's lines in the Journal (#85, #86): the Planner started, the user's vision, the triage
  * answer and the user keeping the mission, one line per Planner turn that wrote the Spec, each
  * declaration of completeness, refused or recorded; each wave, answer and waiting mark, each
- * question retired or replaced, each draft, and each input delivered and integrated. Each is the projection of the domain event
+ * question retired or replaced, each draft, and each input delivered and integrated; #90 adds a
+ * proof written, the task graph written with what changed, and the model recommended for Building.
+ * Each is the projection of the domain event
  * written in the same transaction as what it records.
  */
 
@@ -111,6 +113,55 @@ export const PLANNING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       author: planner(event),
       text: `Spec: ${stringOf(event.payload, 'what') ?? 'written'}`,
     })),
+  ],
+  [
+    'planning.proof_written',
+    line((event) => {
+      const scenario = stringOf(event.payload, 'scenario') ?? ''
+      const probe = stringOf(event.payload, 'fromProbe')
+      return {
+        kind: 'spec',
+        author: planner(event),
+        text: `The Planner wrote the proof of ${scenario}${probe === null ? '' : `, from Probe ${probe}`}`,
+        fields: { scenario, probe },
+      }
+    }),
+  ],
+  [
+    'planning.tasks_written',
+    line((event) => {
+      const count = Option.getOrElse(readNumber(event.payload['count']), () => 0)
+      const listed = (key: string) => Option.getOrElse(readStrings(event.payload[key]), () => [])
+      const changes = [
+        ['added', listed('added')],
+        ['changed', listed('changed')],
+        ['removed', listed('removed')],
+      ] as const
+      const said = changes
+        .filter(([, ids]) => ids.length > 0)
+        .map(([what, ids]) => `${what} ${ids.join(', ')}`)
+        .join('; ')
+      return {
+        kind: 'spec',
+        author: planner(event),
+        text: `The Planner wrote the task graph: ${String(count)} task${count === 1 ? '' : 's'}${said === '' ? '' : ` (${said})`}`,
+        fields: { count },
+      }
+    }),
+  ],
+  [
+    'planning.model_recommended',
+    line((event) => {
+      const agent = stringOf(event.payload, 'agent') ?? ''
+      const model = stringOf(event.payload, 'model') ?? ''
+      const effort = stringOf(event.payload, 'effort')
+      return {
+        kind: 'spec',
+        author: planner(event),
+        text: `The Planner recommends ${[agent, model, ...(effort === null ? [] : [`effort ${effort}`])].join(' · ')} for Building: ${stringOf(event.payload, 'reason') ?? ''}`,
+        fields: { agent, model, effort },
+      }
+    }),
   ],
   [
     'planning.declared_complete',

@@ -134,6 +134,7 @@ import {
 } from './planning/probe-desk.ts'
 import { PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
+import { agentOffersLayer, agentOffersServed } from './planning/offers.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -350,6 +351,8 @@ export const startProfile = (
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
     const desk = Context.get(deskContext, ProbeDesk)
+    // Where the gate reads what an agent offers, served by the agents' runtime above it (#90).
+    const offersContext = yield* Layer.build(agentOffersLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -361,6 +364,7 @@ export const startProfile = (
       parts.tickets ?? noTicketSearch,
       parts.probes?.cleanup ?? noProbeCleanup,
       Layer.succeedContext(deskContext),
+      Layer.succeedContext(offersContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -461,6 +465,7 @@ export const startProfile = (
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
+      agentOffersServed,
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

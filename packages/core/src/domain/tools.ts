@@ -29,6 +29,7 @@ import {
 import { MissionType } from './mission.ts'
 import { ProbeLaunch, ProbeRead, ProbeReport } from './probes.ts'
 import { RetireHow } from './questions.ts'
+import { ModelRecommend, ProofWrite, TasksWrite } from './proofs.ts'
 import { SetupProposal } from './setup.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
@@ -467,9 +468,9 @@ const Version = (description: string) =>
 
 const SpecRead = Schema.Struct({
   section: Schema.optionalKey(
-    Schema.Literals([...SPEC_SECTIONS, 'requirements']).annotate({
+    Schema.Literals([...SPEC_SECTIONS, 'requirements', 'tasks']).annotate({
       description:
-        'Only this section (`why`, `goals`, `impact`, `requirements`, `decisions`, `risks`, `migration`, `open_questions`); the whole Spec without it.',
+        'Only this section (`why`, `goals`, `impact`, `requirements`, `decisions`, `risks`, `migration`, `open_questions`, `tasks`); the whole Spec without it.',
     }),
   ),
   cursor: Schema.optionalKey(Text('Where to resume, as the previous page gave it.')),
@@ -1102,6 +1103,34 @@ export const TOOLS = {
     input: ProbeReport,
     label: { label: 'Report', mark: 'probe-report', doing: 'Reporting what it found' },
   }),
+  proof_write: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ProofWrite,
+    label: { label: 'Write a proof', mark: 'proof-write', doing: 'Writing a proof' },
+  }),
+  tasks_write: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: TasksWrite,
+    label: { label: 'Write the tasks', mark: 'tasks-write', doing: 'Writing the tasks' },
+  }),
+  model_recommend: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ModelRecommend,
+    label: {
+      label: 'Recommend a model',
+      mark: 'model-recommend',
+      doing: 'Recommending a model for Building',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1162,6 +1191,9 @@ export const TOOL_NAMES = [
   'probe_launch',
   'probe_read',
   'probe_report',
+  'proof_write',
+  'tasks_write',
+  'model_recommend',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

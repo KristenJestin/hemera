@@ -394,6 +394,8 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('planning.setSpecLanguage', log),
       ),
+    'planning.tasks': (request) =>
+      engine['planning.tasks'](request).pipe(closedAs(gone), observed('planning.tasks', log)),
     'resources.list': (request) =>
       engine['resources.list'](request).pipe(closedAs(gone), observed('resources.list', log)),
     'resources.save': (request) =>

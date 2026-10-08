@@ -13,6 +13,17 @@ import { Schema } from 'effect'
 import { type LivingDrift, driftSaid } from './living-spec.ts'
 import { type MissionType, type Stage, isFrozen } from './mission.ts'
 import { type InputKind, inputAbout } from './questions.ts'
+import {
+  type ModelRecommendation,
+  type ProofSeen,
+  type SpecTaskText,
+  graphProblemSaid,
+  proofText,
+  recommendationText,
+  seenTodayRefusals,
+  taskGraph,
+  taskText,
+} from './proofs.ts'
 
 /** The seven prose sections, in their order; the requirements come after the impact. */
 export const SPEC_SECTIONS = [
@@ -67,6 +78,10 @@ export interface SpecScenarioText {
   readonly when: string
   readonly then: string
   readonly version: number
+  /** Its Proof block (#90), its support files by reference; null until written. */
+  readonly proof: ProofSeen | null
+  /** The version of its proof, what `proof_write` names as its base; 0 until written. */
+  readonly proofVersion: number
 }
 
 export interface SpecRequirementText {
@@ -94,6 +109,12 @@ export interface SpecText {
   readonly sections: ReadonlyArray<SpecSectionText>
   /** In their order, removed ones included. */
   readonly requirements: ReadonlyArray<SpecRequirementText>
+  /** The task graph for the Builder (#90), in its order. */
+  readonly tasks: ReadonlyArray<SpecTaskText>
+  /** The version of the task graph, what `tasks_write` names as its base; 0 until written. */
+  readonly tasksVersion: number
+  /** The Planner's recommended model for Building (#90), once it gave one. */
+  readonly recommendation: ModelRecommendation | null
 }
 
 /** Where a write would land: the mission's stage, whether its Spec is frozen, the writer's role. */
@@ -158,6 +179,11 @@ export interface CompletenessContext {
   readonly openQuestions: ReadonlyArray<{ readonly id: string; readonly state: 'open' | 'waiting' }>
   /** The deltas whose living requirement changed after they were written (#93). */
   readonly livingChanged: ReadonlyArray<LivingDrift>
+  /**
+   * What does not hold at each repository's base commit (#90): an insertion form of a proof, a
+   * task's target. Git reads it; the Spec alone cannot.
+   */
+  readonly atBase: ReadonlyArray<CompletenessFailure>
 }
 
 const blank = (text: string): boolean => text.trim() === ''
@@ -238,7 +264,67 @@ export function completeness(
           : `${question.id} waits on someone: a complete Spec has no open question.`,
     })
   }
+  failures.push(...planFailures(spec, live), ...context.atBase)
+  if (spec.recommendation === null) {
+    failures.push({
+      target: 'model',
+      sentence: 'No model is recommended for Building: give one with model_recommend.',
+    })
+  }
   return failures
+}
+
+/** What a scenario's proof lacks (#90), each said with the scenario. */
+const proofFailures = (scenario: SpecScenarioText): ReadonlyArray<CompletenessFailure> => {
+  const { id, proof } = scenario
+  const failure = (sentence: string) => ({ target: id, sentence })
+  if (proof === null) return [failure(`${id} has no proof: write it with proof_write.`)]
+  const failures: CompletenessFailure[] = []
+  if (proof.actions.length === 0) failures.push(failure(`${id}’s proof has no action.`))
+  if (blank(proof.starting_data)) {
+    failures.push(
+      failure(`${id}’s proof has no starting data: write "None." when it starts from nothing.`),
+    )
+  }
+  if (blank(proof.expected)) failures.push(failure(`${id}’s proof has no expected result.`))
+  if (proof.mode === 'automated' && proof.test === undefined && proof.command === undefined) {
+    failures.push(failure(`${id}’s proof has neither a test nor a command.`))
+  }
+  for (const refusal of seenTodayRefusals(proof))
+    failures.push(failure(`${id}’s proof: ${refusal}`))
+  return failures
+}
+
+/**
+ * The proofs and the tasks (#90): every live scenario has a proof whole, every scenario is covered
+ * by a task and every task covers one, and the graph has no cycle nor reference to nothing.
+ */
+const planFailures = (
+  spec: SpecText,
+  live: ReadonlyArray<SpecRequirementText>,
+): ReadonlyArray<CompletenessFailure> => {
+  const scenarios = live.flatMap((requirement) => requirement.scenarios)
+  const covered = new Set(spec.tasks.flatMap((task) => task.scenarios))
+  const liveScenarios = new Set(scenarios.map((scenario) => scenario.id))
+  return [
+    ...scenarios.flatMap(proofFailures),
+    ...scenarios
+      .filter((scenario) => !covered.has(scenario.id))
+      .map((scenario) => ({
+        target: scenario.id,
+        sentence: `${scenario.id} is covered by no task.`,
+      })),
+    ...spec.tasks
+      .filter((task) => !task.scenarios.some((id) => liveScenarios.has(id)))
+      .map((task) => ({
+        target: task.id,
+        sentence: `${task.id} (${task.title}) covers no scenario.`,
+      })),
+    ...taskGraph(spec.tasks, {
+      requirements: new Set(live.map((requirement) => requirement.id)),
+      scenarios: liveScenarios,
+    }).map((problem) => ({ target: 'tasks', sentence: graphProblemSaid(problem) })),
+  ]
 }
 
 /** A requirement's heading: its id, its delta, its domain, and the living requirement it changes. */
@@ -265,9 +351,22 @@ const requirementsText = (spec: SpecText, versions: boolean): string => {
         '',
         requirement.text,
         '',
-        ...requirement.scenarios.map(
-          (scenario) =>
+        ...requirement.scenarios.map((scenario) =>
+          [
             `- ${scenario.id}${versions ? ` (version ${String(scenario.version)})` : ''}: WHEN ${scenario.when} THEN ${scenario.then}`,
+            ...(scenario.proof === null
+              ? versions
+                ? ['  - Proof: none yet (version 0)']
+                : []
+              : [
+                  versions
+                    ? proofText(scenario.proof).replace(
+                        /^ {2}- Proof: [^\n]*/,
+                        (line) => `${line} (version ${String(scenario.proofVersion)})`,
+                      )
+                    : proofText(scenario.proof),
+                ]),
+          ].join('\n'),
         ),
       ].join('\n'),
     )
@@ -302,14 +401,27 @@ export function renderSpecMarkdown(
     if (name === REQUIREMENTS_AFTER)
       parts.push(`## Requirements\n\n${requirementsText(spec, versions)}`)
   }
+  parts.push(tasksPart(spec, versions), modelPart(spec))
   return `${parts.join('\n\n')}\n`
 }
 
+/** The task graph as the file writes it (#90). */
+const tasksPart = (spec: SpecText, versions: boolean): string =>
+  `## Tasks${versions ? ` (version ${String(spec.tasksVersion)})` : ''}\n\n${spec.tasks.length === 0 ? '_Not written yet._' : spec.tasks.map(taskText).join('\n')}`
+
+/** The recommended model for Building as the file writes it (#90). */
+const modelPart = (spec: SpecText): string =>
+  `## Model for Building\n\n${spec.recommendation === null ? '_Not given yet._' : recommendationText(spec.recommendation)}`
+
 /** One part of the Spec as Markdown, with every item's version: what `spec_read` gives of it. */
-export const specPartMarkdown = (spec: SpecText, part: SpecSectionName | 'requirements'): string =>
-  part === 'requirements'
-    ? `## Requirements\n\n${requirementsText(spec, true)}\n`
-    : `${sectionText(spec, part, true)}\n`
+export const specPartMarkdown = (
+  spec: SpecText,
+  part: SpecSectionName | 'requirements' | 'tasks',
+): string => {
+  if (part === 'requirements') return `## Requirements\n\n${requirementsText(spec, true)}\n`
+  if (part === 'tasks') return `${tasksPart(spec, true)}\n`
+  return `${sectionText(spec, part, true)}\n`
+}
 
 /** A language tag in its canonical BCP 47 spelling (`en-GB`), or null when it is not one. */
 export function canonicalLanguage(tag: string): string | null {

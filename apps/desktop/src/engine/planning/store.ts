@@ -69,6 +69,7 @@ import { SpecLanguage } from '../sessions/ports.ts'
 import type { SessionOwner } from '../sessions/roles.ts'
 import { SpecBoard, type Wrote } from './board.ts'
 import { pendingIn, receiveInput } from './inputs.ts'
+import { atBaseFailures, planIn } from './plan.ts'
 
 /** The file a mission's Spec is readable in, in its Memory's folder. */
 export const SPEC_FILE = 'spec.md'
@@ -173,6 +174,7 @@ const specRowOf = (transaction: EngineTransaction, mission: MissionRow) =>
       nextRequirement: 1,
       describedAt: null,
       updatedAt: mission.updatedAt,
+      tasksVersion: 0,
     } satisfies typeof specs.$inferSelect
   })
 
@@ -228,6 +230,7 @@ export const specIn = (
       const living = yield* livingStandingIn(transaction, mission.projectId, row.livingRef)
       if (living?.state === 'proposed') proposed.add(row.id)
     }
+    const plan = yield* planIn(transaction, missionId)
     return {
       missionId,
       key: missionKey(mission.keyPrefix, mission.keyNumber),
@@ -268,9 +271,14 @@ export const specIn = (
             when: scenario.whenText,
             then: scenario.thenText,
             version: scenario.version,
+            proof: plan.proofs.get(scenario.id)?.proof ?? null,
+            proofVersion: plan.proofs.get(scenario.id)?.version ?? 0,
           })),
       })),
       triage: triageOf(mission),
+      tasks: plan.tasks,
+      tasksVersion: spec.tasksVersion,
+      recommendation: plan.recommendation,
     } satisfies Spec
   })
 
@@ -321,7 +329,7 @@ export const standingOf = (transaction: EngineTransaction, writer: SpecWriter) =
   })
 
 /** The next Spec version, and the change rows it leaves. */
-const bump = (
+export const bump = (
   transaction: EngineTransaction,
   writer: SpecWriter,
   version: number,
@@ -355,7 +363,7 @@ const bump = (
  * What a write tells after its commit: the file, the board, and the turn's line. The write has
  * committed: a file that cannot be written is said in the diagnostic log, never to the agent.
  */
-const afterWrite = (writer: SpecWriter, items: ReadonlyArray<Wrote>) =>
+export const afterWrite = (writer: SpecWriter, items: ReadonlyArray<Wrote>) =>
   Effect.gen(function* () {
     const board = yield* SpecBoard
     yield* writeSpecFile(writer.missionId).pipe(
@@ -892,6 +900,9 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const said = secrets.mask(why.trim())
+    // Git is read outside the transaction: each repository's base fetched once (#90), and what
+    // the proofs insert and the tasks target checked there, for the Spec at the version read.
+    const atBase = yield* atBaseFailures(writer.missionId, true)
     const outcome = yield* mutate('declaring the Spec complete', (transaction) =>
       Effect.gen(function* () {
         const standing = yield* standingOf(transaction, writer)
@@ -900,11 +911,20 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
         }
         const spec = yield* specIn(transaction, writer.missionId)
         const livingChanged = yield* driftIn(transaction, standing.mission.projectId, spec)
+        if (spec.version !== atBase.version) {
+          return {
+            result: refused<Declaration>(
+              'refused: the Spec changed while Hemera checked it at the base commit: declare again.',
+            ),
+            events: [],
+          }
+        }
         const failures = completeness(spec, {
           described: standing.spec.describedAt !== null,
           triagePending: spec.triage?.state === 'pending',
           ...(yield* pendingIn(transaction, writer.missionId)),
           livingChanged,
+          atBase: atBase.failures,
         })
         if (failures.length > 0) {
           return {

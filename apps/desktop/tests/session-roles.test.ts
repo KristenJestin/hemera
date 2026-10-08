@@ -59,6 +59,9 @@ describe('The role registry', () => {
         'input_integrated',
         'probe_launch',
         'probe_report',
+        'proof_write',
+        'tasks_write',
+        'model_recommend',
       ].sort(),
     )
   })

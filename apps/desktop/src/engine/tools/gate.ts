@@ -92,6 +92,9 @@ import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
+import type { AgentOffers } from '../planning/offers.ts'
+import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
+import type { RepositoryStatuses } from '../repositories.ts'
 import {
   askWaveTool,
   declareCompleteTool,
@@ -189,6 +192,8 @@ export type GateServices =
   | Git
   | ProfileHome
   | ProbeDesk
+  | AgentOffers
+  | RepositoryStatuses
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -292,6 +297,12 @@ const decodeCall = (
       return decoder(tool, TOOLS.probe_read.input)(raw)
     case 'probe_report':
       return decoder(tool, TOOLS.probe_report.input)(raw)
+    case 'proof_write':
+      return decoder(tool, TOOLS.proof_write.input)(raw)
+    case 'tasks_write':
+      return decoder(tool, TOOLS.tasks_write.input)(raw)
+    case 'model_recommend':
+      return decoder(tool, TOOLS.model_recommend.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -681,6 +692,12 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* ProbeDesk.use((desk) => desk.read(grant, call.args))
             case 'probe_report':
               return yield* ProbeDesk.use((desk) => desk.report(grant, call.args))
+            case 'proof_write':
+              return yield* proofWrite(grant, call.args)
+            case 'tasks_write':
+              return yield* tasksWrite(grant, call.args)
+            case 'model_recommend':
+              return yield* modelRecommend(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

@@ -93,6 +93,7 @@ import {
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
+import { taskGraphOf } from './planning/plan.ts'
 import {
   changesSince,
   markRead,
@@ -520,6 +521,9 @@ export const engineHandlers = (
       follow(
         Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
       ).pipe(observedStream('livingSpec.changed', log)),
+    // The task graph of a Spec, with its coverage (#90).
+    'planning.tasks': ({ missionId }) =>
+      use(taskGraphOf(missionId)).pipe(observed('planning.tasks', log)),
     // The Probes of a mission in Planning (#89), as their LiveChips show them; no stop.
     'probes.list': ({ missionId }) => use(listProbes(missionId)).pipe(observed('probes.list', log)),
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),

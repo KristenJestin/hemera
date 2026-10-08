@@ -103,9 +103,38 @@ const spec = (): SpecText => ({
       text: 'Invoices export as CSV.',
       version: 1,
       removed: false,
-      scenarios: [{ id: 'R1.S1', when: 'the user exports', then: 'a CSV is saved', version: 1 }],
+      scenarios: [
+        {
+          id: 'R1.S1',
+          when: 'the user exports',
+          then: 'a CSV is saved',
+          version: 1,
+          // Proven, covered by a task and with a model (#90): only the living drift is left to find.
+          proof: {
+            mode: 'by_hand',
+            actions: ['Export the invoices'],
+            starting_data: 'None.',
+            expected: 'A CSV is saved.',
+            seen_today: false,
+          },
+          proofVersion: 1,
+        },
+      ],
     },
   ],
+  tasks: [
+    {
+      id: 'T1',
+      title: 'Export',
+      result: 'Invoices export as CSV.',
+      requirements: ['R1'],
+      scenarios: ['R1.S1'],
+      targets: [],
+      dependsOn: [],
+    },
+  ],
+  tasksVersion: 1,
+  recommendation: { agent: 'claude', model: 'large', effort: null, reason: 'Small.' },
 })
 
 describe('Completeness refuses a delta whose living requirement changed after it was written', () => {
@@ -115,6 +144,7 @@ describe('Completeness refuses a delta whose living requirement changed after it
       triagePending: false,
       pendingInputs: [],
       openQuestions: [],
+      atBase: [],
       livingChanged: [
         { requirement: 'R1', livingRef: 'LR3', recorded: 1, current: 2 },
         { requirement: 'R2', livingRef: 'LR4', recorded: 3, current: null },
@@ -142,6 +172,7 @@ describe('Completeness refuses a delta whose living requirement changed after it
         pendingInputs: [],
         openQuestions: [],
         livingChanged: [],
+        atBase: [],
       }),
     ).toEqual([])
   })

@@ -17,6 +17,10 @@ export type Wrote =
   | { readonly kind: 'section'; readonly name: SpecSectionName }
   | { readonly kind: 'added' | 'changed' | 'removed'; readonly id: string }
   | { readonly kind: 'described' }
+  /** #90: a scenario's proof, the task graph, the recommended model. */
+  | { readonly kind: 'proof'; readonly id: string }
+  | { readonly kind: 'tasks' }
+  | { readonly kind: 'model' }
 
 /** A declaration Hemera's check passed: `first` when none was recorded before in this Planning. */
 export interface Declared {
@@ -147,7 +151,7 @@ export function draftedSaid(items: ReadonlyArray<Wrote>): string {
       items.flatMap((item) => {
         if (item.kind !== kind) return []
         if (item.kind === 'section') return [SECTION_TITLES[item.name]]
-        return item.kind === 'described' ? [] : [item.id]
+        return 'id' in item ? [item.id] : []
       }),
     ),
   ]
@@ -161,6 +165,9 @@ export function draftedSaid(items: ReadonlyArray<Wrote>): string {
     changed.length === 0 ? null : `changed ${runsOf(changed)}`,
     removed.length === 0 ? null : `removed ${runsOf(removed)}`,
     items.some((item) => item.kind === 'described') ? 'named the mission' : null,
+    once('proof').length === 0 ? null : `wrote the proof of ${once('proof').join(', ')}`,
+    items.some((item) => item.kind === 'tasks') ? 'wrote the tasks' : null,
+    items.some((item) => item.kind === 'model') ? 'recommended a model' : null,
   ]
     .filter((part) => part !== null)
     .join('; ')

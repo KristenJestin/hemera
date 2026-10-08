@@ -1547,11 +1547,13 @@ describe('The Spec is a delta against the living spec', () => {
         }),
       ),
     )
-    expect(answersOf(world.agents[0]).at(-1)).toBe(
-      [
-        'refused: the Spec is not complete, and nothing was recorded. Fix each of these, then declare again:',
-        '- R1: R1 was written against LR1 at version 1, which is now at version 2: read it again with living_spec_read and write R1 on it.',
-      ].join('\n'),
+    // Beside what #90 asks of a complete Spec (proofs, tasks, a model), the drift is named.
+    const refused = answersOf(world.agents[0]).at(-1) ?? ''
+    expect(refused).toMatch(
+      /^refused: the Spec is not complete, and nothing was recorded\. Fix each of these, then declare again:\n/,
+    )
+    expect(refused.split('\n')).toContain(
+      '- R1: R1 was written against LR1 at version 1, which is now at version 2: read it again with living_spec_read and write R1 on it.',
     )
     expect(seen.spec.declaredCompleteVersion).toBeNull()
   })

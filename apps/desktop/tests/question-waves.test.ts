@@ -1046,6 +1046,38 @@ describe('Completeness waits for every input and every question', () => {
       text: 'Invoices export as CSV.',
       scenarios: [{ when: 'the user exports the invoices', then: 'a CSV file is saved' }],
     })
+    // What #90 asks of a complete Spec beside the inputs and questions: a proof, a task, a model.
+    const PLAN = [
+      uses('toolu_proof', 'proof_write', {
+        scenario: 'R1.S1',
+        proof: {
+          mode: 'by_hand',
+          actions: ['Export the invoices', 'Open the saved file'],
+          starting_data: 'Two invoices.',
+          expected: 'A CSV file holds both invoices.',
+          seen_today: false,
+        },
+        base_version: 0,
+      }),
+      uses('toolu_tasks', 'tasks_write', {
+        tasks: [
+          {
+            title: 'Export as CSV',
+            result: 'The invoices export as CSV.',
+            requirements: ['R1'],
+            scenarios: ['R1.S1'],
+            targets: [],
+            depends_on: [],
+          },
+        ],
+        base_version: 0,
+      }),
+      uses('toolu_model', 'model_recommend', {
+        agent: 'claude',
+        model: 'large',
+        reason: 'One export: a small change.',
+      }),
+    ]
     const declare = (id: string) => uses(id, 'declare_complete', { why: 'A Builder can build it.' })
     const { world, run } = planning(() => ({
       turns: [
@@ -1053,6 +1085,7 @@ describe('Completeness waits for every input and every question', () => {
           ...ALL_SECTIONS,
           R1,
           uses('toolu_describe', 'mission_describe', { title: 'Invoices as CSV', type: 'feature' }),
+          ...PLAN,
           wave('toolu_wave', SEPARATOR, WHICH),
           declare('toolu_declare_1'),
         ],
@@ -1102,6 +1135,9 @@ describe('Completeness waits for every input and every question', () => {
       ...ALL_SECTIONS.map((_, index) => `s${String(index)}`),
       'r1',
       'describe',
+      'proof',
+      'tasks',
+      'model',
       'wave',
       'declare_1',
       'declare_2',
@@ -1115,6 +1151,7 @@ describe('Completeness waits for every input and every question', () => {
     ]
     const at = (id: string) => answers[ids.indexOf(id)]
     expect(answers).toHaveLength(ids.length)
+    for (const id of ['proof', 'tasks', 'model']) expect(at(id)).not.toMatch(/^refused/)
     expect(at('declare_1')?.split('\n').slice(1)).toEqual([
       "- Q1: Q1 is open: it waits for the user's answer.",
       "- Q2: Q2 is open: it waits for the user's answer.",

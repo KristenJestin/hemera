@@ -79,6 +79,11 @@ describe('Every table and file of history or diagnostics has its class', () => {
     expect(FILE_CLASSES[DIAGNOSTIC_FILE]).toBe('diagnostic')
     expect(FILE_CLASSES[TRACES_FOLDER]).toBe('diagnostic')
   })
+
+  test('the large pieces of a mission are heavy: its evidence, its Probes’ contents, its proofs’ files', () => {
+    const { memory_evidence, probe_contents, spec_proofs } = TABLE_CLASSES
+    expect([memory_evidence, probe_contents, spec_proofs]).toEqual(['heavy', 'heavy', 'heavy'])
+  })
 })
 
 describe('Only the diagnostic sink writes into the diagnostic class', () => {
