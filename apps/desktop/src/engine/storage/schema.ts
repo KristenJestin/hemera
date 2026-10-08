@@ -1775,3 +1775,17 @@ export const missionTickets = sqliteTable('mission_tickets', {
   lastVersionId: text('last_version_id').references(() => ticketVersions.id),
   linkedAt: text('linked_at').notNull(),
 })
+
+/**
+ * The Jira API token of a Jira provider (#96), sealed by the operating system's keyring in main:
+ * only its ciphertext is kept here, never the token. `refused_at` is set when Jira refused the
+ * token and cleared when another is saved. Removing the provider removes it.
+ */
+export const jiraTokens = sqliteTable('jira_tokens', {
+  providerId: text('provider_id')
+    .primaryKey()
+    .references(() => ticketProviders.id, { onDelete: 'cascade' }),
+  ciphertext: text('ciphertext').notNull(),
+  refusedAt: text('refused_at'),
+  savedAt: text('saved_at').notNull(),
+})

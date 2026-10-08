@@ -11,12 +11,14 @@
 
 import {
   AgentsPortHandover,
+  closedAs,
   EngineMainRpcs,
   EngineStart,
   fromMessagePortMain,
   HostRpcs,
   makeClientProtocol,
   makeServerProtocol,
+  TokenUnreadable,
 } from '@hemera/ipc'
 import { Effect, Option, Schema } from 'effect'
 import type { Scope } from 'effect'
@@ -33,8 +35,18 @@ import { startProfile } from './profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from './registries.ts'
 import { secretsRegistry, type SecretsRegistry } from './secrets.ts'
 import { engineHandlers } from './serve.ts'
+import type { Fetch } from './tickets/jira-link.ts'
 
 const readStart = Schema.decodeUnknownOption(Schema.toCodecJson(EngineStart))
+
+/**
+ * Electron's `net.fetch`, as this utility process has it: loaded at the first Jira call, so that an
+ * engine whose Electron lacks it still starts, and that call fails with the reason.
+ */
+const chromiumFetch: Fetch = async (url, init) => {
+  const { net } = await import('electron/utility')
+  return net.fetch(url, init)
+}
 const readHandover = Schema.decodeUnknownOption(AgentsPortHandover)
 
 const serveOn = (port: MessagePortMain) =>
@@ -85,6 +97,14 @@ const engine = (
         backupFolders: BACKUP_FOLDERS,
         reconciliationSteps: RECONCILIATION_STEPS,
         secrets,
+        // A Jira call goes through Chromium's network; its token is opened by main at call time.
+        jira: {
+          fetch: chromiumFetch,
+          open: (ciphertext) =>
+            host['jiraToken.open']({ ciphertext }).pipe(
+              closedAs(() => new TokenUnreadable({ reason: 'main does not answer' })),
+            ),
+        },
         sessions: {
           ...(suite?.sessions ?? { starter: agentStarterLayer(launch) }),
           // A new mission starts its Planner on its own (#85); under the suite (its probe handed

@@ -1,5 +1,6 @@
 /**
- * Main as the launcher of the agents' processes, and as nothing else.
+ * Main as the launcher of the agents' processes, and as the opener of a Jira token the engine
+ * holds sealed (#96, `jira-token.ts`): the two things the engine asks of main.
  *
  * The engine starts every agent, but a packaged Hemera has no Node to run a program with:
  * `process.execPath` is Electron and the `runAsNode` fuse is off. `utilityProcess.fork` runs a
@@ -11,7 +12,14 @@
  * Electron is reached through `Launcher`, so the launch itself is tested without it.
  */
 
-import { Exited, HostRpcs, LaunchFailed, Started, type LaunchEvent } from '@hemera/ipc'
+import {
+  Exited,
+  HostRpcs,
+  LaunchFailed,
+  Started,
+  type LaunchEvent,
+  type TokenUnreadable,
+} from '@hemera/ipc'
 import { Effect, Queue, Stream } from 'effect'
 
 import type { Log } from './diagnostic.ts'
@@ -39,9 +47,17 @@ export interface Launcher<P> {
   readonly handOver: (launch: number, port: P) => void
 }
 
-/** The answer to `agents.launch`: the launch's events, for as long as its process runs. */
-export const launchHandlers = <P>(launcher: Launcher<P>, log: Log) =>
+/**
+ * The answer to `agents.launch`: the launch's events, for as long as its process runs; and to
+ * `jiraToken.open`, the token a ciphertext seals.
+ */
+export const launchHandlers = <P>(
+  launcher: Launcher<P>,
+  log: Log,
+  openToken: (ciphertext: string) => Effect.Effect<string, TokenUnreadable>,
+) =>
   HostRpcs.toLayer({
+    'jiraToken.open': ({ ciphertext }) => openToken(ciphertext),
     'agents.launch': ({ launch, program, args, environment }) =>
       Stream.callback<LaunchEvent, LaunchFailed>((events) =>
         Effect.gen(function* () {

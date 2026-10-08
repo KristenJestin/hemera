@@ -15,6 +15,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { TokenUnreadable } from './tickets.ts'
+
 /** Main could not start the agents' process at all. */
 export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()('LaunchFailed', {
   reason: Schema.String,
@@ -54,13 +56,22 @@ export const AgentsLaunch = Schema.Struct({
 })
 export type AgentsLaunch = typeof AgentsLaunch.Type
 
-/** Served by main to the engine. The stream ends with the process. */
+/**
+ * Served by main to the engine. The launch's stream ends with the process. A Jira token is opened
+ * here at call time (#96): main alone decrypts what it sealed, and the engine holds the token for
+ * that call only.
+ */
 export const HostRpcs = RpcGroup.make(
   Rpc.make('agents.launch', {
     payload: AgentsLaunch,
     success: LaunchEvent,
     error: LaunchFailed,
     stream: true,
+  }),
+  Rpc.make('jiraToken.open', {
+    payload: { ciphertext: Schema.String },
+    success: Schema.String,
+    error: TokenUnreadable,
   }),
 )
 

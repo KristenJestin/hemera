@@ -1,5 +1,6 @@
 /**
- * A Project's ticket providers and its Spec mode, as the data folder keeps them (#95).
+ * A Project's ticket providers and its Spec mode, as the data folder keeps them (#95, and Jira's
+ * in #96).
  *
  * A provider is recorded only from the user's choice: what is proposed (the repositories whose
  * remote points to the host) is never written by itself. A provider a live mission's ticket comes
@@ -12,6 +13,8 @@ import { LIVE_STAGES, type SpecMode, missionKey } from '@hemera/core/domain'
 import {
   type GithubProviderConfig,
   InvalidProviderConfig,
+  type JiraProviderConfig,
+  JiraProviderConfig as JiraConfigSchema,
   ProviderInUse,
   type TicketProviderInfo,
   type TicketsSettings,
@@ -29,27 +32,43 @@ import { Database, type EngineTransaction, refusedWhile } from '../storage/datab
 import { missionTickets, missions, projects, ticketProviders } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { GithubConfig } from './github.ts'
+import { secureJiraSite } from './jira-link.ts'
 
 const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/
 
 const readConfig = Schema.decodeUnknownOption(Schema.fromJsonString(GithubConfig))
+const readJiraConfig = Schema.decodeUnknownOption(Schema.fromJsonString(JiraConfigSchema))
 
 type ProviderRow = typeof ticketProviders.$inferSelect
 
 const infoOf = (row: ProviderRow): TicketProviderInfo => {
+  const base = {
+    id: row.id,
+    projectId: row.projectId,
+    unreachableSince: row.unreachableSince,
+    createdAt: row.createdAt,
+  }
+  if (row.kind === 'jira') {
+    const jira = Option.getOrNull(readJiraConfig(row.configuration))
+    return {
+      ...base,
+      kind: 'jira',
+      host: jira === null ? '' : (URL.parse(jira.site)?.host ?? ''),
+      repositories: [],
+      jira,
+    }
+  }
   const config = Option.getOrElse(readConfig(row.configuration), () => ({
     host: '',
     repositories: [],
   }))
   return {
-    id: row.id,
-    projectId: row.projectId,
+    ...base,
     kind: 'github',
     host: config.host,
     repositories: config.repositories,
-    unreachableSince: row.unreachableSince,
-    createdAt: row.createdAt,
+    jira: null,
   }
 }
 
@@ -68,6 +87,39 @@ const checkedGithub = (config: GithubProviderConfig) =>
       return yield* new InvalidProviderConfig({ reason: `${wrong} is not an owner/repo name` })
     }
     return { host, repositories }
+  })
+
+const JIRA_KEY = /^[A-Z][A-Z0-9]{1,9}$/
+
+/**
+ * A Jira configuration as it is kept: the site without its trailing slash, over https (plain http
+ * only to this machine), the email on Cloud only, the project keys in capitals, once each.
+ */
+const checkedJira = (config: JiraProviderConfig) =>
+  Effect.gen(function* () {
+    const url = secureJiraSite(config.site)
+    if (url === null) {
+      return yield* new InvalidProviderConfig({
+        reason: `${config.site} is not the https address of a Jira site`,
+      })
+    }
+    const email = config.email?.trim() ?? ''
+    if (config.deployment === 'cloud' && !email.includes('@')) {
+      return yield* new InvalidProviderConfig({
+        reason: 'Jira Cloud needs the email of the account the token belongs to',
+      })
+    }
+    const projectKeys = [...new Set(config.projectKeys.map((key) => key.trim().toUpperCase()))]
+    const wrong = projectKeys.find((key) => !JIRA_KEY.test(key))
+    if (wrong !== undefined) {
+      return yield* new InvalidProviderConfig({ reason: `${wrong} is not a Jira project key` })
+    }
+    return {
+      site: `${url.origin}${url.pathname.replace(/\/+$/, '')}`,
+      deployment: config.deployment,
+      email: config.deployment === 'cloud' ? email : null,
+      projectKeys,
+    } satisfies JiraProviderConfig
   })
 
 const providerEvent = (
@@ -164,6 +216,43 @@ export const addGithub = (projectId: string, config: GithubProviderConfig) =>
     )
   })
 
+/** Adds a Jira provider to a Project: its site and project keys; its token is saved apart. */
+export const addJira = (projectId: string, config: JiraProviderConfig) =>
+  Effect.gen(function* () {
+    const project = yield* getProject(projectId)
+    const checked = yield* checkedJira(config)
+    const row: ProviderRow = {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      kind: 'jira',
+      configuration: JSON.stringify(checked),
+      unreachableSince: null,
+      limitedUntil: null,
+      createdAt: new Date().toISOString(),
+    }
+    const info = infoOf(row)
+    return yield* mutate('adding a ticket provider', (transaction) =>
+      Effect.gen(function* () {
+        yield* hostFree(transaction, project.id, info.host, null)
+        yield* transaction
+          .insert(ticketProviders)
+          .values(row)
+          .pipe(Effect.mapError(refusedWhile('writing the ticket provider')))
+        return {
+          result: info,
+          events: [
+            providerEvent('tickets.provider_added', row, {
+              kind: 'jira',
+              site: checked.site,
+              deployment: checked.deployment,
+              projectKeys: checked.projectKeys,
+            }),
+          ],
+        }
+      }),
+    )
+  })
+
 /** Changes a GitHub provider's host or repositories. */
 export const updateProvider = (id: string, config: GithubProviderConfig) =>
   Effect.gen(function* () {
@@ -171,11 +260,14 @@ export const updateProvider = (id: string, config: GithubProviderConfig) =>
     return yield* mutate('changing a ticket provider', (transaction) =>
       Effect.gen(function* () {
         const [before] = yield* transaction
-          .select({ projectId: ticketProviders.projectId })
+          .select({ projectId: ticketProviders.projectId, kind: ticketProviders.kind })
           .from(ticketProviders)
           .where(eq(ticketProviders.id, id))
           .pipe(Effect.mapError(refusedWhile('reading the ticket providers')))
         if (before === undefined) return yield* new UnknownTicketProvider({ id })
+        if (before.kind !== 'github') {
+          return yield* new InvalidProviderConfig({ reason: 'this is not a GitHub provider' })
+        }
         yield* hostFree(transaction, before.projectId, checked.host, id)
         const [row] = yield* transaction
           .update(ticketProviders)

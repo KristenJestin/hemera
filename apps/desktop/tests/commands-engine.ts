@@ -52,6 +52,7 @@ export function commandsEngine(
     | 'tickets'
     | 'probes'
     | 'gh'
+    | 'jira'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {

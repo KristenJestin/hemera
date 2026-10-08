@@ -123,6 +123,7 @@ import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
+import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
 import { ticketSearchLayer } from './tickets/search.ts'
 import { type SpecBoard, specBoardLayer } from './planning/board.ts'
 import { PLANNING_MAPPERS } from './planning/journal.ts'
@@ -210,6 +211,11 @@ export interface ProfileParts {
   }
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /**
+   * The network a Jira call goes through, its limit, and how a sealed token is opened (#96):
+   * Node's `fetch`, 30 seconds and no opener otherwise.
+   */
+  readonly jira?: JiraSettings | undefined
 }
 
 /** What the role sessions are built with; this version's defaults otherwise. */
@@ -274,6 +280,7 @@ export type EngineServices =
   | TesterFindings
   | TicketSearch
   | GhCli
+  | JiraLink
   | PlannerWake
   | SpecBoard
   | ExclusiveResources
@@ -505,6 +512,7 @@ export const startProfile = (
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
       Layer.provideMerge(ghCliLayer(parts.gh)),
+      Layer.provideMerge(jiraLinkLayer(parts.jira)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(

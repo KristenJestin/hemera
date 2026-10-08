@@ -114,6 +114,7 @@ export const TABLE_CLASSES = {
   ticket_providers: 'state',
   ticket_versions: 'permanent',
   mission_tickets: 'permanent',
+  jira_tokens: 'state',
 } as const satisfies Record<string, RetentionClass>
 
 /**

@@ -121,6 +121,7 @@ import { discussionProposeDecision, discussionReply } from '../planning/discussi
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import type { GhCli } from '../tickets/gh.ts'
+import type { JiraLink } from '../tickets/jira-link.ts'
 import { ticketRead } from '../tickets/tool.ts'
 import { resolvePath } from './paths.ts'
 import {
@@ -199,6 +200,7 @@ export type GateServices =
   | AgentOffers
   | RepositoryStatuses
   | GhCli
+  | JiraLink
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
