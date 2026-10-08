@@ -134,10 +134,8 @@ jobs:
       - working-directory: source
         run: pnpm build
 
-      # The suites that need a window are not run here: a runner has no display server and no
-      # GPU, and what is proved about a window is proved on a real target with
-      # `pnpm --filter @hemera/desktop e2e:headless`. The stories run headless, which is a page
-      # and not a window.
+      # The suites that need a window run in the `e2e` job below. The stories run headless,
+      # which is a page and not a window.
       #
       # The step is capped: a suite that hangs fails this in twenty minutes rather than in the
       # fifty a Windows job once sat for, and the suites' own timeouts catch what really stalls.
@@ -161,3 +159,40 @@ jobs:
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project storybook-light --project storybook-dark
+
+  # The end-to-end suite, which drives the built application's window. A runner has no display,
+  # so the window opens in a virtual X server (`xvfb-run`); the run needs no compositor of its
+  # own there (`e2e/compositor.ts` starts none in CI). Ubuntu forbids the unprivileged user
+  # namespaces Chromium's sandbox needs unless AppArmor is told otherwise.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        working-directory: source
+        run: corepack enable
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+      - working-directory: source
+        run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: source/apps/desktop
+        run: pnpm exec install-electron
+      - name: Let Chromium's sandbox create its namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install the virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - working-directory: source
+        run: pnpm build
+      - name: Run the end-to-end suite
+        working-directory: source
+        timeout-minutes: 30
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1366x768x24' pnpm --filter @hemera/desktop e2e:headless
