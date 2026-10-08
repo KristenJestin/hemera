@@ -426,6 +426,48 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       ),
     'planning.inputs': (request) =>
       engine['planning.inputs'](request).pipe(closedAs(gone), observed('planning.inputs', log)),
+    'livingSpec.domains': (request) =>
+      engine['livingSpec.domains'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.domains', log),
+      ),
+    'livingSpec.requirements': (request) =>
+      engine['livingSpec.requirements'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.requirements', log),
+      ),
+    'livingSpec.requirement': (request) =>
+      engine['livingSpec.requirement'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.requirement', log),
+      ),
+    'livingSpec.runs': (request) =>
+      engine['livingSpec.runs'](request).pipe(closedAs(gone), observed('livingSpec.runs', log)),
+    'livingSpec.validateDomain': (request) =>
+      engine['livingSpec.validateDomain'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.validateDomain', log),
+      ),
+    'livingSpec.rejectDomain': (request) =>
+      engine['livingSpec.rejectDomain'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.rejectDomain', log),
+      ),
+    'livingSpec.dropRequirement': (request) =>
+      engine['livingSpec.dropRequirement'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.dropRequirement', log),
+      ),
+    'livingSpec.bootstrap': (request) =>
+      engine['livingSpec.bootstrap'](request).pipe(
+        closedAs(gone),
+        observed('livingSpec.bootstrap', log),
+      ),
+    'livingSpec.changed': (request) =>
+      engine['livingSpec.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('livingSpec.changed', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

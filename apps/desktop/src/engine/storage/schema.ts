@@ -402,6 +402,10 @@ export const missions = sqliteTable(
     triageText: text('triage_text').$type<Masked<string>>(),
     triageState: text('triage_state'),
     triagedAt: text('triaged_at'),
+    /** Whether a `delivered` triage answer rests on a living requirement still proposed (#93). */
+    triageBasedOnProposed: integer('triage_based_on_proposed', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     stage: text('stage').notNull(),
     round: integer('round').notNull(),
     cleanup: text('cleanup'),
@@ -1168,6 +1172,125 @@ export const specVisions = sqliteTable(
     at: text('at').notNull(),
   },
   (table) => [index('spec_visions_by_mission').on(table.missionId, table.at)],
+)
+
+/**
+ * A domain of a Project's living spec (#93): its name as a user would say it (unique among the
+ * Project's domains that are not removed), a summary, what the agent was not sure of, and its
+ * state: `proposed` until the user validates it, again `proposed` while a re-run's proposals wait.
+ * A rejected domain is kept, removed, so its requirements' history stays readable.
+ */
+export const livingDomains = sqliteTable(
+  'living_domains',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    rank: integer('rank').notNull(),
+    name: text('name').$type<Masked<string>>().notNull(),
+    summary: text('summary').$type<Masked<string>>().notNull(),
+    uncertainty: text('uncertainty').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    validatedAt: text('validated_at'),
+    removedAt: text('removed_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('living_domains_by_project').on(table.projectId, table.rank)],
+)
+
+/**
+ * A requirement of a living spec: `LR1`, `LR2`… from `seq`, never reused (a removed one is kept);
+ * its text and scenarios (JSON `[{when, then}]`); its origin (no mission for the bootstrap, or the
+ * mission and its round, whose key is read from the mission); its state; what the agent was not
+ * sure of; its version, from 1, bumped by each change of text, scenarios or removal; and the change
+ * a re-run of its domain proposes on it (`replace` or `obsolete`) with the version it was proposed
+ * on, applied only at validation, and only on that version.
+ */
+export const livingRequirements = sqliteTable(
+  'living_requirements',
+  {
+    id: text('id').primaryKey(),
+    seq: integer('seq').notNull().unique(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    domainId: text('domain_id')
+      .notNull()
+      .references(() => livingDomains.id, { onDelete: 'cascade' }),
+    text: text('text').$type<Masked<string>>().notNull(),
+    scenarios: text('scenarios').$type<Masked<string>>().notNull(),
+    originMissionId: text('origin_mission_id'),
+    originRound: integer('origin_round'),
+    state: text('state').notNull(),
+    uncertainty: text('uncertainty').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull().default(false),
+    pendingKind: text('pending_kind'),
+    pendingVersion: integer('pending_version'),
+    pendingText: text('pending_text').$type<Masked<string>>(),
+    pendingScenarios: text('pending_scenarios').$type<Masked<string>>(),
+    pendingUncertainty: text('pending_uncertainty').$type<Masked<string>>(),
+    pendingReason: text('pending_reason').$type<Masked<string>>(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('living_requirements_by_domain').on(table.domainId, table.seq)],
+)
+
+/**
+ * One row per change of a living requirement: what happened, its version before (null when it was
+ * proposed) and after, its text and scenarios before and after, who (`bootstrap`, a mission and
+ * its round, or `user`), and when.
+ */
+export const livingHistory = sqliteTable(
+  'living_history',
+  {
+    sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+    requirementId: text('requirement_id')
+      .notNull()
+      .references(() => livingRequirements.id, { onDelete: 'cascade' }),
+    what: text('what').notNull(),
+    versionBefore: integer('version_before'),
+    versionAfter: integer('version_after').notNull(),
+    textBefore: text('text_before').$type<Masked<string>>(),
+    textAfter: text('text_after').$type<Masked<string>>(),
+    scenariosBefore: text('scenarios_before').$type<Masked<string>>(),
+    scenariosAfter: text('scenarios_after').$type<Masked<string>>(),
+    /** Why it was removed, for a removal. */
+    reason: text('reason').$type<Masked<string>>(),
+    byKind: text('by_kind').notNull(),
+    byMissionId: text('by_mission_id'),
+    byRound: integer('by_round'),
+    at: text('at').notNull(),
+  },
+  (table) => [index('living_history_by_requirement').on(table.requirementId, table.sequence)],
+)
+
+/**
+ * A bootstrap run of a living spec: its Project, its domain on a run on one domain (null for all),
+ * the session lineage that reads, its state as written (`running` until it ends; whether it waits
+ * for a slot is the cap's to say), why it ended, the commit of each repository's main checkout
+ * when it started (JSON `[{repository, commit}]`) and its summary once done.
+ */
+export const livingRuns = sqliteTable(
+  'living_runs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    domainId: text('domain_id').references(() => livingDomains.id, { onDelete: 'set null' }),
+    lineage: text('lineage').notNull().unique(),
+    state: text('state').notNull(),
+    stateReason: text('state_reason'),
+    commits: text('commits').notNull(),
+    summary: text('summary').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [index('living_runs_by_project').on(table.projectId, table.startedAt)],
 )
 
 /**

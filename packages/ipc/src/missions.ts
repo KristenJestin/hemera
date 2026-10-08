@@ -87,6 +87,8 @@ export const TriageAnswer = Schema.Struct({
   text: Schema.String,
   state: Schema.Literals(['pending', 'kept']),
   at: Schema.String,
+  /** A `delivered` answer that rests on a living requirement still proposed (#93): say so. */
+  basedOnProposed: Schema.Boolean,
 })
 export type TriageAnswer = typeof TriageAnswer.Type
 

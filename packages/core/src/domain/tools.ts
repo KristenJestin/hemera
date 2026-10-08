@@ -29,6 +29,7 @@ import {
 import { MissionType } from './mission.ts'
 import { RetireHow } from './questions.ts'
 import { SetupProposal } from './setup.ts'
+import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
 
@@ -44,6 +45,7 @@ export const ROLES = [
   'code-reviewer',
   'chat',
   'setup',
+  'living-spec',
 ] as const
 export const Role = Schema.Literals(ROLES)
 export type Role = typeof Role.Type
@@ -60,6 +62,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   'code-reviewer': 'the code reviewer',
   chat: 'the Chat',
   setup: 'the setup agent',
+  'living-spec': 'the living spec agent',
 }
 
 /** The kinds of place a role works in. */
@@ -89,6 +92,7 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   'code-reviewer': { kind: 'workspace', readOnly: true },
   chat: { kind: 'main-checkout', readOnly: false },
   setup: { kind: 'main-checkout', readOnly: true },
+  'living-spec': { kind: 'main-checkout', readOnly: true },
 }
 
 export type GateClass = 'local' | 'judged' | 'workflow'
@@ -633,6 +637,86 @@ const InputIntegrated = Schema.Struct({
     'Mark an input delivered to you as integrated into the Spec, or as changing nothing.',
 })
 
+const LivingSpecRead = Schema.Struct({
+  domain: Schema.optionalKey(Text('Only this domain, by its name.')),
+  page: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+      description: `The page to read, from 1: ${String(LIVING_PAGE_DOMAINS)} domains a page.`,
+    }),
+  ),
+}).annotate({
+  description:
+    "Read the living spec of your Project: what it does today, by domain, each requirement with its id, version, state, origin, uncertainty and scenarios. A requirement marked [proposed] is not validated by the user: a hint, never a fact. A delta names a requirement's id as living_ref and its version as living_version.",
+})
+
+const LivingScenarioAsked = Schema.Struct({
+  when: Bounded(1000, 'WHEN: the situation and the action, as a user would do it.'),
+  then: Bounded(1000, 'THEN: the observable result, concrete enough for a test to check.'),
+})
+
+/** A domain's name is one line: no line break, no control character (#93). */
+// oxlint-disable-next-line no-control-regex -- a control character is exactly what is refused
+const ONE_LINE = /^[^\u0000-\u001f\u007f]*$/
+
+const LivingDomainPropose = Schema.Struct({
+  name: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(80),
+    Schema.isPattern(ONE_LINE, {
+      message: 'a domain name is one line, without a line break or a control character',
+    }),
+  ).annotate({
+    description:
+      'The domain as a user would name it (`Search`, `Export`), not a code folder: one line.',
+  }),
+  summary: Bounded(1000, 'What the domain covers, in one paragraph, in the Spec language.'),
+  uncertainty: Schema.optionalKey(
+    Bounded(1000, 'What you are not sure of about this domain; leave it out when you are sure.'),
+  ),
+}).annotate({
+  description:
+    'Propose a domain of the living spec. It stays proposed until the user validates it. Refused if the Project already has a domain of that name.',
+})
+
+const LivingRequirementPropose = Schema.Struct({
+  domain: Text('The domain it belongs to, by its name.'),
+  text: Bounded(2000, 'The observable behaviour, in one or two sentences, in the Spec language.'),
+  scenarios: Schema.Array(LivingScenarioAsked)
+    .check(Schema.isNonEmpty())
+    .annotate({ description: 'One or more scenarios WHEN … THEN … that a test could check.' }),
+  uncertainty: Schema.optionalKey(
+    Bounded(
+      1000,
+      'What you are not sure of (dead code, a flag you cannot resolve, data you cannot see); leave it out when you are sure.',
+    ),
+  ),
+  replaces: Schema.optionalKey(
+    Text(
+      'On a run on one domain only: the requirement of that domain (`LR3`) this one replaces, where the behaviour differs.',
+    ),
+  ),
+}).annotate({
+  description:
+    'Propose a requirement of the living spec, grounded in code you read. It stays proposed until the user validates its domain.',
+})
+
+const LivingRequirementObsolete = Schema.Struct({
+  requirement: Text('The requirement (`LR3`) whose behaviour is gone from the code.'),
+  reason: Bounded(1000, 'What you read that shows it is gone.'),
+}).annotate({
+  description:
+    'On a run on one domain only: propose that a requirement of that domain is obsolete. Nothing changes until the user validates the domain.',
+})
+
+const LivingSpecDone = Schema.Struct({
+  summary: Bounded(
+    4000,
+    'Domains proposed, what you left out and why, in the language of the user.',
+  ),
+}).annotate({
+  description: 'End the reading of the living spec: your summary is kept, and your session ends.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -666,6 +750,7 @@ const READERS: ReadonlyArray<Role> = [
   'documenter',
   'chat',
   'setup',
+  'living-spec',
 ]
 const WRITERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'documenter', 'chat']
 const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
@@ -936,6 +1021,62 @@ export const TOOLS = {
       doing: 'Integrating an input',
     },
   }),
+  living_spec_read: tool({
+    roles: ['planner', 'chat', 'living-spec'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: LivingSpecRead,
+    label: {
+      label: 'Read the living spec',
+      mark: 'living-spec-read',
+      doing: 'Reading the living spec',
+    },
+  }),
+  living_domain_propose: tool({
+    roles: ['living-spec'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: LivingDomainPropose,
+    label: {
+      label: 'Propose a domain',
+      mark: 'living-domain-propose',
+      doing: 'Proposing a domain',
+    },
+  }),
+  living_requirement_propose: tool({
+    roles: ['living-spec'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: LivingRequirementPropose,
+    label: {
+      label: 'Propose a requirement',
+      mark: 'living-requirement-propose',
+      doing: 'Proposing a requirement',
+    },
+  }),
+  living_requirement_obsolete: tool({
+    roles: ['living-spec'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: LivingRequirementObsolete,
+    label: {
+      label: 'Propose a removal',
+      mark: 'living-requirement-obsolete',
+      doing: 'Proposing a removal',
+    },
+  }),
+  living_spec_done: tool({
+    roles: ['living-spec'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: LivingSpecDone,
+    label: { label: 'End the reading', mark: 'living-spec-done', doing: 'Ending the reading' },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -988,6 +1129,11 @@ export const TOOL_NAMES = [
   'question_retire',
   'question_draft_message',
   'input_integrated',
+  'living_spec_read',
+  'living_domain_propose',
+  'living_requirement_propose',
+  'living_requirement_obsolete',
+  'living_spec_done',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

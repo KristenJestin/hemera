@@ -56,6 +56,10 @@ export const SpecRequirement = Schema.Struct({
   removed: Schema.Boolean,
   /** Its live scenarios, in order. */
   scenarios: Schema.Array(SpecScenario),
+  /** Its domain is not one of the living spec's yet (#93). */
+  newDomain: Schema.Boolean,
+  /** It modifies or removes a living requirement that is still proposed (#93). */
+  againstProposed: Schema.Boolean,
 })
 export type SpecRequirement = typeof SpecRequirement.Type
 

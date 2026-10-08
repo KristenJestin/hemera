@@ -311,6 +311,21 @@ const triaged = (event: DomainEvent) =>
     })
   })
 
+interface LivingSpecFacts extends Facts {
+  readonly project: NoticeProject
+}
+
+/** A bootstrap of a living spec that ended done (#93): ready to review. */
+const livingSpecReady = (event: DomainEvent) =>
+  Effect.gen(function* () {
+    if (Option.getOrNull(readText(event.payload['state'])) !== 'done') {
+      return Option.none<LivingSpecFacts>()
+    }
+    const project = yield* projectOf(event.entityId)
+    if (project === null) return Option.none<LivingSpecFacts>()
+    return Option.some<LivingSpecFacts>({ project, missionKey: null, needId: null })
+  })
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -390,6 +405,18 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     words: (facts) => ({ subject: facts.title, what: 'the Planner asks questions' }),
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'living-spec-ready',
+    label: 'The living spec of a Project is ready to review',
+    byDefault: false,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'done',
+    source: 'livingSpec.bootstrap_finished',
+    facts: livingSpecReady,
+    words: (facts) => ({ subject: facts.project.name, what: 'its living spec is ready to review' }),
+    route: (facts) => ProjectTarget.make({ projectId: facts.project.id }),
   }),
 ]
 

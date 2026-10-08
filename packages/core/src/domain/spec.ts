@@ -10,6 +10,7 @@
 
 import { Schema } from 'effect'
 
+import { type LivingDrift, driftSaid } from './living-spec.ts'
 import { type MissionType, type Stage, isFrozen } from './mission.ts'
 import { type InputKind, inputAbout } from './questions.ts'
 
@@ -155,6 +156,8 @@ export interface CompletenessContext {
   }>
   /** The questions open or waiting on someone. */
   readonly openQuestions: ReadonlyArray<{ readonly id: string; readonly state: 'open' | 'waiting' }>
+  /** The deltas whose living requirement changed after they were written (#93). */
+  readonly livingChanged: ReadonlyArray<LivingDrift>
 }
 
 const blank = (text: string): boolean => text.trim() === ''
@@ -199,6 +202,9 @@ export function completeness(
         failures.push({ target: scenario.id, sentence: `${scenario.id} has no THEN.` })
       }
     }
+  }
+  for (const drift of context.livingChanged) {
+    failures.push({ target: drift.requirement, sentence: driftSaid(drift) })
   }
   if (!context.described) {
     failures.push({

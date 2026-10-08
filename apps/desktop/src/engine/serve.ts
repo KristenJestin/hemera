@@ -66,6 +66,15 @@ import { Chats, chatsChanges } from './chat/service.ts'
 import { type Chat, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
 import { Setup } from './setup/service.ts'
+import { LivingSpec } from './living-spec/service.ts'
+import {
+  domainsOf,
+  dropRequirement,
+  rejectDomain,
+  requirementDetail,
+  requirementsOf,
+  validateDomain,
+} from './living-spec/store.ts'
 import { TesterFindings } from './tester/findings.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
@@ -476,6 +485,34 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
     'planning.inputs': ({ missionId }) =>
       use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
+    // The living spec (#93): its domains and requirements, its runs, and the user's validation.
+    // Hemera does not detect behaviour changed outside Hemera in 1.0: the user re-runs a domain.
+    'livingSpec.domains': ({ projectId }) =>
+      use(domainsOf(projectId)).pipe(observed('livingSpec.domains', log)),
+    'livingSpec.requirements': ({ projectId, domainId }) =>
+      use(requirementsOf(projectId, domainId)).pipe(observed('livingSpec.requirements', log)),
+    'livingSpec.requirement': ({ id }) =>
+      use(requirementDetail(id)).pipe(observed('livingSpec.requirement', log)),
+    'livingSpec.runs': ({ projectId }) =>
+      use(LivingSpec.use((living) => living.runs(projectId))).pipe(
+        observed('livingSpec.runs', log),
+      ),
+    'livingSpec.validateDomain': ({ domainId, seen }) =>
+      use(Effect.asVoid(validateDomain(domainId, seen))).pipe(
+        observed('livingSpec.validateDomain', log),
+      ),
+    'livingSpec.rejectDomain': ({ domainId, seen }) =>
+      use(rejectDomain(domainId, seen)).pipe(observed('livingSpec.rejectDomain', log)),
+    'livingSpec.dropRequirement': ({ requirementId }) =>
+      use(dropRequirement(requirementId)).pipe(observed('livingSpec.dropRequirement', log)),
+    'livingSpec.bootstrap': ({ projectId, domainId }) =>
+      use(LivingSpec.use((living) => living.bootstrap(projectId, domainId ?? null))).pipe(
+        observed('livingSpec.bootstrap', log),
+      ),
+    'livingSpec.changed': ({ projectId }) =>
+      follow(
+        Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
+      ).pipe(observedStream('livingSpec.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(machineAgentsLayer()))
 }

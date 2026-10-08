@@ -104,6 +104,13 @@ import {
   specWriteSection,
   triageAnswer,
 } from '../planning/tools.ts'
+import {
+  livingDomainPropose,
+  livingRequirementObsolete,
+  livingRequirementPropose,
+  livingSpecDone,
+  livingSpecRead,
+} from '../living-spec/tools.ts'
 import type { ProfileHome } from '../profile-home.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
@@ -267,6 +274,16 @@ const decodeCall = (
       return decoder(tool, TOOLS.question_draft_message.input)(raw)
     case 'input_integrated':
       return decoder(tool, TOOLS.input_integrated.input)(raw)
+    case 'living_spec_read':
+      return decoder(tool, TOOLS.living_spec_read.input)(raw)
+    case 'living_domain_propose':
+      return decoder(tool, TOOLS.living_domain_propose.input)(raw)
+    case 'living_requirement_propose':
+      return decoder(tool, TOOLS.living_requirement_propose.input)(raw)
+    case 'living_requirement_obsolete':
+      return decoder(tool, TOOLS.living_requirement_obsolete.input)(raw)
+    case 'living_spec_done':
+      return decoder(tool, TOOLS.living_spec_done.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -640,6 +657,16 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* questionDraftMessageTool(grant, call.args)
             case 'input_integrated':
               return yield* inputIntegratedTool(grant, call.args)
+            case 'living_spec_read':
+              return yield* livingSpecRead(grant, call.args)
+            case 'living_domain_propose':
+              return yield* livingDomainPropose(grant, call.args)
+            case 'living_requirement_propose':
+              return yield* livingRequirementPropose(grant, call.args)
+            case 'living_requirement_obsolete':
+              return yield* livingRequirementObsolete(grant, call.args)
+            case 'living_spec_done':
+              return yield* livingSpecDone(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
