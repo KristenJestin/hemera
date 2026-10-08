@@ -27,6 +27,7 @@ import {
   NOW_TEXT_MAX,
 } from './memory.ts'
 import { MissionType } from './mission.ts'
+import { ProbeLaunch, ProbeRead, ProbeReport } from './probes.ts'
 import { RetireHow } from './questions.ts'
 import { SetupProposal } from './setup.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
@@ -1077,6 +1078,30 @@ export const TOOLS = {
     input: LivingSpecDone,
     label: { label: 'End the reading', mark: 'living-spec-done', doing: 'Ending the reading' },
   }),
+  probe_launch: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ProbeLaunch,
+    label: { label: 'Launch a Probe', mark: 'probe-launch', doing: 'Launching a Probe' },
+  }),
+  probe_read: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: ProbeRead,
+    label: { label: 'Read a Probe', mark: 'probe-read', doing: 'Reading a Probe' },
+  }),
+  probe_report: tool({
+    roles: ['probe'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ProbeReport,
+    label: { label: 'Report', mark: 'probe-report', doing: 'Reporting what it found' },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1134,6 +1159,9 @@ export const TOOL_NAMES = [
   'living_requirement_propose',
   'living_requirement_obsolete',
   'living_spec_done',
+  'probe_launch',
+  'probe_read',
+  'probe_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

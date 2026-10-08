@@ -47,7 +47,7 @@ import {
 import { createProject } from '../src/engine/projects.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { workspaces } from '../src/engine/storage/schema.ts'
+import { probes as probesTable, workspaces } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { workspaceEvent } from '../src/engine/workspaces.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
@@ -301,10 +301,42 @@ describe('A need that ends is never notified, and takes its notification away', 
 })
 
 describe('A Workspace preparation that ends is told by its own kind', () => {
-  const ended = (state: string) =>
+  const ended = (state: string, probes = false) =>
     Effect.gen(function* () {
       const project = yield* acme()
       const database = yield* Database
+      if (probes) {
+        // A Probe's own Workspace (#89): its preparation is the Probe's to report.
+        const secrets = yield* Secrets
+        const mission = yield* createMission({
+          projectId: project.id,
+          idea: { sentence: 'Import names as written', ticket: null },
+        })
+        yield* database.insert(probesTable).values({
+          id: 'probe-1',
+          missionId: mission.id,
+          number: 1,
+          scenario: null,
+          question: secrets.mask('does the importer keep accents?'),
+          brief: secrets.mask('Look at api/importer.ts.'),
+          state: 'preparing',
+          stuck: false,
+          folder: join(work, 'ws'),
+          workspaceId: null,
+          bases: null,
+          lineage: 'lineage-1',
+          parentLineage: 'lineage-0',
+          reminded: false,
+          outcome: null,
+          answer: null,
+          report: null,
+          failure: null,
+          startedAt: new Date().toISOString(),
+          endedAt: null,
+          wipeAttempts: 0,
+          wipeError: null,
+        })
+      }
       yield* database.insert(workspaces).values({
         id: 'ws-1',
         projectId: project.id,
@@ -344,6 +376,11 @@ describe('A Workspace preparation that ends is told by its own kind', () => {
   test('ready: its own kind, with no sound', async () => {
     const [feed] = await told(1, ended('ready'))
     expect(raised(feed!)).toMatchObject({ kind: 'workspace-ready', sound: null })
+  })
+
+  test.each(['failed', 'ready'])('a Probe’s Workspace %s is told nothing', async (state) => {
+    const [feed] = await told(1, ended(state, true))
+    expect(raised(feed!).kind).toBe('need')
   })
 
   test('a preparation interrupted is told nothing', async () => {

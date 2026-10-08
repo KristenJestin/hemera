@@ -6,6 +6,7 @@
 
 import { MISSIONS_FOLDER } from './memory/files.ts'
 import { RESTORED_REQUESTS } from './permissions/requests.ts'
+import { RESTORED_PROBES } from './planning/probes.ts'
 
 export const BACKUP_FOLDERS: ReadonlyArray<string> = [MISSIONS_FOLDER]
-export const RECONCILIATION_STEPS = [RESTORED_REQUESTS] as const
+export const RECONCILIATION_STEPS = [RESTORED_REQUESTS, RESTORED_PROBES] as const

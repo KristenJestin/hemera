@@ -19,7 +19,7 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 import { type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
@@ -191,6 +191,12 @@ export interface AheadBehind {
   readonly behind: number
 }
 
+/** A file a worktree holds that its commit does not: created, or modified. */
+export interface WorktreeChange {
+  readonly path: string
+  readonly status: 'new' | 'modified'
+}
+
 export interface GitRemote {
   readonly name: string
   readonly fetchUrl: string
@@ -238,6 +244,30 @@ export interface GitService {
     path: string,
     commit: string,
   ) => Effect.Effect<void, GitRefusal>
+  /**
+   * Removes a Probe's worktree with `--force` twice, what it holds with it and even if it is
+   * locked: a separate call from the Workspaces' removal, which never forces.
+   */
+  readonly worktreeRemoveForced: (folder: string, path: string) => Effect.Effect<void, GitRefusal>
+  /**
+   * What a worktree holds against a commit, whatever was committed since: each file created or
+   * modified, tracked ones first, then the untracked; ignored ones left out.
+   */
+  readonly worktreeChanges: (
+    folder: string,
+    commit: string,
+  ) => Effect.Effect<ReadonlyArray<WorktreeChange>, GitRefusal>
+  /** The patch of one file of a worktree against a commit. */
+  readonly fileDiff: (
+    folder: string,
+    commit: string,
+    path: string,
+  ) => Effect.Effect<string, GitRefusal>
+  /**
+   * The repository a worktree belongs to, as Git reads it from the worktree's `.git` (absolute or
+   * relative, either separator): the folder holding its common `.git`, or a bare repository.
+   */
+  readonly repositoryOf: (worktree: string) => Effect.Effect<string, GitRefusal>
   /** The folders of a repository's worktrees, its own first, as Git lists them. */
   readonly worktrees: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
   /** The files a removal would lose: changed, staged, unmerged or untracked, relative to it. */
@@ -323,6 +353,29 @@ export function changedFilesOf(printed: string): ReadonlyArray<string> {
     .map((entry) => entry.slice(3))
 }
 
+/**
+ * What `git diff --name-status -z --no-renames <commit>` and `git ls-files --others -z` printed, as
+ * the files a worktree created (added, or untracked) or modified; a file it deleted is left out. A
+ * repository inside the worktree is listed once, as its folder with a trailing `/`.
+ */
+export function worktreeChangesOf(
+  diffed: string,
+  untracked: string,
+): ReadonlyArray<WorktreeChange> {
+  const fields = diffed.split('\0')
+  const changes: WorktreeChange[] = []
+  for (let at = 0; at + 1 < fields.length; at += 2) {
+    const code = fields[at] ?? ''
+    const path = fields[at + 1] ?? ''
+    if (code === '' || path === '' || code.startsWith('D')) continue
+    changes.push({ path, status: code.startsWith('A') ? 'new' : 'modified' })
+  }
+  for (const path of untracked.split('\0')) {
+    if (path !== '') changes.push({ path, status: 'new' })
+  }
+  return changes
+}
+
 /** What `git rev-list --left-right --count <base>...HEAD` printed: behind, then ahead. */
 export function aheadBehindOf(printed: string): AheadBehind {
   const [behind = 0, ahead = 0] = printed
@@ -390,6 +443,43 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
     worktreeDetach: (folder, path, commit) =>
       run(folder, ['worktree', 'add', '--quiet', '--detach', path, commit], 'work').pipe(
         Effect.asVoid,
+      ),
+    worktreeRemoveForced: (folder, path) =>
+      run(folder, ['worktree', 'remove', '--force', '--force', path], 'work').pipe(Effect.asVoid),
+    worktreeChanges: (folder, commit) =>
+      Effect.all([
+        run(
+          folder,
+          [
+            '--no-optional-locks',
+            'diff',
+            '--name-status',
+            '-z',
+            '--no-renames',
+            '--end-of-options',
+            commit,
+            '--',
+          ],
+          'read',
+        ),
+        run(
+          folder,
+          ['--no-optional-locks', 'ls-files', '--others', '--exclude-standard', '-z'],
+          'read',
+        ),
+      ]).pipe(Effect.map(([diffed, untracked]) => worktreeChangesOf(diffed, untracked))),
+    fileDiff: (folder, commit, path) =>
+      run(
+        folder,
+        ['diff', '--no-color', '--no-ext-diff', '--end-of-options', commit, '--', path],
+        'read',
+      ),
+    repositoryOf: (worktree) =>
+      run(worktree, ['rev-parse', '--git-common-dir'], 'read').pipe(
+        Effect.map((printed) => {
+          const common = resolve(worktree, printed.trim())
+          return basename(common) === '.git' ? dirname(common) : common
+        }),
       ),
     worktrees: (folder) =>
       run(folder, ['worktree', 'list', '--porcelain', '-z'], 'read').pipe(Effect.map(worktreesOf)),

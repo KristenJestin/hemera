@@ -44,6 +44,7 @@ export function commandsEngine(
     | 'memory'
     | 'sessions'
     | 'tickets'
+    | 'probes'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {

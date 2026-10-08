@@ -92,6 +92,7 @@ import {
   waitOnSomeone,
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
+import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
 import {
   changesSince,
   markRead,
@@ -513,6 +514,11 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
       follow(
         Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
       ).pipe(observedStream('livingSpec.changed', log)),
+    // The Probes of a mission in Planning (#89), as their LiveChips show them; no stop.
+    'probes.list': ({ missionId }) => use(listProbes(missionId)).pipe(observed('probes.list', log)),
+    'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
+    'probes.changed': ({ missionId }) =>
+      follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(machineAgentsLayer()))
 }
