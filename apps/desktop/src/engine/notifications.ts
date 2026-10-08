@@ -44,7 +44,7 @@ import type { DomainEvent } from './journal.ts'
 import { getNeed } from './needs.ts'
 import { Secrets } from './secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
-import { appPreferences, missions, projects, workspaces } from './storage/schema.ts'
+import { appPreferences, missions, probes, projects, workspaces } from './storage/schema.ts'
 
 /** What every kind's facts say: the Project, the mission's key, and the need, when there are. */
 export interface Facts {
@@ -260,11 +260,18 @@ const preparationEnded = (state: 'ready' | 'failed') => (event: DomainEvent) =>
     }
     const database = yield* Database
     const [row] = yield* database
-      .select({ name: workspaces.name, projectId: workspaces.projectId })
+      .select({ name: workspaces.name, projectId: workspaces.projectId, folder: workspaces.folder })
       .from(workspaces)
       .where(eq(workspaces.id, event.entityId))
       .pipe(Effect.mapError(refusedWhile('reading a Workspace')))
     if (row === undefined) return Option.none<WorkspaceFacts>()
+    // A Probe's own Workspace (#89): its preparation is the Probe's to report, never the user's.
+    const [probe] = yield* database
+      .select({ id: probes.id })
+      .from(probes)
+      .where(eq(probes.folder, row.folder))
+      .pipe(Effect.mapError(refusedWhile('reading the Probes')))
+    if (probe !== undefined) return Option.none<WorkspaceFacts>()
     const project = yield* projectOf(row.projectId)
     if (project === null) return Option.none<WorkspaceFacts>()
     return Option.some<WorkspaceFacts>({

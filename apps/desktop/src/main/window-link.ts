@@ -468,6 +468,15 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('livingSpec.changed', log),
       ),
+    'probes.list': (request) =>
+      engine['probes.list'](request).pipe(closedAs(gone), observed('probes.list', log)),
+    'probes.read': (request) =>
+      engine['probes.read'](request).pipe(closedAs(gone), observed('probes.read', log)),
+    'probes.changed': (request) =>
+      engine['probes.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('probes.changed', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

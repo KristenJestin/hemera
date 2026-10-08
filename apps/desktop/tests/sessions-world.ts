@@ -113,6 +113,10 @@ export const sessionsEngine = (
     readonly starting?: () => Effect.Effect<void>
     /** Bounds other than `FAST`, for a suite whose turns are held longer. */
     readonly timings?: Partial<SessionTimings>
+    /** The ports of the tools' gate a suite fills (a judge, the home folder). */
+    readonly tools?: ProfileParts['tools']
+    /** The Probes' Cleanup hook a suite watches. */
+    readonly probes?: ProfileParts['probes']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -150,9 +154,12 @@ export const sessionsEngine = (
       timings: { ...FAST, ...options.timings },
     },
   }
+  const withMemory = options.memory === undefined ? parts : { ...parts, memory: options.memory }
+  const withTools =
+    options.tools === undefined ? withMemory : { ...withMemory, tools: options.tools }
   const run = commandsEngine(
     data,
-    options.memory === undefined ? parts : { ...parts, memory: options.memory },
+    options.probes === undefined ? withTools : { ...withTools, probes: options.probes },
   )
   return { world, run }
 }

@@ -891,6 +891,13 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (yield* commandRunning(driver.session.id)) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
+          // Told to whoever follows the session's role (a Probe's chip, #89).
+          yield* mutate('saying a session is stuck', () =>
+            Effect.succeed({
+              result: undefined,
+              events: [sessionEvent('session.stuck', driver.session, { reason })],
+            }),
+          )
           yield* addToThread(driver.session.id, 'state', `stuck: ${reason}`)
           yield* tellParent(
             driver.session,

@@ -42,6 +42,7 @@ import { eq } from 'drizzle-orm'
 import { Effect, Option, Result } from 'effect'
 
 import { Git } from './git.ts'
+import { ProfileHome } from './profile-home.ts'
 import type { NewEvent } from './journal.ts'
 import { RecipeRunner } from './recipe-runner.ts'
 import { refusedWhile } from './storage/database.ts'
@@ -55,6 +56,7 @@ import {
   getWorkspace,
   occupied,
   placeOf,
+  probeWorkspace,
   readAllWorkspaces,
   templateValuesOf,
   workspaceEvent,
@@ -416,11 +418,15 @@ export const beginPreparation = (id: string, resume: boolean) =>
 
 /**
  * At the engine's start: every preparation a stopped engine interrupted is resumed, in the
- * background. One never started, or stopped by a failure, waits for the user.
+ * background. One never started, or stopped by a failure, waits for the user. A Probe's is the
+ * Probes' to resume, or to wipe (#89).
  */
 export const resumeInterrupted = Effect.gen(function* () {
+  const { dataFolder } = yield* ProfileHome
   const interrupted = (yield* readAllWorkspaces).filter(
-    (workspace) => preparationStateOf(workspace.steps) === 'preparing',
+    (workspace) =>
+      preparationStateOf(workspace.steps) === 'preparing' &&
+      !probeWorkspace(dataFolder, workspace.folder),
   )
   for (const workspace of interrupted) {
     yield* beginPreparation(workspace.id, true).pipe(

@@ -1,0 +1,1 @@
+ALTER TABLE `probes` ADD `prepared` text;

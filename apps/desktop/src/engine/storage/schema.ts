@@ -1503,3 +1503,76 @@ export const planningInputs = sqliteTable(
     index('planning_inputs_by_state').on(table.missionId, table.state),
   ],
 )
+
+/**
+ * The Probes of Planning (#89): a sub-agent the Planner launched to answer one question by running
+ * things, in a worktree of its own under `probes/<mission key>/<number>/` of the data folder, kept
+ * until the mission leaves Planning. `number` is its `#n` in its mission. `bases` is the JSON of
+ * the commit each repository's worktree was made from, with its ref and freshness. `prepared` is
+ * the JSON of what its preparation left against those commits (repository, path, sha256), taken
+ * once before its session first opens, so its capture leaves it out. `lineage` is
+ * its session's lineage, whose slot of the cap was taken at its launch; `parent_lineage` the
+ * Planner's. `reminded` says it was told once to end with its report. `report` is the JSON of its
+ * report, masked. `wipe_attempts` and `wipe_error` follow a wipe that has not succeeded yet.
+ */
+export const probes = sqliteTable(
+  'probes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    scenario: text('scenario'),
+    question: text('question').$type<Masked<string>>().notNull(),
+    brief: text('brief').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    stuck: integer('stuck', { mode: 'boolean' }).notNull(),
+    folder: text('folder').notNull(),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    bases: text('bases'),
+    prepared: text('prepared'),
+    lineage: text('lineage').notNull(),
+    parentLineage: text('parent_lineage').notNull(),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull(),
+    outcome: text('outcome'),
+    answer: text('answer').$type<Masked<string>>(),
+    report: text('report').$type<Masked<string>>(),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    wipeAttempts: integer('wipe_attempts').notNull(),
+    wipeError: text('wipe_error').$type<Masked<string>>(),
+  },
+  (table) => [
+    unique('probe_number_in_mission').on(table.missionId, table.number),
+    uniqueIndex('probe_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * What a Probe left in its worktree, captured at its report: each created or modified file not
+ * ignored, by repository and path, with its sha256, and for a modified one its patch against the
+ * Probe's commit. `withheld` says why its content was not kept (a sensitive place, a binary file).
+ */
+export const probeFiles = sqliteTable(
+  'probe_files',
+  {
+    probeId: text('probe_id')
+      .notNull()
+      .references(() => probes.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    sha256: text('sha256').notNull(),
+    patch: text('patch').$type<Masked<string>>(),
+    withheld: text('withheld'),
+  },
+  (table) => [primaryKey({ columns: [table.probeId, table.repository, table.path] })],
+)
+
+/** The contents the Probes captured, masked, once each by the sha256 of the file. */
+export const probeContents = sqliteTable('probe_contents', {
+  sha256: text('sha256').primaryKey(),
+  content: text('content').$type<Masked<string>>().notNull(),
+})

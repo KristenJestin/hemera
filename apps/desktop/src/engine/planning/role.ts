@@ -1,8 +1,8 @@
 /**
  * The `planner` role (#85): the main session of Planning, in the Project's main checkout,
  * read-only, reading the Memory, never counted in the cap. Its layer of the instructions is the
- * ticket's, with the questions' paragraph (#86) and without those the later Planning tickets add
- * with their tools (#87 to #92).
+ * ticket's, with the questions' paragraph (#86) and the Probes' (#89), without those the other
+ * Planning tickets add with their tools (#87 to #92).
  * Its brief is the mission as the Spec and the Memory hold it: a session never keeps state that is
  * not there.
  */
@@ -84,6 +84,16 @@ Your requirements are a delta against it: \`added\`, or \`modified\` / \`removed
 requirement and the version you read. A proposed requirement (not yet validated by the
 user) is a hint, never a fact: if you rely on it, say so. If the idea is already delivered,
 answer with \`triage_answer\` (\`delivered\`) and name the requirement; say whether it is proposed.
+
+## Probes
+- Whenever you would have to assume how the code, a library or a bug behaves, launch a Probe with
+  \`probe_launch\` (the question, the scenario it serves, your hints). Keep working while it runs.
+- A launch refused by the cap or the budget is an answer: go on without it, or ask the user.
+- \`[hemera:probe]\` brings its report. Its test, its actions and its support files become the
+  scenario's Proof. Its neighbouring cases go to your next wave as questions (include them or
+  leave them out).
+- A scenario that describes a wrong behaviour seen today needs a Probe that reproduced it. If it
+  cannot be reproduced, ask. Never guess.
 
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).

@@ -63,6 +63,7 @@ import { type Secrets, unregisterWorkspace } from './secrets.ts'
 import { DomainEvents } from './domain-events.ts'
 import { Git, type GitRefusal } from './git.ts'
 import type { DomainEvent, EventPayload, NewEvent } from './journal.ts'
+import { PROBES_FOLDER } from './planning/probe-store.ts'
 import { ProfileHome } from './profile-home.ts'
 import { canonical, getProject, within } from './projects.ts'
 import { type ProjectServices, upToDateBase } from './repositories.ts'
@@ -237,7 +238,14 @@ export const readAllWorkspaces = Effect.gen(function* () {
   return yield* readWorkspaces(rows)
 })
 
-/** A Project's Workspaces, in the order they were made. */
+/**
+ * Whether a Workspace is one a Probe made for itself (#89), under `probes/` of the data folder:
+ * the Probe's, never one of the Project's to list, follow or resume.
+ */
+export const probeWorkspace = (dataFolder: string, folder: string): boolean =>
+  within(canonical(join(dataFolder, PROBES_FOLDER)), canonical(folder))
+
+/** A Project's Workspaces, in the order they were made; a Probe's is not one of them. */
 export const listWorkspaces = (projectId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
@@ -247,7 +255,8 @@ export const listWorkspaces = (projectId: string) =>
       .where(eq(workspaces.projectId, projectId))
       .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
       .pipe(Effect.mapError(refusedWhile('reading the Workspaces')))
-    return yield* readWorkspaces(rows)
+    const { dataFolder } = yield* ProfileHome
+    return yield* readWorkspaces(rows.filter((row) => !probeWorkspace(dataFolder, row.folder)))
   })
 
 /** Where a Workspace, or the main checkout, runs: what its templates and commands are given. */
@@ -776,23 +785,27 @@ const workspaceChanged = (
 export const workspaceChanges: Stream.Stream<
   WorkspaceChange,
   DatabaseError,
-  Database | DomainEvents | Preparations
+  Database | DomainEvents | Preparations | ProfileHome
 > = Stream.unwrap(
-  Effect.map(
-    DomainEvents.use((events) => events.subscribe),
-    (committed) =>
-      committed.pipe(
-        Stream.filterMap(workspaceChanged),
-        Stream.mapEffect(({ id, projectId }) =>
-          getWorkspace(id).pipe(
-            Effect.map((workspace): WorkspaceChange => ({ id, projectId, workspace })),
-            Effect.catchTag('UnknownWorkspace', () =>
-              Effect.succeed<WorkspaceChange>({ id, projectId, workspace: null }),
-            ),
+  Effect.gen(function* () {
+    const { dataFolder } = yield* ProfileHome
+    const committed = yield* DomainEvents.use((events) => events.subscribe)
+    return committed.pipe(
+      Stream.filterMap(workspaceChanged),
+      Stream.mapEffect(({ id, projectId }) =>
+        getWorkspace(id).pipe(
+          Effect.map((workspace): WorkspaceChange => ({ id, projectId, workspace })),
+          Effect.catchTag('UnknownWorkspace', () =>
+            Effect.succeed<WorkspaceChange>({ id, projectId, workspace: null }),
           ),
         ),
       ),
-  ),
+      // A Probe's Workspace is the Probe's (#89).
+      Stream.filter(
+        ({ workspace }) => workspace === null || !probeWorkspace(dataFolder, workspace.folder),
+      ),
+    )
+  }),
 )
 
 /** The main checkout's repositories, as a place a step reads its sources from. */

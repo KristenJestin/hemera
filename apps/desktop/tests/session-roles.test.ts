@@ -57,6 +57,8 @@ describe('The role registry', () => {
         'question_retire',
         'question_draft_message',
         'input_integrated',
+        'probe_launch',
+        'probe_report',
       ].sort(),
     )
   })

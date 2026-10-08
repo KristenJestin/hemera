@@ -1351,6 +1351,196 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Launch a Probe: a sub-agent that answers one question by running things in a worktree of its own, from the up-to-date base. Hemera answers at once with its number; keep working. Its report arrives as [hemera:probe].",
+      "properties": {
+        "brief": {
+          "description": "Your hints: where to look, the starting data, what you already know. The Probe reads nothing else of your conversation.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "question": {
+          "description": "The one question to answer by running things (\`does the importer keep accents?\`).",
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string",
+        },
+        "scenario": {
+          "description": "The scenario it serves (\`R1.S2\`), when it serves one.",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "question",
+        "brief",
+      ],
+      "type": "object",
+    },
+    "name": "probe_launch",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Where a Probe stands, and its report once it is done.",
+      "properties": {
+        "probe": {
+          "description": "The Probe, by its number as probe_launch answered it (\`#3\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "probe",
+      ],
+      "type": "object",
+    },
+    "name": "probe_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "End your work with your report. Hemera keeps it with what you created or changed in your worktree, and hands it to the Planner. Call it once: your session ends with it.",
+      "properties": {
+        "actions": {
+          "description": "Every action you took, in order: what a Builder replays.",
+          "items": {
+            "description": "One action, exact enough to replay word for word.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "answer": {
+          "description": "The answer to the question, in one or a few sentences.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "base_commit": {
+          "description": "The commit your worktree was made from, as your brief gives it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "command": {
+          "description": "The command that shows the behaviour, as you ran it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "evidence": {
+          "description": "The evidence you kept, by name.",
+          "items": {
+            "description": "Evidence kept with evidence_add, by its name.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "expected": {
+          "description": "What should happen.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "key_line": {
+          "description": "The line of \`observed\` that shows the behaviour.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "neighbours": {
+          "description": "The neighbouring cases you tried that break too; empty when none did.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "evidence": {
+                "description": "The command and output that show it, or the evidence it was kept as.",
+                "type": "string",
+              },
+              "observed": {
+                "description": "What it did, quoted.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "what": {
+                "description": "The case: another input, a boundary value.",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "what",
+              "observed",
+              "evidence",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "observed": {
+          "description": "What happened, verbatim and trimmed: the output of a real run, never a paraphrase.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "outcome": {
+          "description": "\`reproduced\`, \`not_reproduced\`, \`answered\` (a question that is not a bug) or \`inconclusive\` (say what is missing).",
+          "enum": [
+            "reproduced",
+            "not_reproduced",
+            "answered",
+            "inconclusive",
+          ],
+          "type": "string",
+        },
+        "starting_data": {
+          "description": "The data the actions start from (fixtures, inputs); empty when none.",
+          "type": "string",
+        },
+        "test": {
+          "additionalProperties": true,
+          "description": "The smallest test that shows it, if you wrote one.",
+          "properties": {
+            "code": {
+              "description": "Its whole code, as it is written in the file.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "path": {
+              "description": "Its path, relative to that repository, inside your worktree.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "repository": {
+              "description": "The repository it belongs to, by its path as the Project names it (\`api\`).",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "repository",
+            "path",
+            "code",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "outcome",
+        "answer",
+        "actions",
+        "starting_data",
+        "expected",
+        "base_commit",
+        "neighbours",
+        "evidence",
+      ],
+      "type": "object",
+    },
+    "name": "probe_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

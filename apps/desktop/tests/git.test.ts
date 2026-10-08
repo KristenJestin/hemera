@@ -6,7 +6,7 @@
  * Where a Git that hangs or floods is needed, a stub stands in for it.
  */
 
-import { existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
@@ -154,6 +154,7 @@ describe('Every Git call declares its class, and its class sets its limit', () =
     ['worktreeRemove', 'work', (one: GitService) => one.worktreeRemove('/r', '/w')],
     ['worktreePrune', 'work', (one: GitService) => one.worktreePrune('/r')],
     ['worktreeDetach', 'work', (one: GitService) => one.worktreeDetach('/r', '/w', 'abc')],
+    ['repositoryOf', 'read', (one: GitService) => one.repositoryOf('/w')],
     ['worktrees', 'read', (one: GitService) => one.worktrees('/r')],
     ['changedFiles', 'read', (one: GitService) => one.changedFiles('/r')],
     ['aheadBehind', 'read', (one: GitService) => one.aheadBehind('/r', 'abc')],
@@ -317,6 +318,78 @@ describe('A Workspace’s worktrees are read with the machine’s git', () => {
     expect(seen.listed).toHaveLength(2)
     expect(seen.listed.some((path) => path.endsWith('api') && path.includes('probe'))).toBe(true)
     expect(seen.after).toHaveLength(1)
+  })
+
+  test('a Probe’s worktree is removed by force, what it holds with it, and pruned', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    git(api, 'add', 'tracked.txt')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    const tree = join(folder, 'probes', 'ACME-12', '1', 'api')
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        yield* one.worktreeDetach(api, tree, git(api, 'rev-parse', 'HEAD'))
+        writeFileSync(join(tree, 'tracked.txt'), 'two\n')
+        writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+        yield* one.worktreeRemoveForced(api, tree)
+        yield* one.worktreePrune(api)
+        return yield* one.worktrees(api)
+      }),
+    )
+    expect(existsSync(tree)).toBe(false)
+    expect(seen).toHaveLength(1)
+  })
+
+  test('a worktree’s repository is read by Git, its .git absolute or relative', async () => {
+    const api = repository(join(folder, 'api'))
+    const absolute = join(folder, 'probes', 'ACME-12', '3', 'api')
+    const relative = join(folder, 'probes', 'ACME-12', '4', 'api')
+    git(api, 'worktree', 'add', '--quiet', '--detach', absolute, 'HEAD')
+    git(api, '-c', 'worktree.useRelativePaths=true', 'worktree', 'add', '-q', '--detach', relative)
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return [yield* one.repositoryOf(absolute), yield* one.repositoryOf(relative)]
+      }),
+    )
+    expect(readFileSync(join(relative, '.git'), 'utf8')).toMatch(/^gitdir: \.\.\//)
+    expect(seen).toEqual([api, api])
+  })
+
+  test('a worktree’s new and modified files against its commit, committed or not, ignored ones left out', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    writeFileSync(join(api, '.gitignore'), '*.log\n')
+    writeFileSync(join(api, 'gone.txt'), 'gone\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    const commit = git(api, 'rev-parse', 'HEAD')
+    const tree = join(folder, 'probes', 'ACME-12', '2', 'api')
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        yield* one.worktreeDetach(api, tree, commit)
+        writeFileSync(join(tree, 'tracked.txt'), 'two\n')
+        mkdirSync(join(tree, 'tests', 'fixtures'), { recursive: true })
+        writeFileSync(join(tree, 'tests', 'fixtures', 'names.csv'), 'name\n')
+        writeFileSync(join(tree, 'run.log'), 'ignored\n')
+        rmSync(join(tree, 'gone.txt'))
+        writeFileSync(join(tree, 'committed.txt'), 'kept\n')
+        git(tree, 'add', 'committed.txt')
+        git(tree, 'commit', '-q', '-m', 'committed')
+        const changes = yield* one.worktreeChanges(tree, commit)
+        const patch = yield* one.fileDiff(tree, commit, 'tracked.txt')
+        return { changes, patch }
+      }),
+    )
+    expect([...seen.changes].toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: 'committed.txt', status: 'new' },
+      { path: 'tests/fixtures/names.csv', status: 'new' },
+      { path: 'tracked.txt', status: 'modified' },
+    ])
+    expect(seen.patch).toContain('-one')
+    expect(seen.patch).toContain('+two')
   })
 
   test('the files changed are named, tracked and untracked', async () => {

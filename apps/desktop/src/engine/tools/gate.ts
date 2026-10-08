@@ -91,6 +91,7 @@ import type { MissionActivity } from '../missions.ts'
 import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
+import { ProbeDesk } from '../planning/probe-desk.ts'
 import {
   askWaveTool,
   declareCompleteTool,
@@ -187,6 +188,7 @@ export type GateServices =
   | SpecBoard
   | Git
   | ProfileHome
+  | ProbeDesk
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -284,6 +286,12 @@ const decodeCall = (
       return decoder(tool, TOOLS.living_requirement_obsolete.input)(raw)
     case 'living_spec_done':
       return decoder(tool, TOOLS.living_spec_done.input)(raw)
+    case 'probe_launch':
+      return decoder(tool, TOOLS.probe_launch.input)(raw)
+    case 'probe_read':
+      return decoder(tool, TOOLS.probe_read.input)(raw)
+    case 'probe_report':
+      return decoder(tool, TOOLS.probe_report.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -667,6 +675,12 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* livingRequirementObsolete(grant, call.args)
             case 'living_spec_done':
               return yield* livingSpecDone(grant, call.args)
+            case 'probe_launch':
+              return yield* ProbeDesk.use((desk) => desk.launch(grant, call.args))
+            case 'probe_read':
+              return yield* ProbeDesk.use((desk) => desk.read(grant, call.args))
+            case 'probe_report':
+              return yield* ProbeDesk.use((desk) => desk.report(grant, call.args))
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

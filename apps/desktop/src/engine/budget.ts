@@ -140,6 +140,19 @@ export type Spent = { readonly spent: true } | { readonly spent: false; readonly
  * and one decision need for the user, however many calls are refused before the answer.
  */
 export const spendBudget = (missionId: string, counter: BudgetCounter) =>
+  mutate('spending the mission’s budget', (transaction) =>
+    spendBudgetIn(transaction, missionId, counter),
+  )
+
+/**
+ * The same as `spendBudget`, inside a transaction a caller holds: what it spends, refuses and
+ * asks is written with the caller's own change, or not at all.
+ */
+export const spendBudgetIn = (
+  transaction: EngineTransaction,
+  missionId: string,
+  counter: BudgetCounter,
+) =>
   Effect.gen(function* () {
     const decision = (key: string, by: number) =>
       DecisionFields.make({
@@ -150,47 +163,43 @@ export const spendBudget = (missionId: string, counter: BudgetCounter) =>
           reason: 'The mission stops short otherwise; the raise holds for this mission only.',
         },
       })
-    return yield* mutate('spending the mission’s budget', (transaction) =>
-      Effect.gen(function* () {
-        const { projectId, key, limits, project } = yield* limitsIn(transaction, missionId)
-        const spent = (yield* spentIn(transaction, missionId)).get(counter) ?? 0
-        const limit = limits[counter]
-        if (spent < limit) {
-          yield* transaction
-            .insert(missionSpent)
-            .values({ missionId, counter, spent: 1 })
-            .onConflictDoUpdate({
-              target: [missionSpent.missionId, missionSpent.counter],
-              set: { spent: sql`${missionSpent.spent} + 1` },
-            })
-            .pipe(Effect.mapError(refusedWhile('spending the mission’s budget')))
-          const spentOne: Mutation<Spent> = { result: { spent: true }, events: [] }
-          return spentOne
-        }
-        const sentence = budgetSpentSentence(counter, spent, limit)
-        const refusedEvent: NewEvent = {
-          type: 'budget.refused',
-          entityKind: 'mission',
-          entityId: missionId,
-          source: 'system',
-          author: 'hemera',
-          payload: { missionId, counter, sentence },
-        }
-        const events: NewEvent[] = [refusedEvent]
-        if (!(yield* askedAlready(transaction, missionId, counter))) {
-          const owner = MissionOwner.make({ projectId, missionId, taskId: null })
-          const write = yield* createNeedIn(
-            BUDGET_NEEDS,
-            owner,
-            decision(key, Math.max(1, project[counter])),
-          )
-          const written = yield* write(transaction)
-          events.push(...written.events)
-        }
-        const refusal: Mutation<Spent> = { result: { spent: false, sentence }, events }
-        return refusal
-      }),
-    )
+    const { projectId, key, limits, project } = yield* limitsIn(transaction, missionId)
+    const spent = (yield* spentIn(transaction, missionId)).get(counter) ?? 0
+    const limit = limits[counter]
+    if (spent < limit) {
+      yield* transaction
+        .insert(missionSpent)
+        .values({ missionId, counter, spent: 1 })
+        .onConflictDoUpdate({
+          target: [missionSpent.missionId, missionSpent.counter],
+          set: { spent: sql`${missionSpent.spent} + 1` },
+        })
+        .pipe(Effect.mapError(refusedWhile('spending the mission’s budget')))
+      const spentOne: Mutation<Spent> = { result: { spent: true }, events: [] }
+      return spentOne
+    }
+    const sentence = budgetSpentSentence(counter, spent, limit)
+    const refusedEvent: NewEvent = {
+      type: 'budget.refused',
+      entityKind: 'mission',
+      entityId: missionId,
+      source: 'system',
+      author: 'hemera',
+      payload: { missionId, counter, sentence },
+    }
+    const events: NewEvent[] = [refusedEvent]
+    if (!(yield* askedAlready(transaction, missionId, counter))) {
+      const owner = MissionOwner.make({ projectId, missionId, taskId: null })
+      const write = yield* createNeedIn(
+        BUDGET_NEEDS,
+        owner,
+        decision(key, Math.max(1, project[counter])),
+      )
+      const written = yield* write(transaction)
+      events.push(...written.events)
+    }
+    const refusal: Mutation<Spent> = { result: { spent: false, sentence }, events }
+    return refusal
   })
 
 /**

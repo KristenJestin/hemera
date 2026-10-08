@@ -102,6 +102,9 @@ export const TABLE_CLASSES = {
   exclusive_resources: 'state',
   exclusive_resource_commands: 'state',
   resource_claims: 'state',
+  probes: 'permanent',
+  probe_files: 'permanent',
+  probe_contents: 'heavy',
 } as const satisfies Record<string, RetentionClass>
 
 /**

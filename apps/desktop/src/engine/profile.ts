@@ -76,7 +76,13 @@ import {
 import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
 import { supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
-import { type MissionParts, type MissionServices, missionsLayer, runStops } from './missions.ts'
+import {
+  type MissionParts,
+  type MissionServices,
+  StopFailed,
+  missionsLayer,
+  runStops,
+} from './missions.ts'
 import { deliverAnswers, recheckNeeds } from './needs.ts'
 import {
   type ActionRules,
@@ -120,6 +126,14 @@ import { PLANNING_MAPPERS } from './planning/journal.ts'
 import { projectSpecLanguages } from './planning/store.ts'
 import { type PlannerWake, plannerLayer } from './planning/wake.ts'
 import { type LivingSpec, livingSpecLayer } from './living-spec/service.ts'
+import {
+  ProbeDesk,
+  type ProbeCleanup,
+  noProbeCleanup,
+  probeDeskLayer,
+} from './planning/probe-desk.ts'
+import { PROBE_MAPPERS } from './planning/probe-store.ts'
+import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -184,6 +198,12 @@ export interface ProfileParts {
   readonly sessions?: SessionsParts
   /** The ticket providers the field searches (#95, #96); none otherwise. */
   readonly tickets?: Layer.Layer<TicketSearch>
+  /** The Probes' Cleanup hook (S6 fills it); one that does nothing otherwise. */
+  readonly probes?: {
+    readonly cleanup?: Layer.Layer<ProbeCleanup>
+    /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
+    readonly hold?: ProbesSettings['hold']
+  }
 }
 
 /** What the role sessions are built with; this version's defaults otherwise. */
@@ -251,6 +271,7 @@ export type EngineServices =
   | SpecBoard
   | ExclusiveResources
   | LivingSpec
+  | ProbeDesk
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -326,6 +347,9 @@ export const startProfile = (
     if (restored !== null) log(`restored the backup taken at ${restored.takenAt}`)
 
     const secrets = parts.secrets ?? secretsRegistry()
+    // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
+    const deskContext = yield* Layer.build(probeDeskLayer)
+    const desk = Context.get(deskContext, ProbeDesk)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -335,6 +359,8 @@ export const startProfile = (
       reconciliationStepsLayer(parts.reconciliationSteps),
       parts.liveMissions ?? noLiveMissions,
       parts.tickets ?? noTicketSearch,
+      parts.probes?.cleanup ?? noProbeCleanup,
+      Layer.succeedContext(deskContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -380,6 +406,20 @@ export const startProfile = (
                 stop: (missionId: string) => post.stopTree({ kind: 'mission', missionId }),
               },
             ]),
+        // The Probes' wipe (#89), unless a part brings its own under that name.
+        ...(parts.missions?.stoppers?.some((one) => one.name === 'probes')
+          ? []
+          : [
+              {
+                name: 'probes',
+                stop: (missionId: string) =>
+                  desk
+                    .wipeAll(missionId)
+                    .pipe(
+                      Effect.mapError((failure) => new StopFailed({ reason: failure.message })),
+                    ),
+              },
+            ]),
         ...(parts.missions?.stoppers ?? []),
       ],
       activity:
@@ -402,6 +442,7 @@ export const startProfile = (
         ['budget.refused', refusedLine],
         ...PLANNING_MAPPERS,
         ...RESOURCE_EVENTS.map((event) => [event, resourceLine] as const),
+        ...PROBE_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -416,7 +457,9 @@ export const startProfile = (
     const sessionsLayers = Layer.mergeAll(
       chatsLayer,
       setupLayer,
-      plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false }),
+      probesLayer({ log, hold: parts.probes?.hold }).pipe(
+        Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
+      ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
@@ -583,6 +626,18 @@ export const startProfile = (
       ),
       Effect.catch((refusal) =>
         Effect.sync(() => log(`the reservations a stop left were not released: ${said(refusal)}`)),
+      ),
+    )
+    // The Probes a stop left preparing or running are interrupted, their sessions ended, before
+    // the sessions are rebuilt: their relaunch is theirs, once automations may run (#89).
+    yield* run(interruptLeftProbes).pipe(
+      Effect.tap((interrupted) =>
+        interrupted === 0
+          ? Effect.void
+          : Effect.sync(() => log(`interrupted ${String(interrupted)} Probe(s) a stop left`)),
+      ),
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the Probes a stop left were not interrupted: ${said(refusal)}`)),
       ),
     )
     // No run waits across a restart: the questions of "ask before running" it left are withdrawn.
