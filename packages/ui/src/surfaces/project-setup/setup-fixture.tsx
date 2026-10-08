@@ -10,10 +10,10 @@ import {
   REFUSALS,
   REVISED_VARIABLES,
 } from '../../blocks/setup/setup-fixtures.ts'
-import { IconPlus } from '../../icons.ts'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
-import { ProjectSetup, type SetupAgent, type SetupCardEntry } from './project-setup.tsx'
+import type { SetupAgent, SetupCardEntry } from './project-setup.tsx'
+import { ProjectTasks, SetupProposals, SetupTask, type SetupTaskProps } from './setup-task.tsx'
 
 /**
  * A small machine around the setup of Acme, so a story walks what a user walks: the cards arriving
@@ -36,6 +36,14 @@ export interface SetupFixtureProps {
   folder?: string | undefined
 }
 
+/** The step the agent's glance says it is on, as it stands. */
+const STEPS: Record<SetupAgent, string> = {
+  waiting: 'Waiting for a free slot',
+  working: 'Reading the folder',
+  done: 'Proposed the setup of 5 parts',
+  failed: 'Stopped',
+}
+
 /** How long a batch takes to arrive, and the agent to write another proposal, in a story. */
 const BEAT = 700
 
@@ -53,7 +61,7 @@ export function SetupFixture({
     kind === 'repositories' && nested ? NESTED_REPOSITORY : proposals[kind]
   const [startedAt] = useState(() => Date.now() - 42_000)
   const [agent, setAgent] = useState<SetupAgent>(firstAgent)
-  const [creating, setCreating] = useState(false)
+  const [open, setOpen] = useState(false)
   const [cards, setCards] = useState<SetupCardEntry[]>(() =>
     SETUP_KINDS.map((kind) => {
       const status: CardStatus = arriving.includes(kind)
@@ -100,65 +108,75 @@ export function SetupFixture({
     setTimeout(() => set(kind, { status: { state: 'proposed' }, proposal }), BEAT * 2)
   }
 
+  const task: SetupTaskProps = {
+    project: folder.split('/').at(-1) ?? folder,
+    open,
+    onOpenChange: setOpen,
+    agent,
+    startedAt,
+    endedAt: agent === 'working' || agent === 'waiting' ? null : startedAt + 42_000,
+    failure,
+    glance: {
+      kind: 'helper',
+      type: 'Agent · Claude Code',
+      step: agent === 'failed' ? failure : STEPS[agent],
+    },
+    cards,
+    onAcceptAll: () => {
+      for (const card of cards) {
+        if (card.status.state !== 'proposed') continue
+        if (!accept(card.kind)) break
+      }
+    },
+    onRetry: () => {
+      setAgent('working')
+      for (const card of cards) {
+        if (card.status.state === 'reading') proposeLater(card.kind, proposalOf(card.kind))
+      }
+    },
+    onAccept: accept,
+    onEdit: (kind) => {
+      const card = cards.find((one) => one.kind === kind)
+      set(kind, { status: { state: 'editing' }, draft: card?.proposal ?? undefined })
+    },
+    onDraft: (kind, draft) => set(kind, { draft }),
+    onDiscuss: (kind) => set(kind, { status: { state: 'discussing' } }),
+    onDecline: (kind) => set(kind, { status: { state: 'declined' } }),
+    onSave: (kind) => {
+      const card = cards.find((one) => one.kind === kind)
+      set(kind, {
+        status: { state: 'proposed' },
+        proposal: card?.draft ?? card?.proposal ?? null,
+      })
+    },
+    onCancel: (kind) => set(kind, { status: { state: 'proposed' }, draft: undefined }),
+    onSend: (kind, note) => {
+      set(kind, { status: { state: 'discussed', note } })
+      proposeLater(kind, kind === 'variables' ? REVISED_VARIABLES : proposalOf(kind))
+    },
+    onProposeAgain: (kind) => {
+      set(kind, { status: { state: 'reading' }, proposal: null })
+      proposeLater(kind, proposalOf(kind))
+    },
+  }
+
   return (
     <main className="flex h-screen flex-col bg-surface-content">
       <ContentHeader
         folded={false}
         onFold={() => {}}
-        crumbs={[{ id: 'new', label: 'New Project', icon: <IconPlus size="sm" /> }]}
+        crumbs={[{ id: 'acme', label: folder.split('/').at(-1) ?? folder }]}
         controls={<SystemControls />}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-        <ProjectSetup
-          folder={
-            long
-              ? `${folder}/clients/acme-platform-services-and-internal-tooling/checkouts/2026/main-checkout`
-              : folder
-          }
-          agent={agent}
-          startedAt={startedAt}
-          endedAt={agent === 'working' || agent === 'waiting' ? null : startedAt + 42_000}
-          failure={failure}
-          cards={cards}
-          creating={creating}
-          onAcceptAll={() => {
-            for (const card of cards) {
-              if (card.status.state !== 'proposed') continue
-              if (!accept(card.kind)) break
-            }
-          }}
-          onCreate={() => setCreating(true)}
-          onRetry={() => {
-            setAgent('working')
-            for (const card of cards) {
-              if (card.status.state === 'reading') proposeLater(card.kind, proposalOf(card.kind))
-            }
-          }}
-          onAccept={accept}
-          onEdit={(kind) => {
-            const card = cards.find((one) => one.kind === kind)
-            set(kind, { status: { state: 'editing' }, draft: card?.proposal ?? undefined })
-          }}
-          onDraft={(kind, draft) => set(kind, { draft })}
-          onDiscuss={(kind) => set(kind, { status: { state: 'discussing' } })}
-          onDecline={(kind) => set(kind, { status: { state: 'declined' } })}
-          onSave={(kind) => {
-            const card = cards.find((one) => one.kind === kind)
-            set(kind, {
-              status: { state: 'proposed' },
-              proposal: card?.draft ?? card?.proposal ?? null,
-            })
-          }}
-          onCancel={(kind) => set(kind, { status: { state: 'proposed' }, draft: undefined })}
-          onSend={(kind, note) => {
-            set(kind, { status: { state: 'discussed', note } })
-            proposeLater(kind, kind === 'variables' ? REVISED_VARIABLES : proposalOf(kind))
-          }}
-          onProposeAgain={(kind) => {
-            set(kind, { status: { state: 'reading' }, proposal: null })
-            proposeLater(kind, proposalOf(kind))
-          }}
-        />
+        <div className="mx-auto flex w-full max-w-page flex-col p-8">
+          <ProjectTasks>
+            <SetupTask {...task} />
+          </ProjectTasks>
+          <div className="mt-6 flex flex-col">
+            <SetupProposals {...task} />
+          </div>
+        </div>
       </div>
     </main>
   )

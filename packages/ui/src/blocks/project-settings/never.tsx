@@ -10,13 +10,15 @@ import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconBan, IconPlus, IconTerminal, IconTrash } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { Section } from './parts.tsx'
+import { Section, SectionRefusal } from './parts.tsx'
 
 /**
  * The commands never run in a Project: whoever asks — an agent, Hemera Auto — they are refused,
  * and the user is not asked. A line per command, in the mono face, its bin at its end; the bin
  * removes it at once, with no confirmation: a line is put back as easily. A command is added in a
- * dialog, from the head of the section. A line added grows in on `fold`, one removed folds out.
+ * dialog, from the head of the block. It stands under the catalogue, in the Commands section: they
+ * are commands too, so they stand with the others. A line added grows in on `fold`, one removed
+ * folds out.
  */
 export interface NeverLine {
   id: string
@@ -95,6 +97,8 @@ export interface NeverSectionProps {
   loading?: boolean | undefined
   onAdd: () => void
   onRemove: (id: string) => void
+  /** A change the engine refused, in words: the list stands as the engine keeps it. */
+  error?: string | undefined
 }
 
 export function NeverSection({
@@ -102,11 +106,12 @@ export function NeverSection({
   loading = false,
   onAdd,
   onRemove,
+  error,
 }: NeverSectionProps): ReactNode {
   const add = (
     <Button size="sm" onClick={onAdd}>
       <IconPlus size="sm" />
-      Add a command
+      Refuse a command
     </Button>
   )
   const empty = !loading && lines.length === 0
@@ -117,6 +122,7 @@ export function NeverSection({
         count={loading || empty ? undefined : lines.length}
         actions={loading || empty ? undefined : add}
       />
+      <SectionRefusal error={error} />
       <Frame>
         {empty ? (
           <Empty icon={<IconBan size="md" />} title="Nothing refused" action={add} />

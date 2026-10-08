@@ -11,6 +11,7 @@ import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Discovery } from '../src/engine/agents/discovery.ts'
+import { Agents } from '../src/engine/agents/service.ts'
 import { suiteAgent, suiteFor } from '../src/engine/agents/suite-agent.ts'
 import { Chats } from '../src/engine/chat/service.ts'
 import { transcriptOf } from '../src/engine/chat/store.ts'
@@ -39,6 +40,18 @@ describe('The suite’s agent', () => {
       if (variable === undefined) delete process.env['HEMERA_E2E_HEADLESS']
       else process.env['HEMERA_E2E_HEADLESS'] = variable
     }
+  })
+
+  test('the agents the window lists are the suite’s, not this machine’s', async () => {
+    const agent = await Effect.runPromise(suiteAgent)
+    const listed = await Effect.runPromise(
+      Agents.use((agents) => agents.list).pipe(Effect.provide(agent.agents)),
+    )
+    expect(listed.map(({ id, installed, signedIn }) => ({ id, installed, signedIn }))).toEqual([
+      { id: 'claude', installed: true, signedIn: true },
+      { id: 'codex', installed: false, signedIn: false },
+      { id: 'opencode', installed: false, signedIn: false },
+    ])
   })
 
   test('Claude Code is installed and signed in; the other agents are not installed', async () => {

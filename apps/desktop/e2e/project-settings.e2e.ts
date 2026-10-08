@@ -38,6 +38,13 @@ describe('A Project added and set up from its settings', () => {
     await adding.$('button=Add acme').click()
     await expect(adding).not.toBeExisting()
     await expect($('main h1')).toHaveText('acme', { containing: true })
+    // Nothing launched without being chosen: the engine holds no setup for it, and the Project's
+    // page, which reads that, shows no task.
+    const standing = await browser.electron.execute(
+      async () => await globalThis.hemeraProbe?.setupStanding('acme'),
+    )
+    expect(standing).toBe('none')
+    await expect($('[role="region"][aria-label="Tasks"]')).not.toBeExisting()
   })
 
   it('lists the three repositories in the Project’s settings', async () => {

@@ -67,12 +67,12 @@ function Held(args: SetupCardProps) {
         )
       }}
       onEdit={() => {
-        args.onEdit()
+        args.onEdit?.()
         setDraft(proposal ?? undefined)
         setStatus({ state: 'editing' })
       }}
       onDiscuss={() => {
-        args.onDiscuss()
+        args.onDiscuss?.()
         setStatus({ state: 'discussing' })
       }}
       onDecline={() => {
@@ -93,7 +93,7 @@ function Held(args: SetupCardProps) {
         setStatus({ state: 'discussed', note })
       }}
       onProposeAgain={() => {
-        args.onProposeAgain()
+        args.onProposeAgain?.()
         setStatus({ state: 'reading' })
       }}
     />
@@ -304,5 +304,36 @@ export const Focused: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('textbox', { name: 'Name of dev' })).toHaveFocus()
     })
+  },
+}
+
+/**
+ * A card whose agent takes no edit, no discussion and no new proposal (#44's engine): Accept and
+ * Decline only, and nothing once declined.
+ */
+export const AcceptAndDeclineOnly: Story = {
+  render: (args) => {
+    const { onEdit: _edit, onDiscuss: _discuss, onProposeAgain: _again, ...answers } = args
+    return <SetupCard {...answers} />
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: 'Accept' })).toBeVisible()
+    expect(canvas.getByRole('button', { name: 'Decline' })).toBeVisible()
+    expect(canvas.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Discuss' })).toBeNull()
+  },
+}
+
+/** Declined on such a card: nothing more to offer. */
+export const DeclinedWithNoNewProposal: Story = {
+  args: { status: { state: 'declined' } },
+  render: (args) => {
+    const { onEdit: _edit, onDiscuss: _discuss, onProposeAgain: _again, ...answers } = args
+    return <SetupCard {...answers} />
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('button', { name: 'Propose again' })).toBeNull()
   },
 }

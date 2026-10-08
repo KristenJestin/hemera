@@ -208,6 +208,7 @@ export {
 export {
   ProjectSettings,
   type ProjectSettingsProps,
+  type SetUpAction,
   type SettingsForm,
   type SettingsSection,
 } from './surfaces/project-settings/project-settings.tsx'
@@ -263,12 +264,12 @@ export {
   type MarkIcon,
   type ProjectMarkProps,
 } from './components/project-mark/project-mark.tsx'
+export { MarkPicker, type MarkPickerProps } from './components/project-mark/mark-picker.tsx'
 export {
   CommandLineField,
   type CatalogueChoice,
   type CommandLineValue,
 } from './blocks/project-settings/command-line.tsx'
-export { IdentityField, type IdentityFieldProps } from './surfaces/add-project/identity-field.tsx'
 export {
   AgentsSection,
   AppearanceSection,
@@ -330,10 +331,14 @@ export {
 } from './blocks/setup/proposal.tsx'
 export { SetupCard, type CardStatus, type SetupCardProps } from './blocks/setup/setup-card.tsx'
 export {
-  ProjectSetup,
-  allAnswered,
   type ProjectSetupProps,
   type SetupAgent,
   type SetupCardEntry,
 } from './surfaces/project-setup/project-setup.tsx'
+export {
+  ProjectTasks,
+  SetupTask,
+  SetupProposals,
+  type SetupTaskProps,
+} from './surfaces/project-setup/setup-task.tsx'
 export { FirstLaunch, type FirstLaunchProps } from './surfaces/first-launch/first-launch.tsx'

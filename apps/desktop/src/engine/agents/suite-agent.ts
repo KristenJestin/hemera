@@ -19,7 +19,9 @@ import type { DiscoveredAgent } from './discovery.ts'
 import { Discovery } from './discovery.ts'
 import { ADAPTERS } from './adapters/index.ts'
 import type { FakeScript } from './fake.ts'
+import { AgentRegistry, AgentUpdater } from './installer.ts'
 import { AgentStarter } from './runtime.ts'
+import { type Agents, agentsLayer } from './service.ts'
 
 /** The agent the fake answers for. */
 export const SUITE_AGENT: AgentProvider = 'claude'
@@ -33,6 +35,11 @@ export interface SuiteAgent {
     readonly discovery: Layer.Layer<Discovery>
     readonly starter: Layer.Layer<AgentStarter>
   }
+  /**
+   * The agents the window lists and offers (the setup's offer among them): the same as the
+   * sessions find, with no registry asked and nothing updated.
+   */
+  readonly agents: Layer.Layer<Agents>
   /** What every session started from now on does. */
   readonly script: (script: FakeScript) => Effect.Effect<void>
 }
@@ -58,27 +65,37 @@ export const suiteAgent: Effect.Effect<SuiteAgent> = Effect.map(
         loginHint: adapter.loginHint,
       }
     }
+    const discovery = Layer.succeed(Discovery, {
+      list: Effect.succeed(AGENT_PROVIDERS.map(listed)),
+      probe: () => Effect.succeed('1.0.0'),
+      resolve: (id) =>
+        id === SUITE_AGENT
+          ? Effect.succeed({
+              adapter: ADAPTERS[id],
+              from: 'bundled' as const,
+              program: '/suite/fake-agent',
+              args: [],
+              env: {},
+              own: {},
+            })
+          : Effect.fail(new AgentNotInstalled({ agent: id, label: ADAPTERS[id].label })),
+    })
     return {
       sessions: {
-        discovery: Layer.succeed(Discovery, {
-          list: Effect.succeed(AGENT_PROVIDERS.map(listed)),
-          probe: () => Effect.succeed('1.0.0'),
-          resolve: (id) =>
-            id === SUITE_AGENT
-              ? Effect.succeed({
-                  adapter: ADAPTERS[id],
-                  from: 'bundled' as const,
-                  program: '/suite/fake-agent',
-                  args: [],
-                  env: {},
-                  own: {},
-                })
-              : Effect.fail(new AgentNotInstalled({ agent: id, label: ADAPTERS[id].label })),
-        }),
+        discovery,
         starter: Layer.succeed(AgentStarter, {
           start: () => Effect.map(Ref.get(current), (script) => fakeAgent(script).process),
         }),
       },
+      agents: agentsLayer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            discovery,
+            Layer.succeed(AgentRegistry, { latest: () => Effect.succeed(null) }),
+            Layer.succeed(AgentUpdater, { run: () => Effect.succeed('') }),
+          ),
+        ),
+      ),
       script: (script) => Ref.set(current, script),
     }
   },

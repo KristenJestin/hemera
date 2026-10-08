@@ -1,7 +1,7 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from 'cn'
 import { motion } from 'motion/react'
-import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconX } from '../../icons.ts'
 import { instant, morph, useTransition } from '../../motion.ts'
@@ -88,6 +88,10 @@ export interface DialogProps {
   size?: DialogSize | undefined
   /** Where the trigger sits; never how it looks. */
   className?: string | undefined
+  /** Where the focus goes once it closed, when what opened it is leaving the page. */
+  finalFocus?: RefObject<HTMLElement | null> | undefined
+  /** Once it has closed, its exit played. */
+  onClosed?: (() => void) | undefined
 }
 
 export function Dialog({
@@ -101,10 +105,18 @@ export function Dialog({
   onOpenChange,
   size = 'md',
   className,
+  finalFocus,
+  onClosed,
 }: DialogProps) {
   const container = useOverlayContainer()
   return (
-    <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange?.(next)}>
+    <BaseDialog.Root
+      open={open}
+      onOpenChange={(next) => onOpenChange?.(next)}
+      onOpenChangeComplete={(next) => {
+        if (!next) onClosed?.()
+      }}
+    >
       {trigger !== undefined && (
         <BaseDialog.Trigger render={<Button variant="secondary" className={className} />}>
           {trigger}
@@ -112,7 +124,7 @@ export function Dialog({
       )}
       <BaseDialog.Portal container={container}>
         <BaseDialog.Backdrop className={BACKDROP} />
-        <BaseDialog.Popup className={cn(POPUP, SIZE[size])}>
+        <BaseDialog.Popup className={cn(POPUP, SIZE[size])} finalFocus={finalFocus}>
           <div className="flex items-start gap-2">
             {lead !== undefined && <div className="flex shrink-0 items-center">{lead}</div>}
             <div className="flex flex-col gap-1">

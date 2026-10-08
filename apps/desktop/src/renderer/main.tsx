@@ -7,13 +7,16 @@ import { createRoot } from 'react-dom/client'
 // oxlint-disable-next-line import/no-unassigned-import
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
+import { AgentSection } from './agent-sections.tsx'
 import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
+import { FirstLaunchRoute } from './first-launch-route.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
 import { connect } from './link.ts'
 import {
   START,
   focusOf,
   go,
+  landedAfterSetup,
   routeOf,
   sectionOf,
   show,
@@ -21,6 +24,7 @@ import {
   type Route,
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
+import { ProjectSetupTask, useSetupLaunches, useSetupOffer } from './setup-task.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useChats } from './use-chats.ts'
@@ -102,6 +106,18 @@ function Application() {
   }, [ready])
   const settingsOf = route.kind === 'projectSettings' ? route.id : null
   const [settingsData, settings] = useSettings(link, ready, settingsOf)
+  /** How many times the Project's models by role were changed in its settings. */
+  const [roleChanges, setRoleChanges] = useState(0)
+  // Read each time the add dialog opens, or the settings show, change Project or models by role.
+  const setupOffer = useSetupOffer(link, ready && adding, null)
+  const settingsOffer = useSetupOffer(
+    link,
+    ready && settingsOf !== null,
+    settingsOf,
+    `${settingsOf ?? ''} ${String(roleChanges)}`,
+  )
+  const launches = useSetupLaunches(link)
+  const settingsLaunch = settingsOf === null ? null : launches.of(settingsOf)
   const dataFolder = engine.kind === 'ready' ? engine.status.dataFolder : ''
   const tools = useMemo(() => settingsTools(dataFolder), [dataFolder])
   const { notices, open, dismiss } = useNotices(link, (target) =>
@@ -146,6 +162,18 @@ function Application() {
           onOpen={(id) => openChat(projectId, id)}
         />
       )}
+      projectTasks={
+        route.kind === 'project' && project.kind === 'ready' ? (
+          <ProjectSetupTask
+            key={route.id}
+            link={link}
+            engineReady={ready}
+            project={project.project}
+            launch={launches.of(route.id)}
+            onLaunch={() => launches.start(route.id)}
+          />
+        ) : null
+      }
       chat={
         route.kind === 'chat' && project.kind === 'ready' ? (
           <ChatRoute
@@ -162,8 +190,40 @@ function Application() {
       now={now}
       projectSettings={
         settingsOf === null ? null : (
-          <SettingsPage key={settingsOf} data={settingsData} settings={settings} tools={tools} />
+          <SettingsPage
+            key={settingsOf}
+            data={settingsData}
+            settings={settings}
+            tools={tools}
+            setUp={{
+              // Launched, the setup is a task on the Project's page: the window goes there.
+              onStart: () => {
+                void launches.start(settingsOf).then((started) => {
+                  if (started) setNavigation((before) => landedAfterSetup(before, settingsOf))
+                })
+              },
+              starting: settingsLaunch?.starting ?? false,
+              unavailable: settingsOffer?.unavailable !== undefined,
+              refused: settingsOffer?.unavailable ?? settingsLaunch?.refused,
+            }}
+            agentSection={(section, showForm) => (
+              <AgentSection
+                section={section}
+                link={link}
+                engineReady={ready}
+                projectId={settingsOf}
+                catalogue={
+                  settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
+                }
+                show={showForm}
+                onRolesChanged={() => setRoleChanges((before) => before + 1)}
+              />
+            )}
+          />
         )
+      }
+      firstLaunch={
+        <FirstLaunchRoute link={link} engineReady={ready} onAddProject={() => setAdding(true)} />
       }
       appSettings={
         <AppSettingsPage
@@ -187,9 +247,13 @@ function Application() {
           open={adding}
           onOpenChange={setAdding}
           tools={ADDING}
-          onCreated={(created) =>
-            setNavigation((before) => go(before, { kind: 'project', id: created.id }))
-          }
+          setupOffer={setupOffer}
+          onCreated={(created, setUp) => {
+            // The setup is the user's choice: asked for only when they ticked it. A refusal is
+            // said on the Project's page, where the window goes.
+            if (setUp) void launches.start(created.id)
+            goTo({ kind: 'project', id: created.id })
+          }}
         />
       }
       actions={{

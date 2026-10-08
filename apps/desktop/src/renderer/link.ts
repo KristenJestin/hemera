@@ -34,6 +34,8 @@ import {
   type Mission,
   type MissionsChange,
   type ModelMark,
+  type ProjectLimits,
+  type RepositoryInstructions,
   type Need,
   type NeedAnswerAsked,
   type NeedGroup,
@@ -56,9 +58,13 @@ import {
   type RepositoryStatus,
   type RepositoryStatusChange,
   type RoleModels,
+  type SessionSummary,
   type Run,
+  type ThreadLine,
   type RunOutput,
   type RunStart,
+  type SetupCard,
+  type SetupStanding,
   type Sound,
   type SoundPreview,
   type SoundStyle,
@@ -69,7 +75,7 @@ import {
   type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import type { AgentProvider, ChatMention, ModelSettingValue } from '@hemera/core/domain'
+import type { AgentProvider, ChatMention, ModelSettingValue, NeverEntry } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -188,6 +194,24 @@ export interface Link {
   /** Each role's model at every level, for a Project, or the app's alone with null. */
   readonly roleModels: (projectId: string | null) => Promise<ReadonlyArray<RoleModels>>
   readonly setAppRoleModel: (role: string, setting: ModelSettingValue) => Promise<void>
+  /** A role's model in a Project; null takes it back to the application's. */
+  readonly setProjectRoleModel: (
+    projectId: string,
+    role: string,
+    setting: ModelSettingValue | null,
+  ) => Promise<void>
+  /** The commands never run in a Project. */
+  readonly neverList: (projectId: string) => Promise<ReadonlyArray<NeverEntry>>
+  /** Replaces the list whole; answers it as written. */
+  readonly setNeverList: (
+    projectId: string,
+    entries: ReadonlyArray<NeverEntry>,
+  ) => Promise<ReadonlyArray<NeverEntry>>
+  /** A Project's cap of sub-agents and the budget its new missions start with. */
+  readonly projectLimits: (projectId: string) => Promise<ProjectLimits>
+  readonly setProjectLimits: (projectId: string, limits: ProjectLimits) => Promise<ProjectLimits>
+  /** The instruction files of a Project's repositories, and how each agent gets them. */
+  readonly instructionFiles: (projectId: string) => Promise<ReadonlyArray<RepositoryInstructions>>
   /** Asks every installed agent's registry for its latest version, now. */
   readonly checkAgentUpdates: () => Promise<ReadonlyArray<AgentState>>
   readonly updateAgent: (agent: AgentProvider) => Promise<AgentUpdate>
@@ -208,6 +232,29 @@ export interface Link {
   readonly restoreProfile: (folder: string) => Promise<void>
   readonly retention: () => Promise<DiagnosticsRetention>
   readonly testerFindings: () => Promise<ReadonlyArray<TesterFinding>>
+  /** A Project's setup cards, the pending first. */
+  readonly setupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  /** A click the use case refuses answers the card still pending, with the use case's reason. */
+  readonly acceptSetupCard: (cardId: string) => Promise<SetupCard>
+  readonly declineSetupCard: (cardId: string) => Promise<SetupCard>
+  /** Accepts the pending cards in their order, stopping at the first refusal. */
+  readonly acceptAllSetupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  /** Starts a setup proposal; rejects with `SetupRefused` while one is being made. */
+  readonly proposeSetup: (projectId: string) => Promise<void>
+  /** A Project's sessions, every state, parents before their children. */
+  readonly projectSessions: (projectId: string) => Promise<ReadonlyArray<SessionSummary>>
+  /** A session's hidden thread, oldest first. */
+  readonly sessionThread: (id: string) => Promise<ReadonlyArray<ThreadLine>>
+  readonly setupStanding: (projectId: string) => Promise<SetupStanding>
+  /**
+   * The Projects whose cards or setup session changed, as they change. `onOpen` once the stream is
+   * asked of main: a read made then misses no change made before it.
+   */
+  readonly onSetupChanges: (
+    listener: (change: { readonly projectId: string }) => void,
+    onEnd: (error: Error) => void,
+    onOpen?: () => void,
+  ) => () => void
   /** Every decision on a call from now on, as it is recorded. */
   readonly onDecisions: (
     listener: (decision: PermissionDecision) => void,
@@ -246,6 +293,7 @@ export function linkOver(port: Port): Link {
     listener: (value: A) => void,
     ends: (error: E) => error is F,
     onEnd: (error: F) => void,
+    onOpen?: () => void,
   ): (() => void) => {
     let stopped = false
     let stop = (): void => {
@@ -262,6 +310,7 @@ export function linkOver(port: Port): Link {
         if (Option.isSome(failure) && ends(failure.value)) onEnd(failure.value)
       })
       stop = () => fiber.interruptUnsafe()
+      onOpen?.()
     })
     return () => stop()
   }
@@ -369,6 +418,18 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['models.roles']({ projectId, missionId: null })),
     setAppRoleModel: (role, setting) =>
       call((ready) => ready['models.setRole']({ level: 'app', scopeId: null, role, setting })),
+    setProjectRoleModel: (projectId, role, setting) =>
+      call((ready) =>
+        ready['models.setRole']({ level: 'project', scopeId: projectId, role, setting }),
+      ),
+    neverList: (projectId) => call((ready) => ready['permissions.neverList']({ projectId })),
+    setNeverList: (projectId, entries) =>
+      call((ready) => ready['permissions.setNeverList']({ projectId, entries })),
+    projectLimits: (projectId) => call((ready) => ready['limits.project']({ projectId })),
+    setProjectLimits: (projectId, limits) =>
+      call((ready) => ready['limits.setProject']({ projectId, limits })),
+    instructionFiles: (projectId) =>
+      call((ready) => ready['sessions.instructionFiles']({ projectId })),
     checkAgentUpdates: () => call((ready) => ready['agents.checkUpdates']()),
     updateAgent: (agent) => call((ready) => ready['agents.update']({ agent })),
     hemeraAuto: () => call((ready) => ready['hemeraAuto.status']()),
@@ -387,6 +448,23 @@ export function linkOver(port: Port): Link {
     restoreProfile: (folder) => call((ready) => ready['profile.restore']({ folder })),
     retention: () => call((ready) => ready['diagnostics.retention']()),
     testerFindings: () => call((ready) => ready['tester.findings']()),
+    setupCards: (projectId) => call((ready) => ready['setup.cards']({ projectId })),
+    acceptSetupCard: (cardId) => call((ready) => ready['setup.accept']({ cardId })),
+    declineSetupCard: (cardId) => call((ready) => ready['setup.decline']({ cardId })),
+    acceptAllSetupCards: (projectId) => call((ready) => ready['setup.acceptAll']({ projectId })),
+    proposeSetup: (projectId) => call((ready) => ready['setup.propose']({ projectId })),
+    projectSessions: (projectId) =>
+      call((ready) => ready['sessions.list']({ ownerKind: 'project', ownerId: projectId })),
+    sessionThread: (id) => call((ready) => ready['sessions.thread']({ id })),
+    setupStanding: (projectId) => call((ready) => ready['setup.standing']({ projectId })),
+    onSetupChanges: (listener, onEnd, onOpen) =>
+      follow(
+        (ready) => ready['setup.changes'](),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+        onOpen,
+      ),
     onDecisions: (listener, onEnd) =>
       follow(
         (ready) => ready['permissions.decisions'](),

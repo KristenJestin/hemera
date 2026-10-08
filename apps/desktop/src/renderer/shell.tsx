@@ -63,6 +63,8 @@ export interface ShellProps {
   under?: (projectId: string) => ReactNode
   /** The page of the Chat the route shows, drawn by its own hooks. */
   chat?: ReactNode
+  /** The tasks of the Project the route shows, on its page, drawn by their own hooks. */
+  projectTasks?: ReactNode
   /** A Chat's title, when the window knows it: the last crumb of its page. */
   chatTitle?: (id: string) => string | undefined
   /** Today, as Home's header says it. */
@@ -75,6 +77,8 @@ export interface ShellProps {
   addProject?: ReactNode
   /** What the application's Settings page holds under its title. */
   appSettings?: ReactNode
+  /** Home before the first Project, while nothing waits: the agents and the ways in. */
+  firstLaunch?: ReactNode
   /** The in-app notifications, over the sheet's bottom corner. */
   notices?: ReactNode
   actions: ShellActions
@@ -113,10 +117,12 @@ interface ProjectRouteProps {
   /** The name the sidebar knows, while the page reads the Project. */
   fallback: string
   actions: ShellActions
+  /** Its tasks, under the field that starts a mission. */
+  tasks?: ReactNode
 }
 
 /** A Project's page: its header from the engine; its start field and missions are later tickets'. */
-function ProjectRoute({ id, state, fallback, actions }: ProjectRouteProps): ReactNode {
+function ProjectRoute({ id, state, fallback, actions, tasks }: ProjectRouteProps): ReactNode {
   const project = state.kind === 'ready' ? state.project : null
   return (
     <ProjectPage
@@ -133,6 +139,7 @@ function ProjectRoute({ id, state, fallback, actions }: ProjectRouteProps): Reac
       onOpenMission={() => undefined}
       onOpenSettings={() => actions.go({ kind: 'projectSettings', id })}
       onRetry={actions.retryProject}
+      tasks={tasks}
     />
   )
 }
@@ -147,7 +154,9 @@ interface RoutePageProps {
   today: string
   projectSettings: ReactNode
   appSettings: ReactNode
+  firstLaunch: ReactNode
   chat: ReactNode
+  projectTasks: ReactNode
   actions: ShellActions
 }
 
@@ -162,13 +171,24 @@ function RoutePage({
   today,
   projectSettings,
   appSettings,
+  firstLaunch,
   chat,
+  projectTasks,
   actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
     case 'home': {
       const listed = projects.kind === 'ready' ? projects.projects : []
       const rows = needRowsOf(needs, listed, now, route.projectId)
+      // Something waiting is read on Home, which says it; otherwise the first launch's ways in.
+      if (
+        projects.kind === 'ready' &&
+        needs.kind === 'ready' &&
+        listed.length === 0 &&
+        rows.length === 0
+      ) {
+        return firstLaunch
+      }
       const failure =
         projects.kind === 'failed'
           ? projects.sentence
@@ -217,6 +237,7 @@ function RoutePage({
           state={project}
           fallback={nameOf(route.id) ?? ''}
           actions={actions}
+          tasks={projectTasks}
         />
       )
     case 'projectSettings':
@@ -246,11 +267,13 @@ export function Shell({
   under,
   chat,
   chatTitle,
+  projectTasks,
   today,
   now,
   projectSettings,
   addProject,
   appSettings,
+  firstLaunch,
   notices,
   actions,
 }: ShellProps): ReactNode {
@@ -320,7 +343,9 @@ export function Shell({
             today={today}
             projectSettings={projectSettings}
             appSettings={appSettings}
+            firstLaunch={firstLaunch}
             chat={chat}
+            projectTasks={projectTasks}
             actions={actions}
           />
         )}

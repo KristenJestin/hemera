@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { createContext, type ReactNode, type RefObject, useRef, useState } from 'react'
 
 import type { Ball } from '../../blocks/ball/ball-mark.tsx'
 import { MissionRow, MissionRowSkeleton } from '../../blocks/mission/mission-row.tsx'
@@ -67,7 +67,15 @@ export interface ProjectPageProps {
   onOpenMission: (missionKey: string) => void
   onOpenSettings: () => void
   onRetry: () => void
+  /** The Project's tasks, under the field that starts a mission: what Hemera does for it. */
+  tasks?: ReactNode
 }
+
+/**
+ * The field that starts a mission, as the Project's tasks reach it: a task leaving the page while
+ * the focus is in it hands the focus there rather than to nothing.
+ */
+export const MissionField = createContext<RefObject<HTMLInputElement | null> | null>(null)
 
 const REPOSITORIES = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
 
@@ -151,8 +159,10 @@ export function ProjectPage({
   onOpenMission,
   onOpenSettings,
   onRetry,
+  tasks,
 }: ProjectPageProps): ReactNode {
   const [text, setText] = useState('')
+  const field = useRef<HTMLInputElement>(null)
   const empty = !loading && error === undefined && groups.every((group) => group.rows.length === 0)
   return (
     <Page>
@@ -197,7 +207,9 @@ export function ProjectPage({
           onStart(text.trim())
         }}
         trailing={<Kbd keys="Ctrl+K" />}
+        inputRef={field}
       />
+      <MissionField value={field}>{tasks}</MissionField>
       {error !== undefined && (
         <ErrorState title={`Hemera could not read ${name}`} description={error} onRetry={onRetry} />
       )}

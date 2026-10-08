@@ -8,6 +8,8 @@ import {
 import { AddProject, type FoundRepository } from '@hemera/ui'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import type { SetupOffer } from './setup-cards.ts'
+
 /** What adding a Project asks of the window: the engine's two calls, and main's picker. */
 export interface AddingTools {
   readonly detect: (folder: string) => Promise<ReadonlyArray<string>>
@@ -69,7 +71,10 @@ export interface AddProjectDialogProps {
   onOpenChange: (open: boolean) => void
   tools: AddingTools
   /** The Project created, once the engine has written it. */
-  onCreated: (project: Project) => void
+  /** Who would run the setup, as the dialog offers it; null while it is read. */
+  setupOffer: SetupOffer | null
+  /** The Project created, once the engine has written it, and whether the user chose the setup. */
+  onCreated: (project: Project, setUp: boolean) => void
 }
 
 /**
@@ -82,8 +87,11 @@ export function AddProjectDialog({
   open,
   onOpenChange,
   tools,
+  setupOffer,
   onCreated,
 }: AddProjectDialogProps): ReactNode {
+  /** Whether the user chose to have an agent propose the rest of the setup. */
+  const [setUp, setSetUp] = useState(false)
   const [folder, setFolder] = useState('')
   const [name, setName] = useState('')
   const [named, setNamed] = useState(false)
@@ -114,6 +122,7 @@ export function AddProjectDialog({
     setByHand('')
     setRefusal({})
     setCreating(false)
+    setSetUp(false)
   }
 
   const look = (at: string): void => {
@@ -146,6 +155,8 @@ export function AddProjectDialog({
     setFound(null)
     setRefusal({})
     if (!named) setName(folderName(next))
+    // The list holds its rows' shape from the first keystroke, not once the typing settles.
+    setDetecting(next.trim() !== '')
     if (timer.current !== null) clearTimeout(timer.current)
     looking.current += 1
     if (now) look(next)
@@ -197,6 +208,9 @@ export function AddProjectDialog({
       }}
       refused={refusal.foot}
       creating={creating}
+      setup={setupOffer ?? undefined}
+      setUp={setUp}
+      onSetUp={setSetUp}
       onCreate={() => {
         if (creating) return
         const asked = found ?? []
@@ -204,9 +218,10 @@ export function AddProjectDialog({
         setRefusal({})
         tools.create(newProjectOf(folder, name, asked)).then(
           (project) => {
+            const chosen = setUp && setupOffer !== null && setupOffer.unavailable === undefined
             reset()
             onOpenChange(false)
-            onCreated(project)
+            onCreated(project, chosen)
           },
           (failure: Error) => {
             setCreating(false)

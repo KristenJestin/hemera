@@ -178,3 +178,13 @@ export const Focused: Story = {
     await expect(canvas.getByRole('button', { name: /^Model of Reviewer/ })).toHaveFocus()
   },
 }
+
+/** A model the engine refused for a role: the row is back as the engine keeps it, and why is said. */
+export const ChangeRefused: Story = {
+  args: { error: 'The model could not be changed: Hemera could not write to its profile.' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'The model could not be changed',
+    )
+  },
+}

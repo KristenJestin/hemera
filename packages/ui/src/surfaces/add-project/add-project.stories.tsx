@@ -23,6 +23,8 @@ interface AddProjectFixtureProps {
   refused?: string | undefined
   /** Whether the Project's mark can be chosen; false where it cannot be kept yet. */
   marked?: boolean | undefined
+  /** Whether an agent can propose the rest of the setup, as the dialog offers it. */
+  setUp?: 'offered' | 'unavailable' | undefined
 }
 
 /** The dialog, holding what a renderer's hook would: the folder, the name, what was found. */
@@ -33,6 +35,7 @@ function AddProjectFixture({
   folderError,
   refused: refusal,
   marked = true,
+  setUp,
 }: AddProjectFixtureProps) {
   const [open, setOpen] = useState(true)
   const [folder, setFolder] = useState(firstFolder)
@@ -43,6 +46,7 @@ function AddProjectFixture({
   const [identity, setIdentity] = useState<Identity>({})
   const [byHand, setByHand] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
+  const [settingUp, setSettingUp] = useState(false)
   // The system's picker, as a story can have it: it gives Acme's folder, and Hemera looks in it.
   const [looking, setLooking] = useState(detecting)
   useEffect(() => {
@@ -96,6 +100,9 @@ function AddProjectFixture({
           ])
           setByHand('')
         }}
+        setup={setUp === undefined ? undefined : SETUP_OFFERS[setUp]}
+        setUp={settingUp}
+        onSetUp={setSettingUp}
         refused={refused}
         onCreate={() => {
           if (refusal !== undefined) setRefused(refusal)
@@ -105,6 +112,12 @@ function AddProjectFixture({
     </div>
   )
 }
+
+/** What the dialog offers of the setup, as each story has it. */
+const SETUP_OFFERS = {
+  offered: {},
+  unavailable: { unavailable: 'Claude Code is not signed in' },
+} as const
 
 /** What Hemera finds in Acme's folder: three repositories under it. */
 const ACME_FOUND: readonly FoundRepository[] = [
@@ -200,7 +213,7 @@ export const WithoutMark: Story = {
   play: async () => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('acme')
-    expect(within(dialog).queryByRole('radiogroup', { name: 'Colour' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: /^Mark of / })).toBeNull()
     expect(within(dialog).getAllByRole('checkbox')).toHaveLength(3)
   },
 }
@@ -253,7 +266,7 @@ export const LongText: Story = {
   },
 }
 
-/** From the keyboard: the folder, the picker, the name, the mark, the boxes; Escape closes. */
+/** From the keyboard: the folder, the picker, the mark, the name, the boxes; Escape closes. */
 export const Focused: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND },
   play: async () => {
@@ -263,20 +276,9 @@ export const Focused: Story = {
     await userEvent.tab()
     expect(within(dialog).getByRole('button', { name: 'Choose…' })).toHaveFocus()
     await userEvent.tab()
+    expect(within(dialog).getByRole('button', { name: 'Mark of acme' })).toHaveFocus()
+    await userEvent.tab()
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveFocus()
-    await userEvent.tab()
-    // The colours are one stop, the arrows walk them.
-    const chosen = within(dialog).getByRole('radio', { checked: true })
-    expect(chosen).toHaveFocus()
-    await userEvent.keyboard('{ArrowRight}')
-    await waitFor(() => {
-      expect(within(dialog).getByRole('radio', { checked: true })).toHaveFocus()
-    })
-    expect(within(dialog).getByRole('radio', { checked: true })).not.toBe(chosen)
-    await userEvent.tab()
-    expect(within(dialog).getByRole('combobox', { name: 'Icon' })).toHaveFocus()
-    await userEvent.tab()
-    expect(within(dialog).getByRole('button', { name: 'Choose an image…' })).toHaveFocus()
     await userEvent.tab()
     const api = within(dialog).getByRole('checkbox', { name: 'api' })
     expect(api).toHaveFocus()
@@ -290,28 +292,53 @@ export const Focused: Story = {
 }
 
 /**
- * The Project's mark chosen as it is added: a colour, an icon of the set, or a logo of its own —
- * drawn beside its name as the sidebar will draw it; left alone, the name's letter.
+ * The Project's mark chosen as it is added, from the mark at the head of its name: a symbol, a
+ * colour, or a logo of its own; left alone, the name's letter.
  */
 export const Marked: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND },
   play: async () => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
-    const preview = dialog.querySelector('[data-mark-preview]')
-    expect(preview?.querySelector('[data-avatar]')).toHaveTextContent('A')
-    await userEvent.click(within(dialog).getByRole('radio', { name: 'Cyan' }))
-    expect(within(dialog).getByRole('radio', { name: 'Cyan' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Icon' }))
-    await userEvent.click(await within(document.body).findByRole('option', { name: 'Rocket' }))
+    const mark = within(dialog).getByRole('button', { name: 'Mark of acme' })
+    expect(mark.querySelector('[data-avatar]')).toHaveTextContent('A')
+    await userEvent.click(mark)
+    const panel = await within(document.body).findByRole('dialog', { name: 'Mark of acme' })
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Cyan' }))
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Rocket' }))
+    expect(mark.querySelector('[data-mark-icon="rocket"]')).not.toBeNull()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Upload an image…' }))
+    expect(mark.querySelector('[data-mark-image]')).not.toBeNull()
+    await userEvent.keyboard('{Escape}')
     await waitFor(() => {
-      expect(preview?.querySelector('[data-mark-icon="rocket"]')).not.toBeNull()
+      expect(within(document.body).queryByRole('dialog', { name: 'Mark of acme' })).toBeNull()
     })
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Choose an image…' }))
-    expect(preview?.querySelector('[data-mark-image]')).not.toBeNull()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove the image' }))
-    expect(preview?.querySelector('[data-mark-image]')).toBeNull()
+    // Escape closes the panel and nothing more: the dialog it was opened from stays.
+    expect(dialog).toBeInTheDocument()
+  },
+}
+
+/** An agent can propose the rest of the setup: offered, unticked, the user's choice. */
+export const SetUpOffered: Story = {
+  args: { folder: '~/work/acme', found: ACME_FOUND, setUp: 'offered' },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    const offer = within(dialog).getByRole('checkbox', {
+      name: /^Let an agent propose the rest of the setup/,
+    })
+    expect(offer).toHaveAttribute('aria-checked', 'false')
+    await userEvent.click(offer)
+    expect(offer).toHaveAttribute('aria-checked', 'true')
+  },
+}
+
+/** No agent can: why, and nothing to tick. */
+export const SetUpUnavailable: Story = {
+  args: { folder: '~/work/acme', found: ACME_FOUND, setUp: 'unavailable' },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    expect(within(dialog).getByText(/Claude Code is not signed in/)).toBeVisible()
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /propose the rest of the setup/ }),
+    ).toBeNull()
   },
 }

@@ -23,9 +23,10 @@ import type { LiveState } from './tint.tsx'
  * - A service's address, with copy and open.
  * - The last lines it printed — a short tail of five at most, the newest at the bottom, one line
  *   each and never wrapped — or, for a helper, the step it is on.
- * - Its actions, by kind and state: Restart and Stop while a run or a service works; Run again
- *   once a run or a Probe has ended, Restart once a service has; nothing to stop on a helper or a
- *   Probe — nobody stops them by hand. ⓘ opens its details, always.
+ * - ⓘ at the head's end, top right, opens its details, always. Its actions under the rule, at the
+ *   bottom, by kind and state: what it asks of the user first; Restart and Stop while a run or a
+ *   service works; Run again once a run or a Probe has ended, Restart once a service has; nothing
+ *   to stop on a helper or a Probe — nobody stops them by hand.
  *
  * Plain React: values in, callbacks out. An action whose callback is not given is not offered.
  */
@@ -43,6 +44,11 @@ export interface LiveGlance {
   step?: string | undefined
   /** The last lines it printed or said, oldest first. */
   output?: readonly string[] | undefined
+  /**
+   * What it asks of the user, first among its actions: "Review 2 proposals", "Try again". The
+   * chip is the way in; nothing beside it on the page asks for it.
+   */
+  ask?: { readonly label: string; readonly onPress: () => void } | undefined
   onRestart?: (() => void) | undefined
   onStop?: (() => void) | undefined
   onRunAgain?: (() => void) | undefined
@@ -104,14 +110,14 @@ export interface LiveChipGlanceProps {
 }
 
 export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProps): ReactNode {
-  const { kind, onRestart, onStop, onRunAgain, onDetails } = glance
+  const { kind, ask, onRestart, onStop, onRunAgain, onDetails } = glance
   const stoppable = kind === 'run' || kind === 'service'
   const restart = stoppable && (working(state) || kind === 'service') ? onRestart : undefined
   const stop = stoppable && working(state) ? onStop : undefined
   const again = (kind === 'run' || kind === 'probe') && !working(state) ? onRunAgain : undefined
   return (
     <div className={PANEL} data-glance={kind}>
-      <div className={HEAD}>
+      <div className={HEAD} data-glance-head="">
         {state === 'stuck' ? (
           <span className="flex text-warning">
             <IconClockPause size="sm" aria-hidden="true" />
@@ -120,6 +126,17 @@ export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProp
           <StatusMark state={MARKS[state]} size="sm" />
         )}
         <span>{glanceWordsOf(state, time)}</span>
+        {onDetails !== undefined && (
+          <span className="ml-auto flex">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconInfoCircle size="sm" />}
+              aria-label="Details"
+              onClick={onDetails}
+            />
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-0.5">
         <span className={NAME}>{name}</span>
@@ -160,8 +177,13 @@ export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProp
           ))}
         </div>
       )}
-      {(restart ?? stop ?? again ?? onDetails) !== undefined && (
+      {(ask ?? restart ?? stop ?? again) !== undefined && (
         <div className={ACTIONS}>
+          {ask !== undefined && (
+            <Button size="sm" variant="primary" onClick={ask.onPress}>
+              {ask.label}
+            </Button>
+          )}
           {restart !== undefined && (
             <Button size="sm" onClick={restart}>
               <IconRefresh size="sm" />
@@ -179,17 +201,6 @@ export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProp
               <IconPlayerPlay size="sm" />
               Run again
             </Button>
-          )}
-          {onDetails !== undefined && (
-            <span className="ml-auto flex">
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconInfoCircle size="sm" />}
-                aria-label="Details"
-                onClick={onDetails}
-              />
-            </span>
           )}
         </div>
       )}

@@ -82,9 +82,12 @@ export const LIMITS: readonly BudgetLimit[] = [
   { id: 'rounds', label: 'Automatic rounds', value: null, fallback: 5 },
 ]
 
-/** What the engine refuses in a limit, in words. */
-export function limitRefusal(value: string | null): string | undefined {
+/** What the engine refuses in a limit, in words: the cap is from 1 to 6. */
+export function limitRefusal(id: string, value: string | null): string | undefined {
   if (value === null) return undefined
+  if (id === 'cap') {
+    return /^[1-6]$/.test(value.trim()) ? undefined : 'Write a whole number from 1 to 6.'
+  }
   return /^[1-9]\d{0,2}$/.test(value.trim()) ? undefined : 'Write a whole number from 1 to 999.'
 }
 
@@ -96,9 +99,19 @@ export const INSTRUCTIONS: readonly RepositoryInstructions[] = [
   { repository: 'billing', files: [] },
 ]
 
-/** Which file each agent reads by itself; Hemera sends it the others. */
+/** Which file each agent reads by itself; Hemera sends one to the others. */
 export const READERS: readonly AgentInstructions[] = [
-  { agent: 'Claude Code', reads: ['CLAUDE.md'] },
-  { agent: 'Codex', reads: ['AGENTS.md'] },
-  { agent: 'OpenCode', reads: ['AGENTS.md', 'CLAUDE.md'] },
+  { id: 'claude', agent: 'Claude Code', reads: ['CLAUDE.md'] },
+  { id: 'codex', agent: 'Codex', reads: ['AGENTS.md'] },
+  { id: 'opencode', agent: 'OpenCode', reads: ['AGENTS.md', 'CLAUDE.md'] },
+]
+
+/** Many agents at once: the section's width does not follow how many there are. */
+export const MANY_READERS: readonly AgentInstructions[] = [
+  ...READERS,
+  ...Array.from({ length: 9 }, (_, at) => ({
+    id: `agent-${String(at + 1)}`,
+    agent: `Agent ${String(at + 1)}`,
+    reads: [at % 2 === 0 ? 'AGENTS.md' : 'CLAUDE.md'],
+  })),
 ]

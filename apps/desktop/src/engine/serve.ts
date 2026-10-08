@@ -120,7 +120,13 @@ const chatSummary = (chat: Chat, working: boolean) => ({
   working,
 })
 
-export const engineHandlers = (start: EngineStart, profile: StartedProfile, log: Log) => {
+/** `listed`: the agents the window lists, this machine's unless a suite says otherwise. */
+export const engineHandlers = (
+  start: EngineStart,
+  profile: StartedProfile,
+  log: Log,
+  listed: Layer.Layer<Agents> = machineAgentsLayer(),
+) => {
   const { dataFolder, channel, version } = start
   const statusOf = (database: EngineStatus['database']): EngineStatus => ({
     ready: true,
@@ -520,5 +526,5 @@ export const engineHandlers = (start: EngineStart, profile: StartedProfile, log:
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
-  }).pipe(Layer.provide(machineAgentsLayer()))
+  }).pipe(Layer.provide(listed))
 }

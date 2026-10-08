@@ -56,11 +56,16 @@ describe('A Project’s settings page', () => {
       'Preparation',
       'Variables',
       'Services',
+      'Models by role',
+      'Cap and budget',
+      'Instructions',
     ]) {
       expect(markup).toContain(`>${section}<`)
     }
     expect(markup).toContain('data-row-skeleton')
     expect(markup).toContain('aria-busy="true"')
+    // Never run stands under the catalogue, not as a section of its own.
+    expect(markup).not.toContain('>Never run<')
   })
 
   test('read: the Project’s name and main checkout, each repository with its base', () => {

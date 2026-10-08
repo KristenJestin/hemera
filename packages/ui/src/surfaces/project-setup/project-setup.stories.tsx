@@ -1,17 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
+import type { SetupCardEntry } from './project-setup.tsx'
 import { SetupFixture } from './setup-fixture.tsx'
+import { ProjectTasks, SetupTask, type SetupTaskProps } from './setup-task.tsx'
 
 /**
- * A new Project, set up from its folder: what the setup agent proposes, a card per part, and the
- * answers to each — Accept, Edit in place, Discuss, Decline — or to all at once. Under the window's
- * header. Each story is the page full-bleed; the toolbar's viewports give its two sizes.
+ * A Project's setup as a task of the Project, launched whenever the user chooses: what the setup agent
+ * proposes, a card per part, unfolded in place, and the answers to each — Accept, Edit in place,
+ * Discuss, Decline — or to all at once. Each story is the page full-bleed under the window's
+ * header; the toolbar's viewports give its two sizes.
  */
 const meta = {
   tags: ['autodocs'],
-  title: 'Surfaces/New Project',
+  title: 'Surfaces/Project tasks/Setup',
   component: SetupFixture,
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof SetupFixture>
@@ -22,22 +27,36 @@ type Story = StoryObj<typeof meta>
 const card = (canvasElement: HTMLElement, name: string): HTMLElement =>
   within(canvasElement).getByRole('region', { name })
 
-/** Every card proposed: Accept all at the end of the header, beside the agent's chip, done. */
+/** Every card proposed: Accept all on the task's line, beside the agent's chip, done. */
 export const Proposed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('heading', { level: 1, name: 'New Project' })).toBeVisible()
-    expect(canvas.getByText('~/work/acme')).toBeVisible()
+    expect(canvas.getByRole('region', { name: 'Tasks' })).toBeVisible()
     for (const name of ['Repositories', 'Commands', 'Preparation', 'Variables', 'Never run']) {
       expect(card(canvasElement, name)).toBeVisible()
     }
-    expect(canvas.getByRole('button', { name: 'Setup agent, done' })).toBeVisible()
+    expect(
+      canvas.getByRole('button', { name: /^Setup agent, done(, waits for you)?$/ }),
+    ).toBeVisible()
     expect(canvas.getByRole('button', { name: 'Accept all' })).toBeVisible()
-    expect(canvas.queryByRole('button', { name: 'Create the Project' })).toBeNull()
   },
 }
 
-/** The agent waits for a free slot: its glyph in the header, every card its own shape. */
+/** The agent's chip opens its glance: who it is, where it stands, and the step it is on. */
+export const AgentGlance: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: /^Setup agent, done(, waits for you)?$/ }),
+    )
+    const glance = await within(document.body).findByRole('dialog', { name: /^Setup/ })
+    // The glance rises in: what it says is read once it has.
+    await waitFor(() => expect(within(glance).getByText('Agent · Claude Code')).toBeVisible())
+    expect(within(glance).getByText('Proposed the setup of 5 parts')).toBeVisible()
+  },
+}
+
+/** The agent waits for a free slot: its glyph on the task, nothing to review yet. */
 export const Waiting: Story = {
   args: {
     agent: 'waiting',
@@ -52,8 +71,9 @@ export const Waiting: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('img', { name: 'Setup agent, waiting for a free slot' })).toBeVisible()
-    expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(15)
+    // Nothing to review while every card is still read.
     expect(canvas.queryByRole('button', { name: 'Accept all' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: /^(Review|Hide)$/ })).toBeNull()
   },
 }
 
@@ -62,7 +82,9 @@ export const Reading: Story = {
   args: { agent: 'working', arriving: ['preparation', 'variables', 'never'] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('button', { name: 'Setup agent, running' })).toBeVisible()
+    expect(
+      canvas.getByRole('button', { name: /^Setup agent, running(, waits for you)?$/ }),
+    ).toBeVisible()
     expect(card(canvasElement, 'Preparation')).toHaveAttribute('aria-busy', 'true')
     expect(
       within(card(canvasElement, 'Commands')).getByRole('button', { name: 'Accept' }),
@@ -73,7 +95,9 @@ export const Reading: Story = {
       },
       { timeout: 5000 },
     )
-    expect(await canvas.findByRole('button', { name: 'Setup agent, done' })).toBeVisible()
+    expect(
+      await canvas.findByRole('button', { name: /^Setup agent, done(, waits for you)?$/ }),
+    ).toBeVisible()
   },
 }
 
@@ -151,7 +175,7 @@ export const AcceptAllStopped: Story = {
   },
 }
 
-/** Every card answered: the cards quiet with their check, Create the Project at the header's end. */
+/** Every card answered: the cards quiet with their check, every mark filled; the page then lets it go. */
 export const AllAccepted: Story = {
   args: {
     states: {
@@ -166,9 +190,7 @@ export const AllAccepted: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getAllByRole('img', { name: 'Accepted' })).toHaveLength(4)
     expect(canvas.queryByRole('button', { name: 'Accept all' })).toBeNull()
-    const create = canvas.getByRole('button', { name: 'Create the Project' })
-    await userEvent.click(create)
-    expect(await within(create).findByRole('status', { name: 'Working' })).toBeInTheDocument()
+    expect(canvas.getByRole('img', { name: '5 of 5 proposals answered' })).toBeVisible()
   },
 }
 
@@ -206,8 +228,8 @@ export const NoRepositoryInMain: Story = {
 }
 
 /**
- * The agent stopped: a Project need above the cards, with Try again; the cards it had written stay,
- * the others are not drawn.
+ * The agent stopped: its chip says so, its glance why, with Try again; the cards it had written
+ * stay, the others are not drawn.
  */
 export const Failed: Story = {
   args: {
@@ -221,14 +243,21 @@ export const Failed: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // Why it stopped is the chip's glance's to say.
+    await userEvent.click(canvas.getByRole('button', { name: /^Setup agent, failed/ }))
+    const glance = await within(document.body).findByRole('dialog')
+    await waitFor(() =>
+      expect(within(glance).getByText(/usage limit of this account/)).toBeVisible(),
+    )
     expect(
-      canvas.getByRole('article', { name: 'Something missing: The setup agent stopped' }),
-    ).toHaveTextContent('usage limit')
-    expect(canvas.getByRole('button', { name: 'Setup agent, failed' })).toBeVisible()
+      canvas.getByRole('button', { name: /^Setup agent, failed(, waits for you)?$/ }),
+    ).toBeVisible()
     expect(canvas.queryByRole('region', { name: 'Preparation' })).toBeNull()
     expect(card(canvasElement, 'Commands')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Try again' }))
-    expect(await canvas.findByRole('button', { name: 'Setup agent, running' })).toBeVisible()
+    await userEvent.click(within(glance).getByRole('button', { name: 'Try again' }))
+    expect(
+      await canvas.findByRole('button', { name: /^Setup agent, running(, waits for you)?$/ }),
+    ).toBeVisible()
   },
 }
 
@@ -247,7 +276,7 @@ export const LongText: Story = {
 export const Hemera: Story = {
   args: { folder: '~/work/hemera' },
   play: async ({ canvasElement }) => {
-    expect(within(canvasElement).getByText('~/work/hemera')).toBeVisible()
+    expect(card(canvasElement, 'Commands')).toBeVisible()
   },
 }
 
@@ -290,5 +319,123 @@ export const ReducedMotion: Story = {
     await userEvent.click(within(never).getByRole('button', { name: 'Accept' }))
     expect(within(never).getByRole('img', { name: 'Accepted' })).toBeVisible()
     expect(within(never).queryByRole('button', { name: 'Edit' })).toBeNull()
+  },
+}
+
+const entry = (kind: SetupCardEntry['kind'], state: 'proposed' | 'accepted'): SetupCardEntry => ({
+  kind,
+  status: { state },
+  proposal: PROPOSALS[kind],
+})
+
+const CARDS: readonly SetupCardEntry[] = [
+  entry('repositories', 'accepted'),
+  entry('commands', 'proposed'),
+  entry('preparation', 'proposed'),
+]
+
+const HANDLERS = {
+  onAcceptAll: fn(),
+  onRetry: fn(),
+  onAccept: fn(),
+  onDraft: fn(),
+  onDecline: fn(),
+  onSave: fn(),
+  onCancel: fn(),
+  onSend: fn(),
+}
+
+/** The task alone, on a page's column, holding whether its details are open. */
+function Held(args: SetupTaskProps) {
+  const [open, setOpen] = useState(args.open)
+  return (
+    <div className="mx-auto flex w-full max-w-page flex-col p-8">
+      <ProjectTasks>
+        <SetupTask {...args} open={open} onOpenChange={setOpen} />
+      </ProjectTasks>
+    </div>
+  )
+}
+
+const BASE: SetupTaskProps = {
+  project: 'Acme',
+  agent: 'done',
+  about: 'Agent · Claude Code · opus',
+  messages: [
+    'Read the repositories, their package.json and the README',
+    'Found pnpm workspaces in api and web',
+    'Proposed the commands, the preparation and the variables',
+  ],
+  startedAt: 0,
+  endedAt: 42_000,
+  cards: CARDS,
+  open: false,
+  onOpenChange: fn(),
+  ...HANDLERS,
+}
+
+const chipOf = (canvasElement: HTMLElement, state: string): HTMLElement =>
+  within(canvasElement).getByRole('button', {
+    name: new RegExp(`^Setup agent, ${state}(, waits for you)?$`),
+  })
+
+/** The agent reads the Project: its chip; its menu, what it does and its last messages, and ⓘ. */
+export const TaskReading: Story = {
+  render: () => (
+    <Held {...BASE} agent="working" startedAt={Date.now() - 12_000} endedAt={null} cards={[]} />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: 'Setup agent, running' })
+    expect(chip.querySelector('[data-calls]')).toBeNull()
+    await userEvent.click(chip)
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await waitFor(() => expect(within(menu).getByText('Agent · Claude Code · opus')).toBeVisible())
+    expect(within(menu).getByText('Found pnpm workspaces in api and web')).toBeVisible()
+    expect(within(menu).queryByRole('button', { name: /^Review/ })).toBeNull()
+    expect(within(menu).getByRole('button', { name: 'Details' })).toBeVisible()
+  },
+}
+
+/**
+ * Proposals wait: the chip wears the dot of what waits for you, and nothing beside it. Its menu's
+ * main button is what it asks, "Review 2 proposals": the details, as ⓘ opens them, where the
+ * proposals are answered. The page does not move.
+ */
+export const TaskProposed: Story = {
+  render: () => <Held {...BASE} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('region', { name: 'Tasks' })
+    expect(within(tasks).getAllByRole('button')).toHaveLength(1)
+    const chip = canvas.getByRole('button', { name: 'Setup agent, done, waits for you' })
+    expect(chip.querySelector('[data-calls]')).not.toBeNull()
+    await userEvent.click(chip)
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await userEvent.click(within(menu).getByRole('button', { name: 'Review 2 proposals' }))
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
+    expect(within(details).getByText('Found pnpm workspaces in api and web')).toBeVisible()
+    await userEvent.click(within(details).getByRole('button', { name: 'Accept all' }))
+    expect(HANDLERS.onAcceptAll).toHaveBeenCalled()
+    // Nothing unfolded on the page itself.
+    expect(within(tasks).queryByRole('region', { name: 'Commands' })).toBeNull()
+  },
+}
+
+/** The agent stopped: the dot; its menu says why, with Try again, and ⓘ. */
+export const TaskStopped: Story = {
+  render: () => <Held {...BASE} agent="failed" failure="Claude Code is not signed in" cards={[]} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('region', { name: 'Tasks' })
+    expect(within(tasks).queryByText('Claude Code is not signed in')).toBeNull()
+    await userEvent.click(chipOf(canvasElement, 'failed'))
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await waitFor(() =>
+      expect(within(menu).getByText('Claude Code is not signed in')).toBeVisible(),
+    )
+    await userEvent.click(within(menu).getByRole('button', { name: 'Try again' }))
+    expect(HANDLERS.onRetry).toHaveBeenCalled()
   },
 }

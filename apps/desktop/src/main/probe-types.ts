@@ -45,6 +45,8 @@ export interface HemeraProbe {
     projectId: string,
     sentence: string,
   ) => Promise<{ readonly id: string; readonly key: string }>
+  /** Where the setup of the Project named `name` stands, as the window reads it: `none` unasked. */
+  readonly setupStanding: (name: string) => Promise<string>
   /** Every pending need of Needs you, as the window reads them: id, state and answer. */
   readonly pendingNeeds: () => Promise<ReadonlyArray<PendingNeed>>
   /** A fake agent writes `count` Journal lines of a new mission over `folder`, in the background. */

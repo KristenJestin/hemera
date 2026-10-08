@@ -1,23 +1,25 @@
-import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
+import { AgentMark } from '../../components/agent-mark/agent-mark.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconBook2, IconFileText, IconSend } from '../../icons.ts'
+import { IconFileText } from '../../icons.ts'
 import { Section } from './parts.tsx'
 
 /**
  * The Project's layer of instructions: what each repository tells the agents that work in it.
  *
- * A table, one row per repository: its path, the instruction files it holds — `CLAUDE.md`,
- * `AGENTS.md` — each a button that opens the file, and one column per agent saying how that agent
- * gets them: it reads one by itself (a book), or Hemera sends it the file (a paper plane), each
- * glyph with its legend. A repository with no file leaves the agents' columns empty: there is
- * nothing to read. Nothing here is written: the files are the repository's.
+ * A line per repository: its path, then the instruction files it holds — `CLAUDE.md`,
+ * `AGENTS.md` — each a button that opens the file, and on each file the marks of the agents that
+ * read it by themselves, each with its legend. One sentence under the list says the rest: Hemera
+ * sends one of a repository's files to the agents that read none of them. The width never follows
+ * how many agents there are, so it stays readable whatever their number. A repository with no file
+ * says so. Nothing
+ * here is written: the files are the repository's.
  */
 export interface RepositoryInstructions {
   /** Its path in the main checkout. */
@@ -27,18 +29,19 @@ export interface RepositoryInstructions {
 }
 
 export interface AgentInstructions {
+  /** The id its mark is looked up by. */
+  id: string
   agent: string
   /** The instruction files the agent reads by itself, in its order of preference. */
   reads: readonly string[]
 }
 
-/** How an agent gets a repository's instructions: the file and who brings it, or nothing. */
+/** Whether an agent reads a file of the repository by itself, else what Hemera sends it. */
 export type Reading =
   | { readonly by: 'agent'; readonly file: string }
   | { readonly by: 'hemera'; readonly file: string }
   | null
 
-/** Whether an agent reads a file of the repository by itself, else what Hemera sends it. */
 export function readingOf(repository: RepositoryInstructions, agent: AgentInstructions): Reading {
   const own = agent.reads.find((file) => repository.files.includes(file))
   if (own !== undefined) return { by: 'agent', file: own }
@@ -46,70 +49,93 @@ export function readingOf(repository: RepositoryInstructions, agent: AgentInstru
   return sent === undefined ? null : { by: 'hemera', file: sent }
 }
 
-const TABLE = 'w-full table-fixed border-collapse text-sm'
+const ROW =
+  'flex min-h-control-lg min-w-0 items-center gap-4 border-b border-border px-4 py-2 last:border-b-0'
 
-const HEAD =
-  'h-control-sm border-b border-border px-4 text-left text-xs font-normal text-muted-foreground'
+const PATH = 'w-settings-name min-w-0 shrink-0 truncate font-mono text-sm font-medium'
 
-const AGENT_HEAD =
-  'h-control-sm w-24 border-b border-border px-2 text-center text-xs font-normal text-muted-foreground'
+const FILES = 'flex min-w-0 flex-1 flex-wrap items-center gap-3'
 
-const ROW = 'border-b border-border last:border-b-0'
+const FILE = 'flex min-w-0 items-center gap-1.5'
 
-const PATH_CELL = 'h-control-lg px-4 font-mono text-sm font-medium'
+const FILE_NAME = 'inline-flex h-control-sm items-center gap-1.5 px-2 text-muted-foreground'
 
-const FILES_CELL = 'h-control-lg px-4'
-
-const AGENT_CELL = 'h-control-lg px-2 text-center'
-
-const FILES = 'flex min-w-0 flex-wrap items-center gap-1'
+const READERS = 'flex flex-wrap items-center gap-1'
 
 const NONE = 'text-xs text-muted-foreground'
 
-function ReadingMark({
-  reading,
+const NOTE = 'max-w-measure px-4 py-3 text-xs text-muted-foreground'
+
+/** The marks of the agents that read this file of this repository by themselves. */
+function Readers({
   repository,
-  agent,
+  file,
+  agents,
 }: {
-  reading: Reading
-  repository: string
-  agent: string
+  repository: RepositoryInstructions
+  file: string
+  agents: readonly AgentInstructions[]
 }): ReactNode {
-  if (reading === null) return null
-  const label =
-    reading.by === 'agent'
-      ? `${agent} reads ${reading.file} of ${repository} by itself`
-      : `Hemera sends ${reading.file} of ${repository} to ${agent}`
+  const readers = agents.filter((agent) => {
+    const reading = readingOf(repository, agent)
+    return reading?.by === 'agent' && reading.file === file
+  })
+  if (readers.length === 0) return null
   return (
-    <Legend label={label}>
-      <span
-        className="inline-flex text-muted-foreground"
-        aria-hidden="true"
-        data-reading={reading.by}
-      >
-        {reading.by === 'agent' ? <IconBook2 size="sm" /> : <IconSend size="sm" />}
-      </span>
-    </Legend>
+    <span className={READERS}>
+      {readers.map((agent) => (
+        <Legend
+          key={agent.id}
+          label={`${agent.agent} reads ${file} of ${repository.repository} by itself`}
+        >
+          <span className="inline-flex" data-reader={agent.id}>
+            <AgentMark id={agent.id} name={agent.agent} size="sm" />
+          </span>
+        </Legend>
+      ))}
+    </span>
   )
 }
 
-function SkeletonRow({ agents }: { agents: number }): ReactNode {
+function SkeletonRow(): ReactNode {
   return (
-    <tr aria-hidden="true" className={ROW} data-row-skeleton="">
-      <td className={PATH_CELL}>
+    <li aria-hidden="true" className={ROW} data-row-skeleton="">
+      <span className={PATH}>
         <Skeleton>shared</Skeleton>
-      </td>
-      <td className={FILES_CELL}>
+      </span>
+      <span className={FILES}>
         <Skeleton>CLAUDE.md AGENTS.md</Skeleton>
-      </td>
-      {Array.from({ length: agents }, (_, at) => (
-        <td key={at} className={AGENT_CELL}>
-          <Skeleton shape="block">
-            <IconBook2 size="sm" />
-          </Skeleton>
-        </td>
-      ))}
-    </tr>
+      </span>
+    </li>
+  )
+}
+
+/** A file: the button that opens it, or its name where none can be opened. */
+function File({
+  repository,
+  file,
+  onOpen,
+}: {
+  repository: string
+  file: string
+  onOpen?: ((repository: string, file: string) => void) | undefined
+}): ReactNode {
+  const said = (
+    <>
+      <IconFileText size="sm" aria-hidden="true" />
+      <span className="font-mono text-xs">{file}</span>
+    </>
+  )
+  if (onOpen === undefined) return <span className={FILE_NAME}>{said}</span>
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      aria-label={`Open ${file} of ${repository}`}
+      onClick={() => onOpen(repository, file)}
+    >
+      {said}
+    </Button>
   )
 }
 
@@ -117,8 +143,8 @@ export interface InstructionsSectionProps {
   repositories: readonly RepositoryInstructions[]
   agents: readonly AgentInstructions[]
   loading?: boolean | undefined
-  /** Opens a file of a repository. */
-  onOpen: (repository: string, file: string) => void
+  /** Opens a file of a repository; left out, each file is said by its name only. */
+  onOpen?: ((repository: string, file: string) => void) | undefined
 }
 
 export function InstructionsSection({
@@ -135,69 +161,43 @@ export function InstructionsSection({
         {empty ? (
           <Empty icon={<IconFileText size="md" />} title="No instruction file" />
         ) : (
-          <table aria-label="Instructions" aria-busy={loading} className={TABLE}>
-            <thead>
-              <tr>
-                <th scope="col" className={cn(HEAD, 'w-settings-name')}>
-                  Repository
-                </th>
-                <th scope="col" className={HEAD}>
-                  Files
-                </th>
-                {agents.map((agent) => (
-                  <th key={agent.agent} scope="col" className={AGENT_HEAD}>
-                    {agent.agent}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <ul aria-label="Instructions" aria-busy={loading} className="flex flex-col">
               {loading ? (
                 <>
-                  <SkeletonRow agents={agents.length} />
-                  <SkeletonRow agents={agents.length} />
-                  <SkeletonRow agents={agents.length} />
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
                 </>
               ) : (
                 repositories.map((repository) => (
-                  <tr key={repository.repository} className={ROW}>
-                    <th scope="row" className={PATH_CELL}>
-                      <span className="block truncate text-left">{repository.repository}</span>
-                    </th>
-                    <td className={FILES_CELL}>
+                  <li
+                    key={repository.repository}
+                    className={ROW}
+                    data-repository={repository.repository}
+                  >
+                    <span className={PATH}>{repository.repository}</span>
+                    <span className={FILES}>
                       {repository.files.length === 0 ? (
                         <span className={NONE}>None</span>
                       ) : (
-                        <span className={FILES}>
-                          {repository.files.map((file) => (
-                            <Button
-                              key={file}
-                              size="sm"
-                              variant="ghost"
-                              aria-label={`Open ${file} of ${repository.repository}`}
-                              onClick={() => onOpen(repository.repository, file)}
-                            >
-                              <IconFileText size="sm" aria-hidden="true" />
-                              <span className="font-mono text-xs">{file}</span>
-                            </Button>
-                          ))}
-                        </span>
+                        repository.files.map((file) => (
+                          <span key={file} className={FILE}>
+                            <File repository={repository.repository} file={file} onOpen={onOpen} />
+                            <Readers repository={repository} file={file} agents={agents} />
+                          </span>
+                        ))
                       )}
-                    </td>
-                    {agents.map((agent) => (
-                      <td key={agent.agent} className={AGENT_CELL}>
-                        <ReadingMark
-                          reading={readingOf(repository, agent)}
-                          repository={repository.repository}
-                          agent={agent.agent}
-                        />
-                      </td>
-                    ))}
-                  </tr>
+                    </span>
+                  </li>
                 ))
               )}
-            </tbody>
-          </table>
+            </ul>
+            <p className={NOTE}>
+              Hemera sends one of its files to the agents that read none of a repository's files by
+              themselves.
+            </p>
+          </>
         )}
       </Frame>
     </Section>
