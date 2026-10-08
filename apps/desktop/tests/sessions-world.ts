@@ -29,6 +29,7 @@ import { ProcessSupervisor } from '../src/engine/supervisor.ts'
 import { STAYS_UP, commandsEngine, script } from './commands-engine.ts'
 import { repository } from './repositories.ts'
 import { TEST_ROLE } from './test-role.ts'
+import type { GhSettings } from '../src/engine/tickets/gh.ts'
 
 /** The moves are the stages' to allow: every guard passes. */
 export const PASSING: MissionParts['guards'] = {
@@ -117,6 +118,8 @@ export const sessionsEngine = (
     readonly tools?: ProfileParts['tools']
     /** The Probes' Cleanup hook a suite watches. */
     readonly probes?: ProfileParts['probes']
+    /** The fake `gh` of the ticket suites (#95). */
+    readonly gh?: GhSettings
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -145,6 +148,7 @@ export const sessionsEngine = (
     }),
   )
   const parts = {
+    gh: options.gh,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,

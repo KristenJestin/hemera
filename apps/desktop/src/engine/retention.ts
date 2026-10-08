@@ -111,6 +111,9 @@ export const TABLE_CLASSES = {
   spec_proofs: 'heavy',
   spec_tasks: 'permanent',
   mission_recommendations: 'permanent',
+  ticket_providers: 'state',
+  ticket_versions: 'permanent',
+  mission_tickets: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

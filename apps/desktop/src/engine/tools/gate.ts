@@ -35,6 +35,7 @@ import {
   type ToolName,
   admitTool,
   lineFor,
+  neutralised,
 } from '@hemera/core/domain'
 import { formatSchemaError } from '@hemera/core/schema'
 import type { Command } from '@hemera/ipc'
@@ -119,6 +120,8 @@ import type { ProfileHome } from '../profile-home.ts'
 import { discussionProposeDecision, discussionReply } from '../planning/discussion-store.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
+import type { GhCli } from '../tickets/gh.ts'
+import { ticketRead } from '../tickets/tool.ts'
 import { resolvePath } from './paths.ts'
 import {
   type CallSession,
@@ -195,6 +198,7 @@ export type GateServices =
   | ProbeDesk
   | AgentOffers
   | RepositoryStatuses
+  | GhCli
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -308,6 +312,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.discussion_reply.input)(raw)
     case 'discussion_propose_decision':
       return decoder(tool, TOOLS.discussion_propose_decision.input)(raw)
+    case 'ticket_read':
+      return decoder(tool, TOOLS.ticket_read.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -707,6 +713,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* discussionReply(grant, call.args)
             case 'discussion_propose_decision':
               return yield* discussionProposeDecision(grant, call.args)
+            case 'ticket_read':
+              return yield* ticketRead(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
@@ -912,11 +920,12 @@ export const toolGateLayer = (settings: GateSettings) =>
               asked.callKey === null
                 ? yield* decided(grant, asked)
                 : yield* keyed(grant, asked, asked.callKey)
+            // What a tool answers (a file, a ticket, a command's output) never reads as Hemera's
+            // own words: a marker or a note's tags in it are escaped before any note is added.
+            const text = neutralised(answer.text)
             // What cannot wait for the end of the turn travels in this answer, once.
             const notes = yield* SessionNotes.use((pinned) => pinned.take(grant.sessionId))
-            return notes.length === 0
-              ? answer
-              : { ...answer, text: [answer.text, ...notes].join('\n\n') }
+            return { ...answer, text: notes.length === 0 ? text : [text, ...notes].join('\n\n') }
           }).pipe(Effect.provide(context)),
       }
     }),

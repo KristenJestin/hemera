@@ -37,7 +37,7 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
-import { domainEventsLayer } from './domain-events.ts'
+import { DomainEvents, domainEventsLayer } from './domain-events.ts'
 import { AutomationGate, automationGateLayer } from './gate.ts'
 import { DATABASE_FILE, openProfile } from './migrate.ts'
 import { readPreferences, writePreferences } from './preferences.ts'
@@ -120,7 +120,10 @@ import { modelChoiceLayer, seedAppSettings } from './sessions/cascade.ts'
 import { type Cap, capLayer } from './sessions/cap.ts'
 import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
-import { type TicketSearch, noTicketSearch } from './start/tickets.ts'
+import type { TicketSearch } from './start/tickets.ts'
+import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
+import { deliverReadTickets } from './tickets/deliver.ts'
+import { ticketSearchLayer } from './tickets/search.ts'
 import { type SpecBoard, specBoardLayer } from './planning/board.ts'
 import { PLANNING_MAPPERS } from './planning/journal.ts'
 import { projectSpecLanguages } from './planning/store.ts'
@@ -159,7 +162,7 @@ import {
   resourceActionRules,
   resourceLine,
 } from './resources/reservations.ts'
-import type { ProcessSupervisor } from './supervisor.ts'
+import { ProcessSupervisor } from './supervisor.ts'
 
 /** The calls on the Profile, with the errors a screen is shown. */
 export interface ProfileCalls {
@@ -197,7 +200,7 @@ export interface ProfileParts {
   readonly memory?: Omit<MemoryParts, 'restoreJournal'>
   /** The role sessions: the roles later tickets register, and how agents are started. */
   readonly sessions?: SessionsParts
-  /** The ticket providers the field searches (#95, #96); none otherwise. */
+  /** The field's ticket search, for the suites; the Project's own providers otherwise (#95). */
   readonly tickets?: Layer.Layer<TicketSearch>
   /** The Probes' Cleanup hook (S6 fills it); one that does nothing otherwise. */
   readonly probes?: {
@@ -205,6 +208,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
+  /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
+  readonly gh?: GhSettings | undefined
 }
 
 /** What the role sessions are built with; this version's defaults otherwise. */
@@ -268,6 +273,7 @@ export type EngineServices =
   | AcpTraces
   | TesterFindings
   | TicketSearch
+  | GhCli
   | PlannerWake
   | SpecBoard
   | ExclusiveResources
@@ -361,7 +367,6 @@ export const startProfile = (
       backupFoldersLayer(parts.backupFolders),
       reconciliationStepsLayer(parts.reconciliationSteps),
       parts.liveMissions ?? noLiveMissions,
-      parts.tickets ?? noTicketSearch,
       parts.probes?.cleanup ?? noProbeCleanup,
       Layer.succeedContext(deskContext),
       Layer.succeedContext(offersContext),
@@ -498,6 +503,8 @@ export const startProfile = (
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
+      Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
+      Layer.provideMerge(ghCliLayer(parts.gh)),
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -622,6 +629,8 @@ export const startProfile = (
       ),
     )
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
+    // A `gh` call a stopped engine left (#95) is ended: none outlives the call that started it.
+    yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('tickets')))
     // The reservations a stop left: those whose mission is no longer in Building are released.
     yield* run(ExclusiveResources.use((reservations) => reservations.atStart)).pipe(
       Effect.tap((released) =>
@@ -718,6 +727,13 @@ export const startProfile = (
     // answer, and their results handed over; what a stopped engine left is finished first.
     yield* gate.pass.pipe(
       Effect.andThen(run(Effect.scoped(Approvals.use((approvals) => approvals.watch)))),
+      Effect.forkScoped,
+    )
+    // A ticket read after its mission was created goes to the mission's Planner (#95): followed
+    // from now, delivered once automations may run.
+    const ticketsRead = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(deliverReadTickets(ticketsRead, log))),
       Effect.forkScoped,
     )
     // Once automations may run: the reservations are settled, then again at each change (#88).

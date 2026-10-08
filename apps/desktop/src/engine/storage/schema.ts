@@ -107,6 +107,8 @@ export const projects = sqliteTable(
     budgetRounds: integer('budget_rounds').notNull().default(3),
     /** The language its Specs are written in, a BCP 47 tag (#85); copied into each new Spec. */
     specLanguage: text('spec_language').notNull().default('en'),
+    /** Where its Specs live (#95): `local` or `linked`; read by every ticket provider. */
+    specMode: text('spec_mode').notNull().default('local'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),
@@ -1698,3 +1700,78 @@ export const discussionMessages = sqliteTable(
   },
   (table) => [index('discussion_messages_by_discussion').on(table.discussionId, table.sequence)],
 )
+/**
+ * The ticket providers of a Project (#95), in the order they were added: a kind (`github`, later
+ * `jira`) and its configuration as JSON (for GitHub, the host and the `owner/repo` repositories its
+ * search watches). No credential is ever stored here: GitHub goes through `gh`, which keeps its own.
+ * `unreachable_since` is set by the first failed read or check after a success and cleared by the
+ * next success, so an outage is signalled once; `limited_until` is a rate limit's reset.
+ */
+export const ticketProviders = sqliteTable(
+  'ticket_providers',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    configuration: text('configuration').notNull(),
+    unreachableSince: text('unreachable_since'),
+    limitedUntil: text('limited_until'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('ticket_providers_by_project').on(table.projectId, table.createdAt)],
+)
+
+/**
+ * What Hemera read of a ticket, each time it kept it (#95): the snapshot a Spec is built from and
+ * the versions read after it, for one mission, and removed with it. Its text is masked before it is
+ * written. `comments` is JSON, each comment with its own fingerprint; `fingerprint` is the title's
+ * and the description's.
+ */
+export const ticketVersions = sqliteTable(
+  'ticket_versions',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id').references(() => ticketProviders.id, {
+      onDelete: 'set null',
+    }),
+    provider: text('provider').notNull(),
+    reference: text('reference').notNull(),
+    key: text('key').notNull(),
+    url: text('url').notNull(),
+    title: text('title').$type<Masked<string>>().notNull(),
+    description: text('description').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    wording: text('wording').notNull(),
+    author: text('author'),
+    labels: text('labels').notNull(),
+    comments: text('comments').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    readAt: text('read_at').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+  },
+  (table) => [
+    index('ticket_versions_by_reference').on(table.reference, table.readAt),
+    index('ticket_versions_by_mission').on(table.missionId),
+  ],
+)
+
+/**
+ * The ticket a mission comes from (#95), beside its link on `missions` (#84): the Spec mode at link
+ * time, the base version the Spec is built from and the last known version. Both are null while
+ * the ticket could not be read yet (open question 4).
+ */
+export const missionTickets = sqliteTable('mission_tickets', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  providerId: text('provider_id').references(() => ticketProviders.id, { onDelete: 'set null' }),
+  mode: text('mode').notNull(),
+  baseVersionId: text('base_version_id').references(() => ticketVersions.id),
+  lastVersionId: text('last_version_id').references(() => ticketVersions.id),
+  linkedAt: text('linked_at').notNull(),
+})

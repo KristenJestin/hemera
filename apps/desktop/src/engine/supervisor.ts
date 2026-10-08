@@ -54,9 +54,9 @@ export interface ExitObservation {
   readonly when: string
 }
 
-/** What owns a supervised root: a run of a command, or (later) an agent's session. */
+/** What owns a supervised root: a run of a command, an agent's session, or a `gh` call (#95). */
 export interface ProcessOwner {
-  readonly kind: 'run' | 'session'
+  readonly kind: 'run' | 'session' | 'tickets'
   readonly id: string
 }
 
@@ -73,7 +73,7 @@ export interface Supervised {
   /** Ends the tree now, with no grace. */
   readonly kill: Effect.Effect<void>
   /** Each line it writes on its standard output, as it arrives. */
-  readonly onStdout: (read: (line: string) => void) => void
+  readonly onStdout: (read: (line: string) => void, done?: () => void) => void
   /** Each line it writes on its standard error, as it arrives (the diagnostic has them too). */
   readonly onStderr: (read: (line: string) => void) => void
 }
@@ -104,7 +104,8 @@ export interface HostProcess {
   readonly onSpawn: (spawned: () => void) => void
   readonly onExit: (ended: (code: number | null, signal: string | null) => void) => void
   readonly onFailure: (failed: (reason: string) => void) => void
-  readonly onStdout: (read: (line: string) => void) => void
+  /** Each line of its standard output; `done` once the output is closed, after the last line. */
+  readonly onStdout: (read: (line: string) => void, done?: () => void) => void
   readonly onStderr: (read: (line: string) => void) => void
 }
 
@@ -162,7 +163,7 @@ export class ProcessRegistry extends Context.Service<
 >()('ProcessRegistry') {}
 
 /** The lines a pipe carries, each whole and without its newline. */
-function linesOf(stream: Readable, read: (line: string) => void): void {
+function linesOf(stream: Readable, read: (line: string) => void, done?: () => void): void {
   let rest = ''
   stream.setEncoding('utf8')
   stream.on('data', (chunk: string) => {
@@ -173,6 +174,7 @@ function linesOf(stream: Readable, read: (line: string) => void): void {
   stream.on('end', () => {
     if (rest !== '') read(rest)
     rest = ''
+    done?.()
   })
 }
 
@@ -246,8 +248,8 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
         // A pipe that breaks under a child that is ending is not news worth a crash.
         child.stdin?.on('error', () => {})
       },
-      onStdout: (read) => {
-        if (child.stdout !== null) linesOf(child.stdout, read)
+      onStdout: (read, done) => {
+        if (child.stdout !== null) linesOf(child.stdout, read, done)
       },
       onStderr: (read) => {
         if (child.stderr !== null) linesOf(child.stderr, read)
@@ -590,7 +592,7 @@ export const processSupervisorLayer = Layer.effect(
           closeInput: child.closeInput,
           stop: stopOf(child),
           kill: killOf(child),
-          onStdout: (read) => started.onStdout(read),
+          onStdout: (read, done) => started.onStdout(read, done),
           onStderr: (read) => started.onStderr(read),
         })),
       )

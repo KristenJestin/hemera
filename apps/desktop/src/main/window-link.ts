@@ -499,6 +499,46 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('discussions.changed', log),
       ),
+    'tickets.providers': (request) =>
+      engine['tickets.providers'](request).pipe(closedAs(gone), observed('tickets.providers', log)),
+    'tickets.proposeGithub': (request) =>
+      engine['tickets.proposeGithub'](request).pipe(
+        closedAs(gone),
+        observed('tickets.proposeGithub', log),
+      ),
+    'tickets.addGithub': (request) =>
+      engine['tickets.addGithub'](request).pipe(closedAs(gone), observed('tickets.addGithub', log)),
+    'tickets.updateProvider': (request) =>
+      engine['tickets.updateProvider'](request).pipe(
+        closedAs(gone),
+        observed('tickets.updateProvider', log),
+      ),
+    'tickets.removeProvider': (request) =>
+      engine['tickets.removeProvider'](request).pipe(
+        closedAs(gone),
+        observed('tickets.removeProvider', log),
+      ),
+    'tickets.status': (request) =>
+      engine['tickets.status'](request).pipe(closedAs(gone), observed('tickets.status', log)),
+    'tickets.checkAgain': (request) =>
+      engine['tickets.checkAgain'](request).pipe(
+        closedAs(gone),
+        observed('tickets.checkAgain', log),
+      ),
+    'tickets.specMode': (request) =>
+      engine['tickets.specMode'](request).pipe(closedAs(gone), observed('tickets.specMode', log)),
+    'tickets.setSpecMode': (request) =>
+      engine['tickets.setSpecMode'](request).pipe(
+        closedAs(gone),
+        observed('tickets.setSpecMode', log),
+      ),
+    'tickets.ticket': (request) =>
+      engine['tickets.ticket'](request).pipe(closedAs(gone), observed('tickets.ticket', log)),
+    'tickets.changed': (request) =>
+      engine['tickets.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('tickets.changed', log),
+      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>

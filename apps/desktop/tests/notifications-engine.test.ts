@@ -45,6 +45,7 @@ import {
   setSoundStyle,
 } from '../src/engine/notifications.ts'
 import { createProject } from '../src/engine/projects.ts'
+import { addGithub } from '../src/engine/tickets/store.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { probes as probesTable, workspaces } from '../src/engine/storage/schema.ts'
@@ -389,6 +390,53 @@ describe('A Workspace preparation that ends is told by its own kind', () => {
   })
 })
 
+describe('A tracker that becomes unreachable is told once, and its return is not', () => {
+  const outage = (type: string) =>
+    Effect.gen(function* () {
+      const project = yield* acme()
+      const provider = yield* addGithub(project.id, { host: 'github.com', repositories: [] })
+      yield* mutate('saying an outage', () =>
+        Effect.succeed({
+          result: undefined,
+          events: [
+            {
+              type,
+              entityKind: 'ticket_provider',
+              entityId: provider.id,
+              source: 'system' as const,
+              author: 'hemera' as const,
+              payload: {
+                projectId: project.id,
+                host: 'github.com',
+                provider: 'GitHub',
+                message: 'GitHub is unreachable: error connecting to api.github.com',
+              },
+            },
+          ],
+        }),
+      )
+      // Something after it, so an event that is told nothing still ends the test.
+      yield* createNeed(BILLING, ProjectOwner.make({ projectId: project.id }), decision)
+    })
+
+  test('unreachable: on by default, with the error sound, leading to the Project', async () => {
+    const [feed] = await told(1, outage('tickets.provider_unreachable'))
+    expect(raised(feed!)).toMatchObject({
+      kind: 'tracker-unreachable',
+      sound: 'error',
+      project: { name: 'Acme' },
+      subject: 'GitHub',
+      what: 'it cannot be read; its tickets keep the version last read',
+      target: { projectId: expect.any(String) },
+    })
+  })
+
+  test('back: told nothing', async () => {
+    const [feed] = await told(1, outage('tickets.provider_back'))
+    expect(raised(feed!).kind).toBe('need')
+  })
+})
+
 describe('The registry of event kinds', () => {
   const kind = (id: string, routed = true) =>
     defineKind({
@@ -425,6 +473,7 @@ describe('The registry of event kinds', () => {
       ['triage-answer', true, 'needs-you'],
       ['questions-asked', true, 'needs-you'],
       ['living-spec-ready', false, null],
+      ['tracker-unreachable', true, 'error'],
     ])
   })
 })
@@ -444,6 +493,7 @@ describe('The switches are the application’s, listed from the registry', () =>
       ['triage-answer', true],
       ['questions-asked', true],
       ['living-spec-ready', false],
+      ['tracker-unreachable', true],
     ])
     expect(settings.sounds.map((one) => [one.sound, one.on])).toEqual([
       ['needs-you', true],

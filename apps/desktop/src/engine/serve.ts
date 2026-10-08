@@ -102,6 +102,17 @@ import {
   openDiscussion,
   sayInDiscussion,
 } from './planning/discussions.ts'
+import { checkAgain, missionTicket, providerStatus } from './tickets/link.ts'
+import {
+  addGithub,
+  proposeGithub,
+  providersOf,
+  removeProvider,
+  setSpecMode,
+  specModeOf,
+  ticketsChanges,
+  updateProvider,
+} from './tickets/store.ts'
 import {
   changesSince,
   markRead,
@@ -405,6 +416,28 @@ export const engineHandlers = (
       follow(
         Stream.unwrap(ExclusiveResources.useSync((reservations) => reservations.changes)),
       ).pipe(observedStream('resources.changed', log)),
+    'tickets.providers': ({ projectId }) =>
+      use(providersOf(projectId)).pipe(observed('tickets.providers', log)),
+    'tickets.proposeGithub': ({ projectId, host }) =>
+      use(proposeGithub(projectId, host)).pipe(observed('tickets.proposeGithub', log)),
+    'tickets.addGithub': ({ projectId, config }) =>
+      use(addGithub(projectId, config)).pipe(observed('tickets.addGithub', log)),
+    'tickets.updateProvider': ({ providerId, config }) =>
+      use(updateProvider(providerId, config)).pipe(observed('tickets.updateProvider', log)),
+    'tickets.removeProvider': ({ providerId }) =>
+      use(removeProvider(providerId)).pipe(observed('tickets.removeProvider', log)),
+    'tickets.status': ({ providerId }) =>
+      use(providerStatus(providerId)).pipe(observed('tickets.status', log)),
+    'tickets.checkAgain': ({ providerId }) =>
+      use(checkAgain(providerId)).pipe(observed('tickets.checkAgain', log)),
+    'tickets.specMode': ({ projectId }) =>
+      use(specModeOf(projectId)).pipe(observed('tickets.specMode', log)),
+    'tickets.setSpecMode': ({ projectId, mode }) =>
+      use(setSpecMode(projectId, mode)).pipe(observed('tickets.setSpecMode', log)),
+    'tickets.ticket': ({ missionId }) =>
+      use(missionTicket(missionId)).pipe(observed('tickets.ticket', log)),
+    'tickets.changed': ({ projectId }) =>
+      follow(ticketsChanges(projectId)).pipe(observedStream('tickets.changed', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

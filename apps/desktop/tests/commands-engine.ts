@@ -22,6 +22,12 @@ import { SHIPPED, temporaryFolder } from './storage.ts'
 /** Fast enough for a suite: a readiness asked every 50 ms, and half a second of grace. */
 const FAST = { readinessEveryMillis: 50, readinessForMillis: 10_000, graceMillis: 500 }
 
+/**
+ * No `gh` at all: an empty PATH to look for it on. A suite that wants one hands its fake
+ * (`fake-gh.ts`); none ever falls back to a real `gh` that could reach GitHub.
+ */
+export const NO_GH = { path: '' }
+
 /** What a program of these suites is handed: the Profile, and the engine's diagnostic lines. */
 export interface Started {
   readonly profile: StartedProfile
@@ -45,6 +51,7 @@ export function commandsEngine(
     | 'sessions'
     | 'tickets'
     | 'probes'
+    | 'gh'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {
@@ -55,7 +62,13 @@ export function commandsEngine(
         Effect.gen(function* () {
           const profile = yield* startProfile(
             { dataFolder: data, version: '1.0.0', migrations: SHIPPED },
-            { backupFolders: [], reconciliationSteps: [], runs: FAST, ...parts },
+            {
+              backupFolders: [],
+              reconciliationSteps: [],
+              runs: FAST,
+              ...parts,
+              gh: parts.gh ?? NO_GH,
+            },
             (line) => lines.push(line),
           )
           return yield* program({ profile, lines })

@@ -17,7 +17,6 @@ import {
   provisionalTitleOf,
   searchWordsOf,
   ticketKeyOf,
-  ticketProviderOf,
 } from '@hemera/core/domain'
 import {
   CreateChoice,
@@ -34,14 +33,17 @@ import { Effect, Predicate, Stream } from 'effect'
 
 import { createMission, getMission, linkedMission, linkedTo, missionsOf } from '../missions.ts'
 import { getProject } from '../projects.ts'
-import { Database, refusedWhile } from '../storage/database.ts'
+import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import { memoryJournal, missions } from '../storage/schema.ts'
+import { readForCreation } from '../tickets/link.ts'
 import { TicketSearch } from './tickets.ts'
 
 /** How many missions a search lists besides the one it opens. */
 export const LOCAL_RESULTS = 20
 
-export const NO_PROVIDER = 'No ticket provider is set for this Project.'
+/** What the field says of a reference no provider of the Project reads. */
+export const noProviderReads = (reference: TicketReference): string =>
+  `No ticket provider of this Project reads ${ticketKeyOf(reference)}.`
 
 /** The mission of this Project the text names by its key, or none. */
 const byKey = (projectId: string, text: string) => {
@@ -144,14 +146,18 @@ const ownKey = (project: Project, reference: TicketReference) =>
 /**
  * The local part of a search: the missions found, then what creating would create. A bare key is
  * a mission key of this Project first, and a ticket only when no mission has that key. Creating
- * links the ticket only when a provider of the Project reads its kind: otherwise a text shaped like
- * a key (`UTF-8`) would leave a link to a ticket nobody can read.
+ * links the ticket only when a provider of the Project reads it: otherwise a text shaped like a key
+ * (`UTF-8`) would leave a link to a ticket nobody can read.
  */
-const localResults = (project: Project, text: string, providers: ReadonlyArray<string>) =>
+const localResults = (project: Project, text: string) =>
   Effect.gen(function* () {
     const projectId = project.id
     const keyed = yield* byKey(projectId, text)
     const reference = keyed.length === 0 ? referenceIn(project, text) : null
+    const read =
+      reference === null
+        ? false
+        : yield* TicketSearch.use((tickets) => tickets.reads(projectId, reference))
     const linked = reference === null ? [] : yield* byTicket(projectId, reference)
     const [opened] = [...keyed, ...linked]
     const listed = yield* byWords(projectId, text, opened?.id ?? null)
@@ -168,30 +174,63 @@ const localResults = (project: Project, text: string, providers: ReadonlyArray<s
     if (text.trim() !== '' && linked.length === 0) {
       results.push(
         CreateChoice.make(
-          reference === null || !providers.includes(ticketProviderOf(reference))
+          reference === null || !read
             ? { title: provisionalTitleOf(text), ticket: null }
             : { title: ticketKeyOf(reference), ticket: reference },
         ),
       )
     }
-    return { results, reference }
+    if (reference !== null && !read && linked.length === 0) {
+      results.push(SearchNotice.make({ sentence: noProviderReads(reference) }))
+    }
+    return {
+      results,
+      reference: read ? reference : null,
+      offered: read && reference !== null && text.trim() !== '' && linked.length === 0,
+    }
   })
 
-/** The remote tickets, each with the mission of this Project linked to it; a failure said once. */
-const remoteResults = (projectId: string, text: string, reference: TicketReference | null) =>
+/**
+ * The remote tickets, each with the mission of this Project linked to it; each provider that failed
+ * said once, in its own notice, while the others' hits still come. When the text is a reference
+ * offered for creation and no provider could read it because it is not a readable ticket (missing,
+ * forbidden, a pull request), the choice to create comes again, last, without the ticket: it
+ * replaces the one sent with the local results.
+ */
+const remoteResults = (
+  projectId: string,
+  text: string,
+  reference: TicketReference | null,
+  offered: boolean,
+) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const tickets = yield* TicketSearch
       const database = yield* Database
+      const seen = { hits: 0, unreadable: 0, failed: 0 }
+      const withdrawn = Stream.suspend(() =>
+        offered && seen.hits === 0 && seen.unreadable > 0 && seen.unreadable === seen.failed
+          ? Stream.make(CreateChoice.make({ title: provisionalTitleOf(text), ticket: null }))
+          : Stream.empty,
+      )
       return tickets.search(projectId, { text, reference }).pipe(
-        Stream.mapEffect((hit) =>
-          Effect.map(linkedMission(database, projectId, hit.reference), (linked) =>
-            TicketFound.make({ hit: { ...hit, linkedMission: linked } }),
-          ),
+        Stream.tap((found) =>
+          Effect.sync(() => {
+            if (!Predicate.isTagged(found, 'ProviderFailed')) seen.hits += 1
+            else {
+              seen.failed += 1
+              if (found.ticketUnreadable === true) seen.unreadable += 1
+            }
+          }),
         ),
-        Stream.catchTag('TicketSearchError', (failed) =>
-          Stream.make(SearchNotice.make({ sentence: failed.message })),
+        Stream.mapEffect((found): Effect.Effect<StartResult, DatabaseError> =>
+          Predicate.isTagged(found, 'ProviderFailed')
+            ? Effect.succeed(SearchNotice.make({ sentence: found.message }))
+            : Effect.map(linkedMission(database, projectId, found.reference), (linked) =>
+                TicketFound.make({ hit: { ...found, linkedMission: linked } }),
+              ),
         ),
+        Stream.concat(withdrawn),
       )
     }),
   )
@@ -201,16 +240,13 @@ export const searchStart = (projectId: string, text: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const project = yield* getProject(projectId)
-      const providers = yield* TicketSearch.use((tickets) => tickets.providers(projectId))
-      const local = yield* localResults(project, text, providers)
-      if (providers.length === 0) {
-        const notice =
-          local.reference === null ? [] : [SearchNotice.make({ sentence: NO_PROVIDER })]
-        return Stream.fromIterable([...local.results, ...notice])
+      const local = yield* localResults(project, text)
+      if (text.trim() === '' || (local.reference === null && referenceIn(project, text) !== null)) {
+        return Stream.fromIterable(local.results)
       }
       return Stream.concat(
         Stream.fromIterable(local.results),
-        remoteResults(projectId, text, local.reference),
+        remoteResults(projectId, text, local.reference, local.offered),
       )
     }),
   )
@@ -255,6 +291,10 @@ export const createStart = (asked: StartCreate) =>
       }
     }
     const githubHost = yield* hostOf(asked.projectId, ticket?.reference)
+    // The ticket is read before the creation's transaction, never inside it (#95): what was read,
+    // or nothing when it could not be, is linked in the same transaction as the mission.
+    const link =
+      ticket === undefined ? null : yield* readForCreation(asked.projectId, ticket.reference)
     return yield* createMission(
       {
         projectId: asked.projectId,
@@ -266,7 +306,8 @@ export const createStart = (asked: StartCreate) =>
       {
         reference: ticket?.reference,
         githubHost,
-        ticketTitle: ticket?.title,
+        ticketTitle: ticket?.title ?? link?.version?.title,
+        ticket: link,
         origin: asked.origin,
         idempotencyKey: asked.idempotencyKey,
       },

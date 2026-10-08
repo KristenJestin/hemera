@@ -1188,6 +1188,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (driver === undefined) {
               // Not started yet: give its start a chance; one that is gone is settled.
               const session = yield* getSession(sessionId).pipe(Effect.orElseSucceed(() => null))
+              // Its start may have taken it while its state was read: look at it again.
+              if (liveDriver(sessionId) !== undefined) continue
               if (session === null || session.state !== 'starting') return
               // Its start waits for the gate and the Memory: look again in a moment.
               yield* Effect.sleep('10 millis')
