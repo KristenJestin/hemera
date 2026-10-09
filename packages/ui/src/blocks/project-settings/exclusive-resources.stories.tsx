@@ -201,7 +201,9 @@ export const Resources: Story = {
     await expect(canvas.getByText(/ACME-14 waits/)).toBeVisible()
     await expect(canvas.getByText(/restored by Reset the database/)).toBeVisible()
     await expect(canvas.getByText(/no restore: a need opens at the start/)).toBeVisible()
-    await expect(canvas.getByText(/Only the commands declared on a resource are protected/)).toBeVisible()
+    await expect(
+      canvas.getByText(/Only the commands declared on a resource are protected/),
+    ).toBeVisible()
     await expect(canvas.getByText(/launched after it/)).toBeVisible()
   },
 }

@@ -27,7 +27,7 @@ const command = (id: string, name: string): Command => ({
   id,
   projectId: 'acme',
   name,
-  type: 'run',
+  type: 'script',
   line: `run ${id}`,
   lineWindows: null,
   lineLinux: null,
@@ -112,8 +112,7 @@ describe('the line of a resource', () => {
   })
 
   test('says the day of a holding that began before today', () => {
-    const held = { ...HELD, holder: HELD.holder && { ...HELD.holder, since: at(9, 41, 7) } }
-    expect(sinceWords(held.holder.since, NOW)).not.toBe('09:41')
+    expect(sinceWords(at(9, 41, 7), NOW)).not.toBe('09:41')
     expect(sinceWords(at(9, 41), NOW)).toBe('09:41')
   })
 })
@@ -155,9 +154,7 @@ describe('a resource in its dialog', () => {
   test('is refused without a name, without a command, or with a restore that also uses it', () => {
     const draft = draftOf(DB)
     expect(resourceRefusal({ ...draft, name: '  ' })).toBe('Give the resource a name.')
-    expect(resourceRefusal({ ...draft, uses: [] })).toBe(
-      'Pick at least one command that uses it.',
-    )
+    expect(resourceRefusal({ ...draft, uses: [] })).toBe('Pick at least one command that uses it.')
     expect(resourceRefusal({ ...draft, resetCommandId: 'seed' })).toBe(
       'The restore command cannot also be one that uses the resource.',
     )
@@ -191,7 +188,11 @@ describe('the list the engine takes at save', () => {
   })
 
   test('keeps the changes of a resource and adds the chosen restore to them', () => {
-    const saved = resourceDraftsOf([DB], 'db', { ...draftOf(DB), resetCommandId: 'migrate', uses: ['seed'] })
+    const saved = resourceDraftsOf([DB], 'db', {
+      ...draftOf(DB),
+      resetCommandId: 'migrate',
+      uses: ['seed'],
+    })
     expect(saved[0]?.changes).toEqual(['reset', 'stripe', 'migrate'])
   })
 
@@ -201,20 +202,22 @@ describe('the list the engine takes at save', () => {
   })
 
   test('appends a new resource', () => {
-    const saved = resourceDraftsOf([DB], null, { ...draftOf(undefined), name: 'Cache', uses: ['seed'] })
+    const saved = resourceDraftsOf([DB], null, {
+      ...draftOf(undefined),
+      name: 'Cache',
+      uses: ['seed'],
+    })
     expect(saved.map((one) => one.name)).toEqual(['Shared database', 'Cache'])
     expect(saved[1]?.changes).toEqual([])
   })
 
   test('leaves a resource out when it is removed', () => {
-    expect(withoutResource([DB, SANDBOX], 'db').map((one) => one.name)).toEqual([
-      'Payment sandbox',
-    ])
+    expect(withoutResource([DB, SANDBOX], 'db').map((one) => one.name)).toEqual(['Payment sandbox'])
   })
 })
 
 describe('the words of a refusal', () => {
-  test('are the engine\'s own for a declaration it refuses', () => {
+  test("are the engine's own for a declaration it refuses", () => {
     expect(savedWords(new InvalidResources({ reason: 'Cache is declared twice' }))).toBe(
       'These resources are refused: Cache is declared twice.',
     )

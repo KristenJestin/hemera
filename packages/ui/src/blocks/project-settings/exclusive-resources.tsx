@@ -166,7 +166,11 @@ export function ResourceForm({ draft, commands, refused, onDraft }: ResourceForm
     })
   return (
     <>
-      <Input label="Name" value={draft.name} onValueChange={(name) => onDraft({ ...draft, name })} />
+      <Input
+        label="Name"
+        value={draft.name}
+        onValueChange={(name) => onDraft({ ...draft, name })}
+      />
       <Input
         label="What it is"
         value={draft.description}
