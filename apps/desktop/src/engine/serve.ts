@@ -109,6 +109,7 @@ import {
 import { checkAgain, missionTicket, providerStatus } from './tickets/link.ts'
 import { acknowledgeEvent, ticketEventDifference, ticketEventsOf } from './tickets/events.ts'
 import { TicketSync, lastCheckOf, syncIntervalOf } from './tickets/sync.ts'
+import { retryWrite, ticketWritesOf } from './tickets/writes.ts'
 import { acceptProposedAnswer, dismissProposedAnswer } from './planning/proposals.ts'
 import { jiraDeployment } from './tickets/jira-link.ts'
 import { jiraTokenState, removeJiraToken, saveJiraToken } from './tickets/jira-tokens.ts'
@@ -487,6 +488,10 @@ export const engineHandlers = (
       use(ticketEventDifference(eventId)).pipe(observed('tickets.difference', log)),
     'tickets.acknowledge': ({ eventId }) =>
       use(acknowledgeEvent(eventId)).pipe(observed('tickets.acknowledge', log)),
+    'tickets.writes': ({ missionId }) =>
+      use(ticketWritesOf(missionId)).pipe(observed('tickets.writes', log)),
+    'tickets.retryWrite': ({ writeId }) =>
+      use(retryWrite(writeId)).pipe(observed('tickets.retryWrite', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>

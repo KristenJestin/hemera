@@ -7,7 +7,9 @@
  * - `GET /rest/api/{2,3}/serverInfo` (anonymous), `GET …/myself`;
  * - `GET …/issue/{key}?fields=…` and `GET …/issue/{key}/comment?startAt=&maxResults=` (paged);
  * - Cloud `POST /rest/api/3/search/jql`, Data Center `POST /rest/api/2/search`, reading only the
- *   JQL Hemera writes: `project in (…)`, `text ~ "…"`, `key in (…)`.
+ *   JQL Hemera writes: `project in (…)`, `text ~ "…"`, `key in (…)`;
+ * - `PUT …/issue/{key}` with `fields.description` only (#98): the description replaced (rewritten
+ *   first when the suite says how Jira stores it), the update date a minute later, `204`.
  *
  * Every request is written down. A rule answers before the routes: a status, headers and a body,
  * or a hang (the connection held until the client closes it, counted in `closed`).
@@ -74,6 +76,8 @@ export interface FakeJiraOptions {
   readonly rules?: ReadonlyArray<JiraRule>
   /** How many comments one page holds at most. */
   readonly commentPage?: number
+  /** What it keeps of a description written, as Jira rewrites what it stores; as sent otherwise. */
+  readonly stored?: (description: Schema.Json) => Schema.Json
 }
 
 export interface FakeJira {
@@ -81,6 +85,8 @@ export interface FakeJira {
   readonly site: string
   readonly host: string
   readonly requests: () => ReadonlyArray<SeenRequest>
+  /** The issues now, writes applied. */
+  readonly issues: () => ReadonlyArray<FakeIssue>
   /** How many held connections the client closed. */
   readonly closed: () => number
   readonly close: () => Promise<void>
@@ -101,6 +107,9 @@ const SearchBody = Schema.Struct({
   fields: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 const readSearch = Schema.decodeUnknownOption(Schema.fromJsonString(SearchBody))
+const readWrite = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ fields: Schema.Struct({ description: Schema.Json }) })),
+)
 
 /** Reads the JQL strings of a query, in order, as Jira unquotes them. */
 const jqlStrings = (jql: string): ReadonlyArray<string> => {
@@ -170,7 +179,7 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
     options.deployment === 'cloud'
       ? `Basic ${Buffer.from(`${options.email ?? ''}:${options.token}`).toString('base64')}`
       : `Bearer ${options.token}`
-  const issues = options.issues ?? []
+  const issues = [...(options.issues ?? [])]
   const page = options.commentPage ?? 2
 
   const send = (
@@ -227,6 +236,21 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
       )
     }
     const one = /^issue\/([A-Za-z][A-Za-z0-9]*-\d+)$/.exec(rest)
+    if (one !== null && request.method === 'PUT') {
+      const at = issues.findIndex((candidate) => candidate.key === one[1])
+      const issue = issues[at]
+      if (issue === undefined) return send(response, 404, NOT_FOUND)
+      const body = readWrite(request.body)
+      if (Option.isNone(body)) return send(response, 400, '{"errorMessages":["Bad request"]}')
+      issues[at] = {
+        ...issue,
+        description: (options.stored ?? ((sent) => sent))(body.value.fields.description),
+        updated: new Date(Date.parse(issue.updated) + 60_000).toISOString(),
+      }
+      response.writeHead(204)
+      response.end()
+      return
+    }
     if (one !== null) {
       const issue = issues.find((candidate) => candidate.key === one[1])
       if (issue === undefined) return send(response, 404, NOT_FOUND)
@@ -322,6 +346,7 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
     site: `http://${host}`,
     host,
     requests: () => [...seen],
+    issues: () => [...issues],
     closed: () => closed,
     close: () =>
       new Promise<void>((done) => {

@@ -477,6 +477,7 @@ describe('The registry of event kinds', () => {
       ['ticket-comment', true, null],
       ['ticket-changed', true, null],
       ['ticket-status', true, null],
+      ['ticket-write-failed', true, 'error'],
       ['can-be-built', true, 'done'],
     ])
   })
@@ -501,6 +502,7 @@ describe('The switches are the application’s, listed from the registry', () =>
       ['ticket-comment', true],
       ['ticket-changed', true],
       ['ticket-status', true],
+      ['ticket-write-failed', true],
       ['can-be-built', true],
     ])
     expect(settings.sounds.map((one) => [one.sound, one.on])).toEqual([

@@ -236,7 +236,9 @@ export const adfFingerprintText = (document: Schema.Json): string =>
 const WIKI_HEADING = /^\s*h([1-6])\.\s+(.*)$/
 const WIKI_LIST = /^\s*([*#]+|-)\s+(.*)$/
 const WIKI_BLOCK = /^\s*\{(code|noformat)(?::([^}]*))?\}\s*$/
-const WIKI_LINK = /\[([^[\]|]*)\|([^[\]]+)\]|\[~([^[\]]+)\]|\[((?:https?|mailto):[^[\]|]+)\]/g
+/** A link, a mention or a bare link; never one whose bracket is escaped (`\[`), which is text. */
+const WIKI_LINK =
+  /(?<!\\)\[([^[\]|]*)\|([^[\]]+)\]|(?<!\\)\[~([^[\]]+)\]|(?<!\\)\[((?:https?|mailto):[^[\]|]+)\]/g
 
 /** A `{code}` block's language: `{code:java}`, or `{code:title=A.java|language=java}`. */
 const languageOf = (parameters: string | undefined): string => {

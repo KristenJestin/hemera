@@ -3,12 +3,21 @@
  * memory, behind the `TicketProviders` port, never a real tracker. Each issue has a title, a body,
  * a status and comments; every change moves its update date, as GitHub's does. The tracker writes
  * down what it is asked (the grouped `changedSince` with the tickets it named, and each full read),
- * can hold its next grouped question until the suite releases it, and can be out of reach.
+ * can hold its grouped questions or its full reads until the suite releases them, and can be out of
+ * reach.
+ *
+ * A write (#98) replaces an issue's body as GitHub's edit does, refused as the providers refuse it
+ * when its description moved since the fingerprint expected; the suite can refuse writes, edit the
+ * issue just before a write, hold a write before or after it lands (what an engine killed in
+ * between leaves), and see every body written.
  */
 
 import {
   GithubIssue,
   ProviderUnreachable,
+  REMOTE_SPEC_LIMITS,
+  TicketForbidden,
+  TicketTooLong,
   type TicketComment,
   type TicketReference,
   type TicketVersion,
@@ -26,6 +35,7 @@ import {
   type TicketChange,
   commentFingerprint,
   ticketFingerprint,
+  unmoved,
 } from '../src/engine/tickets/provider.ts'
 import { TicketProviders } from '../src/engine/tickets/search.ts'
 
@@ -64,7 +74,28 @@ export interface FakeTracker {
   /** Holds the grouped questions from now until `release`. */
   readonly hold: () => void
   readonly release: () => void
+  /** Holds every full read from now until `releaseReads`. */
+  readonly holdReads: () => void
+  readonly releaseReads: () => void
+  /** How many full reads are held now. */
+  readonly readsHeld: () => number
   readonly offline: (out: boolean) => void
+  /** Every body a write sent, by key, in order. */
+  readonly written: () => ReadonlyArray<{ readonly key: string; readonly text: string }>
+  /** Writes refused as forbidden while on, as for an account that may only read. */
+  readonly refuseWrites: (on: boolean) => void
+  /**
+   * How the next writes answer: `hang` never sends, `landed` sends then never answers (an engine
+   * killed between the two), `answer` as a tracker does.
+   */
+  readonly writes: (mode: 'answer' | 'hang' | 'landed') => void
+  /**
+   * Runs once, at the next write, before the tracker compares the ticket with the version expected:
+   * a teammate's edit landing between Hemera's read again and its write.
+   */
+  readonly beforeWrite: (edit: () => void) => void
+  /** How many writes were asked, sent or not. */
+  readonly asksToWrite: () => number
 }
 
 const DAY = Date.parse('2026-10-01T10:00:00Z')
@@ -79,7 +110,14 @@ export const fakeTracker = (): FakeTracker => {
   let atOnce = 0
   let most = 0
   let out = false
+  let refused = false
+  let writeMode: 'answer' | 'hang' | 'landed' = 'answer'
+  let asksToWrite = 0
+  let editBeforeWrite: (() => void) | null = null
+  const written: Array<{ key: string; text: string }> = []
   let gate: { promise: Promise<void>; release: () => void } | null = null
+  let readGate: { promise: Promise<void>; release: () => void } | null = null
+  let readsHeld = 0
   const nextDate = () => {
     tick += 1
     return new Date(DAY + tick * 60_000).toISOString()
@@ -129,6 +167,12 @@ export const fakeTracker = (): FakeTracker => {
       reads: owns,
       read: (reference: TicketReference) =>
         Effect.gen(function* () {
+          const heldRead = readGate
+          if (heldRead !== null) {
+            readsHeld += 1
+            yield* Effect.promise(() => heldRead.promise)
+            readsHeld -= 1
+          }
           if (out) return yield* Effect.fail(offline())
           const key = Predicate.isTagged(reference, 'GithubIssue')
             ? id(host, reference.number)
@@ -183,6 +227,37 @@ export const fakeTracker = (): FakeTracker => {
           }
           return changes
         }),
+      write: (reference: TicketReference, text: string, expected: { fingerprint: string }) =>
+        Effect.gen(function* () {
+          asksToWrite += 1
+          const key = ticketKeyOf(reference)
+          if (out) return yield* Effect.fail(offline())
+          if (!Predicate.isTagged(reference, 'GithubIssue')) {
+            return yield* Effect.fail(new TicketNotFound({ key, detail: 'none' }))
+          }
+          if ([...text].length > REMOTE_SPEC_LIMITS.github) {
+            return yield* Effect.fail(new TicketTooLong({ key, limit: REMOTE_SPEC_LIMITS.github }))
+          }
+          const edit = editBeforeWrite
+          editBeforeWrite = null
+          edit?.()
+          const issue = issues.get(id(host, reference.number))
+          if (issue === undefined) {
+            return yield* Effect.fail(new TicketNotFound({ key, detail: 'none' }))
+          }
+          yield* unmoved(versionOf(host, reference.number, issue), expected)
+          if (refused) {
+            return yield* Effect.fail(
+              new TicketForbidden({ key, detail: 'Resource not accessible by integration' }),
+            )
+          }
+          if (writeMode === 'hang') return yield* Effect.never
+          written.push({ key, text })
+          issue.body = text
+          issue.updatedAt = nextDate()
+          if (writeMode === 'landed') return yield* Effect.never
+          return versionOf(host, reference.number, issue)
+        }),
     }
   }
 
@@ -227,8 +302,29 @@ export const fakeTracker = (): FakeTracker => {
       gate = null
       held?.release()
     },
+    holdReads: () => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      readGate = { promise, release: () => resolve() }
+    },
+    releaseReads: () => {
+      const held = readGate
+      readGate = null
+      held?.release()
+    },
+    readsHeld: () => readsHeld,
     offline: (now) => {
       out = now
     },
+    written: () => [...written],
+    refuseWrites: (on) => {
+      refused = on
+    },
+    writes: (mode) => {
+      writeMode = mode
+    },
+    beforeWrite: (edit) => {
+      editBeforeWrite = edit
+    },
+    asksToWrite: () => asksToWrite,
   }
 }

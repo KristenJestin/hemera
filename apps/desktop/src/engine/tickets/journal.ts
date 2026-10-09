@@ -1,8 +1,9 @@
 /**
  * The ticket sync's lines in a mission's Journal (#97): each change found on the ticket, its
- * analysis after the Freeze, the user seeing it, a ticket gone missing; and the answers proposed
- * from the ticket's comments, accepted, dismissed or expired. Each is the projection of the domain
- * event written in the same transaction as what it records.
+ * analysis after the Freeze, the user seeing it, a ticket gone missing; the answers proposed from
+ * the ticket's comments, accepted, dismissed or expired; and the writes of a remote Spec into the
+ * ticket (#98). Each is the projection of the domain event written in the same transaction as what
+ * it records.
  */
 
 import { TICKET_EVENT_KINDS, TICKET_EVENT_SAID } from '@hemera/core/domain'
@@ -81,6 +82,65 @@ export const TICKET_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       () => HEMERA,
       (payload) =>
         `${stringOf(payload, 'key')} can no longer be read: ${stringOf(payload, 'message')} Its last known version is kept.`,
+    ),
+  ],
+  [
+    'tickets.write_done',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) => `The frozen Spec was written to ${stringOf(payload, 'key')}`,
+    ),
+  ],
+  [
+    'tickets.write_waiting',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) =>
+        `The Spec waits to be written to ${stringOf(payload, 'key')}: its tracker cannot be reached`,
+    ),
+  ],
+  [
+    'tickets.write_failed',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) => stringOf(payload, 'error'),
+    ),
+  ],
+  [
+    'tickets.write_dropped',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) => stringOf(payload, 'error'),
+    ),
+  ],
+  [
+    'tickets.write_conflict',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) =>
+        `${stringOf(payload, 'key')} changed since Hemera last read it: the Spec was not written, and your decision is asked`,
+    ),
+  ],
+  [
+    'tickets.write_kept',
+    lineOf(
+      'ticket',
+      () => USER,
+      (payload) => `You kept the change of ${stringOf(payload, 'key')}: the Spec was not written`,
+    ),
+  ],
+  [
+    'tickets.write_indeterminate',
+    lineOf(
+      'ticket',
+      () => HEMERA,
+      (payload) =>
+        `Hemera stopped while writing the Spec to ${stringOf(payload, 'key')}: what the ticket holds decides`,
     ),
   ],
   [

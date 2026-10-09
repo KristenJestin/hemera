@@ -386,6 +386,16 @@ const ticketChanged =
       }))
     })
 
+/** A write of a mission's remote Spec that failed (#98), with the ticket's key. */
+const ticketWriteFailed = (event: DomainEvent) =>
+  Effect.map(
+    triaged(event),
+    Option.map((found): TicketFacts => ({
+      ...found,
+      key: Option.getOrElse(readText(event.payload['key']), () => 'the ticket'),
+    })),
+  )
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -532,6 +542,22 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     source: 'tickets.changed',
     facts: ticketChanged('status_changed'),
     words: (facts) => ({ subject: facts.title, what: `the status of ${facts.key} changed` }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'ticket-write-failed',
+    label: 'The Spec could not be written to the ticket',
+    byDefault: true,
+    sound: 'error',
+    importance: IMPORTANCE.error,
+    tone: 'failed',
+    source: 'tickets.write_failed',
+    facts: ticketWriteFailed,
+    words: (facts) => ({
+      subject: facts.title,
+      what: `the Spec could not be written to ${facts.key}`,
+    }),
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),

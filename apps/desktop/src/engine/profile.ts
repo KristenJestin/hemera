@@ -127,6 +127,12 @@ import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-
 import { type TicketProviders, ticketProvidersLayer, ticketSearchLayer } from './tickets/search.ts'
 import { TICKET_MAPPERS } from './tickets/journal.ts'
 import { ticketEventRunsLayer } from './tickets/event-runs.ts'
+import {
+  TICKET_WRITES,
+  type TicketWrites,
+  ticketWritesLayer,
+  ticketWritesNeeds,
+} from './tickets/writes.ts'
 import { type TicketSync, ticketSyncLayer } from './tickets/sync.ts'
 import { type SpecBoard, specBoardLayer } from './planning/board.ts'
 import { PLANNING_MAPPERS } from './planning/journal.ts'
@@ -307,6 +313,7 @@ export type EngineServices =
   | FreezeLog
   | TicketProviders
   | TicketSync
+  | TicketWrites
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -431,6 +438,7 @@ export const startProfile = (
         [BUDGET_NEEDS, budgetHandler],
         [PERMISSION_REQUESTS, requestsHandler],
         [RESOURCE_NEEDS, resources.handler],
+        [TICKET_WRITES, ticketWritesNeeds],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -503,6 +511,7 @@ export const startProfile = (
         freezeLayer({ log }),
         ticketSyncLayer({ log, schedules: parts.ticketSync?.schedules }),
         ticketEventRunsLayer({ log }),
+        ticketWritesLayer({ log }),
       ).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),

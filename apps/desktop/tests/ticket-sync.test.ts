@@ -893,6 +893,7 @@ describe('Three notification kinds, on by default, each can be turned off', () =
       ['ticket-comment', true, true],
       ['ticket-changed', true, true],
       ['ticket-status', true, false],
+      ['ticket-write-failed', true, true],
     ])
   })
 })

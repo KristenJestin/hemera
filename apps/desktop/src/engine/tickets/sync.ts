@@ -4,7 +4,7 @@
  * engine starts, or after a restore's reconciliation when there was one (CT-08). No webhooks.
  *
  * - **Watched.** The tickets of a Project's live missions (Planning, Ready, Building, Review,
- *   Shipping) while the Project is in linked mode. A Done, cancelled or archived mission is not.
+ *   Shipping) while the Project is in linked or remote mode (#98). A Done, cancelled or archived mission is not.
  * - **Grouped.** Each provider of the Project asks once which of its tickets moved since their last
  *   known version (`changedSince`, one request per host or site, batched), on its own: one that
  *   fails is signalled once (#95's `observed`) and the others go on. Only the tickets that moved
@@ -165,8 +165,8 @@ export const setSyncIntervalIn = (projectId: string, minutes: number) =>
   })
 
 /**
- * The tickets of a Project's live missions, when the Project watches them (linked mode); null when
- * it watches none (local mode).
+ * The tickets of a Project's live missions, when the Project watches them (linked and remote
+ * mode); null when it watches none (local mode).
  */
 const watchedOf = (projectId: string) =>
   Effect.gen(function* () {
@@ -176,7 +176,7 @@ const watchedOf = (projectId: string) =>
       .from(projects)
       .where(eq(projects.id, projectId))
       .pipe(Effect.mapError(refusedWhile('reading the Project')))
-    if (project?.mode !== 'linked') return null
+    if (project?.mode !== 'linked' && project?.mode !== 'remote') return null
     const rows = yield* database
       .select({
         missionId: missions.id,

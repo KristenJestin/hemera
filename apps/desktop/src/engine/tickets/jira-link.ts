@@ -48,7 +48,7 @@ export class JiraLink extends Context.Service<
       site: string,
       path: string,
       init: {
-        readonly method: 'GET' | 'POST'
+        readonly method: 'GET' | 'POST' | 'PUT'
         readonly headers: Record<string, string>
         readonly body?: string
       },

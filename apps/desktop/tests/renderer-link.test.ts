@@ -302,6 +302,8 @@ const noProjects = {
   'tickets.events': unused,
   'tickets.difference': unused,
   'tickets.acknowledge': unused,
+  'tickets.writes': unused,
+  'tickets.retryWrite': unused,
   'tickets.changed': () => Stream.die('the window’s link is not asked for the tickets here'),
   'missions.freezeReadiness': unused,
   'missions.freezeReadinessChanged': () =>
