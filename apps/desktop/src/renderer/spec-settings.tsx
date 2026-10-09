@@ -55,13 +55,15 @@ export function SpecSettingsPart({
 }: SpecSettingsPartProps): ReactNode {
   const [held, setHeld] = useState<Held>(NOTHING)
   const change = (part: Partial<Held>): void => setHeld((before) => ({ ...before, ...part }))
-  // The newest record of the Project this section has seen: its version is the one to write at.
-  const current = useRef<Pick<Project, 'id' | 'version' | 'keyPrefix'> | null>(null)
-  const saved = useRef<Project | null>(null)
-  if (project !== null && (saved.current === null || project.version >= saved.current.version)) {
-    saved.current = project
-  }
-  current.current = saved.current?.id === projectId ? saved.current : null
+  // The Project as the section knows it: the newer of what it was given and what it last wrote.
+  const [written, setWritten] = useState<Project | null>(null)
+  const known = [project, written]
+    .filter((one): one is Project => one !== null && one.id === projectId)
+    .toSorted((a, b) => b.version - a.version)[0]
+  const current = useRef<Project | undefined>(known)
+  useEffect(() => {
+    current.current = known
+  }, [known])
   const gates = useRef({
     mode: answerGate(),
     language: answerGate(),
@@ -71,7 +73,7 @@ export function SpecSettingsPart({
 
   useEffect(() => {
     setHeld(NOTHING)
-    saved.current = null
+    setWritten(null)
     const mine = { mode: answerGate(), language: answerGate(), prefix: answerGate() }
     gates.current = mine
     if (!engineReady) return undefined
@@ -104,7 +106,7 @@ export function SpecSettingsPart({
       // A prefix typed and not yet sent is sent as the section is left, not lost.
       const waiting = pending.current
       pending.current = null
-      if (waiting !== null && current.current !== null) {
+      if (waiting !== null && current.current !== undefined) {
         clearTimeout(waiting.timer)
         link.setKeyPrefix(prefixEditOf(current.current, waiting.prefix)).catch(() => undefined)
       }
@@ -149,7 +151,7 @@ export function SpecSettingsPart({
   const writePrefix = (prefix: string): void => {
     pending.current = null
     const record = current.current
-    if (record === null) return
+    if (record === undefined) return
     if (prefix.trim().toUpperCase() === record.keyPrefix) {
       change({ typed: null, prefixRefused: undefined })
       return
@@ -157,9 +159,9 @@ export function SpecSettingsPart({
     const gate = gates.current.prefix
     const ticket = gate.begin()
     link.setKeyPrefix(prefixEditOf(record, prefix)).then(
-      (written) => {
+      (answer) => {
         if (!gate.isLatest(ticket)) return
-        saved.current = written
+        setWritten(answer)
         change({ typed: null, prefixRefused: undefined })
       },
       (failure: Error) => {
@@ -176,7 +178,6 @@ export function SpecSettingsPart({
     pending.current = { timer, prefix }
   }
 
-  const shown = current.current
   return (
     <SpecFields
       mode={held.mode}
@@ -184,7 +185,7 @@ export function SpecSettingsPart({
       onMode={chooseMode}
       language={held.language}
       onLanguage={chooseLanguage}
-      prefix={held.typed ?? shown?.keyPrefix ?? null}
+      prefix={held.typed ?? known?.keyPrefix ?? null}
       prefixRefused={held.prefixRefused}
       onPrefix={typePrefix}
       sync={undefined}
