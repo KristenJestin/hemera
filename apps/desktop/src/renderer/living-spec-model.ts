@@ -15,6 +15,7 @@ import {
   type NeedGroup,
   livingSeen,
 } from '@hemera/ipc'
+import { Predicate } from 'effect'
 import type {
   BootstrapRun,
   LivingChange,
@@ -36,7 +37,7 @@ const wordsOf = (at: string, now: Date): string =>
 const pendingOf = (pending: EnginePending | null): LivingPending | null =>
   pending === null
     ? null
-    : pending._tag === 'Replace'
+    : Predicate.isTagged(pending, 'Replace')
       ? {
           kind: 'replace',
           text: pending.text,
@@ -126,7 +127,7 @@ export function noModelIn(groups: ReadonlyArray<NeedGroup>, projectId: string): 
       group.needs.some(
         (need) =>
           need.state === 'pending' &&
-          need.fields._tag === 'Environment' &&
+          Predicate.isTagged(need.fields, 'Environment') &&
           need.fields.settingsSection === 'models' &&
           need.fields.missing.startsWith(AGENT_STARTS),
       ),
@@ -138,6 +139,8 @@ export type LivingSpecView = Pick<
   LivingSpecPageProps,
   'data' | 'error' | 'opened' | 'histories' | 'busy' | 'refused'
 >
+
+type Histories = LivingSpecPageProps['histories']
 
 export const LOADING_LIVING_SPEC: LivingSpecView = { data: null, opened: null, histories: {} }
 
@@ -185,7 +188,7 @@ export function followLivingSpec(
   let opened: string | null = null
   let busy: string | undefined
   let refused: string | undefined
-  let histories: Record<string, 'loading' | readonly LivingChange[]> = {}
+  let histories: Histories = {}
   const requirements = new Map<string, ReadonlyArray<EngineRequirement>>()
   const reads = new Map<string, number>()
   const historyReads = new Map<string, number>()
@@ -308,7 +311,11 @@ export function followLivingSpec(
   start()
 
   /** Runs a gesture on `target`; its answer is heard only if no later gesture was made. */
-  const gesture = <A>(target: string | undefined, run: () => Promise<A>, then: () => void): void => {
+  const gesture = <A>(
+    target: string | undefined,
+    run: () => Promise<A>,
+    then: () => void,
+  ): void => {
     gestures += 1
     const mine = gestures
     busy = target

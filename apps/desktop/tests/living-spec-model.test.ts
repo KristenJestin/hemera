@@ -4,14 +4,16 @@
  */
 
 import { EnvironmentFields, ProjectOwner } from '@hemera/core/domain'
-import type {
-  BootstrapRun,
-  LivingChange,
-  LivingDomain,
-  LivingRequirement,
-  LivingSpecState,
-  Need,
-  NeedGroup,
+import {
+  LivingObsolete,
+  LivingReplace,
+  type BootstrapRun,
+  type LivingChange,
+  type LivingDomain,
+  type LivingRequirement,
+  type LivingSpecState,
+  type Need,
+  type NeedGroup,
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -89,12 +91,11 @@ describe('the records in the page words', () => {
   test('a pending replacement or removal becomes a plain kind', () => {
     const replace = requirementOf(
       requirement({
-        pending: {
-          _tag: 'Replace',
+        pending: LivingReplace.make({
           text: 'new',
           scenarios: [{ when: 'w', then: 't' }],
           uncertainty: 'unsure',
-        },
+        }),
       }),
     )
     expect(replace.pending).toEqual({
@@ -104,7 +105,7 @@ describe('the records in the page words', () => {
       uncertainty: 'unsure',
     })
     const obsolete = requirementOf(
-      requirement({ pending: { _tag: 'Obsolete', reason: 'it is gone' } }),
+      requirement({ pending: LivingObsolete.make({ reason: 'it is gone' }) }),
     )
     expect(obsolete.pending).toEqual({ kind: 'obsolete', reason: 'it is gone' })
     expect(requirementOf(requirement()).pending).toBeNull()
@@ -273,7 +274,12 @@ describe('following the living spec', () => {
       livingSpecRequirements: (_project, domainId) =>
         Promise.resolve(domainId === 'd1' ? [requirement()] : []),
     })
-    followLivingSpec(played.link, 'acme', (view) => played.views.push(view), () => NOW)
+    followLivingSpec(
+      played.link,
+      'acme',
+      (view) => played.views.push(view),
+      () => NOW,
+    )
     played.send(STATE)
     expect(played.last().data?.domains).toHaveLength(2)
     expect(played.last().data?.requirements).toEqual({})
@@ -299,11 +305,19 @@ describe('following the living spec', () => {
 
   test('a change of a domain read reads its requirements again', async () => {
     const played = world()
-    followLivingSpec(played.link, 'acme', (view) => played.views.push(view), () => NOW)
+    followLivingSpec(
+      played.link,
+      'acme',
+      (view) => played.views.push(view),
+      () => NOW,
+    )
     played.send(STATE)
     await flush()
     const before = played.calls.filter((one) => one.call === 'requirements').length
-    played.send({ ...STATE, domains: [domain({ proposed: 0 }), STATE.domains[1] as LivingDomain] })
+    played.send({
+      ...STATE,
+      domains: [domain({ proposed: 0 }), domain({ id: 'd2', name: 'Payments' })],
+    })
     await flush()
     expect(played.calls.filter((one) => one.call === 'requirements')).toHaveLength(before + 1)
   })
@@ -313,7 +327,7 @@ describe('following the living spec', () => {
     const replaced = requirement({
       id: 'LR3',
       version: 2,
-      pending: { _tag: 'Obsolete', reason: 'gone' },
+      pending: LivingObsolete.make({ reason: 'gone' }),
     })
     const settled = requirement({ id: 'LR1' })
     const played = world({
@@ -335,7 +349,7 @@ describe('following the living spec', () => {
       'd1',
       [
         { id: 'LR2', version: 3, pending: null },
-        { id: 'LR3', version: 2, pending: { _tag: 'Obsolete', reason: 'gone' } },
+        { id: 'LR3', version: 2, pending: LivingObsolete.make({ reason: 'gone' }) },
       ],
     ])
     expect(played.last().busy).toBeUndefined()
@@ -461,7 +475,8 @@ describe('following the living spec', () => {
     const answers = [first, second]
     let asked = 0
     const played = world({
-      livingSpecRequirements: () => Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })]),
+      livingSpecRequirements: () =>
+        Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })]),
       dropRequirement: () => {
         const answer = answers[asked]
         asked += 1
@@ -511,7 +526,12 @@ describe('following the living spec', () => {
 
   test('the Project need of a model makes the data say so', async () => {
     const played = world({ needs: () => Promise.resolve([{ projectId: 'acme', needs: [need()] }]) })
-    followLivingSpec(played.link, 'acme', (view) => played.views.push(view), () => NOW)
+    followLivingSpec(
+      played.link,
+      'acme',
+      (view) => played.views.push(view),
+      () => NOW,
+    )
     played.send({ domains: [], runs: [run({ state: 'failed', sentence: 'No model.' })] })
     await flush()
     expect(played.last().data?.noModel).toBe(true)

@@ -22,19 +22,21 @@ const domains = () => $('nav[aria-label="Domains"]')
 
 const SCENARIO = [{ when: 'the user exports the invoices', then: 'a CSV file is saved' }]
 
-const domain = (id: string, name: string) => ({
-  does: 'uses',
-  id: `toolu_domain_${id}`,
-  tool: 'living_domain_propose',
-  arguments: { name, summary: `What ${name} covers.` },
-})
+const domain = (id: string, name: string) =>
+  ({
+    does: 'uses',
+    id: `toolu_domain_${id}`,
+    tool: 'living_domain_propose',
+    arguments: { name, summary: `What ${name} covers.` },
+  }) as const
 
-const requirement = (id: string, name: string, text: string) => ({
-  does: 'uses',
-  id: `toolu_requirement_${id}`,
-  tool: 'living_requirement_propose',
-  arguments: { domain: name, text, scenarios: SCENARIO },
-})
+const requirement = (id: string, name: string, text: string) =>
+  ({
+    does: 'uses',
+    id: `toolu_requirement_${id}`,
+    tool: 'living_requirement_propose',
+    arguments: { domain: name, text, scenarios: SCENARIO },
+  }) as const
 
 /** What the reading agent proposes: two domains, two requirements each, then done. */
 const SCRIPT = {
