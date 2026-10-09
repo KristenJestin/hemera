@@ -38,15 +38,9 @@ const INFO = {
   createdAt: '2026-10-01T09:00:00.000Z',
 }
 
-/** Every string a value holds, keys included. */
-function wordsIn(value: ReturnType<typeof JSON.parse>): string[] {
-  if (typeof value === 'string') return [value]
-  if (Array.isArray(value)) return value.flatMap(wordsIn)
-  if (value !== null && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, one]) => [key, ...wordsIn(one)])
-  }
-  return []
-}
+/** The names a value is written with, as its JSON gives them. */
+const namesIn = (value: TicketProviderInfo): string[] =>
+  [...JSON.stringify(value).matchAll(/"([^"]+)":/g)].map((one) => one[1] ?? '')
 
 describe('A Jira token the window never receives', () => {
   test('the window may ask the token calls and not the engine’s own', () => {
@@ -74,7 +68,7 @@ describe('A Jira token the window never receives', () => {
       jira: { ...INFO.jira, token: SECRET, apiToken: SECRET },
     }
     const provider = Schema.decodeUnknownSync(TicketProviderInfo)(leaky)
-    expect(wordsIn(JSON.parse(JSON.stringify(provider)))).not.toContain(SECRET)
+    expect(JSON.stringify(provider)).not.toContain(SECRET)
     const config = Schema.decodeUnknownSync(JiraProviderConfig)(leaky.jira)
     expect(JSON.stringify(config)).not.toContain(SECRET)
     const settings = Schema.decodeUnknownSync(TicketsSettings)({
@@ -88,8 +82,7 @@ describe('A Jira token the window never receives', () => {
 
   test('no field of what the window decodes is named for a secret', () => {
     const provider = Schema.decodeUnknownSync(TicketProviderInfo)(INFO)
-    const names = wordsIn(JSON.parse(JSON.stringify(provider))).join(' ')
-    expect(names).not.toMatch(/token|secret|password|ciphertext/i)
+    expect(namesIn(provider).join(' ')).not.toMatch(/token|secret|password|ciphertext/i)
   })
 
   test('the lines the screens are given carry a status of the token and never its value', () => {
@@ -101,7 +94,7 @@ describe('A Jira token the window never receives', () => {
         'UTC',
       )
       expect(views?.[0]?.token).toBe(status)
-      expect(wordsIn(JSON.parse(JSON.stringify(views)))).not.toContain(SECRET)
+      expect(JSON.stringify(views)).not.toContain(SECRET)
     }
   })
 

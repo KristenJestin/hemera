@@ -5,7 +5,7 @@
  */
 
 import type { ProviderStatus } from '@hemera/core/domain'
-import { ProviderInUse, type TicketProviderInfo } from '@hemera/ipc'
+import { type JiraTokenStatus, ProviderInUse, type TicketProviderInfo } from '@hemera/ipc'
 import { providerProblem } from '@hemera/ui'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -54,7 +54,9 @@ const READY: ProviderStatus = { state: 'ready', sentence: 'Ready.', fix: null }
 const FOR = (providers: ReadonlyArray<TicketProviderInfo>) => ({
   infos: providers,
   statuses: new Map(providers.map((one) => [one.id, READY])),
-  tokens: new Map(providers.flatMap((one) => (one.kind === 'jira' ? [[one.id, 'saved']] : []))),
+  tokens: new Map<string, JiraTokenStatus>(
+    providers.flatMap((one) => (one.kind === 'jira' ? [[one.id, 'saved'] as const] : [])),
+  ),
 })
 
 describe('The scope words of a provider', () => {
@@ -146,7 +148,10 @@ describe('The sentence of the section’s glyph', () => {
   })
 
   test('a token that is not saved is a trouble although the provider is ready', () => {
-    const state = { ...FOR([JIRA]), tokens: new Map([['jira', 'missing' as const]]) }
+    const state = {
+      ...FOR([JIRA]),
+      tokens: new Map<string, JiraTokenStatus>([['jira', 'missing']]),
+    }
     expect(providerProblem(problem(state))).toBe('Jira · acme.atlassian.net needs you')
   })
 })
@@ -231,7 +236,10 @@ describe('What the Jira form writes', () => {
 
 describe('The store a dialog and its foot share', () => {
   test('a change reaches every listener, and the state read is the last one', () => {
-    const store = providerStore({ saving: false, refused: undefined as string | undefined })
+    const store = providerStore<{ saving: boolean; refused: string | undefined }>({
+      saving: false,
+      refused: undefined,
+    })
     const heard: boolean[] = []
     const stop = store.subscribe(() => heard.push(store.get().saving))
     store.set({ saving: true })
