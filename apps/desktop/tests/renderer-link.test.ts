@@ -350,6 +350,7 @@ const recording = (asked: string[]) => {
     'missions.freezeReadinessChanged': stream('missions.freezeReadinessChanged'),
     'missions.freeze': call('missions.freeze'),
     'planning.spec': call('planning.spec'),
+    'planning.keepAfterTriage': call('planning.keepAfterTriage'),
     'planning.openQuestions': call('planning.openQuestions'),
     'planning.questionsChanged': stream('planning.questionsChanged'),
     'planning.specLanguage': call('planning.specLanguage'),
@@ -642,6 +643,11 @@ const WIRINGS: ReadonlyArray<Wiring> = [
       link.onFreezeReadiness('m1', NO_END, NO_END)
     },
     asks: 'missions.freezeReadinessChanged {"id":"m1"}',
+  },
+  {
+    method: 'keepAfterTriage',
+    run: (link) => ask(link.keepAfterTriage('m1')),
+    asks: 'planning.keepAfterTriage {"missionId":"m1"}',
   },
   {
     method: 'freeze',

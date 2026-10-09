@@ -225,6 +225,8 @@ export interface Link {
   ) => () => void
   /** Creates the mission of the user's explicit choice; the same key twice creates one. */
   readonly createStart: (create: StartCreate) => Promise<Mission>
+  /** The user keeps the mission the Planner triaged as not new work: it goes on planning. */
+  readonly keepAfterTriage: (missionId: string) => Promise<void>
   /** Stops everything the mission runs; rejects with `MoveRefused` when its stage does not allow it. */
   readonly cancelMission: (id: string) => Promise<Mission>
   /** What stands between a mission in Planning and its Freeze. */
@@ -567,6 +569,8 @@ export function linkOver(port: Port): Link {
     searchStart: (projectId, text, listener, onEnd) =>
       follow((ready) => ready['start.search']({ projectId, text }), listener, anError, onEnd),
     createStart: (create) => call((ready) => ready['start.create'](create)),
+    keepAfterTriage: (missionId) =>
+      call((ready) => ready['planning.keepAfterTriage']({ missionId })),
     cancelMission: (id) => call((ready) => ready['missions.cancel']({ id })),
     freezeReadiness: (id) => call((ready) => ready['missions.freezeReadiness']({ id })),
     onFreezeReadiness: (id, listener, onEnd) =>

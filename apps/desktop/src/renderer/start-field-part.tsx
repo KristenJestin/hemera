@@ -15,6 +15,7 @@ import {
   foldStart,
   settleStart,
   triageOf,
+  triageStep,
   viewsOf,
 } from './start-results.ts'
 
@@ -158,11 +159,17 @@ export function StartFieldPart({
   }
 
   const onTriageAction = (action: StartTriageAction) => {
-    if (action === 'chat') onOpenChat()
-    else if (triage?.kind === 'belongs' || triage?.kind === 'delivered') {
-      if (action === 'open') onOpenMission(triage.key)
-      else if (created !== null) onOpenMission(created.key)
-    } else if (created !== null) onOpenMission(created.key)
+    const step = triageStep(action, triage, created)
+    if (step === null) return
+    if (step.kind === 'chat') onOpenChat()
+    else if (step.kind === 'open') onOpenMission(step.key)
+    else {
+      // Kept, the mission goes on planning: its change opens it, as for any mission planned.
+      setRefused(null)
+      link
+        .keepAfterTriage(step.missionId)
+        .catch((failure: Error) => setRefused(`The mission could not be kept: ${failure.message}`))
+    }
   }
 
   return (

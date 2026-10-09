@@ -23,6 +23,7 @@ import {
   foldStart,
   settleStart,
   triageOf,
+  triageStep,
   viewsOf,
 } from '../src/renderer/start-results.ts'
 
@@ -219,5 +220,34 @@ describe('what the first change of the created mission settles', () => {
 
   test('is nothing for another mission', () => {
     expect(settleStart(MissionChanged.make({ mission: mission({ id: 'm9' }) }), 'm12')).toBeNull()
+  })
+})
+
+describe('what an action on the triage answer does', () => {
+  const created = { id: 'm12', key: 'ACME-12' }
+
+  test('Open goes to the mission the answer points to', () => {
+    expect(triageStep('open', { kind: 'belongs', key: 'ACME-4' }, created)).toEqual({
+      kind: 'open',
+      key: 'ACME-4',
+    })
+  })
+
+  test('Start a mission anyway keeps the created mission planning', () => {
+    expect(triageStep('anyway', { kind: 'small' }, created)).toEqual({
+      kind: 'keep',
+      missionId: 'm12',
+    })
+    expect(
+      triageStep('anyway', { kind: 'delivered', key: 'ACME-4', proposed: false }, created),
+    ).toEqual({ kind: 'keep', missionId: 'm12' })
+  })
+
+  test('the Chat is opened for a small change', () => {
+    expect(triageStep('chat', { kind: 'small' }, created)).toEqual({ kind: 'chat' })
+  })
+
+  test('nothing is done while no mission was created', () => {
+    expect(triageStep('anyway', { kind: 'small' }, null)).toBeNull()
   })
 })

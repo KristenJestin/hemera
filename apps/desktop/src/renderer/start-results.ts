@@ -15,7 +15,7 @@ import type {
   StartResult,
   TicketFound as TicketFoundSchema,
 } from '@hemera/ipc'
-import type { StartResultView, StartTriage } from '@hemera/ui'
+import type { StartResultView, StartTriage, StartTriageAction } from '@hemera/ui'
 import { Match, Predicate } from 'effect'
 
 type MissionFound = typeof MissionFoundSchema.Type
@@ -147,4 +147,30 @@ export function settleStart(change: MissionsChange, missionId: string): StartSet
   return triage === undefined
     ? { kind: 'planning', key: change.mission.key }
     : { kind: 'answer', triage }
+}
+
+/** What an action on the triage answer asks: open a mission, the Chat, or keep the created one. */
+export type TriageStep =
+  | { kind: 'open'; key: string }
+  | { kind: 'chat' }
+  | { kind: 'keep'; missionId: string }
+
+/**
+ * What an action on the triage answer does: Open goes to the mission the answer points to, Chat to
+ * the Project's Chat, and "Start a mission anyway" keeps the created mission, which goes on
+ * planning. Nothing while no mission was created.
+ */
+export function triageStep(
+  action: StartTriageAction,
+  triage: StartTriage | undefined,
+  created: { id: string; key: string } | null,
+): TriageStep | null {
+  if (action === 'chat') return { kind: 'chat' }
+  if (action === 'open' && (triage?.kind === 'belongs' || triage?.kind === 'delivered')) {
+    return { kind: 'open', key: triage.key }
+  }
+  if (created === null) return null
+  return action === 'anyway'
+    ? { kind: 'keep', missionId: created.id }
+    : { kind: 'open', key: created.key }
 }

@@ -104,6 +104,7 @@ export const SILENT_LINK: Link = {
   onSetupChanges: silent,
   searchStart: silent,
   createStart: never,
+  keepAfterTriage: never,
   cancelMission: never,
   freezeReadiness: never,
   onFreezeReadiness: silent,
