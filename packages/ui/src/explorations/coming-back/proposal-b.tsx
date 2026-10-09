@@ -73,7 +73,7 @@ const WHEN = 'shrink-0 text-xs text-muted-foreground tabular-nums'
 /** The marks whose cause is read: written out. The others: their glyph. */
 const SPELLED: ReadonlySet<Mark['kind']> = new Set(['blocked', 'waiting'])
 
-function Marks({ marks }: { marks: readonly Mark[] }): ReactNode {
+export function Marks({ marks }: { marks: readonly Mark[] }): ReactNode {
   if (marks.length === 0) return null
   return (
     <span className="flex min-w-0 shrink items-center gap-2">
@@ -328,7 +328,7 @@ const META_LINK =
   'flex min-w-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-ring'
 
 /** The six stages of a mission's life, the current one lit; the Spec's lock after Planning. */
-function StageTrack({ mission }: { mission: ExploredMission }): ReactNode {
+export function StageTrack({ mission }: { mission: ExploredMission }): ReactNode {
   const now = LIFE.indexOf(mission.stage)
   return (
     <ol aria-label="Stage" className={TRACK}>
