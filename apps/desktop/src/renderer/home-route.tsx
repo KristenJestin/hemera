@@ -125,6 +125,13 @@ export function homeViewOf(props: HomeRouteProps, data: HomeData, onMore: () => 
         rows,
         projects: ['Hemera', ...listed.map((one) => one.name)],
         open: focus.need,
+        onOpenMission: (id) => {
+          const owner =
+            needs.kind === 'ready' ? needs.needs.find((one) => one.id === id)?.owner : undefined
+          if (owner === undefined || !Predicate.isTagged(owner, 'Mission')) return
+          const key = needs.kind === 'ready' ? needs.missions.get(owner.missionId)?.key : undefined
+          if (key !== undefined) actions.openMission(owner.projectId, key)
+        },
         on: (id) => {
           const need = needs.kind === 'ready' ? needs.needs.find((one) => one.id === id) : undefined
           return need === undefined ? {} : handlersFor(need, tools)

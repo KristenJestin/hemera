@@ -1,10 +1,11 @@
 /** Home as the window feeds it: the lists from what was read, and the page it draws. */
 
-import { AgentWorking } from '@hemera/core/domain'
-import type { Mission, OpenQuestion, Project } from '@hemera/ipc'
+import { AgentWorking, DecisionFields, MissionOwner } from '@hemera/core/domain'
+import type { Mission, Need, OpenQuestion, Project } from '@hemera/ipc'
+import { HomePage } from '@hemera/ui'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, test } from 'vite-plus/test'
+import { describe, expect, test, vi } from 'vite-plus/test'
 
 import {
   NO_HOME_DATA,
@@ -175,6 +176,42 @@ describe('Home, from what the engine answered', () => {
       { projects: { kind: 'failed', sentence: 'The Projects failed.' } },
     )
     expect(page.error).toBe('The Projects failed.')
+  })
+
+  test('a need of a mission offers to open it, by the Project and the key of that mission', () => {
+    const waiting: Need = {
+      id: 'need-1',
+      owner: MissionOwner.make({ projectId: 'acme', missionId: 'm12', taskId: null }),
+      fields: DecisionFields.make({
+        question: 'Which table?',
+        options: ['a', 'b'],
+        recommended: { option: 'a', reason: 'it is used' },
+      }),
+      choices: [],
+      requestedBy: null,
+      state: 'pending',
+      answer: null,
+      endedReason: null,
+      createdAt: '2026-10-09T08:00:00.000Z',
+      endedAt: null,
+    }
+    const openMission = vi.fn()
+    const page = pageOf(READ, {
+      needs: {
+        kind: 'ready',
+        needs: [waiting],
+        missions: new Map([['m12', { key: 'ACME-12', updatedAt: '2026-10-09T07:00:00.000Z' }]]),
+        answers: new Map(),
+      },
+      actions: { ...props().actions, openMission },
+    })
+    expect(page.needs.onOpenMission).toBeDefined()
+    page.needs.onOpenMission?.('need-1')
+    expect(openMission).toHaveBeenCalledWith('acme', 'ACME-12')
+    const markup = renderToStaticMarkup(
+      createElement(HomePage, { ...page, needs: { ...page.needs, open: 'need-1' } }),
+    )
+    expect(markup).toContain('Open ACME-12')
   })
 
   test('with no Project and nothing waiting, Home is the first launch', () => {
