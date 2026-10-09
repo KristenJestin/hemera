@@ -47,8 +47,7 @@ describe('the last Journal line of several missions', () => {
           const ids = [first.id, second.id, 'nobody']
           const seen = yield* until(
             journalTail(ids),
-            (all) =>
-              all[0]?.line !== null && /cancelled/i.test(all[1]?.line?.text ?? ''),
+            (all) => all[0]?.line !== null && /cancelled/i.test(all[1]?.line?.text ?? ''),
           )
           return { seen, first, second }
         }),

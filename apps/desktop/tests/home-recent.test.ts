@@ -118,17 +118,17 @@ describe('Recent', () => {
   })
 
   test('refuses a mission that does not exist, and keeps the list as it was', async () => {
-    const { refused, recent } = await engine()(({ profile }) =>
+    const { outcome, recent } = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const [one] = yield* made(1)
           yield* missionOpened(one?.id ?? '')
           const refused = yield* Effect.result(missionOpened('nobody'))
-          return { refused, recent: yield* recentMissions }
+          return { outcome: refused, recent: yield* recentMissions }
         }),
       ),
     )
-    expect(Result.isFailure(refused) && refused.failure).toBeInstanceOf(UnknownMission)
+    expect(Result.isFailure(outcome) && outcome.failure).toBeInstanceOf(UnknownMission)
     expect(recent).toHaveLength(1)
   })
 
