@@ -339,12 +339,12 @@ export function SettingsPage({
   setUp,
   ticketSection,
   onOpenLivingSpec,
-  section,
+  section: first,
   problems: known,
 }: SettingsPageProps): ReactNode {
   const [current, setCurrent] = useState<SectionId>(() => {
-    const first = section === undefined ? null : sectionChosen(section)
-    return first?.kind === 'section' ? first.id : 'repositories'
+    const chosen = first === undefined ? null : sectionChosen(first)
+    return chosen?.kind === 'section' ? chosen.id : 'repositories'
   })
   /** The dialog an agent section shows over the page. */
   const [agentForm, setAgentForm] = useState<SettingsForm | null>(null)
@@ -531,7 +531,12 @@ export function SettingsPage({
     if (chosen?.kind === 'section') problems.set(chosen.id, sentence)
   }
   for (const [id, sentence] of refusedIn) problems.set(id, sentence)
-  const sections = SECTIONS.map((one) => ({ ...one, problem: problems.get(one.id) }))
+  const sections = SECTIONS.map(({ id, label, icon }) => ({
+    id,
+    label,
+    icon,
+    problem: problems.get(id),
+  }))
 
   const unread = [data.project, data.catalogue, data.recipe, data.variables, data.runs].find(
     (one) => one.kind === 'failed',

@@ -575,11 +575,16 @@ describe('The window’s link, for components and hooks', () => {
 /** A method of the link, what it is called with, and the call it makes of main. */
 interface Wiring {
   readonly method: string
-  readonly run: (link: Link) => unknown
+  readonly run: (link: Link) => void
   readonly asks: string
 }
 
 const NO_END = (): void => undefined
+
+/** Makes a call whose refusal is not what is checked. */
+const ask = <A>(call: Promise<A>): void => {
+  void call.catch(() => undefined)
+}
 
 const GITHUB = { host: 'github.com', repositories: ['acme/web'] }
 const JIRA = {
@@ -599,221 +604,240 @@ const DRAFT = {
 const WIRINGS: ReadonlyArray<Wiring> = [
   {
     method: 'searchStart',
-    run: (link) => link.searchStart('acme', 'invoices', NO_END, NO_END),
+    run: (link) => {
+      link.searchStart('acme', 'invoices', NO_END, NO_END)
+    },
     asks: 'start.search {"projectId":"acme","text":"invoices"}',
   },
   {
     method: 'createStart',
-    run: (link) => link.createStart({ projectId: 'acme', text: 'Export', idempotencyKey: 'k1' }),
+    run: (link) =>
+      ask(link.createStart({ projectId: 'acme', text: 'Export', idempotencyKey: 'k1' })),
     asks: 'start.create {"projectId":"acme","text":"Export","idempotencyKey":"k1"}',
   },
   {
     method: 'cancelMission',
-    run: (link) => link.cancelMission('m1'),
+    run: (link) => ask(link.cancelMission('m1')),
     asks: 'missions.cancel {"id":"m1"}',
   },
   {
     method: 'freezeReadiness',
-    run: (link) => link.freezeReadiness('m1'),
+    run: (link) => ask(link.freezeReadiness('m1')),
     asks: 'missions.freezeReadiness {"id":"m1"}',
   },
   {
     method: 'onFreezeReadiness',
-    run: (link) => link.onFreezeReadiness('m1', NO_END, NO_END),
+    run: (link) => {
+      link.onFreezeReadiness('m1', NO_END, NO_END)
+    },
     asks: 'missions.freezeReadinessChanged {"id":"m1"}',
   },
   {
     method: 'freeze',
-    run: (link) => link.freeze('m1', 3),
+    run: (link) => ask(link.freeze('m1', 3)),
     asks: 'missions.freeze {"id":"m1","specVersion":3}',
   },
-  { method: 'spec', run: (link) => link.spec('m1'), asks: 'planning.spec {"missionId":"m1"}' },
+  { method: 'spec', run: (link) => ask(link.spec('m1')), asks: 'planning.spec {"missionId":"m1"}' },
   {
     method: 'openQuestions',
-    run: (link) => link.openQuestions(),
+    run: (link) => ask(link.openQuestions()),
     asks: 'planning.openQuestions {}',
   },
   {
     method: 'onOpenQuestions',
-    run: (link) => link.onOpenQuestions(NO_END, NO_END),
+    run: (link) => {
+      link.onOpenQuestions(NO_END, NO_END)
+    },
     asks: 'planning.questionsChanged {}',
   },
   {
     method: 'sinceYouLeft',
-    run: (link) => link.sinceYouLeft(null),
+    run: (link) => ask(link.sinceYouLeft(null)),
     asks: 'home.sinceYouLeft {"before":null}',
   },
   {
     method: 'onSinceYouLeft',
-    run: (link) => link.onSinceYouLeft(NO_END, NO_END),
+    run: (link) => {
+      link.onSinceYouLeft(NO_END, NO_END)
+    },
     asks: 'home.sinceYouLeftChanged',
   },
-  { method: 'lookedAtHome', run: (link) => link.lookedAtHome(), asks: 'home.looked' },
-  { method: 'recentMissions', run: (link) => link.recentMissions(), asks: 'home.recent' },
+  { method: 'lookedAtHome', run: (link) => ask(link.lookedAtHome()), asks: 'home.looked' },
+  { method: 'recentMissions', run: (link) => ask(link.recentMissions()), asks: 'home.recent' },
   {
     method: 'missionOpened',
-    run: (link) => link.missionOpened('m1'),
+    run: (link) => ask(link.missionOpened('m1')),
     asks: 'home.opened {"missionId":"m1"}',
   },
   {
     method: 'journalTail',
-    run: (link) => link.journalTail(['m1', 'm2']),
+    run: (link) => ask(link.journalTail(['m1', 'm2'])),
     asks: 'memory.journalTail {"missionIds":["m1","m2"]}',
   },
   {
     method: 'livingSpecDomains',
-    run: (link) => link.livingSpecDomains('acme'),
+    run: (link) => ask(link.livingSpecDomains('acme')),
     asks: 'livingSpec.domains {"projectId":"acme"}',
   },
   {
     method: 'onLivingSpec',
-    run: (link) => link.onLivingSpec('acme', NO_END, NO_END),
+    run: (link) => {
+      link.onLivingSpec('acme', NO_END, NO_END)
+    },
     asks: 'livingSpec.changed {"projectId":"acme"}',
   },
   {
     method: 'livingSpecRequirements',
-    run: (link) => link.livingSpecRequirements('acme', 'd1'),
+    run: (link) => ask(link.livingSpecRequirements('acme', 'd1')),
     asks: 'livingSpec.requirements {"projectId":"acme","domainId":"d1"}',
   },
   {
     method: 'livingSpecRequirement',
-    run: (link) => link.livingSpecRequirement('r1'),
+    run: (link) => ask(link.livingSpecRequirement('r1')),
     asks: 'livingSpec.requirement {"id":"r1"}',
   },
   {
     method: 'livingSpecRuns',
-    run: (link) => link.livingSpecRuns('acme'),
+    run: (link) => ask(link.livingSpecRuns('acme')),
     asks: 'livingSpec.runs {"projectId":"acme"}',
   },
   {
     method: 'validateDomain',
-    run: (link) => link.validateDomain('d1', []),
+    run: (link) => ask(link.validateDomain('d1', [])),
     asks: 'livingSpec.validateDomain {"domainId":"d1","seen":[]}',
   },
   {
     method: 'rejectDomain',
-    run: (link) => link.rejectDomain('d1', []),
+    run: (link) => ask(link.rejectDomain('d1', [])),
     asks: 'livingSpec.rejectDomain {"domainId":"d1","seen":[]}',
   },
   {
     method: 'dropRequirement',
-    run: (link) => link.dropRequirement('r1'),
+    run: (link) => ask(link.dropRequirement('r1')),
     asks: 'livingSpec.dropRequirement {"requirementId":"r1"}',
   },
   {
     method: 'bootstrapLivingSpec (every domain)',
-    run: (link) => link.bootstrapLivingSpec('acme'),
+    run: (link) => ask(link.bootstrapLivingSpec('acme')),
     asks: 'livingSpec.bootstrap {"projectId":"acme"}',
   },
   {
     method: 'bootstrapLivingSpec (one domain)',
-    run: (link) => link.bootstrapLivingSpec('acme', 'd1'),
+    run: (link) => ask(link.bootstrapLivingSpec('acme', 'd1')),
     asks: 'livingSpec.bootstrap {"projectId":"acme","domainId":"d1"}',
   },
   {
     method: 'ticketProviders',
-    run: (link) => link.ticketProviders('acme'),
+    run: (link) => ask(link.ticketProviders('acme')),
     asks: 'tickets.providers {"projectId":"acme"}',
   },
   {
     method: 'proposeGithub',
-    run: (link) => link.proposeGithub('acme', 'github.com'),
+    run: (link) => ask(link.proposeGithub('acme', 'github.com')),
     asks: 'tickets.proposeGithub {"projectId":"acme","host":"github.com"}',
   },
   {
     method: 'addGithub',
-    run: (link) => link.addGithub('acme', GITHUB),
+    run: (link) => ask(link.addGithub('acme', GITHUB)),
     asks: `tickets.addGithub ${JSON.stringify({ projectId: 'acme', config: GITHUB })}`,
   },
   {
     method: 'addJira',
-    run: (link) => link.addJira('acme', JIRA),
+    run: (link) => ask(link.addJira('acme', JIRA)),
     asks: `tickets.addJira ${JSON.stringify({ projectId: 'acme', config: JIRA })}`,
   },
   {
     method: 'jiraDeployment',
-    run: (link) => link.jiraDeployment('https://acme.atlassian.net'),
+    run: (link) => ask(link.jiraDeployment('https://acme.atlassian.net')),
     asks: 'tickets.jiraDeployment {"site":"https://acme.atlassian.net"}',
   },
   {
     method: 'updateProvider',
-    run: (link) => link.updateProvider('p1', GITHUB),
+    run: (link) => ask(link.updateProvider('p1', GITHUB)),
     asks: `tickets.updateProvider ${JSON.stringify({ providerId: 'p1', config: GITHUB })}`,
   },
   {
     method: 'removeProvider',
-    run: (link) => link.removeProvider('p1'),
+    run: (link) => ask(link.removeProvider('p1')),
     asks: 'tickets.removeProvider {"providerId":"p1"}',
   },
   {
     method: 'providerStatus',
-    run: (link) => link.providerStatus('p1'),
+    run: (link) => ask(link.providerStatus('p1')),
     asks: 'tickets.status {"providerId":"p1"}',
   },
   {
     method: 'checkProviderAgain',
-    run: (link) => link.checkProviderAgain('p1'),
+    run: (link) => ask(link.checkProviderAgain('p1')),
     asks: 'tickets.checkAgain {"providerId":"p1"}',
   },
   {
     method: 'specMode',
-    run: (link) => link.specMode('acme'),
+    run: (link) => ask(link.specMode('acme')),
     asks: 'tickets.specMode {"projectId":"acme"}',
   },
   {
     method: 'setSpecMode',
-    run: (link) => link.setSpecMode('acme', 'linked'),
+    run: (link) => ask(link.setSpecMode('acme', 'linked')),
     asks: 'tickets.setSpecMode {"projectId":"acme","mode":"linked"}',
   },
   {
     method: 'onTicketSettings',
-    run: (link) => link.onTicketSettings('acme', NO_END, NO_END),
+    run: (link) => {
+      link.onTicketSettings('acme', NO_END, NO_END)
+    },
     asks: 'tickets.changed {"projectId":"acme"}',
   },
   {
     method: 'saveJiraToken',
-    run: (link) => link.saveJiraToken('p1', 'secret'),
+    run: (link) => ask(link.saveJiraToken('p1', 'secret')),
     asks: 'tickets.saveJiraToken {"providerId":"p1","token":"secret"}',
   },
   {
     method: 'removeJiraToken',
-    run: (link) => link.removeJiraToken('p1'),
+    run: (link) => ask(link.removeJiraToken('p1')),
     asks: 'tickets.removeJiraToken {"providerId":"p1"}',
   },
   {
     method: 'jiraTokenStatus',
-    run: (link) => link.jiraTokenStatus('p1'),
+    run: (link) => ask(link.jiraTokenStatus('p1')),
     asks: 'tickets.jiraTokenStatus {"providerId":"p1"}',
   },
   {
     method: 'specLanguage',
-    run: (link) => link.specLanguage('acme'),
+    run: (link) => ask(link.specLanguage('acme')),
     asks: 'planning.specLanguage {"projectId":"acme"}',
   },
   {
     method: 'setSpecLanguage',
-    run: (link) => link.setSpecLanguage('acme', 'French'),
+    run: (link) => ask(link.setSpecLanguage('acme', 'French')),
     asks: 'planning.setSpecLanguage {"projectId":"acme","language":"French"}',
   },
   {
     method: 'setKeyPrefix',
-    run: (link) => link.setKeyPrefix({ id: 'acme', version: 2, prefix: 'AC' }),
+    run: (link) => ask(link.setKeyPrefix({ id: 'acme', version: 2, prefix: 'AC' })),
     asks: 'projects.setKeyPrefix {"id":"acme","version":2,"prefix":"AC"}',
   },
   {
     method: 'resources',
-    run: (link) => link.resources('acme'),
+    run: (link) => ask(link.resources('acme')),
     asks: 'resources.list {"projectId":"acme"}',
   },
   {
     method: 'saveResources',
-    run: (link) => link.saveResources('acme', [DRAFT]),
+    run: (link) => ask(link.saveResources('acme', [DRAFT])),
     asks: `resources.save ${JSON.stringify({ projectId: 'acme', resources: [DRAFT] })}`,
   },
-  { method: 'resourceHolders', run: (link) => link.resourceHolders(), asks: 'resources.holders' },
+  {
+    method: 'resourceHolders',
+    run: (link) => ask(link.resourceHolders()),
+    asks: 'resources.holders',
+  },
   {
     method: 'onResourceHolders',
-    run: (link) => link.onResourceHolders(NO_END, NO_END),
+    run: (link) => {
+      link.onResourceHolders(NO_END, NO_END)
+    },
     asks: 'resources.changed',
   },
 ]
@@ -821,11 +845,8 @@ const WIRINGS: ReadonlyArray<Wiring> = [
 describe('The window’s link, for the screens that come back to a mission and its spec', () => {
   test.each(WIRINGS)('$method asks main for $asks', async ({ run, asks }) => {
     const { link, asked } = await main('answers')
-    const result = run(link)
-    // A call is refused by the recorder, a stream stays open: neither is what is checked.
-    if (result instanceof Promise) await result.catch(() => undefined)
+    run(link)
     await vi.waitFor(() => expect(asked).toContain(asks))
-    if (typeof result === 'function') result()
   })
 
   test('Home reads a page of what happened since the user left, and the cursor of the next', async () => {
