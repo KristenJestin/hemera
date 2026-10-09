@@ -26,7 +26,10 @@ export function settingWords(setting: 'Spec mode' | 'Spec language', failure: Er
 }
 
 /** The key prefix typed, as the engine takes it: at the version of the Project it was read from. */
-export function prefixEditOf(project: Pick<Project, 'id' | 'version'>, prefix: string): KeyPrefixEdit {
+export function prefixEditOf(
+  project: Pick<Project, 'id' | 'version'>,
+  prefix: string,
+): KeyPrefixEdit {
   return { id: project.id, version: project.version, prefix }
 }
 

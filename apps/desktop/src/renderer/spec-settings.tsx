@@ -1,7 +1,25 @@
+/**
+ * The Spec settings of a Project, under its ticket providers (#104): where Specs live, the
+ * language they are written in and the key prefix of the next missions. The sync interval is a
+ * seam: its row is drawn only once something feeds it. No Effect here: the link's calls are
+ * promises. A write answered after a later one is dropped; the key prefix is sent once the typing
+ * settles, and the engine's refusal is shown under the field.
+ */
+
+import type { SpecMode } from '@hemera/core/domain'
 import type { Project } from '@hemera/ipc'
-import type { ReactNode } from 'react'
+import { SpecFields, type SpecModeChoice } from '@hemera/ui'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { Link } from './link.ts'
+import {
+  OFFERED_MODES,
+  PREFIX_SETTLES_MS,
+  answerGate,
+  prefixEditOf,
+  prefixWords,
+  settingWords,
+} from './spec-settings-model.ts'
 
 export interface SpecSettingsPartProps {
   link: Link
@@ -10,7 +28,167 @@ export interface SpecSettingsPartProps {
   project: Project | null
 }
 
-/** The Spec settings of a Project (mode, language, sync, key prefix): drawn once they are built. */
-export function SpecSettingsPart(_props: SpecSettingsPartProps): ReactNode {
-  return null
+/** What the section has read of the Spec settings, and what it is writing. */
+interface Held {
+  readonly mode: SpecMode | null
+  readonly language: string | null
+  /** The prefix as typed, until the engine has answered it. */
+  readonly typed: string | null
+  readonly prefixRefused: string | undefined
+  readonly refused: string | undefined
+}
+
+const NOTHING: Held = {
+  mode: null,
+  language: null,
+  typed: null,
+  prefixRefused: undefined,
+  refused: undefined,
+}
+
+/** The Spec settings of a Project (mode, language, key prefix; the sync interval is not fed yet). */
+export function SpecSettingsPart({
+  link,
+  engineReady,
+  projectId,
+  project,
+}: SpecSettingsPartProps): ReactNode {
+  const [held, setHeld] = useState<Held>(NOTHING)
+  const change = (part: Partial<Held>): void => setHeld((before) => ({ ...before, ...part }))
+  // The newest record of the Project this section has seen: its version is the one to write at.
+  const current = useRef<Pick<Project, 'id' | 'version' | 'keyPrefix'> | null>(null)
+  const saved = useRef<Project | null>(null)
+  if (project !== null && (saved.current === null || project.version >= saved.current.version)) {
+    saved.current = project
+  }
+  current.current = saved.current?.id === projectId ? saved.current : null
+  const gates = useRef({
+    mode: answerGate(),
+    language: answerGate(),
+    prefix: answerGate(),
+  })
+  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; prefix: string } | null>(null)
+
+  useEffect(() => {
+    setHeld(NOTHING)
+    saved.current = null
+    const mine = { mode: answerGate(), language: answerGate(), prefix: answerGate() }
+    gates.current = mine
+    if (!engineReady) return undefined
+    let live = true
+    const stop = link.onTicketSettings(
+      projectId,
+      (settings) => {
+        if (live) setHeld((before) => ({ ...before, mode: settings.specMode }))
+      },
+      (failure) => {
+        if (live) setHeld((before) => ({ ...before, refused: settingWords('Spec mode', failure) }))
+      },
+    )
+    link.specLanguage(projectId).then(
+      (language) => {
+        if (live) setHeld((before) => ({ ...before, language }))
+      },
+      (failure: Error) => {
+        if (live) {
+          setHeld((before) => ({ ...before, refused: settingWords('Spec language', failure) }))
+        }
+      },
+    )
+    return () => {
+      live = false
+      stop()
+      mine.mode.close()
+      mine.language.close()
+      mine.prefix.close()
+      // A prefix typed and not yet sent is sent as the section is left, not lost.
+      const waiting = pending.current
+      pending.current = null
+      if (waiting !== null && current.current !== null) {
+        clearTimeout(waiting.timer)
+        link.setKeyPrefix(prefixEditOf(current.current, waiting.prefix)).catch(() => undefined)
+      }
+    }
+  }, [link, engineReady, projectId])
+
+  const chooseMode = (choice: SpecModeChoice): void => {
+    if (choice === 'remote' || held.mode === null) return
+    const before = held.mode
+    const ticket = gates.current.mode.begin()
+    const gate = gates.current.mode
+    change({ mode: choice, refused: undefined })
+    link.setSpecMode(projectId, choice).then(
+      (mode) => {
+        if (gate.isLatest(ticket)) change({ mode })
+      },
+      (failure: Error) => {
+        if (gate.isLatest(ticket)) {
+          change({ mode: before, refused: settingWords('Spec mode', failure) })
+        }
+      },
+    )
+  }
+
+  const chooseLanguage = (tag: string): void => {
+    const before = held.language
+    const ticket = gates.current.language.begin()
+    const gate = gates.current.language
+    change({ language: tag, refused: undefined })
+    link.setSpecLanguage(projectId, tag).then(
+      (language) => {
+        if (gate.isLatest(ticket)) change({ language })
+      },
+      (failure: Error) => {
+        if (gate.isLatest(ticket)) {
+          change({ language: before, refused: settingWords('Spec language', failure) })
+        }
+      },
+    )
+  }
+
+  const writePrefix = (prefix: string): void => {
+    pending.current = null
+    const record = current.current
+    if (record === null) return
+    if (prefix.trim().toUpperCase() === record.keyPrefix) {
+      change({ typed: null, prefixRefused: undefined })
+      return
+    }
+    const gate = gates.current.prefix
+    const ticket = gate.begin()
+    link.setKeyPrefix(prefixEditOf(record, prefix)).then(
+      (written) => {
+        if (!gate.isLatest(ticket)) return
+        saved.current = written
+        change({ typed: null, prefixRefused: undefined })
+      },
+      (failure: Error) => {
+        if (gate.isLatest(ticket)) change({ prefixRefused: prefixWords(failure) })
+      },
+    )
+  }
+
+  const typePrefix = (prefix: string): void => {
+    if (pending.current !== null) clearTimeout(pending.current.timer)
+    gates.current.prefix.begin()
+    change({ typed: prefix, prefixRefused: undefined })
+    const timer = setTimeout(() => writePrefix(prefix), PREFIX_SETTLES_MS)
+    pending.current = { timer, prefix }
+  }
+
+  const shown = current.current
+  return (
+    <SpecFields
+      mode={held.mode}
+      modes={OFFERED_MODES}
+      onMode={chooseMode}
+      language={held.language}
+      onLanguage={chooseLanguage}
+      prefix={held.typed ?? shown?.keyPrefix ?? null}
+      prefixRefused={held.prefixRefused}
+      onPrefix={typePrefix}
+      sync={undefined}
+      refused={held.refused}
+    />
+  )
 }
