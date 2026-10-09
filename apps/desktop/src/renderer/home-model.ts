@@ -20,6 +20,12 @@ import { ballOf, lineOf } from './missions.ts'
 import { whenOf } from './needs.ts'
 import { eventsOf } from './project-lines.ts'
 
+/** The answer the ticket proposes for a question: the latest one still proposed, if any. */
+const proposedOf = (question: OpenQuestion): string | undefined =>
+  question.proposals
+    .filter((one) => one.state === 'proposed')
+    .toSorted((a, b) => b.proposedAt.localeCompare(a.proposedAt))[0]?.text
+
 /** The open questions as rows, a mission's together, the mission that has waited longest first. */
 export function questionRowsOf(
   questions: ReadonlyArray<OpenQuestion>,
@@ -43,6 +49,7 @@ export function questionRowsOf(
           missionKey: one.missionKey,
           title: one.text,
           when: whenOf(one.since, now),
+          proposed: proposedOf(one),
         })),
     )
 }

@@ -67,6 +67,7 @@ const question: OpenQuestion = {
   state: 'open',
   waitingNote: null,
   since: '2026-10-08T09:00:00.000Z',
+  proposals: [],
 }
 
 const props = (more: Partial<HomeRouteProps> = {}): HomeRouteProps => ({

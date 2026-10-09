@@ -9,6 +9,7 @@ import type {
   Mission,
   MissionMark,
   OpenQuestion,
+  ProposedAnswer,
   Project,
   SinceEvent,
   SinceGroup,
@@ -41,7 +42,26 @@ const question = (more: Partial<OpenQuestion> = {}): OpenQuestion => ({
   state: 'open',
   waitingNote: null,
   since: '2026-10-08T09:00:00.000Z',
+  proposals: [],
   ...more,
+})
+
+const proposal = (
+  text: string,
+  state: ProposedAnswer['state'],
+  proposedAt: string,
+): ProposedAnswer => ({
+  id: `p-${text}`,
+  missionId: 'm14',
+  questionId: 'q1',
+  commentId: `c-${text}`,
+  commentAuthor: 'sam',
+  comment: text,
+  text,
+  state,
+  proposedAt,
+  decidedAt: null,
+  reason: null,
 })
 
 const event = (sequence: number, more: Partial<SinceEvent> = {}): SinceEvent => ({
@@ -153,6 +173,30 @@ describe('The open questions, grouped by mission', () => {
 
   test('no proposed answer is invented before the ticket gives one', () => {
     const [row] = questionRowsOf([question()], NOW)
+    expect(row?.proposed).toBeUndefined()
+  })
+
+  test('the answer the ticket proposes is the latest one still proposed', () => {
+    const [row] = questionRowsOf(
+      [
+        question({
+          proposals: [
+            proposal('Admins only', 'proposed', '2026-10-08T10:00:00.000Z'),
+            proposal('Admins and auditors', 'proposed', '2026-10-08T12:00:00.000Z'),
+            proposal('Everyone', 'dismissed', '2026-10-08T14:00:00.000Z'),
+          ],
+        }),
+      ],
+      NOW,
+    )
+    expect(row?.proposed).toBe('Admins and auditors')
+  })
+
+  test('a proposal dismissed, accepted or expired is not offered', () => {
+    const [row] = questionRowsOf(
+      [question({ proposals: [proposal('Everyone', 'expired', '2026-10-08T14:00:00.000Z')] })],
+      NOW,
+    )
     expect(row?.proposed).toBeUndefined()
   })
 })
