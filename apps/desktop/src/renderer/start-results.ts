@@ -154,15 +154,26 @@ export type StartSettled =
 
 /**
  * The first change of the mission just created: the Planner answered that it is not new work, or
- * it went on planning, and the mission opens. A change of another mission settles nothing.
+ * it went on planning (see `wentOnPlanning`), and the mission opens. A change of another mission settles nothing.
  */
 export function settleStart(change: MissionsChange, missionId: string): StartSettled | null {
   if (!Predicate.isTagged(change, 'MissionChanged') || change.mission.id !== missionId) return null
-  const triage = triageOf(change.mission)
-  return triage === undefined
-    ? { kind: 'planning', key: change.mission.key }
-    : { kind: 'answer', triage }
+  const { mission } = change
+  const triage = triageOf(mission)
+  if (triage !== undefined) return { kind: 'answer', triage }
+  return wentOnPlanning(mission) ? { kind: 'planning', key: mission.key } : null
 }
+
+/**
+ * Whether the mission shows that triage is behind it: the user kept it after an answer, it left
+ * Planning or froze its Spec, or the Planner now waits on the user (its questions). Any other
+ * change, a mark or a Journal line say, settles nothing.
+ */
+const wentOnPlanning = (mission: Mission): boolean =>
+  mission.triage?.state === 'kept' ||
+  mission.stage !== 'planning' ||
+  mission.frozen ||
+  Predicate.isTagged(mission.ball, 'WaitingOnYou')
 
 /** What an action on the triage answer asks: open a mission, the Chat, or keep the created one. */
 export type TriageStep =

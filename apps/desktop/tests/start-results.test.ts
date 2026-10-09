@@ -4,7 +4,12 @@
  * creates, and the triage answer a created mission carries.
  */
 
-import { CanonicalTicket, parseTicketReference } from '@hemera/core/domain'
+import {
+  AgentWorking,
+  CanonicalTicket,
+  WaitingOnYou,
+  parseTicketReference,
+} from '@hemera/core/domain'
 import {
   CreateChoice,
   MissionChanged,
@@ -236,11 +241,36 @@ describe('what the first change of the created mission settles', () => {
     })
   })
 
-  test('is that it went on planning when there is no answer', () => {
-    expect(settleStart(MissionChanged.make({ mission: mission() }), 'm12')).toEqual({
-      kind: 'planning',
-      key: 'ACME-12',
-    })
+  test('is nothing for a change that says nothing of the triage', () => {
+    expect(settleStart(MissionChanged.make({ mission: mission() }), 'm12')).toBeNull()
+    expect(
+      settleStart(
+        MissionChanged.make({ mission: mission({ ball: AgentWorking.make({}) }) }),
+        'm12',
+      ),
+    ).toBeNull()
+  })
+
+  test('is that it went on planning when the user kept it, or the mission moved on', () => {
+    const planning = { kind: 'planning', key: 'ACME-12' }
+    expect(
+      settleStart(
+        MissionChanged.make({ mission: answered('too_small', { state: 'kept' }) }),
+        'm12',
+      ),
+    ).toEqual(planning)
+    expect(
+      settleStart(MissionChanged.make({ mission: mission({ stage: 'building' }) }), 'm12'),
+    ).toEqual(planning)
+    expect(settleStart(MissionChanged.make({ mission: mission({ frozen: true }) }), 'm12')).toEqual(
+      planning,
+    )
+    expect(
+      settleStart(
+        MissionChanged.make({ mission: mission({ ball: WaitingOnYou.make({}) }) }),
+        'm12',
+      ),
+    ).toEqual(planning)
   })
 
   test('is nothing for another mission', () => {
