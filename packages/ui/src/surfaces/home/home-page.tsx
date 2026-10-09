@@ -101,7 +101,10 @@ export interface HomePageProps {
   questions: readonly HomeQuestionRow[]
   since: HomeSince
   recent: readonly HomeRecentRow[]
+  /** Whether the Projects and the needs are still being read: every list is on its way. */
   loading?: boolean | undefined
+  /** Whether Since you left and Recent are still being read; Needs you is already there. */
+  reading?: boolean | undefined
   error?: string | undefined
   /** A mission opens. */
   onOpen: (missionId: string) => void
@@ -397,6 +400,7 @@ export function HomePage({
   since,
   recent,
   loading = false,
+  reading = false,
   error,
   onOpen,
   onAddProject,
@@ -430,14 +434,14 @@ export function HomePage({
     )
   }
   const calling = needs.rows.filter(waiting).length
-  const quiet = calling === 0 && questions.length === 0 && since.groups.length === 0
+  const quiet = !reading && calling === 0 && questions.length === 0 && since.groups.length === 0
   return (
     <Page>
       <PageHeader title="Home" about={<span>{today}</span>} />
       <div className={COLUMNS}>
         <div className={MAIN}>
-          <SinceYouLeft since={since} loading={loading} quiet={quiet} onOpen={onOpen} />
-          <Recent rows={recent} loading={loading} onOpen={onOpen} />
+          <SinceYouLeft since={since} loading={loading || reading} quiet={quiet} onOpen={onOpen} />
+          <Recent rows={recent} loading={loading || reading} onOpen={onOpen} />
         </div>
         <aside aria-label="What calls" className={RAIL}>
           <section aria-label="Needs you" className="flex flex-col gap-3">
