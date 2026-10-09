@@ -81,6 +81,8 @@ export interface FormFootProps {
   /** What the save button says: `Save`, `Add`. */
   save?: string | undefined
   saving?: boolean | undefined
+  /** Whether the save button waits for something else to be done first. */
+  saveDisabled?: boolean | undefined
   onSave: () => void
   onCancel: () => void
 }
@@ -95,6 +97,7 @@ export function FormFoot({
   onRemove,
   save = 'Save',
   saving = false,
+  saveDisabled = false,
   onSave,
   onCancel,
 }: FormFootProps): ReactNode {
@@ -116,7 +119,13 @@ export function FormFoot({
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" size="sm" state={saving ? 'loading' : 'idle'} onClick={onSave}>
+          <Button
+            variant="primary"
+            size="sm"
+            state={saving ? 'loading' : 'idle'}
+            disabled={saveDisabled}
+            onClick={onSave}
+          >
             {save}
           </Button>
         </span>

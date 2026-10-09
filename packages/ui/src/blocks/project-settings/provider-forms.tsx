@@ -189,6 +189,8 @@ export interface TokenFieldProps {
   refused?: string | undefined
   /** Hands the token over once; the field is empty from then on. */
   onSave: (token: string) => void
+  /** Hears whether the field holds something: never what it holds. */
+  onFilled?: ((filled: boolean) => void) | undefined
   onRemove: () => void
 }
 
@@ -203,15 +205,20 @@ export function TokenField({
   saving = false,
   refused,
   onSave,
+  onFilled,
   onRemove,
 }: TokenFieldProps): ReactNode {
   const [typed, setTyped] = useState('')
   const [replacing, setReplacing] = useState(false)
+  const type = (text: string): void => {
+    setTyped(text)
+    onFilled?.(text !== '')
+  }
   const label = deployment === 'cloud' ? 'API token' : 'Personal access token'
   const give = (): void => {
     if (typed === '') return
     onSave(typed)
-    setTyped('')
+    type('')
     setReplacing(false)
   }
   if (status === 'storage-unavailable') {
@@ -231,7 +238,7 @@ export function TokenField({
         secret
         placeholder="Paste the token"
         value={typed}
-        onValueChange={setTyped}
+        onValueChange={type}
         error={refused}
         onKeyDown={(event) => {
           if (event.key === 'Enter') give()

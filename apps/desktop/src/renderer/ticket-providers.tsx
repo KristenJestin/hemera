@@ -6,13 +6,12 @@
  * link in one call and is never kept: only where it stands is read back.
  */
 
-import type { Project, TicketProviderInfo } from '@hemera/ipc'
+import type { Project } from '@hemera/ipc'
 import {
   FormFoot,
   GithubForm,
   type GithubDraft,
   JiraForm,
-  type JiraDraft,
   ProviderDetails,
   ProviderMark,
   type ProviderView,
@@ -26,15 +25,22 @@ import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react
 
 import type { Link } from './link.ts'
 import {
+  type GithubAddDraft,
+  type JiraAddDraft,
   type ProviderStore,
   type ProvidersState,
+  checkProvider,
+  dropToken,
+  giveToken,
   githubConfigOf,
+  githubEdited,
   githubRefusal,
-  jiraConfigOf,
-  jiraRefusal,
+  proposalsArrived,
   providerStore,
   providerViewsOf,
+  readProvider,
   removalWords,
+  submitJira,
 } from './ticket-providers-model.ts'
 
 export interface ProvidersPartProps {
@@ -63,28 +69,6 @@ const TYPING_SETTLES_MS = 500
 
 const nothing = (): void => undefined
 
-/** Reads what a provider can do now, and where its Jira token stands. */
-function readState(link: Link, store: ProviderStore<Read>, provider: TicketProviderInfo): void {
-  link.providerStatus(provider.id).then(
-    (status) => store.set({ statuses: new Map(store.get().statuses).set(provider.id, status) }),
-    (failure: Error) =>
-      store.set({
-        statuses: new Map(store.get().statuses).set(provider.id, {
-          state: 'configured',
-          sentence: `The provider could not be checked: ${failure.message}`,
-          fix: null,
-        }),
-      }),
-  )
-  if (provider.kind !== 'jira') return
-  link
-    .jiraTokenStatus(provider.id)
-    .then(
-      (status) => store.set({ tokens: new Map(store.get().tokens).set(provider.id, status) }),
-      nothing,
-    )
-}
-
 /** The providers of a Project as the engine holds them, followed while the section is there. */
 function useProviderStore(
   link: Link,
@@ -99,7 +83,7 @@ function useProviderStore(
       projectId,
       (settings) => {
         store.set({ infos: settings.providers, error: undefined })
-        for (const provider of settings.providers) readState(link, store, provider)
+        for (const provider of settings.providers) readProvider(link, store, provider)
       },
       (failure) =>
         store.set({ error: `The ticket providers could not be read: ${failure.message}` }),
@@ -136,26 +120,6 @@ interface ProviderDraft {
   readonly tokenSaving: boolean
   readonly tokenRefused: string | undefined
   /** Why the last save, check or removal was refused, in words. */
-  readonly refused: string | undefined
-}
-
-/** What the dialog that adds a GitHub provider holds. */
-interface GithubAddDraft {
-  readonly github: GithubDraft
-  readonly proposed: ReadonlyArray<string>
-  /** Whether the first proposal was ticked for the user. */
-  readonly preselected: boolean
-  readonly saving: boolean
-  readonly refused: string | undefined
-}
-
-/** What the dialog that adds a Jira provider holds. */
-interface JiraAddDraft {
-  readonly jira: JiraDraft
-  /** Whether the user chose the deployment themselves: the site's answer then leaves it alone. */
-  readonly chosen: boolean
-  readonly saving: boolean
-  readonly tokenRefused: string | undefined
   readonly refused: string | undefined
 }
 
@@ -204,15 +168,12 @@ function ProviderBody({ link, projectId, store, draft, id, copy }: ProviderDialo
   if (view === undefined || info === undefined) return null
   const saveToken = (token: string): void => {
     draft.set({ tokenSaving: true, tokenRefused: undefined })
-    link.saveJiraToken(id, token).then(
-      (status) => {
-        store.set({ tokens: new Map(store.get().tokens).set(id, status) })
+    giveToken(link, store, info, token).then(
+      (status) =>
         draft.set({
           tokenSaving: false,
           tokenRefused: status === 'invalid' ? 'Jira refused this token.' : undefined,
-        })
-        readState(link, store, info)
-      },
+        }),
       (failure: Error) =>
         draft.set({
           tokenSaving: false,
@@ -221,22 +182,14 @@ function ProviderBody({ link, projectId, store, draft, id, copy }: ProviderDialo
     )
   }
   const removeToken = (): void => {
-    link.removeJiraToken(id).then(
-      (status) => {
-        store.set({ tokens: new Map(store.get().tokens).set(id, status) })
-        readState(link, store, info)
-      },
-      (failure: Error) =>
-        draft.set({ refused: `The token could not be removed: ${failure.message}` }),
+    dropToken(link, store, info).then(undefined, (failure: Error) =>
+      draft.set({ refused: `The token could not be removed: ${failure.message}` }),
     )
   }
   const checkAgain = (): void => {
     draft.set({ checking: true, refused: undefined })
-    link.checkProviderAgain(id).then(
-      (status) => {
-        store.set({ statuses: new Map(store.get().statuses).set(id, status) })
-        draft.set({ checking: false })
-      },
+    checkProvider(link, store, id).then(
+      () => draft.set({ checking: false }),
       (failure: Error) =>
         draft.set({
           checking: false,
@@ -328,17 +281,12 @@ function GithubAddBody({
 }: DialogProps & { draft: ProviderStore<GithubAddDraft> }): ReactNode {
   const mine = useStored(draft)
   useProposals(link, projectId, mine.github.host, (proposed) => {
-    const now = draft.get()
-    draft.set({
-      proposed,
-      preselected: true,
-      github: now.preselected ? now.github : { ...now.github, repositories: proposed },
-    })
+    draft.set(proposalsArrived(draft.get(), proposed))
   })
   return (
     <GithubForm
       draft={mine.github}
-      onChange={(github) => draft.set({ github })}
+      onChange={(github) => draft.set(githubEdited(draft.get(), github))}
       proposed={mine.proposed}
     />
   )
@@ -400,29 +348,9 @@ function JiraAddBody({ link, store, draft, projectId, close }: JiraAddProps): Re
   }, [link, site, draft])
   // The token can only be kept for a provider that exists: giving it adds the provider first.
   const addWithToken = (token: string): void => {
-    const refusal = jiraRefusal(mine.jira)
-    if (refusal !== undefined) {
-      draft.set({ refused: refusal })
-      return
-    }
-    draft.set({ saving: true, refused: undefined, tokenRefused: undefined })
-    link.addJira(projectId, jiraConfigOf(mine.jira)).then(
-      (added) =>
-        link.saveJiraToken(added.id, token).then(
-          () => {
-            readState(link, store, added)
-            close()
-          },
-          (failure: Error) => {
-            readState(link, store, added)
-            draft.set({
-              saving: false,
-              tokenRefused: `The provider was added, but the token could not be saved: ${failure.message}`,
-            })
-          },
-        ),
-      (failure: Error) => draft.set({ saving: false, refused: failure.message }),
-    )
+    submitJira(link, store, draft, projectId, token).then((done) => {
+      if (done) close()
+    })
   }
   return (
     <JiraForm
@@ -437,6 +365,7 @@ function JiraAddBody({ link, store, draft, projectId, close }: JiraAddProps): Re
           saving={mine.saving}
           refused={mine.tokenRefused}
           onSave={addWithToken}
+          onFilled={(filled) => draft.set({ filled })}
           onRemove={nothing}
         />
       }
@@ -444,28 +373,19 @@ function JiraAddBody({ link, store, draft, projectId, close }: JiraAddProps): Re
   )
 }
 
-function JiraAddFoot({
-  link,
-  projectId,
-  draft,
-  close,
-}: DialogProps & { draft: ProviderStore<JiraAddDraft>; close: () => void }): ReactNode {
+function JiraAddFoot({ link, projectId, store, draft, close }: JiraAddProps): ReactNode {
   const mine = useStored(draft)
   return (
     <FormFoot
       refused={mine.refused}
       save="Add"
       saving={mine.saving}
+      // A token typed goes through the field's own Save; the foot adds a provider without one.
+      saveDisabled={mine.filled}
       onSave={() => {
-        const refusal = jiraRefusal(mine.jira)
-        if (refusal !== undefined) {
-          draft.set({ refused: refusal })
-          return
-        }
-        draft.set({ saving: true, refused: undefined })
-        link
-          .addJira(projectId, jiraConfigOf(mine.jira))
-          .then(close, (failure: Error) => draft.set({ saving: false, refused: failure.message }))
+        submitJira(link, store, draft, projectId, null).then((done) => {
+          if (done) close()
+        })
       }}
       onCancel={close}
     />
@@ -521,6 +441,7 @@ export function ProvidersPart({
       github: { host: 'github.com', repositories: [] },
       proposed: [],
       preselected: false,
+      touched: false,
       saving: false,
       refused: undefined,
     })
@@ -535,6 +456,8 @@ export function ProvidersPart({
     const draft = providerStore<JiraAddDraft>({
       jira: { site: '', deployment: 'cloud', email: '', projectKeys: '' },
       chosen: false,
+      added: null,
+      filled: false,
       saving: false,
       tokenRefused: undefined,
       refused: undefined,
@@ -545,7 +468,9 @@ export function ProvidersPart({
       body: (
         <JiraAddBody link={link} projectId={projectId} store={store} draft={draft} close={close} />
       ),
-      footer: <JiraAddFoot link={link} projectId={projectId} draft={draft} close={close} />,
+      footer: (
+        <JiraAddFoot link={link} projectId={projectId} store={store} draft={draft} close={close} />
+      ),
     })
   }
   return (

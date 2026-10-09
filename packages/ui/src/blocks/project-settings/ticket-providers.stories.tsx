@@ -170,6 +170,7 @@ function Page(props: PageProps): ReactNode {
     projectKeys: 'SHOP',
   })
   const [saving, setSaving] = useState(false)
+  const [filled, setFilled] = useState(false)
   const close = (): void => setForm(null)
   const checkAgain = (id: string): void => {
     props.onCheckAgain(id)
@@ -211,12 +212,15 @@ function Page(props: PageProps): ReactNode {
                 deployment={jira.deployment}
                 saving={false}
                 onSave={(token) => props.onSaveToken('new', token)}
+                onFilled={setFilled}
                 onRemove={() => {}}
               />
             }
           />
         ),
-        footer: <FormFoot save="Add" onSave={props.onAddJira} onCancel={close} />,
+        footer: (
+          <FormFoot save="Add" saveDisabled={filled} onSave={props.onAddJira} onCancel={close} />
+        ),
       }
     }
     const provider = providers?.find((one) => one.id === form.id)
@@ -397,6 +401,14 @@ export const AddJiraCloud: Story = {
     const dialog = await body().findByRole('dialog', { name: 'Add Jira' })
     await expect(within(dialog).getByLabelText('Account email')).toBeVisible()
     await expect(within(dialog).getByLabelText('API token')).toHaveAttribute('type', 'password')
+    // A token typed has one way out, the field's own Save: the foot's Add waits for it.
+    const add = within(dialog).getByRole('button', { name: 'Add' })
+    await expect(add).toBeEnabled()
+    await userEvent.type(within(dialog).getByLabelText('API token'), 'pasted-secret')
+    await expect(add).toBeDisabled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await expect(within(dialog).getByLabelText('API token')).toHaveValue('')
+    await expect(add).toBeEnabled()
     await expect(within(dialog).getByRole('tab', { name: 'Cloud' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -461,6 +473,8 @@ export const JiraTokenMissing: Story = {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await expect(args.onSaveToken).toHaveBeenCalledWith('jira', 'pasted-secret')
     await expect(field).toHaveValue('')
+    await expect(dialog).not.toHaveTextContent('pasted-secret')
+    await expect(body().queryByDisplayValue('pasted-secret')).toBeNull()
   },
 }
 

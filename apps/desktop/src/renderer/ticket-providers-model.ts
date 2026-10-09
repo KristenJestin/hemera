@@ -13,6 +13,8 @@ import {
 } from '@hemera/ipc'
 import type { GithubDraft, JiraDraft, ProviderView } from '@hemera/ui'
 
+import type { Link } from './link.ts'
+
 /** What the section has read of a Project's providers so far. */
 export interface ProvidersState {
   /** Null: not read yet. */
@@ -155,4 +157,202 @@ export function providerStore<T extends object>(initial: T): ProviderStore<T> {
       return () => listeners.delete(listener)
     },
   }
+}
+
+const reads = new WeakMap<object, Map<string, number>>()
+
+/**
+ * Starts a read under a key and answers whether it is still the latest one for that key: an answer
+ * that comes back after a newer read began is stale and must not be written over it.
+ */
+export function latestRead(owner: object, key: string): () => boolean {
+  const known = reads.get(owner) ?? new Map<string, number>()
+  reads.set(owner, known)
+  const mine = (known.get(key) ?? 0) + 1
+  known.set(key, mine)
+  return () => known.get(key) === mine
+}
+
+/** Reads what a provider can do now, and where its Jira token stands. */
+export function readProvider(
+  link: Pick<Link, 'providerStatus' | 'jiraTokenStatus'>,
+  store: ProviderStore<ProvidersState>,
+  provider: TicketProviderInfo,
+): void {
+  const keep = (status: ProviderStatus): void =>
+    store.set({ statuses: new Map(store.get().statuses).set(provider.id, status) })
+  const currentStatus = latestRead(store, `status:${provider.id}`)
+  link.providerStatus(provider.id).then(
+    (status) => {
+      if (currentStatus()) keep(status)
+    },
+    (failure: Error) => {
+      if (currentStatus()) {
+        keep({
+          state: 'configured',
+          sentence: `The provider could not be checked: ${failure.message}`,
+          fix: null,
+        })
+      }
+    },
+  )
+  if (provider.kind !== 'jira') return
+  const currentToken = latestRead(store, `token:${provider.id}`)
+  link.jiraTokenStatus(provider.id).then(
+    (status) => {
+      if (currentToken())
+        store.set({ tokens: new Map(store.get().tokens).set(provider.id, status) })
+    },
+    () => undefined,
+  )
+}
+
+/** Asks the engine to check a provider again; its answer lands unless a newer read began. */
+export function checkProvider(
+  link: Pick<Link, 'checkProviderAgain'>,
+  store: ProviderStore<ProvidersState>,
+  id: string,
+): Promise<void> {
+  const current = latestRead(store, `status:${id}`)
+  return link.checkProviderAgain(id).then((status) => {
+    if (current()) store.set({ statuses: new Map(store.get().statuses).set(id, status) })
+  })
+}
+
+type TokenCalls = Pick<
+  Link,
+  'saveJiraToken' | 'removeJiraToken' | 'providerStatus' | 'jiraTokenStatus'
+>
+
+/** Gives a provider its Jira token; where it stands is kept, then the provider is read again. */
+export function giveToken(
+  link: TokenCalls,
+  store: ProviderStore<ProvidersState>,
+  provider: TicketProviderInfo,
+  token: string,
+): Promise<JiraTokenStatus> {
+  const current = latestRead(store, `token:${provider.id}`)
+  return link.saveJiraToken(provider.id, token).then((status) => {
+    if (current()) store.set({ tokens: new Map(store.get().tokens).set(provider.id, status) })
+    readProvider(link, store, provider)
+    return status
+  })
+}
+
+/** Removes a provider's Jira token; where it stands is kept, then the provider is read again. */
+export function dropToken(
+  link: TokenCalls,
+  store: ProviderStore<ProvidersState>,
+  provider: TicketProviderInfo,
+): Promise<void> {
+  const current = latestRead(store, `token:${provider.id}`)
+  return link.removeJiraToken(provider.id).then((status) => {
+    if (current()) store.set({ tokens: new Map(store.get().tokens).set(provider.id, status) })
+    readProvider(link, store, provider)
+  })
+}
+
+/** What the dialog that adds a GitHub provider holds. */
+export interface GithubAddDraft {
+  readonly github: GithubDraft
+  readonly proposed: ReadonlyArray<string>
+  /** Whether the first proposal was ticked for the user. */
+  readonly preselected: boolean
+  /** Whether the user ticked or unticked a repository themselves. */
+  readonly touched: boolean
+  readonly saving: boolean
+  readonly refused: string | undefined
+}
+
+/** The repositories proposed for the host arrived: ticked for the user only if they have not chosen. */
+export function proposalsArrived(
+  now: GithubAddDraft,
+  proposed: ReadonlyArray<string>,
+): Partial<GithubAddDraft> {
+  const ticks = now.preselected || now.touched
+  return {
+    proposed,
+    preselected: true,
+    github: ticks ? now.github : { ...now.github, repositories: proposed },
+  }
+}
+
+/** The form was edited: a change of the repositories is the user's own choice. */
+export function githubEdited(now: GithubAddDraft, github: GithubDraft): Partial<GithubAddDraft> {
+  return {
+    github,
+    touched:
+      now.touched ||
+      github.repositories.length !== now.github.repositories.length ||
+      github.repositories.some((one, at) => one !== now.github.repositories[at]),
+  }
+}
+
+/** What the dialog that adds a Jira provider holds. */
+export interface JiraAddDraft {
+  readonly jira: JiraDraft
+  /** Whether the user chose the deployment themselves: the site's answer then leaves it alone. */
+  readonly chosen: boolean
+  /** The provider once the engine added it: a token retried goes to it, never to a second one. */
+  readonly added: TicketProviderInfo | null
+  /** Whether the token field holds something not given yet. */
+  readonly filled: boolean
+  readonly saving: boolean
+  readonly tokenRefused: string | undefined
+  readonly refused: string | undefined
+}
+
+/** Why a token was not kept, in words; undefined when it was. */
+export function tokenRefusal(status: JiraTokenStatus): string | undefined {
+  if (status === 'saved') return undefined
+  if (status === 'storage-unavailable') return 'This system has no protected storage for a token.'
+  return 'Jira refused this token.'
+}
+
+/**
+ * The one way out of the Jira dialog: adds the provider (once) and, if a token is given, keeps it
+ * for that provider. Answers whether the dialog is done. A token refused leaves the provider added,
+ * so the next token goes to the same provider.
+ */
+export async function submitJira(
+  link: Pick<Link, 'addJira'> & TokenCalls,
+  store: ProviderStore<ProvidersState>,
+  draft: ProviderStore<JiraAddDraft>,
+  projectId: string,
+  token: string | null,
+): Promise<boolean> {
+  const before = draft.get()
+  if (before.added === null) {
+    const refusal = jiraRefusal(before.jira)
+    if (refusal !== undefined) {
+      draft.set({ refused: refusal })
+      return false
+    }
+  }
+  draft.set({ saving: true, refused: undefined, tokenRefused: undefined })
+  let added = before.added
+  if (added === null) {
+    try {
+      added = await link.addJira(projectId, jiraConfigOf(before.jira))
+    } catch (failure) {
+      draft.set({ saving: false, refused: failure instanceof Error ? failure.message : 'Failed.' })
+      return false
+    }
+    draft.set({ added })
+  }
+  if (token === null) return true
+  try {
+    const refusal = tokenRefusal(await giveToken(link, store, added, token))
+    if (refusal === undefined) return true
+    draft.set({ saving: false, tokenRefused: refusal })
+  } catch (failure) {
+    readProvider(link, store, added)
+    draft.set({
+      saving: false,
+      tokenRefused: `The provider was added, but the token could not be saved: ${
+        failure instanceof Error ? failure.message : 'Failed.'
+      }`,
+    })
+  }
+  return false
 }

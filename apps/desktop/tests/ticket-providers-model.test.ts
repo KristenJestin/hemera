@@ -10,6 +10,13 @@ import { providerProblem } from '@hemera/ui'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  type JiraAddDraft,
+  type GithubAddDraft,
+  checkProvider,
+  githubEdited,
+  proposalsArrived,
+  readProvider,
+  submitJira,
   githubConfigOf,
   githubRefusal,
   jiraConfigOf,
@@ -247,5 +254,165 @@ describe('The store a dialog and its foot share', () => {
     store.set({ saving: false })
     expect(heard).toEqual([true])
     expect(store.get().saving).toBe(false)
+  })
+})
+
+/** A promise a test settles by hand. */
+function later<A>(): { promise: Promise<A>; resolve: (value: A) => void } {
+  let resolve: (value: A) => void = () => undefined
+  const promise = new Promise<A>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+const emptyState = () =>
+  providerStore<{
+    infos: ReadonlyArray<TicketProviderInfo> | null
+    statuses: ReadonlyMap<string, ProviderStatus>
+    tokens: ReadonlyMap<string, JiraTokenStatus>
+  }>({ infos: [GITHUB, JIRA], statuses: new Map(), tokens: new Map() })
+
+describe('Adding a Jira provider with a token', () => {
+  const jiraDraft = () =>
+    providerStore<JiraAddDraft>({
+      jira: {
+        site: 'https://acme.atlassian.net',
+        deployment: 'cloud',
+        email: 'a@b.c',
+        projectKeys: 'SHOP',
+      },
+      chosen: false,
+      added: null,
+      filled: false,
+      saving: false,
+      tokenRefused: undefined,
+      refused: undefined,
+    })
+  const linkOf = (answers: JiraTokenStatus[]) => {
+    const calls = { addJira: 0, saved: [] as Array<[string, string]> }
+    return {
+      calls,
+      link: {
+        addJira: () => {
+          calls.addJira += 1
+          return Promise.resolve(JIRA)
+        },
+        saveJiraToken: (id: string, token: string) => {
+          calls.saved.push([id, token])
+          return Promise.resolve(answers.shift() ?? 'saved')
+        },
+        removeJiraToken: () => Promise.resolve('missing' as const),
+        providerStatus: () => Promise.resolve(READY),
+        jiraTokenStatus: () => Promise.resolve('saved' as const),
+      },
+    }
+  }
+
+  test('a token refused and saved again adds the provider once', async () => {
+    const { calls, link } = linkOf(['invalid', 'saved'])
+    const draft = jiraDraft()
+    const store = emptyState()
+    expect(await submitJira(link, store, draft, 'acme', 'wrong')).toBe(false)
+    expect(draft.get().tokenRefused).toBe('Jira refused this token.')
+    expect(draft.get().saving).toBe(false)
+    expect(await submitJira(link, store, draft, 'acme', 'right')).toBe(true)
+    expect(calls.addJira).toBe(1)
+    expect(calls.saved).toEqual([
+      ['jira', 'wrong'],
+      ['jira', 'right'],
+    ])
+  })
+
+  test('a token answered invalid keeps the dialog open and says so', async () => {
+    const { link } = linkOf(['invalid'])
+    const draft = jiraDraft()
+    expect(await submitJira(link, emptyState(), draft, 'acme', 'wrong')).toBe(false)
+    expect(draft.get().tokenRefused).toBe('Jira refused this token.')
+  })
+
+  test('the foot adds the provider without a token, and once if it was already added', async () => {
+    const { calls, link } = linkOf(['invalid'])
+    const draft = jiraDraft()
+    const store = emptyState()
+    await submitJira(link, store, draft, 'acme', 'wrong')
+    expect(await submitJira(link, store, draft, 'acme', null)).toBe(true)
+    expect(calls.addJira).toBe(1)
+    const fresh = linkOf([])
+    expect(await submitJira(fresh.link, emptyState(), jiraDraft(), 'acme', null)).toBe(true)
+    expect(fresh.calls.saved).toEqual([])
+  })
+})
+
+describe('Adding a GitHub provider whose repositories were ticked by hand', () => {
+  const github = (more: Partial<GithubAddDraft> = {}): GithubAddDraft => ({
+    github: { host: 'github.com', repositories: [] },
+    proposed: [],
+    preselected: false,
+    touched: false,
+    saving: false,
+    refused: undefined,
+    ...more,
+  })
+
+  test('the proposals arriving after a manual add keep it', () => {
+    const edited = {
+      ...github(),
+      ...githubEdited(github(), { host: 'github.com', repositories: ['acme/mine'] }),
+    }
+    expect(edited.touched).toBe(true)
+    const after = { ...edited, ...proposalsArrived(edited, ['acme/api', 'acme/web']) }
+    expect(after.github.repositories).toEqual(['acme/mine'])
+    expect(after.proposed).toEqual(['acme/api', 'acme/web'])
+  })
+
+  test('the first proposals are ticked when nothing was touched, a host edit is not a touch', () => {
+    const typed = {
+      ...github(),
+      ...githubEdited(github(), { host: 'ghe.acme.example', repositories: [] }),
+    }
+    expect(typed.touched).toBe(false)
+    const after = { ...typed, ...proposalsArrived(typed, ['acme/api']) }
+    expect(after.github.repositories).toEqual(['acme/api'])
+  })
+})
+
+describe('Reads that come back out of order', () => {
+  test('an older status answer does not overwrite a fresh Check again', async () => {
+    const store = emptyState()
+    const old = later<ProviderStatus>()
+    const fresh: ProviderStatus = { state: 'ready', sentence: 'Fresh.', fix: null }
+    const stale: ProviderStatus = { state: 'unreachable', sentence: 'Stale.', fix: null }
+    const link = {
+      providerStatus: () => old.promise,
+      jiraTokenStatus: () => Promise.resolve('saved' as const),
+      checkProviderAgain: () => Promise.resolve(fresh),
+    }
+    readProvider(link, store, GITHUB)
+    await checkProvider(link, store, 'github')
+    expect(store.get().statuses.get('github')).toEqual(fresh)
+    old.resolve(stale)
+    await old.promise
+    await Promise.resolve()
+    expect(store.get().statuses.get('github')).toEqual(fresh)
+  })
+
+  test('the latest of two reads wins, whichever answers last', async () => {
+    const store = emptyState()
+    const first = later<ProviderStatus>()
+    const second = later<ProviderStatus>()
+    const answers = [first.promise, second.promise]
+    const link = {
+      providerStatus: () => answers.shift() ?? first.promise,
+      jiraTokenStatus: () => Promise.resolve('saved' as const),
+    }
+    readProvider(link, store, GITHUB)
+    readProvider(link, store, GITHUB)
+    second.resolve({ state: 'ready', sentence: 'Second.', fix: null })
+    await second.promise
+    first.resolve({ state: 'ready', sentence: 'First.', fix: null })
+    await first.promise
+    await Promise.resolve()
+    expect(store.get().statuses.get('github')?.sentence).toBe('Second.')
   })
 })
