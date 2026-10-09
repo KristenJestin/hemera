@@ -30,8 +30,11 @@ describe('The Spec settings of a Project', () => {
     )
     await $('nav[aria-label="Places"]').$('button*=Acme').click()
     await settingsOf('Acme')
-    await section('Tickets and Specs')
+    await section('Tickets and Specs', 'Specs')
     await expect(specs()).toHaveText(expect.stringContaining('The Spec lives in Hemera.'))
+    await expect(specs().$('[aria-label="Spec language"]')).toHaveText(
+      expect.stringContaining('English'),
+    )
     await expect(field(specs(), 'Key prefix')).toHaveValue('ACME')
     await expect(specs().$('[aria-label="Check linked tickets"]')).not.toBeExisting()
   })

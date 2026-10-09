@@ -37,7 +37,13 @@ esac
 writeFakeGh(SPEC, FAKE)
 rmSync(SIGNED_IN, { force: true })
 
-const list = () => $('ul[aria-label="Ticket providers"]')
+const providers = () => $('section[aria-label="Ticket providers"]')
+
+/** The list of the providers once read: while it is on its way, its skeleton rows wear its name. */
+const list = () => providers().$('ul[aria-label="Ticket providers"]:not([aria-busy="true"])')
+
+/** How long the dialog that adds GitHub waits before it asks which repositories to propose. */
+const PROPOSALS_ASKED_MS = 500
 
 /** The fake `gh` is a shell script: not on Windows. */
 const describeWithFake = RUNS_FAKE_GH ? describe : describe.skip
@@ -57,17 +63,18 @@ describeWithFake('A GitHub provider added from the settings of a Project', () =>
     )
     await $('nav[aria-label="Places"]').$('button*=Acme').click()
     await settingsOf('Acme')
-    await section('Tickets and Specs')
-    await expect($('section[aria-label="Ticket providers"]')).toHaveText('No ticket provider', {
-      containing: true,
-    })
+    await section('Tickets and Specs', 'Ticket providers')
+    await expect(providers()).toHaveText('No ticket provider', { containing: true })
   })
 
   it('adds GitHub from the menu, with a repository written by hand', async () => {
-    await $('button[aria-label="Add a provider"]').click()
+    await providers().$('button=Add a provider').click()
     await $('[role="menuitem"]*=GitHub').click()
     const adding = dialog()
     await expect(field(adding, 'Host')).toHaveValue('github.com')
+    // The first answer about the repositories proposed for the host ticks them in place of what is
+    // ticked: the repository is written once it came, so it is not unticked under the hand.
+    await browser.pause(PROPOSALS_ASKED_MS * 3)
     await write(field(adding, 'Another repository'), 'acme/api')
     await browser.keys('Enter')
     await expect(adding.$('[role="checkbox"][aria-checked="true"]')).toBeDisplayed()

@@ -21,7 +21,7 @@ describe('The Spec settings of Acme, found again after Hemera started anew', () 
     await designSize()
     await $('nav[aria-label="Places"]').$('button*=Acme').click()
     await settingsOf('Acme')
-    await section('Tickets and Specs')
+    await section('Tickets and Specs', 'Specs')
     const specs = $('section[aria-label="Specs"]')
     await expect(specs).toHaveText(expect.stringContaining('follows its ticket'))
     await expect(specs.$('[aria-label="Spec language"]')).toHaveText(

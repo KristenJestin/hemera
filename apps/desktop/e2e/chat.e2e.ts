@@ -1,6 +1,7 @@
 /**
- * The Chat page in the real application (#52): a Project opened in the sidebar lists its Chats and
- * the row that starts one; starting one opens its page, empty, under the Project in the trail.
+ * The Chat page in the real application: a Project opened in the sidebar lists, after its missions
+ * by stage, its Chats and the row that starts one; starting one opens its page, empty, under the
+ * Project in the trail.
  * The agent is the headless suite's fake, scripted here: it answers with a folded action, has a
  * read of `.env` held until Allow once, and drafts a mission whose key leads to it.
  */

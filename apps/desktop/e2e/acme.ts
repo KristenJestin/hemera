@@ -1,9 +1,9 @@
 /**
- * Acme on the disk, for the suites about a Project's settings: a folder that is not a repository,
- * holding two repositories Hemera finds (`api`, with a remote on the same disk and a `dev`
- * branch, and `web`) and one it does not (`services/billing`, a level too deep), with two small
- * programs at its root: a service that prints its address, and a greeting run at each opening.
- * Nothing here reaches a network.
+ * Acme on the disk, for the suites about a Project's settings and its start field: a folder that
+ * is not a repository, holding two repositories Hemera finds (`api`, with a remote on the same
+ * disk and a `dev` branch, and `web`) and one it does not (`services/billing`, a level too deep),
+ * with two small programs at its root: a service that prints its address, and a greeting run at
+ * each opening. Nothing here reaches a network.
  */
 
 import { execFileSync } from 'node:child_process'

@@ -6,7 +6,7 @@
 import { $, expect } from '@wdio/globals'
 
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
-import { designSize, dialog, section, settingsOf } from './settings-page.ts'
+import { checkbox, designSize, dialog, section, settingsOf } from './settings-page.ts'
 
 const SPEC = 'exclusive-resources.restarted.e2e.ts'
 
@@ -21,7 +21,8 @@ describe('An exclusive resource, found again after Hemera started anew', () => {
     await $('nav[aria-label="Places"]').$('button*=Acme').click()
     await settingsOf('Acme')
     await section('Exclusive resources')
-    const list = $('ul[aria-label="Exclusive resources"]')
+    // Once read: while the list is on its way, its skeleton rows wear its name.
+    const list = $('ul[aria-label="Exclusive resources"]:not([aria-busy="true"])')
     await expect(list).toHaveText(expect.stringContaining('Shared database'))
     await expect(list).toHaveText(expect.stringContaining('Seed the database'))
     await expect(list).toHaveText(expect.stringContaining('restored by Reset the database'))
@@ -29,6 +30,7 @@ describe('An exclusive resource, found again after Hemera started anew', () => {
 
   it('opens it with its command ticked', async () => {
     await $('ul[aria-label="Exclusive resources"]').$('button*=Shared database').click()
-    await expect(dialog().$('aria/Seed the database')).toHaveAttribute('aria-checked', 'true')
+    await expect(checkbox(dialog(), 'Seed the database')).toHaveAttribute('aria-checked', 'true')
+    await expect(checkbox(dialog(), 'Reset the database')).toHaveAttribute('aria-checked', 'false')
   })
 })

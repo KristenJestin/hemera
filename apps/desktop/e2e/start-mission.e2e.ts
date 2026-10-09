@@ -57,6 +57,8 @@ const itWithFake = RUNS_FAKE_GH ? it : it.skip
 const places = () => $('nav[aria-label="Places"]')
 const start = () => $('aria/Start a mission in Acme')
 const found = () => $('ul[aria-label="Found"]')
+/** The Planning missions under Acme in the sidebar: there whatever page the window shows. */
+const planningInSidebar = () => places().$('[role="group"][aria-label="Planning"]')
 
 describe('A mission started from the Project’s field', () => {
   afterEach(function () {
@@ -76,7 +78,7 @@ describe('A mission started from the Project’s field', () => {
       async (_, id) => await globalThis.hemeraProbe?.createMission(id, 'Export the movements'),
       project,
     )
-    await places().$('button=Acme').click()
+    await places().$('button*=Acme').click()
     await write(start(), 'Export')
     await expect(found()).toBeDisplayed()
     await expect(found().$('li:first-child button')).toHaveText(
@@ -96,12 +98,13 @@ describe('A mission started from the Project’s field', () => {
 
   it('creates a mission from a sentence with the last choice', async () => {
     await found().$('button*=Create a mission').click()
-    await expect($('ul[aria-label="Planning missions"]').$$('button')).toBeElementsArrayOfSize({
-      eq: 2,
-    })
+    // Once the Planner goes on with it, the mission opens: the sidebar counts it on any page.
+    await places().$('button[aria-label="Open the missions of Acme"]').click()
+    await expect(planningInSidebar().$$('button')).toBeElementsArrayOfSize({ eq: 2 })
   })
 
   itWithFake('adds a GitHub provider, then starts a mission from a ticket reference', async () => {
+    await places().$('button*=Acme').click()
     await settingsOf('Acme')
     await section('Tickets and Specs')
     await $('button[aria-label="Add a provider"]').click()
@@ -111,13 +114,13 @@ describe('A mission started from the Project’s field', () => {
     await browser.keys('Enter')
     await adding.$('button=Add').click()
     await expect(dialog()).not.toBeExisting()
-    await places().$('button=Acme').click()
+    await places().$('button*=Acme').click()
     await write(start(), 'acme/api#41')
     await expect(found().$('button*=acme/api#41')).toBeDisplayed()
     await expect(found().$('li:last-child button')).toHaveText(
       expect.stringContaining('Create a mission'),
     )
     await found().$('button*=acme/api#41').click()
-    await expect(places().$('button*=Export invoices as CSV')).toBeDisplayed()
+    await expect(planningInSidebar().$('button*=Export invoices as CSV')).toBeDisplayed()
   })
 })

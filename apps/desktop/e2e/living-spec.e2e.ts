@@ -1,8 +1,9 @@
 /**
- * The living spec in the real application (#104): a Project added, the bootstrap read by the
- * fake agent the headless suite scripts, the page opened from the Project's page, one domain
- * validated and one proposed requirement dropped in another. `living-spec.restarted.e2e.ts`
- * starts Hemera again on the same data folder and finds all of it.
+ * The living spec in the real application (#104): a Project added, its living spec opened from the
+ * Project's page, the Project read when the page asks for it (under the headless suite, adding a
+ * Project starts no reading) by the fake agent the suite scripts, one domain validated and one
+ * proposed requirement dropped in another. `living-spec.restarted.e2e.ts` starts Hemera again on
+ * the same data folder and finds all of it.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -18,7 +19,11 @@ const SPEC = 'living-spec.e2e.ts'
 const ACME = join(tmpdir(), 'hemera-e2e-living-spec-acme')
 
 const places = () => $('nav[aria-label="Places"]')
+/** The rail of the Project's page, where its living spec has a card of its own. */
+const rail = () => $('aside[aria-label="About Acme"]')
 const domains = () => $('nav[aria-label="Domains"]')
+/** A domain of the list beside the page, by what it says to a screen reader. */
+const domainLine = (words: string) => domains().$(`button[aria-label="${words}"]`)
 
 const SCENARIO = [{ when: 'the user exports the invoices', then: 'a CSV file is saved' }]
 
@@ -67,7 +72,7 @@ describe('The living spec read, then reviewed', () => {
     if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
   })
 
-  it('adds Acme: the agent reads it, and the Project’s page offers the living spec', async () => {
+  it('adds Acme, and opens its living spec from the Project’s page', async () => {
     await waitForEngine()
     mkdirSync(ACME, { recursive: true })
     writeFileSync(join(ACME, 'README.md'), '# Acme\n')
@@ -80,15 +85,24 @@ describe('The living spec read, then reviewed', () => {
       ACME,
     )
     await places().$('button*=Acme').click()
-    const card = $('section*=Living spec')
-    await expect(card.$('ul[aria-label="Domains"]')).toBeDisplayed({ wait: 60_000 })
-    await card.$('button=Open').click()
+    await expect(rail()).toHaveText(expect.stringContaining('Not written yet.'))
+    await rail().$('button=Open').click()
     await expect($('h1=Living spec')).toBeDisplayed()
+    await expect($('h2=No living spec yet')).toBeDisplayed()
+  })
+
+  it('reads the Project when asked, its reading a chip that ends done', async () => {
+    await $('button=Read the Project').click()
+    await expect($('button[data-live-chip][aria-label^="Reading Acme, "]')).toHaveAttribute(
+      'data-state',
+      'finished',
+      { wait: 60_000 },
+    )
   })
 
   it('lists both domains, each waiting for the user', async () => {
-    await expect(domains().$('button*=Invoicing, 2 waiting for you')).toBeDisplayed()
-    await expect(domains().$('button*=Accounts, 2 waiting for you')).toBeDisplayed()
+    await expect(domainLine('Invoicing, 2 waiting for you')).toBeDisplayed()
+    await expect(domainLine('Accounts, 2 waiting for you')).toBeDisplayed()
   })
 
   it('draws a proposed requirement as a draft, never as a validated one', async () => {
@@ -100,13 +114,13 @@ describe('The living spec read, then reviewed', () => {
   it('validates Invoicing: its requirements become what the Project does today', async () => {
     await $('button=Validate this domain').click()
     await expect($$('article[aria-label$=", validated"]')).toBeElementsArrayOfSize(2)
-    await expect(domains().$('button*=Invoicing, validated')).toBeDisplayed()
+    await expect(domainLine('Invoicing, validated')).toBeDisplayed()
   })
 
   it('drops one proposed requirement of Accounts, the other stays proposed', async () => {
     await openDomain('Accounts')
     await $$('button[aria-label^="Drop "]')[0]?.click()
     await expect($$('article[aria-label$=", proposed"]')).toBeElementsArrayOfSize(1)
-    await expect(domains().$('button*=Accounts, 1 waiting for you')).toBeDisplayed()
+    await expect(domainLine('Accounts, 1 waiting for you')).toBeDisplayed()
   })
 })

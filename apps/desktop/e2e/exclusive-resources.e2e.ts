@@ -9,11 +9,21 @@ import { $, browser, expect } from '@wdio/globals'
 
 import { ACME, writeAcme } from './acme.ts'
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
-import { choose, designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
+import {
+  checkbox,
+  choose,
+  designSize,
+  dialog,
+  field,
+  section,
+  settingsOf,
+  write,
+} from './settings-page.ts'
 
 const SPEC = 'exclusive-resources.e2e.ts'
 
-const list = () => $('ul[aria-label="Exclusive resources"]')
+/** The list of the resources once read: while it is on its way, its skeleton rows wear its name. */
+const list = () => $('ul[aria-label="Exclusive resources"]:not([aria-busy="true"])')
 
 /** Adds a command to the catalogue from the Commands section. */
 async function addCommand(name: string, line: string): Promise<void> {
@@ -61,7 +71,8 @@ describe('An exclusive resource declared from the settings of a Project', () => 
   it('declares the shared database from the commands of the catalogue', async () => {
     const adding = dialog()
     await write(field(adding, 'What it is'), 'The Postgres of the staging machine.')
-    await adding.$('aria/Seed the database').click()
+    await checkbox(adding, 'Seed the database').click()
+    await expect(checkbox(adding, 'Seed the database')).toHaveAttribute('aria-checked', 'true')
     await choose(adding, 'Restore command', 'Reset the database')
     await adding.$('button=Add').click()
     await expect(adding).not.toBeExisting()

@@ -16,6 +16,7 @@ const SPEC = 'mission-frame.e2e.ts'
 /** Acme's main checkout: a folder of the run's own, which the headless run removes after it. */
 const ACME = join(tmpdir(), 'hemera-e2e-mission-frame-acme')
 
+const places = () => $('nav[aria-label="Places"]')
 const trail = () => $('nav[aria-label="Where you are"]')
 const heading = () => $('main h1')
 const base = () => $('[data-base]')
@@ -34,7 +35,7 @@ describe('A mission’s frame', () => {
     if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
   })
 
-  it('opens from the need it owns, with its key, its title and its stage', async () => {
+  it('opens from its row on the Project’s page, with its key, its title and its stage', async () => {
     await waitForEngine()
     mkdirSync(ACME, { recursive: true })
     const project =
@@ -47,15 +48,13 @@ describe('A mission’s frame', () => {
       project,
     )
     key = mission?.key ?? ''
-    const id =
-      (await browser.electron.execute(
-        async (_, owner, fields) => await globalThis.hemeraProbe?.createNeed(owner, fields),
-        MissionOwner.make({ projectId: project, missionId: mission?.id ?? '', taskId: null }),
-        ROLES,
-      )) ?? ''
-    const row = $(`li[data-need="${id}"]`)
-    await row.$('button=Answer here').click()
-    await row.$(`button=Open ${key}`).click()
+    await browser.electron.execute(
+      async (_, owner, fields) => await globalThis.hemeraProbe?.createNeed(owner, fields),
+      MissionOwner.make({ projectId: project, missionId: mission?.id ?? '', taskId: null }),
+      ROLES,
+    )
+    await places().$('button*=Acme').click()
+    await $('ul[aria-label="Planning missions"]').$(`button*=${key}`).click()
     await expect(heading()).toHaveText('An audit log', { containing: true })
     await expect(trail()).toHaveText(key, { containing: true })
     await expect(track().$('li[aria-current="step"]')).toHaveText('Planning', { containing: true })
@@ -67,7 +66,7 @@ describe('A mission’s frame', () => {
   })
 
   // Needs a mission whose Ticket changed after the Freeze, which the probe cannot make yet.
-  it.skip('opens what changed over the base, and Back finds the base where it was', async () => {
+  it.skip('opens what changed over the base, and closing it finds the base where it was', async () => {
     await base().execute((element) => {
       element.scrollTop = element.scrollHeight
     })
@@ -75,7 +74,7 @@ describe('A mission’s frame', () => {
     await $('button=What changed').click()
     await expect($('section[data-view="difference"]')).toBeDisplayed()
     await expect(base()).toHaveAttribute('inert')
-    await $('button[aria-label="Back to the page"]').click()
+    await $('button[aria-label="Close What changed"]').click()
     await expect(base()).not.toHaveAttribute('inert')
     expect(await base().getProperty('scrollTop')).toBe(scrolled)
   })

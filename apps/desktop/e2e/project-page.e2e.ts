@@ -1,6 +1,6 @@
 /**
- * A Project's missions in the real application: listed by stage on its page with a second line,
- * opened from a row of the page, then from the sidebar's rows under the Project, each by stage.
+ * A Project's missions in the real application: listed by stage on its page, opened from a row of
+ * the page, then from the sidebar's rows under the Project, each by stage.
  */
 
 import { mkdirSync } from 'node:fs'
@@ -16,6 +16,7 @@ const SPEC = 'project-page.e2e.ts'
 const ACME = join(tmpdir(), 'hemera-e2e-project-page-acme')
 
 const places = () => $('nav[aria-label="Places"]')
+const trail = () => $('nav[aria-label="Where you are"]')
 const planning = () => $('ul[aria-label="Planning missions"]')
 
 describe('A Project’s missions by stage', () => {
@@ -38,21 +39,19 @@ describe('A Project’s missions by stage', () => {
       project,
     )
     key = mission?.key ?? ''
-    await places().$('button=Acme').click()
+    await places().$('button*=Acme').click()
     await expect(planning().$(`button*=${key}`)).toBeDisplayed()
     await expect(planning().$(`button*=Add roles`)).toBeDisplayed()
   })
 
   it('opens the mission from its row on the page', async () => {
     await planning().$(`button*=${key}`).click()
-    await expect(places().$(`button[data-mark="mission:${key}"]`)).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    await expect($('main h1')).toHaveText('Add roles')
+    await expect(trail()).toHaveText(new RegExp(`Acme\\s*${key}`))
   })
 
   it('opens it again from the sidebar, under the Project, in its stage', async () => {
-    await places().$('button=Acme').click()
+    await places().$('button*=Acme').click()
     await expect(planning()).toBeDisplayed()
     await places().$('button[aria-label="Open the missions of Acme"]').click()
     const group = places().$('[role="group"][aria-label="Planning"]')
