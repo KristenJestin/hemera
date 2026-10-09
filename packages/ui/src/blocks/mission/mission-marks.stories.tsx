@@ -102,7 +102,7 @@ export const Mixed: Story = {
 export const LongCause: Story = {
   decorators: [
     (Story) => (
-      <div className="w-64">
+      <div className="w-picker">
         <Story />
       </div>
     ),
