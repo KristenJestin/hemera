@@ -108,6 +108,9 @@ import {
   IconArrowBackUp as TablerArrowBackUp,
   IconArrowUp as TablerArrowUp,
   IconBrandOpenai as TablerBrandOpenai,
+  IconBrandGithub as TablerBrandGithub,
+  IconBrandJira as TablerBrandJira,
+  IconHistory as TablerHistory,
   IconAt as TablerAt,
   IconShieldCheck as TablerShieldCheck,
   IconShieldCheckFilled as TablerShieldCheckFilled,
@@ -300,6 +303,9 @@ export const IconShieldCheck = catalogued(
 )
 export const IconStar = catalogued(TablerStarFilled, TablerStar, 'IconStar')
 export const IconBrandOpenai = catalogued(TablerBrandOpenai, TablerBrandOpenai, 'IconBrandOpenai')
+export const IconBrandGithub = catalogued(TablerBrandGithub, TablerBrandGithub, 'IconBrandGithub')
+export const IconBrandJira = catalogued(TablerBrandJira, TablerBrandJira, 'IconBrandJira')
+export const IconHistory = catalogued(TablerHistory, TablerHistory, 'IconHistory')
 
 /**
  * A mark Tabler does not draw, vendored as the one path it is (design D17-11).
