@@ -23,7 +23,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { type Masked, maskText } from '@hemera/core/domain'
+import { type DirtyStatus, type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
 import { Context, Effect, Layer, Option } from 'effect'
 
@@ -199,6 +199,12 @@ export interface WorktreeChange {
   readonly status: 'new' | 'modified' | 'deleted'
 }
 
+/** A file of a checkout that differs from its HEAD, with how (#92, CT-23). */
+export interface DirtyFile {
+  readonly path: string
+  readonly status: DirtyStatus
+}
+
 export interface GitRemote {
   readonly name: string
   readonly fetchUrl: string
@@ -274,6 +280,12 @@ export interface GitService {
   readonly worktrees: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
   /** The files a removal would lose: changed, staged, unmerged or untracked, relative to it. */
   readonly changedFiles: (folder: string) => Effect.Effect<ReadonlyArray<string>, GitRefusal>
+  /**
+   * Every file of a checkout that differs from its HEAD, ignored ones left out: modified, added,
+   * deleted, or untracked, each untracked file named (never its folder). A repository inside the
+   * checkout is named by its folder with a trailing `/`, and a submodule by its path.
+   */
+  readonly dirtyFiles: (folder: string) => Effect.Effect<ReadonlyArray<DirtyFile>, GitRefusal>
   /** Whether a file is modified, added or untracked in its repository; false outside one. */
   readonly fileChanged: (path: string) => Effect.Effect<boolean, GitRefusal>
   /** How many commits HEAD has that `base` has not, and the other way round. */
@@ -405,6 +417,24 @@ export function worktreeChangesOf(
   return changes
 }
 
+/**
+ * What `git status --porcelain=v1 -z --no-renames --untracked-files=all` printed, as each file that
+ * differs from HEAD with how.
+ */
+export function dirtyFilesOf(printed: string): ReadonlyArray<DirtyFile> {
+  return printed
+    .split('\0')
+    .filter((entry) => entry.length > 3)
+    .map((entry): DirtyFile => {
+      const code = entry.slice(0, 2)
+      const path = entry.slice(3)
+      if (code === '??') return { path, status: 'untracked' }
+      if (code.includes('D')) return { path, status: 'deleted' }
+      if (code.startsWith('A')) return { path, status: 'added' }
+      return { path, status: 'modified' }
+    })
+}
+
 /** What `git rev-list --left-right --count <base>...HEAD` printed: behind, then ahead. */
 export function aheadBehindOf(printed: string): AheadBehind {
   const [behind = 0, ahead = 0] = printed
@@ -529,6 +559,19 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--no-renames'],
         'read',
       ).pipe(Effect.map(changedFilesOf)),
+    dirtyFiles: (folder) =>
+      run(
+        folder,
+        [
+          '--no-optional-locks',
+          'status',
+          '--porcelain=v1',
+          '-z',
+          '--no-renames',
+          '--untracked-files=all',
+        ],
+        'read',
+      ).pipe(Effect.map(dirtyFilesOf)),
     fileChanged: (path) =>
       run(
         dirname(path),

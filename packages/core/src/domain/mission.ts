@@ -177,7 +177,9 @@ export const OutdatedReason = Schema.Literals([
   'ticket-changed',
   'target-moved',
   'dependency-merged',
+  'dependency-cancelled',
 ])
+export type OutdatedReason = typeof OutdatedReason.Type
 
 export const BlockedMark = Schema.TaggedStruct('Blocked', { cause: BlockedCause })
 /** A Planning question waits on someone other than the user. */
@@ -190,6 +192,8 @@ export const OutdatedMark = Schema.TaggedStruct('Outdated', {
   reason: OutdatedReason,
   /** Where the difference can be read. */
   reference: Schema.String,
+  /** What moved, as the user is shown it. */
+  difference: Schema.String,
 })
 export const ChangedOutsideMark = Schema.TaggedStruct('ChangedOutside', {
   repositoryId: Schema.String,

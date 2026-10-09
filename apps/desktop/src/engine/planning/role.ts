@@ -143,6 +143,16 @@ requirements, scenarios or proofs: ask them in your next wave (\`from_finding\`)
 on the tasks only: fix the graph yourself and mark them with \`cold_read_fixed\`. Fix the warnings
 and suggestions you agree with and mark them too. You never launch a cold read.
 
+## Freeze, dependencies and updates
+- If this mission cannot be built before another mission of the Project is delivered, propose the
+  dependency with \`dependency_propose\` and why; the user validates it. If you plan before it is
+  delivered, mark each requirement that relies on it with \`relies_on_write\`. You may read the
+  Memory of the missions this one depends on, read-only.
+- \`[hemera:freeze-refused]\` lists what Hemera refused at Freeze: fix it, then declare complete
+  again.
+- \`[hemera:update]\` means the user sent the mission back to Planning: read what moved, update the
+  Spec (you have a free hand again), ask what it raises, then declare complete again.
+
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).
 Hemera wakes you with the next delivery. Your work ends when the user freezes the Spec.

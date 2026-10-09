@@ -159,6 +159,7 @@ describe('Every Git call declares its class, and its class sets its limit', () =
     ['repositoryOf', 'read', (one: GitService) => one.repositoryOf('/w')],
     ['worktrees', 'read', (one: GitService) => one.worktrees('/r')],
     ['changedFiles', 'read', (one: GitService) => one.changedFiles('/r')],
+    ['dirtyFiles', 'read', (one: GitService) => one.dirtyFiles('/r')],
     ['aheadBehind', 'read', (one: GitService) => one.aheadBehind('/r', 'abc')],
   ] as const)('%s runs as a %s', async (_, kind, call) => {
     expect(await classesOf((one: GitService) => Effect.asVoid(call(one)))).toEqual([kind])
@@ -428,6 +429,38 @@ describe('A Workspace’s worktrees are read with the machine’s git', () => {
     git(api, 'commit', '-q', '--allow-empty', '-m', 'mine again')
     const counted = await asked(Git.use((one) => one.aheadBehind(api, base)))
     expect(counted).toEqual({ ahead: 2, behind: 0 })
+  })
+})
+
+describe('The dirty files of a main checkout are named with how they differ (#92)', () => {
+  test('modified, added, deleted and untracked, each untracked file named, ignored ones left out', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, '.gitignore'), '*.log\n')
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    writeFileSync(join(api, 'gone.txt'), 'gone\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'files')
+    writeFileSync(join(api, 'tracked.txt'), 'two\n')
+    rmSync(join(api, 'gone.txt'))
+    writeFileSync(join(api, 'staged.ts'), 'export const staged = 1\n')
+    git(api, 'add', 'staged.ts')
+    mkdirSync(join(api, 'fixtures', 'csv'), { recursive: true })
+    writeFileSync(join(api, 'fixtures', 'csv', 'names.csv'), 'name\n')
+    writeFileSync(join(api, '.env'), 'DATABASE_PASSWORD=acme\n')
+    writeFileSync(join(api, 'run.log'), 'ignored\n')
+    const dirty = await asked(Git.use((one) => one.dirtyFiles(api)))
+    expect([...dirty].toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: '.env', status: 'untracked' },
+      { path: 'fixtures/csv/names.csv', status: 'untracked' },
+      { path: 'gone.txt', status: 'deleted' },
+      { path: 'staged.ts', status: 'added' },
+      { path: 'tracked.txt', status: 'modified' },
+    ])
+  })
+
+  test('a clean checkout has none', async () => {
+    const api = repository(join(folder, 'api'))
+    expect(await asked(Git.use((one) => one.dirtyFiles(api)))).toEqual([])
   })
 })
 

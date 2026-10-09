@@ -21,6 +21,8 @@ export type Wrote =
   | { readonly kind: 'proof'; readonly id: string }
   | { readonly kind: 'tasks' }
   | { readonly kind: 'model' }
+  /** #92: what a requirement relies on in a dependency not delivered yet. */
+  | { readonly kind: 'relies_on'; readonly id: string }
 
 /** A declaration Hemera's check passed: `first` when none was recorded before in this Planning. */
 export interface Declared {
@@ -168,6 +170,7 @@ export function draftedSaid(items: ReadonlyArray<Wrote>): string {
     once('proof').length === 0 ? null : `wrote the proof of ${once('proof').join(', ')}`,
     items.some((item) => item.kind === 'tasks') ? 'wrote the tasks' : null,
     items.some((item) => item.kind === 'model') ? 'recommended a model' : null,
+    once('relies_on').length === 0 ? null : `marked what ${once('relies_on').join(', ')} relies on`,
   ]
     .filter((part) => part !== null)
     .join('; ')

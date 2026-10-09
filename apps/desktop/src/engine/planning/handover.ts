@@ -40,6 +40,7 @@ export const DELIVERY_KIND: Readonly<Record<InputKind, string>> = {
   discuss_decision: 'decision',
   dismissed_finding: 'findings',
   triage_kept: 'triage-kept',
+  dependency_accepted: 'dependency',
 }
 
 /** What closes a delivery of inputs: what the Planner does with each. */

@@ -352,6 +352,21 @@ const trackerDown = (event: DomainEvent) =>
     })
   })
 
+interface BuiltFacts extends TriageFacts {
+  /** The mission it depended on, now delivered. */
+  readonly on: string
+}
+
+/** A mission whose last dependency reached Done (#92): not a need, and nothing starts. */
+const unblocked = (event: DomainEvent) =>
+  Effect.map(
+    triaged(event),
+    Option.map((facts): BuiltFacts => ({
+      ...facts,
+      on: Option.getOrElse(readText(event.payload['on']), () => ''),
+    })),
+  )
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -458,6 +473,19 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
       what: 'it cannot be read; its tickets keep the version last read',
     }),
     route: (facts) => ProjectTarget.make({ projectId: facts.project.id }),
+  }),
+  defineKind({
+    id: 'can-be-built',
+    label: 'A mission can be built: what it depended on is delivered',
+    byDefault: true,
+    sound: 'done',
+    importance: IMPORTANCE.done,
+    tone: 'done',
+    source: 'mission.unblocked',
+    facts: unblocked,
+    words: (facts) => ({ subject: facts.title, what: `it can be built: ${facts.on} is delivered` }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),
 ]
 

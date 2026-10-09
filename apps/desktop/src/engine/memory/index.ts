@@ -72,10 +72,10 @@ import { nextRefusal, nowOf, readNow, writeNow } from './now.ts'
 import {
   MissionDependencies,
   RunningSessions,
+  acceptedDependencies,
   SessionEpochs,
   SlotWaits,
   epochsInMemory,
-  noDependencies,
   noRunningSessions,
   noSlotWaits,
 } from './ports.ts'
@@ -188,7 +188,7 @@ export interface MemoryParts {
   readonly running?: Layer.Layer<RunningSessions, never, Database>
   /** A Hemera phase of the mission waiting for a slot of the cap (#41); none otherwise. */
   readonly slotWaits?: Layer.Layer<SlotWaits>
-  /** The accepted dependencies of a mission (P9); none otherwise. */
+  /** The accepted dependencies of a mission; those the database holds (#92) otherwise. */
   readonly dependencies?: MissionDependencies['Service']
   /** The Journal mappers of later tickets, beside this one's. */
   readonly mappers?: ReadonlyMap<string, JournalMapper>
@@ -585,7 +585,7 @@ export const memoryLayer = (parts: MemoryParts, log: Log) =>
         parts.running ?? noRunningSessions,
         parts.slotWaits ?? noSlotWaits,
         parts.dependencies === undefined
-          ? noDependencies
+          ? acceptedDependencies
           : Layer.succeed(MissionDependencies, parts.dependencies),
       ),
     ),

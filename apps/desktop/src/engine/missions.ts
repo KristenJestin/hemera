@@ -107,6 +107,7 @@ import { mutate } from './transaction.ts'
 import { newSpec, triageOf } from './planning/store.ts'
 import { discussionBalls } from './planning/discussion-store.ts'
 import { type TicketLinkAtCreation, linkMissionTicket } from './tickets/versions.ts'
+import { freezesOf } from './planning/freeze-store.ts'
 
 /** The longest idea sentence a mission keeps. */
 export const MAX_IDEA_LENGTH = 2000
@@ -267,6 +268,7 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
       .where(and(inArray(questions.missionId, ids), eq(questions.state, 'open')))
       .pipe(Effect.mapError(refusedWhile('reading the questions')))
     const discussing = yield* discussionBalls(ids)
+    const frozen = yield* freezesOf(ids)
     const activityOf = yield* MissionActivity
     return yield* Effect.forEach(rows, (row) =>
       Effect.gen(function* () {
@@ -295,6 +297,7 @@ export const missionsOf = (rows: ReadonlyArray<MissionRow>) =>
           stage,
           round: row.round,
           frozen: isFrozen(stage),
+          freeze: isFrozen(stage) ? (frozen.get(row.id) ?? null) : null,
           marks: own,
           ball: ballOf({
             stage,
@@ -654,6 +657,8 @@ const cancel = (mission: Mission) =>
                 failedReason: null,
               })),
             )
+            // A Freeze's stops not done yet (#92) are owed once.
+            .onConflictDoNothing()
             .pipe(Effect.mapError(refusedWhile('writing the stops')))
         }
         return {
@@ -681,7 +686,7 @@ export const moveMission = (id: string, move: Move, actor: Actor) =>
   Effect.gen(function* () {
     const mission = yield* getMission(id)
     const { stage } = mission
-    const to = yield* Effect.fromResult(checkedMove(move, stage, actor))
+    yield* Effect.fromResult(checkedMove(move, stage, actor))
     if (isGuarded(move)) {
       const guard = (yield* MoveGuards)[move]
       if (guard === undefined) {
@@ -694,41 +699,55 @@ export const moveMission = (id: string, move: Move, actor: Actor) =>
       yield* cancel(mission)
       return yield* getMission(id)
     }
-    const round = move === 'fix' ? mission.round + 1 : mission.round
     yield* mutate('moving a mission', (transaction) =>
-      Effect.gen(function* () {
-        // A return to Planning opens a new Planning cycle (#91).
-        const cycle = sql`${missions.planningCycle} + ${to === 'planning' ? 1 : 0}`
-        const written = yield* transaction
-          .update(missions)
-          .set({ stage: to, round, updatedAt: now(), planningCycle: cycle })
-          .where(and(eq(missions.id, id), eq(missions.stage, stage)))
-          .returning({ id: missions.id })
-          .pipe(Effect.mapError(refusedWhile('moving the mission')))
-        if (written.length === 0) return yield* movedMeanwhile(move, stage)
-        // In a new cycle, the Spec is declared complete anew, and that declaration is its first.
-        if (to === 'planning') {
-          yield* transaction
-            .update(specs)
-            .set({ declaredCompleteVersion: null })
-            .where(eq(specs.missionId, id))
-            .pipe(Effect.mapError(refusedWhile('opening a Planning cycle')))
-        }
-        return {
-          result: undefined,
-          events: [
-            missionEvent('mission.moved', id, byActor(actor), {
-              from: stage,
-              to,
-              move,
-              actor,
-              round,
-            }),
-          ],
-        }
-      }),
+      Effect.map(moveIn(transaction, mission, move, actor), (event) => ({
+        result: undefined,
+        events: [event],
+      })),
     )
     return yield* getMission(id)
+  })
+
+/**
+ * Writes a move in the transaction given, refused from a stage it does not leave or by an actor it
+ * is not for, and written as `WHERE stage = <the stage it leaves>`: refused when the mission moved
+ * meanwhile. Answers its `mission.moved`. The Freeze and the return to Planning (#92) write theirs
+ * here, beside what they change with it.
+ */
+export const moveIn = (
+  transaction: EngineTransaction,
+  mission: { readonly id: string; readonly stage: Stage; readonly round: number },
+  move: Move,
+  actor: Actor,
+) =>
+  Effect.gen(function* () {
+    const { id, stage } = mission
+    const to = yield* Effect.fromResult(checkedMove(move, stage, actor))
+    const round = move === 'fix' ? mission.round + 1 : mission.round
+    // A return to Planning opens a new Planning cycle (#91).
+    const cycle = sql`${missions.planningCycle} + ${to === 'planning' ? 1 : 0}`
+    const written = yield* transaction
+      .update(missions)
+      .set({ stage: to, round, updatedAt: now(), planningCycle: cycle })
+      .where(and(eq(missions.id, id), eq(missions.stage, stage)))
+      .returning({ id: missions.id })
+      .pipe(Effect.mapError(refusedWhile('moving the mission')))
+    if (written.length === 0) return yield* movedMeanwhile(move, stage)
+    // In a new cycle, the Spec is declared complete anew, and that declaration is its first.
+    if (to === 'planning') {
+      yield* transaction
+        .update(specs)
+        .set({ declaredCompleteVersion: null })
+        .where(eq(specs.missionId, id))
+        .pipe(Effect.mapError(refusedWhile('opening a Planning cycle')))
+    }
+    return missionEvent('mission.moved', id, byActor(actor), {
+      from: stage,
+      to,
+      move,
+      actor,
+      round,
+    })
   })
 
 /**

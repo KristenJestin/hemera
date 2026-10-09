@@ -45,11 +45,12 @@ import {
 import { type InputsDelivery, contentIn, prepareDeliveriesIn } from './handover.ts'
 
 /**
- * One gesture and its hand-over at a time, per mission. A mission's lock is kept while a gesture
- * holds it or waits for it, and dropped with the last one.
+ * One gesture and its hand-over at a time, per mission: a discussion's, a Freeze, a return to
+ * Planning (#92). A mission's lock is kept while a gesture holds it or waits for it, and dropped
+ * with the last one.
  */
 const missionLocks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
-const oneAtATime =
+export const oneAtATime =
   (missionId: string) =>
   <A, E, R>(gesture: Effect.Effect<A, E, R>) =>
     Effect.acquireUseRelease(

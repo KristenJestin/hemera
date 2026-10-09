@@ -119,6 +119,7 @@ import {
 } from '../living-spec/tools.ts'
 import type { ProfileHome } from '../profile-home.ts'
 import { discussionProposeDecision, discussionReply } from '../planning/discussion-store.ts'
+import { dependencyProposeTool, reliesOnWriteTool } from '../planning/dependencies.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import type { GhCli } from '../tickets/gh.ts'
@@ -321,6 +322,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.cold_read_report.input)(raw)
     case 'cold_read_fixed':
       return decoder(tool, TOOLS.cold_read_fixed.input)(raw)
+    case 'dependency_propose':
+      return decoder(tool, TOOLS.dependency_propose.input)(raw)
+    case 'relies_on_write':
+      return decoder(tool, TOOLS.relies_on_write.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -726,6 +731,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* coldReadReportTool(grant, call.args)
             case 'cold_read_fixed':
               return yield* coldReadFixedTool(grant, call.args)
+            case 'dependency_propose':
+              return yield* dependencyProposeTool(grant, call.args)
+            case 'relies_on_write':
+              return yield* reliesOnWriteTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

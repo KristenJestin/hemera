@@ -1862,3 +1862,101 @@ export const coldReadFindings = sqliteTable(
     index('cold_read_findings_of_pass').on(table.coldReadId),
   ],
 )
+
+/**
+ * The Freezes of a mission (#92): one per Planning cycle that ended in a Freeze, with the Spec
+ * version frozen and when. `bases` is the JSON of the base commit recorded for each repository of
+ * the Project (CT-24): its ref and its freshness, "not fetched since" when the fetch failed.
+ */
+export const freezes = sqliteTable(
+  'freezes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    cycle: integer('cycle').notNull(),
+    specVersion: integer('spec_version').notNull(),
+    bases: text('bases').notNull(),
+    frozenAt: text('frozen_at').notNull(),
+  },
+  (table) => [uniqueIndex('freeze_once_per_cycle').on(table.missionId, table.cycle)],
+)
+
+/**
+ * The files of a main checkout that were dirty when the Spec was frozen (CT-23): by repository and
+ * path, how they differed, and the sha256 of their content (none for a deleted file). `withheld`
+ * says why the content was not kept (a sensitive place such as a `.env`, a binary file, a link).
+ */
+export const freezeFiles = sqliteTable(
+  'freeze_files',
+  {
+    freezeId: text('freeze_id')
+      .notNull()
+      .references(() => freezes.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    sha256: text('sha256'),
+    withheld: text('withheld'),
+  },
+  (table) => [primaryKey({ columns: [table.freezeId, table.repository, table.path] })],
+)
+
+/** The contents the Freeze's snapshots kept, masked, once each by their sha256 (B2's stand-in). */
+export const snapshotContents = sqliteTable('snapshot_contents', {
+  sha256: text('sha256').primaryKey(),
+  content: text('content').$type<Masked<string>>().notNull(),
+})
+
+/**
+ * A mission's dependency on another mission of its Project (#92): proposed by the Planner with its
+ * reason, then `accepted` or `rejected` by the user, with when. `done_at` is when the mission it
+ * depends on ended and that was told: reached Done (the mark lifted, `dependency.done` written), or
+ * was cancelled (the mark lifted, its mission marked outdated).
+ */
+export const missionDependencies = sqliteTable(
+  'mission_dependencies',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    dependsOn: text('depends_on')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    reason: text('reason').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    proposedAt: text('proposed_at').notNull(),
+    decidedAt: text('decided_at'),
+    doneAt: text('done_at'),
+  },
+  (table) => [
+    uniqueIndex('dependency_once').on(table.missionId, table.dependsOn),
+    index('dependencies_on_mission').on(table.dependsOn),
+  ],
+)
+
+/**
+ * What a requirement of a mission's Spec relies on in a dependency not delivered yet (#92): the
+ * dependency's requirement and the version of it the Planner read.
+ */
+export const specReliesOn = sqliteTable(
+  'spec_relies_on',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    requirementId: text('requirement_id').notNull(),
+    dependsOn: text('depends_on')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    theirRequirement: text('their_requirement').notNull(),
+    theirVersion: integer('their_version').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.missionId, table.requirementId, table.dependsOn, table.theirRequirement],
+    }),
+  ],
+)
