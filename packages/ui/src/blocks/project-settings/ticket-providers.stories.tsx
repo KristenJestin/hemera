@@ -47,10 +47,10 @@ const JIRA: ProviderView = {
 }
 
 /** What the dialog of a Jira provider also says: not part of its line. */
-const JIRA_DETAILS: Record<string, { deployment: ProviderDeployment; email: string | null }> = {
-  jira: { deployment: 'cloud', email: 'dev@acme.example' },
-  datacenter: { deployment: 'datacenter', email: null },
-}
+const JIRA_DETAILS = new Map([
+  ['jira', { deployment: 'cloud' as const, email: 'dev@acme.example' }],
+  ['datacenter', { deployment: 'datacenter' as const, email: null }],
+])
 
 const BOTH = [GITHUB, JIRA]
 
@@ -221,7 +221,7 @@ function Page(props: PageProps): ReactNode {
     }
     const provider = providers?.find((one) => one.id === form.id)
     if (provider === undefined) return null
-    const details = JIRA_DETAILS[provider.id]
+    const details = JIRA_DETAILS.get(provider.id)
     return {
       title: providerTitle(provider),
       icon: <ProviderMark kind={provider.kind} />,
