@@ -18,6 +18,7 @@ const places = () => $('nav[aria-label="Places"]')
 const home = () => places().$('button[aria-label^="Home"]')
 
 describe('Home, found again after Hemera started anew', () => {
+  // SAFETY: `home.e2e.ts` wrote this file as `{ key, told }` just before Hemera was restarted.
   const before = JSON.parse(readFileSync(SEEN, 'utf8')) as { key: string; told: string[] }
 
   afterEach(function () {

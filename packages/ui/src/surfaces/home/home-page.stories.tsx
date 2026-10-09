@@ -5,7 +5,13 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { Button } from '../../components/button/button.tsx'
 import { LONG_TITLE } from '../../shell/shell-cast.ts'
 import { HomePage, type HomePageProps } from './home-page.tsx'
-import { HOME_NEEDS, HOME_ROWS, denseRows, denseSince } from './home-shell-fixture.tsx'
+import {
+  HOME_NEEDS,
+  HOME_ROWS,
+  denseQuestions,
+  denseRows,
+  denseSince,
+} from './home-shell-fixture.tsx'
 
 /**
  * Home, coming back: Since you left leads — a card per mission, its events newest first — with
@@ -184,7 +190,7 @@ export const LongTitles: Story = {
 export const Dense: Story = {
   args: {
     since: { ...SINCE, groups: denseSince(14), more: true },
-    questions: denseRows(6).map((row) => ({ ...row, missionId: row.id })),
+    questions: denseQuestions(6),
     recent: denseRows(8),
   },
   globals: { viewport: { value: 'laptop', isRotated: false } },

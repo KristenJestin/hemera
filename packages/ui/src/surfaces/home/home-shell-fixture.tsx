@@ -42,11 +42,13 @@ export const HOME_NEEDS: readonly NeedRow[] = [
 ]
 
 /** The morning after a night with failures and finishes: two questions, five missions that moved. */
-export const HOME_ROWS: {
+export interface HomeFixtureRows {
   questions: HomeQuestionRow[]
   since: HomeSinceGroup[]
   recent: HomeRecentRow[]
-} = {
+}
+
+export const HOME_ROWS: HomeFixtureRows = {
   questions: [
     {
       id: 'q1',
@@ -199,6 +201,18 @@ export function denseRows(count: number): HomeRecentRow[] {
   }))
 }
 
+/** Questions many and long. */
+export function denseQuestions(count: number): HomeQuestionRow[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `q${String(index)}`,
+    missionId: `d${String(index)}`,
+    project: index % 3 === 0 ? 'Hemera' : 'Acme',
+    missionKey: `ACME-${String(100 + index)}`,
+    title: `${LONG_TITLE} (${String(index + 1)})`,
+    when: `${String(8 + (index % 10))}:${String(10 + index).padStart(2, '0')}`,
+  }))
+}
+
 const noNeed = () => ({})
 
 /** Home as the window draws it, on the fixtures' cast: for the shell's stories. */
@@ -221,7 +235,7 @@ export function HomeShellFixture({
       today="Saturday 4 October"
       hasProjects={filled || loading}
       needs={{ rows: filled ? HOME_NEEDS : [], projects: ['Acme', 'Hemera'], on: noNeed }}
-      questions={dense ? denseRows(6).map(questionOf) : filled ? HOME_ROWS.questions : []}
+      questions={dense ? denseQuestions(6) : filled ? HOME_ROWS.questions : []}
       since={{
         groups: dense ? denseSince(14) : filled ? HOME_ROWS.since : [],
         more: dense,
@@ -236,15 +250,4 @@ export function HomeShellFixture({
       onRetry={() => {}}
     />
   )
-}
-
-function questionOf(row: HomeRecentRow): HomeQuestionRow {
-  return {
-    id: row.id,
-    missionId: row.id,
-    project: row.project,
-    missionKey: row.missionKey,
-    title: row.title,
-    when: row.when,
-  }
 }

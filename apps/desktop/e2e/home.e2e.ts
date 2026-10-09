@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { $, $$, browser, expect } from '@wdio/globals'
+import { $, browser, expect } from '@wdio/globals'
 
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
 
@@ -67,11 +67,11 @@ describe('Home, coming back', () => {
   it('keeps what Since you left told in a file, then leaves Home', async () => {
     await home().click()
     await expect(sinceYouLeft()).toBeDisplayed()
-    const told = await Promise.all(
-      (await sinceYouLeft().$$('li li').getElements()).map(async (line) => await line.getText()),
-    )
+    const told = await sinceYouLeft()
+      .$$('li li')
+      .map(async (line) => await line.getText())
     writeFileSync(SEEN, JSON.stringify({ key, told }))
-    expect(await $$('section[aria-label="Questions"]').length).toBe(0)
+    await expect($('section[aria-label="Questions"]')).not.toBeExisting()
     await places().$('button=Acme').click()
     await expect(planning()).toBeDisplayed()
   })

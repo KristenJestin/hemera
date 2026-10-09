@@ -72,7 +72,7 @@ export function mergeSince(pages: ReadonlyArray<SincePage>): SinceGroup[] {
     })
   }
   return [...merged.values()]
-    .map((one) => ({ ...one, events: one.events.toSorted(newestFirst) }))
+    .map((one) => Object.assign({}, one, { events: one.events.toSorted(newestFirst) }))
     .toSorted((a, b) => {
       const [x, y] = [a.events[0], b.events[0]]
       return x === undefined || y === undefined ? 0 : newestFirst(x, y)
