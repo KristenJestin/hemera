@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { EngineState } from '../src/renderer/engine-start.ts'
-import { START, go, type Route } from '../src/renderer/navigation.ts'
+import { START, go, open, type Route } from '../src/renderer/navigation.ts'
 import type { NeedsState } from '../src/renderer/needs.ts'
 import type { ProjectState, ProjectsState } from '../src/renderer/projects.ts'
 import { HomeRoute } from '../src/renderer/home-route.tsx'
@@ -94,6 +94,8 @@ interface Drawn {
   folded?: boolean
   needs?: NeedsState
   opened?: ReadonlySet<string>
+  /** The views opened over the mission shown, in order. */
+  views?: readonly string[]
 }
 
 const drawn = ({
@@ -104,13 +106,14 @@ const drawn = ({
   folded = false,
   needs = { kind: 'ready', needs: [], missions: new Map(), answers: new Map() },
   opened = new Set(),
+  views = [],
 }: Drawn): string => {
   const props: ShellProps = {
     engine,
     projects,
     project,
     needs,
-    navigation: go(START, route),
+    navigation: views.reduce(open, go(START, route)),
     folded,
     opened,
     home: createElement(HomeRoute, {
@@ -341,6 +344,15 @@ describe('The pages', () => {
     const markup = drawn({ route: { kind: 'mission', projectId: 'acme', key: 'ACME-12' } })
     expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*ACME-12/)
     expect(renderToStaticMarkup(createElement(MissionRoute, missionProps))).toBe('')
+  })
+
+  test('a view opened over a mission is named in the trail by its title, not its id', () => {
+    const markup = drawn({
+      route: { kind: 'mission', projectId: 'acme', key: 'ACME-12' },
+      views: ['difference'],
+    })
+    expect(markup).toMatch(/aria-label="Where you are".*ACME-12.*What changed/)
+    expect(markup).not.toContain('>difference<')
   })
 
   test('the living spec is a page under its Project, drawn by its own route', () => {

@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 
 import { ENGINE_START_LIMIT, type EngineState } from './engine-start.ts'
 import { placeOf, trailOf, type Navigation, type Route, type Step } from './navigation.ts'
+import { MISSION_VIEWS } from './stage-pages.tsx'
 import { waitingCount, type NeedsState } from './needs.ts'
 import type { ProjectState, ProjectsState } from './projects.ts'
 
@@ -135,6 +136,10 @@ function RoutePage({
   }
 }
 
+/** A view opened over a mission, as the trail names it: its title, or its id when unregistered. */
+const viewTitleOf = (id: string): string =>
+  Object.entries(MISSION_VIEWS).find(([view]) => view === id)?.[1].title ?? id
+
 /**
  * The window: the sidebar, the sheet's header with the one breadcrumb, and the page of the route
  * — mounted only once the engine has answered; until then, and whenever it cannot be shown, the
@@ -169,7 +174,7 @@ export function Shell({
   const { route } = navigation
   const stepTo = (step: Step): void =>
     'go' in step ? actions.go(step.go) : actions.show(step.show)
-  const names = { project: nameOf, view: (id: string) => id, chat: (id: string) => chatTitle?.(id) }
+  const names = { project: nameOf, view: viewTitleOf, chat: (id: string) => chatTitle?.(id) }
   const crumbs: Crumb[] = trailOf(navigation, names).map(({ id, label, mono, step }) => ({
     id,
     label,
