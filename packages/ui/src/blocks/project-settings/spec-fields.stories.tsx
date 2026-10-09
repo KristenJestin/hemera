@@ -47,7 +47,7 @@ export const Linked: Story = {
     await expect(canvas.getByText(SPEC_MODE_WORDS.linked.does)).toBeVisible()
     await expect(canvas.getByText('Last checked at 09:41')).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Key prefix' })).toHaveValue('ACME')
-    await expect(canvas.getByText(/Only the next missions change: ACME-13 and after/)).toBeVisible()
+    await expect(canvas.getByText(/the next ones use ACME\./)).toBeVisible()
   },
 }
 
@@ -161,7 +161,7 @@ export const TypePrefix: Story = {
     await userEvent.clear(field)
     await userEvent.type(field, 'SHOP')
     await expect(args.onPrefix).toHaveBeenLastCalledWith('SHOP')
-    await expect(canvas.getByText(/Only the next missions change: SHOP-13/)).toBeVisible()
+    await expect(canvas.getByText(/the next ones use SHOP/)).toBeVisible()
   },
 }
 

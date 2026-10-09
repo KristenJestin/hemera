@@ -145,7 +145,7 @@ export function SpecFields({
             disabled={prefix === null}
             onValueChange={onPrefix}
             error={prefixRefused}
-            description={`Only the next missions change: ${prefix ?? ''}-13 and after. ACME-12 keeps its key.`}
+            description={`Missions already started keep their key; the next ones use ${prefix ?? ''}.`}
           />
         </div>
       </Frame>

@@ -77,6 +77,6 @@ describe('The Spec settings of a Project', () => {
       wait: 10_000,
     })
     await expect(field(specs(), 'Key prefix')).toHaveValue('SHOP')
-    await expect(specs()).toHaveText(expect.stringContaining('Only the next missions change'))
+    await expect(specs()).toHaveText(expect.stringContaining('Missions already started keep their key'))
   })
 })
