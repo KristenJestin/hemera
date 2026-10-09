@@ -109,7 +109,7 @@ function useProviderStore(
 }
 
 function useStored<T extends object>(store: ProviderStore<T>): T {
-  return useSyncExternalStore(store.subscribe, store.get)
+  return useSyncExternalStore(store.subscribe, store.get, store.get)
 }
 
 /**
