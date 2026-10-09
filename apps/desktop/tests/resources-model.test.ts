@@ -12,8 +12,12 @@ import {
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { providerStore } from '../src/renderer/ticket-providers-model.ts'
 import {
+  type ResourcesRead,
   draftOf,
+  followResources,
+  savedResources,
   holdingOf,
   resourceDraftsOf,
   resourceRefusal,
@@ -225,5 +229,54 @@ describe('the words of a refusal', () => {
 
   test('say the resources could not be saved otherwise', () => {
     expect(savedWords(new Error('gone'))).toBe('The resources could not be saved: gone')
+  })
+})
+
+describe('Reads of the resources that come back out of order', () => {
+  const store = () =>
+    providerStore<ResourcesRead>({ resources: null, holdings: [], error: undefined })
+
+  test('an older answer arriving late does not overwrite the newer one', async () => {
+    const answers: Array<(list: ReadonlyArray<ExclusiveResource>) => void> = []
+    const promises = [0, 1].map(
+      () =>
+        new Promise<ReadonlyArray<ExclusiveResource>>((resolve) => {
+          answers.push(resolve)
+        }),
+    )
+    let changed: (holdings: ReadonlyArray<ResourceHolding>) => void = () => undefined
+    const link = {
+      resources: () => promises.shift() ?? Promise.resolve([]),
+      onResourceHolders: (listener: typeof changed) => {
+        changed = listener
+        return () => undefined
+      },
+    }
+    const kept = store()
+    const first = promises[0]
+    const second = promises[1]
+    followResources(link, kept, 'acme')
+    changed([])
+    answers[1]?.([SANDBOX])
+    await second
+    answers[0]?.([DB])
+    await first
+    await Promise.resolve()
+    expect(kept.get().resources).toEqual([SANDBOX])
+  })
+
+  test('a save answered while a read is on its way is not overwritten by that read', async () => {
+    let answer: (list: ReadonlyArray<ExclusiveResource>) => void = () => undefined
+    const read = new Promise<ReadonlyArray<ExclusiveResource>>((resolve) => {
+      answer = resolve
+    })
+    const link = { resources: () => read, onResourceHolders: () => () => undefined }
+    const kept = store()
+    followResources(link, kept, 'acme')
+    savedResources(kept, [SANDBOX])
+    answer([DB])
+    await read
+    await Promise.resolve()
+    expect(kept.get().resources).toEqual([SANDBOX])
   })
 })

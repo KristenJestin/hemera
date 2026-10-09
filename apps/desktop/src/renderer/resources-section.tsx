@@ -5,7 +5,7 @@
  * React's state, so its body and its foot read it in the same render. No Effect here.
  */
 
-import type { Command, ExclusiveResource, ResourceHolding } from '@hemera/ipc'
+import type { Command } from '@hemera/ipc'
 import {
   ExclusiveResources,
   FormFoot,
@@ -18,10 +18,13 @@ import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react
 
 import type { Link } from './link.ts'
 import {
+  type ResourcesRead,
   draftOf,
+  followResources,
   resourceDraftsOf,
   resourceRefusal,
   resourceViewsOf,
+  savedResources,
   savedWords,
   withoutResource,
 } from './resources-model.ts'
@@ -35,14 +38,7 @@ export interface ResourcesPartProps {
   show: (form: SettingsForm | null) => void
 }
 
-/** What the section has read, and why it could not read more. */
-interface Read {
-  readonly resources: ReadonlyArray<ExclusiveResource> | null
-  readonly holdings: ReadonlyArray<ResourceHolding>
-  readonly error: string | undefined
-}
-
-const NOTHING_READ: Read = { resources: null, holdings: [], error: undefined }
+const NOTHING_READ: ResourcesRead = { resources: null, holdings: [], error: undefined }
 
 /** What a resource's dialog holds. */
 interface Edit {
@@ -60,38 +56,12 @@ function useResourceStore(
   link: Link,
   engineReady: boolean,
   projectId: string,
-): ProviderStore<Read> {
-  const [store] = useState(() => providerStore<Read>(NOTHING_READ))
+): ProviderStore<ResourcesRead> {
+  const [store] = useState(() => providerStore<ResourcesRead>(NOTHING_READ))
   useEffect(() => {
     store.set(NOTHING_READ)
     if (!engineReady) return undefined
-    let current = true
-    const read = (): void => {
-      link.resources(projectId).then(
-        (resources) => {
-          if (current) store.set({ resources, error: undefined })
-        },
-        (failure: Error) => {
-          if (current) {
-            store.set({ error: `The exclusive resources could not be read: ${failure.message}` })
-          }
-        },
-      )
-    }
-    read()
-    const stop = link.onResourceHolders(
-      (holdings) => {
-        store.set({ holdings })
-        // A declaration changed elsewhere moves the holdings too.
-        read()
-      },
-      (failure) =>
-        store.set({ error: `The exclusive resources could not be read: ${failure.message}` }),
-    )
-    return () => {
-      current = false
-      stop()
-    }
+    return followResources(link, store, projectId)
   }, [link, engineReady, projectId, store])
   return store
 }
@@ -99,7 +69,7 @@ function useResourceStore(
 interface DialogProps {
   link: Link
   projectId: string
-  store: ProviderStore<Read>
+  store: ProviderStore<ResourcesRead>
   edit: ProviderStore<Edit>
   /** The resource being mended; null for a new one. */
   id: string | null
@@ -137,7 +107,7 @@ function ResourceFoot({
     edit.set({ saving: true, refused: undefined })
     link.saveResources(projectId, drafts).then(
       (resources) => {
-        store.set({ resources })
+        savedResources(store, resources)
         close()
       },
       (failure: Error) => edit.set({ saving: false, refused: savedWords(failure) }),

@@ -15,7 +15,9 @@ import {
 } from '@hemera/ipc'
 import type { ResourceDraftView, ResourceView } from '@hemera/ui'
 
+import type { Link } from './link.ts'
 import { whenOf } from './needs.ts'
+import { type ProviderStore, latestRead } from './ticket-providers-model.ts'
 
 const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 
@@ -136,4 +138,60 @@ export function savedWords(failure: Error): string {
   return failure instanceof InvalidResources
     ? failure.message
     : `The resources could not be saved: ${failure.message}`
+}
+
+/** What the section has read, and why it could not read more. */
+export interface ResourcesRead {
+  readonly resources: ReadonlyArray<ExclusiveResource> | null
+  readonly holdings: ReadonlyArray<ResourceHolding>
+  readonly error: string | undefined
+}
+
+/** Keeps the list the engine answered to a save, over any read that began before it. */
+export function savedResources(
+  store: ProviderStore<ResourcesRead>,
+  resources: ReadonlyArray<ExclusiveResource>,
+): void {
+  latestRead(store, 'resources')
+  store.set({ resources, error: undefined })
+}
+
+/**
+ * Follows a Project's resources and who holds them: the list is read now and again at each change
+ * of the holdings. Only the latest read lands: an older answer arriving late is dropped. Answers
+ * the function that stops it.
+ */
+export function followResources(
+  link: Pick<Link, 'resources' | 'onResourceHolders'>,
+  store: ProviderStore<ResourcesRead>,
+  projectId: string,
+): () => void {
+  let current = true
+  const read = (): void => {
+    const latest = latestRead(store, 'resources')
+    link.resources(projectId).then(
+      (resources) => {
+        if (current && latest()) store.set({ resources, error: undefined })
+      },
+      (failure: Error) => {
+        if (current && latest()) {
+          store.set({ error: `The exclusive resources could not be read: ${failure.message}` })
+        }
+      },
+    )
+  }
+  read()
+  const stop = link.onResourceHolders(
+    (holdings) => {
+      store.set({ holdings })
+      // A declaration changed elsewhere moves the holdings too.
+      read()
+    },
+    (failure) =>
+      store.set({ error: `The exclusive resources could not be read: ${failure.message}` }),
+  )
+  return () => {
+    current = false
+    stop()
+  }
 }
