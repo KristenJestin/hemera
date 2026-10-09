@@ -1,0 +1,105 @@
+/**
+ * A GitHub provider added from a Project's settings, with a fake `gh` in place of the real one:
+ * the list says there is none, the menu adds GitHub with a repository written by hand, the line
+ * says `gh` is not signed in and its dialog gives the command that mends it, and Check again,
+ * once the fake is signed in, turns the line to ready. Nothing here reaches GitHub.
+ *
+ * The engine finds `gh` on the `PATH` it was started with, so the folder of the fake must lead
+ * that `PATH` when the application is launched: `FAKE_GH` is where the suite writes it.
+ */
+
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+
+import { $, browser, expect } from '@wdio/globals'
+
+import { ACME, writeAcme } from './acme.ts'
+import { diagnosticOf, waitForEngine } from './diagnostic.ts'
+import { designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
+
+const SPEC = 'ticket-providers.e2e.ts'
+
+/** The folder of the fake `gh`, which leads the `PATH` of the run. */
+const FAKE_GH = join(tmpdir(), 'hemera-e2e-ticket-providers-gh')
+
+/** Exists once the fake is signed in; the fake answers `auth status` by it. */
+const SIGNED_IN = join(FAKE_GH, 'signed-in')
+
+const FAKE = `#!/bin/sh
+case "$1" in
+  --version) echo "gh version 2.50.0" ;;
+  auth)
+    if [ -f "${SIGNED_IN}" ]; then exit 0; fi
+    echo "You are not logged into any GitHub hosts." >&2
+    exit 1 ;;
+  *) echo "fake gh: no answer for $*" >&2; exit 1 ;;
+esac
+`
+
+mkdirSync(FAKE_GH, { recursive: true })
+rmSync(SIGNED_IN, { force: true })
+writeFileSync(join(FAKE_GH, 'gh'), FAKE)
+chmodSync(join(FAKE_GH, 'gh'), 0o755)
+process.env.PATH = `${FAKE_GH}${delimiter}${process.env.PATH ?? ''}`
+
+const list = () => $('ul[aria-label="Ticket providers"]')
+
+describe('A GitHub provider added from the settings of a Project', () => {
+  afterEach(function () {
+    if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
+  })
+
+  it('says there is no provider yet, in the section Tickets and Specs', async () => {
+    writeAcme()
+    await waitForEngine()
+    await designSize()
+    await browser.electron.execute(
+      async (_, folder) => await globalThis.hemeraProbe?.createProject('Acme', folder),
+      ACME,
+    )
+    await $('nav[aria-label="Places"]').$('button*=Acme').click()
+    await settingsOf('Acme')
+    await section('Tickets and Specs')
+    await expect($('section[aria-label="Ticket providers"]')).toHaveText('No ticket provider', {
+      containing: true,
+    })
+  })
+
+  it('adds GitHub from the menu, with a repository written by hand', async () => {
+    await $('button[aria-label="Add a provider"]').click()
+    await $('[role="menuitem"]*=GitHub').click()
+    const adding = dialog()
+    await expect(field(adding, 'Host')).toHaveValue('github.com')
+    await write(field(adding, 'Another repository'), 'acme/api')
+    await browser.keys('Enter')
+    await expect(adding.$('[role="checkbox"][aria-checked="true"]')).toBeDisplayed()
+    await adding.$('button=Add').click()
+    await expect(adding).not.toBeExisting()
+    await expect(list()).toHaveText(expect.stringContaining('github.com'))
+    await expect(list()).toHaveText(expect.stringContaining('acme/api'))
+  })
+
+  it('says gh is not signed in, and gives the command that mends it', async () => {
+    await expect(list()).toHaveText(expect.stringContaining('GitHub CLI is not logged in'))
+    await list().$('button*=github.com').click()
+    const provider = dialog()
+    await expect(provider).toHaveText(
+      expect.stringContaining('gh auth login --hostname github.com'),
+    )
+    await expect(
+      provider.$('button[aria-label="Copy gh auth login --hostname github.com"]'),
+    ).toBeDisplayed()
+  })
+
+  it('turns the line to ready after Check again, once gh is signed in', async () => {
+    writeFileSync(SIGNED_IN, '')
+    const provider = dialog()
+    await provider.$('button=Check again').click()
+    await expect(provider).toHaveText(expect.stringContaining('is logged in to github.com'))
+    await expect(provider.$('button=Check again')).not.toBeExisting()
+    await provider.$('button=Save').click()
+    await expect(dialog()).not.toBeExisting()
+    await expect(list()).not.toHaveText(expect.stringContaining('not logged in'))
+  })
+})
