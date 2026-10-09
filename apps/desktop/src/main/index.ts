@@ -21,6 +21,7 @@ import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
 import { identityOf } from './identity.ts'
 import { type JevKeyEngine, jevKeyHandling } from './jev-key.ts'
+import { type JiraTokenEngine, jiraTokenHandling, tokenOpener } from './jira-token.ts'
 import { missingSecretService, passwordStoreSwitch, readBusNames } from './secret-service.ts'
 import { applicationOrigin } from './origin.ts'
 import { GROUP_WINDOW } from './notifications.ts'
@@ -113,6 +114,8 @@ const run = Effect.gen(function* () {
     { dataFolder, migrations: MIGRATIONS, ...identity },
     log,
     underSuite,
+    // A Jira token the engine holds sealed is opened here, at call time (#96).
+    tokenOpener(safeStorage, process.platform),
   )
 
   // The Jev key: restored before the window loads, so the first judged call can use it. Main
@@ -139,6 +142,24 @@ const run = Effect.gen(function* () {
     )
   }
   yield* jevKey.restore
+
+  // Jira tokens (#96): sealed here as the Jev key is; the engine stores the ciphertext only.
+  const tokenEngine: JiraTokenEngine = {
+    save: (providerId, ciphertext, token) =>
+      engine.client['jiraToken.save']({ providerId, ciphertext, token }).pipe(
+        closedAs(() => new EngineGone()),
+      ),
+    state: (providerId) =>
+      engine.client['jiraToken.state']({ providerId }).pipe(closedAs(() => new EngineGone())),
+    remove: (providerId) =>
+      engine.client['jiraToken.remove']({ providerId }).pipe(closedAs(() => new EngineGone())),
+  }
+  const jiraTokens = jiraTokenHandling({
+    engine: tokenEngine,
+    storage: safeStorage,
+    platform: process.platform,
+    log,
+  })
 
   const report = Effect.sync(() => collectReport(identity, dataFolder, screen))
   // What main tells the window of notifications: whoever listens hears it from then on.
@@ -167,6 +188,7 @@ const run = Effect.gen(function* () {
     notices: Stream.fromPubSub(notices),
     preview: previewSound(sounds),
     hemeraAuto: { status: jevKey.status, save: jevKey.save, remove: jevKey.remove },
+    jiraToken: { status: jiraTokens.status, save: jiraTokens.save, remove: jiraTokens.remove },
   }
   yield* refreshDisplay(engine.client, application).pipe(Effect.ignore, Effect.forkScoped)
   // Served before the page loads: the first thing the page does is hand over its port.

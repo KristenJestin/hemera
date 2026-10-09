@@ -4,7 +4,9 @@
  * Every provider runs at once (`Stream.mergeAll`, unbounded): its hits come as soon as it answers,
  * and its failure comes as one `ProviderFailed` while the others go on. A reference is read, not
  * searched, and only by the providers it can belong to: a GitHub URL by the providers of its host,
- * a short form by the host of the first provider that lists its repository, else github.com's.
+ * a short form by the host of the first provider that lists its repository, else github.com's; a
+ * Jira browse URL by the Jira providers of its site, a bare Jira key by those whose project keys
+ * include its prefix, or every Jira provider when none does.
  * Interrupting the stream interrupts every call, and the supervisor ends each `gh` it started.
  * The search writes nothing.
  */
@@ -22,9 +24,12 @@ import { Effect, Layer, Predicate, Stream } from 'effect'
 
 import type { Database } from '../storage/database.ts'
 import { TicketSearch } from '../start/tickets.ts'
+import type { Secrets } from '../secrets.ts'
 import type { GhCli } from './gh.ts'
 import { githubProvider } from './github.ts'
-import { type TicketProvider, isOutage } from './provider.ts'
+import { jiraProvider } from './jira.ts'
+import type { JiraLink } from './jira-link.ts'
+import { type TicketProvider, isOutage, undying } from './provider.ts'
 import { providersOf } from './store.ts'
 
 export interface LiveProvider {
@@ -32,17 +37,34 @@ export interface LiveProvider {
   readonly provider: TicketProvider
 }
 
+/** The provider a configuration describes: Jira's for a Jira site, GitHub's otherwise. */
+export const providerOf = (
+  info: TicketProviderInfo,
+): Effect.Effect<TicketProvider, never, GhCli | JiraLink | Database | Secrets> =>
+  info.jira === null
+    ? githubProvider({ host: info.host, repositories: info.repositories })
+    : jiraProvider(info, info.jira)
+
 /** The providers of a Project, ready to be asked, in the Project's order. */
 export const liveProviders = (projectId: string) =>
   Effect.gen(function* () {
     const infos = yield* providersOf(projectId)
     return yield* Effect.forEach(infos, (info) =>
-      Effect.map(
-        githubProvider({ host: info.host, repositories: info.repositories }),
-        (provider): LiveProvider => ({ info, provider }),
-      ),
+      Effect.map(providerOf(info), (provider): LiveProvider => ({ info, provider })),
     )
   })
+
+/**
+ * The providers that read a reference: those it belongs to, and for a bare Jira key no Jira
+ * provider claims by its project keys, every Jira provider of the Project.
+ */
+export const readersOf = (providers: ReadonlyArray<LiveProvider>, reference: TicketReference) => {
+  const claimed = providers.filter((one) => one.provider.reads(reference))
+  const bareJira = Predicate.isTagged(reference, 'JiraKey') && reference.host === null
+  return claimed.length > 0 || !bareJira
+    ? claimed
+    : providers.filter((one) => one.info.kind === 'jira')
+}
 
 /** The hosts of the GitHub providers that list `owner/repo`, the Project's first first. */
 const hostsListing = (providers: ReadonlyArray<LiveProvider>, owner: string, repo: string) =>
@@ -77,9 +99,11 @@ const hitOf = (reference: TicketReference, version: TicketVersion): ProviderHit 
 /** One provider's part of a search: its hits, or the one notice it failed with. */
 const askedOf = (provider: TicketProvider, text: string, reference: TicketReference | null) =>
   Stream.fromIterableEffect(
-    (reference === null
-      ? provider.search(text)
-      : Effect.map(provider.read(reference), (version) => [hitOf(reference, version)])
+    undying(
+      provider.label,
+      reference === null
+        ? provider.search(text)
+        : Effect.map(provider.read(reference), (version) => [hitOf(reference, version)]),
     ).pipe(
       Effect.map((hits): ReadonlyArray<ProviderHit | ProviderFailed> => hits),
       Effect.catch((failed) =>
@@ -98,14 +122,13 @@ const askedOf = (provider: TicketProvider, text: string, reference: TicketRefere
 export const ticketSearchLayer = Layer.effect(
   TicketSearch,
   Effect.gen(function* () {
-    const context = yield* Effect.context<Database | GhCli>()
+    const context = yield* Effect.context<Database | GhCli | JiraLink | Secrets>()
     const providers = (projectId: string) =>
       Effect.provideContext(liveProviders(projectId), context)
     return {
       reads: (projectId, reference) =>
         Effect.map(providers(projectId), (live) => {
-          const resolved = resolvedAmong(live, reference)
-          return live.some((one) => one.provider.reads(resolved))
+          return readersOf(live, resolvedAmong(live, reference)).length > 0
         }),
       githubHosts: (projectId, owner, repo) =>
         Effect.map(providers(projectId), (live) => hostsListing(live, owner, repo)),
@@ -113,7 +136,7 @@ export const ticketSearchLayer = Layer.effect(
         Stream.unwrap(
           Effect.map(providers(projectId), (live) => {
             const reference = query.reference === null ? null : resolvedAmong(live, query.reference)
-            const asked = live.filter((one) => reference === null || one.provider.reads(reference))
+            const asked = reference === null ? live : readersOf(live, reference)
             return Stream.mergeAll(
               asked.map((one) => askedOf(one.provider, query.text, reference)),
               { concurrency: 'unbounded' },

@@ -106,6 +106,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'exclusive_resource_commands',
       'exclusive_resources',
       'grants_by_mission',
+      'jira_tokens',
       'journal_by_mission',
       'key_prefix_once',
       'living_domains',

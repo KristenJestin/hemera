@@ -160,6 +160,8 @@ export const ProviderStatus = Schema.Struct({
   state: Schema.Literals(PROVIDER_STATES),
   sentence: Schema.String,
   fix: Schema.NullOr(Schema.String),
+  /** When a rate limit the provider answered resets (an ISO date); absent when none. */
+  limitedUntil: Schema.optionalKey(Schema.String),
 })
 export type ProviderStatus = typeof ProviderStatus.Type
 

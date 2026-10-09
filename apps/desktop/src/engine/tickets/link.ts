@@ -41,9 +41,8 @@ import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missionTickets, missions, ticketProviders, ticketVersions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { githubProvider } from './github.ts'
-import { isOutage } from './provider.ts'
-import { type LiveProvider, liveProviders, resolvedAmong } from './search.ts'
+import { isOutage, undying } from './provider.ts'
+import { type LiveProvider, liveProviders, providerOf, readersOf, resolvedAmong } from './search.ts'
 import { getProvider, specModeOf } from './store.ts'
 import { type TicketLinkAtCreation, insertVersion, maskedVersion, versionOf } from './versions.ts'
 
@@ -154,7 +153,7 @@ export const observed = <A, R>(live: LiveProvider, call: Effect.Effect<A, Ticket
     const { info, provider } = live
     const limited = yield* limitedUntilOf(info.id)
     if (limited !== null) return yield* waiting(provider.label, limited)
-    const outcome = yield* Effect.result(call)
+    const outcome = yield* Effect.result(undying(provider.label, call))
     if (Result.isSuccess(outcome)) {
       yield* reached(info, provider.label)
       return outcome.success
@@ -171,36 +170,58 @@ export const observed = <A, R>(live: LiveProvider, call: Effect.Effect<A, Ticket
     return yield* Effect.fail(failure)
   })
 
-/** The provider of a Project that reads a reference, and the reference as it resolves there. */
-const readerOf = (projectId: string, reference: TicketReference) =>
+/** The providers of a Project that read a reference, in order, and the reference as it resolves. */
+const readersFor = (projectId: string, reference: TicketReference) =>
   Effect.gen(function* () {
     const live = yield* liveProviders(projectId)
     const resolved = resolvedAmong(live, reference)
-    const reader = live.find((one) => one.provider.reads(resolved))
-    if (reader === undefined) return yield* new NoProviderReads({ key: ticketKeyOf(reference) })
-    return { reader, resolved }
+    const readers = readersOf(live, resolved)
+    if (readers.length === 0) return yield* new NoProviderReads({ key: ticketKeyOf(reference) })
+    return { readers, resolved }
   })
 
 /**
- * What a creation from a ticket is linked with: the provider that reads it, the Project's Spec
- * mode, and the version read now, or none when the provider is out of reach (said once, as any
- * outage). None at all when no provider of the Project reads the reference. A ticket the provider
- * answers does not exist, may not be read, or is not a ticket (a pull request) refuses the
- * creation in the provider's sentence: no Planner ever waits for it.
+ * The reference read by each of its readers in turn until one answers (a bare Jira key may belong
+ * to any Jira provider of the Project): the one that answered and its version, or every failure, in
+ * order. A failure of the data folder ends it at once.
+ */
+const readInTurn = (readers: ReadonlyArray<LiveProvider>, resolved: TicketReference) =>
+  Effect.gen(function* () {
+    const failures: Array<{ readonly reader: LiveProvider; readonly failure: TicketError }> = []
+    for (const reader of readers) {
+      const read = yield* Effect.result(observed(reader, reader.provider.read(resolved)))
+      if (Result.isSuccess(read)) return { answered: { reader, version: read.success }, failures }
+      if (!isTicketError(read.failure)) return yield* Effect.fail(read.failure)
+      failures.push({ reader, failure: read.failure })
+    }
+    return { answered: null, failures }
+  })
+
+/**
+ * What a creation from a ticket is linked with: the provider that answers it, the Project's Spec
+ * mode, and the version read now; or, when none answers and one is out of reach, that provider and
+ * no version (said once, as any outage). None at all when no provider of the Project reads the
+ * reference. A ticket every provider answers does not exist, may not be read, or is not a ticket (a
+ * pull request) refuses the creation in the first provider's sentence: no Planner ever waits for
+ * it.
  */
 export const readForCreation = (projectId: string, reference: TicketReference) =>
   Effect.gen(function* () {
-    const found = yield* Effect.option(readerOf(projectId, reference))
+    const found = yield* Effect.option(readersFor(projectId, reference))
     if (Option.isNone(found)) return null
-    const { reader, resolved } = found.value
-    const read = yield* Effect.result(observed(reader, reader.provider.read(resolved)))
-    if (Result.isFailure(read) && isTicketError(read.failure) && !isOutage(read.failure)) {
-      return yield* new InvalidMissionIdea({ reason: read.failure.message.replace(/\.$/, '') })
+    const { readers, resolved } = found.value
+    const { answered, failures } = yield* readInTurn(readers, resolved)
+    const out = failures.find((one) => isOutage(one.failure))
+    const [first] = failures
+    if (answered === null && out === undefined && first !== undefined) {
+      return yield* new InvalidMissionIdea({ reason: first.failure.message.replace(/\.$/, '') })
     }
+    const reader = answered?.reader ?? out?.reader ?? readers[0]
+    if (reader === undefined) return null
     return {
       providerId: reader.info.id,
       mode: yield* specModeOf(projectId),
-      version: Result.isSuccess(read) ? read.success : null,
+      version: answered?.version ?? null,
     } satisfies TicketLinkAtCreation
   })
 
@@ -211,8 +232,14 @@ export const readForCreation = (projectId: string, reference: TicketReference) =
  */
 export const readTicket = (projectId: string, reference: TicketReference) =>
   Effect.gen(function* () {
-    const { reader, resolved } = yield* readerOf(projectId, reference)
-    const version = yield* observed(reader, reader.provider.read(resolved))
+    const { readers, resolved } = yield* readersFor(projectId, reference)
+    const { answered, failures } = yield* readInTurn(readers, resolved)
+    if (answered === null) {
+      const failure = failures.find((one) => isOutage(one.failure)) ?? failures[0]
+      if (failure !== undefined) return yield* Effect.fail(failure.failure)
+      return yield* new NoProviderReads({ key: ticketKeyOf(reference) })
+    }
+    const { reader, version } = answered
     const secrets = yield* Secrets
     yield* mutate('keeping the version read', (transaction) =>
       Effect.gen(function* () {
@@ -312,7 +339,7 @@ export const missionTicket = (missionId: string) =>
 export const providerStatus = (providerId: string) =>
   Effect.gen(function* () {
     const info = yield* getProvider(providerId)
-    const provider = yield* githubProvider({ host: info.host, repositories: info.repositories })
+    const provider = yield* providerOf(info)
     return yield* provider.status
   })
 
@@ -326,7 +353,7 @@ export const checkAgain = (providerId: string) =>
     const info = yield* getProvider(providerId)
     const live: LiveProvider = {
       info,
-      provider: yield* githubProvider({ host: info.host, repositories: info.repositories }),
+      provider: yield* providerOf(info),
     }
     const status: ProviderStatus = yield* live.provider.status
     // A rate limit is kept until its reset, whatever the CLI says of its login meanwhile.
@@ -339,7 +366,7 @@ export const checkAgain = (providerId: string) =>
       } satisfies ProviderStatus
     }
     if (status.state === 'ready') yield* reached(info, live.provider.label)
-    else yield* unreached(info, live.provider.label, status.sentence, null)
+    else yield* unreached(info, live.provider.label, status.sentence, status.limitedUntil ?? null)
     if (status.state !== 'ready') return status
     const database = yield* Database
     const unread = yield* database

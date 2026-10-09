@@ -15,6 +15,7 @@ import {
   makeServerProtocol,
   Output,
   type AgentLine,
+  TokenUnreadable,
 } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, FiberSet, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -25,6 +26,9 @@ import { runProgram } from '../src/agents/program.ts'
 import { agentsLauncher } from '../src/engine/agents.ts'
 import { portHandovers } from '../src/engine/handovers.ts'
 import { launchHandlers, type Forked, type Launcher } from '../src/main/launches.ts'
+
+/** No Jira token is opened on this link here. */
+const noToken = () => Effect.fail(new TokenUnreadable({ reason: 'not in this suite' }))
 
 const ECHO = join(import.meta.dirname, 'fixtures', 'echo.mjs')
 
@@ -87,7 +91,7 @@ const setup = Effect.gen(function* () {
   const server = yield* makeServerProtocol
   server.accept(fromMessagePort(mainEnd))
   yield* RpcServer.make(HostRpcs, { disableFatalDefects: true }).pipe(
-    Effect.provide(launchHandlers(launcher, () => undefined)),
+    Effect.provide(launchHandlers(launcher, () => undefined, noToken)),
     Effect.provideService(RpcServer.Protocol, server.protocol),
     Effect.forkScoped,
   )

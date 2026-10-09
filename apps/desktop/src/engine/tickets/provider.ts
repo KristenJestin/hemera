@@ -16,11 +16,27 @@ import {
   TicketForbidden,
   TicketNotFound,
   type TicketReference,
+  TicketUnreadable,
   type TicketVersion,
   commentFingerprintInput,
   fingerprintInput,
 } from '@hemera/core/domain'
-import { type Effect, Predicate, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
+
+/**
+ * A provider's call that cannot die: a defect in it (an answer Hemera failed to read) is the
+ * provider's failure, said in a sentence that holds nothing of the answer, so one bad ticket never
+ * ends a search or a creation.
+ */
+export const undying = <A, R>(label: string, call: Effect.Effect<A, TicketError, R>) =>
+  Effect.catchDefect(call, () =>
+    Effect.fail(
+      new TicketUnreadable({
+        key: label,
+        detail: `${label} answered something Hemera failed to read.`,
+      }),
+    ),
+  )
 
 /** The failures that mean the provider cannot be reached at all, as opposed to one ticket. */
 export const isOutage = (failure: TicketError): boolean =>

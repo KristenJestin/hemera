@@ -103,8 +103,11 @@ import {
   sayInDiscussion,
 } from './planning/discussions.ts'
 import { checkAgain, missionTicket, providerStatus } from './tickets/link.ts'
+import { jiraDeployment } from './tickets/jira-link.ts'
+import { jiraTokenState, removeJiraToken, saveJiraToken } from './tickets/jira-tokens.ts'
 import {
   addGithub,
+  addJira,
   proposeGithub,
   providersOf,
   removeProvider,
@@ -422,6 +425,17 @@ export const engineHandlers = (
       use(proposeGithub(projectId, host)).pipe(observed('tickets.proposeGithub', log)),
     'tickets.addGithub': ({ projectId, config }) =>
       use(addGithub(projectId, config)).pipe(observed('tickets.addGithub', log)),
+    'tickets.addJira': ({ projectId, config }) =>
+      use(addJira(projectId, config)).pipe(observed('tickets.addJira', log)),
+    'tickets.jiraDeployment': ({ site }) =>
+      use(jiraDeployment(site)).pipe(observed('tickets.jiraDeployment', log)),
+    // A Jira token is main's to seal and to open: the engine stores its ciphertext only.
+    'jiraToken.save': ({ providerId, ciphertext, token }) =>
+      use(saveJiraToken(providerId, ciphertext, token)).pipe(observed('jiraToken.save', log)),
+    'jiraToken.state': ({ providerId }) =>
+      use(jiraTokenState(providerId)).pipe(observed('jiraToken.state', log)),
+    'jiraToken.remove': ({ providerId }) =>
+      use(removeJiraToken(providerId)).pipe(observed('jiraToken.remove', log)),
     'tickets.updateProvider': ({ providerId, config }) =>
       use(updateProvider(providerId, config)).pipe(observed('tickets.updateProvider', log)),
     'tickets.removeProvider': ({ providerId }) =>

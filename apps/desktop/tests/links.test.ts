@@ -125,6 +125,11 @@ const chain = Effect.gen(function* () {
             save: () => Effect.die('the key is not asked of this main'),
             remove: Effect.die('the key is not asked of this main'),
           },
+          jiraToken: {
+            status: () => Effect.die('no Jira token is asked of this main'),
+            save: () => Effect.die('no Jira token is asked of this main'),
+            remove: () => Effect.die('no Jira token is asked of this main'),
+          },
         },
         (line) => mainLines.push(line),
       ),

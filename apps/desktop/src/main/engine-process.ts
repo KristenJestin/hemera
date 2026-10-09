@@ -10,6 +10,7 @@
 import { join } from 'node:path'
 
 import {
+  type TokenUnreadable,
   AgentsPortHandover,
   closesWith,
   EngineMainRpcs,
@@ -93,6 +94,7 @@ export const startEngine = (
   start: EngineStart,
   log: Log,
   withProbe: boolean,
+  openToken: (ciphertext: string) => Effect.Effect<string, TokenUnreadable>,
 ): Effect.Effect<Engine, never, Scope.Scope> =>
   Effect.gen(function* () {
     const child = utilityProcess.fork(join(main, '..', 'engine', 'index.js'), [], {
@@ -119,7 +121,7 @@ export const startEngine = (
     const hostServer = yield* makeServerProtocol
     hostServer.accept(linkTo(child, host.port1))
     yield* RpcServer.make(HostRpcs, { disableFatalDefects: true }).pipe(
-      Effect.provide(launchHandlers(electronLauncher(main, child, log), log)),
+      Effect.provide(launchHandlers(electronLauncher(main, child, log), log, openToken)),
       Effect.provideService(RpcServer.Protocol, hostServer.protocol),
       Effect.forkScoped,
     )

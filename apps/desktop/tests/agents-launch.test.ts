@@ -16,6 +16,7 @@ import {
   makeServerProtocol,
   Started,
   type LaunchEvent,
+  TokenUnreadable,
 } from '@hemera/ipc'
 import { Effect, Fiber, Stream } from 'effect'
 import type { Scope } from 'effect'
@@ -24,6 +25,9 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import { launchHandlers, type Forked, type Launcher } from '../src/main/launches.ts'
 import { portHandovers } from '../src/engine/handovers.ts'
+
+/** No Jira token is opened on this link here. */
+const noToken = () => Effect.fail(new TokenUnreadable({ reason: 'not in this suite' }))
 
 /** A forked process that does what the test tells it to, and remembers what it was given. */
 interface StandIn extends Forked<string> {
@@ -83,7 +87,7 @@ const host = (forks: Array<StandIn | Error>) =>
     const server = yield* makeServerProtocol
     server.accept(fromMessagePort(mainPort))
     yield* RpcServer.make(HostRpcs, { disableFatalDefects: true }).pipe(
-      Effect.provide(launchHandlers(launcher, (line) => lines.push(line))),
+      Effect.provide(launchHandlers(launcher, (line) => lines.push(line), noToken)),
       Effect.provideService(RpcServer.Protocol, server.protocol),
       Effect.forkScoped,
     )

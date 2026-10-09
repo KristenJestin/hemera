@@ -313,6 +313,8 @@ const memoryHandlers = {
   'discussions.changed': unused,
   'tickets.providers': unused,
   'tickets.proposeGithub': unused,
+  'tickets.addJira': unused,
+  'tickets.jiraDeployment': unused,
   'tickets.addGithub': unused,
   'tickets.updateProvider': unused,
   'tickets.removeProvider': unused,

@@ -2,6 +2,7 @@ import { ApplicationRpcs } from './application.ts'
 import { EngineRpcs } from './engine.ts'
 import { SoundPreviewRpcs, WindowNoticeRpcs } from './notifications.ts'
 import { HemeraAutoRpcs } from './permissions.ts'
+import { JiraTokenRpcs } from './tickets.ts'
 
 /**
  * What the window may ask main: the engine's calls, which main forwards, and main's own, the
@@ -12,4 +13,5 @@ export const WindowRpcs = EngineRpcs.merge(
   WindowNoticeRpcs,
   SoundPreviewRpcs,
   HemeraAutoRpcs,
+  JiraTokenRpcs,
 )

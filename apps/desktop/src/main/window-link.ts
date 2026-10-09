@@ -17,6 +17,9 @@ import {
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
+  type InvalidProviderConfig,
+  type JiraTokenStatus,
+  type UnknownTicketProvider,
   type Preferences,
   type PreferencesChange,
   type Sound,
@@ -56,7 +59,18 @@ export interface Application {
     readonly save: (key: string) => Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
     readonly remove: Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
   }
+  /** A Jira provider's token, which main alone seals (#96): where it stands, saved, removed. */
+  readonly jiraToken: {
+    readonly status: (providerId: string) => Effect.Effect<JiraTokenStatus, TokenRefused>
+    readonly save: (
+      providerId: string,
+      token: string,
+    ) => Effect.Effect<JiraTokenStatus, TokenRefused>
+    readonly remove: (providerId: string) => Effect.Effect<JiraTokenStatus, TokenRefused>
+  }
 }
+
+type TokenRefused = StorageFailed | EngineGone | UnknownTicketProvider | InvalidProviderConfig
 
 const gone = () => new EngineGone()
 
@@ -508,6 +522,20 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       ),
     'tickets.addGithub': (request) =>
       engine['tickets.addGithub'](request).pipe(closedAs(gone), observed('tickets.addGithub', log)),
+    'tickets.addJira': (request) =>
+      engine['tickets.addJira'](request).pipe(closedAs(gone), observed('tickets.addJira', log)),
+    'tickets.jiraDeployment': (request) =>
+      engine['tickets.jiraDeployment'](request).pipe(
+        closedAs(gone),
+        observed('tickets.jiraDeployment', log),
+      ),
+    // The token is sealed here and never answered back.
+    'tickets.saveJiraToken': ({ providerId, token }) =>
+      application.jiraToken.save(providerId, token).pipe(observed('tickets.saveJiraToken', log)),
+    'tickets.removeJiraToken': ({ providerId }) =>
+      application.jiraToken.remove(providerId).pipe(observed('tickets.removeJiraToken', log)),
+    'tickets.jiraTokenStatus': ({ providerId }) =>
+      application.jiraToken.status(providerId).pipe(observed('tickets.jiraTokenStatus', log)),
     'tickets.updateProvider': (request) =>
       engine['tickets.updateProvider'](request).pipe(
         closedAs(gone),
