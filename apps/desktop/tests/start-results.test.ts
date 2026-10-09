@@ -21,6 +21,7 @@ import {
   createFromTicket,
   createOf,
   foldStart,
+  searchPending,
   settleStart,
   triageOf,
   triageStep,
@@ -200,6 +201,30 @@ describe('the triage answer of a created mission', () => {
       kind: 'belongs',
       key: 'ACME-12',
     })
+  })
+})
+
+describe('whether the search for the text typed is still going', () => {
+  const choice = foldStart(EMPTY_FOLD, CreateChoice.make({ title: 'export', ticket: null }))
+  const search = (done: boolean, ended: string | null = null) => ({
+    for: 'export',
+    fold: choice,
+    done,
+    ended,
+  })
+
+  test('is going while the stream that emitted the create choice has not ended', () => {
+    expect(searchPending(search(false), 'export')).toBe(true)
+  })
+
+  test('is over once the stream ended, or failed', () => {
+    expect(searchPending(search(true), 'export')).toBe(false)
+    expect(searchPending(search(false, 'The search stopped'), 'export')).toBe(false)
+  })
+
+  test('is going for a text nothing was said about yet', () => {
+    expect(searchPending(null, 'export')).toBe(true)
+    expect(searchPending(search(true), 'export invoices')).toBe(true)
   })
 })
 

@@ -46,6 +46,8 @@ export interface StartFieldProps {
   onText: (text: string) => void
   /** What was found, or `'searching'` before the first answer. */
   results: readonly StartResultView[] | 'searching'
+  /** Whether the search goes on: Enter does not create until it has ended. */
+  searching?: boolean | undefined
   /** Something the search said once, in words. */
   notice?: string | undefined
   triage?: StartTriage | undefined
@@ -141,6 +143,7 @@ export function StartField({
   text,
   onText,
   results,
+  searching = false,
   notice,
   triage,
   onOpen,
@@ -161,7 +164,7 @@ export function StartField({
       result.kind === 'mission' && result.open ? [result.key] : [],
     )[0]
     if (opens !== undefined) onOpen(opens)
-    else if (others.length === 0 && shown.length > 0) onCreate()
+    else if (others.length === 0 && shown.length > 0 && !searching) onCreate()
   }
 
   const fromField = (event: KeyboardEvent<HTMLElement>) => {

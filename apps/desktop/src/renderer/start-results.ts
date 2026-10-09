@@ -90,6 +90,21 @@ export function viewsOf(fold: StartFold): StartResultView[] {
   return views
 }
 
+/** What the search for the text typed has said, and whether its stream ended. */
+export interface Search {
+  for: string
+  fold: StartFold
+  /** The stream ended without failing. */
+  done: boolean
+  /** The words of the failure that stopped the stream, if one did. */
+  ended: string | null
+}
+
+/** Whether the search for `typed` still goes on: nothing said yet, or its stream is still open. */
+export function searchPending(search: Search | null, typed: string): boolean {
+  return search?.for !== typed || (!search.done && search.ended === null)
+}
+
 /** The creation "Create a mission" asks: the ticket when the text is one, the sentence otherwise. */
 export function createOf(
   projectId: string,

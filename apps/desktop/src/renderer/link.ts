@@ -222,6 +222,8 @@ export interface Link {
     text: string,
     listener: (result: StartResult) => void,
     onEnd: (error: Error) => void,
+    /** The stream ended: nothing more will be found for this text. */
+    onDone?: () => void,
   ) => () => void
   /** Creates the mission of the user's explicit choice; the same key twice creates one. */
   readonly createStart: (create: StartCreate) => Promise<Mission>
@@ -449,6 +451,7 @@ export function linkOver(port: Port): Link {
     ends: (error: E) => error is F,
     onEnd: (error: F) => void,
     onOpen?: () => void,
+    onDone?: () => void,
   ): (() => void) => {
     let stopped = false
     let stop = (): void => {
@@ -460,7 +463,10 @@ export function linkOver(port: Port): Link {
         Stream.runForEach(open(ready), (value) => Effect.sync(() => listener(value))),
       )
       fiber.addObserver((exit) => {
-        if (Exit.isSuccess(exit)) return
+        if (Exit.isSuccess(exit)) {
+          if (!stopped) onDone?.()
+          return
+        }
         const failure = Cause.findErrorOption(exit.cause)
         if (Option.isSome(failure) && ends(failure.value)) onEnd(failure.value)
       })
@@ -566,8 +572,15 @@ export function linkOver(port: Port): Link {
         onEnd,
       ),
     missions: (projectId) => call((ready) => ready['missions.list']({ projectId })),
-    searchStart: (projectId, text, listener, onEnd) =>
-      follow((ready) => ready['start.search']({ projectId, text }), listener, anError, onEnd),
+    searchStart: (projectId, text, listener, onEnd, onDone) =>
+      follow(
+        (ready) => ready['start.search']({ projectId, text }),
+        listener,
+        anError,
+        onEnd,
+        undefined,
+        onDone,
+      ),
     createStart: (create) => call((ready) => ready['start.create'](create)),
     keepAfterTriage: (missionId) =>
       call((ready) => ready['planning.keepAfterTriage']({ missionId })),

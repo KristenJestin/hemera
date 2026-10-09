@@ -9,10 +9,11 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { Link } from './link.ts'
 import {
   EMPTY_FOLD,
-  type StartFold,
   createFromTicket,
   createOf,
   foldStart,
+  searchPending,
+  type Search,
   settleStart,
   triageOf,
   triageStep,
@@ -26,13 +27,6 @@ export interface StartFieldPartProps {
   projectName: string
   onOpenMission: (key: string) => void
   onOpenChat: () => void
-}
-
-/** What the search for the text typed has said, and whether it ended. */
-interface Search {
-  for: string
-  fold: StartFold
-  ended: string | null
 }
 
 /** The mission just created, which the Planner has not answered yet. */
@@ -77,6 +71,7 @@ export function StartFieldPart({
           setSearch((before) => ({
             for: typed,
             fold: foldStart(before?.for === typed ? before.fold : EMPTY_FOLD, result),
+            done: false,
             ended: null,
           }))
         },
@@ -85,7 +80,17 @@ export function StartFieldPart({
           setSearch((before) => ({
             for: typed,
             fold: before?.for === typed ? before.fold : EMPTY_FOLD,
+            done: false,
             ended: `The search stopped: ${failure.message}`,
+          }))
+        },
+        () => {
+          if (stopped) return
+          setSearch((before) => ({
+            for: typed,
+            fold: before?.for === typed ? before.fold : EMPTY_FOLD,
+            done: true,
+            ended: before?.for === typed ? before.ended : null,
           }))
         },
       )
@@ -137,7 +142,9 @@ export function StartFieldPart({
   const fold = search?.for === typed ? search.fold : EMPTY_FOLD
   const views = viewsOf(fold)
   const results: readonly StartResultView[] | 'searching' =
-    search?.for === typed && (views.length > 0 || search.ended !== null) ? views : 'searching'
+    search?.for === typed && (views.length > 0 || search.ended !== null || search.done)
+      ? views
+      : 'searching'
   const notice = refused ?? (search?.for === typed ? (search.ended ?? fold.notice) : null)
 
   const create = (made: Parameters<Link['createStart']>[0]) => {
@@ -184,6 +191,7 @@ export function StartFieldPart({
         choice.current = null
       }}
       results={results}
+      searching={searchPending(search, typed)}
       notice={notice ?? undefined}
       triage={triage}
       onOpen={onOpen}

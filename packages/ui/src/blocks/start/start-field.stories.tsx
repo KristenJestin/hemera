@@ -190,6 +190,23 @@ export const EnterDoesNotCreate: Story = {
   },
 }
 
+/** The create choice is there but the search goes on: Enter waits for it to end. */
+export const EnterWaitsForTheSearch: Story = {
+  args: {
+    text: 'Fix the typo in the footer',
+    results: [{ kind: 'create', title: 'Fix the typo in the footer', ticket: null }],
+    searching: true,
+  },
+  render: typing,
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('textbox', { name: 'Start a mission in Acme' }),
+    )
+    await userEvent.keyboard('{Enter}')
+    expect(args.onCreate).not.toHaveBeenCalled()
+  },
+}
+
 /** Nothing else found: Enter creates, and the row says so. */
 export const EnterCreatesAlone: Story = {
   args: {
