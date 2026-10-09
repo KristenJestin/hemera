@@ -211,6 +211,20 @@ export const Loading: Story = {
   },
 }
 
+/** Needs you is read, the two lists are still on their way: their shapes, and no quiet state yet. */
+export const Reading: Story = {
+  args: { reading: true, since: NO_SINCE, recent: [], questions: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getAllByRole('list', { busy: true })).toHaveLength(2)
+    expect(
+      within(canvas.getByRole('region', { name: 'Needs you' })).getAllByRole('listitem'),
+    ).toHaveLength(2)
+    expect(canvas.queryByText('All quiet')).toBeNull()
+    expect(canvas.queryByText('No mission yet.')).toBeNull()
+  },
+}
+
 /** The engine could not answer: said in the middle, in words, and Try again. */
 export const Error: Story = {
   args: { error: 'The engine did not answer within 10 seconds.' },
