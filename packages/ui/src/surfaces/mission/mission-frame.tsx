@@ -257,3 +257,19 @@ export function MissionFrameBase({ stage }: { stage: MissionStage }): ReactNode 
     </div>
   )
 }
+
+/** What moved since the Spec was frozen, as the outdated mark keeps it: why, and what differs. */
+export function MissionFrameDifference({
+  why,
+  difference,
+}: {
+  why: string
+  difference: string | null
+}): ReactNode {
+  return (
+    <div className="flex max-w-measure flex-col gap-3 px-6 py-5">
+      <p className="text-sm text-muted-foreground">{why}</p>
+      <p className="text-base whitespace-pre-line">{difference ?? 'Nothing differs now.'}</p>
+    </div>
+  )
+}
