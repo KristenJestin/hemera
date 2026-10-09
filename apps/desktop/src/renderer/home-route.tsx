@@ -8,6 +8,7 @@ import {
   leavesLooked,
   mergeSince,
   questionRowsOf,
+  refreshSince,
   recentRowsOf,
   sightAfter,
   sinceCursorOf,
@@ -180,7 +181,9 @@ function useHomeData(
       if (!stopped) setData((now) => ({ ...now, questions }))
     }, fail)
     const stopSince = link.onSinceYouLeft((first) => {
-      if (!stopped) setData((now) => ({ ...now, since: { ...now.since, first } }))
+      if (!stopped) {
+        setData((now) => ({ ...now, since: { ...now.since, ...refreshSince(now.since, first) } }))
+      }
     }, fail)
     // Recent, then the last Journal line of each: shown together, so no row grows after it came.
     const read = (): void => {

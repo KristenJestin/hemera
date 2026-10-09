@@ -22,6 +22,7 @@ import {
   leavesLooked,
   mergeSince,
   questionRowsOf,
+  refreshSince,
   recentRowsOf,
   sightAfter,
   sinceCursorOf,
@@ -248,6 +249,23 @@ describe('The pages of Since you left, merged', () => {
       ['hemera', null],
       ['acme', 'm1'],
     ])
+  })
+
+  test('a refreshed first page keeps every event of the old one once older pages were loaded', () => {
+    const oldFirst = page([group('m1', [event(9), event(8), event(7)])], 6)
+    const older = page([group('m1', [event(5), event(4)])], 3)
+    const late = { at: '2026-10-09T09:30:00.000Z' }
+    const refreshed = page([group('m1', [event(10, late), event(9)])], 8)
+    const next = refreshSince({ first: oldFirst, older: [older] }, refreshed)
+    const merged = mergeSince([next.first, ...next.older])
+    expect(merged[0]?.events.map((one) => one.sequence)).toEqual([10, 9, 8, 7, 5, 4])
+    expect(sinceCursorOf(next.first, next.older)).toBe(3)
+  })
+
+  test('a refreshed first page replaces the old one while no older page was loaded', () => {
+    const refreshed = page([group('m1', [event(10)])], 8)
+    const next = refreshSince({ first: page([group('m1', [event(9)])], 8), older: [] }, refreshed)
+    expect(next).toEqual({ first: refreshed, older: [] })
   })
 
   test('the cursor is the last page read’s, or none while nothing was read', () => {

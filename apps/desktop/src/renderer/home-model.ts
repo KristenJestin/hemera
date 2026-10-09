@@ -86,6 +86,22 @@ export function mergeSince(pages: ReadonlyArray<SincePage>): SinceGroup[] {
     })
 }
 
+/**
+ * The newest page heard again. Once older pages were loaded, the events of the page it replaces
+ * that it no longer holds stay with the nearest older page, so nothing already shown vanishes.
+ */
+export function refreshSince(
+  kept: { first: SincePage | null; older: ReadonlyArray<SincePage> },
+  first: SincePage,
+): { first: SincePage; older: ReadonlyArray<SincePage> } {
+  const [nearest, ...rest] = kept.older
+  if (kept.first === null || nearest === undefined) return { first, older: kept.older }
+  return {
+    first,
+    older: [{ groups: [...kept.first.groups, ...nearest.groups], before: nearest.before }, ...rest],
+  }
+}
+
 /** The cursor of the next, older page: the last page read says it; none read yet, none to ask. */
 export function sinceCursorOf(
   first: SincePage | null,
