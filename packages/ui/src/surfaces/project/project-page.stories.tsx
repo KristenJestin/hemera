@@ -288,6 +288,17 @@ export const Focused: Story = {
   },
 }
 
+/** Ctrl+K, from anywhere on the page, puts the focus in the field that starts a mission. */
+export const StartShortcut: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const field = canvas.getByRole('textbox', { name: 'Start a mission in Acme' })
+    canvas.getByRole('button', { name: /ACME-12/ }).focus()
+    await userEvent.keyboard('{Control>}k{/Control}')
+    expect(field).toHaveFocus()
+  },
+}
+
 /** The 1366 by 768 laptop screen: the two columns side by side, the rail beside the missions. */
 export const Laptop: Story = {
   globals: { viewport: { value: 'laptop', isRotated: false } },

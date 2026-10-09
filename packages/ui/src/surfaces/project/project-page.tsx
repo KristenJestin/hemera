@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { createContext, type ReactNode, type RefObject, useRef, useState } from 'react'
+import { createContext, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
 import {
   MissionRow,
@@ -313,6 +313,17 @@ export function ProjectPage({
   tasks,
 }: ProjectPageProps): ReactNode {
   const field = useRef<HTMLInputElement>(null)
+  // Ctrl+K (Cmd+K on macOS), as the field's hint says, puts the focus in it from anywhere.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      if (event.key.toLowerCase() !== 'k' || field.current === null) return
+      event.preventDefault()
+      field.current.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const listed = STAGE_ORDER.flatMap((stage) =>
     groups.filter((group) => group.stage === stage && group.rows.length > 0),
   )
