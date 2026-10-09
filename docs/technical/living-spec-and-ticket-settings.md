@@ -1,19 +1,16 @@
 # The living spec and the ticket and Spec settings
 
-The validated design for the screens of #101: the living spec of a Project, and the Project
-settings sections for tickets and Specs. They are drawn as Storybook stories under
-**Explorations**, on the neutral Project "Acme" (repositories `api`, `web` and `shared`, missions
-`ACME-12` and `ACME-14`, the GitHub repositories `acme/api` and `acme/web`, the Jira site
-`acme.atlassian.net`). The data is in the shapes the engine answers (`livingSpec.*`, `tickets.*`,
-`resources.*`). The building of the screens is #104.
+The validated design for the living spec of a Project and the Project settings sections for
+tickets and Specs, now built. The screens are drawn in Storybook on the neutral Project "Acme"
+(repositories `api`, `web` and `shared`, missions `ACME-12` and `ACME-14`, the GitHub repositories
+`acme/api` and `acme/web`, the Jira site `acme.atlassian.net`).
 
-| Screen                   | Stories                                                      |
-| ------------------------ | ------------------------------------------------------------ |
-| Living spec              | `Explorations/Living spec/Domain by domain`                  |
-| Ticket and Spec settings | `Explorations/Ticket and Spec settings/Rows and dialogs`     |
-
-The files are in `packages/ui/src/explorations/living-spec/` and
-`packages/ui/src/explorations/ticket-settings/`.
+| Screen              | Stories                                         |
+| ------------------- | ----------------------------------------------- |
+| Living spec         | `Surfaces/Living spec`                          |
+| Ticket providers    | `Blocks/Project settings/Ticket providers`      |
+| Spec settings       | `Blocks/Project settings/Spec fields`           |
+| Exclusive resources | `Blocks/Project settings/Exclusive resources`   |
 
 ## The living spec
 

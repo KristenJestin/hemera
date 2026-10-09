@@ -22,9 +22,7 @@ import { SidebarMissionsFixture } from './sidebar-shell-fixture.tsx'
 import { Sidebar, type SidebarPlace, type SidebarProject } from './sidebar.tsx'
 import { WindowShell } from './window-shell.tsx'
 
-export { ACME, CHATS, LONG_TITLE, MISSION, REPOSITORIES, STAGE } from './shell-cast.ts'
-export { HOME_ROWS, denseRows } from '../surfaces/home/home-shell-fixture.tsx'
-export { DONE_GROUP, STAGE_GROUPS } from '../surfaces/project/project-shell-fixture.tsx'
+export { CHATS, LONG_TITLE, MISSION, REPOSITORIES } from './shell-cast.ts'
 
 /**
  * The neutral case every story of the shell is drawn on: a Project "Acme" with the repositories
