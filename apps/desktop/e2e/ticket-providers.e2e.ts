@@ -42,9 +42,6 @@ const providers = () => $('section[aria-label="Ticket providers"]')
 /** The list of the providers once read: while it is on its way, its skeleton rows wear its name. */
 const list = () => providers().$('ul[aria-label="Ticket providers"]:not([aria-busy="true"])')
 
-/** How long the dialog that adds GitHub waits before it asks which repositories to propose. */
-const PROPOSALS_ASKED_MS = 500
-
 /** The fake `gh` is a shell script: not on Windows. */
 const describeWithFake = RUNS_FAKE_GH ? describe : describe.skip
 
@@ -72,9 +69,8 @@ describeWithFake('A GitHub provider added from the settings of a Project', () =>
     await $('[role="menuitem"]*=GitHub').click()
     const adding = dialog()
     await expect(field(adding, 'Host')).toHaveValue('github.com')
-    // The first answer about the repositories proposed for the host ticks them in place of what is
-    // ticked: the repository is written once it came, so it is not unticked under the hand.
-    await browser.pause(PROPOSALS_ASKED_MS * 3)
+    // The proposals for the host may arrive before or after the repository is written: what was
+    // written by hand stays ticked either way.
     await write(field(adding, 'Another repository'), 'acme/api')
     await browser.keys('Enter')
     await expect(adding.$('[role="checkbox"][aria-checked="true"]')).toBeDisplayed()
