@@ -342,8 +342,12 @@ describe('following the living spec', () => {
   })
 
   test('rejecting names what is shown too, and reads the domain again', async () => {
+    let reads = 0
     const played = world({
-      livingSpecRequirements: () => Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })]),
+      livingSpecRequirements: () => {
+        reads += 1
+        return Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })])
+      },
     })
     const following = followLivingSpec(
       played.link,
@@ -353,14 +357,14 @@ describe('following the living spec', () => {
     )
     played.send(STATE)
     await flush()
-    const reads = played.calls.filter((one) => one.call === 'requirements').length
+    const before = reads
     following.reject('d1')
     await flush()
     expect(played.calls.find((one) => one.call === 'reject')?.args).toEqual([
       'd1',
       [{ id: 'LR2', version: 1, pending: null }],
     ])
-    expect(played.calls.filter((one) => one.call === 'requirements')).toHaveLength(reads + 1)
+    expect(reads).toBe(before + 1)
   })
 
   test('a refusal lands in refused and frees the domain', async () => {
@@ -383,8 +387,12 @@ describe('following the living spec', () => {
   })
 
   test('dropping a requirement reads its domain again', async () => {
+    let reads = 0
     const played = world({
-      livingSpecRequirements: () => Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })]),
+      livingSpecRequirements: () => {
+        reads += 1
+        return Promise.resolve([requirement({ id: 'LR2', state: 'proposed' })])
+      },
     })
     const following = followLivingSpec(
       played.link,
@@ -394,12 +402,12 @@ describe('following the living spec', () => {
     )
     played.send(STATE)
     await flush()
-    const reads = played.calls.filter((one) => one.call === 'requirements').length
+    const before = reads
     following.drop('LR2')
     expect(played.last().busy).toBe('LR2')
     await flush()
     expect(played.calls.find((one) => one.call === 'drop')?.args).toEqual(['LR2'])
-    expect(played.calls.filter((one) => one.call === 'requirements')).toHaveLength(reads + 1)
+    expect(reads).toBe(before + 1)
   })
 
   test('reading again starts the reading of one domain or of all', async () => {
