@@ -1,38 +1,47 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
-
-import {
-  DONE_GROUP,
-  LONG_NAME,
-  LONG_TITLE,
-  REPOSITORIES,
-  STAGE_GROUPS,
-} from '../../shell/shell-fixtures.tsx'
-import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { IconFileText } from '../../icons.ts'
+import { LONG_NAME, LONG_TITLE, REPOSITORIES } from '../../shell/shell-fixtures.tsx'
 import { ProjectTasks, SetupTask } from '../project-setup/setup-task.tsx'
 import { ProjectPage } from './project-page.tsx'
+import {
+  CANCELLED_GROUP,
+  DONE_GROUP,
+  PROJECT_CHATS,
+  PROJECT_LIVING_SPEC,
+  STAGE_GROUPS,
+  manyGroups,
+} from './project-shell-fixture.tsx'
+import { ProjectStartSlot } from './project-start-slot.tsx'
 
 /**
- * The Project page: its name and repositories, the entry to its settings, the start field, and
- * its missions by stage. The field's content and the rows' are later tickets'; here their place.
+ * The Project page: two columns. On the left the start slot, the Project's tasks and its missions
+ * by stage, each mission a two-line row, Done and Cancelled folded at the end. On the right a rail
+ * with the living spec card and the Chats. The field itself is the start slot's; here it is
+ * a stand-in of the same name.
  */
 const meta = {
   tags: ['autodocs'],
-  title: 'Surfaces/Project',
+  title: 'Surfaces/Project page',
   component: ProjectPage,
   parameters: { layout: 'fullscreen' },
   args: {
     name: 'Acme',
     repositories: REPOSITORIES,
+    start: <ProjectStartSlot name="Acme" />,
     groups: STAGE_GROUPS,
-    onStart: fn(),
+    livingSpec: PROJECT_LIVING_SPEC,
+    chats: PROJECT_CHATS,
     onOpenMission: fn(),
     onOpenSettings: fn(),
+    onOpenLivingSpec: fn(),
+    onOpenChat: fn(),
+    onNewChat: fn(),
     onRetry: fn(),
   },
   argTypes: {
@@ -41,6 +50,9 @@ const meta = {
     error: { control: 'text' },
     repositories: { table: { disable: true } },
     groups: { table: { disable: true } },
+    chats: { table: { disable: true } },
+    livingSpec: { table: { disable: true } },
+    start: { table: { disable: true } },
   },
   decorators: [
     (Story) => (
@@ -56,23 +68,58 @@ type Story = StoryObj<typeof meta>
 
 /** A Project with no mission yet: the header, the field, and the empty state in the room below. */
 export const Empty: Story = {
-  args: { groups: [] },
+  args: { groups: [], chats: [], livingSpec: null },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByText('No mission yet')).toBeVisible()
     expect(canvas.getByText('api')).toBeInTheDocument()
+    expect(canvas.getByText('No Chat yet.')).toBeVisible()
   },
 }
 
-/** Four stages, one mission each, four done folded away: the page as a Project is lived in. */
+/** One mission per stage, every mark once, Done folded, and the rail: the page as it is lived in. */
 export const Filled: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getAllByRole('list')).toHaveLength(4)
+    const headings = canvas.getAllByRole('heading', { level: 2 }).map((head) => head.textContent)
+    expect(headings.slice(0, 5)).toEqual([
+      expect.stringMatching(/^Shipping/),
+      expect.stringMatching(/^Review/),
+      expect.stringMatching(/^Building/),
+      expect.stringMatching(/^Planning/),
+      expect.stringMatching(/^Ready/),
+    ])
+    expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull()
+    for (const words of [
+      'Blocked by ACME-9',
+      'Blocked by shared database · ACME-15',
+      'Waiting on CI on acme/shop#52',
+      'web changed outside Hemera',
+      'Outdated',
+      'Fixing',
+    ]) {
+      expect(
+        canvas.queryAllByRole('img', { name: words }).length + canvas.queryAllByText(words).length,
+      ).toBeGreaterThan(0)
+    }
+    expect(canvas.getByText('Round 1 addressed: 4 points, checks green')).toBeVisible()
+    expect(canvas.getByText('60%')).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: /ACME-12/ }))
     expect(args.onOpenMission).toHaveBeenCalledWith('ACME-12')
     await userEvent.click(canvas.getByRole('button', { name: 'Settings of Acme' }))
     expect(args.onOpenSettings).toHaveBeenCalled()
+  },
+}
+
+/** Thirty missions, every title and event long: the page scrolls and no row grows. */
+export const Many: Story = {
+  args: { groups: manyGroups() },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const title = canvas.getAllByText(/^Export invoices as CSV/)[0]!
+    expect(getComputedStyle(title).textOverflow).toBe('ellipsis')
+    expect(canvas.getAllByRole('listitem').length).toBeGreaterThanOrEqual(30)
   },
 }
 
@@ -95,11 +142,11 @@ export const Dense: Story = {
           title: LONG_TITLE,
           when: '09:02',
           ball: 'agent' as const,
+          event: 'The agent wrote the tests of the export of every invoice of every customer',
         })),
       },
       {
         stage: 'Done',
-        fold: 'folded',
         rows: Array.from({ length: 128 }, (_, index) => ({
           missionKey: `ACME-${String(index + 1)}`,
           title: LONG_TITLE,
@@ -113,16 +160,22 @@ export const Dense: Story = {
     const canvas = within(canvasElement)
     const title = canvas.getByRole('heading', { level: 1 })
     expect(getComputedStyle(title).textOverflow).toBe('ellipsis')
-    expect(canvas.getAllByRole('listitem')).toHaveLength(12)
+    const rows = within(canvas.getByRole('list', { name: 'Building missions' }))
+    expect(rows.getAllByRole('listitem')).toHaveLength(12)
   },
 }
 
-/** Done folded, as the page opens: its header says how many, and the chevron opens them. */
+/** Done folded, as the page opens: its header says how many, and pressing it opens the list. */
 export const DoneFolded: Story = {
+  args: { groups: [...STAGE_GROUPS, CANCELLED_GROUP] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const header = canvas.getByRole('button', { name: /^Done/ })
     expect(header).toHaveAttribute('aria-expanded', 'false')
+    expect(canvas.getByRole('button', { name: /^Cancelled/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
     expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull()
     await userEvent.click(header)
     expect(header).toHaveAttribute('aria-expanded', 'true')
@@ -134,37 +187,77 @@ export const DoneFolded: Story = {
   },
 }
 
-/** Done open: its four missions in the same framed list as every stage; the keyboard folds it. */
-export const DoneOpen: Story = {
-  args: {
-    groups: [
-      ...STAGE_GROUPS.filter((group) => group !== DONE_GROUP),
-      { ...DONE_GROUP, fold: 'open' },
-    ],
-  },
+/** Opened from the keyboard: Enter folds Done back, Space opens it, and a row opens its mission. */
+export const DoneKeyboard: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const list = canvas.getByRole('list', { name: 'Done missions' })
-    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+    const header = canvas.getByRole('button', { name: /^Done/ })
+    header.focus()
+    await userEvent.keyboard(' ')
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    const list = await canvas.findByRole('list', { name: 'Done missions' })
     await userEvent.click(within(list).getByRole('button', { name: /ACME-9/ }))
     expect(args.onOpenMission).toHaveBeenCalledWith('ACME-9')
-    const header = canvas.getByRole('button', { name: /^Done/ })
     header.focus()
     await userEvent.keyboard('{Enter}')
     expect(header).toHaveAttribute('aria-expanded', 'false')
     await waitFor(() => expect(canvas.queryByRole('list', { name: 'Done missions' })).toBeNull())
-    await userEvent.keyboard(' ')
-    expect(header).toHaveAttribute('aria-expanded', 'true')
-    expect(await canvas.findByRole('list', { name: 'Done missions' })).toBeVisible()
   },
 }
 
-/** The missions on their way: the rows' own shape under the field. */
+/** The living spec card: its domains, the one that waits marked, and the way into the page. */
+export const LivingSpecCard: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const rail = canvas.getByRole('complementary', { name: 'About Acme' })
+    expect(within(rail).getByText('3 domains · updated yesterday')).toBeVisible()
+    const domains = within(within(rail).getByRole('list', { name: 'Domains' }))
+    expect(domains.getAllByRole('listitem')).toHaveLength(3)
+    expect(domains.getByText('Waits for you')).toBeInTheDocument()
+    await userEvent.click(within(rail).getByRole('button', { name: 'Open' }))
+    expect(args.onOpenLivingSpec).toHaveBeenCalled()
+  },
+}
+
+/** No living spec yet: the card says so, and still opens the page that writes it. */
+export const LivingSpecNone: Story = {
+  args: { livingSpec: null },
+  play: async ({ canvasElement }) => {
+    const rail = within(canvasElement).getByRole('complementary', { name: 'About Acme' })
+    expect(within(rail).getByText('Not written yet.')).toBeVisible()
+    expect(within(rail).getByRole('button', { name: 'Open' })).toBeVisible()
+  },
+}
+
+/** The living spec on its way: the card's own shape, nothing to press. */
+export const LivingSpecLoading: Story = {
+  args: { livingSpec: null, loading: true },
+  play: async ({ canvasElement }) => {
+    const rail = within(canvasElement).getByRole('complementary', { name: 'About Acme' })
+    expect(rail.querySelector('[data-living-spec-skeleton]')).not.toBeNull()
+  },
+}
+
+/** The Chats in the rail: each opens, and New Chat starts one. */
+export const Chats: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Chats' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    await userEvent.click(within(list).getByRole('button', { name: /Invoices export/ }))
+    expect(args.onOpenChat).toHaveBeenCalledWith('invoices')
+    await userEvent.click(canvas.getByRole('button', { name: 'New Chat' }))
+    expect(args.onNewChat).toHaveBeenCalled()
+  },
+}
+
+/** The missions on their way: the two-line rows' own shape under the field. */
 export const Loading: Story = {
-  args: { loading: true, groups: [] },
+  args: { loading: true, groups: [], chats: [], livingSpec: null },
   play: async ({ canvasElement }) => {
     expect(within(canvasElement).getByRole('list', { busy: true })).toBeInTheDocument()
     expect(canvasElement.querySelectorAll('[data-row-skeleton]')).toHaveLength(3)
+    expect(canvasElement.querySelectorAll('[data-row-event]').length).toBeGreaterThanOrEqual(3)
   },
 }
 
@@ -179,19 +272,35 @@ export const Error: Story = {
   },
 }
 
-/** From the keyboard: the settings, then the field, which Enter sends; then the rows. */
+/** From the keyboard: the settings, then the field, then the first mission, then the rail. */
 export const Focused: Story = {
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.tab()
     expect(canvas.getByRole('button', { name: 'Settings of Acme' })).toHaveFocus()
     await userEvent.tab()
-    const field = canvas.getByRole('textbox', { name: 'Start a mission in Acme' })
-    expect(field).toHaveFocus()
-    // The keystroke that reaches the field is inside its box, after the text.
-    expect(field.closest('[data-input-box]')).toContainElement(canvas.getByText('Ctrl'))
-    await userEvent.keyboard('Export the audit log{Enter}')
-    expect(args.onStart).toHaveBeenCalledWith('Export the audit log')
+    expect(canvas.getByRole('textbox', { name: 'Start a mission in Acme' })).toHaveFocus()
+    await userEvent.tab()
+    expect(canvas.getByRole('button', { name: /ACME-18/ })).toHaveFocus()
+    // The legends inside a row (its marks, its ball) are stops of their own before the next row.
+    const next = canvas.getByRole('button', { name: /ACME-12/ })
+    for (let stops = 0; stops < 4 && document.activeElement !== next; stops += 1) {
+      await userEvent.tab()
+    }
+    expect(next).toHaveFocus()
+  },
+}
+
+/** The 1366 by 768 laptop screen: the two columns side by side, the rail beside the missions. */
+export const Laptop: Story = {
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const rail = canvas.getByRole('complementary', { name: 'About Acme' })
+    const list = canvas.getByRole('list', { name: 'Review missions' })
+    expect(rail.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+      list.getBoundingClientRect().right,
+    )
   },
 }
 
