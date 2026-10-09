@@ -60,6 +60,7 @@ import {
   specRequirements,
   specScenarios,
   specSections,
+  specReliesOn,
   specVisions,
   specs,
 } from '../storage/schema.ts'
@@ -233,6 +234,19 @@ export const specIn = (
       if (living?.state === 'proposed') proposed.add(row.id)
     }
     const plan = yield* planIn(transaction, missionId)
+    // What its requirements rely on in dependencies not delivered yet (#92), by their key.
+    const relied = yield* transaction
+      .select({
+        requirementId: specReliesOn.requirementId,
+        prefix: missions.keyPrefix,
+        number: missions.keyNumber,
+        requirement: specReliesOn.theirRequirement,
+        version: specReliesOn.theirVersion,
+      })
+      .from(specReliesOn)
+      .innerJoin(missions, eq(missions.id, specReliesOn.dependsOn))
+      .where(eq(specReliesOn.missionId, missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the Spec')))
     return {
       missionId,
       key: missionKey(mission.keyPrefix, mission.keyNumber),
@@ -275,6 +289,13 @@ export const specIn = (
             version: scenario.version,
             proof: plan.proofs.get(scenario.id)?.proof ?? null,
             proofVersion: plan.proofs.get(scenario.id)?.version ?? 0,
+          })),
+        reliesOn: relied
+          .filter((one) => one.requirementId === row.id)
+          .map((one) => ({
+            dependency: missionKey(one.prefix, one.number),
+            requirement: one.requirement,
+            version: one.version,
           })),
       })),
       triage: triageOf(mission),
@@ -870,7 +891,7 @@ export const answerTriage = (
  * The deltas whose living requirement moved after they were written: a newer version, or removed
  * since. Before Freeze only; after it, the pre-launch check's and the merge's (#93).
  */
-const driftIn = (transaction: EngineTransaction, projectId: string, spec: Spec) =>
+export const driftIn = (transaction: EngineTransaction, projectId: string, spec: Spec) =>
   Effect.gen(function* () {
     const drifts: LivingDrift[] = []
     for (const requirement of spec.requirements) {

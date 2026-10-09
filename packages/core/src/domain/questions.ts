@@ -34,6 +34,7 @@ export const INPUT_KINDS = [
   'discuss_decision',
   'dismissed_finding',
   'triage_kept',
+  'dependency_accepted',
 ] as const
 export const InputKind = Schema.Literals(INPUT_KINDS)
 export type InputKind = typeof InputKind.Type
@@ -156,5 +157,7 @@ export function inputAbout(kind: InputKind, item: string, version: number | null
       return `the dismissed finding ${item}`
     case 'triage_kept':
       return 'the user keeping the mission'
+    case 'dependency_accepted':
+      return `the dependency on ${item}`
   }
 }

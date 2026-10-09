@@ -141,6 +141,9 @@ import { type ProbesSettings, interruptLeftProbes, probesLayer } from './plannin
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
 import { coldReadsLayer } from './planning/cold-reads.ts'
 import { agentOffersLayer, agentOffersServed } from './planning/offers.ts'
+import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
+import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
+import { type FileSnapshots, databaseSnapshots } from './planning/snapshots.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -211,6 +214,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
+  /** What the Freeze keeps of the dirty files (#92); the database's stand-in otherwise. */
+  readonly snapshots?: Layer.Layer<FileSnapshots, never, Secrets>
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
   /**
@@ -288,6 +293,8 @@ export type EngineServices =
   | ExclusiveResources
   | LivingSpec
   | ProbeDesk
+  | FileSnapshots
+  | FreezeLog
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -462,6 +469,7 @@ export const startProfile = (
         ...RESOURCE_EVENTS.map((event) => [event, resourceLine] as const),
         ...PROBE_MAPPERS,
         ...COLD_READ_MAPPERS,
+        ...FREEZE_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -476,11 +484,16 @@ export const startProfile = (
     const sessionsLayers = Layer.mergeAll(
       chatsLayer,
       setupLayer,
-      Layer.mergeAll(probesLayer({ log, hold: parts.probes?.hold }), coldReadsLayer({ log })).pipe(
+      Layer.mergeAll(
+        probesLayer({ log, hold: parts.probes?.hold }),
+        coldReadsLayer({ log }),
+        freezeLayer({ log }),
+      ).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
+      parts.snapshots ?? databaseSnapshots,
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

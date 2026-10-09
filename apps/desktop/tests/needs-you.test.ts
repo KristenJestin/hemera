@@ -117,6 +117,7 @@ const mission = (id: string, key: string, updatedAt: string): Mission => ({
   stage: 'building',
   round: 0,
   frozen: true,
+  freeze: null,
   marks: [],
   ball: null,
   needs: [],

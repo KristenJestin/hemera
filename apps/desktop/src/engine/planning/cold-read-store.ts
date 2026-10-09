@@ -716,38 +716,48 @@ const questionSettledIn = (transaction: EngineTransaction, missionId: string, id
     return false
   })
 
+/**
+ * Whether the cold read lets the Freeze appear (#92), and every reason it does not, in the
+ * transaction given: the latest pass of the mission's current Planning cycle and its findings.
+ * `ran` says whether a pass of this cycle was recorded at all.
+ */
+export const coldReadSettledIn = (transaction: EngineTransaction, missionId: string) =>
+  Effect.gen(function* () {
+    const mission = yield* missionRow(transaction, missionId)
+    const passes = (yield* passesIn(transaction, missionId)).filter(
+      (one) => one.cycle === mission.planningCycle,
+    )
+    const latest = passes.at(-1)
+    if (latest === undefined) return { ran: false, reasons: coldReadUnsettled(null, null) }
+    const head = { label: coldReadLabel(latest.number), state: stateOf(latest) }
+    // A failed pass leaves the findings of the last pass done in its cycle to settle.
+    const judged = passes.findLast((one) => one.state === 'done')
+    if (judged === undefined) return { ran: true, reasons: coldReadUnsettled(head, null) }
+    const findings = (yield* findingsIn(transaction, missionId)).filter(
+      (one) => one.coldReadId === judged.id,
+    )
+    const standing: FindingStanding[] = []
+    for (const row of findings) {
+      standing.push({
+        id: row.id,
+        severity: severityOf(row),
+        tasksOnly: row.tasksOnly,
+        fate: fateOf(row),
+        questionId: row.questionId,
+        questionSettled:
+          row.questionId !== null &&
+          (yield* questionSettledIn(transaction, missionId, row.questionId)),
+      })
+    }
+    return { ran: true, reasons: coldReadUnsettled(head, standing) }
+  })
+
 /** Whether the cold read lets the Freeze appear (#92), and every reason it does not. */
 export const coldReadSettled = (missionId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
-    const reasons = yield* database.transaction((transaction) =>
-      Effect.gen(function* () {
-        yield* missionRow(transaction, missionId)
-        const passes = yield* passesIn(transaction, missionId)
-        const latest = passes.at(-1)
-        if (latest === undefined) return coldReadUnsettled(null, null)
-        const head = { label: coldReadLabel(latest.number), state: stateOf(latest) }
-        // A failed pass leaves the findings of the last pass done in its cycle to settle.
-        const judged = passes.findLast((one) => one.state === 'done' && one.cycle === latest.cycle)
-        if (judged === undefined) return coldReadUnsettled(head, null)
-        const findings = (yield* findingsIn(transaction, missionId)).filter(
-          (one) => one.coldReadId === judged.id,
-        )
-        const standing: FindingStanding[] = []
-        for (const row of findings) {
-          standing.push({
-            id: row.id,
-            severity: severityOf(row),
-            tasksOnly: row.tasksOnly,
-            fate: fateOf(row),
-            questionId: row.questionId,
-            questionSettled:
-              row.questionId !== null &&
-              (yield* questionSettledIn(transaction, missionId, row.questionId)),
-          })
-        }
-        return coldReadUnsettled(head, standing)
-      }),
+    const { reasons } = yield* database.transaction((transaction) =>
+      coldReadSettledIn(transaction, missionId),
     )
     return { settled: reasons.length === 0, reasons }
   })

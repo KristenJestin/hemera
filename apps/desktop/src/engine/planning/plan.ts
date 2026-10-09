@@ -211,10 +211,15 @@ interface Base {
 /**
  * The base commit of each repository named, by #5's rule: with `fetch`, fetched once now (a
  * declaration); without it, the tracking ref last fetched (a write), fetched only when there is
- * none yet. A repository the Project does not have is left out; one whose base cannot be read is
- * said.
+ * none yet; or the commit `at` names for it (the Freeze's, #92). A repository the Project does not
+ * have is left out; one whose base cannot be read is said.
  */
-export const basesAt = (place: Place, names: ReadonlySet<string>, fetch: boolean) =>
+export const basesAt = (
+  place: Place,
+  names: ReadonlySet<string>,
+  fetch: boolean,
+  at: ReadonlyMap<string, string> = new Map(),
+) =>
   Effect.gen(function* () {
     const git = yield* Git
     const bases = new Map<string, Base>()
@@ -223,6 +228,11 @@ export const basesAt = (place: Place, names: ReadonlySet<string>, fetch: boolean
       const row = place.repositories.get(name)
       if (row === undefined) continue
       const folder = join(place.main, row.path)
+      const given = at.get(name)
+      if (given !== undefined) {
+        bases.set(name, { commit: given, folder })
+        continue
+      }
       const ref =
         row.remote === null
           ? `refs/heads/${row.baseBranch}`
@@ -407,9 +417,13 @@ const gitFailed = (missionId: string, reason: string) =>
 /**
  * What a declaration finds at each repository's base (#90), fetched once: every file a proof of a
  * live scenario inserts, every target of a task. Read outside the transaction, for the Spec at
- * the version it answers with.
+ * the version it answers with. `at` names the commits to check at instead (the Freeze's, #92).
  */
-export const atBaseFailures = (missionId: string, fetch: boolean) =>
+export const atBaseFailures = (
+  missionId: string,
+  fetch: boolean,
+  at: ReadonlyMap<string, string> = new Map(),
+) =>
   Effect.gen(function* () {
     const database = yield* Database
     const place = yield* placeOf(missionId)
@@ -428,7 +442,7 @@ export const atBaseFailures = (missionId: string, fetch: boolean) =>
       ),
       ...read.plan.tasks.flatMap((task) => task.targets.map((target) => target.repository)),
     ])
-    const { bases, problems } = yield* basesAt(place, named, fetch)
+    const { bases, problems } = yield* basesAt(place, named, fetch, at)
     const failures: CompletenessFailure[] = problems.map((sentence) => ({
       target: 'base',
       sentence,

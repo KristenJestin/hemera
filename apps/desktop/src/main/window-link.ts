@@ -256,13 +256,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['missions.get'](request).pipe(closedAs(gone), observed('missions.get', log)),
     'missions.create': (request) =>
       engine['missions.create'](request).pipe(closedAs(gone), observed('missions.create', log)),
-    'missions.freeze': (request) =>
-      engine['missions.freeze'](request).pipe(closedAs(gone), observed('missions.freeze', log)),
-    'missions.backToPlanning': (request) =>
-      engine['missions.backToPlanning'](request).pipe(
-        closedAs(gone),
-        observed('missions.backToPlanning', log),
-      ),
     'missions.launch': (request) =>
       engine['missions.launch'](request).pipe(closedAs(gone), observed('missions.launch', log)),
     'missions.fix': (request) =>
@@ -584,6 +577,30 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['tickets.changed'](request).pipe(
         streamClosedAs(gone),
         observedStream('tickets.changed', log),
+      ),
+    'missions.freezeReadiness': (request) =>
+      engine['missions.freezeReadiness'](request).pipe(
+        closedAs(gone),
+        observed('missions.freezeReadiness', log),
+      ),
+    'missions.freezeReadinessChanged': (request) =>
+      engine['missions.freezeReadinessChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('missions.freezeReadinessChanged', log),
+      ),
+    'missions.freeze': (request) =>
+      engine['missions.freeze'](request).pipe(closedAs(gone), observed('missions.freeze', log)),
+    'missions.returnToPlanning': (request) =>
+      engine['missions.returnToPlanning'](request).pipe(
+        closedAs(gone),
+        observed('missions.returnToPlanning', log),
+      ),
+    'dependencies.list': (request) =>
+      engine['dependencies.list'](request).pipe(closedAs(gone), observed('dependencies.list', log)),
+    'dependencies.decide': (request) =>
+      engine['dependencies.decide'](request).pipe(
+        closedAs(gone),
+        observed('dependencies.decide', log),
       ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),

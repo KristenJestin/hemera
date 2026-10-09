@@ -2136,6 +2136,77 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Propose that this mission depends on another mission of the Project: it cannot be built before that one is delivered. The user accepts or rejects it.",
+      "properties": {
+        "mission": {
+          "description": "The key of the mission yours cannot be built before (\`ACME-9\`), a mission of the same Project.",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reason": {
+          "description": "Why, in the language of the user: what this mission needs from it.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "mission",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "dependency_propose",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Mark a requirement of this Spec as relying on a requirement of a dependency not delivered yet. When the dependency is delivered, the pre-launch check reads it again.",
+      "properties": {
+        "base_version": {
+          "description": "The version of your requirement as you read it.",
+          "minimum": 0,
+          "type": "integer",
+        },
+        "dependency": {
+          "description": "The key of an accepted dependency of this mission (\`ACME-9\`).",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+        "requirement": {
+          "description": "The requirement of this Spec that relies on the dependency (\`R2\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "their_requirement": {
+          "description": "The requirement of the dependency’s Spec it relies on, its pending delta (\`R4\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "their_version": {
+          "description": "The version of that requirement you read.",
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "requirement",
+        "dependency",
+        "their_requirement",
+        "their_version",
+        "base_version",
+      ],
+      "type": "object",
+    },
+    "name": "relies_on_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

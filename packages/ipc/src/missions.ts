@@ -10,6 +10,7 @@
 import {
   Ball,
   CanonicalTicket,
+  DirtyStatus,
   InvalidKeyPrefix,
   Mark,
   MissionType,
@@ -28,6 +29,7 @@ import { Rpc, RpcGroup } from 'effect/rpc'
 
 import { EngineGone } from './gone.ts'
 import { StorageFailed } from './profile.ts'
+import { BaseFreshness } from './projects.ts'
 import { UnknownProject } from './projects.ts'
 
 export { InvalidKeyPrefix, MoveRefused, NeedAnswerRefused }
@@ -95,6 +97,36 @@ export type TriageAnswer = typeof TriageAnswer.Type
 /** What is left once a mission is cancelled: its work, kept until the user confirms the cleanup. */
 export const Cleanup = Schema.Literals(['awaiting-confirmation'])
 
+/** The base commit a Freeze recorded for one repository (CT-24), with how fresh it was. */
+export const FrozenBase = Schema.Struct({
+  repository: Schema.String,
+  commit: Schema.String,
+  ref: Schema.String,
+  freshness: BaseFreshness,
+})
+export type FrozenBase = typeof FrozenBase.Type
+
+/** A file of a main checkout that was dirty at the Freeze (CT-23); its content kept by hash. */
+export const FrozenFile = Schema.Struct({
+  repository: Schema.String,
+  path: Schema.String,
+  status: DirtyStatus,
+  /** The sha256 of its content; null for a deleted file and a folder (a repository, a submodule). */
+  sha256: Schema.NullOr(Schema.String),
+  /** Why its content was not kept ("content withheld: a sensitive place"), or null. */
+  withheld: Schema.NullOr(Schema.String),
+})
+export type FrozenFile = typeof FrozenFile.Type
+
+/** The last Freeze of a mission (#92): the Spec version frozen, the bases and the dirty files. */
+export const MissionFreeze = Schema.Struct({
+  version: Schema.Number,
+  frozenAt: Schema.String,
+  bases: Schema.Array(FrozenBase),
+  dirtyFiles: Schema.Array(FrozenFile),
+})
+export type MissionFreeze = typeof MissionFreeze.Type
+
 export const Mission = Schema.Struct({
   /** Internal and immutable: every reference to the mission uses it. */
   id: Schema.String,
@@ -112,6 +144,8 @@ export const Mission = Schema.Struct({
   /** The last review round, 0 before the first: Building · round N. */
   round: Schema.Number,
   frozen: Schema.Boolean,
+  /** Its last Freeze while its Spec is frozen; null in Planning and before any Freeze. */
+  freeze: Schema.NullOr(MissionFreeze),
   marks: Schema.Array(MissionMark),
   /** Who has the ball; null once Done or Cancelled. */
   ball: Schema.NullOr(Ball),
@@ -236,9 +270,6 @@ export const MissionsRpcs = RpcGroup.make(
     success: Mission,
     error: failing(...always, UnknownProject, InvalidMissionIdea, TicketAlreadyLinked),
   }),
-  humanMove('missions.freeze'),
-  /** The user chooses to update the Spec: it is unfrozen until the next Freeze. */
-  humanMove('missions.backToPlanning'),
   humanMove('missions.launch'),
   humanMove('missions.fix'),
   humanMove('missions.ship'),

@@ -1,10 +1,14 @@
 /**
  * The ports of the Memory that later tickets fill: the sessions' epochs and the sub-agents running
- * (the role sessions, #40), and the missions a mission depends on (Planning, P9). Their defaults
- * know of no replacement, no sub-agent and no dependency.
+ * (the role sessions, #40), and the missions a mission depends on (Planning, #92). Their defaults
+ * know of no replacement and no sub-agent; the dependencies are those the database holds.
  */
 
+import { and, eq } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
+
+import { Database, refusedWhile } from '../storage/database.ts'
+import { missionDependencies } from '../storage/schema.ts'
 
 /**
  * Whether the epoch a session's write carries is still the session's current one (CT-11): a
@@ -70,10 +74,34 @@ export class SlotWaits extends Context.Service<
 
 export const noSlotWaits = Layer.succeed(SlotWaits, () => Effect.succeed(null))
 
-/** The missions a mission depends on, accepted dependencies only, by identifier; P9 fills it. */
+/** The missions a mission depends on, accepted dependencies only, by identifier (#92). */
 export class MissionDependencies extends Context.Service<
   MissionDependencies,
   (missionId: string) => Effect.Effect<ReadonlyArray<string>>
 >()('MissionDependencies') {}
 
-export const noDependencies = Layer.succeed(MissionDependencies, () => Effect.succeed([]))
+/** The accepted dependencies the database holds (#92): what the user accepted, and only that. */
+export const acceptedDependencies = Layer.effect(
+  MissionDependencies,
+  Effect.map(
+    Effect.context<Database>(),
+    (context) => (missionId: string) =>
+      Effect.gen(function* () {
+        const database = yield* Database
+        const rows = yield* database
+          .select({ on: missionDependencies.dependsOn })
+          .from(missionDependencies)
+          .where(
+            and(
+              eq(missionDependencies.missionId, missionId),
+              eq(missionDependencies.state, 'accepted'),
+            ),
+          )
+          .pipe(Effect.mapError(refusedWhile('reading the dependencies')))
+        return rows.map((row) => row.on)
+      }).pipe(
+        Effect.provide(context),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      ),
+  ),
+)

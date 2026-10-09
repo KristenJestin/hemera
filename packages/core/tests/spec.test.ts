@@ -325,6 +325,22 @@ describe('The readable file', () => {
     expect(text).toContain('## Impact\n\n_Not written yet._')
     expect(text).toContain('### R1 · modified · invoices · L-4 at version 2')
   })
+
+  test('what a requirement relies on in a dependency not delivered yet is said under it (#92)', () => {
+    const spec = written()
+    const text = renderSpecMarkdown({
+      ...spec,
+      requirements: [
+        {
+          ...spec.requirements[0]!,
+          reliesOn: [{ dependency: 'ACME-9', requirement: 'R4', version: 3 }],
+        },
+      ],
+    })
+    expect(text).toContain(
+      'Invoices export as CSV.\n\nRelies on ACME-9 R4 (version 3), not delivered yet.\n',
+    )
+  })
 })
 
 describe('The Spec language is a BCP 47 tag', () => {

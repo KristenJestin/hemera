@@ -27,6 +27,7 @@ import {
   NOW_TEXT_MAX,
 } from './memory.ts'
 import { ColdReadFixed, ColdReadReport } from './cold-read.ts'
+import { DependencyPropose, ReliesOnWrite } from './freeze.ts'
 import { MissionType } from './mission.ts'
 import { ProbeLaunch, ProbeRead, ProbeReport } from './probes.ts'
 import { RetireHow } from './questions.ts'
@@ -1218,6 +1219,30 @@ export const TOOLS = {
       doing: 'Marking a cold read finding fixed',
     },
   }),
+  dependency_propose: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: DependencyPropose,
+    label: {
+      label: 'Propose a dependency',
+      mark: 'dependency-propose',
+      doing: 'Proposing a dependency',
+    },
+  }),
+  relies_on_write: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ReliesOnWrite,
+    label: {
+      label: 'Mark what relies on a dependency',
+      mark: 'relies-on-write',
+      doing: 'Marking what relies on a dependency',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1286,6 +1311,8 @@ export const TOOL_NAMES = [
   'ticket_read',
   'cold_read_report',
   'cold_read_fixed',
+  'dependency_propose',
+  'relies_on_write',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

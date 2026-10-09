@@ -120,6 +120,8 @@ export const sessionsEngine = (
     readonly probes?: ProfileParts['probes']
     /** The fake `gh` of the ticket suites (#95). */
     readonly gh?: GhSettings
+    /** What the Freeze keeps of the dirty files, when a suite holds it (#92). */
+    readonly snapshots?: ProfileParts['snapshots']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -161,9 +163,11 @@ export const sessionsEngine = (
   const withMemory = options.memory === undefined ? parts : { ...parts, memory: options.memory }
   const withTools =
     options.tools === undefined ? withMemory : { ...withMemory, tools: options.tools }
+  const withProbes =
+    options.probes === undefined ? withTools : { ...withTools, probes: options.probes }
   const run = commandsEngine(
     data,
-    options.probes === undefined ? withTools : { ...withTools, probes: options.probes },
+    options.snapshots === undefined ? withProbes : { ...withProbes, snapshots: options.snapshots },
   )
   return { world, run }
 }

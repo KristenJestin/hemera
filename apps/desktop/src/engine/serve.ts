@@ -124,6 +124,13 @@ import {
   dismissFinding,
   listColdReads,
 } from './planning/cold-read-store.ts'
+import { decideDependency, dependenciesOf } from './planning/dependencies.ts'
+import {
+  freezeMission,
+  freezeReadiness,
+  freezeReadinessChanges,
+  returnToPlanning,
+} from './planning/freeze.ts'
 import {
   changesSince,
   markRead,
@@ -266,10 +273,6 @@ export const engineHandlers = (
     'missions.get': ({ id }) => use(getMission(id)).pipe(observed('missions.get', log)),
     'missions.create': (asked) => use(createMission(asked)).pipe(observed('missions.create', log)),
     // The moves the window asks for are the user's: an agent never reaches them.
-    'missions.freeze': ({ id }) =>
-      use(moveMission(id, 'freeze', 'user')).pipe(observed('missions.freeze', log)),
-    'missions.backToPlanning': ({ id }) =>
-      use(moveMission(id, 'backToPlanning', 'user')).pipe(observed('missions.backToPlanning', log)),
     'missions.launch': ({ id }) =>
       use(moveMission(id, 'launch', 'user')).pipe(observed('missions.launch', log)),
     'missions.fix': ({ id }) =>
@@ -620,6 +623,22 @@ export const engineHandlers = (
       use(closeDiscussion(discussionId, closing)).pipe(observed('discussions.close', log)),
     'discussions.changed': ({ missionId }) =>
       follow(discussionChanges(missionId)).pipe(observedStream('discussions.changed', log)),
+    // The Freeze (#92): offered once everything is settled; it and the return are the user's.
+    'missions.freezeReadiness': ({ id }) =>
+      use(freezeReadiness(id)).pipe(observed('missions.freezeReadiness', log)),
+    'missions.freezeReadinessChanged': ({ id }) =>
+      follow(freezeReadinessChanges(id)).pipe(
+        observedStream('missions.freezeReadinessChanged', log),
+      ),
+    'missions.freeze': ({ id, specVersion }) =>
+      use(freezeMission(id, specVersion)).pipe(observed('missions.freeze', log)),
+    'missions.returnToPlanning': ({ id, reason }) =>
+      use(returnToPlanning(id, reason)).pipe(observed('missions.returnToPlanning', log)),
+    // The dependencies between missions (#92): the Planner proposes, the user decides.
+    'dependencies.list': ({ missionId }) =>
+      use(dependenciesOf(missionId)).pipe(observed('dependencies.list', log)),
+    'dependencies.decide': ({ id, accept }) =>
+      use(decideDependency(id, accept)).pipe(observed('dependencies.decide', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
 }

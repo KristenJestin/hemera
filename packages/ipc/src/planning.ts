@@ -70,6 +70,14 @@ export const SpecRequirement = Schema.Struct({
   newDomain: Schema.Boolean,
   /** It modifies or removes a living requirement that is still proposed (#93). */
   againstProposed: Schema.Boolean,
+  /** What it relies on in dependencies not delivered yet (#92): their key, requirement, version. */
+  reliesOn: Schema.Array(
+    Schema.Struct({
+      dependency: Schema.String,
+      requirement: Schema.String,
+      version: Schema.Number,
+    }),
+  ),
 })
 export type SpecRequirement = typeof SpecRequirement.Type
 

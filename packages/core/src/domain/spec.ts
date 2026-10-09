@@ -13,6 +13,7 @@ import { Schema } from 'effect'
 import { type LivingDrift, driftSaid } from './living-spec.ts'
 import { type MissionType, type Stage, isFrozen } from './mission.ts'
 import { type InputKind, inputAbout } from './questions.ts'
+import type { ReliedOn } from './freeze.ts'
 import {
   type ModelRecommendation,
   type ProofSeen,
@@ -95,6 +96,8 @@ export interface SpecRequirementText {
   readonly removed: boolean
   /** Its live scenarios, in their order. */
   readonly scenarios: ReadonlyArray<SpecScenarioText>
+  /** What it relies on in dependencies not delivered yet (#92). */
+  readonly reliesOn?: ReadonlyArray<ReliedOn>
 }
 
 /** A Spec as its file and its checks read it. */
@@ -368,6 +371,10 @@ const requirementsText = (spec: SpecText, versions: boolean): string => {
         '',
         requirement.text,
         '',
+        ...(requirement.reliesOn ?? []).flatMap((one) => [
+          `Relies on ${one.dependency} ${one.requirement} (version ${String(one.version)}), not delivered yet.`,
+          '',
+        ]),
         ...requirement.scenarios.map((scenario) =>
           [
             `- ${scenario.id}${versions ? ` (version ${String(scenario.version)})` : ''}: WHEN ${scenario.when} THEN ${scenario.then}`,

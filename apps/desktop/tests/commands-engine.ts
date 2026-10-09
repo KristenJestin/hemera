@@ -53,6 +53,7 @@ export function commandsEngine(
     | 'probes'
     | 'gh'
     | 'jira'
+    | 'snapshots'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {
