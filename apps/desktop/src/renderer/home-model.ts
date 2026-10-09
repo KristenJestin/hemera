@@ -86,14 +86,17 @@ export function mergeSince(pages: ReadonlyArray<SincePage>): SinceGroup[] {
     })
 }
 
+/** The pages of Since you left a window holds: the newest, and the older ones asked for. */
+export interface SinceHeld<First extends SincePage | null = SincePage | null> {
+  first: First
+  older: ReadonlyArray<SincePage>
+}
+
 /**
  * The newest page heard again. Once older pages were loaded, the events of the page it replaces
  * that it no longer holds stay with the nearest older page, so nothing already shown vanishes.
  */
-export function refreshSince(
-  kept: { first: SincePage | null; older: ReadonlyArray<SincePage> },
-  first: SincePage,
-): { first: SincePage; older: ReadonlyArray<SincePage> } {
+export function refreshSince(kept: SinceHeld, first: SincePage): SinceHeld<SincePage> {
   const [nearest, ...rest] = kept.older
   if (kept.first === null || nearest === undefined) return { first, older: kept.older }
   return {
