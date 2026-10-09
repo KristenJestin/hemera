@@ -1,19 +1,28 @@
 import type { ReactNode } from 'react'
 
 import { Menu } from '../../components/menu/menu.tsx'
+import { Frame } from '../../components/frame/frame.tsx'
 import { type SheetView, type SheetWidth, SheetStack } from '../../components/sheet/sheet.tsx'
-import { IconBan, IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
-import { type Ball, BallMark } from '../../blocks/ball/ball-mark.tsx'
+import { IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
+import { type Ball, BALL_LEGENDS, BallMark } from '../../blocks/ball/ball-mark.tsx'
+import { TicketLink } from '../../blocks/mission/mission-marks.tsx'
+import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
+import { NeedsYouList, type NeedsYouListProps } from '../../blocks/need/needs-you-list.tsx'
+import { CancelMission, HeaderMarks, StageTrack } from './mission-header.tsx'
 
 /**
- * The frame of a mission: its header, a base that keeps its state, and the views opened over it.
+ * The frame of a mission: its header, the needs at the top, a base that keeps its state, and the
+ * views opened over it.
  *
- * The header is two lines. The first: the key in the mono face, the title, and at its end what
- * the stage owns — who has the ball, as the ball's glyph (Hemera's face when the agent works);
- * the stage's chip; its marks; the stage's action; and a `…` with the rest, Cancel last. The
- * second, quiet: the branch, and the Spec, which opens from here on every stage because it is
- * what the mission is. The content of the chip, the marks and the action is a later ticket's;
- * here is where each sits.
+ * The header is three lines. The first: the key in the mono face, the title, and at its end the
+ * stage's action, the `…` with the rest when there is one, and Cancel, visible at every stage
+ * before Done. The second: the stage as a track of the stages of a mission's life, the current
+ * one lit and the lock of the frozen Spec on Planning. The third, quiet: who has the ball, the
+ * marks with the causes of those that have one written out, the type, the ticket it comes from,
+ * the branch when it is known, and the Spec, which opens from here on every stage because it is
+ * what the mission is. What the stage's action does is a later ticket's; here is where it sits.
+ *
+ * The needs of the mission stand under the header, above the base, whatever the stage.
  *
  * The base — the page of the current stage — is drawn once and never drawn again while a view
  * stands over it: its scroll, its folds and its chosen task are where they were when the view
@@ -44,15 +53,6 @@ export type ViewWidth = SheetWidth
 /** A view over the base: a sheet of the design system's stack. */
 export type MissionView = SheetView
 
-/** The tone of a stage, which its chip's dot wears. */
-export type StageTone = 'info' | 'build' | 'warning' | 'primary' | 'success' | 'muted'
-
-export interface MissionStage {
-  /** The stage as the chip says it: `Review · round 1`. */
-  label: string
-  tone: StageTone
-}
-
 export interface MissionMore {
   label: string
   icon?: ReactNode
@@ -63,19 +63,35 @@ export interface MissionFrameProps {
   missionKey: string
   title: string
   stage: MissionStage
+  /** The last review round, 0 before the first. */
+  round?: number | undefined
+  /** Whether the Spec is frozen. */
+  frozen: boolean
+  /** What kind of work it is, as the header says it. */
+  type: 'feature' | 'bug' | 'maintenance'
   ball: Ball
+  /** The marks of the mission after its ball: a glyph each, the causes written out. */
+  marks?: readonly MissionMarkView[] | undefined
+  /** Opens what moved, from the outdated mark. */
+  onOpenOutdated?: (() => void) | undefined
+  /** The ticket the mission comes from, by its key. */
+  ticket?: { key: string; onOpen?: (() => void) | undefined } | null | undefined
   /** The mission's branch, on the stages that have one. */
   branch?: string | undefined
   /** What the Spec's link says of it: `frozen yesterday at 17:02`. */
   spec?: string | undefined
+  /** The Spec's link is there only when this is: a Spec view is registered. */
   onOpenSpec?: (() => void) | undefined
-  /** The marks of the mission after its chip: glyphs, each with its legend. */
-  marks?: ReactNode
-  /** The stage's action: Freeze, Build, Ship. */
+  /** The stage's action: Freeze, Launch, Ship. */
   action?: ReactNode
   /** The rest of what can be done, in the `…`: open the Memory, the diff. */
   more?: readonly MissionMore[] | undefined
-  onCancel: () => void
+  /** Cancel is there only when this is: not at Done, not at Cancelled. */
+  onCancel?: (() => void) | undefined
+  /** Why the last thing asked of the header did not go through, in words. */
+  notice?: string | undefined
+  /** What the mission waits on the user for, at the top of every stage. */
+  needs?: ReactNode
   base: ReactNode
   /** Every view the frame can show, by id. */
   views: readonly MissionView[]
@@ -91,7 +107,7 @@ export interface MissionFrameProps {
 
 const FRAME = 'flex min-h-0 flex-1 flex-col'
 
-const HEADER = 'flex shrink-0 flex-col gap-1 px-8 pt-5 pb-3'
+const HEADER = 'flex shrink-0 flex-col gap-2 px-8 pt-5 pb-3'
 
 const LINE = 'flex min-h-control-md min-w-0 items-center gap-3'
 
@@ -101,24 +117,12 @@ const TITLE = 'min-w-0 truncate text-xl font-semibold tracking-tight'
 
 const END = 'ml-auto flex shrink-0 items-center gap-2'
 
-const META = 'flex min-w-0 items-center gap-4 text-xs text-muted-foreground'
+const META = 'flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground'
 
 const META_ITEM = 'flex min-w-0 items-center gap-1'
 
 const META_LINK =
   'flex min-w-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-ring'
-
-const CHIP =
-  'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border px-2 text-sm whitespace-nowrap'
-
-const CHIP_DOT: Record<StageTone, string> = {
-  info: 'size-2 rounded-full bg-info',
-  build: 'size-2 rounded-full bg-build',
-  warning: 'size-2 rounded-full bg-warning',
-  primary: 'size-2 rounded-full bg-primary',
-  success: 'size-2 rounded-full bg-success',
-  muted: 'size-2 rounded-full bg-muted-foreground',
-}
 
 /** Clipped: a sheet past the right edge, on its way in or out, is not a reason for the page to scroll. */
 const BODY = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
@@ -129,14 +133,21 @@ export function MissionFrame({
   missionKey,
   title,
   stage,
+  round = 0,
+  frozen,
+  type,
   ball,
+  marks = [],
+  onOpenOutdated,
+  ticket,
   branch,
   spec,
   onOpenSpec,
-  marks,
   action,
   more = [],
   onCancel,
+  notice,
+  needs,
   base,
   views,
   open,
@@ -144,19 +155,6 @@ export function MissionFrame({
   onShow,
   onClose,
 }: MissionFrameProps): ReactNode {
-  const groups = [
-    more.map((item) => ({ label: item.label, icon: item.icon, onSelect: item.onSelect })),
-    // Cancel cannot be undone: the destructive item of the menu, with its ban.
-    [
-      {
-        label: 'Cancel mission…',
-        icon: <IconBan size="sm" />,
-        destructive: true,
-        onSelect: onCancel,
-      },
-    ],
-  ].filter((group) => group.length > 0)
-
   return (
     <div className={FRAME}>
       <div className={HEADER}>
@@ -164,33 +162,56 @@ export function MissionFrame({
           <span className={KEY}>{missionKey}</span>
           <h1 className={TITLE}>{title}</h1>
           <div className={END}>
-            <BallMark ball={ball} legend face />
-            <span className={CHIP} data-stage={stage.label}>
-              <span aria-hidden="true" className={CHIP_DOT[stage.tone]} />
-              {stage.label}
-            </span>
-            {marks}
             {action}
-            <Menu label={`More for ${missionKey}`} icon={<IconDots size="md" />} groups={groups} />
+            {onCancel !== undefined && (
+              <CancelMission missionKey={missionKey} onCancel={onCancel} />
+            )}
+            {more.length > 0 && (
+              <Menu
+                label={`More for ${missionKey}`}
+                icon={<IconDots size="md" />}
+                groups={[
+                  more.map((item) => ({
+                    label: item.label,
+                    icon: item.icon,
+                    onSelect: item.onSelect,
+                  })),
+                ]}
+              />
+            )}
           </div>
         </div>
-        {(branch !== undefined || spec !== undefined) && (
-          <div className={META}>
-            {branch !== undefined && (
-              <span className={META_ITEM}>
-                <IconGitBranch size="sm" />
-                <span className="truncate font-mono">{branch}</span>
-              </span>
-            )}
-            {spec !== undefined && (
-              <button type="button" className={META_LINK} onClick={onOpenSpec}>
-                <IconFileText size="sm" />
-                <span className="truncate">Spec · {spec}</span>
-              </button>
-            )}
-          </div>
+        <StageTrack stage={stage} round={round} frozen={frozen} />
+        <div className={META}>
+          <span className={META_ITEM}>
+            <BallMark ball={ball} legend face />
+            <span>{BALL_LEGENDS[ball]}</span>
+          </span>
+          <HeaderMarks marks={marks} onOpenOutdated={onOpenOutdated} />
+          <span className="capitalize">{type}</span>
+          {ticket !== null && ticket !== undefined && (
+            <TicketLink ticket={ticket.key} onOpen={ticket.onOpen} />
+          )}
+          {branch !== undefined && (
+            <span className={META_ITEM}>
+              <IconGitBranch size="sm" />
+              <span className="truncate font-mono">{branch}</span>
+            </span>
+          )}
+          {onOpenSpec !== undefined && (
+            <button type="button" className={META_LINK} onClick={onOpenSpec}>
+              <IconFileText size="sm" />
+              <span className="truncate">Spec{spec === undefined ? '' : ` · ${spec}`}</span>
+            </button>
+          )}
+        </div>
+        {notice !== undefined && (
+          <p role="alert" className="text-sm text-destructive">
+            {notice}
+          </p>
         )}
       </div>
+      {needs}
 
       <div className={BODY}>
         <div
@@ -210,6 +231,29 @@ export function MissionFrame({
           scrimLabel="Back to the page"
         />
       </div>
+    </div>
+  )
+}
+
+/** The needs of a mission under its header: Needs you's own list, in a frame of the page's width. */
+export function MissionFrameNeeds(props: NeedsYouListProps): ReactNode {
+  if (props.rows.length === 0 && props.loading !== true) return null
+  return (
+    <div className="px-8 pb-2">
+      <Frame>
+        <NeedsYouList {...props} />
+      </Frame>
+    </div>
+  )
+}
+
+/** The base of a stage no page is registered for: its place, with the stage's name. */
+export function MissionFrameBase({ stage }: { stage: MissionStage }): ReactNode {
+  return (
+    <div className="mx-auto flex w-full max-w-page flex-col gap-3 px-8 py-6">
+      <Frame>
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">The {stage} page</p>
+      </Frame>
     </div>
   )
 }

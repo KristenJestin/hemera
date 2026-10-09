@@ -204,14 +204,8 @@ function says(canvasElement: HTMLElement, words: string): boolean {
   )
 }
 
-const FROM_A_STAGE = {
-  tags: ['!autodocs'],
-  parameters: { layout: 'fullscreen' },
-} as const
-
 /** Planning: the Spec not frozen yet, Freeze as its action, the stage track at its first step, the needs at the top. */
 export const MissionPlanning: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-14" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -232,7 +226,6 @@ export const MissionPlanning: Story = {
 
 /** A need of the top list unfolds to its card, in place, and the card answers. */
 export const MissionNeedUnfolded: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-14" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -246,7 +239,6 @@ export const MissionNeedUnfolded: Story = {
 
 /** Ready, frozen, blocked by a dependency: Launch, the lock on the track, and the cause written out. */
 export const MissionBlockedByDependency: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-16" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -259,18 +251,18 @@ export const MissionBlockedByDependency: Story = {
 
 /** Building, blocked by a shared resource another mission holds. */
 export const MissionBlockedByResource: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-17" />,
   play: async ({ canvasElement }) => {
     expect(says(canvasElement, 'Blocked by shared database · ACME-15')).toBe(true)
     expect(within(canvasElement).queryByRole('button', { name: 'Launch' })).toBeNull()
-    expect(within(canvasElement).getByText('Building')).toBeVisible()
+    expect(
+      within(within(canvasElement).getByRole('list', { name: 'Stage' })).getByText('Building'),
+    ).toBeVisible()
   },
 }
 
 /** Review, round 1: Ship, a repository changed outside Hemera, a fix under way, a need, and the ticket it comes from. */
 export const MissionReview: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-12" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -278,13 +270,14 @@ export const MissionReview: Story = {
     expect(says(canvasElement, 'web changed outside Hemera')).toBe(true)
     expect(says(canvasElement, 'Fixing')).toBe(true)
     expect(canvas.getByRole('button', { name: /acme\/shop#41/ })).toBeInTheDocument()
-    expect(canvas.getByText('Review · round 1')).toBeVisible()
+    expect(
+      within(canvas.getByRole('list', { name: 'Stage' })).getByText('Review · round 1'),
+    ).toBeVisible()
   },
 }
 
 /** Shipping: no action of its own, waiting on someone, said with what it waits on. */
 export const MissionWaiting: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-18" />,
   play: async ({ canvasElement }) => {
     expect(says(canvasElement, 'Waiting on CI on acme/shop#52')).toBe(true)
@@ -296,7 +289,6 @@ export const MissionWaiting: Story = {
 
 /** Ready but outdated: the glyph opens what moved as a view over the base, and Back finds the base. */
 export const MissionOutdated: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-19" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -314,7 +306,6 @@ export const MissionOutdated: Story = {
 
 /** Cancel asks once, says what stops and what is kept; Keep it going leaves everything as it was. */
 export const MissionCancelling: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-15" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -331,12 +322,7 @@ export const MissionCancelling: Story = {
 
 /** Done and Cancelled: no Cancel, no action; the track of a cancelled mission is its one step. */
 export const MissionOver: Story = {
-  ...FROM_A_STAGE,
-  render: () => (
-    <>
-      <MissionStageFixture missionKey="ACME-9" />
-    </>
-  ),
+  render: () => <MissionStageFixture missionKey="ACME-9" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.queryByRole('button', { name: 'Cancel' })).toBeNull()
@@ -345,7 +331,6 @@ export const MissionOver: Story = {
 }
 
 export const MissionCancelled: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-4" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -358,7 +343,6 @@ export const MissionCancelled: Story = {
 
 /** A refused Freeze says why, in words, under the header. */
 export const MissionFreezeRefused: Story = {
-  ...FROM_A_STAGE,
   render: () => (
     <MissionStageFixture missionKey="ACME-14" notice="The Spec changed since you read it." />
   ),
@@ -371,7 +355,6 @@ export const MissionFreezeRefused: Story = {
 
 /** The Spec link is there only when a Spec view is registered. */
 export const MissionWithoutSpecView: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-14" specView={false} />,
   play: async ({ canvasElement }) => {
     expect(within(canvasElement).queryByRole('button', { name: /^Spec/ })).toBeNull()
@@ -380,7 +363,6 @@ export const MissionWithoutSpecView: Story = {
 
 /** At 1366×768, a long title and the longest causes: the title gives way, the header's end stays whole. */
 export const MissionLongCauses: Story = {
-  ...FROM_A_STAGE,
   globals: { viewport: { value: 'laptop', isRotated: false } },
   render: () => <MissionStageFixture missionKey="ACME-17" title={LONG_TITLE} longCause />,
   play: async ({ canvasElement }) => {
@@ -388,13 +370,14 @@ export const MissionLongCauses: Story = {
     const title = canvas.getByRole('heading', { level: 1 })
     expect(getComputedStyle(title).textOverflow).toBe('ellipsis')
     expect(canvas.getByRole('button', { name: 'Cancel' })).toBeVisible()
-    expect(says(canvasElement, 'Blocked by the shared database of the billing service · ACME-15')).toBe(true)
+    expect(
+      says(canvasElement, 'Blocked by the shared database of the billing service · ACME-15'),
+    ).toBe(true)
   },
 }
 
 /** Over a stage's page, a view stands and goes: the page under it is the one that was there. */
 export const MissionStageViewsOverBase: Story = {
-  ...FROM_A_STAGE,
   render: () => <MissionStageFixture missionKey="ACME-19" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)

@@ -1,5 +1,8 @@
 import { type ReactNode, useState } from 'react'
 
+import type { Ball } from '../../blocks/ball/ball-mark.tsx'
+import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
+import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import { Button } from '../../components/button/button.tsx'
 import {
   IconBook2,
@@ -7,10 +10,16 @@ import {
   IconGitCompare,
   IconListCheck,
   IconMessages,
+  IconRefresh,
 } from '../../icons.ts'
-import { ACME, MISSION, STAGE } from '../../shell/shell-cast.ts'
+import { ACME, MISSION } from '../../shell/shell-cast.ts'
 import { ContentHeader, type Crumb } from '../../shell/content-header.tsx'
-import { MissionFrame, type MissionView } from './mission-frame.tsx'
+import {
+  MissionFrame,
+  MissionFrameBase,
+  MissionFrameNeeds,
+  type MissionView,
+} from './mission-frame.tsx'
 import { AT_BASE, type MissionFrameState, closeView, openView, showView } from './navigation.ts'
 import { ReviewStage, type ReviewStageProps } from './review-stage.tsx'
 
@@ -229,8 +238,13 @@ export function MissionBody({
     <MissionFrame
       missionKey={MISSION.key}
       title={title}
-      stage={STAGE}
+      stage="Review"
+      round={1}
+      frozen
+      type="feature"
       ball="you"
+      marks={[{ kind: 'outside', repository: 'web' }, { kind: 'fixing' }]}
+      ticket={{ key: 'acme/shop#41' }}
       branch={MISSION.branch}
       spec={MISSION.spec}
       onOpenSpec={() => machine.open('spec')}
@@ -276,13 +290,259 @@ export function MissionFixture({
   const crumbs: Crumb[] = [
     { id: 'project', label: ACME.name, onPress: () => {} },
     { id: 'mission', label: MISSION.key, mono: true, onPress: () => machine.show(null) },
-    { id: 'stage', label: STAGE.label, onPress: () => machine.show(null) },
+    { id: 'stage', label: 'Review · round 1', onPress: () => machine.show(null) },
     ...machine.crumbs,
   ]
   return (
     <div className="flex h-screen flex-col bg-surface-content">
       <ContentHeader folded={false} onFold={() => {}} crumbs={crumbs} />
       <MissionBody machine={machine} title={title} />
+    </div>
+  )
+}
+
+/** A mission of the cast: what its header shows, and what its stage's action is. */
+interface CastMission {
+  title: string
+  stage: MissionStage
+  round?: number
+  frozen: boolean
+  type: 'feature' | 'bug' | 'maintenance'
+  ball: Ball
+  marks: readonly MissionMarkView[]
+  ticket?: string
+  action?: string
+  /** Done and Cancelled cannot be cancelled. */
+  cancel: boolean
+  needs?: readonly [string, string][]
+}
+
+const CAST = {
+  'ACME-14': {
+    title: 'An audit log of who read what',
+    stage: 'Planning',
+    frozen: false,
+    type: 'feature',
+    ball: 'you',
+    marks: [{ kind: 'needsYou' }],
+    ticket: 'acme/shop#47',
+    action: 'Freeze',
+    cancel: true,
+    needs: [
+      ['q1', 'Who may read the audit log?'],
+      ['q2', 'How long is the log kept?'],
+    ],
+  },
+  'ACME-16': {
+    title: 'Labels in French and English',
+    stage: 'Ready',
+    frozen: true,
+    type: 'feature',
+    ball: 'blocked',
+    marks: [{ kind: 'blocked', cause: 'ACME-9' }],
+    action: 'Launch',
+    cancel: true,
+  },
+  'ACME-17': {
+    title: 'Move the invoice numbers to the shared sequence',
+    stage: 'Building',
+    frozen: true,
+    type: 'maintenance',
+    ball: 'blocked',
+    marks: [{ kind: 'blocked', cause: 'shared database · ACME-15' }],
+    cancel: true,
+  },
+  'ACME-12': {
+    title: MISSION.title,
+    stage: 'Review',
+    round: 1,
+    frozen: true,
+    type: 'feature',
+    ball: 'you',
+    marks: [{ kind: 'outside', repository: 'web' }, { kind: 'fixing' }],
+    ticket: 'acme/shop#41',
+    action: 'Ship',
+    cancel: true,
+  },
+  'ACME-18': {
+    title: 'Release the invoices export to every customer',
+    stage: 'Shipping',
+    frozen: true,
+    type: 'feature',
+    ball: 'someone',
+    marks: [{ kind: 'waiting', on: 'CI on acme/shop#52' }],
+    ticket: 'acme/shop#44',
+    cancel: true,
+  },
+  'ACME-19': {
+    title: 'Paginate the customer list',
+    stage: 'Ready',
+    frozen: true,
+    type: 'feature',
+    ball: 'idle',
+    marks: [{ kind: 'outdated' }],
+    ticket: 'acme/shop#38',
+    action: 'Launch',
+    cancel: true,
+  },
+  'ACME-15': {
+    title: 'Retry a failed webhook from its row',
+    stage: 'Building',
+    frozen: true,
+    type: 'bug',
+    ball: 'agent',
+    marks: [],
+    cancel: true,
+  },
+  'ACME-9': {
+    title: 'Export the movements',
+    stage: 'Done',
+    frozen: true,
+    type: 'feature',
+    ball: 'idle',
+    marks: [],
+    cancel: false,
+  },
+  'ACME-4': {
+    title: 'Drop the legacy invoice screen',
+    stage: 'Cancelled',
+    frozen: false,
+    type: 'maintenance',
+    ball: 'idle',
+    marks: [],
+    cancel: false,
+  },
+} satisfies Record<string, CastMission>
+
+const LONG_CAUSE = 'the shared database of the billing service · ACME-15'
+
+/** The views a stage fixture can open: the Spec when one is registered, and what changed. */
+function stageViews(withSpec: boolean): readonly MissionView[] {
+  return [
+    ...(withSpec
+      ? [
+          {
+            id: 'spec',
+            title: 'Spec',
+            icon: <IconFileText size="sm" />,
+            width: 'wide' as const,
+            body: <Prose title="Frozen yesterday at 17:02" lines={12} />,
+          },
+        ]
+      : []),
+    {
+      id: 'difference',
+      title: 'What changed',
+      icon: <IconRefresh size="sm" />,
+      width: 'narrow',
+      body: (
+        <div className="flex max-w-measure flex-col gap-3 px-6 py-5">
+          <p className="text-sm text-muted-foreground">The ticket changed</p>
+          <p className="text-base">The ticket gained a second acceptance line.</p>
+        </div>
+      ),
+    },
+  ]
+}
+
+/** The needs of ACME-14 as Needs you's rows: a decision each. */
+function needRows(needs: readonly [string, string][]): readonly NeedRow[] {
+  return needs.map(([id, title]) => ({
+    id,
+    project: ACME.name,
+    need: {
+      ask: {
+        kind: 'decision',
+        options: [{ label: 'Admins only' }, { label: 'Every member' }],
+      },
+      title,
+      missionKey: 'ACME-14',
+      when: 'yesterday',
+    },
+  }))
+}
+
+/**
+ * A mission of the cast on the page of its stage, under the header that carries its trail: for
+ * the stories of the header — the stage, the action, the marks, the needs, the views.
+ */
+export function MissionStageFixture({
+  missionKey,
+  title,
+  longCause = false,
+  notice,
+  specView = true,
+}: {
+  missionKey: string
+  title?: string | undefined
+  longCause?: boolean | undefined
+  notice?: string | undefined
+  specView?: boolean | undefined
+}): ReactNode {
+  const found = new Map<string, CastMission>(Object.entries(CAST)).get(missionKey)
+  if (found === undefined) throw new Error(`No mission ${missionKey} in the cast`)
+  const [state, setState] = useState(AT_BASE)
+  const open = (id: string): void => setState((before) => openView(before, id))
+  const show = (id: string | null): void => setState((before) => showView(before, id))
+  const views = stageViews(specView)
+  const marks = longCause
+    ? found.marks.map((mark) =>
+        mark.kind === 'blocked' ? { kind: 'blocked' as const, cause: LONG_CAUSE } : mark,
+      )
+    : found.marks
+  const label =
+    found.round === undefined ? found.stage : `${found.stage} · round ${String(found.round)}`
+  const crumbs: Crumb[] = [
+    { id: 'project', label: ACME.name, onPress: () => {} },
+    { id: 'mission', label: missionKey, mono: true, onPress: () => show(null) },
+    { id: 'stage', label, onPress: () => show(null) },
+    ...state.open.map((id) => ({
+      id: `view:${id}`,
+      label: views.find((view) => view.id === id)?.title ?? id,
+      onPress: () => show(id),
+    })),
+  ]
+  return (
+    <div className="flex h-screen flex-col bg-surface-content">
+      <ContentHeader folded={false} onFold={() => {}} crumbs={crumbs} />
+      <MissionFrame
+        missionKey={missionKey}
+        title={title ?? found.title}
+        stage={found.stage}
+        round={found.round}
+        frozen={found.frozen}
+        type={found.type}
+        ball={found.ball}
+        marks={marks}
+        onOpenOutdated={() => open('difference')}
+        ticket={found.ticket === undefined ? null : { key: found.ticket }}
+        spec={found.frozen ? 'frozen yesterday at 17:02' : undefined}
+        onOpenSpec={specView ? () => open('spec') : undefined}
+        action={
+          found.action === undefined ? undefined : (
+            <Button variant="primary" size="sm">
+              {found.action}
+            </Button>
+          )
+        }
+        onCancel={found.cancel ? () => {} : undefined}
+        notice={notice}
+        needs={
+          found.needs === undefined ? undefined : (
+            <MissionFrameNeeds
+              rows={needRows(found.needs)}
+              projects={[ACME.name]}
+              on={() => ({ onChoose: () => {} })}
+            />
+          )
+        }
+        base={<MissionFrameBase stage={found.stage} />}
+        views={views}
+        open={state.open}
+        shown={state.shown}
+        onShow={show}
+        onClose={(id) => setState((before) => closeView(before, id))}
+      />
     </div>
   )
 }
