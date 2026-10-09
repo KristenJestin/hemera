@@ -372,6 +372,22 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       ),
     'start.create': (request) =>
       engine['start.create'](request).pipe(closedAs(gone), observed('start.create', log)),
+    'home.sinceYouLeft': (request) =>
+      engine['home.sinceYouLeft'](request).pipe(closedAs(gone), observed('home.sinceYouLeft', log)),
+    'home.sinceYouLeftChanged': () =>
+      engine['home.sinceYouLeftChanged']().pipe(
+        streamClosedAs(gone),
+        observedStream('home.sinceYouLeftChanged', log),
+      ),
+    'home.looked': () => engine['home.looked']().pipe(closedAs(gone), observed('home.looked', log)),
+    'home.recent': () => engine['home.recent']().pipe(closedAs(gone), observed('home.recent', log)),
+    'home.opened': (request) =>
+      engine['home.opened'](request).pipe(closedAs(gone), observed('home.opened', log)),
+    'memory.journalTail': (request) =>
+      engine['memory.journalTail'](request).pipe(
+        closedAs(gone),
+        observed('memory.journalTail', log),
+      ),
     'planning.spec': (request) =>
       engine['planning.spec'](request).pipe(closedAs(gone), observed('planning.spec', log)),
     'planning.changesSince': (request) =>
