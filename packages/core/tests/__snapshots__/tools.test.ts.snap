@@ -2051,6 +2051,91 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "End the cold read with your report. Hemera keeps it, bound to the Spec version you read, and hands it on. Call it once: your session ends with it.",
+      "properties": {
+        "findings": {
+          "description": "Every finding, graded; an empty list is a valid report.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "question": {
+                "description": "For a blocking finding on a section, a requirement, a scenario or a proof: the question a developer would ask.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "severity": {
+                "description": "\`blocking\` (a developer would have to guess), \`warning\` (likely trouble) or \`suggestion\` (it would read better).",
+                "enum": [
+                  "blocking",
+                  "warning",
+                  "suggestion",
+                ],
+                "type": "string",
+              },
+              "text": {
+                "description": "What is wrong, in the language of the user.",
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "where": {
+                "description": "Every item of the Spec it concerns, at least one.",
+                "items": {
+                  "description": "A section name (\`why\`, \`impact\`…), or a requirement, scenario, proof or task id (\`R2\`, \`R2.S1\`, \`R2.S1 proof\`, \`T3\`).",
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "severity",
+              "where",
+              "text",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "findings",
+      ],
+      "type": "object",
+    },
+    "name": "cold_read_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Mark a finding of the cold read fixed: a blocking finding on the tasks only, a warning or a suggestion you agreed with. A blocking finding on the rest is asked in a wave instead.",
+      "properties": {
+        "finding": {
+          "description": "The finding (\`C1.F2\`), as [hemera:cold-read] named it.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "what": {
+          "description": "What you changed: the section, requirement, scenario or task.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "finding",
+        "what",
+      ],
+      "type": "object",
+    },
+    "name": "cold_read_fixed",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

@@ -57,6 +57,7 @@ import {
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { deliveredIn, inputKindOf, receiveInput } from './inputs.ts'
+import { findingsAskRefusal, findingsAskedIn, findingsReopenedIn } from './cold-read-findings.ts'
 import {
   type SpecWriter,
   type Written,
@@ -161,6 +162,9 @@ export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) 
         if (new Set(replacing).size !== replacing.length) {
           return answer(refused('refused: two questions of the wave replace the same one.'))
         }
+        // A question from a cold read's finding: only a blocking one on the Spec (#91).
+        const fromFinding = yield* findingsAskRefusal(transaction, writer.missionId, asked)
+        if (fromFinding !== null) return answer(refused(fromFinding))
         const replaced: QuestionRow[] = []
         for (const id of replacing) {
           const row = yield* questionRow(transaction, writer.missionId, id)
@@ -242,6 +246,15 @@ export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) 
             plannerEvent(writer, 'planning.question_replaced', { question: old.id, by: id }),
           )
         }
+        yield* findingsAskedIn(
+          transaction,
+          writer.missionId,
+          asked.flatMap((one, place) =>
+            one.fromFinding === undefined
+              ? []
+              : [[one.fromFinding.trim(), ids[place] ?? ''] as const],
+          ),
+        )
         const next = yield* hemeraNext(
           transaction,
           writer.missionId,
@@ -294,6 +307,10 @@ export const retireQuestion = (
           .set({ state: asked.how, retiredReason: reason, mootDecision: moot, changedAt: now() })
           .where(and(eq(questions.missionId, writer.missionId), eq(questions.id, row.id)))
           .pipe(Effect.mapError(refusedWhile('retiring a question')))
+        // A finding of the cold read asked as it is open again (#91): a moot one is settled by
+        // the decision that made it moot.
+        if (asked.how === 'withdrawn')
+          yield* findingsReopenedIn(transaction, writer.missionId, row.id)
         const unmarked =
           row.state === 'waiting'
             ? yield* clearMarkIn(

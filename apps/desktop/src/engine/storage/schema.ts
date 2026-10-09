@@ -410,6 +410,8 @@ export const missions = sqliteTable(
       .default(false),
     stage: text('stage').notNull(),
     round: integer('round').notNull(),
+    /** The Planning cycle (#91): 1 from its creation, bumped at each return to Planning. */
+    planningCycle: integer('planning_cycle').notNull().default(1),
     cleanup: text('cleanup'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
@@ -1789,3 +1791,74 @@ export const jiraTokens = sqliteTable('jira_tokens', {
   refusedAt: text('refused_at'),
   savedAt: text('saved_at').notNull(),
 })
+
+/**
+ * The cold reads of Planning (#91): `C1`, `C2`… per mission, each one pass of a fresh reader over
+ * the Spec at one version. `cycle` is the mission's Planning cycle it ran in, `spec_version` the
+ * version it read and `snapshot` that Spec as `spec_read` hands it (the JSON of the whole text and
+ * of each part, masked). `requested_by` is `hemera` (the first pass of a cycle) or `user`; `state`
+ * goes `waiting_for_slot`, `running`, then `done` or `failed` with its `failure`. `lineage` is its
+ * session's, whose slot of the cap it holds; `reminded` says it was told once to end with its
+ * report; `delivery_id` is the delivery that carried its findings to the Planner.
+ */
+export const coldReads = sqliteTable(
+  'cold_reads',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    cycle: integer('cycle').notNull(),
+    specVersion: integer('spec_version').notNull(),
+    snapshot: text('snapshot').$type<Masked<string>>().notNull(),
+    requestedBy: text('requested_by').notNull(),
+    state: text('state').notNull(),
+    stuck: integer('stuck', { mode: 'boolean' }).notNull(),
+    lineage: text('lineage').notNull(),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull(),
+    failure: text('failure').$type<Masked<string>>(),
+    deliveryId: text('delivery_id'),
+    askedAt: text('asked_at').notNull(),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    unique('cold_read_number_in_mission').on(table.missionId, table.number),
+    uniqueIndex('cold_read_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * A finding of a cold read: `C1.F1`… its id in the mission, its severity, `where` (the JSON of the
+ * Spec items it names), its text and the question a developer would ask, whether it concerns the
+ * tasks only, and its fate: `open`, `asked` (with its question), `fixed` by the Planner (with what
+ * it changed) or `dismissed` by the user (with the input that told the Planner).
+ */
+export const coldReadFindings = sqliteTable(
+  'cold_read_findings',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    coldReadId: text('cold_read_id')
+      .notNull()
+      .references(() => coldReads.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    severity: text('severity').notNull(),
+    where: text('where').$type<Masked<string>>().notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    question: text('question').$type<Masked<string>>(),
+    tasksOnly: integer('tasks_only', { mode: 'boolean' }).notNull(),
+    fate: text('fate').notNull(),
+    questionId: text('question_id'),
+    fixedWhat: text('fixed_what').$type<Masked<string>>(),
+    inputId: text('input_id'),
+    changedAt: text('changed_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.missionId, table.id] }),
+    index('cold_read_findings_of_pass').on(table.coldReadId),
+  ],
+)

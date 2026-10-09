@@ -421,6 +421,24 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('resources.changed', log),
       ),
+    'coldRead.list': (request) =>
+      engine['coldRead.list'](request).pipe(closedAs(gone), observed('coldRead.list', log)),
+    'coldRead.again': (request) =>
+      engine['coldRead.again'](request).pipe(closedAs(gone), observed('coldRead.again', log)),
+    'coldRead.dismiss': (request) =>
+      engine['coldRead.dismiss'](request).pipe(closedAs(gone), observed('coldRead.dismiss', log)),
+    'coldRead.freshness': (request) =>
+      engine['coldRead.freshness'](request).pipe(
+        closedAs(gone),
+        observed('coldRead.freshness', log),
+      ),
+    'coldRead.settled': (request) =>
+      engine['coldRead.settled'](request).pipe(closedAs(gone), observed('coldRead.settled', log)),
+    'coldRead.changed': (request) =>
+      engine['coldRead.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('coldRead.changed', log),
+      ),
     'planning.waves': (request) =>
       engine['planning.waves'](request).pipe(closedAs(gone), observed('planning.waves', log)),
     'planning.answer': (request) =>

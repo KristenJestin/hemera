@@ -60,6 +60,7 @@ describe('Models by role', () => {
       'planner',
       'living-spec',
       'probe',
+      'cold-read',
       'builder',
       'helper',
       'code-reviewer',

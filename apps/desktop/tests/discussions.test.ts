@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import { createMission, getMission, moveMission } from '../src/engine/missions.ts'
+import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
 import { discussionsOf, readDiscussion } from '../src/engine/planning/discussion-store.ts'
 import {
   acceptProposal,
@@ -150,6 +151,18 @@ const plannerScript = (...later: ReadonlyArray<ReadonlyArray<FakeStep>>): FakeSc
   turns: [WRITE_SPEC, ...later],
   steps: [says('Done.')],
 })
+
+/** #91: the cold read a first declaration launches, the next agent started; it reports nothing. */
+const COLD_READ: FakeScript = {
+  turns: [[uses('toolu_cold_read_report', 'cold_read_report', { findings: [] })]],
+  steps: [says('Done.')],
+}
+
+/** Waits until the mission's cold read has ended with its report. */
+const coldReadEnded = (missionId: string) =>
+  until(
+    Effect.map(listColdReads(missionId), (passes) => passes.some((one) => one.state === 'done')),
+  )
 
 /** The engine with the Planner starting on its own, its agents scripted in their start order. */
 const planning = (scriptOf: (index: number) => FakeScript) =>
@@ -488,20 +501,22 @@ describe('The Planner replies and proposes; only the user decides', () => {
   })
 
   test('accepting closes on the proposal as written and delivers [hemera:decision] once, even accepted twice at once; the Planner writes it into Decisions with the link', async () => {
-    const { world, run } = planning(() =>
-      plannerScript(
-        [propose('toolu_propose', '#1', 'Name the file invoices-YYYY-MM.csv.')],
-        [
-          uses('toolu_decisions', 'spec_write_section', {
-            section: 'decisions',
-            content: 'Name the file invoices-YYYY-MM.csv (discussion #1).',
-            base_version: 1,
-          }),
-          declare('toolu_declare_early'),
-          integrated('toolu_integrated', 'I2', 'decisions'),
-          declare('toolu_declare'),
-        ],
-      ),
+    const { world, run } = planning((index) =>
+      index > 0
+        ? COLD_READ
+        : plannerScript(
+            [propose('toolu_propose', '#1', 'Name the file invoices-YYYY-MM.csv.')],
+            [
+              uses('toolu_decisions', 'spec_write_section', {
+                section: 'decisions',
+                content: 'Name the file invoices-YYYY-MM.csv (discussion #1).',
+                base_version: 1,
+              }),
+              declare('toolu_declare_early'),
+              integrated('toolu_integrated', 'I2', 'decisions'),
+              declare('toolu_declare'),
+            ],
+          ),
     )
     const seen = await run(({ profile }) =>
       within(
@@ -521,6 +536,7 @@ describe('The Planner replies and proposes; only the user decides', () => {
           )
           yield* prompted(world, planner, 3)
           yield* journalHas(mission.id, 'The user closed #1 on R2 on a decision')
+          yield* coldReadEnded(mission.id)
           return {
             both,
             discussion: yield* readDiscussion(opened.id),
@@ -569,11 +585,13 @@ describe('The Planner replies and proposes; only the user decides', () => {
   })
 
   test('closing without a decision withdraws the pending proposal, is delivered as information, and blocks nothing', async () => {
-    const { world, run } = planning(() =>
-      plannerScript(
-        [propose('toolu_propose', '#1', 'Name the file invoices-YYYY-MM.csv.')],
-        [integrated('toolu_integrated', 'I1', 'decisions'), declare('toolu_declare')],
-      ),
+    const { world, run } = planning((index) =>
+      index > 0
+        ? COLD_READ
+        : plannerScript(
+            [propose('toolu_propose', '#1', 'Name the file invoices-YYYY-MM.csv.')],
+            [integrated('toolu_integrated', 'I1', 'decisions'), declare('toolu_declare')],
+          ),
     )
     const seen = await run(({ profile }) =>
       within(

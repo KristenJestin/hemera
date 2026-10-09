@@ -26,6 +26,7 @@ import {
   NOTE_TOPIC_MAX,
   NOW_TEXT_MAX,
 } from './memory.ts'
+import { ColdReadFixed, ColdReadReport } from './cold-read.ts'
 import { MissionType } from './mission.ts'
 import { ProbeLaunch, ProbeRead, ProbeReport } from './probes.ts'
 import { RetireHow } from './questions.ts'
@@ -102,7 +103,8 @@ export type GateClass = 'local' | 'judged' | 'workflow'
 /**
  * What a tool does to the world: reads it, writes files, runs (or stops) a command, records in
  * Hemera's own Memory of the mission, which writes nothing in the role's place; proposes a
- * change the user accepts or declines (the setup agent's cards), which changes nothing itself; or
+ * change the user accepts or declines (the setup agent's cards), or findings the Planner and the
+ * user settle (the cold read's report, #91), which changes nothing itself; or
  * reports a problem with Hemera itself into the tester's own folder (#45), which writes nothing in
  * the place either.
  */
@@ -953,7 +955,7 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner'],
+    roles: ['planner', 'cold-read'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1196,6 +1198,26 @@ export const TOOLS = {
     input: TicketRead,
     label: { label: 'Read the ticket', mark: 'ticket-read', doing: 'Reading the ticket' },
   }),
+  cold_read_report: tool({
+    roles: ['cold-read'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: ColdReadReport,
+    label: { label: 'Report', mark: 'cold-read-report', doing: 'Reporting what it found' },
+  }),
+  cold_read_fixed: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ColdReadFixed,
+    label: {
+      label: 'Cold read finding fixed',
+      mark: 'cold-read-fixed',
+      doing: 'Marking a cold read finding fixed',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1262,6 +1284,8 @@ export const TOOL_NAMES = [
   'discussion_reply',
   'discussion_propose_decision',
   'ticket_read',
+  'cold_read_report',
+  'cold_read_fixed',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

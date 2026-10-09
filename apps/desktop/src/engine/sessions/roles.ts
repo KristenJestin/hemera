@@ -16,6 +16,7 @@ import type { MissionActivity } from '../missions.ts'
 import { LIVING_SPEC_ROLE } from '../living-spec/role.ts'
 import { PLANNER_ROLE } from '../planning/role.ts'
 import { PROBE_ROLE } from '../planning/probe-role.ts'
+import { COLD_READ_ROLE } from '../planning/cold-read-role.ts'
 import { SETUP_ROLE } from '../setup/role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
@@ -85,6 +86,7 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   PLANNER_ROLE,
   LIVING_SPEC_ROLE,
   PROBE_ROLE,
+  COLD_READ_ROLE,
 ]
 
 /**

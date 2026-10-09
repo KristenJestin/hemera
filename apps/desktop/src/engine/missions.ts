@@ -101,6 +101,7 @@ import {
   missions,
   projects,
   questions,
+  specs,
 } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 import { newSpec, triageOf } from './planning/store.ts'
@@ -696,13 +697,23 @@ export const moveMission = (id: string, move: Move, actor: Actor) =>
     const round = move === 'fix' ? mission.round + 1 : mission.round
     yield* mutate('moving a mission', (transaction) =>
       Effect.gen(function* () {
+        // A return to Planning opens a new Planning cycle (#91).
+        const cycle = sql`${missions.planningCycle} + ${to === 'planning' ? 1 : 0}`
         const written = yield* transaction
           .update(missions)
-          .set({ stage: to, round, updatedAt: now() })
+          .set({ stage: to, round, updatedAt: now(), planningCycle: cycle })
           .where(and(eq(missions.id, id), eq(missions.stage, stage)))
           .returning({ id: missions.id })
           .pipe(Effect.mapError(refusedWhile('moving the mission')))
         if (written.length === 0) return yield* movedMeanwhile(move, stage)
+        // In a new cycle, the Spec is declared complete anew, and that declaration is its first.
+        if (to === 'planning') {
+          yield* transaction
+            .update(specs)
+            .set({ declaredCompleteVersion: null })
+            .where(eq(specs.missionId, id))
+            .pipe(Effect.mapError(refusedWhile('opening a Planning cycle')))
+        }
         return {
           result: undefined,
           events: [
