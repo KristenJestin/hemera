@@ -101,7 +101,12 @@ const READ: HomeData = {
           title: 'Export invoices as CSV',
           ball: null,
           events: [
-            { sequence: 4, tone: 'failed', text: 'T3 failed in api', at: '2026-10-09T02:14:00.000Z' },
+            {
+              sequence: 4,
+              tone: 'failed',
+              text: 'T3 failed in api',
+              at: '2026-10-09T02:14:00.000Z',
+            },
           ],
         },
       ],
@@ -121,15 +126,22 @@ const pageOf = (data: HomeData, more: Partial<HomeRouteProps> = {}) => {
 }
 
 describe('Home, from what the engine answered', () => {
-  test('nothing read yet, the lists are on their way', () => {
-    expect(pageOf(NO_HOME_DATA).loading).toBe(true)
+  test('nothing read yet, the lists are on their way and the needs are not held back', () => {
+    const page = pageOf(NO_HOME_DATA)
+    expect(page.reading).toBe(true)
+    expect(page.loading).toBe(false)
   })
 
-  test('each list waits for its own read: one missing keeps Home on its way', () => {
-    expect(pageOf({ ...READ, recent: null }).loading).toBe(true)
-    expect(pageOf({ ...READ, questions: null }).loading).toBe(true)
-    expect(pageOf({ ...READ, since: { ...READ.since, first: null } }).loading).toBe(true)
-    expect(pageOf(READ).loading).toBe(false)
+  test('each list waits for its own read: one missing keeps the lists on their way', () => {
+    expect(pageOf({ ...READ, recent: null }).reading).toBe(true)
+    expect(pageOf({ ...READ, questions: null }).reading).toBe(true)
+    expect(pageOf({ ...READ, since: { ...READ.since, first: null } }).reading).toBe(true)
+    expect(pageOf(READ).reading).toBe(false)
+  })
+
+  test('the Projects or the needs on their way hold the whole page back', () => {
+    expect(pageOf(READ, { projects: { kind: 'loading' } }).loading).toBe(true)
+    expect(pageOf(READ, { needs: { kind: 'loading' } }).loading).toBe(true)
   })
 
   test('the questions, the cards and Recent are what the model made of the reads', () => {
@@ -172,16 +184,16 @@ describe('Home, from what the engine answered', () => {
 
 describe('The Home route, drawn', () => {
   test('before anything is read, the cards and rows are drawn as their shapes', () => {
-    const markup = renderToStaticMarkup(
-      createElement(HomeRoute, props({ engineReady: false })),
-    )
+    const markup = renderToStaticMarkup(createElement(HomeRoute, props({ engineReady: false })))
     expect(markup).toContain('aria-busy="true"')
     expect(markup).toContain('data-row-skeleton')
     expect(markup).not.toContain('All quiet')
   })
 
   test('once read, Since you left leads and Recent follows', () => {
-    const markup = renderToStaticMarkup(createElement(HomeBody, { ...props(), data: READ, onMore: nothing }))
+    const markup = renderToStaticMarkup(
+      createElement(HomeBody, { ...props(), data: READ, onMore: nothing }),
+    )
     expect(markup.indexOf('Since you left')).toBeLessThan(markup.indexOf('Recent'))
     expect(markup).toContain('T3 failed in api')
     expect(markup).toContain('Who may read the audit log?')
@@ -194,7 +206,9 @@ describe('The Home route, drawn', () => {
       recent: { missions: [], tails: [] },
       failure: undefined,
     }
-    const markup = renderToStaticMarkup(createElement(HomeBody, { ...props(), data: quiet, onMore: nothing }))
+    const markup = renderToStaticMarkup(
+      createElement(HomeBody, { ...props(), data: quiet, onMore: nothing }),
+    )
     expect(markup).toContain('All quiet')
     expect(markup).not.toContain('aria-label="Questions"')
   })
