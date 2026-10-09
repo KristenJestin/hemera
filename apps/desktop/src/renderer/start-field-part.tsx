@@ -60,7 +60,8 @@ export function StartFieldPart({
   const [created, setCreated] = useState<Created | null>(null)
   const [triage, setTriage] = useState<StartTriage | undefined>(undefined)
   const [refused, setRefused] = useState<string | null>(null)
-  const choice = useRef(newChoice())
+  const choice = useRef<string | null>(null)
+  const choiceKey = (): string => (choice.current ??= newChoice())
   const typed = text.trim()
 
   useEffect(() => {
@@ -110,7 +111,7 @@ export function StartFieldPart({
           setText('')
           setCreated(null)
           setTriage(undefined)
-          choice.current = newChoice()
+          choice.current = null
           onOpenMission(settle.key)
         }
       },
@@ -153,7 +154,7 @@ export function StartFieldPart({
     const hit = fold.tickets.find((found) => found.hit.key === key)?.hit
     if (hit === undefined) onOpenMission(key)
     else if (hit.linkedMission !== null) onOpenMission(hit.linkedMission)
-    else create(createFromTicket(projectId, hit, choice.current))
+    else create(createFromTicket(projectId, hit, choiceKey()))
   }
 
   const onTriageAction = (action: StartTriageAction) => {
@@ -173,13 +174,13 @@ export function StartFieldPart({
         setCreated(null)
         setTriage(undefined)
         setRefused(null)
-        choice.current = newChoice()
+        choice.current = null
       }}
       results={results}
       notice={notice ?? undefined}
       triage={triage}
       onOpen={onOpen}
-      onCreate={() => create(createOf(projectId, typed, fold, choice.current))}
+      onCreate={() => create(createOf(projectId, typed, fold, choiceKey()))}
       onTriageAction={onTriageAction}
     />
   )
