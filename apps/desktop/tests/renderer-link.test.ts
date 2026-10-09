@@ -20,6 +20,7 @@ import {
   type Run,
   type EnvironmentReport,
   type Project,
+  type SincePage,
   NeedTarget,
   OpenTarget,
 } from '@hemera/ipc'
@@ -113,6 +114,23 @@ const SERVICE: Run = {
   endedAt: null,
 }
 
+/** A page of "Since you left": one mission, one thing that happened. */
+const SINCE: SincePage = {
+  groups: [
+    {
+      projectId: 'acme',
+      missionId: 'm1',
+      missionKey: 'ACME-1',
+      title: 'Export invoices',
+      ball: null,
+      events: [
+        { sequence: 7, tone: 'done', text: 'The review passed', at: '2026-10-09T08:00:00.000Z' },
+      ],
+    },
+  ],
+  before: 7,
+}
+
 const unused = () => Effect.die('the window’s link is not asked for Projects here')
 
 /** The Projects and their Workspaces, which no test of the window's link asks for. */
@@ -124,6 +142,7 @@ const noProjects = {
   'projects.detectRepositories': unused,
   'projects.setWorkspacesRoot': unused,
   'projects.setBranchPrefix': unused,
+  'projects.setKeyPrefix': unused,
   'projects.changes': () => Stream.die('the window’s link is not asked for Projects here'),
   'repositories.add': unused,
   'repositories.remove': unused,
@@ -212,6 +231,12 @@ const noProjects = {
   'tester.findings': unused,
   'tester.folder': unused,
   'start.search': unused,
+  'home.sinceYouLeft': unused,
+  'home.sinceYouLeftChanged': unused,
+  'home.looked': unused,
+  'home.recent': unused,
+  'home.opened': unused,
+  'memory.journalTail': unused,
   'start.create': unused,
   'planning.spec': unused,
   'planning.changesSince': unused,
@@ -292,8 +317,72 @@ const noProjects = {
   'notifications.setStyle': unused,
 }
 
+/** Notes what the window asked of main: one line per call, the call then its payload as JSON. */
+const noted = <P>(asked: string[], call: string, payload: P) =>
+  Effect.sync(() => {
+    asked.push(`${call} ${JSON.stringify(payload) ?? ''}`.trim())
+  })
+
+const asking = (asked: string[], call: string) => ({
+  answer: <P>(payload: P) =>
+    noted(asked, call, payload).pipe(Effect.andThen(Effect.die(`${call} is not answered here`))),
+  follow: <P>(payload: P) =>
+    Stream.drain(Stream.fromEffect(noted(asked, call, payload))).pipe(Stream.concat(Stream.never)),
+})
+
+/** The calls whose wiring is checked by what they ask, not by what they answer. */
+const recording = (asked: string[]) => {
+  const call = (name: string) => asking(asked, name).answer
+  const stream = (name: string) => asking(asked, name).follow
+  return {
+    'start.search': stream('start.search'),
+    'start.create': call('start.create'),
+    'missions.cancel': call('missions.cancel'),
+    'missions.freezeReadiness': call('missions.freezeReadiness'),
+    'missions.freezeReadinessChanged': stream('missions.freezeReadinessChanged'),
+    'missions.freeze': call('missions.freeze'),
+    'planning.spec': call('planning.spec'),
+    'planning.openQuestions': call('planning.openQuestions'),
+    'planning.questionsChanged': stream('planning.questionsChanged'),
+    'planning.specLanguage': call('planning.specLanguage'),
+    'planning.setSpecLanguage': call('planning.setSpecLanguage'),
+    'home.sinceYouLeftChanged': stream('home.sinceYouLeftChanged'),
+    'home.looked': call('home.looked'),
+    'home.opened': call('home.opened'),
+    'livingSpec.domains': call('livingSpec.domains'),
+    'livingSpec.requirements': call('livingSpec.requirements'),
+    'livingSpec.requirement': call('livingSpec.requirement'),
+    'livingSpec.runs': call('livingSpec.runs'),
+    'livingSpec.validateDomain': call('livingSpec.validateDomain'),
+    'livingSpec.rejectDomain': call('livingSpec.rejectDomain'),
+    'livingSpec.dropRequirement': call('livingSpec.dropRequirement'),
+    'livingSpec.bootstrap': call('livingSpec.bootstrap'),
+    'livingSpec.changed': stream('livingSpec.changed'),
+    'tickets.providers': call('tickets.providers'),
+    'tickets.proposeGithub': call('tickets.proposeGithub'),
+    'tickets.addGithub': call('tickets.addGithub'),
+    'tickets.addJira': call('tickets.addJira'),
+    'tickets.jiraDeployment': call('tickets.jiraDeployment'),
+    'tickets.updateProvider': call('tickets.updateProvider'),
+    'tickets.removeProvider': call('tickets.removeProvider'),
+    'tickets.status': call('tickets.status'),
+    'tickets.checkAgain': call('tickets.checkAgain'),
+    'tickets.specMode': call('tickets.specMode'),
+    'tickets.setSpecMode': call('tickets.setSpecMode'),
+    'tickets.changed': stream('tickets.changed'),
+    'tickets.saveJiraToken': call('tickets.saveJiraToken'),
+    'tickets.removeJiraToken': call('tickets.removeJiraToken'),
+    'tickets.jiraTokenStatus': call('tickets.jiraTokenStatus'),
+    'resources.list': call('resources.list'),
+    'resources.save': call('resources.save'),
+    'resources.holders': call('resources.holders'),
+    'resources.changed': stream('resources.changed'),
+  }
+}
+
 /** A main that answers as told, and says when the window stopped listening. */
 const main = async (engine: 'answers' | 'gone') => {
+  const asked: string[] = []
   const stopped = Deferred.makeUnsafe<void>()
   let logsShown = 0
   const written: PreferencesChange[] = []
@@ -327,6 +416,18 @@ const main = async (engine: 'answers' | 'gone') => {
     'notifications.window': () => Stream.concat(Stream.make(NOTICE), Stream.never),
     'notifications.preview': () => Effect.succeed('played'),
     ...noProjects,
+    ...recording(asked),
+    'home.sinceYouLeft': (payload) =>
+      noted(asked, 'home.sinceYouLeft', payload).pipe(Effect.as(SINCE)),
+    'home.recent': () => noted(asked, 'home.recent', undefined).pipe(Effect.as([])),
+    'memory.journalTail': (payload) =>
+      noted(asked, 'memory.journalTail', payload).pipe(
+        Effect.as(payload.missionIds.map((missionId) => ({ missionId, line: null }))),
+      ),
+    'projects.setKeyPrefix': (payload) =>
+      noted(asked, 'projects.setKeyPrefix', payload).pipe(
+        Effect.as({ ...acme, keyPrefix: payload.prefix, version: payload.version + 1 }),
+      ),
     'catalogue.save': () => Effect.fail(new ShellSyntax({ token: '&&' })),
     'variables.reveal': ({ key }) => Effect.succeed(`value of ${key}`),
     'runs.changes': () => Stream.concat(Stream.make(SERVICE), Stream.never),
@@ -357,6 +458,7 @@ const main = async (engine: 'answers' | 'gone') => {
     stopped: Effect.runPromise(Deferred.await(stopped)),
     logsShown: () => logsShown,
     written,
+    asked,
   }
 }
 
@@ -467,6 +569,279 @@ describe('The window’s link, for components and hooks', () => {
     unsubscribe()
     await stopped
     expect(statuses).toEqual([status])
+  })
+})
+
+/** A method of the link, what it is called with, and the call it makes of main. */
+interface Wiring {
+  readonly method: string
+  readonly run: (link: Link) => unknown
+  readonly asks: string
+}
+
+const NO_END = (): void => undefined
+
+const GITHUB = { host: 'github.com', repositories: ['acme/web'] }
+const JIRA = {
+  site: 'https://acme.atlassian.net',
+  deployment: 'cloud',
+  email: 'kris@acme.test',
+  projectKeys: ['ACME'],
+} as const
+const DRAFT = {
+  name: 'Staging database',
+  description: 'One at a time',
+  uses: ['migrate'],
+  changes: ['migrate'],
+  resetCommandId: null,
+}
+
+const WIRINGS: ReadonlyArray<Wiring> = [
+  {
+    method: 'searchStart',
+    run: (link) => link.searchStart('acme', 'invoices', NO_END, NO_END),
+    asks: 'start.search {"projectId":"acme","text":"invoices"}',
+  },
+  {
+    method: 'createStart',
+    run: (link) => link.createStart({ projectId: 'acme', text: 'Export', idempotencyKey: 'k1' }),
+    asks: 'start.create {"projectId":"acme","text":"Export","idempotencyKey":"k1"}',
+  },
+  {
+    method: 'cancelMission',
+    run: (link) => link.cancelMission('m1'),
+    asks: 'missions.cancel {"id":"m1"}',
+  },
+  {
+    method: 'freezeReadiness',
+    run: (link) => link.freezeReadiness('m1'),
+    asks: 'missions.freezeReadiness {"id":"m1"}',
+  },
+  {
+    method: 'onFreezeReadiness',
+    run: (link) => link.onFreezeReadiness('m1', NO_END, NO_END),
+    asks: 'missions.freezeReadinessChanged {"id":"m1"}',
+  },
+  {
+    method: 'freeze',
+    run: (link) => link.freeze('m1', 3),
+    asks: 'missions.freeze {"id":"m1","specVersion":3}',
+  },
+  { method: 'spec', run: (link) => link.spec('m1'), asks: 'planning.spec {"missionId":"m1"}' },
+  {
+    method: 'openQuestions',
+    run: (link) => link.openQuestions(),
+    asks: 'planning.openQuestions {}',
+  },
+  {
+    method: 'onOpenQuestions',
+    run: (link) => link.onOpenQuestions(NO_END, NO_END),
+    asks: 'planning.questionsChanged {}',
+  },
+  {
+    method: 'sinceYouLeft',
+    run: (link) => link.sinceYouLeft(null),
+    asks: 'home.sinceYouLeft {"before":null}',
+  },
+  {
+    method: 'onSinceYouLeft',
+    run: (link) => link.onSinceYouLeft(NO_END, NO_END),
+    asks: 'home.sinceYouLeftChanged',
+  },
+  { method: 'lookedAtHome', run: (link) => link.lookedAtHome(), asks: 'home.looked' },
+  { method: 'recentMissions', run: (link) => link.recentMissions(), asks: 'home.recent' },
+  {
+    method: 'missionOpened',
+    run: (link) => link.missionOpened('m1'),
+    asks: 'home.opened {"missionId":"m1"}',
+  },
+  {
+    method: 'journalTail',
+    run: (link) => link.journalTail(['m1', 'm2']),
+    asks: 'memory.journalTail {"missionIds":["m1","m2"]}',
+  },
+  {
+    method: 'livingSpecDomains',
+    run: (link) => link.livingSpecDomains('acme'),
+    asks: 'livingSpec.domains {"projectId":"acme"}',
+  },
+  {
+    method: 'onLivingSpec',
+    run: (link) => link.onLivingSpec('acme', NO_END, NO_END),
+    asks: 'livingSpec.changed {"projectId":"acme"}',
+  },
+  {
+    method: 'livingSpecRequirements',
+    run: (link) => link.livingSpecRequirements('acme', 'd1'),
+    asks: 'livingSpec.requirements {"projectId":"acme","domainId":"d1"}',
+  },
+  {
+    method: 'livingSpecRequirement',
+    run: (link) => link.livingSpecRequirement('r1'),
+    asks: 'livingSpec.requirement {"id":"r1"}',
+  },
+  {
+    method: 'livingSpecRuns',
+    run: (link) => link.livingSpecRuns('acme'),
+    asks: 'livingSpec.runs {"projectId":"acme"}',
+  },
+  {
+    method: 'validateDomain',
+    run: (link) => link.validateDomain('d1', []),
+    asks: 'livingSpec.validateDomain {"domainId":"d1","seen":[]}',
+  },
+  {
+    method: 'rejectDomain',
+    run: (link) => link.rejectDomain('d1', []),
+    asks: 'livingSpec.rejectDomain {"domainId":"d1","seen":[]}',
+  },
+  {
+    method: 'dropRequirement',
+    run: (link) => link.dropRequirement('r1'),
+    asks: 'livingSpec.dropRequirement {"requirementId":"r1"}',
+  },
+  {
+    method: 'bootstrapLivingSpec (every domain)',
+    run: (link) => link.bootstrapLivingSpec('acme'),
+    asks: 'livingSpec.bootstrap {"projectId":"acme"}',
+  },
+  {
+    method: 'bootstrapLivingSpec (one domain)',
+    run: (link) => link.bootstrapLivingSpec('acme', 'd1'),
+    asks: 'livingSpec.bootstrap {"projectId":"acme","domainId":"d1"}',
+  },
+  {
+    method: 'ticketProviders',
+    run: (link) => link.ticketProviders('acme'),
+    asks: 'tickets.providers {"projectId":"acme"}',
+  },
+  {
+    method: 'proposeGithub',
+    run: (link) => link.proposeGithub('acme', 'github.com'),
+    asks: 'tickets.proposeGithub {"projectId":"acme","host":"github.com"}',
+  },
+  {
+    method: 'addGithub',
+    run: (link) => link.addGithub('acme', GITHUB),
+    asks: `tickets.addGithub ${JSON.stringify({ projectId: 'acme', config: GITHUB })}`,
+  },
+  {
+    method: 'addJira',
+    run: (link) => link.addJira('acme', JIRA),
+    asks: `tickets.addJira ${JSON.stringify({ projectId: 'acme', config: JIRA })}`,
+  },
+  {
+    method: 'jiraDeployment',
+    run: (link) => link.jiraDeployment('https://acme.atlassian.net'),
+    asks: 'tickets.jiraDeployment {"site":"https://acme.atlassian.net"}',
+  },
+  {
+    method: 'updateProvider',
+    run: (link) => link.updateProvider('p1', GITHUB),
+    asks: `tickets.updateProvider ${JSON.stringify({ providerId: 'p1', config: GITHUB })}`,
+  },
+  {
+    method: 'removeProvider',
+    run: (link) => link.removeProvider('p1'),
+    asks: 'tickets.removeProvider {"providerId":"p1"}',
+  },
+  {
+    method: 'providerStatus',
+    run: (link) => link.providerStatus('p1'),
+    asks: 'tickets.status {"providerId":"p1"}',
+  },
+  {
+    method: 'checkProviderAgain',
+    run: (link) => link.checkProviderAgain('p1'),
+    asks: 'tickets.checkAgain {"providerId":"p1"}',
+  },
+  {
+    method: 'specMode',
+    run: (link) => link.specMode('acme'),
+    asks: 'tickets.specMode {"projectId":"acme"}',
+  },
+  {
+    method: 'setSpecMode',
+    run: (link) => link.setSpecMode('acme', 'linked'),
+    asks: 'tickets.setSpecMode {"projectId":"acme","mode":"linked"}',
+  },
+  {
+    method: 'onTicketSettings',
+    run: (link) => link.onTicketSettings('acme', NO_END, NO_END),
+    asks: 'tickets.changed {"projectId":"acme"}',
+  },
+  {
+    method: 'saveJiraToken',
+    run: (link) => link.saveJiraToken('p1', 'secret'),
+    asks: 'tickets.saveJiraToken {"providerId":"p1","token":"secret"}',
+  },
+  {
+    method: 'removeJiraToken',
+    run: (link) => link.removeJiraToken('p1'),
+    asks: 'tickets.removeJiraToken {"providerId":"p1"}',
+  },
+  {
+    method: 'jiraTokenStatus',
+    run: (link) => link.jiraTokenStatus('p1'),
+    asks: 'tickets.jiraTokenStatus {"providerId":"p1"}',
+  },
+  {
+    method: 'specLanguage',
+    run: (link) => link.specLanguage('acme'),
+    asks: 'planning.specLanguage {"projectId":"acme"}',
+  },
+  {
+    method: 'setSpecLanguage',
+    run: (link) => link.setSpecLanguage('acme', 'French'),
+    asks: 'planning.setSpecLanguage {"projectId":"acme","language":"French"}',
+  },
+  {
+    method: 'setKeyPrefix',
+    run: (link) => link.setKeyPrefix({ id: 'acme', version: 2, prefix: 'AC' }),
+    asks: 'projects.setKeyPrefix {"id":"acme","version":2,"prefix":"AC"}',
+  },
+  {
+    method: 'resources',
+    run: (link) => link.resources('acme'),
+    asks: 'resources.list {"projectId":"acme"}',
+  },
+  {
+    method: 'saveResources',
+    run: (link) => link.saveResources('acme', [DRAFT]),
+    asks: `resources.save ${JSON.stringify({ projectId: 'acme', resources: [DRAFT] })}`,
+  },
+  { method: 'resourceHolders', run: (link) => link.resourceHolders(), asks: 'resources.holders' },
+  {
+    method: 'onResourceHolders',
+    run: (link) => link.onResourceHolders(NO_END, NO_END),
+    asks: 'resources.changed',
+  },
+]
+
+describe('The window’s link, for the screens that come back to a mission and its spec', () => {
+  test.each(WIRINGS)('$method asks main for $asks', async ({ run, asks }) => {
+    const { link, asked } = await main('answers')
+    const result = run(link)
+    // A call is refused by the recorder, a stream stays open: neither is what is checked.
+    if (result instanceof Promise) await result.catch(() => undefined)
+    await vi.waitFor(() => expect(asked).toContain(asks))
+    if (typeof result === 'function') result()
+  })
+
+  test('Home reads a page of what happened since the user left, and the cursor of the next', async () => {
+    const { link } = await main('answers')
+    await expect(link.sinceYouLeft(null)).resolves.toEqual(SINCE)
+  })
+
+  test('the last Journal line of each mission asked comes back by mission', async () => {
+    const { link } = await main('answers')
+    await expect(link.journalTail(['m1'])).resolves.toEqual([{ missionId: 'm1', line: null }])
+  })
+
+  test('a Project’s new key prefix comes back on the Project, at its next version', async () => {
+    const { link } = await main('answers')
+    const saved = await link.setKeyPrefix({ id: 'acme', version: 1, prefix: 'AC' })
+    expect(saved).toMatchObject({ keyPrefix: 'AC', version: 2 })
   })
 })
 
