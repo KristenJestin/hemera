@@ -25,11 +25,14 @@ import {
 } from '@hemera/ui'
 import {
   IconAdjustments,
+  IconBook2,
+  IconDatabase,
   IconFileText,
   IconGauge,
   IconGitBranch,
   IconListNumbers,
   IconPlayerPlay,
+  IconPlug,
   IconStack2,
   IconTerminal,
   IconVariable,
@@ -63,6 +66,7 @@ import {
   stepDraftOf,
   stepRowsOf,
 } from './settings-model.ts'
+import { type TicketSectionId, isTicketSection } from './ticket-sections.tsx'
 
 /** What the page needs of the window besides the settings: main's picker, the clipboard, a browser. */
 export interface SettingsTools {
@@ -89,6 +93,14 @@ export interface SettingsPageProps {
   agentSection?: (id: AgentSectionId, show: (form: SettingsForm | null) => void) => ReactNode
   /** The setup agent's launch, at the header's end. */
   setUp?: SetUpAction | undefined
+  /** The ticket and resource sections, drawn by their own hooks, like the agent sections. */
+  ticketSection?: (id: TicketSectionId, show: (form: SettingsForm | null) => void) => ReactNode
+  /** Opens the Project's living spec, which the list offers beside its sections. */
+  onOpenLivingSpec?: () => void
+  /** The section shown first, from the route; the first of the list when it names none. */
+  section?: string | undefined
+  /** What the window knows is wrong in a section, by section, said by its glyph in the list. */
+  problems?: ReadonlyMap<string, string> | undefined
 }
 
 type SectionId =
@@ -99,6 +111,9 @@ type SectionId =
   | 'variables'
   | 'services'
   | AgentSectionId
+  | TicketSectionId
+  /** An entry of the list that opens a page rather than showing a section. */
+  | 'livingSpec'
 
 const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'repositories', label: 'Repositories', icon: <IconGitBranch size="sm" /> },
@@ -110,7 +125,21 @@ const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'models', label: 'Models by role', icon: <IconAdjustments size="sm" /> },
   { id: 'budget', label: 'Cap and budget', icon: <IconGauge size="sm" /> },
   { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
+  { id: 'tickets', label: 'Tickets and Specs', icon: <IconPlug size="sm" /> },
+  { id: 'resources', label: 'Exclusive resources', icon: <IconDatabase size="sm" /> },
+  { id: 'livingSpec', label: 'Living spec', icon: <IconBook2 size="sm" /> },
 ]
+
+/** What choosing an entry of the list does: show its section, open the living spec, or nothing. */
+export type SectionChoice =
+  | { readonly kind: 'section'; readonly id: SectionId }
+  | { readonly kind: 'livingSpec' }
+
+export function sectionChosen(id: string): SectionChoice | null {
+  const chosen = SECTIONS.find((one) => one.id === id)
+  if (chosen === undefined) return null
+  return chosen.id === 'livingSpec' ? { kind: 'livingSpec' } : { kind: 'section', id: chosen.id }
+}
 
 /** What a dialog writes, and the draft it holds. */
 type Writing =
@@ -308,8 +337,15 @@ export function SettingsPage({
   tools,
   agentSection,
   setUp,
+  ticketSection,
+  onOpenLivingSpec,
+  section,
+  problems: known,
 }: SettingsPageProps): ReactNode {
-  const [current, setCurrent] = useState<SectionId>('repositories')
+  const [current, setCurrent] = useState<SectionId>(() => {
+    const first = section === undefined ? null : sectionChosen(section)
+    return first?.kind === 'section' ? first.id : 'repositories'
+  })
   /** The dialog an agent section shows over the page. */
   const [agentForm, setAgentForm] = useState<SettingsForm | null>(null)
   const [writing, setWriting] = useState<Writing | null>(null)
@@ -490,7 +526,11 @@ export function SettingsPage({
   if (runs.some((run) => run.kind === 'live' && run.state === 'failed')) {
     problems.set('services', 'a service failed')
   }
-  for (const [section, sentence] of refusedIn) problems.set(section, sentence)
+  for (const [id, sentence] of known ?? []) {
+    const chosen = sectionChosen(id)
+    if (chosen?.kind === 'section') problems.set(chosen.id, sentence)
+  }
+  for (const [id, sentence] of refusedIn) problems.set(id, sentence)
   const sections = SECTIONS.map((one) => ({ ...one, problem: problems.get(one.id) }))
 
   const unread = [data.project, data.catalogue, data.recipe, data.variables, data.runs].find(
@@ -678,6 +718,7 @@ export function SettingsPage({
 
   const body = ((): ReactNode => {
     if (isAgentSection(current)) return agentSection?.(current, setAgentForm) ?? null
+    if (isTicketSection(current)) return ticketSection?.(current, setAgentForm) ?? null
     switch (current) {
       case 'repositories':
         return (
@@ -797,8 +838,9 @@ export function SettingsPage({
       sections={sections}
       current={current}
       onSection={(id) => {
-        const chosen = SECTIONS.find((one) => one.id === id)
-        if (chosen !== undefined) setCurrent(chosen.id)
+        const chosen = sectionChosen(id)
+        if (chosen?.kind === 'section') setCurrent(chosen.id)
+        else if (chosen?.kind === 'livingSpec') onOpenLivingSpec?.()
       }}
       error={unread?.kind === 'failed' ? unread.sentence : undefined}
       onRetry={() => settings?.retry()}

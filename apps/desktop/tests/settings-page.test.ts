@@ -5,12 +5,19 @@
  */
 
 import { Unreadable, type Project } from '@hemera/ipc'
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { LOADING_SETTINGS, type SettingsData } from '../src/renderer/settings-data.ts'
-import { SettingsPage, type SettingsTools } from '../src/renderer/settings-page.tsx'
+import { SettingsPage, sectionChosen, type SettingsTools } from '../src/renderer/settings-page.tsx'
+import {
+  TICKET_SECTIONS,
+  TicketSection,
+  isTicketSection,
+  type TicketSectionProps,
+} from '../src/renderer/ticket-sections.tsx'
+import { SILENT_LINK } from './fake-link.ts'
 
 const repository = (id: string, path: string, lastFetchedAt: string | null = null) => ({
   id,
@@ -43,8 +50,11 @@ const TOOLS: SettingsTools = {
   dataFolder: '/data',
 }
 
-const drawn = (data: SettingsData): string =>
-  renderToStaticMarkup(createElement(SettingsPage, { data, settings: null, tools: TOOLS }))
+const drawn = (
+  data: SettingsData,
+  more: Partial<ComponentProps<typeof SettingsPage>> = {},
+): string =>
+  renderToStaticMarkup(createElement(SettingsPage, { data, settings: null, tools: TOOLS, ...more }))
 
 describe('A Project’s settings page', () => {
   test('on its way: the list of sections, and the repositories in their own shape', () => {
@@ -98,5 +108,70 @@ describe('A Project’s settings page', () => {
     })
     expect(markup).toContain('This Project no longer exists.')
     expect(markup).toContain('Try again')
+  })
+})
+
+describe('The ticket, resource and living spec entries of a Project’s settings', () => {
+  const ready: SettingsData = { ...LOADING_SETTINGS, project: { kind: 'ready', project: ACME } }
+
+  test('the list gains Tickets and Specs, Exclusive resources and the Living spec entry', () => {
+    const markup = drawn(ready)
+    for (const entry of ['Tickets and Specs', 'Exclusive resources', 'Living spec']) {
+      expect(markup).toContain(`>${entry}<`)
+    }
+  })
+
+  test('a section the route names is the one shown first, drawn by the ticket slot', () => {
+    const markup = drawn(ready, {
+      section: 'resources',
+      ticketSection: (id) => createElement('p', null, `The ${id} part`),
+    })
+    expect(markup).toContain('The resources part')
+    expect(markup).not.toContain('data-repository="api"')
+    const tickets = drawn(ready, {
+      section: 'tickets',
+      ticketSection: (id) => createElement('p', null, `The ${id} part`),
+    })
+    expect(tickets).toContain('The tickets part')
+  })
+
+  test('a section the page does not have leaves the first one shown', () => {
+    expect(drawn(ready, { section: 'nowhere' })).toContain('data-repository="api"')
+  })
+
+  test('the Living spec entry opens the page and shows no section; the others show theirs', () => {
+    expect(sectionChosen('livingSpec')).toEqual({ kind: 'livingSpec' })
+    expect(sectionChosen('tickets')).toEqual({ kind: 'section', id: 'tickets' })
+    expect(sectionChosen('repositories')).toEqual({ kind: 'section', id: 'repositories' })
+    expect(sectionChosen('nowhere')).toBeNull()
+  })
+
+  test('a problem the window knows is said by its section’s glyph in the list', () => {
+    const markup = drawn(ready, {
+      problems: new Map([['tickets', 'GitHub cannot be reached']]),
+    })
+    expect(markup).toContain('aria-label="Tickets and Specs, GitHub cannot be reached"')
+  })
+})
+
+describe('The ticket sections, composed', () => {
+  const props = (section: TicketSectionProps['section']): TicketSectionProps => ({
+    section,
+    link: SILENT_LINK,
+    engineReady: true,
+    projectId: 'acme',
+    project: ACME,
+    catalogue: [],
+    show: () => undefined,
+    copy: () => undefined,
+  })
+
+  test('Tickets and Specs holds the providers, then the Spec settings; resources hold theirs', () => {
+    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources'])
+    expect(isTicketSection('tickets')).toBe(true)
+    expect(isTicketSection('resources')).toBe(true)
+    expect(isTicketSection('models')).toBe(false)
+    expect(renderToStaticMarkup(createElement(TicketSection, props('tickets')))).toBe('')
+    expect(renderToStaticMarkup(createElement(TicketSection, props('resources')))).toBe('')
   })
 })
