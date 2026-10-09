@@ -105,11 +105,11 @@ export const ChooseAMode: Story = {
 
 /** The language keeps the current tag even when the short list does not hold it. */
 export const UnlistedLanguage: Story = {
-  args: { language: 'pt-BR' },
+  args: { language: 'nb-NO' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const select = canvas.getByRole('combobox', { name: 'Spec language' })
-    await expect(select).toHaveTextContent('pt-BR')
+    await expect(select).toHaveTextContent('nb-NO')
     await userEvent.click(select)
     await userEvent.click(await body().findByRole('option', { name: 'French' }))
     await waitFor(() => expect(args.onLanguage).toHaveBeenCalledWith('fr'))
