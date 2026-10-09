@@ -17,11 +17,34 @@ import {
   type AgentState,
   type AgentUpdate,
   type AutomaticBackups,
+  type BootstrapRun,
   type BaseBranchEdit,
   type ChatChanged,
   type ChatLine,
   type ChatPage,
   type ChatSummary,
+  type ExclusiveResource,
+  type FreezeReadiness,
+  type GithubProviderConfig,
+  type JiraDeployment,
+  type JiraProviderConfig,
+  type JiraTokenStatus,
+  type JournalTail,
+  type KeyPrefixEdit,
+  type LivingDomain,
+  type LivingRequirement,
+  type LivingRequirementDetail,
+  type LivingSeen,
+  type LivingSpecState,
+  type OpenQuestion,
+  type ResourceDraft,
+  type ResourceHolding,
+  type SincePage,
+  type Spec,
+  type StartCreate,
+  type StartResult,
+  type TicketProviderInfo,
+  type TicketsSettings,
   type DiagnosticsRetention,
   type HemeraAutoStatus,
   type BranchPrefixEdit,
@@ -75,7 +98,14 @@ import {
   type WindowNotice,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import type { AgentProvider, ChatMention, ModelSettingValue, NeverEntry } from '@hemera/core/domain'
+import type {
+  AgentProvider,
+  ChatMention,
+  ModelSettingValue,
+  NeverEntry,
+  ProviderStatus,
+  SpecMode,
+} from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
@@ -186,6 +216,123 @@ export interface Link {
     onEnd: (error: Error) => void,
   ) => () => void
   readonly missions: (projectId: string) => Promise<ReadonlyArray<Mission>>
+  /** The Project's missions that match the text and the remote tickets, as they answer; the stream ends with the user typing again. */
+  readonly searchStart: (
+    projectId: string,
+    text: string,
+    listener: (result: StartResult) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Creates the mission of the user's explicit choice; the same key twice creates one. */
+  readonly createStart: (create: StartCreate) => Promise<Mission>
+  /** Stops everything the mission runs; rejects with `MoveRefused` when its stage does not allow it. */
+  readonly cancelMission: (id: string) => Promise<Mission>
+  /** What stands between a mission in Planning and its Freeze. */
+  readonly freezeReadiness: (id: string) => Promise<FreezeReadiness>
+  /** The readiness, then each change of it. */
+  readonly onFreezeReadiness: (
+    id: string,
+    listener: (readiness: FreezeReadiness) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Freezes the Spec at the version the user saw. */
+  readonly freeze: (id: string, specVersion: number) => Promise<Mission>
+  /** A mission's Spec as it stands. */
+  readonly spec: (missionId: string) => Promise<Spec>
+  /** The questions waiting on the user across the Profile. */
+  readonly openQuestions: () => Promise<ReadonlyArray<OpenQuestion>>
+  /** The open questions, then each change of them. */
+  readonly onOpenQuestions: (
+    listener: (questions: ReadonlyArray<OpenQuestion>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** A page of what happened since the user last looked at Home; `before` is the cursor of an older one. */
+  readonly sinceYouLeft: (before: number | null) => Promise<SincePage>
+  /** The first page, then again after each event worth telling. */
+  readonly onSinceYouLeft: (
+    listener: (page: SincePage) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The user looked at Home: what happened up to now is not new any more. */
+  readonly lookedAtHome: () => Promise<void>
+  /** At most eight missions, the last opened first. */
+  readonly recentMissions: () => Promise<ReadonlyArray<Mission>>
+  /** The user opened a mission: it leads Recent. */
+  readonly missionOpened: (missionId: string) => Promise<void>
+  /** The last Journal line of each mission named. */
+  readonly journalTail: (missionIds: ReadonlyArray<string>) => Promise<ReadonlyArray<JournalTail>>
+  /** The domains of a Project's living spec. */
+  readonly livingSpecDomains: (projectId: string) => Promise<ReadonlyArray<LivingDomain>>
+  /** A Project's living spec as its page follows it, now and at each change. */
+  readonly onLivingSpec: (
+    projectId: string,
+    listener: (state: LivingSpecState) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly livingSpecRequirements: (
+    projectId: string,
+    domainId: string,
+  ) => Promise<ReadonlyArray<LivingRequirement>>
+  /** One requirement with the history of its changes. */
+  readonly livingSpecRequirement: (id: string) => Promise<LivingRequirementDetail>
+  /** The runs that wrote the living spec, the newest first. */
+  readonly livingSpecRuns: (projectId: string) => Promise<ReadonlyArray<BootstrapRun>>
+  /** Validates a domain as the user saw it. */
+  readonly validateDomain: (domainId: string, seen: ReadonlyArray<LivingSeen>) => Promise<void>
+  /** Rejects a domain as the user saw it. */
+  readonly rejectDomain: (domainId: string, seen: ReadonlyArray<LivingSeen>) => Promise<void>
+  readonly dropRequirement: (requirementId: string) => Promise<void>
+  /** Starts writing the living spec, of one domain or of every one. */
+  readonly bootstrapLivingSpec: (projectId: string, domainId?: string) => Promise<BootstrapRun>
+  /** A Project's ticket providers. */
+  readonly ticketProviders: (projectId: string) => Promise<ReadonlyArray<TicketProviderInfo>>
+  /** The repositories `gh` can read on a host, to propose when adding GitHub. */
+  readonly proposeGithub: (projectId: string, host: string) => Promise<ReadonlyArray<string>>
+  readonly addGithub: (
+    projectId: string,
+    config: GithubProviderConfig,
+  ) => Promise<TicketProviderInfo>
+  readonly addJira: (projectId: string, config: JiraProviderConfig) => Promise<TicketProviderInfo>
+  /** Which Jira deployment a site is, or null when it cannot be told. */
+  readonly jiraDeployment: (site: string) => Promise<JiraDeployment | null>
+  readonly updateProvider: (
+    providerId: string,
+    config: GithubProviderConfig,
+  ) => Promise<TicketProviderInfo>
+  readonly removeProvider: (providerId: string) => Promise<void>
+  readonly providerStatus: (providerId: string) => Promise<ProviderStatus>
+  /** Reads the provider again now. */
+  readonly checkProviderAgain: (providerId: string) => Promise<ProviderStatus>
+  readonly specMode: (projectId: string) => Promise<SpecMode>
+  readonly setSpecMode: (projectId: string, mode: SpecMode) => Promise<SpecMode>
+  /** A Project's providers and Spec mode, now and at each change. */
+  readonly onTicketSettings: (
+    projectId: string,
+    listener: (settings: TicketsSettings) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The token goes to main to be protected by the system; nothing echoes it back. */
+  readonly saveJiraToken: (providerId: string, token: string) => Promise<JiraTokenStatus>
+  readonly removeJiraToken: (providerId: string) => Promise<JiraTokenStatus>
+  readonly jiraTokenStatus: (providerId: string) => Promise<JiraTokenStatus>
+  /** The language the Spec is written in. */
+  readonly specLanguage: (projectId: string) => Promise<string>
+  readonly setSpecLanguage: (projectId: string, language: string) => Promise<string>
+  /** Rejects with `InvalidKeyPrefix`, or `KeyPrefixTaken` when other missions' keys carry it. */
+  readonly setKeyPrefix: (edit: KeyPrefixEdit) => Promise<Project>
+  /** The exclusive resources of a Project. */
+  readonly resources: (projectId: string) => Promise<ReadonlyArray<ExclusiveResource>>
+  /** Replaces the Project's resources whole; answers them as saved. */
+  readonly saveResources: (
+    projectId: string,
+    drafts: ReadonlyArray<ResourceDraft>,
+  ) => Promise<ReadonlyArray<ExclusiveResource>>
+  /** Which mission holds which resource now. */
+  readonly resourceHolders: () => Promise<ReadonlyArray<ResourceHolding>>
+  readonly onResourceHolders: (
+    listener: (holdings: ReadonlyArray<ResourceHolding>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The agents this machine knows, installed or not. */
   readonly agents: () => Promise<ReadonlyArray<AgentState>>
   /** The models the user marked, favourite or hidden. */
@@ -411,6 +558,80 @@ export function linkOver(port: Port): Link {
         onEnd,
       ),
     missions: (projectId) => call((ready) => ready['missions.list']({ projectId })),
+    searchStart: (projectId, text, listener, onEnd) =>
+      follow((ready) => ready['start.search']({ projectId, text }), listener, anError, onEnd),
+    createStart: (create) => call((ready) => ready['start.create'](create)),
+    cancelMission: (id) => call((ready) => ready['missions.cancel']({ id })),
+    freezeReadiness: (id) => call((ready) => ready['missions.freezeReadiness']({ id })),
+    onFreezeReadiness: (id, listener, onEnd) =>
+      follow((ready) => ready['missions.freezeReadinessChanged']({ id }), listener, anError, onEnd),
+    freeze: (id, specVersion) => call((ready) => ready['missions.freeze']({ id, specVersion })),
+    spec: (missionId) => call((ready) => ready['planning.spec']({ missionId })),
+    openQuestions: () => call((ready) => ready['planning.openQuestions']({})),
+    onOpenQuestions: (listener, onEnd) =>
+      follow((ready) => ready['planning.questionsChanged']({}), listener, anError, onEnd),
+    sinceYouLeft: (before) => call((ready) => ready['home.sinceYouLeft']({ before })),
+    onSinceYouLeft: (listener, onEnd) =>
+      follow((ready) => ready['home.sinceYouLeftChanged'](), listener, anError, onEnd),
+    lookedAtHome: () => call((ready) => ready['home.looked']()),
+    recentMissions: () => call((ready) => ready['home.recent']()),
+    missionOpened: (missionId) => call((ready) => ready['home.opened']({ missionId })),
+    journalTail: (missionIds) => call((ready) => ready['memory.journalTail']({ missionIds })),
+    livingSpecDomains: (projectId) => call((ready) => ready['livingSpec.domains']({ projectId })),
+    onLivingSpec: (projectId, listener, onEnd) =>
+      follow((ready) => ready['livingSpec.changed']({ projectId }), listener, anError, onEnd),
+    livingSpecRequirements: (projectId, domainId) =>
+      call((ready) => ready['livingSpec.requirements']({ projectId, domainId })),
+    livingSpecRequirement: (id) => call((ready) => ready['livingSpec.requirement']({ id })),
+    livingSpecRuns: (projectId) => call((ready) => ready['livingSpec.runs']({ projectId })),
+    validateDomain: (domainId, seen) =>
+      call((ready) => ready['livingSpec.validateDomain']({ domainId, seen })),
+    rejectDomain: (domainId, seen) =>
+      call((ready) => ready['livingSpec.rejectDomain']({ domainId, seen })),
+    dropRequirement: (requirementId) =>
+      call((ready) => ready['livingSpec.dropRequirement']({ requirementId })),
+    bootstrapLivingSpec: (projectId, domainId) =>
+      call((ready) =>
+        ready['livingSpec.bootstrap'](
+          domainId === undefined ? { projectId } : { projectId, domainId },
+        ),
+      ),
+    ticketProviders: (projectId) => call((ready) => ready['tickets.providers']({ projectId })),
+    proposeGithub: (projectId, host) =>
+      call((ready) => ready['tickets.proposeGithub']({ projectId, host })),
+    addGithub: (projectId, config) =>
+      call((ready) => ready['tickets.addGithub']({ projectId, config })),
+    addJira: (projectId, config) =>
+      call((ready) => ready['tickets.addJira']({ projectId, config })),
+    jiraDeployment: (site) => call((ready) => ready['tickets.jiraDeployment']({ site })),
+    updateProvider: (providerId, config) =>
+      call((ready) => ready['tickets.updateProvider']({ providerId, config })),
+    removeProvider: (providerId) =>
+      call((ready) => ready['tickets.removeProvider']({ providerId })),
+    providerStatus: (providerId) => call((ready) => ready['tickets.status']({ providerId })),
+    checkProviderAgain: (providerId) =>
+      call((ready) => ready['tickets.checkAgain']({ providerId })),
+    specMode: (projectId) => call((ready) => ready['tickets.specMode']({ projectId })),
+    setSpecMode: (projectId, mode) =>
+      call((ready) => ready['tickets.setSpecMode']({ projectId, mode })),
+    onTicketSettings: (projectId, listener, onEnd) =>
+      follow((ready) => ready['tickets.changed']({ projectId }), listener, anError, onEnd),
+    saveJiraToken: (providerId, token) =>
+      call((ready) => ready['tickets.saveJiraToken']({ providerId, token })),
+    removeJiraToken: (providerId) =>
+      call((ready) => ready['tickets.removeJiraToken']({ providerId })),
+    jiraTokenStatus: (providerId) =>
+      call((ready) => ready['tickets.jiraTokenStatus']({ providerId })),
+    specLanguage: (projectId) => call((ready) => ready['planning.specLanguage']({ projectId })),
+    setSpecLanguage: (projectId, language) =>
+      call((ready) => ready['planning.setSpecLanguage']({ projectId, language })),
+    setKeyPrefix: (edit) => call((ready) => ready['projects.setKeyPrefix'](edit)),
+    resources: (projectId) => call((ready) => ready['resources.list']({ projectId })),
+    saveResources: (projectId, resources) =>
+      call((ready) => ready['resources.save']({ projectId, resources })),
+    resourceHolders: () => call((ready) => ready['resources.holders']()),
+    onResourceHolders: (listener, onEnd) =>
+      follow((ready) => ready['resources.changed'](), listener, anError, onEnd),
     agents: () => call((ready) => ready['agents.list']()),
     modelMarks: () => call((ready) => ready['models.marks']()),
     markModel: (mark) => call((ready) => ready['models.mark'](mark)),
@@ -485,6 +706,9 @@ export function linkOver(port: Port): Link {
     },
   }
 }
+
+/** A stream ends on any error it fails with: all of them are typed errors. */
+const anError = <E extends Error>(error: E): error is E => error instanceof Error
 
 const failureOf = <E>(cause: Cause.Cause<E>) => {
   const failure = Cause.findErrorOption(cause)

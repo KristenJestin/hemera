@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE, MissionFixture } from '../../shell/shell-fixtures.tsx'
+import { LONG_TITLE } from '../../shell/shell-cast.ts'
+import { MissionFixture } from './mission-shell-fixture.tsx'
 
 /**
  * The frame of a mission on its Review page: the header, the base that keeps its state, and the

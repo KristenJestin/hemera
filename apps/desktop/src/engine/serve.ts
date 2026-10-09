@@ -30,6 +30,7 @@ import {
   removeRepository,
   setBaseBranch,
   setBranchPrefix,
+  setKeyPrefix,
   setRemote,
   setWorkspacesRoot,
   updateProject,
@@ -46,6 +47,9 @@ import { beginPreparation } from './preparation.ts'
 import { checkRecipe, getRecipe, saveRecipe } from './recipe.ts'
 import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from './runs.ts'
 import { listVariables, removeVariable, revealVariable, setVariable } from './variables.ts'
+import { journalTail } from './home/journal-tail.ts'
+import { missionOpened, recentMissions } from './home/recent.ts'
+import { lookedAtHome, sinceYouLeft, sinceYouLeftChanges } from './home/since-you-left.ts'
 import { createMission, getMission, listMissions, missionChanges, moveMission } from './missions.ts'
 import { answerNeed, getNeed, listNeeds, retryNeed } from './needs.ts'
 import { listGrants, revokeGrant } from './permissions/grants.ts'
@@ -207,6 +211,8 @@ export const engineHandlers = (
       use(setWorkspacesRoot(edit)).pipe(observed('projects.setWorkspacesRoot', log)),
     'projects.setBranchPrefix': (edit) =>
       use(setBranchPrefix(edit)).pipe(observed('projects.setBranchPrefix', log)),
+    'projects.setKeyPrefix': (edit) =>
+      use(setKeyPrefix(edit)).pipe(observed('projects.setKeyPrefix', log)),
     'projects.changes': () => follow(projectChanges).pipe(observedStream('projects.changes', log)),
     'repositories.add': (asked) =>
       use(addRepository(asked)).pipe(observed('repositories.add', log)),
@@ -527,6 +533,17 @@ export const engineHandlers = (
     'start.search': ({ projectId, text }) =>
       follow(searchStart(projectId, text)).pipe(observedStream('start.search', log)),
     'start.create': (asked) => use(createStart(asked)).pipe(observed('start.create', log)),
+    // Home: what happened since the user looked, and the missions opened last.
+    'home.sinceYouLeft': ({ before }) =>
+      use(sinceYouLeft(before)).pipe(observed('home.sinceYouLeft', log)),
+    'home.sinceYouLeftChanged': () =>
+      follow(sinceYouLeftChanges).pipe(observedStream('home.sinceYouLeftChanged', log)),
+    'home.looked': () => use(lookedAtHome).pipe(observed('home.looked', log)),
+    'home.recent': () => use(recentMissions).pipe(observed('home.recent', log)),
+    'home.opened': ({ missionId }) =>
+      use(missionOpened(missionId)).pipe(observed('home.opened', log)),
+    'memory.journalTail': ({ missionIds }) =>
+      use(journalTail(missionIds)).pipe(observed('memory.journalTail', log)),
     // Planning (#85): the Spec the Planner writes, and the user's side of it.
     'planning.spec': ({ missionId }) =>
       use(readSpec(missionId)).pipe(observed('planning.spec', log)),

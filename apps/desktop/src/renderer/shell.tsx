@@ -1,13 +1,10 @@
 import type { NeedAnswer } from '@hemera/core/domain'
-import { DatabaseRefused, type Project } from '@hemera/ipc'
+import { DatabaseRefused } from '@hemera/ipc'
 import {
   ContentHeader,
   EngineVeil,
-  HomePage,
-  ProjectPage,
   Sidebar,
   WindowShell,
-  type AppSection,
   type Crumb,
   type EngineState as VeilState,
 } from '@hemera/ui'
@@ -15,15 +12,8 @@ import { Schema } from 'effect'
 import type { ReactNode } from 'react'
 
 import { ENGINE_START_LIMIT, type EngineState } from './engine-start.ts'
-import {
-  linkedSettings,
-  placeOf,
-  trailOf,
-  type Navigation,
-  type Route,
-  type Step,
-} from './navigation.ts'
-import { handlersFor, needRowsOf, waitingCount, type NeedsState } from './needs.ts'
+import { placeOf, trailOf, type Navigation, type Route, type Step } from './navigation.ts'
+import { waitingCount, type NeedsState } from './needs.ts'
 import type { ProjectState, ProjectsState } from './projects.ts'
 
 const isRefused = Schema.is(DatabaseRefused)
@@ -63,22 +53,22 @@ export interface ShellProps {
   under?: (projectId: string) => ReactNode
   /** The page of the Chat the route shows, drawn by its own hooks. */
   chat?: ReactNode
-  /** The tasks of the Project the route shows, on its page, drawn by their own hooks. */
-  projectTasks?: ReactNode
+  /** Home, drawn by its own route. */
+  home?: ReactNode
+  /** The page of the Project the route shows, drawn by its own route. */
+  projectPage?: ReactNode
+  /** The page of the mission the route shows, drawn by its own route. */
+  mission?: ReactNode
+  /** The living spec of the Project the route shows, drawn by its own route. */
+  livingSpec?: ReactNode
   /** A Chat's title, when the window knows it: the last crumb of its page. */
   chatTitle?: (id: string) => string | undefined
-  /** Today, as Home's header says it. */
-  today: string
-  /** Now, which each need's "when" is counted from. */
-  now: Date
   /** The settings page of the Project the route shows, drawn by its own hooks. */
   projectSettings?: ReactNode
   /** The dialog that adds a Project, over the window. */
   addProject?: ReactNode
   /** What the application's Settings page holds under its title. */
   appSettings?: ReactNode
-  /** Home before the first Project, while nothing waits: the agents and the ways in. */
-  firstLaunch?: ReactNode
   /** The in-app notifications, over the sheet's bottom corner. */
   notices?: ReactNode
   actions: ShellActions
@@ -105,149 +95,43 @@ function veilOf(engine: EngineState): Veil | null {
   }
 }
 
-/** What a repository is called on its Project's page: its folder, the main checkout's for `.`. */
-function repositoryName(project: Project, path: string): string {
-  const folder = path === '.' ? project.mainCheckout : path
-  return folder.split(/[\\/]/).findLast((part) => part !== '') ?? folder
-}
-
-interface ProjectRouteProps {
-  id: string
-  state: ProjectState
-  /** The name the sidebar knows, while the page reads the Project. */
-  fallback: string
-  actions: ShellActions
-  /** Its tasks, under the field that starts a mission. */
-  tasks?: ReactNode
-}
-
-/** A Project's page: its header from the engine; its start field and missions are later tickets'. */
-function ProjectRoute({ id, state, fallback, actions, tasks }: ProjectRouteProps): ReactNode {
-  const project = state.kind === 'ready' ? state.project : null
-  return (
-    <ProjectPage
-      name={project?.name ?? fallback}
-      repositories={
-        project?.repositories.map((repository) => ({
-          name: repositoryName(project, repository.path),
-        })) ?? []
-      }
-      groups={[]}
-      loading={state.kind === 'loading'}
-      error={state.kind === 'failed' ? state.sentence : undefined}
-      onStart={() => undefined}
-      onOpenMission={() => undefined}
-      onOpenSettings={() => actions.go({ kind: 'projectSettings', id })}
-      onRetry={actions.retryProject}
-      tasks={tasks}
-    />
-  )
-}
-
 interface RoutePageProps {
   route: Route
-  projects: ProjectsState
-  project: ProjectState
-  needs: NeedsState
-  now: Date
-  nameOf: (id: string) => string | undefined
-  today: string
+  home: ReactNode
+  projectPage: ReactNode
+  mission: ReactNode
+  livingSpec: ReactNode
   projectSettings: ReactNode
   appSettings: ReactNode
-  firstLaunch: ReactNode
   chat: ReactNode
-  projectTasks: ReactNode
-  actions: ShellActions
 }
 
-/** The page of the route, on the sheet. A mission's page comes with the missions; nothing leads to one yet. */
+/** The page of the route, on the sheet: each is built by its own route, from its own hooks. */
 function RoutePage({
   route,
-  projects,
-  project,
-  needs,
-  now,
-  nameOf,
-  today,
+  home,
+  projectPage,
+  mission,
+  livingSpec,
   projectSettings,
   appSettings,
-  firstLaunch,
   chat,
-  projectTasks,
-  actions,
 }: RoutePageProps): ReactNode {
   switch (route.kind) {
-    case 'home': {
-      const listed = projects.kind === 'ready' ? projects.projects : []
-      const rows = needRowsOf(needs, listed, now, route.projectId)
-      // Something waiting is read on Home, which says it; otherwise the first launch's ways in.
-      if (
-        projects.kind === 'ready' &&
-        needs.kind === 'ready' &&
-        listed.length === 0 &&
-        rows.length === 0
-      ) {
-        return firstLaunch
-      }
-      const failure =
-        projects.kind === 'failed'
-          ? projects.sentence
-          : needs.kind === 'failed'
-            ? needs.sentence
-            : undefined
-      const tools = {
-        answer: actions.answer,
-        recheck: actions.recheck,
-        openSettings: (section: AppSection) => actions.go(linkedSettings(section)),
-      }
-      return (
-        <HomePage
-          // A need led to by its notification is unfolded: the list opens on it.
-          key={route.need ?? ''}
-          today={today}
-          // Something waiting is shown even before the first Project: Git missing, say.
-          hasProjects={projects.kind !== 'ready' || projects.projects.length > 0 || rows.length > 0}
-          needsYou={{ rows: [] }}
-          needs={{
-            rows,
-            projects: ['Hemera', ...listed.map((one) => one.name)],
-            open: route.need,
-            on: (id) => {
-              const need =
-                needs.kind === 'ready' ? needs.needs.find((one) => one.id === id) : undefined
-              return need === undefined ? {} : handlersFor(need, tools)
-            },
-          }}
-          questions={{ rows: [] }}
-          sinceYouLeft={{ rows: [] }}
-          recent={{ rows: [] }}
-          loading={projects.kind === 'loading' || needs.kind === 'loading'}
-          error={failure}
-          onOpen={() => undefined}
-          onAddProject={actions.addProject}
-          onRetry={actions.retryProjects}
-        />
-      )
-    }
+    case 'home':
+      return home
     case 'project':
-      return (
-        <ProjectRoute
-          key={route.id}
-          id={route.id}
-          state={project}
-          fallback={nameOf(route.id) ?? ''}
-          actions={actions}
-          tasks={projectTasks}
-        />
-      )
+      return projectPage
     case 'projectSettings':
       return projectSettings
+    case 'livingSpec':
+      return livingSpec
     case 'settings':
       return appSettings
     case 'chat':
       return chat
     case 'mission':
-      return null
+      return mission
   }
 }
 
@@ -267,13 +151,13 @@ export function Shell({
   under,
   chat,
   chatTitle,
-  projectTasks,
-  today,
-  now,
+  home,
+  projectPage,
+  mission,
+  livingSpec,
   projectSettings,
   addProject,
   appSettings,
-  firstLaunch,
   notices,
   actions,
 }: ShellProps): ReactNode {
@@ -335,18 +219,13 @@ export function Shell({
         {veil === null && (
           <RoutePage
             route={route}
-            projects={projects}
-            project={project}
-            needs={needs}
-            now={now}
-            nameOf={nameOf}
-            today={today}
+            home={home}
+            projectPage={projectPage}
+            mission={mission}
+            livingSpec={livingSpec}
             projectSettings={projectSettings}
             appSettings={appSettings}
-            firstLaunch={firstLaunch}
             chat={chat}
-            projectTasks={projectTasks}
-            actions={actions}
           />
         )}
       </WindowShell>

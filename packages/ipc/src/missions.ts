@@ -227,15 +227,6 @@ export class TicketAlreadyLinked extends Schema.TaggedError<TicketAlreadyLinked>
   }
 }
 
-/** A prefix another Project holds, or one keys of another Project's missions still carry. */
-export class KeyPrefixTaken extends Schema.TaggedError<KeyPrefixTaken>()('KeyPrefixTaken', {
-  prefix: Schema.String,
-}) {
-  override get message(): string {
-    return `${this.prefix} is already the key prefix of another Project’s missions.`
-  }
-}
-
 const always = [StorageFailed, EngineGone] as const
 
 const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Errors) =>

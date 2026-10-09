@@ -8,6 +8,7 @@ import {
   focusOf,
   frameOf,
   go,
+  goMissionView,
   landedAfterSetup,
   linkedSettings,
   open,
@@ -90,6 +91,43 @@ describe('The window’s routes', () => {
     expect(placeOf(chat.route)).toEqual({ kind: 'chat', id: 'invoices' })
     const unknown = go(START, { kind: 'chat', projectId: 'acme', id: 'elsewhere' })
     expect(trailOf(unknown, names).at(-1)?.label).toBe('Chat')
+  })
+})
+
+describe('The living spec and the settings sections', () => {
+  test('the living spec is a page under its Project: the Project’s name, then Living spec', () => {
+    const page = go(START, { kind: 'livingSpec', projectId: 'acme' })
+    const trail = trailOf(page, names)
+    expect(trail.map((crumb) => crumb.label)).toEqual(['Acme', 'Living spec'])
+    expect(trail[0]?.step).toEqual({ go: { kind: 'project', id: 'acme' } })
+    expect(trail[1]?.step).toBeUndefined()
+    expect(placeOf(page.route)).toEqual({ kind: 'project', id: 'acme' })
+  })
+
+  test('a Project’s settings can be opened at a section, and the trail stays the same', () => {
+    const settings = go(START, { kind: 'projectSettings', id: 'acme', section: 'models' })
+    expect(labels(settings)).toEqual(['Acme', 'Settings'])
+    expect(placeOf(settings.route)).toEqual({ kind: 'project', id: 'acme' })
+  })
+
+  test('the living spec’s origin link opens the mission with its Spec view over its base', () => {
+    const opened = goMissionView(
+      go(START, { kind: 'livingSpec', projectId: 'acme' }),
+      'acme',
+      'ACME-12',
+      'spec',
+    )
+    expect(opened.route).toEqual(ACME_12)
+    expect(labels(opened)).toEqual(['Acme', 'ACME-12', 'Spec'])
+  })
+
+  test('a mission that already had views keeps them under the one opened', () => {
+    const before = open(go(START, ACME_12), 'round:1')
+    const away = go(before, { kind: 'livingSpec', projectId: 'acme' })
+    expect(frameOf(goMissionView(away, 'acme', 'ACME-12', 'spec'), 'ACME-12').open).toEqual([
+      'round:1',
+      'spec',
+    ])
   })
 })
 
