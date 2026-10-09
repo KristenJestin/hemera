@@ -8,6 +8,7 @@
 
 import {
   InvalidBranchName,
+  InvalidKeyPrefix,
   InvalidProjectName,
   InvalidRepositoryPath,
   MaskedText,
@@ -82,6 +83,10 @@ export type WorkspacesRootEdit = typeof WorkspacesRootEdit.Type
 /** The branch prefix chosen, or null for the Project's name as a slug. */
 export const BranchPrefixEdit = Schema.Struct({ ...edit, prefix: Schema.NullOr(Schema.String) })
 export type BranchPrefixEdit = typeof BranchPrefixEdit.Type
+
+/** The key prefix chosen for a Project's next missions: `ACME` for `ACME-12`. */
+export const KeyPrefixEdit = Schema.Struct({ ...edit, prefix: Schema.String })
+export type KeyPrefixEdit = typeof KeyPrefixEdit.Type
 
 /** A repository added to a Project, at the version of the Project it was added to. */
 export const NewRepository = Schema.Struct({
@@ -256,6 +261,15 @@ export class BaseUnavailable extends Schema.TaggedError<BaseUnavailable>()('Base
   }
 }
 
+/** A prefix another Project holds, or one keys of another Project's missions still carry. */
+export class KeyPrefixTaken extends Schema.TaggedError<KeyPrefixTaken>()('KeyPrefixTaken', {
+  prefix: Schema.String,
+}) {
+  override get message(): string {
+    return `${this.prefix} is already the key prefix of another Project’s missions.`
+  }
+}
+
 /** What every call on the Profile may fail with: the data folder, or an engine gone. */
 const always = [StorageFailed, EngineGone] as const
 /** What every edit may fail with besides: the record moved on, or is gone. */
@@ -304,6 +318,12 @@ export const ProjectsRpcs = RpcGroup.make(
     payload: BranchPrefixEdit,
     success: Project,
     error: failing(...edited, InvalidBranchName),
+  }),
+  /** Only the later missions take the new prefix; refused when others' missions carry it. */
+  Rpc.make('projects.setKeyPrefix', {
+    payload: KeyPrefixEdit,
+    success: Project,
+    error: failing(...edited, InvalidKeyPrefix, KeyPrefixTaken),
   }),
   Rpc.make('projects.changes', { success: Project, error: failing(...always), stream: true }),
 )

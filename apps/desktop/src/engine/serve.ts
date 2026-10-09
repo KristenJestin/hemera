@@ -30,6 +30,7 @@ import {
   removeRepository,
   setBaseBranch,
   setBranchPrefix,
+  setKeyPrefix,
   setRemote,
   setWorkspacesRoot,
   updateProject,
@@ -207,6 +208,8 @@ export const engineHandlers = (
       use(setWorkspacesRoot(edit)).pipe(observed('projects.setWorkspacesRoot', log)),
     'projects.setBranchPrefix': (edit) =>
       use(setBranchPrefix(edit)).pipe(observed('projects.setBranchPrefix', log)),
+    'projects.setKeyPrefix': (edit) =>
+      use(setKeyPrefix(edit)).pipe(observed('projects.setKeyPrefix', log)),
     'projects.changes': () => follow(projectChanges).pipe(observedStream('projects.changes', log)),
     'repositories.add': (asked) =>
       use(addRepository(asked)).pipe(observed('repositories.add', log)),

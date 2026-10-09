@@ -141,6 +141,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('projects.setBranchPrefix', log),
       ),
+    'projects.setKeyPrefix': (request) =>
+      engine['projects.setKeyPrefix'](request).pipe(
+        closedAs(gone),
+        observed('projects.setKeyPrefix', log),
+      ),
     'repositories.add': (request) =>
       engine['repositories.add'](request).pipe(closedAs(gone), observed('repositories.add', log)),
     'repositories.remove': (request) =>
