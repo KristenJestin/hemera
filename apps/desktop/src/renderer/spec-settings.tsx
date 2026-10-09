@@ -3,7 +3,7 @@
  * language they are written in, the key prefix of the next missions, and how often linked tickets
  * are checked, with the last check (read again at each change of the ticket settings). No Effect
  * here: the link's calls are promises. A write answered after a later one is dropped; the key prefix is sent once the typing
- * settles, and the engine's refusal is shown under the field.
+ * settles or the field is left, and the engine's refusal is shown under the field.
  */
 
 import { MIN_SYNC_MINUTES, type SpecMode } from '@hemera/core/domain'
@@ -14,9 +14,9 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { Link } from './link.ts'
 import {
   OFFERED_MODES,
-  PREFIX_SETTLES_MS,
   answerGate,
   lastCheckWords,
+  pendingPrefix,
   prefixEditOf,
   prefixWords,
   settingWords,
@@ -78,7 +78,12 @@ export function SpecSettingsPart({
     prefix: answerGate(),
     sync: answerGate(),
   })
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; prefix: string } | null>(null)
+  const [pending] = useState(() =>
+    pendingPrefix((run, delay) => {
+      const timer = setTimeout(run, delay)
+      return () => clearTimeout(timer)
+    }),
+  )
 
   useEffect(() => {
     setHeld(NOTHING)
@@ -135,12 +140,12 @@ export function SpecSettingsPart({
       mine.mode.close()
       mine.language.close()
       mine.prefix.close()
-      // A prefix typed and not yet sent is sent as the section is left, not lost.
-      const waiting = pending.current
-      pending.current = null
+      // The field sends its prefix when it loses focus, which comes before the section goes. A
+      // prefix still waiting here is sent anyway, not lost; the window has no place left to say
+      // that the engine refused it.
+      const waiting = pending.take()
       if (waiting !== null && current.current !== undefined) {
-        clearTimeout(waiting.timer)
-        link.setKeyPrefix(prefixEditOf(current.current, waiting.prefix)).catch(() => undefined)
+        link.setKeyPrefix(prefixEditOf(current.current, waiting)).catch(() => undefined)
       }
     }
   }, [link, engineReady, projectId])
@@ -196,7 +201,6 @@ export function SpecSettingsPart({
   }
 
   const writePrefix = (prefix: string): void => {
-    pending.current = null
     const record = current.current
     if (record === undefined) return
     if (prefix.trim().toUpperCase() === record.keyPrefix) {
@@ -218,11 +222,9 @@ export function SpecSettingsPart({
   }
 
   const typePrefix = (prefix: string): void => {
-    if (pending.current !== null) clearTimeout(pending.current.timer)
     gates.current.prefix.begin()
     change({ typed: prefix, prefixRefused: undefined })
-    const timer = setTimeout(() => writePrefix(prefix), PREFIX_SETTLES_MS)
-    pending.current = { timer, prefix }
+    pending.type(prefix, writePrefix)
   }
 
   return (
@@ -235,6 +237,7 @@ export function SpecSettingsPart({
       prefix={held.typed ?? known?.keyPrefix ?? null}
       prefixRefused={held.prefixRefused}
       onPrefix={typePrefix}
+      onPrefixCommit={() => pending.commit()}
       sync={
         held.minutes === null
           ? undefined

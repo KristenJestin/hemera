@@ -93,3 +93,44 @@ export function answerGate(): AnswerGate {
     },
   }
 }
+
+/** Runs a function after a delay and answers how to cancel it. */
+export type Schedule = (run: () => void, delay: number) => () => void
+
+/**
+ * The key prefix typed and not yet sent: it is sent when the typing settles, at once when the
+ * field is committed (focus lost, Enter), and handed over when the section is left.
+ */
+export interface PendingPrefix {
+  /** Waits for the typing to settle, then sends; a prefix typed before is dropped. */
+  readonly type: (prefix: string, send: (prefix: string) => void) => void
+  /** Sends the prefix waiting now, if any; answers whether there was one. */
+  readonly commit: () => boolean
+  /** Takes the prefix waiting out without sending it. */
+  readonly take: () => string | null
+}
+
+export function pendingPrefix(schedule: Schedule, delay = PREFIX_SETTLES_MS): PendingPrefix {
+  let waiting: { prefix: string; send: (prefix: string) => void; cancel: () => void } | null = null
+  const commit = (): boolean => {
+    const now = waiting
+    if (now === null) return false
+    now.cancel()
+    waiting = null
+    now.send(now.prefix)
+    return true
+  }
+  return {
+    type: (prefix, send) => {
+      waiting?.cancel()
+      waiting = { prefix, send, cancel: schedule(commit, delay) }
+    },
+    commit,
+    take: () => {
+      const now = waiting
+      now?.cancel()
+      waiting = null
+      return now?.prefix ?? null
+    },
+  }
+}

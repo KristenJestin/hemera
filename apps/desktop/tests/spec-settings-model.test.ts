@@ -11,6 +11,7 @@ import {
   OFFERED_MODES,
   answerGate,
   lastCheckWords,
+  pendingPrefix,
   prefixEditOf,
   prefixWords,
   settingWords,
@@ -125,5 +126,56 @@ describe('A write answered after a later one', () => {
     const write = gate.begin()
     gate.close()
     expect(gate.isLatest(write)).toBe(false)
+  })
+})
+
+describe('A key prefix typed and not yet sent', () => {
+  /** A schedule that runs nothing until the test says the typing settled. */
+  const held = () => {
+    const timers: Array<{ run: () => void; cancelled: boolean }> = []
+    return {
+      schedule: (run: () => void) => {
+        const timer = { run, cancelled: false }
+        timers.push(timer)
+        return () => {
+          timer.cancelled = true
+        }
+      },
+      settle: () => timers.filter((one) => !one.cancelled).forEach((one) => one.run()),
+    }
+  }
+
+  test('is sent when the field is committed, once, so its refusal is shown under the field', () => {
+    const clock = held()
+    const pending = pendingPrefix(clock.schedule)
+    const sent: string[] = []
+    pending.type('H', (prefix) => sent.push(prefix))
+    pending.type('HEM', (prefix) => sent.push(prefix))
+    expect(sent).toEqual([])
+    expect(pending.commit()).toBe(true)
+    expect(sent).toEqual(['HEM'])
+    clock.settle()
+    expect(sent).toEqual(['HEM'])
+    expect(pending.commit()).toBe(false)
+  })
+
+  test('is sent once the typing settles when nothing commits it', () => {
+    const clock = held()
+    const pending = pendingPrefix(clock.schedule)
+    const sent: string[] = []
+    pending.type('HEM', (prefix) => sent.push(prefix))
+    clock.settle()
+    expect(sent).toEqual(['HEM'])
+    expect(pending.take()).toBeNull()
+  })
+
+  test('is handed over, unsent, when the section is left', () => {
+    const clock = held()
+    const pending = pendingPrefix(clock.schedule)
+    const sent: string[] = []
+    pending.type('HEM', (prefix) => sent.push(prefix))
+    expect(pending.take()).toBe('HEM')
+    clock.settle()
+    expect(sent).toEqual([])
   })
 })

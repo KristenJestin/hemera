@@ -46,6 +46,8 @@ export interface SpecFieldsProps {
   prefix: string | null
   prefixRefused?: string | undefined
   onPrefix: (prefix: string) => void
+  /** The prefix is done: the field lost focus or Enter was pressed. */
+  onPrefixCommit?: (() => void) | undefined
   /** Absent: the row is not drawn. Drawn only for the linked mode. */
   sync?:
     | {
@@ -95,6 +97,7 @@ export function SpecFields({
   prefix,
   prefixRefused,
   onPrefix,
+  onPrefixCommit,
   sync,
   refused,
 }: SpecFieldsProps): ReactNode {
@@ -144,6 +147,10 @@ export function SpecFields({
             value={prefix ?? ''}
             disabled={prefix === null}
             onValueChange={onPrefix}
+            onBlur={onPrefixCommit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') onPrefixCommit?.()
+            }}
             error={prefixRefused}
             description={`Missions already started keep their key; the next ones use ${prefix ?? ''}.`}
           />
