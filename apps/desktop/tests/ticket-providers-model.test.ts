@@ -258,7 +258,12 @@ describe('The store a dialog and its foot share', () => {
 })
 
 /** A promise a test settles by hand. */
-function later<A>(): { promise: Promise<A>; resolve: (value: A) => void } {
+interface Settled<A> {
+  promise: Promise<A>
+  resolve: (value: A) => void
+}
+
+function pending<A>(): Settled<A> {
   let resolve: (value: A) => void = () => undefined
   const promise = new Promise<A>((done) => {
     resolve = done
@@ -290,7 +295,8 @@ describe('Adding a Jira provider with a token', () => {
       refused: undefined,
     })
   const linkOf = (answers: JiraTokenStatus[]) => {
-    const calls = { addJira: 0, saved: [] as Array<[string, string]> }
+    const saved: Array<[string, string]> = []
+    const calls = { addJira: 0, saved }
     return {
       calls,
       link: {
@@ -380,7 +386,7 @@ describe('Adding a GitHub provider whose repositories were ticked by hand', () =
 describe('Reads that come back out of order', () => {
   test('an older status answer does not overwrite a fresh Check again', async () => {
     const store = emptyState()
-    const old = later<ProviderStatus>()
+    const old = pending<ProviderStatus>()
     const fresh: ProviderStatus = { state: 'ready', sentence: 'Fresh.', fix: null }
     const stale: ProviderStatus = { state: 'unreachable', sentence: 'Stale.', fix: null }
     const link = {
@@ -399,8 +405,8 @@ describe('Reads that come back out of order', () => {
 
   test('the latest of two reads wins, whichever answers last', async () => {
     const store = emptyState()
-    const first = later<ProviderStatus>()
-    const second = later<ProviderStatus>()
+    const first = pending<ProviderStatus>()
+    const second = pending<ProviderStatus>()
     const answers = [first.promise, second.promise]
     const link = {
       providerStatus: () => answers.shift() ?? first.promise,

@@ -357,7 +357,7 @@ describe('following the living spec', () => {
 
   test('validating sends what was shown at the click, even if the write waits behind a slow one', async () => {
     const first = requirement({ id: 'LR2', state: 'proposed', version: 3 })
-    const later = requirement({ id: 'LR9', state: 'proposed', version: 1 })
+    const added = requirement({ id: 'LR9', state: 'proposed', version: 1 })
     let shownNow = [first]
     let release: () => void = () => undefined
     const slow = new Promise<void>((resolve) => {
@@ -378,7 +378,7 @@ describe('following the living spec', () => {
     following.reject('d1')
     following.validate('d1')
     // New requirements are read while the validation waits its turn.
-    shownNow = [first, later]
+    shownNow = [first, added]
     played.send({
       ...STATE,
       domains: [domain({ proposed: 2 }), domain({ id: 'd2', name: 'Payments' })],

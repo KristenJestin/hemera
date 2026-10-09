@@ -159,13 +159,13 @@ export function providerStore<T extends object>(initial: T): ProviderStore<T> {
   }
 }
 
-const reads = new WeakMap<object, Map<string, number>>()
+const reads = new WeakMap<WeakKey, Map<string, number>>()
 
 /**
  * Starts a read under a key and answers whether it is still the latest one for that key: an answer
  * that comes back after a newer read began is stale and must not be written over it.
  */
-export function latestRead(owner: object, key: string): () => boolean {
+export function latestRead(owner: WeakKey, key: string): () => boolean {
   const known = reads.get(owner) ?? new Map<string, number>()
   reads.set(owner, known)
   const mine = (known.get(key) ?? 0) + 1
