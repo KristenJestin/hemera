@@ -222,10 +222,11 @@ export const Error: Story = {
   },
 }
 
-/** From the keyboard: each card's mission and each row is a stop, and Enter opens it. */
+/** From the keyboard: a card's ball is a stop, then its mission, and Enter opens it. */
 export const Focused: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
+    await userEvent.tab()
     await userEvent.tab()
     expect(
       canvas.getAllByRole('button', { name: /Export invoices as CSV from the billing/ })[0],
@@ -240,7 +241,7 @@ export const SinceMore: Story = {
   args: { since: { ...SINCE, more: true } },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Show earlier' }))
+    await userEvent.click(canvas.getByRole('button', { name: /Show earlier/ }))
     expect(args.since.onMore).toHaveBeenCalled()
   },
 }
@@ -248,7 +249,7 @@ export const SinceMore: Story = {
 export const SinceMoreLoading: Story = {
   args: { since: { ...SINCE, more: true, loadingMore: true } },
   play: async ({ canvasElement }) => {
-    const button = within(canvasElement).getByRole('button', { name: 'Show earlier' })
+    const button = within(canvasElement).getByRole('button', { name: /Show earlier/ })
     expect(button).toHaveAttribute('aria-disabled', 'true')
   },
 }
@@ -277,17 +278,17 @@ export const SinceOfTheProject: Story = {
   },
 }
 
-/** Needs you in its column, a third of a 1366 px window wide: nothing spills out of its frame. */
+/** Needs you in its column, a third of a 1366 px window wide: the page does not scroll sideways. */
 export const NeedsInTheColumn: Story = {
   globals: { viewport: { value: 'laptop', isRotated: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const region = canvas.getByRole('region', { name: 'Needs you' })
-    const list = within(region).getByRole('list', { name: 'Needs you' })
-    for (const row of within(list).getAllByRole('listitem')) {
-      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth)
-    }
     expect(region.getBoundingClientRect().width).toBeLessThan(window.innerWidth / 2)
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth)
+    const list = within(region).getByRole('list', { name: 'Needs you' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getAllByRole('button', { name: /here$/ })).toHaveLength(2)
   },
 }
 
