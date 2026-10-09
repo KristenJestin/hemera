@@ -355,6 +355,41 @@ describe('following the living spec', () => {
     expect(played.last().busy).toBeUndefined()
   })
 
+  test('validating sends what was shown at the click, even if the write waits behind a slow one', async () => {
+    const first = requirement({ id: 'LR2', state: 'proposed', version: 3 })
+    const later = requirement({ id: 'LR9', state: 'proposed', version: 1 })
+    let shownNow = [first]
+    let release: () => void = () => undefined
+    const slow = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const played = world({
+      livingSpecRequirements: () => Promise.resolve(shownNow),
+      rejectDomain: () => slow,
+    })
+    const following = followLivingSpec(
+      played.link,
+      'acme',
+      (view) => played.views.push(view),
+      () => NOW,
+    )
+    played.send(STATE)
+    await flush()
+    following.reject('d1')
+    following.validate('d1')
+    // New requirements are read while the validation waits its turn.
+    shownNow = [first, later]
+    played.send({
+      ...STATE,
+      domains: [domain({ proposed: 2 }), domain({ id: 'd2', name: 'Payments' })],
+    })
+    await flush()
+    release()
+    await flush()
+    const sent = played.calls.find((one) => one.call === 'validate')
+    expect(sent?.args).toEqual(['d1', [{ id: 'LR2', version: 3, pending: null }]])
+  })
+
   test('rejecting names what is shown too, and reads the domain again', async () => {
     let reads = 0
     const played = world({

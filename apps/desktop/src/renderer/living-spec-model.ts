@@ -357,18 +357,24 @@ export function followLivingSpec(
       readHistory(requirementId)
       emit()
     },
-    validate: (domainId) =>
+    validate: (domainId) => {
+      // What the user is shown at the click, not what a queued write finds when its turn comes.
+      const seen = livingSeen(shown(domainId))
       gesture(
         domainId,
-        () => link.validateDomain(domainId, livingSeen(shown(domainId))),
+        () => link.validateDomain(domainId, seen),
         () => readRequirements(domainId),
-      ),
-    reject: (domainId) =>
+      )
+    },
+    reject: (domainId) => {
+      // What the user is shown at the click, not what a queued write finds when its turn comes.
+      const seen = livingSeen(shown(domainId))
       gesture(
         domainId,
-        () => link.rejectDomain(domainId, livingSeen(shown(domainId))),
+        () => link.rejectDomain(domainId, seen),
         () => readRequirements(domainId),
-      ),
+      )
+    },
     drop: (requirementId) =>
       gesture(
         requirementId,
