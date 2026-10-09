@@ -411,3 +411,22 @@ export const DENSE: LivingSpecData = {
   ),
   runs: [],
 }
+
+/** The Catalogue search domain once the user validated it: its proposals are requirements. */
+export const SEARCH_VALIDATED: LivingSpecData = {
+  ...FILLED,
+  domains: FILLED.domains.map((domain) => validatedDomain(domain)),
+  requirements: {
+    ...FILLED.requirements,
+    search: (FILLED.requirements['search'] ?? []).map((one) => validatedRequirement(one)),
+  },
+}
+
+function validatedDomain(domain: LivingDomain): LivingDomain {
+  if (domain.id !== 'search') return domain
+  return { ...domain, state: 'validated', proposed: 0, validated: domain.proposed }
+}
+
+function validatedRequirement(one: LivingRequirement): LivingRequirement {
+  return { ...one, state: 'validated', uncertainty: '' }
+}

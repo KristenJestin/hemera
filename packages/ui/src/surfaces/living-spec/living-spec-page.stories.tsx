@@ -13,10 +13,10 @@ import {
   NO_MODEL,
   REREADING,
   RUNNING,
+  SEARCH_VALIDATED,
   WAITING,
 } from './living-spec-fixtures.ts'
 import { LivingSpecPage } from './living-spec-page.tsx'
-import type { LivingSpecData } from './living-spec-types.ts'
 
 /**
  * The living spec of a Project, domain by domain: the domains listed down the left, one open
@@ -356,24 +356,7 @@ export const ProposedBecomesValidated: Story = {
   args: { opened: 'search' },
   render: function Render(args) {
     const [validated, setValidated] = useState(false)
-    const data: LivingSpecData = validated
-      ? {
-          ...FILLED,
-          domains: FILLED.domains.map((one) =>
-            one.id === 'search'
-              ? { ...one, state: 'validated', proposed: 0, validated: one.proposed }
-              : one,
-          ),
-          requirements: {
-            ...FILLED.requirements,
-            search: (FILLED.requirements['search'] ?? []).map((one) => ({
-              ...one,
-              state: 'validated',
-              uncertainty: '',
-            })),
-          },
-        }
-      : FILLED
+    const data = validated ? SEARCH_VALIDATED : FILLED
     return (
       <>
         <LivingSpecPage
