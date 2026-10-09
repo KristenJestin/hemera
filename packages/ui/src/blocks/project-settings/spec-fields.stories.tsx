@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { SPEC_MODE_WORDS, SpecFields } from './spec-fields.tsx'
@@ -140,6 +141,19 @@ export const PrefixRefused: Story = {
 
 /** Typing a prefix tells the page at each change; the engine is asked once the typing settles. */
 export const TypePrefix: Story = {
+  render: (args) => {
+    const [prefix, setPrefix] = useState(args.prefix)
+    return (
+      <SpecFields
+        {...args}
+        prefix={prefix}
+        onPrefix={(value) => {
+          setPrefix(value)
+          args.onPrefix(value)
+        }}
+      />
+    )
+  },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const field = canvas.getByRole('textbox', { name: 'Key prefix' })
