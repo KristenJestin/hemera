@@ -10,6 +10,7 @@ import type { FreezeReadiness, Mission, Project } from '@hemera/ipc'
 import type { MissionStage, NeedRow } from '@hemera/ui'
 import { Predicate } from 'effect'
 
+import type { Link } from './link.ts'
 import type { MissionLine } from './missions.ts'
 import { cardOf, handlersFor, type NeedHandlers, type NeedTools } from './needs.ts'
 
@@ -109,5 +110,36 @@ export function needHandlersOf(mission: Mission, tools: NeedTools): (id: string)
   return (id) => {
     const need = mission.needs.find((one) => one.id === id)
     return need === undefined ? {} : handlersFor(need, tools)
+  }
+}
+
+/**
+ * Freezes the Spec at the version the engine reported when it offered Freeze, which is the one the
+ * user was shown: a Spec that moved since is refused by the engine, never frozen unseen.
+ */
+export function freezeShown(
+  link: Pick<Link, 'freeze'>,
+  missionId: string,
+  shown: FreezeReadiness,
+): Promise<Mission> {
+  return link.freeze(missionId, shown.freshness.specVersion)
+}
+
+/**
+ * Lets one gesture run at a time: while a task is in flight another call does nothing and answers
+ * undefined. `onChange` hears when a task starts and ends.
+ */
+export function oneAtATime(
+  onChange: (busy: boolean) => void,
+): <A>(task: () => Promise<A>) => Promise<A | undefined> {
+  let busy = false
+  return (task) => {
+    if (busy) return Promise.resolve(undefined)
+    busy = true
+    onChange(true)
+    return task().finally(() => {
+      busy = false
+      onChange(false)
+    })
   }
 }

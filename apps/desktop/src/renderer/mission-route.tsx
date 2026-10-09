@@ -12,10 +12,12 @@ import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
 import {
+  freezeShown,
   frozenOf,
   headerOf,
   needHandlersOf,
   needRowsOfMission,
+  oneAtATime,
   pageOf,
   repositoryNamer,
 } from './mission-header-model.ts'
@@ -52,6 +54,8 @@ export interface MissionPageProps extends Omit<MissionRouteProps, 'projectId' | 
   /** Why the last Freeze or Cancel did not go through, in words. */
   notice?: string | undefined
   freeze: () => void
+  /** Whether a Freeze is in flight: Freeze is then not offered again. */
+  freezing?: boolean | undefined
   cancel: () => void
   /** The page of each stage; the registry of `stage-pages.tsx` unless a test says otherwise. */
   pages?: typeof STAGE_PAGES | undefined
@@ -85,6 +89,7 @@ export function MissionPage({
   frame,
   actions,
   freeze,
+  freezing = false,
   cancel,
   pages = STAGE_PAGES,
   views = MISSION_VIEWS,
@@ -121,7 +126,12 @@ export function MissionPage({
       onOpenSpec={'spec' in views ? () => actions.open('spec') : undefined}
       action={
         header.freeze ? (
-          <Button variant="primary" size="sm" onClick={freeze}>
+          <Button
+            variant="primary"
+            size="sm"
+            state={freezing ? 'loading' : 'idle'}
+            onClick={freeze}
+          >
             Freeze
           </Button>
         ) : undefined
@@ -169,6 +179,8 @@ export function MissionRoute({
   const [project, setProject] = useState<Project | null>(null)
   const [readiness, setReadiness] = useState<FreezeReadiness | null>(null)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  const [freezing, setFreezing] = useState(false)
+  const [once] = useState(() => oneAtATime(setFreezing))
   const mission =
     missions.kind === 'ready' ? missions.missions.find((one) => one.key === missionKey) : undefined
   const id = mission?.id
@@ -220,13 +232,13 @@ export function MissionRoute({
 
   if (missions.kind !== 'ready' || mission === undefined) return null
 
-  // The Spec is frozen at the version the user saw; the engine refuses one that moved since.
+  // The Spec is frozen at the version the user was shown; the engine refuses one that moved since.
   const freeze = (): void => {
+    if (readiness === null) return
     setNotice(undefined)
-    link
-      .spec(mission.id)
-      .then((spec) => link.freeze(mission.id, spec.version))
-      .catch((failure: Error) => setNotice(failure.message))
+    once(() => freezeShown(link, mission.id, readiness)).catch((failure: Error) =>
+      setNotice(failure.message),
+    )
   }
   const cancel = (): void => {
     setNotice(undefined)
@@ -245,6 +257,7 @@ export function MissionRoute({
       frame={frame}
       actions={actions}
       freeze={freeze}
+      freezing={freezing}
       cancel={cancel}
     />
   )

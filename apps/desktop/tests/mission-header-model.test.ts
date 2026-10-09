@@ -17,13 +17,16 @@ import {
   cancelOffered,
   differenceOf,
   freezeOffered,
+  freezeShown,
   frozenOf,
   headerOf,
   needHandlersOf,
   needRowsOfMission,
+  oneAtATime,
   pageOf,
   repositoryNamer,
 } from '../src/renderer/mission-header-model.ts'
+import { SILENT_LINK } from './fake-link.ts'
 
 const readiness = (ready: boolean): FreezeReadiness => ({
   ready,
@@ -247,5 +250,49 @@ describe('The needs at the top of a mission', () => {
         openSettings: () => undefined,
       })('unknown'),
     ).toEqual({})
+  })
+})
+
+describe('Freeze at the version the user was shown', () => {
+  test('freezes the version of the readiness, not the Spec as it is at the click', async () => {
+    const frozen: Array<[string, number]> = []
+    const link = {
+      ...SILENT_LINK,
+      spec: () => Promise.reject(new Error('the Spec is not read at the click')),
+      freeze: (id: string, version: number) => {
+        frozen.push([id, version])
+        return Promise.resolve(mission())
+      },
+    }
+    const shown = {
+      ...readiness(true),
+      freshness: { readVersion: 3, specVersion: 4, changes: [] },
+    }
+    await freezeShown(link, 'm14', shown)
+    expect(frozen).toEqual([['m14', 4]])
+  })
+
+  test('pressing twice while the first is in flight makes one call', async () => {
+    const busy: boolean[] = []
+    const once = oneAtATime((now) => busy.push(now))
+    let calls = 0
+    let finish: () => void = () => undefined
+    const task = (): Promise<number> => {
+      calls += 1
+      return new Promise((resolve) => {
+        finish = () => resolve(calls)
+      })
+    }
+    const first = once(task)
+    const second = once(task)
+    expect(calls).toBe(1)
+    expect(await second).toBeUndefined()
+    finish()
+    expect(await first).toBe(1)
+    expect(busy).toEqual([true, false])
+    const third = once(task)
+    expect(calls).toBe(2)
+    finish()
+    await third
   })
 })
