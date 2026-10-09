@@ -33,6 +33,7 @@ import { ProbeLaunch, ProbeRead, ProbeReport } from './probes.ts'
 import { RetireHow } from './questions.ts'
 import { ModelRecommend, ProofWrite, TasksWrite } from './proofs.ts'
 import { SetupProposal } from './setup.ts'
+import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
@@ -42,6 +43,7 @@ export const ROLES = [
   'planner',
   'probe',
   'cold-read',
+  'ticket-event',
   'builder',
   'helper',
   'documenter',
@@ -59,6 +61,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   planner: 'the Planner',
   probe: 'the Probe',
   'cold-read': 'the cold read',
+  'ticket-event': 'the ticket-event Planner',
   builder: 'the Builder',
   helper: 'a helper',
   documenter: 'the documenter',
@@ -89,6 +92,7 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   planner: { kind: 'main-checkout', readOnly: true },
   probe: { kind: 'own-worktree', readOnly: false },
   'cold-read': { kind: 'main-checkout', readOnly: true },
+  'ticket-event': { kind: 'main-checkout', readOnly: true },
   builder: { kind: 'workspace', readOnly: false },
   helper: { kind: 'workspace', readOnly: false },
   documenter: { kind: 'workspace', readOnly: false },
@@ -644,7 +648,7 @@ const QuestionDraftMessage = Schema.Struct({
 })
 
 const InputIntegrated = Schema.Struct({
-  id: Bounded(20, 'The input (`I4`), as its delivery named it.'),
+  id: Bounded(40, 'The input (`I4`) or the ticket event, as its delivery named it.'),
   where: Schema.Union([
     Bounded(200, 'The Spec item it went into: a section name, `R2`, or a decision.'),
     Schema.Struct({
@@ -787,6 +791,7 @@ const READERS: ReadonlyArray<Role> = [
   'planner',
   'probe',
   'cold-read',
+  'ticket-event',
   'builder',
   'helper',
   'documenter',
@@ -956,7 +961,7 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner', 'cold-read'],
+    roles: ['planner', 'cold-read', 'ticket-event'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1192,7 +1197,7 @@ export const TOOLS = {
     },
   }),
   ticket_read: tool({
-    roles: ['planner', 'chat'],
+    roles: ['planner', 'chat', 'ticket-event'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1241,6 +1246,26 @@ export const TOOLS = {
       label: 'Mark what relies on a dependency',
       mark: 'relies-on-write',
       doing: 'Marking what relies on a dependency',
+    },
+  }),
+  answer_propose: tool({
+    roles: ['planner'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: AnswerPropose,
+    label: { label: 'Propose an answer', mark: 'answer-propose', doing: 'Proposing an answer' },
+  }),
+  ticket_event_report: tool({
+    roles: ['ticket-event'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: TicketEventReport,
+    label: {
+      label: 'Report a ticket event',
+      mark: 'ticket-event-report',
+      doing: 'Reporting a ticket change',
     },
   }),
   hemera_report: tool({
@@ -1313,6 +1338,8 @@ export const TOOL_NAMES = [
   'cold_read_fixed',
   'dependency_propose',
   'relies_on_write',
+  'answer_propose',
+  'ticket_event_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

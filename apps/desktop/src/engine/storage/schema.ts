@@ -109,6 +109,10 @@ export const projects = sqliteTable(
     specLanguage: text('spec_language').notNull().default('en'),
     /** Where its Specs live (#95): `local` or `linked`; read by every ticket provider. */
     specMode: text('spec_mode').notNull().default('local'),
+    /** How often its watched tickets are checked, in minutes (#97): 5 at least, 60 by default. */
+    ticketSyncMinutes: integer('ticket_sync_minutes').notNull().default(60),
+    /** When the last check of its tickets succeeded with every provider (#97); null before. */
+    ticketsCheckedAt: text('tickets_checked_at'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),
@@ -1776,6 +1780,8 @@ export const missionTickets = sqliteTable('mission_tickets', {
   baseVersionId: text('base_version_id').references(() => ticketVersions.id),
   lastVersionId: text('last_version_id').references(() => ticketVersions.id),
   linkedAt: text('linked_at').notNull(),
+  /** Since when the provider no longer finds the ticket (#97): said once, cleared once read. */
+  missingSince: text('missing_since'),
 })
 
 /**
@@ -1959,4 +1965,96 @@ export const specReliesOn = sqliteTable(
       columns: [table.missionId, table.requirementId, table.dependsOn, table.theirRequirement],
     }),
   ],
+)
+
+/**
+ * The sessions that analyse the ticket events of a frozen Spec (#97): one per mission and per
+ * check, a fixed phase counted in the Project's cap. `state` goes `waiting_for_slot`, `running`,
+ * then `done` (every event of it has its report) or `failed` with its `failure`. `lineage` is its
+ * session's, whose slot it holds; `reminded` says it was told once to end with its reports.
+ */
+export const ticketEventRuns = sqliteTable(
+  'ticket_event_runs',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    lineage: text('lineage').notNull(),
+    state: text('state').notNull(),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull(),
+    failure: text('failure').$type<Masked<string>>(),
+    askedAt: text('asked_at').notNull(),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+  },
+  (table) => [uniqueIndex('ticket_event_run_of_lineage').on(table.lineage)],
+)
+
+/**
+ * Each change the sync found on a watched ticket (#97), in detection order per mission
+ * (`sequence`): its kind, the comment it is about, the last known version before it and the version
+ * read, the difference (masked), the stage it was found in, and its state: `new`, `delivered`,
+ * `analysed`, `integrated` or `seen`. In Planning it is an input of the Planner (`input_id`); after
+ * the Freeze, the run that analyses it (`run_id`) stores its report (`summary`, `matters`, `why`).
+ */
+export const ticketEvents = sqliteTable(
+  'ticket_events',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    reference: text('reference').notNull(),
+    key: text('key').notNull(),
+    kind: text('kind').notNull(),
+    commentId: text('comment_id'),
+    beforeVersionId: text('before_version_id').references(() => ticketVersions.id),
+    afterVersionId: text('after_version_id')
+      .notNull()
+      .references(() => ticketVersions.id),
+    difference: text('difference').$type<Masked<string>>().notNull(),
+    stage: text('stage').notNull(),
+    detectedAt: text('detected_at').notNull(),
+    state: text('state').notNull(),
+    inputId: text('input_id'),
+    runId: text('run_id').references(() => ticketEventRuns.id, { onDelete: 'set null' }),
+    summary: text('summary').$type<Masked<string>>(),
+    matters: text('matters'),
+    why: text('why').$type<Masked<string>>(),
+    analysedAt: text('analysed_at'),
+    seenAt: text('seen_at'),
+  },
+  (table) => [
+    uniqueIndex('ticket_event_order').on(table.missionId, table.sequence),
+    index('ticket_events_of_run').on(table.runId),
+  ],
+)
+
+/**
+ * An answer the Planner proposes for a question that waits, from a comment of the mission's ticket
+ * (#97): never a need, never applied. `state` goes `proposed`, then `accepted` (it became the
+ * user's answer), `dismissed` by the user, or `expired` (the question was answered or retired
+ * meanwhile, said in `reason`).
+ */
+export const proposedAnswers = sqliteTable(
+  'proposed_answers',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    questionId: text('question_id').notNull(),
+    commentId: text('comment_id').notNull(),
+    commentAuthor: text('comment_author'),
+    commentBody: text('comment_body').$type<Masked<string>>().notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    sessionId: text('session_id').notNull(),
+    proposedAt: text('proposed_at').notNull(),
+    decidedAt: text('decided_at'),
+    reason: text('reason').$type<Masked<string>>(),
+  },
+  (table) => [index('proposed_answers_of_question').on(table.missionId, table.questionId)],
 )

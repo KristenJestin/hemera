@@ -122,6 +122,11 @@ export const sessionsEngine = (
     readonly gh?: GhSettings
     /** What the Freeze keeps of the dirty files, when a suite holds it (#92). */
     readonly snapshots?: ProfileParts['snapshots']
+    /** The fake trackers of the ticket sync's suites, and its schedule (#97). */
+    readonly ticketProviders?: ProfileParts['ticketProviders']
+    readonly ticketSync?: ProfileParts['ticketSync']
+    /** The steps of a restore's reconciliation, when a suite holds the gate with one. */
+    readonly reconciliationSteps?: ProfileParts['reconciliationSteps']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -151,6 +156,8 @@ export const sessionsEngine = (
   )
   const parts = {
     gh: options.gh,
+    ticketProviders: options.ticketProviders,
+    ticketSync: options.ticketSync,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,
@@ -165,9 +172,13 @@ export const sessionsEngine = (
     options.tools === undefined ? withMemory : { ...withMemory, tools: options.tools }
   const withProbes =
     options.probes === undefined ? withTools : { ...withTools, probes: options.probes }
+  const withSnapshots =
+    options.snapshots === undefined ? withProbes : { ...withProbes, snapshots: options.snapshots }
   const run = commandsEngine(
     data,
-    options.snapshots === undefined ? withProbes : { ...withProbes, snapshots: options.snapshots },
+    options.reconciliationSteps === undefined
+      ? withSnapshots
+      : { ...withSnapshots, reconciliationSteps: options.reconciliationSteps },
   )
   return { world, run }
 }

@@ -20,7 +20,7 @@ import {
   type TicketVersion,
 } from '@hemera/core/domain'
 import type { TicketProviderInfo } from '@hemera/ipc'
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Context, Effect, Layer, Predicate, Stream } from 'effect'
 
 import type { Database } from '../storage/database.ts'
 import { TicketSearch } from '../start/tickets.ts'
@@ -45,12 +45,31 @@ export const providerOf = (
     ? githubProvider({ host: info.host, repositories: info.repositories })
     : jiraProvider(info, info.jira)
 
+/**
+ * Where a provider's configuration becomes the provider that reads it: GitHub over `gh`, Jira over
+ * its site. A suite hands its own trackers here, never a real one.
+ */
+export class TicketProviders extends Context.Service<
+  TicketProviders,
+  { readonly of: (info: TicketProviderInfo) => Effect.Effect<TicketProvider> }
+>()('TicketProviders') {}
+
+/** The providers of the machine: `gh` for GitHub, the Jira site's API for Jira. */
+export const ticketProvidersLayer = Layer.effect(
+  TicketProviders,
+  Effect.gen(function* () {
+    const context = yield* Effect.context<GhCli | JiraLink | Database | Secrets>()
+    return { of: (info) => Effect.provideContext(providerOf(info), context) }
+  }),
+)
+
 /** The providers of a Project, ready to be asked, in the Project's order. */
 export const liveProviders = (projectId: string) =>
   Effect.gen(function* () {
     const infos = yield* providersOf(projectId)
+    const providers = yield* TicketProviders
     return yield* Effect.forEach(infos, (info) =>
-      Effect.map(providerOf(info), (provider): LiveProvider => ({ info, provider })),
+      Effect.map(providers.of(info), (provider): LiveProvider => ({ info, provider })),
     )
   })
 
@@ -122,7 +141,7 @@ const askedOf = (provider: TicketProvider, text: string, reference: TicketRefere
 export const ticketSearchLayer = Layer.effect(
   TicketSearch,
   Effect.gen(function* () {
-    const context = yield* Effect.context<Database | GhCli | JiraLink | Secrets>()
+    const context = yield* Effect.context<Database | TicketProviders>()
     const providers = (projectId: string) =>
       Effect.provideContext(liveProviders(projectId), context)
     return {

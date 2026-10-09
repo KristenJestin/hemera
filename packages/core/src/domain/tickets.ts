@@ -263,7 +263,7 @@ export const TicketErrorSchema = Schema.Union([
 // --- The fingerprint ------------------------------------------------------------------------------
 
 /** Text as a fingerprint reads it: Unicode NFC, line endings LF, trailing spaces trimmed. */
-const normalisedText = (text: string): string =>
+export const normalisedText = (text: string): string =>
   text
     .normalize('NFC')
     .replace(/\r\n?/g, '\n')

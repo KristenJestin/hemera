@@ -124,7 +124,10 @@ import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
-import { ticketSearchLayer } from './tickets/search.ts'
+import { type TicketProviders, ticketProvidersLayer, ticketSearchLayer } from './tickets/search.ts'
+import { TICKET_MAPPERS } from './tickets/journal.ts'
+import { ticketEventRunsLayer } from './tickets/event-runs.ts'
+import { type TicketSync, ticketSyncLayer } from './tickets/sync.ts'
 import { type SpecBoard, specBoardLayer } from './planning/board.ts'
 import { PLANNING_MAPPERS } from './planning/journal.ts'
 import { projectSpecLanguages } from './planning/store.ts'
@@ -208,6 +211,13 @@ export interface ProfileParts {
   readonly sessions?: SessionsParts
   /** The field's ticket search, for the suites; the Project's own providers otherwise (#95). */
   readonly tickets?: Layer.Layer<TicketSearch>
+  /**
+   * The trackers a provider's configuration reads, for the suites; `gh` and the Jira sites
+   * otherwise (#95, #96).
+   */
+  readonly ticketProviders?: Layer.Layer<TicketProviders> | undefined
+  /** Whether the ticket sync's schedule runs (#97): on unless a suite says. */
+  readonly ticketSync?: { readonly schedules?: boolean | undefined } | undefined
   /** The Probes' Cleanup hook (S6 fills it); one that does nothing otherwise. */
   readonly probes?: {
     readonly cleanup?: Layer.Layer<ProbeCleanup>
@@ -295,6 +305,8 @@ export type EngineServices =
   | ProbeDesk
   | FileSnapshots
   | FreezeLog
+  | TicketProviders
+  | TicketSync
 
 export interface ProfileStart {
   readonly dataFolder: string
@@ -470,6 +482,7 @@ export const startProfile = (
         ...PROBE_MAPPERS,
         ...COLD_READ_MAPPERS,
         ...FREEZE_MAPPERS,
+        ...TICKET_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -488,6 +501,8 @@ export const startProfile = (
         probesLayer({ log, hold: parts.probes?.hold }),
         coldReadsLayer({ log }),
         freezeLayer({ log }),
+        ticketSyncLayer({ log, schedules: parts.ticketSync?.schedules }),
+        ticketEventRunsLayer({ log }),
       ).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),
@@ -527,6 +542,7 @@ export const startProfile = (
       Layer.provideMerge(resources.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
+      Layer.provideMerge(parts.ticketProviders ?? ticketProvidersLayer),
       Layer.provideMerge(ghCliLayer(parts.gh)),
       Layer.provideMerge(jiraLinkLayer(parts.jira)),
       Layer.provideMerge(runsRecipeRunnerLayer),

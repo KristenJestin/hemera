@@ -17,7 +17,7 @@ import { Effect, Option, Schema } from 'effect'
 
 import { Secrets } from '../secrets.ts'
 import { type EngineTransaction, refusedWhile } from '../storage/database.ts'
-import { missionTickets, ticketProviders, ticketVersions } from '../storage/schema.ts'
+import { missionTickets, missions, ticketProviders, ticketVersions } from '../storage/schema.ts'
 
 const readComments = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(TicketComment)))
 const readLabels = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
@@ -25,6 +25,17 @@ const readState = Schema.decodeUnknownOption(Schema.Literals(['open', 'closed'])
 const readKind = Schema.decodeUnknownOption(Schema.Literals(['github', 'jira']))
 
 type VersionRow = typeof ticketVersions.$inferSelect
+
+/** The Project of a mission, in the transaction given; empty when the mission is gone. */
+export const projectOfIn = (transaction: EngineTransaction, missionId: string) =>
+  Effect.map(
+    transaction
+      .select({ projectId: missions.projectId })
+      .from(missions)
+      .where(eq(missions.id, missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission'))),
+    ([row]) => row?.projectId ?? '',
+  )
 
 /** A version as it was kept: its sections read again from the masked description. */
 export const versionOf = (row: VersionRow): TicketVersion => {

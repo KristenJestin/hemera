@@ -10,6 +10,9 @@ import {
   ProviderKind,
   ProviderStatus,
   SpecMode,
+  TicketEventKind,
+  TicketEventMatters,
+  TicketEventState,
   TicketVersion,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
@@ -152,6 +155,78 @@ export const TicketsSettings = Schema.Struct({
 })
 export type TicketsSettings = typeof TicketsSettings.Type
 
+/** What a `ticket-event` session reported of an event (#97). */
+export const TicketEventAnalysis = Schema.Struct({
+  summary: Schema.String,
+  matters: TicketEventMatters,
+  why: Schema.String,
+  at: Schema.String,
+})
+export type TicketEventAnalysis = typeof TicketEventAnalysis.Type
+
+/** A change the sync found on a mission's ticket (#97), in detection order. */
+export const TicketEventInfo = Schema.Struct({
+  id: Schema.String,
+  missionId: Schema.String,
+  /** Its place in the mission's detection order, from 1. */
+  sequence: Schema.Number,
+  key: Schema.String,
+  kind: TicketEventKind,
+  /** The comment it is about; null for the description and the status. */
+  commentId: Schema.NullOr(Schema.String),
+  /** What moved, masked: lines removed `- `, added `+ `; `before → after` for a status. */
+  difference: Schema.String,
+  /** The stage the mission was in when it was found. */
+  stage: Schema.String,
+  detectedAt: Schema.String,
+  state: TicketEventState,
+  /** The Planning input it is (CT-26), while the Planner integrates it. */
+  input: Schema.NullOr(Schema.String),
+  /** The analysis of a `ticket-event` session, after the Freeze. */
+  analysis: Schema.NullOr(TicketEventAnalysis),
+  seenAt: Schema.NullOr(Schema.String),
+})
+export type TicketEventInfo = typeof TicketEventInfo.Type
+
+/** An event's difference, with the versions before and after it. */
+export const TicketEventDifference = Schema.Struct({
+  event: Schema.String,
+  kind: TicketEventKind,
+  difference: Schema.String,
+  before: Schema.NullOr(TicketVersion),
+  after: Schema.NullOr(TicketVersion),
+})
+export type TicketEventDifference = typeof TicketEventDifference.Type
+
+export class UnknownTicketEvent extends Schema.TaggedError<UnknownTicketEvent>()(
+  'UnknownTicketEvent',
+  { id: Schema.String },
+) {
+  override get message(): string {
+    return 'This ticket event no longer exists.'
+  }
+}
+
+/** A gesture on a ticket event refused, with the reason. */
+export class TicketEventRefused extends Schema.TaggedError<TicketEventRefused>()(
+  'TicketEventRefused',
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason
+  }
+}
+
+/** A sync interval refused: under five minutes, over a week, or not whole minutes. */
+export class InvalidSyncInterval extends Schema.TaggedError<InvalidSyncInterval>()(
+  'InvalidSyncInterval',
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return `This interval cannot be kept: ${this.reason}.`
+  }
+}
+
 const always = [StorageFailed, EngineGone] as const
 
 const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Errors) =>
@@ -230,6 +305,42 @@ export const TicketsRpcs = RpcGroup.make(
     payload: { missionId: Schema.String },
     success: Schema.NullOr(MissionTicket),
     error: failing(...always),
+  }),
+  /** How often the Project's watched tickets are checked, in minutes (#97). */
+  Rpc.make('tickets.syncInterval', {
+    payload: ofProject,
+    success: Schema.Number,
+    error: failing(...always, UnknownProject),
+  }),
+  /** Sets it: 5 minutes at least; the next check follows it. */
+  Rpc.make('tickets.setSyncInterval', {
+    payload: { projectId: Schema.String, minutes: Schema.Number },
+    success: Schema.Number,
+    error: failing(...always, UnknownProject, InvalidSyncInterval),
+  }),
+  /** When the last check of the Project's tickets succeeded with every provider; null before. */
+  Rpc.make('tickets.lastCheck', {
+    payload: ofProject,
+    success: Schema.NullOr(Schema.String),
+    error: failing(...always, UnknownProject),
+  }),
+  /** The changes found on a mission's ticket, in detection order. */
+  Rpc.make('tickets.events', {
+    payload: { missionId: Schema.String },
+    success: Schema.Array(TicketEventInfo),
+    error: failing(...always),
+  }),
+  /** What an event changed, with the versions before and after it. */
+  Rpc.make('tickets.difference', {
+    payload: { eventId: Schema.String },
+    success: TicketEventDifference,
+    error: failing(...always, UnknownTicketEvent),
+  }),
+  /** The user has seen an event: the mark lifts once no change waits; the base never moves. */
+  Rpc.make('tickets.acknowledge', {
+    payload: { eventId: Schema.String },
+    success: TicketEventInfo,
+    error: failing(...always, UnknownTicketEvent, TicketEventRefused),
   }),
   /** The Project's ticket settings now, then again after each change. */
   Rpc.make('tickets.changed', {

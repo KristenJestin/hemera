@@ -1149,8 +1149,8 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
       "description": "Mark an input delivered to you as integrated into the Spec, or as changing nothing.",
       "properties": {
         "id": {
-          "description": "The input (\`I4\`), as its delivery named it.",
-          "maxLength": 20,
+          "description": "The input (\`I4\`) or the ticket event, as its delivery named it.",
+          "maxLength": 40,
           "minLength": 1,
           "type": "string",
         },
@@ -2203,6 +2203,82 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
       "type": "object",
     },
     "name": "relies_on_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Propose an answer to a question that waits, from a comment of the ticket. Hemera shows it to the user beside the question; it becomes an answer only if the user accepts it. Never answer the question yourself.",
+      "properties": {
+        "question": {
+          "description": "The question it answers (\`Q3\`): open, or waiting on someone.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "source": {
+          "description": "The id of the ticket comment that answers it, as the delivery named it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "The answer, in the user’s words, taken from the comment.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "question",
+        "source",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "answer_propose",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Report your analysis of one ticket event. Call it once per event of your brief: your session ends when every event has its report.",
+      "properties": {
+        "event": {
+          "description": "The ticket event, as the brief named it.",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+        "matters": {
+          "description": "Whether it matters to the frozen Spec: \`yes\`, \`no\` or \`unsure\`.",
+          "enum": [
+            "yes",
+            "no",
+            "unsure",
+          ],
+          "type": "string",
+        },
+        "summary": {
+          "description": "What changed, in a few sentences.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "why": {
+          "description": "Why it matters, or why not.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "event",
+        "summary",
+        "matters",
+        "why",
+      ],
+      "type": "object",
+    },
+    "name": "ticket_event_report",
   },
   {
     "inputSchema": {

@@ -42,9 +42,16 @@ import { Database, refusedWhile } from '../storage/database.ts'
 import { missionTickets, missions, ticketProviders, ticketVersions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { isOutage, undying } from './provider.ts'
-import { type LiveProvider, liveProviders, providerOf, readersOf, resolvedAmong } from './search.ts'
+import {
+  type LiveProvider,
+  TicketProviders,
+  liveProviders,
+  readersOf,
+  resolvedAmong,
+} from './search.ts'
 import { getProvider, specModeOf } from './store.ts'
-import { type TicketLinkAtCreation, insertVersion, maskedVersion, versionOf } from './versions.ts'
+import { compareVersion, keepVersionIn } from './events.ts'
+import { type TicketLinkAtCreation, maskedVersion, versionOf } from './versions.ts'
 
 const providerEvent = (
   type: string,
@@ -241,56 +248,25 @@ export const readTicket = (projectId: string, reference: TicketReference) =>
     }
     const { reader, version } = answered
     const secrets = yield* Secrets
-    yield* mutate('keeping the version read', (transaction) =>
-      Effect.gen(function* () {
-        const [linked] = yield* transaction
-          .select({
-            missionId: missionTickets.missionId,
-            baseVersionId: missionTickets.baseVersionId,
-            last: ticketVersions,
-          })
-          .from(missionTickets)
-          .innerJoin(missions, eq(missions.id, missionTickets.missionId))
-          .leftJoin(ticketVersions, eq(ticketVersions.id, missionTickets.lastVersionId))
-          .where(linkedTo(projectId, resolved))
-          .limit(1)
-          .pipe(Effect.mapError(refusedWhile('reading the mission’s ticket')))
-        if (linked === undefined) return { result: undefined, events: [] }
-        const same =
-          linked.last !== null &&
-          linked.last.fingerprint === version.fingerprint &&
-          linked.last.updatedAt === version.updatedAt
-        if (same) return { result: undefined, events: [] }
-        const id = yield* insertVersion(
-          transaction,
-          linked.missionId,
-          reader.info.id,
-          version,
-          secrets.mask,
-        )
-        const first = linked.baseVersionId === null
-        yield* transaction
-          .update(missionTickets)
-          .set(first ? { baseVersionId: id, lastVersionId: id } : { lastVersionId: id })
-          .where(eq(missionTickets.missionId, linked.missionId))
-          .pipe(Effect.mapError(refusedWhile('keeping the version read')))
-        return {
-          result: undefined,
-          events: first
-            ? [
-                {
-                  type: 'tickets.ticket_read',
-                  entityKind: 'mission',
-                  entityId: linked.missionId,
-                  source: 'system' as const,
-                  author: 'hemera' as const,
-                  payload: { key: version.key, title: secrets.mask(version.title) },
-                },
-              ]
-            : [],
-        }
-      }),
-    )
+    // Kept for the mission of the Project linked to it, as the sync keeps it (#97), compared with
+    // its last known version before the transaction.
+    const database = yield* Database
+    const [linked] = yield* database
+      .select({ missionId: missionTickets.missionId })
+      .from(missionTickets)
+      .innerJoin(missions, eq(missions.id, missionTickets.missionId))
+      .where(linkedTo(projectId, resolved))
+      .limit(1)
+      .pipe(Effect.mapError(refusedWhile('reading the mission’s ticket')))
+    if (linked !== undefined) {
+      const compared = yield* compareVersion(linked.missionId, version)
+      yield* mutate('keeping the version read', (transaction) =>
+        Effect.map(
+          keepVersionIn(transaction, linked.missionId, reader.info.id, version, compared),
+          (kept) => ({ result: undefined, events: kept.events }),
+        ),
+      )
+    }
     return maskedVersion(version, secrets.mask)
   })
 
@@ -339,7 +315,7 @@ export const missionTicket = (missionId: string) =>
 export const providerStatus = (providerId: string) =>
   Effect.gen(function* () {
     const info = yield* getProvider(providerId)
-    const provider = yield* providerOf(info)
+    const provider = yield* TicketProviders.use((providers) => providers.of(info))
     return yield* provider.status
   })
 
@@ -353,7 +329,7 @@ export const checkAgain = (providerId: string) =>
     const info = yield* getProvider(providerId)
     const live: LiveProvider = {
       info,
-      provider: yield* providerOf(info),
+      provider: yield* TicketProviders.use((providers) => providers.of(info)),
     }
     const status: ProviderStatus = yield* live.provider.status
     // A rate limit is kept until its reset, whatever the CLI says of its login meanwhile.

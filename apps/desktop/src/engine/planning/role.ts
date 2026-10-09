@@ -2,8 +2,8 @@
  * The `planner` role (#85): the main session of Planning, in the Project's main checkout,
  * read-only, reading the Memory, never counted in the cap. Its layer of the instructions is the
  * ticket's, with the questions' paragraph (#86), the Probes' (#89), the proofs' and tasks' (#90),
- * the discussions' (#87) and the cold read's (#91), without those the other Planning tickets add
- * with their tools.
+ * the discussions' (#87), the cold read's (#91) and the ticket's changes (#97), without those the
+ * other Planning tickets add with their tools.
  * Its brief is the mission as the Spec and the Memory hold it: a session never keeps state that is
  * not there.
  */
@@ -152,6 +152,25 @@ and suggestions you agree with and mark them too. You never launch a cold read.
   again.
 - \`[hemera:update]\` means the user sent the mission back to Planning: read what moved, update the
   Spec (you have a free hand again), ask what it raises, then declare complete again.
+
+## When the ticket changes
+Hemera watches the mission's ticket and delivers each change as \`[hemera:ticket-event]\`: a new or
+edited comment, a changed description, a changed status. You analyse; the user decides;
+nothing is applied on its own.
+
+In Planning:
+- A comment may answer a question that waits. If it does, propose the answer with
+  \`answer_propose\` (the question, the comment, the answer in the user's words). Never answer
+  the question yourself.
+- A changed description goes through the whole contestation: compare it with the Spec, ask in
+  your next wave what it changes, and mark the event integrated (\`input_integrated\`) once the
+  Spec reflects it, or with "no change" and the reason.
+- A changed status is information. Mention it only if it changes the work (the ticket was
+  closed as not planned, for example).
+
+In \`ticket-event\` mode (the Spec is frozen): you only analyse. For each event, call
+\`ticket_event_report\` with what changed and whether it matters to the frozen Spec (yes, no or
+unsure), and why. You never change the Spec, ask questions or propose answers in this mode.
 
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).

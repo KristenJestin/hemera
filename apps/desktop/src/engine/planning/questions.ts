@@ -57,6 +57,8 @@ import {
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { deliveredIn, inputKindOf, receiveInput } from './inputs.ts'
+import { eventInputIn, integratedIn } from '../tickets/events.ts'
+import { expireProposalsIn, proposalsIn } from './proposals-store.ts'
 import { findingsAskRefusal, findingsAskedIn, findingsReopenedIn } from './cold-read-findings.ts'
 import {
   type SpecWriter,
@@ -244,6 +246,12 @@ export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) 
           }
           events.push(
             plannerEvent(writer, 'planning.question_replaced', { question: old.id, by: id }),
+            ...(yield* expireProposalsIn(
+              transaction,
+              writer.missionId,
+              old.id,
+              `${old.id} was replaced by ${id}`,
+            )),
           )
         }
         yield* findingsAskedIn(
@@ -326,6 +334,12 @@ export const retireQuestion = (
             { question: row.id, reason, decision: moot },
           ),
           ...unmarked,
+          ...(yield* expireProposalsIn(
+            transaction,
+            writer.missionId,
+            row.id,
+            `${row.id} is ${asked.how}`,
+          )),
         ])
       }),
     )
@@ -396,10 +410,12 @@ export const integrateInput = (writer: SpecWriter, id: string, where: Integrated
           result,
           events: [...delivered, ...events],
         })
+        // A ticket event is named by its own id too (#97): the input it is.
+        const named = (yield* eventInputIn(transaction, writer.missionId, id)) ?? id
         const [row] = yield* transaction
           .select()
           .from(planningInputs)
-          .where(and(eq(planningInputs.missionId, writer.missionId), eq(planningInputs.id, id)))
+          .where(and(eq(planningInputs.missionId, writer.missionId), eq(planningInputs.id, named)))
           .pipe(Effect.mapError(refusedWhile('reading an input')))
         if (row === undefined) return answer(refused(`refused: this mission has no input ${id}.`))
         if (row.state === 'received') {
@@ -425,10 +441,16 @@ export const integrateInput = (writer: SpecWriter, id: string, where: Integrated
         yield* transaction
           .update(planningInputs)
           .set({ state: 'integrated', integratedAt: now(), where: said })
-          .where(and(eq(planningInputs.missionId, writer.missionId), eq(planningInputs.id, id)))
+          .where(and(eq(planningInputs.missionId, writer.missionId), eq(planningInputs.id, row.id)))
           .pipe(Effect.mapError(refusedWhile('marking an input integrated')))
+        // A ticket event integrated moves the base version and may lift the mark (#97).
+        const ticket =
+          inputKindOf(row.kind) === 'ticket_event'
+            ? yield* integratedIn(transaction, writer.missionId, row.item)
+            : []
         return answer({ done: { where: said, again: false } }, [
-          plannerEvent(writer, 'planning.input_integrated', { id, where: said }),
+          plannerEvent(writer, 'planning.input_integrated', { id: row.id, where: said }),
+          ...ticket,
         ])
       }),
     )
@@ -470,82 +492,98 @@ export const recordAnswer = (
   questionId: string,
   given: { readonly optionId?: string | undefined; readonly text?: string | undefined },
 ) =>
+  mutate('answering a question', (transaction) =>
+    answerIn(transaction, missionId, questionId, given),
+  )
+
+/**
+ * `recordAnswer` in the transaction given, answering whether it changed anything and its events: an
+ * answer the Planner proposed from a ticket comment (#97) becomes the user's answer through it.
+ */
+export const answerIn = (
+  transaction: EngineTransaction,
+  missionId: string,
+  questionId: string,
+  given: { readonly optionId?: string | undefined; readonly text?: string | undefined },
+) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
-    return yield* mutate('answering a question', (transaction) =>
-      Effect.gen(function* () {
-        const row = yield* actedOn(transaction, missionId, questionId, 'an answer')
-        const options = optionsOf(row)
-        const checked = answerTo(options, given)
-        if ('refused' in checked) return yield* new InvalidAnswer({ reason: checked.refused })
-        const kept: Answer =
-          checked.answer.optionId === null
-            ? { optionId: null, text: secrets.mask(checked.answer.text) }
-            : checked.answer
-        const earlier = yield* transaction
-          .select()
-          .from(answers)
-          .where(and(eq(answers.missionId, missionId), eq(answers.questionId, row.id)))
-          .orderBy(asc(answers.version))
-          .pipe(Effect.mapError(refusedWhile('reading the answers')))
-        const last = earlier.at(-1)
-        const was = last === undefined ? null : answerOf(last)
-        if (was !== null && sameAnswer(was, kept)) return { result: false, events: [] }
-        const version = (last?.version ?? 0) + 1
-        const at = now()
-        yield* transaction
-          .insert(answers)
-          .values({
-            missionId,
-            questionId: row.id,
-            version,
-            optionId: kept.optionId,
-            text: kept.text === null ? null : secrets.mask(kept.text),
-            author: 'user',
-            at,
-          })
-          .pipe(Effect.mapError(refusedWhile('keeping the answer')))
-        yield* transaction
-          .update(questions)
-          .set({ state: 'answered', changedAt: at })
-          .where(and(eq(questions.missionId, missionId), eq(questions.id, row.id)))
-          .pipe(Effect.mapError(refusedWhile('answering the question')))
-        const unmarked =
-          row.state === 'waiting'
-            ? yield* clearMarkIn(transaction, missionId, waitingMark(row.id, row.waitingNote))
-            : []
-        const input = yield* receiveInput(transaction, {
+    return yield* Effect.gen(function* () {
+      const row = yield* actedOn(transaction, missionId, questionId, 'an answer')
+      const options = optionsOf(row)
+      const checked = answerTo(options, given)
+      if ('refused' in checked) return yield* new InvalidAnswer({ reason: checked.refused })
+      const kept: Answer =
+        checked.answer.optionId === null
+          ? { optionId: null, text: secrets.mask(checked.answer.text) }
+          : checked.answer
+      const earlier = yield* transaction
+        .select()
+        .from(answers)
+        .where(and(eq(answers.missionId, missionId), eq(answers.questionId, row.id)))
+        .orderBy(asc(answers.version))
+        .pipe(Effect.mapError(refusedWhile('reading the answers')))
+      const last = earlier.at(-1)
+      const was = last === undefined ? null : answerOf(last)
+      if (was !== null && sameAnswer(was, kept)) return { result: false, events: [] }
+      const version = (last?.version ?? 0) + 1
+      const at = now()
+      yield* transaction
+        .insert(answers)
+        .values({
           missionId,
-          kind: 'answer',
-          item: row.id,
+          questionId: row.id,
           version,
-          said: answerChangeSaid(row.id, version, options, kept, was),
-          supersedes: true,
+          optionId: kept.optionId,
+          text: kept.text === null ? null : secrets.mask(kept.text),
+          author: 'user',
+          at,
         })
-        const chosen = options.find((option) => option.id === kept.optionId)
-        const open = yield* openCount(transaction, missionId)
-        const events: NewEvent[] = [
-          {
-            type: 'planning.answered',
-            entityKind: 'mission',
-            entityId: missionId,
-            source: 'ui',
-            author: 'human',
-            payload: {
-              question: row.id,
-              version,
-              answer: chosen?.label ?? kept.text,
-              optionId: kept.optionId,
-              author: 'user',
-              input,
-            },
+        .pipe(Effect.mapError(refusedWhile('keeping the answer')))
+      yield* transaction
+        .update(questions)
+        .set({ state: 'answered', changedAt: at })
+        .where(and(eq(questions.missionId, missionId), eq(questions.id, row.id)))
+        .pipe(Effect.mapError(refusedWhile('answering the question')))
+      const unmarked =
+        row.state === 'waiting'
+          ? yield* clearMarkIn(transaction, missionId, waitingMark(row.id, row.waitingNote))
+          : []
+      const input = yield* receiveInput(transaction, {
+        missionId,
+        kind: 'answer',
+        item: row.id,
+        version,
+        said: answerChangeSaid(row.id, version, options, kept, was),
+        supersedes: true,
+      })
+      const chosen = options.find((option) => option.id === kept.optionId)
+      const open = yield* openCount(transaction, missionId)
+      const events: NewEvent[] = [
+        {
+          type: 'planning.answered',
+          entityKind: 'mission',
+          entityId: missionId,
+          source: 'ui',
+          author: 'human',
+          payload: {
+            question: row.id,
+            version,
+            answer: chosen?.label ?? kept.text,
+            optionId: kept.optionId,
+            author: 'user',
+            input,
           },
-          ...unmarked,
-        ]
-        if (open > 0) events.push(yield* hemeraNext(transaction, missionId, waitingForYou(open)))
-        return { result: true, events }
-      }),
-    )
+        },
+        ...unmarked,
+      ]
+      if (open > 0) events.push(yield* hemeraNext(transaction, missionId, waitingForYou(open)))
+      // A proposal still waiting on it no longer holds (#97).
+      events.push(
+        ...(yield* expireProposalsIn(transaction, missionId, row.id, `${row.id} was answered`)),
+      )
+      return { result: true, events }
+    })
   })
 
 /**
@@ -677,6 +715,7 @@ export const wavesOf = (missionId: string) =>
           .from(planningInputs)
           .where(and(eq(planningInputs.missionId, missionId), eq(planningInputs.kind, 'answer')))
           .pipe(Effect.mapError(read))
+        const proposals = yield* proposalsIn(transaction, [missionId])
         const questionOf = (row: QuestionRow): Question => ({
           id: row.id,
           wave: row.wave,
@@ -713,6 +752,7 @@ export const wavesOf = (missionId: string) =>
           drafts: draftRows
             .filter((one) => one.questionId === row.id)
             .map((one) => ({ text: one.text, at: one.at })),
+          proposals: proposals.filter((one) => one.questionId === row.id),
         })
         return waveRows.map((wave): Wave => ({
           number: wave.number,
@@ -723,10 +763,9 @@ export const wavesOf = (missionId: string) =>
     )
   })
 
-/** Every open or waiting question of the missions in Planning, by mission then wave. */
-export const openQuestions = Effect.gen(function* () {
-  const database = yield* Database
-  const rows = yield* database
+/** The open or waiting questions of the missions in Planning, with their mission and Project. */
+const openRowsIn = (transaction: EngineTransaction) =>
+  transaction
     .select({
       question: questions,
       prefix: missions.keyPrefix,
@@ -740,6 +779,19 @@ export const openQuestions = Effect.gen(function* () {
     .where(and(inArray(questions.state, ['open', 'waiting']), eq(missions.stage, 'planning')))
     .orderBy(asc(missions.createdAt), asc(missions.id), asc(questions.wave), asc(questions.number))
     .pipe(Effect.mapError(refusedWhile('reading the open questions')))
+
+/** Every open or waiting question of the missions in Planning, by mission then wave. */
+export const openQuestions = Effect.gen(function* () {
+  const database = yield* Database
+  const [rows, proposals] = yield* database.transaction((transaction) =>
+    Effect.gen(function* () {
+      const found = yield* openRowsIn(transaction)
+      const waiting = yield* proposalsIn(transaction, [
+        ...new Set(found.map((one) => one.question.missionId)),
+      ])
+      return [found, waiting.filter((one) => one.state === 'proposed')] as const
+    }),
+  )
   return rows.map(({ question, prefix, number, projectId, projectName }): OpenQuestion => {
     const recommended = optionsOf(question).find((one) => one.id === question.recommended)
     return {
@@ -754,6 +806,9 @@ export const openQuestions = Effect.gen(function* () {
       state: question.state === 'waiting' ? 'waiting' : 'open',
       waitingNote: question.waitingNote,
       since: question.state === 'waiting' ? question.changedAt : question.askedAt,
+      proposals: proposals.filter(
+        (one) => one.missionId === question.missionId && one.questionId === question.id,
+      ),
     }
   })
 })

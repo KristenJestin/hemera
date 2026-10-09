@@ -16,8 +16,9 @@
  *   written down. After it the Probes are wiped and the Planner tree stopped; a stop in between
  *   leaves the stops owed, which the next start runs before any session is rebuilt.
  * - **Return.** Ready → Planning, a new Planning cycle, the Spec unfrozen (a new version), the
- *   declaration cleared, the Freeze's stops still owed dropped, and `[hemera:update]` stored in the
- *   same transaction, then handed to a fresh Planner.
+ *   declaration cleared, the Freeze's stops still owed dropped, the ticket's changes found after the
+ *   Freeze made inputs of the new Planning (#97), and `[hemera:update]` stored in the same
+ *   transaction, then handed to a fresh Planner with those inputs.
  *
  * A mission's Freezes and returns run one at a time, and never beside one of its discussions'
  * gestures. No path here reaches Building.
@@ -29,8 +30,6 @@ import {
   type CompletenessFailure,
   type Mark,
   Mark as MarkSchema,
-  OutdatedMark,
-  type OutdatedReason,
   type OutdatedSeen,
   SPEC_CHANGED_SINCE_READ,
   STAGES,
@@ -39,10 +38,7 @@ import {
   declarationUnsettled,
   dependencyUndecidedSaid,
   freezeRefusedDelivery,
-  isLive,
-  markIdentity,
   missionKey,
-  outdatedReasonSaid,
   probeLabel,
   probeUnsettled,
   updateDelivery,
@@ -72,8 +68,7 @@ import { AutomationGate } from '../gate.ts'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
-import { MarkRefused, getMission, markIn, moveIn, runStops } from '../missions.ts'
-import { expireNeedIn } from '../needs.ts'
+import { getMission, moveIn, runStops } from '../missions.ts'
 import { upToDateBase } from '../repositories.ts'
 import { Secrets } from '../secrets.ts'
 import { storeDeliveryIn } from '../sessions/deliveries.ts'
@@ -85,19 +80,21 @@ import {
   missionMarks,
   missionStops,
   type missions,
-  needs,
   probes,
   sessionDeliveries,
   specChanges,
   specs,
 } from '../storage/schema.ts'
+import { ticketEventsToPlanningIn } from '../tickets/events.ts'
 import { mutate } from '../transaction.ts'
 import { SpecBoard } from './board.ts'
+import { deliverInputs } from './calls.ts'
 import { coldReadFreshness, coldReadSettledIn } from './cold-read-store.ts'
 import { blockIn, dependenciesIn, liftEnded, unblockIn } from './dependencies.ts'
 import { pendingWithDiscussionsIn } from './discussion-store.ts'
 import { oneAtATime } from './discussions.ts'
 import { writeFrozenBases } from './freeze-store.ts'
+import { type Outdated, markOutdatedIn } from './outdated.ts'
 import { atBaseFailures, placeOf } from './plan.ts'
 import { ProbeDesk } from './probe-desk.ts'
 import { type Captured, FileSnapshots } from './snapshots.ts'
@@ -585,6 +582,8 @@ export const returnToPlanning = (missionId: string, reason: string | null) =>
             )
             .pipe(Effect.mapError(refusedWhile('forgetting the Freeze’s stops')))
           const unblocked = yield* unblockIn(transaction, missionId)
+          // The ticket's changes found after the Freeze are the new Planning's inputs (#97).
+          const ticket = yield* ticketEventsToPlanningIn(transaction, missionId)
           const body = updateDelivery({
             key,
             version,
@@ -606,7 +605,10 @@ export const returnToPlanning = (missionId: string, reason: string | null) =>
             author: 'human',
             payload: { reason: given, version },
           }
-          return { result: { deliveryId, body }, events: [moved, back, ...unblocked] }
+          return {
+            result: { deliveryId, body, inputs: ticket.inputs },
+            events: [moved, back, ...unblocked, ...ticket.events],
+          }
         }),
       )
       yield* writeSpecFile(missionId).pipe(Effect.ignore)
@@ -614,20 +616,12 @@ export const returnToPlanning = (missionId: string, reason: string | null) =>
       yield* PlannerWake.use((wake) =>
         wake.deliver(missionId, 'update', returned.body, returned.deliveryId),
       )
+      if (returned.inputs > 0) yield* deliverInputs(missionId)
       return yield* getMission(missionId)
     }),
   )
 
-/** What moved since the Freeze, as an engine service tells it. */
-export interface Outdated {
-  readonly reason: OutdatedReason
-  /** Where the difference can be read. */
-  readonly reference: string
-  /** What moved, as the user is shown it. */
-  readonly difference: string
-  /** The pending needs of the mission that no longer hold: they expire. */
-  readonly expiring: ReadonlyArray<string>
-}
+export type { Outdated } from './outdated.ts'
 
 /**
  * An engine service (B1 for the code and the dependencies, #97 for the ticket) marks a mission
@@ -638,63 +632,11 @@ export interface Outdated {
 export const markOutdated = (missionId: string, outdated: Outdated) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
-    const difference = secrets.mask(outdated.difference.trim())
-    const reference = secrets.mask(outdated.reference.trim())
     yield* mutate('marking the mission outdated', (transaction) =>
-      Effect.gen(function* () {
-        const mission = yield* missionRow(transaction, missionId)
-        if (!isLive(stageOf(mission))) {
-          return yield* new MarkRefused({ reason: 'the mission has ended' })
-        }
-        const mark = OutdatedMark.make({ reason: outdated.reason, reference, difference })
-        const marked = yield* markIn(transaction, missionId, mark)
-        // Already marked on that reference: the mark says what moved last.
-        if (marked.length === 0) {
-          yield* transaction
-            .update(missionMarks)
-            .set({ mark: JSON.stringify(mark) })
-            .where(
-              and(
-                eq(missionMarks.missionId, missionId),
-                eq(missionMarks.identity, markIdentity(mark)),
-              ),
-            )
-            .pipe(Effect.mapError(refusedWhile('marking the mission outdated')))
-        }
-        const owned =
-          outdated.expiring.length === 0
-            ? []
-            : yield* transaction
-                .select({ id: needs.id })
-                .from(needs)
-                .where(
-                  and(
-                    eq(needs.missionId, missionId),
-                    inArray(needs.id, [...outdated.expiring]),
-                    eq(needs.state, 'pending'),
-                  ),
-                )
-                .pipe(Effect.mapError(refusedWhile('reading the needs')))
-        const expired: NewEvent[] = []
-        for (const need of owned) {
-          expired.push(
-            ...(yield* expireNeedIn(
-              transaction,
-              need.id,
-              `it no longer holds: ${outdatedReasonSaid(outdated.reason)}`,
-            )),
-          )
-        }
-        const told: NewEvent = {
-          type: 'mission.outdated',
-          entityKind: 'mission',
-          entityId: missionId,
-          source: 'system',
-          author: 'hemera',
-          payload: { reason: outdated.reason, reference, difference },
-        }
-        return { result: undefined, events: [...marked, told, ...expired] }
-      }),
+      Effect.map(markOutdatedIn(transaction, missionId, outdated, secrets.mask), (events) => ({
+        result: undefined,
+        events,
+      })),
     )
     return yield* getMission(missionId)
   })

@@ -474,6 +474,9 @@ describe('The registry of event kinds', () => {
       ['questions-asked', true, 'needs-you'],
       ['living-spec-ready', false, null],
       ['tracker-unreachable', true, 'error'],
+      ['ticket-comment', true, null],
+      ['ticket-changed', true, null],
+      ['ticket-status', true, null],
       ['can-be-built', true, 'done'],
     ])
   })
@@ -495,6 +498,9 @@ describe('The switches are the application’s, listed from the registry', () =>
       ['questions-asked', true],
       ['living-spec-ready', false],
       ['tracker-unreachable', true],
+      ['ticket-comment', true],
+      ['ticket-changed', true],
+      ['ticket-status', true],
       ['can-be-built', true],
     ])
     expect(settings.sounds.map((one) => [one.sound, one.on])).toEqual([

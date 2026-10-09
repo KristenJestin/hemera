@@ -200,6 +200,33 @@ export type AnswerVersion = typeof AnswerVersion.Type
 /** A message the Planner drafted for a question that waits on someone: never sent by Hemera. */
 export const QuestionDraft = Schema.Struct({ text: Schema.String, at: Schema.String })
 
+/** Where an answer the Planner proposed from a ticket comment stands (#97). */
+export const ProposalState = Schema.Literals(['proposed', 'accepted', 'dismissed', 'expired'])
+export type ProposalState = typeof ProposalState.Type
+
+/**
+ * An answer the Planner proposed for a question that waits, from a comment of the mission's ticket
+ * (#97): never a need, never applied until the user accepts it.
+ */
+export const ProposedAnswer = Schema.Struct({
+  id: Schema.String,
+  missionId: Schema.String,
+  questionId: Schema.String,
+  commentId: Schema.String,
+  /** The comment's author; null for a deleted account. */
+  commentAuthor: Schema.NullOr(Schema.String),
+  /** The comment, masked. */
+  comment: Schema.String,
+  /** The answer the Planner proposes, in the user's words. */
+  text: Schema.String,
+  state: ProposalState,
+  proposedAt: Schema.String,
+  decidedAt: Schema.NullOr(Schema.String),
+  /** Why it expired. */
+  reason: Schema.NullOr(Schema.String),
+})
+export type ProposedAnswer = typeof ProposedAnswer.Type
+
 /** A question of the Planner, with its answers and drafts; retired ones keep their reason. */
 export const Question = Schema.Struct({
   id: Schema.String,
@@ -224,6 +251,8 @@ export const Question = Schema.Struct({
   /** Every version, oldest first. */
   answers: Schema.Array(AnswerVersion),
   drafts: Schema.Array(QuestionDraft),
+  /** The answers proposed from the ticket's comments (#97), every state, oldest first. */
+  proposals: Schema.Array(ProposedAnswer),
 })
 export type Question = typeof Question.Type
 
@@ -266,6 +295,8 @@ export const OpenQuestion = Schema.Struct({
   waitingNote: Schema.NullOr(Schema.String),
   /** When it was asked, or when it began to wait on someone. */
   since: Schema.String,
+  /** The answers proposed from the ticket's comments still waiting for the user (#97). */
+  proposals: Schema.Array(ProposedAnswer),
 })
 export type OpenQuestion = typeof OpenQuestion.Type
 
@@ -363,6 +394,22 @@ export const PlanningRpcs = RpcGroup.make(
     payload: ofMission,
     success: Schema.Array(PlanningInput),
     error: failing(...always, UnknownMission),
+  }),
+  /**
+   * The user accepts an answer the Planner proposed from a ticket comment (#97): it becomes their
+   * answer, the proposed text or their own, delivered and integrated as any answer. Refused once
+   * the question was answered or retired meanwhile: the proposal has expired.
+   */
+  Rpc.make('planning.acceptProposedAnswer', {
+    payload: { proposalId: Schema.String, text: Schema.optionalKey(Schema.String) },
+    success: Schema.Void,
+    error: failing(...always, UnknownMission, PlanningRefused, InvalidAnswer),
+  }),
+  /** The user dismisses a proposed answer; the Planner is told, as information. */
+  Rpc.make('planning.dismissProposedAnswer', {
+    payload: { proposalId: Schema.String },
+    success: Schema.Void,
+    error: failing(...always, UnknownMission, PlanningRefused),
   }),
   /** The task graph with its targets and its coverage (#90). */
   Rpc.make('planning.tasks', {
