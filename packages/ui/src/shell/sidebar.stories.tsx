@@ -485,7 +485,7 @@ export const MovesStage: Story = {
   render: (args) => {
     const [stage, setStage] = useState<SidebarMissionEntry['stage']>('Planning')
     const missions = SIDEBAR_MISSIONS.map((mission) =>
-      mission.missionKey === 'ACME-14' ? { ...mission, stage } : mission,
+      mission.missionKey === 'ACME-14' ? Object.assign({}, mission, { stage }) : mission,
     )
     return (
       <div className="flex h-screen bg-surface-page">

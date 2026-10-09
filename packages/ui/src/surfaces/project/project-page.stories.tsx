@@ -11,7 +11,6 @@ import { ProjectTasks, SetupTask } from '../project-setup/setup-task.tsx'
 import { ProjectPage } from './project-page.tsx'
 import {
   CANCELLED_GROUP,
-  DONE_GROUP,
   PROJECT_CHATS,
   PROJECT_LIVING_SPEC,
   STAGE_GROUPS,
@@ -282,12 +281,10 @@ export const Focused: Story = {
     expect(canvas.getByRole('textbox', { name: 'Start a mission in Acme' })).toHaveFocus()
     await userEvent.tab()
     expect(canvas.getByRole('button', { name: /ACME-18/ })).toHaveFocus()
-    // The legends inside a row (its marks, its ball) are stops of their own before the next row.
-    const next = canvas.getByRole('button', { name: /ACME-12/ })
-    for (let stops = 0; stops < 4 && document.activeElement !== next; stops += 1) {
-      await userEvent.tab()
-    }
-    expect(next).toHaveFocus()
+    // The ball's legend inside the row is a stop of its own before the next row.
+    await userEvent.tab()
+    await userEvent.tab()
+    expect(canvas.getByRole('button', { name: /ACME-12/ })).toHaveFocus()
   },
 }
 
