@@ -4,27 +4,24 @@
  * says `gh` is not signed in and its dialog gives the command that mends it, and Check again,
  * once the fake is signed in, turns the line to ready. Nothing here reaches GitHub.
  *
- * The engine finds `gh` on the `PATH` it was started with, so the folder of the fake must lead
- * that `PATH` when the application is launched: `FAKE_GH` is where the suite writes it.
+ * The fake is a shell script on the `PATH` the launcher gives the application (`fake-gh.ts`): the
+ * spec file is skipped on Windows.
  */
 
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { $, browser, expect } from '@wdio/globals'
 
 import { ACME, writeAcme } from './acme.ts'
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
+import { RUNS_FAKE_GH, fakeGhOf, writeFakeGh } from './fake-gh.ts'
 import { designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
 
 const SPEC = 'ticket-providers.e2e.ts'
 
-/** The folder of the fake `gh`, which leads the `PATH` of the run. */
-const FAKE_GH = join(tmpdir(), 'hemera-e2e-ticket-providers-gh')
-
 /** Exists once the fake is signed in; the fake answers `auth status` by it. */
-const SIGNED_IN = join(FAKE_GH, 'signed-in')
+const SIGNED_IN = join(fakeGhOf(SPEC), 'signed-in')
 
 const FAKE = `#!/bin/sh
 case "$1" in
@@ -37,15 +34,15 @@ case "$1" in
 esac
 `
 
-mkdirSync(FAKE_GH, { recursive: true })
+writeFakeGh(SPEC, FAKE)
 rmSync(SIGNED_IN, { force: true })
-writeFileSync(join(FAKE_GH, 'gh'), FAKE)
-chmodSync(join(FAKE_GH, 'gh'), 0o755)
-process.env.PATH = `${FAKE_GH}${delimiter}${process.env.PATH ?? ''}`
 
 const list = () => $('ul[aria-label="Ticket providers"]')
 
-describe('A GitHub provider added from the settings of a Project', () => {
+/** The fake `gh` is a shell script: not on Windows. */
+const describeWithFake = RUNS_FAKE_GH ? describe : describe.skip
+
+describeWithFake('A GitHub provider added from the settings of a Project', () => {
   afterEach(function () {
     if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
   })

@@ -11,8 +11,10 @@
 
 import { readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { FAKE_GH_SPECS, RUNS_FAKE_GH, fakeGhOf } from './e2e/fake-gh.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -38,6 +40,20 @@ export function e2eProfileOf(spec: string): string {
 const SPECS = readdirSync(join(application, 'e2e'))
   .filter((entry) => entry.endsWith('.e2e.ts'))
   .toSorted()
+
+/** The `PATH` the run was started with, before any spec file's fake led it. */
+const PATH = process.env.PATH ?? ''
+
+/**
+ * The `PATH` a spec file's application is started with: led by the folder of its fake `gh` when
+ * it runs on one (`e2e/fake-gh.ts`), the run's own otherwise. Set on the launcher before each
+ * worker starts, as the worker, its driver and the application inherit the launcher's variables.
+ */
+export function pathFor(spec: string): string {
+  return RUNS_FAKE_GH && FAKE_GH_SPECS.includes(basename(spec))
+    ? `${fakeGhOf(spec)}${delimiter}${PATH}`
+    : PATH
+}
 
 // A terminal opened inside an Electron based editor exports ELECTRON_RUN_AS_NODE, and the
 // binary would then start as a plain Node process: no window for the suite to drive.
@@ -71,5 +87,8 @@ export const config: WebdriverIO.Config = {
   },
   onComplete() {
     for (const spec of SPECS) rmSync(e2eProfileOf(spec), { recursive: true, force: true })
+  },
+  onWorkerStart(_cid, _capabilities, specs) {
+    process.env.PATH = pathFor(specs[0] ?? '')
   },
 }

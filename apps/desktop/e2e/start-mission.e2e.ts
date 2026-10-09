@@ -3,24 +3,18 @@
  * mission" is the last choice and Enter does not take it while something else shows) and from a
  * ticket reference, with a fake `gh` that signs in and reads one issue. Nothing here reaches GitHub.
  *
- * The engine finds `gh` on the `PATH` it was started with, so the folder of the fake must lead
- * that `PATH` when the application is launched.
+ * The fake is a shell script on the `PATH` the launcher gives the application (`fake-gh.ts`): the
+ * start from a ticket is skipped on Windows.
  */
-
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
 
 import { $, browser, expect } from '@wdio/globals'
 
 import { ACME, writeAcme } from './acme.ts'
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
+import { RUNS_FAKE_GH, writeFakeGh } from './fake-gh.ts'
 import { designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
 
 const SPEC = 'start-mission.e2e.ts'
-
-/** The folder of the fake `gh`, which leads the `PATH` of the run. */
-const FAKE_GH = join(tmpdir(), 'hemera-e2e-start-mission-gh')
 
 const ISSUE = JSON.stringify({
   data: {
@@ -55,11 +49,10 @@ JSON
 esac
 `
 
-rmSync(FAKE_GH, { recursive: true, force: true })
-mkdirSync(FAKE_GH, { recursive: true })
-writeFileSync(join(FAKE_GH, 'gh'), FAKE)
-chmodSync(join(FAKE_GH, 'gh'), 0o755)
-process.env.PATH = `${FAKE_GH}${delimiter}${process.env.PATH ?? ''}`
+writeFakeGh(SPEC, FAKE)
+
+/** The fake `gh` is a shell script: not on Windows. */
+const itWithFake = RUNS_FAKE_GH ? it : it.skip
 
 const places = () => $('nav[aria-label="Places"]')
 const start = () => $('aria/Start a mission in Acme')
@@ -108,7 +101,7 @@ describe('A mission started from the Project’s field', () => {
     })
   })
 
-  it('adds a GitHub provider, then starts a mission from a ticket reference', async () => {
+  itWithFake('adds a GitHub provider, then starts a mission from a ticket reference', async () => {
     await settingsOf('Acme')
     await section('Tickets and Specs')
     await $('button[aria-label="Add a provider"]').click()
