@@ -112,7 +112,7 @@ export function SpecFields({
               label="Where Specs live"
               mark={<IconFileText size="sm" />}
               items={modes.map((one) => ({ value: one, label: SPEC_MODE_WORDS[one].label }))}
-              value={mode ?? undefined}
+              value={mode}
               disabled={mode === null}
               onValueChange={onMode}
             />
@@ -125,7 +125,7 @@ export function SpecFields({
           <Select
             label="Spec language"
             items={languagesOffered(language)}
-            value={language ?? undefined}
+            value={language}
             disabled={language === null}
             onValueChange={onLanguage}
           />

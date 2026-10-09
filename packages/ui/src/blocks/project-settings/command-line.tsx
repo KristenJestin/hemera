@@ -205,7 +205,7 @@ export function CommandLineField({
                 <Select
                   label="Command of the catalogue"
                   className="w-full"
-                  value={value.command ?? undefined}
+                  value={value.command}
                   mark={
                     chosen === undefined ? undefined : (
                       <span className="flex text-muted-foreground">{typeIcon(chosen.type)}</span>

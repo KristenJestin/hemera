@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { SPEC_MODE_WORDS, SpecFields } from './spec-fields.tsx'
@@ -123,6 +123,35 @@ export const Reading: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('combobox', { name: 'Where Specs live' })).toBeDisabled()
     await expect(canvas.getByRole('textbox', { name: 'Key prefix' })).toBeDisabled()
+  },
+}
+
+/** Read, then answered: the mode and the language the engine gives are the ones shown. */
+export const ReadThenAnswered: Story = {
+  args: { mode: null, language: null, prefix: null, sync: undefined },
+  render: (args) => {
+    const [answered, setAnswered] = useState(false)
+    useEffect(() => {
+      const timer = setTimeout(() => setAnswered(true), 50)
+      return () => clearTimeout(timer)
+    }, [])
+    return answered ? (
+      <SpecFields {...args} mode="local" language="en" prefix="ACME" />
+    ) : (
+      <SpecFields {...args} />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await waitFor(() =>
+      expect(canvas.getByRole('textbox', { name: 'Key prefix' })).toHaveValue('ACME'),
+    )
+    await expect(canvas.getByRole('combobox', { name: 'Where Specs live' })).toHaveTextContent(
+      'Local',
+    )
+    await expect(canvas.getByRole('combobox', { name: 'Spec language' })).toHaveTextContent(
+      'English',
+    )
   },
 }
 
