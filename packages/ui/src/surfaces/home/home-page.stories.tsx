@@ -309,6 +309,13 @@ export const NeedsInTheColumn: Story = {
     const list = within(region).getByRole('list', { name: 'Needs you' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(2)
     expect(within(list).getAllByRole('button', { name: /here$/ })).toHaveLength(2)
+    // Each row's action is whole inside its row: nothing is clipped at the column's edge.
+    for (const row of within(list).getAllByRole('listitem')) {
+      const action = within(row).getByRole('button', { name: /here$/ })
+      expect(action.getBoundingClientRect().right).toBeLessThanOrEqual(
+        row.getBoundingClientRect().right,
+      )
+    }
   },
 }
 
