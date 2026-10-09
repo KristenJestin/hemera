@@ -679,7 +679,11 @@ const WIRINGS: ReadonlyArray<Wiring> = [
     },
     asks: 'home.sinceYouLeftChanged',
   },
-  { method: 'lookedAtHome', run: (link) => ask(link.lookedAtHome()), asks: 'home.looked' },
+  {
+    method: 'lookedAtHome',
+    run: (link) => ask(link.lookedAtHome(7)),
+    asks: 'home.looked {"upTo":7}',
+  },
   { method: 'recentMissions', run: (link) => ask(link.recentMissions()), asks: 'home.recent' },
   {
     method: 'missionOpened',

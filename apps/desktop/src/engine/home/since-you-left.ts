@@ -32,6 +32,9 @@ const BATCH = 200
 
 const LOOKED_KEY = 'home.lookedAt'
 
+/** Told when the cursor moves, so that every window reads Home again. */
+const LOOKED_EVENT = 'home.looked'
+
 /** The sequence of the last event the user saw; zero before they ever looked. */
 const lookedAt = (reader: Pick<Database['Service'], 'select'>) =>
   reader
@@ -366,29 +369,48 @@ export const sinceYouLeftChanges: Stream.Stream<
     (committed) =>
       Stream.concat(
         Stream.make(null),
-        committed.pipe(Stream.filter((event) => isTold(event.type))),
+        committed.pipe(Stream.filter((event) => isTold(event.type) || event.type === LOOKED_EVENT)),
       ).pipe(Stream.mapEffect(() => sinceYouLeft(null))),
   ),
 )
 
-/** The user looked: the cursor moves to the latest event, and never back. */
-export const lookedAtHome: Effect.Effect<void, DatabaseError, Database | DomainEvents> = mutate(
-  'keeping what the user saw',
-  (transaction) =>
+/**
+ * The user looked at what was drawn, up to the sequence `upTo` (the highest one actually shown):
+ * the cursor moves there, never past the latest event and never back, and the first page is told
+ * again so that another window stops showing what this one has seen. Without `upTo`, the user
+ * looked at everything there is.
+ */
+export const lookedAtHome = (
+  upTo?: number,
+): Effect.Effect<void, DatabaseError, Database | DomainEvents> =>
+  mutate('keeping what the user saw', (transaction) =>
     Effect.gen(function* () {
       const [latest] = yield* transaction
         .select({ sequence: max(domainEvents.sequence) })
         .from(domainEvents)
         .pipe(Effect.mapError(refusedWhile('reading the latest event')))
       const seen = yield* lookedAt(transaction)
-      const sequence = latest?.sequence ?? 0
-      if (sequence > seen) {
-        yield* transaction
-          .insert(appPreferences)
-          .values({ key: LOOKED_KEY, value: String(sequence) })
-          .onConflictDoUpdate({ target: appPreferences.key, set: { value: String(sequence) } })
-          .pipe(Effect.mapError(refusedWhile('keeping what the user saw')))
+      const newest = latest?.sequence ?? 0
+      const wanted = upTo === undefined || !Number.isFinite(upTo) ? newest : Math.floor(upTo)
+      const sequence = Math.min(wanted, newest)
+      if (sequence <= seen) return { result: undefined, events: [] }
+      yield* transaction
+        .insert(appPreferences)
+        .values({ key: LOOKED_KEY, value: String(sequence) })
+        .onConflictDoUpdate({ target: appPreferences.key, set: { value: String(sequence) } })
+        .pipe(Effect.mapError(refusedWhile('keeping what the user saw')))
+      return {
+        result: undefined,
+        events: [
+          {
+            type: LOOKED_EVENT,
+            entityKind: 'home',
+            entityId: 'home',
+            source: 'ui' as const,
+            author: 'human' as const,
+            payload: { upTo: sequence },
+          },
+        ],
       }
-      return { result: undefined, events: [] }
     }),
-)
+  )

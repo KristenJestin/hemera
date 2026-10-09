@@ -1,5 +1,5 @@
 import type { JournalTail, Mission, MissionsChange, OpenQuestion, SincePage } from '@hemera/ipc'
-import { HomePage, type AppSection, type HomePageProps } from '@hemera/ui'
+import { HomePage, type AppSection, type HomePageProps, type HomeSinceGroup } from '@hemera/ui'
 import { Predicate } from 'effect'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -232,32 +232,83 @@ function useHomeData(
   return [data, older]
 }
 
+/** What the window offers the watch over Home's sight: its focus and when it is hidden or closed. */
+export interface LookedEnvironment {
+  readonly window: EventTarget
+  readonly document: EventTarget & { readonly visibilityState: string; hasFocus: () => boolean }
+}
+
+export interface LookedWatch {
+  /** Home is shown with its content (or not), and `upTo` is the highest event it draws. */
+  readonly update: (now: { shown: boolean; upTo: number }) => void
+  /** Home is left: what was seen is told, and the watch ends. */
+  readonly stop: () => void
+}
+
 /**
- * Moves the cursor of Since you left when the user leaves Home, but only if Home was shown with
- * its content while the window had the focus: a Home opened in a window nobody looks at has not
- * been read.
+ * Tells the engine what the user looked at: the events drawn on Home, up to the highest one,
+ * once Home was shown with its content while the window had the focus. It is told on leaving
+ * Home, and also when the window is hidden or closed on Home, which no unmount would report.
  */
-function useLooked(link: Link, shown: boolean): void {
-  const sight = useRef(UNSEEN)
+export function watchLooked(
+  link: Pick<Link, 'lookedAtHome'>,
+  env: LookedEnvironment,
+  initial: { shown: boolean; upTo: number } = { shown: false, upTo: 0 },
+): LookedWatch {
+  let sight = sightAfter(UNSEEN, { focused: env.document.hasFocus() })
+  let state = initial
+  let told = 0
+  const tell = (): void => {
+    if (!leavesLooked(sight) || state.upTo <= told) return
+    told = state.upTo
+    link.lookedAtHome(state.upTo).catch(() => undefined)
+  }
+  const gained = (): void => {
+    sight = sightAfter(sight, { focused: true })
+  }
+  const lost = (): void => {
+    sight = sightAfter(sight, { focused: false })
+  }
+  const hidden = (): void => {
+    if (env.document.visibilityState === 'hidden') tell()
+  }
+  env.window.addEventListener('focus', gained)
+  env.window.addEventListener('blur', lost)
+  env.window.addEventListener('beforeunload', tell)
+  env.document.addEventListener('visibilitychange', hidden)
+  sight = sightAfter(sight, { shown: state.shown })
+  return {
+    update: (now) => {
+      state = now
+      sight = sightAfter(sight, { shown: now.shown })
+    },
+    stop: () => {
+      env.window.removeEventListener('focus', gained)
+      env.window.removeEventListener('blur', lost)
+      env.window.removeEventListener('beforeunload', tell)
+      env.document.removeEventListener('visibilitychange', hidden)
+      tell()
+    },
+  }
+}
+
+/** The highest event Home draws, the one the user has seen up to. */
+export const renderedUpTo = (groups: ReadonlyArray<HomeSinceGroup>): number =>
+  Math.max(0, ...groups.flatMap((one) => one.events.map((event) => Number(event.id))))
+
+function useLooked(link: Link, shown: boolean, upTo: number): void {
+  const watch = useRef<LookedWatch | null>(null)
   useEffect(() => {
-    sight.current = sightAfter(sight.current, { shown })
-  }, [shown])
-  useEffect(() => {
-    sight.current = sightAfter(sight.current, { focused: document.hasFocus() })
-    const gained = (): void => {
-      sight.current = sightAfter(sight.current, { focused: true })
-    }
-    const lost = (): void => {
-      sight.current = sightAfter(sight.current, { focused: false })
-    }
-    window.addEventListener('focus', gained)
-    window.addEventListener('blur', lost)
+    const kept = watchLooked(link, { window, document })
+    watch.current = kept
     return () => {
-      window.removeEventListener('focus', gained)
-      window.removeEventListener('blur', lost)
-      if (leavesLooked(sight.current)) link.lookedAtHome().catch(() => undefined)
+      watch.current = null
+      kept.stop()
     }
   }, [link])
+  useEffect(() => {
+    watch.current?.update({ shown, upTo })
+  }, [shown, upTo])
 }
 
 /** Home drawn from what was read: the page, or the first launch. */
@@ -289,6 +340,7 @@ export function HomeRoute(props: HomeRouteProps): ReactNode {
       view.page.loading !== true &&
       view.page.reading !== true &&
       view.page.error === undefined,
+    view.kind === 'page' ? renderedUpTo(view.page.since.groups) : 0,
   )
   return (
     <HomeBody

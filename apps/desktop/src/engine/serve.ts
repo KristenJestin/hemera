@@ -556,7 +556,7 @@ export const engineHandlers = (
       use(sinceYouLeft(before)).pipe(observed('home.sinceYouLeft', log)),
     'home.sinceYouLeftChanged': () =>
       follow(sinceYouLeftChanges).pipe(observedStream('home.sinceYouLeftChanged', log)),
-    'home.looked': () => use(lookedAtHome).pipe(observed('home.looked', log)),
+    'home.looked': ({ upTo }) => use(lookedAtHome(upTo)).pipe(observed('home.looked', log)),
     'home.recent': () => use(recentMissions).pipe(observed('home.recent', log)),
     'home.opened': ({ missionId }) =>
       use(missionOpened(missionId)).pipe(observed('home.opened', log)),

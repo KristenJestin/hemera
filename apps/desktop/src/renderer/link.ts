@@ -255,8 +255,8 @@ export interface Link {
     listener: (page: SincePage) => void,
     onEnd: (error: Error) => void,
   ) => () => void
-  /** The user looked at Home: what happened up to now is not new any more. */
-  readonly lookedAtHome: () => Promise<void>
+  /** The user looked at Home: the events up to the sequence `upTo`, the last drawn, are not new any more. */
+  readonly lookedAtHome: (upTo: number) => Promise<void>
   /** At most eight missions, the last opened first. */
   readonly recentMissions: () => Promise<ReadonlyArray<Mission>>
   /** The user opened a mission: it leads Recent. */
@@ -583,7 +583,7 @@ export function linkOver(port: Port): Link {
     sinceYouLeft: (before) => call((ready) => ready['home.sinceYouLeft']({ before })),
     onSinceYouLeft: (listener, onEnd) =>
       follow((ready) => ready['home.sinceYouLeftChanged'](), listener, anError, onEnd),
-    lookedAtHome: () => call((ready) => ready['home.looked']()),
+    lookedAtHome: (upTo) => call((ready) => ready['home.looked']({ upTo })),
     recentMissions: () => call((ready) => ready['home.recent']()),
     missionOpened: (missionId) => call((ready) => ready['home.opened']({ missionId })),
     journalTail: (missionIds) => call((ready) => ready['memory.journalTail']({ missionIds })),

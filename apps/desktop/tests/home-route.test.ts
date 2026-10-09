@@ -12,6 +12,9 @@ import {
   HomeBody,
   HomeRoute,
   homeViewOf,
+  renderedUpTo,
+  watchLooked,
+  type LookedEnvironment,
   type HomeData,
   type HomeRouteProps,
 } from '../src/renderer/home-route.tsx'
@@ -249,5 +252,73 @@ describe('The Home route, drawn', () => {
     )
     expect(markup).toContain('All quiet')
     expect(markup).not.toContain('aria-label="Questions"')
+  })
+})
+
+describe('What Home tells the engine it looked at', () => {
+  const environment = (focused = true) => {
+    const document = Object.assign(new EventTarget(), {
+      visibilityState: 'visible',
+      hasFocus: () => focused,
+    })
+    return { window: new EventTarget(), document } satisfies LookedEnvironment
+  }
+  const watched = (focused = true) => {
+    const env = environment(focused)
+    const lookedAtHome = vi.fn(() => Promise.resolve())
+    const watch = watchLooked({ lookedAtHome }, env)
+    return { env, lookedAtHome, watch }
+  }
+  const hide = (env: ReturnType<typeof environment>): void => {
+    env.document.visibilityState = 'hidden'
+    env.document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  test('the highest event drawn is the one looked up to', () => {
+    const groups = pageOf(READ).since.groups
+    expect(renderedUpTo(groups)).toBe(4)
+    expect(renderedUpTo([])).toBe(0)
+  })
+
+  test('hiding the window on a Home that was seen tells the highest event drawn', () => {
+    const { env, lookedAtHome, watch } = watched()
+    watch.update({ shown: true, upTo: 4 })
+    hide(env)
+    expect(lookedAtHome).toHaveBeenCalledWith(4)
+  })
+
+  test('closing the window on a Home that was seen tells it too', () => {
+    const { env, lookedAtHome, watch } = watched()
+    watch.update({ shown: true, upTo: 9 })
+    env.window.dispatchEvent(new Event('beforeunload'))
+    expect(lookedAtHome).toHaveBeenCalledWith(9)
+  })
+
+  test('leaving Home tells the events drawn, once', () => {
+    const { env, lookedAtHome, watch } = watched()
+    watch.update({ shown: true, upTo: 4 })
+    hide(env)
+    watch.stop()
+    expect(lookedAtHome).toHaveBeenCalledTimes(1)
+  })
+
+  test('a Home never shown with its content, or in a window without the focus, tells nothing', () => {
+    const unshown = watched()
+    unshown.watch.update({ shown: false, upTo: 4 })
+    hide(unshown.env)
+    unshown.watch.stop()
+    const blurred = watched(false)
+    blurred.watch.update({ shown: true, upTo: 4 })
+    blurred.env.window.dispatchEvent(new Event('beforeunload'))
+    blurred.watch.stop()
+    expect(unshown.lookedAtHome).not.toHaveBeenCalled()
+    expect(blurred.lookedAtHome).not.toHaveBeenCalled()
+  })
+
+  test('nothing drawn, nothing is looked at', () => {
+    const { env, lookedAtHome, watch } = watched()
+    watch.update({ shown: true, upTo: 0 })
+    hide(env)
+    expect(lookedAtHome).not.toHaveBeenCalled()
   })
 })

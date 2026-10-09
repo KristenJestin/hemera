@@ -227,10 +227,10 @@ describe('Since you left', () => {
           const one = yield* mission(project.id, 'Add roles')
           yield* triaged(one.id)
           const before = yield* sinceYouLeft(null)
-          yield* lookedAtHome
+          yield* lookedAtHome(Math.max(...sequences(before)))
           const after = yield* sinceYouLeft(null)
           // Looking again, with nothing new, moves nothing back.
-          yield* lookedAtHome
+          yield* lookedAtHome(1)
           yield* delivered(one.id, 'ACME-9')
           const later = yield* sinceYouLeft(null)
           return { seen: before, quiet: after, newer: later }
@@ -242,6 +242,76 @@ describe('Since you left', () => {
     expect(newer.groups[0]?.events.map((event) => event.tone)).toEqual(['lifted'])
   })
 
+  test('an event committed after the page was read is still told once the user looked up to it', async () => {
+    const { read, after } = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme()
+          const one = yield* mission(project.id, 'Add roles')
+          yield* triaged(one.id)
+          const first = yield* sinceYouLeft(null)
+          // Committed after the page was drawn: never rendered.
+          yield* delivered(one.id, 'ACME-9')
+          yield* lookedAtHome(Math.max(...sequences(first)))
+          return { read: first, after: yield* sinceYouLeft(null) }
+        }),
+      ),
+    )
+    expect(sequences(read)).toHaveLength(1)
+    expect(after.groups[0]?.events.map((event) => event.tone)).toEqual(['lifted'])
+  })
+
+  test('the cursor never goes past the latest event and never goes back', async () => {
+    const pages = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme()
+          const one = yield* mission(project.id, 'Add roles')
+          yield* triaged(one.id)
+          yield* lookedAtHome(1_000_000)
+          // Further than anything that exists: later events are still new.
+          yield* delivered(one.id, 'ACME-9')
+          const later = yield* sinceYouLeft(null)
+          yield* lookedAtHome(0)
+          return { later, again: yield* sinceYouLeft(null) }
+        }),
+      ),
+    )
+    expect(pages.later.groups[0]?.events.map((event) => event.tone)).toEqual(['lifted'])
+    expect(pages.again).toEqual(pages.later)
+  })
+
+  test('looking sends the first page again, for the other windows', async () => {
+    const pages = await engine()(({ profile }) =>
+      profile.use(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const project = yield* acme()
+            const one = yield* mission(project.id, 'Add roles')
+            yield* triaged(one.id)
+            const heard: SincePage[] = []
+            const following = yield* Effect.forkChild(
+              Stream.runForEach(sinceYouLeftChanges, (page) => Effect.sync(() => heard.push(page))),
+            )
+            yield* until(
+              Effect.sync(() => heard.length),
+              (count) => count >= 1,
+            )
+            yield* lookedAtHome(Math.max(...sequences(heard[0] ?? { groups: [], before: null })))
+            yield* until(
+              Effect.sync(() => heard.length),
+              (count) => count >= 2,
+            )
+            yield* Fiber.interrupt(following)
+            return heard
+          }),
+        ),
+      ),
+    )
+    expect(pages[0]?.groups).toHaveLength(1)
+    expect(pages.at(-1)?.groups).toEqual([])
+  })
+
   test('keeps the cursor across an engine restart', async () => {
     await engine()(({ profile }) =>
       profile.use(
@@ -249,7 +319,7 @@ describe('Since you left', () => {
           const project = yield* acme()
           const one = yield* mission(project.id, 'Add roles')
           yield* triaged(one.id)
-          yield* lookedAtHome
+          yield* lookedAtHome(Math.max(...sequences(yield* sinceYouLeft(null))))
         }),
       ),
     )
