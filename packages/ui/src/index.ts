@@ -158,32 +158,21 @@ export {
   type NoticeStackProps,
   type NoticeTone,
 } from './shell/notice.tsx'
-export {
-  Sidebar,
-  SidebarChatRow,
-  SidebarRow,
-  type SidebarPlace,
-  type SidebarProject,
-  type SidebarProps,
-  type SidebarChatRowProps,
-  type SidebarRowProps,
-} from './shell/sidebar.tsx'
+export * from './shell/sidebar.tsx'
 export { WindowShell, type WindowShellProps } from './shell/window-shell.tsx'
 export { ContentHeader, type ContentHeaderProps, type Crumb } from './shell/content-header.tsx'
-export {
-  HomePage,
-  type HomePageProps,
-  type HomeRow,
-  type HomeSection,
-} from './surfaces/home/home-page.tsx'
-export {
-  MissionFrame,
-  type MissionFrameProps,
-  type MissionStage,
-  type MissionView,
-  type StageTone,
-  type ViewWidth,
-} from './surfaces/mission/mission-frame.tsx'
+export * from './surfaces/home/home-page.tsx'
+export * from './surfaces/mission/mission-frame.tsx'
+// The mission frame's own `MissionStage` (a stage chip) gives way to the vocabulary's.
+export { type MissionStage } from './blocks/mission/vocabulary.ts'
+export * from './blocks/mission/vocabulary.ts'
+export * from './blocks/mission/mission-marks.tsx'
+export * from './blocks/mission/mission-row.tsx'
+export * from './surfaces/living-spec/living-spec-types.ts'
+export * from './surfaces/living-spec/living-spec-page.tsx'
+export * from './blocks/project-settings/ticket-providers.tsx'
+export * from './blocks/project-settings/spec-fields.tsx'
+export * from './blocks/project-settings/exclusive-resources.tsx'
 export {
   AT_BASE,
   closeView,
@@ -198,13 +187,7 @@ export {
   type PageHeaderProps,
   type PageProps,
 } from './surfaces/page.tsx'
-export {
-  ProjectPage,
-  type ProjectMissionRow,
-  type ProjectPageProps,
-  type ProjectRepository,
-  type ProjectStageGroup,
-} from './surfaces/project/project-page.tsx'
+export * from './surfaces/project/project-page.tsx'
 export {
   ProjectSettings,
   type ProjectSettingsProps,
