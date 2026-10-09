@@ -1,10 +1,17 @@
 /**
  * What the Spec settings show of the engine's answers, and what they write back: the modes
  * offered, the words of a refused setting, the key prefix as an edit, and the gate that drops a
- * write answered after a later one. Plain values and no React.
+ * write answered after a later one, and the last check of the linked tickets. Plain values and no
+ * React.
  */
 
-import { InvalidKeyPrefix, KeyPrefixTaken, type KeyPrefixEdit, type Project } from '@hemera/ipc'
+import {
+  InvalidKeyPrefix,
+  InvalidSyncInterval,
+  KeyPrefixTaken,
+  type KeyPrefixEdit,
+  type Project,
+} from '@hemera/ipc'
 import type { SpecModeChoice } from '@hemera/ui'
 
 /** The modes the select offers: one line to change when the remote mode can be used. */
@@ -23,6 +30,38 @@ export function prefixWords(failure: Error): string {
 /** Why a Spec setting was not saved, in words. */
 export function settingWords(setting: 'Spec mode' | 'Spec language', failure: Error): string {
   return `The ${setting} could not be saved: ${failure.message}`
+}
+
+/** Why the sync interval was not saved, in words: the engine's own for an interval it refuses. */
+export function syncWords(failure: Error): string {
+  return failure instanceof InvalidSyncInterval
+    ? failure.message
+    : `The sync interval could not be saved: ${failure.message}`
+}
+
+const dayIn = (date: Date, zone?: string): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(date)
+
+/**
+ * When the linked tickets were last checked, as the row says it after "Last checked at": `08:12`
+ * today, `7 Oct, 08:12` another day; null before the first check or when the date cannot be read.
+ */
+export function lastCheckWords(iso: string | null, now: Date, zone?: string): string | null {
+  if (iso === null) return null
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return null
+  const time = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: zone,
+  }).format(at)
+  if (dayIn(at, zone) === dayIn(now, zone)) return time
+  const day = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: zone,
+  }).format(at)
+  return `${day}, ${time}`
 }
 
 /** The key prefix typed, as the engine takes it: at the version of the Project it was read from. */

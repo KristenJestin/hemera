@@ -381,6 +381,9 @@ const recording = (asked: string[]) => {
     'tickets.saveJiraToken': call('tickets.saveJiraToken'),
     'tickets.removeJiraToken': call('tickets.removeJiraToken'),
     'tickets.jiraTokenStatus': call('tickets.jiraTokenStatus'),
+    'tickets.syncInterval': call('tickets.syncInterval'),
+    'tickets.setSyncInterval': call('tickets.setSyncInterval'),
+    'tickets.lastCheck': call('tickets.lastCheck'),
     'resources.list': call('resources.list'),
     'resources.save': call('resources.save'),
     'resources.holders': call('resources.holders'),
@@ -810,6 +813,21 @@ const WIRINGS: ReadonlyArray<Wiring> = [
     method: 'jiraTokenStatus',
     run: (link) => ask(link.jiraTokenStatus('p1')),
     asks: 'tickets.jiraTokenStatus {"providerId":"p1"}',
+  },
+  {
+    method: 'syncInterval',
+    run: (link) => ask(link.syncInterval('acme')),
+    asks: 'tickets.syncInterval {"projectId":"acme"}',
+  },
+  {
+    method: 'setSyncInterval',
+    run: (link) => ask(link.setSyncInterval('acme', 30)),
+    asks: 'tickets.setSyncInterval {"projectId":"acme","minutes":30}',
+  },
+  {
+    method: 'lastCheck',
+    run: (link) => ask(link.lastCheck('acme')),
+    asks: 'tickets.lastCheck {"projectId":"acme"}',
   },
   {
     method: 'specLanguage',

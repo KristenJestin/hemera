@@ -315,6 +315,12 @@ export interface Link {
   readonly saveJiraToken: (providerId: string, token: string) => Promise<JiraTokenStatus>
   readonly removeJiraToken: (providerId: string) => Promise<JiraTokenStatus>
   readonly jiraTokenStatus: (providerId: string) => Promise<JiraTokenStatus>
+  /** How often the Project's linked tickets are checked, in minutes. */
+  readonly syncInterval: (projectId: string) => Promise<number>
+  /** Rejects with `InvalidSyncInterval` under the engine's minimum; answers the interval kept. */
+  readonly setSyncInterval: (projectId: string, minutes: number) => Promise<number>
+  /** When the linked tickets were last checked with every provider; null before the first. */
+  readonly lastCheck: (projectId: string) => Promise<string | null>
   /** The language the Spec is written in. */
   readonly specLanguage: (projectId: string) => Promise<string>
   readonly setSpecLanguage: (projectId: string, language: string) => Promise<string>
@@ -622,6 +628,10 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['tickets.removeJiraToken']({ providerId })),
     jiraTokenStatus: (providerId) =>
       call((ready) => ready['tickets.jiraTokenStatus']({ providerId })),
+    syncInterval: (projectId) => call((ready) => ready['tickets.syncInterval']({ projectId })),
+    setSyncInterval: (projectId, minutes) =>
+      call((ready) => ready['tickets.setSyncInterval']({ projectId, minutes })),
+    lastCheck: (projectId) => call((ready) => ready['tickets.lastCheck']({ projectId })),
     specLanguage: (projectId) => call((ready) => ready['planning.specLanguage']({ projectId })),
     setSpecLanguage: (projectId, language) =>
       call((ready) => ready['planning.setSpecLanguage']({ projectId, language })),

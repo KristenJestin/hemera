@@ -1,12 +1,12 @@
 /**
  * The Spec settings of a Project, under its ticket providers (#104): where Specs live, the
- * language they are written in and the key prefix of the next missions. The sync interval is a
- * seam: its row is drawn only once something feeds it. No Effect here: the link's calls are
- * promises. A write answered after a later one is dropped; the key prefix is sent once the typing
+ * language they are written in, the key prefix of the next missions, and how often linked tickets
+ * are checked, with the last check (read again at each change of the ticket settings). No Effect
+ * here: the link's calls are promises. A write answered after a later one is dropped; the key prefix is sent once the typing
  * settles, and the engine's refusal is shown under the field.
  */
 
-import type { SpecMode } from '@hemera/core/domain'
+import { MIN_SYNC_MINUTES, type SpecMode } from '@hemera/core/domain'
 import type { Project } from '@hemera/ipc'
 import { SpecFields, type SpecModeChoice } from '@hemera/ui'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
@@ -16,9 +16,11 @@ import {
   OFFERED_MODES,
   PREFIX_SETTLES_MS,
   answerGate,
+  lastCheckWords,
   prefixEditOf,
   prefixWords,
   settingWords,
+  syncWords,
 } from './spec-settings-model.ts'
 
 export interface SpecSettingsPartProps {
@@ -32,6 +34,10 @@ export interface SpecSettingsPartProps {
 interface Held {
   readonly mode: SpecMode | null
   readonly language: string | null
+  /** How often linked tickets are checked, in minutes; null until read. */
+  readonly minutes: number | null
+  /** When they were last checked, as the engine says it; null before the first check. */
+  readonly lastCheck: string | null
   /** The prefix as typed, until the engine has answered it. */
   readonly typed: string | null
   readonly prefixRefused: string | undefined
@@ -41,12 +47,14 @@ interface Held {
 const NOTHING: Held = {
   mode: null,
   language: null,
+  minutes: null,
+  lastCheck: null,
   typed: null,
   prefixRefused: undefined,
   refused: undefined,
 }
 
-/** The Spec settings of a Project (mode, language, key prefix; the sync interval is not fed yet). */
+/** The Spec settings of a Project: mode, language, key prefix and the sync interval. */
 export function SpecSettingsPart({
   link,
   engineReady,
@@ -68,20 +76,35 @@ export function SpecSettingsPart({
     mode: answerGate(),
     language: answerGate(),
     prefix: answerGate(),
+    sync: answerGate(),
   })
   const pending = useRef<{ timer: ReturnType<typeof setTimeout>; prefix: string } | null>(null)
 
   useEffect(() => {
     setHeld(NOTHING)
     setWritten(null)
-    const mine = { mode: answerGate(), language: answerGate(), prefix: answerGate() }
+    const mine = {
+      mode: answerGate(),
+      language: answerGate(),
+      prefix: answerGate(),
+      sync: answerGate(),
+    }
     gates.current = mine
     if (!engineReady) return undefined
     let live = true
+    const readLastCheck = (): void => {
+      link.lastCheck(projectId).then(
+        (lastCheck) => {
+          if (live) setHeld((before) => ({ ...before, lastCheck }))
+        },
+        () => undefined,
+      )
+    }
     const stop = link.onTicketSettings(
       projectId,
       (settings) => {
         if (live) setHeld((before) => ({ ...before, mode: settings.specMode }))
+        readLastCheck()
       },
       (failure) => {
         if (live) setHeld((before) => ({ ...before, refused: settingWords('Spec mode', failure) }))
@@ -97,9 +120,18 @@ export function SpecSettingsPart({
         }
       },
     )
+    link.syncInterval(projectId).then(
+      (minutes) => {
+        if (live) setHeld((before) => ({ ...before, minutes }))
+      },
+      (failure: Error) => {
+        if (live) setHeld((before) => ({ ...before, refused: syncWords(failure) }))
+      },
+    )
     return () => {
       live = false
       stop()
+      mine.sync.close()
       mine.mode.close()
       mine.language.close()
       mine.prefix.close()
@@ -148,6 +180,21 @@ export function SpecSettingsPart({
     )
   }
 
+  const chooseMinutes = (minutes: number): void => {
+    const before = held.minutes
+    const ticket = gates.current.sync.begin()
+    const gate = gates.current.sync
+    change({ minutes, refused: undefined })
+    link.setSyncInterval(projectId, minutes).then(
+      (kept) => {
+        if (gate.isLatest(ticket)) change({ minutes: kept })
+      },
+      (failure: Error) => {
+        if (gate.isLatest(ticket)) change({ minutes: before, refused: syncWords(failure) })
+      },
+    )
+  }
+
   const writePrefix = (prefix: string): void => {
     pending.current = null
     const record = current.current
@@ -188,7 +235,16 @@ export function SpecSettingsPart({
       prefix={held.typed ?? known?.keyPrefix ?? null}
       prefixRefused={held.prefixRefused}
       onPrefix={typePrefix}
-      sync={undefined}
+      sync={
+        held.minutes === null
+          ? undefined
+          : {
+              minutes: held.minutes,
+              minimum: MIN_SYNC_MINUTES,
+              lastCheck: lastCheckWords(held.lastCheck, new Date()),
+              onMinutes: chooseMinutes,
+            }
+      }
       refused={held.refused}
     />
   )

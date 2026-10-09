@@ -1,8 +1,8 @@
 /**
  * The Spec settings of a Project in the real application: where Specs live changed to Linked and
- * the language to French, a key prefix refused with its reason under the field, then a valid one
- * kept. `spec-settings.restarted.e2e.ts` starts Hemera again on the same data folder and finds
- * all three.
+ * the language to French, linked tickets checked every 30 minutes, a key prefix refused with its
+ * reason under the field, then a valid one kept. `spec-settings.restarted.e2e.ts` starts Hemera
+ * again on the same data folder and finds all four.
  */
 
 import { $, browser, expect } from '@wdio/globals'
@@ -51,6 +51,14 @@ describe('The Spec settings of a Project', () => {
     await expect(specs().$('[aria-label="Spec language"]')).toHaveText(
       expect.stringContaining('French'),
     )
+  })
+
+  it('checks linked tickets every hour, and keeps another interval', async () => {
+    const interval = specs().$('[aria-label="Check linked tickets"]')
+    await expect(interval).toHaveText(expect.stringContaining('Every hour'), { wait: 10_000 })
+    await expect(specs()).toHaveText(expect.stringMatching(/Last checked at|Not checked yet/))
+    await choose(specs(), 'Check linked tickets', 'Every 30 minutes')
+    await expect(interval).toHaveText(expect.stringContaining('Every 30 minutes'))
   })
 
   it('refuses a key prefix that is not one, with the reason under the field', async () => {

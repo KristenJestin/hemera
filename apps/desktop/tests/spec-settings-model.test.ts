@@ -4,15 +4,17 @@
  * after a later one, which is dropped.
  */
 
-import { InvalidKeyPrefix, KeyPrefixTaken, StaleVersion } from '@hemera/ipc'
+import { InvalidKeyPrefix, InvalidSyncInterval, KeyPrefixTaken, StaleVersion } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
   OFFERED_MODES,
   answerGate,
+  lastCheckWords,
   prefixEditOf,
   prefixWords,
   settingWords,
+  syncWords,
 } from '../src/renderer/spec-settings-model.ts'
 
 describe('The modes the Spec settings offer', () => {
@@ -58,6 +60,38 @@ describe('The words of a refused Spec setting', () => {
     expect(settingWords('Spec language', new Error('no'))).toBe(
       'The Spec language could not be saved: no',
     )
+  })
+})
+
+describe('The last check of the linked tickets, in words', () => {
+  const now = new Date('2026-10-09T14:00:00.000Z')
+
+  test('is its time today', () => {
+    expect(lastCheckWords('2026-10-09T08:12:00.000Z', now, 'UTC')).toBe('08:12')
+  })
+
+  test('is its day and time another day', () => {
+    expect(lastCheckWords('2026-10-07T08:12:00.000Z', now, 'UTC')).toBe('7 Oct, 08:12')
+  })
+
+  test('is absent before the first check, or when its date cannot be read', () => {
+    expect(lastCheckWords(null, now, 'UTC')).toBeNull()
+    expect(lastCheckWords('not a date', now, 'UTC')).toBeNull()
+  })
+})
+
+describe('The words of a refused sync interval', () => {
+  test('an interval the engine cannot keep says why', () => {
+    const failure = new InvalidSyncInterval({
+      reason: 'the interval is at least 5 minutes, for the trackers’ rate limits',
+    })
+    expect(syncWords(failure)).toBe(
+      'This interval cannot be kept: the interval is at least 5 minutes, for the trackers’ rate limits.',
+    )
+  })
+
+  test('any other failure is named as the engine says it', () => {
+    expect(syncWords(new Error('no'))).toBe('The sync interval could not be saved: no')
   })
 })
 
