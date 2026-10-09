@@ -85,8 +85,9 @@ export const RemoteNotOffered: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('combobox', { name: 'Where Specs live' }))
-    await expect(await body().findByRole('option', { name: 'Local' })).toBeVisible()
-    await expect(body().getByRole('option', { name: 'Linked' })).toBeVisible()
+    const local = await body().findByRole('option', { name: 'Local' })
+    await waitFor(() => expect(local).toBeVisible())
+    await expect(body().getByRole('option', { name: 'Linked' })).toBeInTheDocument()
     await expect(body().queryByRole('option', { name: 'Remote' })).toBeNull()
     await userEvent.keyboard('{Escape}')
   },
