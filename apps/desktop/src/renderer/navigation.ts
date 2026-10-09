@@ -39,7 +39,14 @@ export type Route =
     }
   | { readonly kind: 'project'; readonly id: string }
   /** The settings of a Project: its own page, entered from the Project page's header. */
-  | { readonly kind: 'projectSettings'; readonly id: string }
+  | {
+      readonly kind: 'projectSettings'
+      readonly id: string
+      /** The section shown first; the first of the page when none is named. */
+      readonly section?: string | undefined
+    }
+  /** What the Project's requirements say, domain by domain: a page under the Project. */
+  | { readonly kind: 'livingSpec'; readonly projectId: string }
   | { readonly kind: 'mission'; readonly projectId: string; readonly key: string }
   /** A Chat of a Project: listed under it in the sidebar. */
   | { readonly kind: 'chat'; readonly projectId: string; readonly id: string }
@@ -90,6 +97,19 @@ export function open(navigation: Navigation, view: string): Navigation {
   return overMission(navigation, (state) => openView(state, view))
 }
 
+/**
+ * Goes to a mission and opens a view over its base, the views it had open kept below: the living
+ * spec's link to the mission that wrote a requirement leads to that mission's Spec.
+ */
+export function goMissionView(
+  navigation: Navigation,
+  projectId: string,
+  key: string,
+  view: string,
+): Navigation {
+  return open(go(navigation, { kind: 'mission', projectId, key }), view)
+}
+
 /** Shows a view of the stack, closing those above it; null goes back to the base. */
 export function show(navigation: Navigation, view: string | null): Navigation {
   return overMission(navigation, (state) => showView(state, view))
@@ -130,6 +150,8 @@ export function placeOf(route: Route): SidebarPlace {
     case 'project':
     case 'projectSettings':
       return { kind: 'project', id: route.id }
+    case 'livingSpec':
+      return { kind: 'project', id: route.projectId }
     case 'mission':
       return { kind: 'mission', key: route.key }
     case 'chat':
@@ -195,6 +217,15 @@ export function trailOf(navigation: Navigation, names: Names): Trail[] {
           step: { go: { kind: 'project', id: route.id } },
         },
         { id: 'settings', label: 'Settings' },
+      ]
+    case 'livingSpec':
+      return [
+        {
+          id: 'project',
+          label: project(route.projectId),
+          step: { go: { kind: 'project', id: route.projectId } },
+        },
+        { id: 'livingSpec', label: 'Living spec' },
       ]
     case 'chat':
       return [
