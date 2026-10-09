@@ -13,7 +13,7 @@
  */
 
 import type { SinceEvent, SincePage, SinceTone } from '@hemera/ipc'
-import { and, desc, eq, gt, inArray, lt, max } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, lt, max, or, sql } from 'drizzle-orm'
 import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
@@ -21,7 +21,7 @@ import { EventPayload } from '../journal.ts'
 import { type MissionActivity, missionsOf } from '../missions.ts'
 import { getNeed } from '../needs.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
-import { appPreferences, domainEvents, missions, projects } from '../storage/schema.ts'
+import { appPreferences, domainEvents, missions, needs, projects } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 
 /** How many events a page holds. */
@@ -197,13 +197,18 @@ const tellOf = (row: EventRow): Effect.Effect<Option.Option<Told>, DatabaseError
   }
 }
 
-/** The types of event that can be told: the rest is never read. */
-const TOLD_TYPES = [
-  'mission.moved',
+/** The types of event that are told whenever they happen. */
+const ALWAYS_TOLD = [
   'mission.restored',
   'mission.unblocked',
   'planning.triaged',
   'planning.wave_asked',
+] as const
+
+/** The types of event that can be told at all: the rest is never read. */
+const TOLD_TYPES = [
+  ...ALWAYS_TOLD,
+  'mission.moved',
   'tickets.changed',
   'tickets.provider_unreachable',
   'livingSpec.bootstrap_finished',
@@ -212,44 +217,87 @@ const TOLD_TYPES = [
 
 const isTold = (type: string): boolean => TOLD_TYPES.some((one) => one === type)
 
+const field = (name: string) => sql<string | null>`json_extract(${domainEvents.payload}, ${name})`
+
+/**
+ * The events that `tellOf` would tell, decided where they are stored: a move is told only when it
+ * ends in done, a ticket change only of the kinds said, a failed need only when its fields are an
+ * error. What is not told is never read.
+ */
+const toldInStorage = or(
+  inArray(domainEvents.type, [...ALWAYS_TOLD]),
+  and(eq(domainEvents.type, 'mission.moved'), sql`${field('$.to')} = 'done'`),
+  and(
+    eq(domainEvents.type, 'tickets.changed'),
+    sql`${field('$.kind')} in ('comment_added', 'comment_edited', 'description_changed', 'status_changed')`,
+  ),
+  and(
+    eq(domainEvents.type, 'tickets.provider_unreachable'),
+    sql`${field('$.projectId')} is not null`,
+  ),
+  and(
+    eq(domainEvents.type, 'livingSpec.bootstrap_finished'),
+    sql`${field('$.state')} in ('done', 'failed')`,
+  ),
+  and(
+    eq(domainEvents.type, 'need.created'),
+    sql`exists (select 1 from ${needs} where ${needs.id} = ${domainEvents.entityId} and ${needs.kind} = 'Error')`,
+  ),
+)
+
 interface Found {
   readonly row: EventRow
   readonly told: Told
 }
 
+/** The most rows one read goes through, whatever lies after the cursor. */
+export const SCAN_CEILING = 1000
+
+/** What a read found, how many rows it went through, and where to go on if it stopped early. */
+interface Scan {
+  readonly found: ReadonlyArray<Found>
+  readonly scanned: number
+  /** The cursor to go on from when the ceiling stopped the read; null when nothing is left. */
+  readonly resume: number | null
+}
+
 /**
  * The events worth telling after `seen` and before `before`, the newest first: one more than a
- * page, so that a page knows whether an older one exists.
+ * page, so that a page knows whether an older one exists. At most `ceiling` rows are read.
  */
-const foundBefore = (seen: number, before: number | null) =>
+export const scanSince = (seen: number, before: number | null, ceiling = SCAN_CEILING) =>
   Effect.gen(function* () {
     const database = yield* Database
     const found: Found[] = []
     let from = before
+    let scanned = 0
     while (found.length <= SINCE_PAGE) {
       const rows = yield* database
         .select()
         .from(domainEvents)
         .where(
           and(
-            inArray(domainEvents.type, [...TOLD_TYPES]),
+            toldInStorage,
             gt(domainEvents.sequence, seen),
             from === null ? undefined : lt(domainEvents.sequence, from),
           ),
         )
         .orderBy(desc(domainEvents.sequence))
-        .limit(BATCH)
+        .limit(Math.min(BATCH, ceiling - scanned))
         .pipe(Effect.mapError(refusedWhile('reading what happened')))
       for (const row of rows) {
+        scanned += 1
         const told = yield* tellOf(row)
         if (Option.isSome(told)) found.push({ row, told: told.value })
         if (found.length > SINCE_PAGE) break
       }
       const last = rows.at(-1)
-      if (rows.length < BATCH || last === undefined) break
+      if (found.length > SINCE_PAGE || last === undefined) break
+      if (scanned >= ceiling) return { found, scanned, resume: last.sequence } satisfies Scan
+      if (rows.length < BATCH) break
       from = last.sequence
     }
-    return found
+    return { found, scanned, resume: null } satisfies Scan
   })
 
 const eventOf = ({ row, told }: Found): SinceEvent => ({
@@ -347,11 +395,11 @@ export const sinceYouLeft = (
   Effect.gen(function* () {
     const database = yield* Database
     const seen = yield* lookedAt(database)
-    const found = yield* foundBefore(seen, before)
+    const { found, resume } = yield* scanSince(seen, before)
     const page = found.slice(0, SINCE_PAGE)
     return {
       groups: yield* groupsOf(page),
-      before: found.length > SINCE_PAGE ? (page.at(-1)?.row.sequence ?? null) : null,
+      before: found.length > SINCE_PAGE ? (page.at(-1)?.row.sequence ?? null) : resume,
     }
   })
 
@@ -370,7 +418,10 @@ export const sinceYouLeftChanges: Stream.Stream<
       Stream.concat(
         Stream.make(null),
         committed.pipe(Stream.filter((event) => isTold(event.type) || event.type === LOOKED_EVENT)),
-      ).pipe(Stream.mapEffect(() => sinceYouLeft(null))),
+      ).pipe(
+        // A read still going when another event comes is dropped: only the latest page is told.
+        Stream.switchMap(() => Stream.fromEffect(sinceYouLeft(null))),
+      ),
   ),
 )
 

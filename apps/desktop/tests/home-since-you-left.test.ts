@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
   SINCE_PAGE,
+  scanSince,
   lookedAtHome,
   sinceYouLeft,
   sinceYouLeftChanges,
@@ -310,6 +311,52 @@ describe('Since you left', () => {
     )
     expect(pages[0]?.groups).toHaveLength(1)
     expect(pages.at(-1)?.groups).toEqual([])
+  })
+
+  test('events that are not told are never read, however many follow the cursor', async () => {
+    const { scan, page } = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme()
+          const one = yield* mission(project.id, 'Add roles')
+          yield* triaged(one.id)
+          for (let n = 0; n < 450; n += 1) {
+            yield* tell({
+              type: 'mission.moved',
+              entityKind: 'mission',
+              entityId: one.id,
+              payload: {
+                from: 'planning',
+                to: 'building',
+                move: 'launch',
+                actor: 'user',
+                round: n,
+              },
+            })
+          }
+          return { scan: yield* scanSince(0, null), page: yield* sinceYouLeft(null) }
+        }),
+      ),
+    )
+    expect(scan.scanned).toBe(1)
+    expect(sequences(page)).toHaveLength(1)
+  })
+
+  test('a read stops at its ceiling and leaves a cursor to go on from', async () => {
+    const { scan, page } = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme()
+          const one = yield* mission(project.id, 'Add roles')
+          for (let n = 0; n < 12; n += 1) yield* triaged(one.id)
+          return { scan: yield* scanSince(0, null, 5), page: yield* sinceYouLeft(null) }
+        }),
+      ),
+    )
+    expect(scan.scanned).toBe(5)
+    expect(scan.found).toHaveLength(5)
+    expect(scan.resume).toBe(scan.found.at(-1)?.row.sequence)
+    expect(sequences(page)).toHaveLength(12)
   })
 
   test('keeps the cursor across an engine restart', async () => {
