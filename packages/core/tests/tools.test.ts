@@ -81,6 +81,7 @@ describe('Each role has exactly its tools', () => {
       'planner',
       [
         'ask_wave',
+        'cold_read_fixed',
         'commands_list',
         'commands_output',
         'commands_run',
@@ -132,7 +133,7 @@ describe('Each role has exactly its tools', () => {
         'search',
       ],
     ],
-    ['cold-read', ['fs_list', 'fs_read', 'search']],
+    ['cold-read', ['cold_read_report', 'fs_list', 'fs_read', 'search', 'spec_read']],
     [
       'builder',
       [

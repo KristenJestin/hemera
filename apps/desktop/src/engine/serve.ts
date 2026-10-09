@@ -117,6 +117,14 @@ import {
   updateProvider,
 } from './tickets/store.ts'
 import {
+  againColdRead,
+  coldReadChanges,
+  coldReadFreshness,
+  coldReadSettled,
+  dismissFinding,
+  listColdReads,
+} from './planning/cold-read-store.ts'
+import {
   changesSince,
   markRead,
   readSpec,
@@ -533,6 +541,19 @@ export const engineHandlers = (
       use(specLanguageOf(projectId)).pipe(observed('planning.specLanguage', log)),
     'planning.setSpecLanguage': ({ projectId, language }) =>
       use(setSpecLanguage(projectId, language)).pipe(observed('planning.setSpecLanguage', log)),
+    // The cold reads of a mission in Planning (#91): another pass and a dismissal are the user's.
+    'coldRead.list': ({ missionId }) =>
+      use(listColdReads(missionId)).pipe(observed('coldRead.list', log)),
+    'coldRead.again': ({ missionId }) =>
+      use(againColdRead(missionId)).pipe(observed('coldRead.again', log)),
+    'coldRead.dismiss': ({ missionId, findingId }) =>
+      use(dismissFinding(missionId, findingId)).pipe(observed('coldRead.dismiss', log)),
+    'coldRead.freshness': ({ missionId }) =>
+      use(coldReadFreshness(missionId)).pipe(observed('coldRead.freshness', log)),
+    'coldRead.settled': ({ missionId }) =>
+      use(coldReadSettled(missionId)).pipe(observed('coldRead.settled', log)),
+    'coldRead.changed': ({ missionId }) =>
+      follow(coldReadChanges(missionId)).pipe(observedStream('coldRead.changed', log)),
     // Planning's questions (#86): the waves, the user's answers, the inputs.
     'planning.waves': ({ missionId }) =>
       use(wavesOf(missionId)).pipe(observed('planning.waves', log)),

@@ -64,6 +64,7 @@ describe('The role registry', () => {
         'model_recommend',
         'discussion_reply',
         'discussion_propose_decision',
+        'cold_read_fixed',
       ].sort(),
     )
   })

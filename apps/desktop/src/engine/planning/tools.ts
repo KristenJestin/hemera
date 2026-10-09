@@ -29,6 +29,7 @@ import {
   writeSection,
 } from './store.ts'
 import { askWave, draftMessage, integrateInput, retireQuestion } from './questions.ts'
+import { coldReadSpec } from './cold-read-store.ts'
 
 /** The writer a grant stands for, when its session works for a mission. */
 const writerOf = (grant: Grant): SpecWriter | null =>
@@ -68,33 +69,44 @@ const settled = <A, E extends { readonly message: string }, R>(
 export const specRead = (grant: Grant, args: ToolArguments<'spec_read'>) =>
   Effect.gen(function* () {
     if (grant.missionId === null) return NO_MISSION
+    // A cold read reads the Spec at the version its pass was launched on (#91).
+    if (grant.role === 'cold-read') {
+      const kept = yield* coldReadSpec(grant, args.section)
+      if (kept === null) return refusal('refused: this session is no cold read')
+      return paged(kept.text, kept.header, args.cursor)
+    }
     const spec = yield* readSpec(grant.missionId)
     const text =
       args.section === undefined
         ? renderSpecMarkdown(spec, { versions: true })
         : specPartMarkdown(spec, args.section)
-    const start = args.cursor === undefined ? 0 : Number(args.cursor)
-    if (!Number.isInteger(start) || start < 0 || start > text.length) {
-      return refusal('refused: this cursor is not one a page of this Spec gave')
-    }
-    const lines = text.slice(start).split('\n')
-    let page = ''
-    for (const line of lines) {
-      const next = page === '' ? line : `${page}\n${line}`
-      if (page !== '' && Buffer.byteLength(next) > SPEC_PAGE_BYTES) break
-      page = next
-    }
-    const end = start + page.length + 1
-    const more =
-      end < text.length
-        ? `More follows: spec_read with cursor ${String(end)}.`
-        : 'This is the end of the Spec.'
-    const header =
-      start === 0
-        ? `The Spec of ${spec.key} is at version ${String(spec.version)}; write on each item's own version.\n\n`
-        : ''
-    return answered(`${header}${page}\n\n${more}`)
+    return paged(
+      text,
+      `The Spec of ${spec.key} is at version ${String(spec.version)}; write on each item's own version.\n\n`,
+      args.cursor,
+    )
   }).pipe(Effect.catch((failed) => Effect.succeed(failure(`the call failed: ${failed.message}`))))
+
+/** A page of a Spec's text from a cursor, the header on the first page only. */
+const paged = (text: string, header: string, cursor: string | undefined): ToolAnswer => {
+  const start = cursor === undefined ? 0 : Number(cursor)
+  if (!Number.isInteger(start) || start < 0 || start > text.length) {
+    return refusal('refused: this cursor is not one a page of this Spec gave')
+  }
+  const lines = text.slice(start).split('\n')
+  let page = ''
+  for (const line of lines) {
+    const next = page === '' ? line : `${page}\n${line}`
+    if (page !== '' && Buffer.byteLength(next) > SPEC_PAGE_BYTES) break
+    page = next
+  }
+  const end = start + page.length + 1
+  const more =
+    end < text.length
+      ? `More follows: spec_read with cursor ${String(end)}.`
+      : 'This is the end of the Spec.'
+  return answered(`${start === 0 ? header : ''}${page}\n\n${more}`)
+}
 
 export const specWriteSection = (grant: Grant, args: ToolArguments<'spec_write_section'>) => {
   const writer = writerOf(grant)

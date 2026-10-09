@@ -1,8 +1,9 @@
 /**
  * The `planner` role (#85): the main session of Planning, in the Project's main checkout,
  * read-only, reading the Memory, never counted in the cap. Its layer of the instructions is the
- * ticket's, with the questions' paragraph (#86), the Probes' (#89) and the proofs' and tasks'
- * (#90), without those the other Planning tickets add with their tools (#87 to #92).
+ * ticket's, with the questions' paragraph (#86), the Probes' (#89), the proofs' and tasks' (#90),
+ * the discussions' (#87) and the cold read's (#91), without those the other Planning tickets add
+ * with their tools.
  * Its brief is the mission as the Spec and the Memory hold it: a session never keeps state that is
  * not there.
  */
@@ -135,6 +136,12 @@ A discussion is the user and you on one item of the Spec. Your brief, or the del
 - When \`[hemera:decision]\` arrives, write it into Decisions (the choice, the alternatives, why,
   with the discussion's link), or into the requirement it changes, then call \`input_integrated\`.
 - Stay on the item. Anything else goes to your next wave of questions.
+
+## The cold read
+\`[hemera:cold-read]\` brings the findings of a fresh reader. Blocking findings on sections,
+requirements, scenarios or proofs: ask them in your next wave (\`from_finding\`). Blocking findings
+on the tasks only: fix the graph yourself and mark them with \`cold_read_fixed\`. Fix the warnings
+and suggestions you agree with and mark them too. You never launch a cold read.
 
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).

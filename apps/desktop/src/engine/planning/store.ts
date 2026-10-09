@@ -70,6 +70,7 @@ import type { SessionOwner } from '../sessions/roles.ts'
 import { SpecBoard, type Wrote } from './board.ts'
 import { receiveInput } from './inputs.ts'
 import { atBaseFailures, planIn } from './plan.ts'
+import { COLD_READ_WAITS, insertPassIn, passesIn } from './cold-read-pass.ts'
 import { pendingWithDiscussionsIn } from './discussion-store.ts'
 
 /** The file a mission's Spec is readable in, in its Memory's folder. */
@@ -950,6 +951,21 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
           .set({ declaredCompleteVersion: spec.version })
           .where(eq(specs.missionId, writer.missionId))
           .pipe(Effect.mapError(refusedWhile('declaring the Spec complete')))
+        // The first declaration of a Planning cycle records its cold read, bound to this version,
+        // in this transaction (#91, CT-29): nothing written meanwhile, nor a stop, comes between.
+        const passes = yield* passesIn(transaction, writer.missionId)
+        const cycle = standing.mission.planningCycle
+        const pass = passes.some((one) => one.cycle === cycle)
+          ? []
+          : [
+              (yield* insertPassIn(transaction, {
+                mission: standing.mission,
+                spec,
+                asker: 'hemera',
+                passes,
+              })).event,
+              yield* hemeraNext(transaction, writer.missionId, COLD_READ_WAITS),
+            ]
         return {
           result: {
             done: {
@@ -963,6 +979,7 @@ export const declareComplete = (writer: SpecWriter, why: string) =>
               version: spec.version,
               why: said,
             }),
+            ...pass,
           ],
         }
       }),

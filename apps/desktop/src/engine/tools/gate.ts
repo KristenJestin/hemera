@@ -95,6 +95,7 @@ import type { SpecBoard } from '../planning/board.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
+import { coldReadFixedTool, coldReadReportTool } from '../planning/cold-read-store.ts'
 import type { RepositoryStatuses } from '../repositories.ts'
 import {
   askWaveTool,
@@ -316,6 +317,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.discussion_propose_decision.input)(raw)
     case 'ticket_read':
       return decoder(tool, TOOLS.ticket_read.input)(raw)
+    case 'cold_read_report':
+      return decoder(tool, TOOLS.cold_read_report.input)(raw)
+    case 'cold_read_fixed':
+      return decoder(tool, TOOLS.cold_read_fixed.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -717,6 +722,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* discussionProposeDecision(grant, call.args)
             case 'ticket_read':
               return yield* ticketRead(grant, call.args)
+            case 'cold_read_report':
+              return yield* coldReadReportTool(grant, call.args)
+            case 'cold_read_fixed':
+              return yield* coldReadFixedTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

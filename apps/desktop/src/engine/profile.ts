@@ -138,6 +138,8 @@ import {
 } from './planning/probe-desk.ts'
 import { PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
+import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
+import { coldReadsLayer } from './planning/cold-reads.ts'
 import { agentOffersLayer, agentOffersServed } from './planning/offers.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
@@ -459,6 +461,7 @@ export const startProfile = (
         ...PLANNING_MAPPERS,
         ...RESOURCE_EVENTS.map((event) => [event, resourceLine] as const),
         ...PROBE_MAPPERS,
+        ...COLD_READ_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -473,7 +476,7 @@ export const startProfile = (
     const sessionsLayers = Layer.mergeAll(
       chatsLayer,
       setupLayer,
-      probesLayer({ log, hold: parts.probes?.hold }).pipe(
+      Layer.mergeAll(probesLayer({ log, hold: parts.probes?.hold }), coldReadsLayer({ log })).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
