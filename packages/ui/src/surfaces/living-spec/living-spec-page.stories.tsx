@@ -266,7 +266,7 @@ export const Busy: Story = {
   args: { opened: 'accounts', busy: 'accounts' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'Validate this domain' })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /Validate this domain/ })).toHaveAttribute(
       'aria-disabled',
       'true',
     )
