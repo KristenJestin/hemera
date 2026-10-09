@@ -320,6 +320,34 @@ export const Laptop: Story = {
   },
 }
 
+/**
+ * A narrow window: no room on one line for the domain's name and its three actions. The name
+ * takes the whole line, never pressed to nothing by them, and they go under it, not past the edge.
+ */
+export const NarrowWindow: Story = {
+  args: { opened: 'accounts' },
+  decorators: [
+    (Story) => (
+      <div className="flex w-view-wide flex-col bg-surface-content">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const pane = canvas.getByRole('region', { name: 'Accounts and sign-in' })
+    const name = within(pane).getByRole('heading', { level: 2, name: 'Accounts and sign-in' })
+    await expect(name).toBeVisible()
+    const line = pane.getBoundingClientRect()
+    await expect(name.getBoundingClientRect().width).toBeGreaterThanOrEqual(line.width - 0.5)
+    const edge = line.right
+    const rights = ['Validate this domain', 'Reject this domain', 'Re-read this domain'].map(
+      (action) => within(pane).getByRole('button', { name: action }).getBoundingClientRect().right,
+    )
+    await expect(Math.max(...rights)).toBeLessThanOrEqual(edge + 0.5)
+  },
+}
+
 /** The keyboard path: Tab reaches each domain in turn, Enter opens it. */
 export const KeyboardThroughDomains: Story = {
   render: function Render(args) {

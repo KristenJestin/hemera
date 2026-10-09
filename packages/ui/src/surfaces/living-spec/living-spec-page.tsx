@@ -174,11 +174,16 @@ function DomainPane({
   return (
     <section aria-labelledby={`domain-${domain.id}`} className="flex min-w-0 flex-1 flex-col gap-5">
       <header className="flex flex-col gap-2">
-        <div className="flex min-h-control-md min-w-0 items-center gap-3">
-          <h2 id={`domain-${domain.id}`} className="min-w-0 truncate text-lg font-semibold">
+        {/* The name keeps room for a few words and is cut short past them; when the line is too
+            short for that and the actions, they go under it, never over it. */}
+        <div className="flex min-h-control-md min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <h2
+            id={`domain-${domain.id}`}
+            className="min-w-0 grow basis-settings-name truncate text-lg font-semibold"
+          >
             {domain.name}
           </h2>
-          <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="ml-auto flex flex-wrap items-center gap-2">
             {waiting.length > 0 && (
               <>
                 <Tooltip
