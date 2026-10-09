@@ -367,6 +367,25 @@ const unblocked = (event: DomainEvent) =>
     })),
   )
 
+interface TicketFacts extends TriageFacts {
+  readonly key: string
+}
+
+/** A change found on a mission's ticket (#97), of the kinds given. */
+const ticketChanged =
+  (...kinds: ReadonlyArray<string>) =>
+  (event: DomainEvent) =>
+    Effect.gen(function* () {
+      if (!kinds.includes(Option.getOrElse(readText(event.payload['kind']), () => ''))) {
+        return Option.none<TicketFacts>()
+      }
+      const facts = yield* triaged(event)
+      return Option.map(facts, (found): TicketFacts => ({
+        ...found,
+        key: Option.getOrElse(readText(event.payload['key']), () => 'the ticket'),
+      }))
+    })
+
 /** The importance of each sound, a group playing the highest: an error, then a need, then done. */
 export const IMPORTANCE = { error: 3, 'needs-you': 2, done: 1, none: 0 } as const
 
@@ -473,6 +492,48 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
       what: 'it cannot be read; its tickets keep the version last read',
     }),
     route: (facts) => ProjectTarget.make({ projectId: facts.project.id }),
+  }),
+  defineKind({
+    id: 'ticket-comment',
+    label: 'A comment is added to or edited on a mission’s ticket',
+    byDefault: true,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'outside',
+    source: 'tickets.changed',
+    facts: ticketChanged('comment_added', 'comment_edited'),
+    words: (facts) => ({ subject: facts.title, what: `a comment on ${facts.key}` }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'ticket-changed',
+    label: 'The description of a mission’s ticket changed',
+    byDefault: true,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'outside',
+    source: 'tickets.changed',
+    facts: ticketChanged('description_changed'),
+    words: (facts) => ({
+      subject: facts.title,
+      what: `${facts.key} changed: the mission is outdated`,
+    }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'ticket-status',
+    label: 'The status of a mission’s ticket changed',
+    byDefault: true,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'outside',
+    source: 'tickets.changed',
+    facts: ticketChanged('status_changed'),
+    words: (facts) => ({ subject: facts.title, what: `the status of ${facts.key} changed` }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),
   defineKind({
     id: 'can-be-built',

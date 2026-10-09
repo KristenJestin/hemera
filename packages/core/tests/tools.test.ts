@@ -80,6 +80,7 @@ describe('Each role has exactly its tools', () => {
     [
       'planner',
       [
+        'answer_propose',
         'ask_wave',
         'cold_read_fixed',
         'commands_list',
@@ -196,6 +197,10 @@ describe('Each role has exactly its tools', () => {
     ],
     ['setup', ['fs_list', 'fs_read', 'search', 'setup_propose', 'setup_read']],
     [
+      'ticket-event',
+      ['fs_list', 'fs_read', 'search', 'spec_read', 'ticket_event_report', 'ticket_read'],
+    ],
+    [
       'living-spec',
       [
         'fs_list',
@@ -212,10 +217,11 @@ describe('Each role has exactly its tools', () => {
     expect(toolsFor(role)).toEqual(tools)
   })
 
-  test('every role has a place, and the read-only ones are the Planner, the cold read, the reviewers, the setup agent and the living spec agent', () => {
+  test('every role has a place, and the read-only ones are the Planner, the cold read, the ticket-event Planner, the reviewers, the setup agent and the living spec agent', () => {
     expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
       'planner',
       'cold-read',
+      'ticket-event',
       'spec-reviewer',
       'code-reviewer',
       'setup',

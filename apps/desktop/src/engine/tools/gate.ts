@@ -120,10 +120,13 @@ import {
 import type { ProfileHome } from '../profile-home.ts'
 import { discussionProposeDecision, discussionReply } from '../planning/discussion-store.ts'
 import { dependencyProposeTool, reliesOnWriteTool } from '../planning/dependencies.ts'
+import { answerProposeTool } from '../planning/proposals-store.ts'
+import { ticketEventReportTool } from '../tickets/event-report.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import type { GhCli } from '../tickets/gh.ts'
 import type { JiraLink } from '../tickets/jira-link.ts'
+import type { TicketProviders } from '../tickets/search.ts'
 import { ticketRead } from '../tickets/tool.ts'
 import { resolvePath } from './paths.ts'
 import {
@@ -203,6 +206,7 @@ export type GateServices =
   | RepositoryStatuses
   | GhCli
   | JiraLink
+  | TicketProviders
 
 /**
  * How many answered keys a session keeps against a retry, and how many sessions keep theirs, the
@@ -326,6 +330,10 @@ const decodeCall = (
       return decoder(tool, TOOLS.dependency_propose.input)(raw)
     case 'relies_on_write':
       return decoder(tool, TOOLS.relies_on_write.input)(raw)
+    case 'answer_propose':
+      return decoder(tool, TOOLS.answer_propose.input)(raw)
+    case 'ticket_event_report':
+      return decoder(tool, TOOLS.ticket_event_report.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -735,6 +743,10 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* dependencyProposeTool(grant, call.args)
             case 'relies_on_write':
               return yield* reliesOnWriteTool(grant, call.args)
+            case 'answer_propose':
+              return yield* answerProposeTool(grant, call.args)
+            case 'ticket_event_report':
+              return yield* ticketEventReportTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

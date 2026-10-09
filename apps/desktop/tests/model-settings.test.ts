@@ -61,6 +61,7 @@ describe('Models by role', () => {
       'living-spec',
       'probe',
       'cold-read',
+      'ticket-event',
       'builder',
       'helper',
       'code-reviewer',

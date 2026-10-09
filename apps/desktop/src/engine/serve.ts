@@ -107,6 +107,9 @@ import {
   sayInDiscussion,
 } from './planning/discussions.ts'
 import { checkAgain, missionTicket, providerStatus } from './tickets/link.ts'
+import { acknowledgeEvent, ticketEventDifference, ticketEventsOf } from './tickets/events.ts'
+import { TicketSync, lastCheckOf, syncIntervalOf } from './tickets/sync.ts'
+import { acceptProposedAnswer, dismissProposedAnswer } from './planning/proposals.ts'
 import { jiraDeployment } from './tickets/jira-link.ts'
 import { jiraTokenState, removeJiraToken, saveJiraToken } from './tickets/jira-tokens.ts'
 import {
@@ -469,6 +472,21 @@ export const engineHandlers = (
       use(missionTicket(missionId)).pipe(observed('tickets.ticket', log)),
     'tickets.changed': ({ projectId }) =>
       follow(ticketsChanges(projectId)).pipe(observedStream('tickets.changed', log)),
+    // The ticket sync (#97): the interval, the last check, the events and their differences.
+    'tickets.syncInterval': ({ projectId }) =>
+      use(syncIntervalOf(projectId)).pipe(observed('tickets.syncInterval', log)),
+    'tickets.setSyncInterval': ({ projectId, minutes }) =>
+      use(TicketSync.use((sync) => sync.setInterval(projectId, minutes))).pipe(
+        observed('tickets.setSyncInterval', log),
+      ),
+    'tickets.lastCheck': ({ projectId }) =>
+      use(lastCheckOf(projectId)).pipe(observed('tickets.lastCheck', log)),
+    'tickets.events': ({ missionId }) =>
+      use(ticketEventsOf(missionId)).pipe(observed('tickets.events', log)),
+    'tickets.difference': ({ eventId }) =>
+      use(ticketEventDifference(eventId)).pipe(observed('tickets.difference', log)),
+    'tickets.acknowledge': ({ eventId }) =>
+      use(acknowledgeEvent(eventId)).pipe(observed('tickets.acknowledge', log)),
     'models.roles': ({ projectId, missionId }) =>
       use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
     'models.setRole': ({ level, scopeId, role, setting }) =>
@@ -589,6 +607,13 @@ export const engineHandlers = (
       follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
     'planning.inputs': ({ missionId }) =>
       use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
+    // Answers proposed from the ticket's comments (#97).
+    'planning.acceptProposedAnswer': ({ proposalId, text }) =>
+      use(acceptProposedAnswer(proposalId, text)).pipe(
+        observed('planning.acceptProposedAnswer', log),
+      ),
+    'planning.dismissProposedAnswer': ({ proposalId }) =>
+      use(dismissProposedAnswer(proposalId)).pipe(observed('planning.dismissProposedAnswer', log)),
     // The living spec (#93): its domains and requirements, its runs, and the user's validation.
     // Hemera does not detect behaviour changed outside Hemera in 1.0: the user re-runs a domain.
     'livingSpec.domains': ({ projectId }) =>

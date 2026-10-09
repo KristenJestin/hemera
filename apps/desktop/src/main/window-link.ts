@@ -474,6 +474,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       ),
     'planning.inputs': (request) =>
       engine['planning.inputs'](request).pipe(closedAs(gone), observed('planning.inputs', log)),
+    'planning.acceptProposedAnswer': (request) =>
+      engine['planning.acceptProposedAnswer'](request).pipe(
+        closedAs(gone),
+        observed('planning.acceptProposedAnswer', log),
+      ),
+    'planning.dismissProposedAnswer': (request) =>
+      engine['planning.dismissProposedAnswer'](request).pipe(
+        closedAs(gone),
+        observed('planning.dismissProposedAnswer', log),
+      ),
     'livingSpec.domains': (request) =>
       engine['livingSpec.domains'](request).pipe(
         closedAs(gone),
@@ -598,6 +608,30 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['tickets.changed'](request).pipe(
         streamClosedAs(gone),
         observedStream('tickets.changed', log),
+      ),
+    'tickets.syncInterval': (request) =>
+      engine['tickets.syncInterval'](request).pipe(
+        closedAs(gone),
+        observed('tickets.syncInterval', log),
+      ),
+    'tickets.setSyncInterval': (request) =>
+      engine['tickets.setSyncInterval'](request).pipe(
+        closedAs(gone),
+        observed('tickets.setSyncInterval', log),
+      ),
+    'tickets.lastCheck': (request) =>
+      engine['tickets.lastCheck'](request).pipe(closedAs(gone), observed('tickets.lastCheck', log)),
+    'tickets.events': (request) =>
+      engine['tickets.events'](request).pipe(closedAs(gone), observed('tickets.events', log)),
+    'tickets.difference': (request) =>
+      engine['tickets.difference'](request).pipe(
+        closedAs(gone),
+        observed('tickets.difference', log),
+      ),
+    'tickets.acknowledge': (request) =>
+      engine['tickets.acknowledge'](request).pipe(
+        closedAs(gone),
+        observed('tickets.acknowledge', log),
       ),
     'missions.freezeReadiness': (request) =>
       engine['missions.freezeReadiness'](request).pipe(

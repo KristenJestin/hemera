@@ -54,6 +54,8 @@ export function commandsEngine(
     | 'gh'
     | 'jira'
     | 'snapshots'
+    | 'ticketProviders'
+    | 'ticketSync'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {
