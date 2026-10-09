@@ -16,7 +16,33 @@ import type { EngineState } from '../src/renderer/engine-start.ts'
 import { START, go, type Route } from '../src/renderer/navigation.ts'
 import type { NeedsState } from '../src/renderer/needs.ts'
 import type { ProjectState, ProjectsState } from '../src/renderer/projects.ts'
+import { HomeRoute } from '../src/renderer/home-route.tsx'
+import { LivingSpecRoute } from '../src/renderer/living-spec-route.tsx'
+import { MissionRoute } from '../src/renderer/mission-route.tsx'
+import { ProjectRoute } from '../src/renderer/project-route.tsx'
 import { Shell, type ShellProps } from '../src/renderer/shell.tsx'
+import { SidebarMissions } from '../src/renderer/sidebar-missions.tsx'
+import { StartFieldPart } from '../src/renderer/start-field-part.tsx'
+import { AT_BASE } from '@hemera/ui'
+import { SILENT_LINK } from './fake-link.ts'
+
+const missionProps = {
+  link: SILENT_LINK,
+  engineReady: true,
+  projectId: 'acme',
+  missionKey: 'ACME-12',
+  now: new Date('2026-10-04T12:00:00.000Z'),
+  frame: AT_BASE,
+  actions: {
+    open: () => undefined,
+    show: () => undefined,
+    close: () => undefined,
+    goProject: () => undefined,
+    answer: () => undefined,
+    recheck: () => undefined,
+    openSettings: () => undefined,
+  },
+}
 
 const OPEN = DatabaseOpen.make({
   lastMigration: null,
@@ -58,6 +84,7 @@ const ACME: Project = {
 
 const READY: EngineState = { kind: 'ready', status: status() }
 const nothing = (): void => undefined
+const NOW = new Date('2026-10-04T12:00:00.000Z')
 
 interface Drawn {
   engine?: EngineState
@@ -86,8 +113,64 @@ const drawn = ({
     navigation: go(START, route),
     folded,
     opened,
-    today: 'Saturday 4 October',
-    now: new Date('2026-10-04T12:00:00.000Z'),
+    home: createElement(HomeRoute, {
+      link: SILENT_LINK,
+      engineReady: engine.kind === 'ready',
+      today: 'Saturday 4 October',
+      now: NOW,
+      projects,
+      needs,
+      focus: route.kind === 'home' ? { projectId: route.projectId, need: route.need } : {},
+      firstLaunch: createElement('p', null, 'Welcome, with the agents of this machine'),
+      actions: {
+        answer: nothing,
+        recheck: nothing,
+        openSettings: nothing,
+        addProject: nothing,
+        retry: nothing,
+        openMission: nothing,
+      },
+    }),
+    projectPage: createElement(ProjectRoute, {
+      link: SILENT_LINK,
+      engineReady: engine.kind === 'ready',
+      id: route.kind === 'project' ? route.id : '',
+      state: project,
+      fallback: 'Acme',
+      now: NOW,
+      tasks: createElement('p', null, 'The tasks of the Project'),
+      actions: {
+        openSettings: nothing,
+        retry: nothing,
+        openMission: nothing,
+        openChat: nothing,
+        openLivingSpec: nothing,
+      },
+    }),
+    mission: createElement(MissionRoute, {
+      link: SILENT_LINK,
+      engineReady: true,
+      projectId: 'acme',
+      missionKey: route.kind === 'mission' ? route.key : '',
+      now: NOW,
+      frame: AT_BASE,
+      actions: {
+        open: nothing,
+        show: nothing,
+        close: nothing,
+        goProject: nothing,
+        answer: nothing,
+        recheck: nothing,
+        openSettings: nothing,
+      },
+    }),
+    livingSpec: createElement(LivingSpecRoute, {
+      link: SILENT_LINK,
+      engineReady: true,
+      projectId: 'acme',
+      projectName: 'Acme',
+      actions: { openOrigin: nothing, openModels: nothing },
+    }),
     actions: {
       go: nothing,
       show: nothing,
@@ -103,12 +186,10 @@ const drawn = ({
     },
     under: (id) => (id === 'acme' ? createElement('p', null, 'The Chats of Acme') : null),
     chat: createElement('p', null, 'The Chat on its page'),
-    projectTasks: createElement('p', null, 'The tasks of the Project'),
     chatTitle: (id) => (id === 'invoices' ? 'Invoices export' : undefined),
     projectSettings: createElement('p', null, 'The settings of the Project'),
     addProject: createElement('p', null, 'The dialog that adds a Project'),
     appSettings: createElement('p', null, 'The choice of theme'),
-    firstLaunch: createElement('p', null, 'Welcome, with the agents of this machine'),
     notices: createElement('p', null, 'The in-app notifications'),
   }
   return renderToStaticMarkup(createElement(Shell, props))
@@ -244,6 +325,46 @@ describe('The pages', () => {
     expect(markup).toMatch(
       /aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Invoices export/,
     )
+  })
+
+  test('a mission’s page is drawn by its own route, which draws nothing yet', () => {
+    const markup = drawn({ route: { kind: 'mission', projectId: 'acme', key: 'ACME-12' } })
+    expect(markup).toMatch(/aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*ACME-12/)
+    expect(renderToStaticMarkup(createElement(MissionRoute, missionProps))).toBe('')
+  })
+
+  test('the living spec is a page under its Project, drawn by its own route', () => {
+    const markup = drawn({ route: { kind: 'livingSpec', projectId: 'acme' } })
+    expect(markup).toMatch(/<h1[^>]*>.*Living spec.*<\/h1>/)
+    expect(markup).toMatch(
+      /aria-label="Where you are".*<button[^>]*>.*Acme.*<\/button>.*Living spec/,
+    )
+  })
+
+  test('the Project page’s start field and the sidebar’s missions are parts that draw nothing yet', () => {
+    expect(
+      renderToStaticMarkup(
+        createElement(StartFieldPart, {
+          link: SILENT_LINK,
+          engineReady: true,
+          projectId: 'acme',
+          projectName: 'Acme',
+          onOpenMission: nothing,
+          onOpenChat: nothing,
+        }),
+      ),
+    ).toBe('')
+    expect(
+      renderToStaticMarkup(
+        createElement(SidebarMissions, {
+          link: SILENT_LINK,
+          engineReady: true,
+          projectId: 'acme',
+          current: { kind: 'home' },
+          onOpenMission: nothing,
+        }),
+      ),
+    ).toBe('')
   })
 
   test('a Project’s page holds its tasks, under the field that starts a mission', () => {

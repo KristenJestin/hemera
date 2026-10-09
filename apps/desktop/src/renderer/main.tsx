@@ -11,12 +11,22 @@ import { AgentSection } from './agent-sections.tsx'
 import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
 import { FirstLaunchRoute } from './first-launch-route.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
+import { HomeRoute } from './home-route.tsx'
+import { LivingSpecRoute } from './living-spec-route.tsx'
+import { MissionRoute } from './mission-route.tsx'
+import { ProjectRoute } from './project-route.tsx'
 import { connect } from './link.ts'
 import {
   START,
+  close as closeView,
   focusOf,
+  frameOf,
   go,
+  goMissionView,
   landedAfterSetup,
+  linkedSettings,
+  open as openView,
+  placeOf,
   routeOf,
   sectionOf,
   show,
@@ -24,6 +34,7 @@ import {
   type Route,
 } from './navigation.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
+import { SidebarMissions } from './sidebar-missions.tsx'
 import { ProjectSetupTask, useSetupLaunches, useSetupOffer } from './setup-task.tsx'
 import { Shell } from './shell.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
@@ -32,6 +43,8 @@ import { useEngine } from './use-engine.ts'
 import { useMinute, useNeeds } from './use-needs.ts'
 import { useNotices } from './use-notices.ts'
 import { useProject, useProjects } from './use-projects.ts'
+import { TicketSection } from './ticket-sections.tsx'
+import { useTicketProblem } from './ticket-providers.tsx'
 import { useSettings } from './use-settings.ts'
 
 const root = document.querySelector('#root')
@@ -87,7 +100,7 @@ function Application() {
   const shownProject =
     route.kind === 'project' || route.kind === 'projectSettings'
       ? route.id
-      : route.kind === 'chat'
+      : route.kind === 'chat' || route.kind === 'livingSpec'
         ? route.projectId
         : null
   const [projects, retryProjects] = useProjects(link, ready)
@@ -105,6 +118,7 @@ function Application() {
     )
   }, [ready])
   const settingsOf = route.kind === 'projectSettings' ? route.id : null
+  const ticketProblem = useTicketProblem(link, ready, settingsOf)
   const [settingsData, settings] = useSettings(link, ready, settingsOf)
   /** How many times the Project's models by role were changed in its settings. */
   const [roleChanges, setRoleChanges] = useState(0)
@@ -139,6 +153,11 @@ function Application() {
     setOpened((before) => new Set([...before, projectId]))
     goTo({ kind: 'chat', projectId, id })
   }
+  const listed = projects.kind === 'ready' ? projects.projects : []
+  const nameOf = (id: string): string =>
+    (project.kind === 'ready' && project.project.id === id ? project.project.name : undefined) ??
+    listed.find((one) => one.id === id)?.name ??
+    ''
   return (
     <Shell
       engine={engine}
@@ -154,23 +173,120 @@ function Application() {
           : undefined
       }
       under={(projectId) => (
-        <ProjectChats
+        <>
+          <SidebarMissions
+            link={link}
+            engineReady={ready}
+            projectId={projectId}
+            current={placeOf(route)}
+            onOpenMission={(key) => goTo({ kind: 'mission', projectId, key })}
+          />
+          <ProjectChats
+            link={link}
+            engineReady={ready}
+            projectId={projectId}
+            current={route.kind === 'chat' ? route.id : null}
+            onOpen={(id) => openChat(projectId, id)}
+          />
+        </>
+      )}
+      home={
+        <HomeRoute
           link={link}
           engineReady={ready}
-          projectId={projectId}
-          current={route.kind === 'chat' ? route.id : null}
-          onOpen={(id) => openChat(projectId, id)}
+          today={TODAY.format(now)}
+          now={now}
+          projects={projects}
+          needs={needs}
+          focus={route.kind === 'home' ? { projectId: route.projectId, need: route.need } : {}}
+          firstLaunch={
+            <FirstLaunchRoute
+              link={link}
+              engineReady={ready}
+              onAddProject={() => setAdding(true)}
+            />
+          }
+          actions={{
+            answer: answering.answer,
+            recheck: answering.recheck,
+            openSettings: (section) => goTo(linkedSettings(section)),
+            addProject: () => setAdding(true),
+            retry: () => {
+              retryProjects()
+              answering.retry()
+            },
+            openMission: (projectId, key) => goTo({ kind: 'mission', projectId, key }),
+          }}
         />
-      )}
-      projectTasks={
-        route.kind === 'project' && project.kind === 'ready' ? (
-          <ProjectSetupTask
+      }
+      projectPage={
+        route.kind === 'project' ? (
+          <ProjectRoute
             key={route.id}
             link={link}
             engineReady={ready}
-            project={project.project}
-            launch={launches.of(route.id)}
-            onLaunch={() => launches.start(route.id)}
+            id={route.id}
+            state={project}
+            fallback={nameOf(route.id)}
+            now={now}
+            tasks={
+              project.kind === 'ready' ? (
+                <ProjectSetupTask
+                  key={route.id}
+                  link={link}
+                  engineReady={ready}
+                  project={project.project}
+                  launch={launches.of(route.id)}
+                  onLaunch={() => launches.start(route.id)}
+                />
+              ) : null
+            }
+            actions={{
+              openSettings: () => goTo({ kind: 'projectSettings', id: route.id }),
+              retry: retryProject,
+              openMission: (key) => goTo({ kind: 'mission', projectId: route.id, key }),
+              openChat: (chatId) => openChat(route.id, chatId),
+              openLivingSpec: () => goTo({ kind: 'livingSpec', projectId: route.id }),
+            }}
+          />
+        ) : null
+      }
+      mission={
+        route.kind === 'mission' ? (
+          <MissionRoute
+            key={route.key}
+            link={link}
+            engineReady={ready}
+            projectId={route.projectId}
+            missionKey={route.key}
+            now={now}
+            frame={frameOf(navigation, route.key)}
+            actions={{
+              open: (view) => setNavigation((before) => openView(before, view)),
+              show: (view) => setNavigation((before) => show(before, view)),
+              close: (view) => setNavigation((before) => closeView(before, view)),
+              goProject: () => goTo({ kind: 'project', id: route.projectId }),
+              answer: answering.answer,
+              recheck: answering.recheck,
+              openSettings: (section) => goTo(linkedSettings(section)),
+            }}
+          />
+        ) : null
+      }
+      livingSpec={
+        route.kind === 'livingSpec' ? (
+          <LivingSpecRoute
+            key={route.projectId}
+            link={link}
+            engineReady={ready}
+            projectId={route.projectId}
+            projectName={nameOf(route.projectId)}
+            actions={{
+              openOrigin: (key) =>
+                setNavigation((before) => goMissionView(before, route.projectId, key, 'spec')),
+              openModels: () =>
+                goTo({ kind: 'projectSettings', id: route.projectId, section: 'models' }),
+            }}
           />
         ) : null
       }
@@ -186,8 +302,6 @@ function Application() {
           />
         ) : null
       }
-      today={TODAY.format(now)}
-      now={now}
       projectSettings={
         settingsOf === null ? null : (
           <SettingsPage
@@ -195,6 +309,27 @@ function Application() {
             data={settingsData}
             settings={settings}
             tools={tools}
+            section={route.kind === 'projectSettings' ? route.section : undefined}
+            problems={
+              ticketProblem === undefined ? undefined : new Map([['tickets', ticketProblem]])
+            }
+            onOpenLivingSpec={() => goTo({ kind: 'livingSpec', projectId: settingsOf })}
+            ticketSection={(section, showForm) => (
+              <TicketSection
+                section={section}
+                link={link}
+                engineReady={ready}
+                projectId={settingsOf}
+                project={
+                  settingsData.project.kind === 'ready' ? settingsData.project.project : null
+                }
+                catalogue={
+                  settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
+                }
+                show={showForm}
+                copy={tools.copy}
+              />
+            )}
             setUp={{
               // Launched, the setup is a task on the Project's page: the window goes there.
               onStart: () => {
@@ -221,9 +356,6 @@ function Application() {
             )}
           />
         )
-      }
-      firstLaunch={
-        <FirstLaunchRoute link={link} engineReady={ready} onAddProject={() => setAdding(true)} />
       }
       appSettings={
         <AppSettingsPage
