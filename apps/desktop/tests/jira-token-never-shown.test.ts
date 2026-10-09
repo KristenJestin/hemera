@@ -1,7 +1,10 @@
 /**
  * A Jira token is never shown: it crosses one call, from the window to main, and nothing the
  * window decodes from the engine carries it back, no `ProviderView` the screens are given has a
- * place for it, no story draws one, and the field that takes it is empty once it was given.
+ * place for it, no story draws one, and the field that takes it is empty once it was given. This
+ * file checks the first four; the last needs a rendered field and is played by the story
+ * `JiraTokenMissing` of the ticket providers (type a token, Save, the field is empty and no text of
+ * the dialog holds it).
  */
 
 import { readFileSync } from 'node:fs'
