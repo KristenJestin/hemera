@@ -37,6 +37,7 @@ import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { SidebarMissions } from './sidebar-missions.tsx'
 import { ProjectSetupTask, useSetupLaunches, useSetupOffer } from './setup-task.tsx'
 import { Shell } from './shell.tsx'
+import { MISSION_VIEWS } from './stage-pages.tsx'
 import { DARK_QUERY, wearTheme } from './theme.ts'
 import { useChats } from './use-chats.ts'
 import { useEngine } from './use-engine.ts'
@@ -282,8 +283,13 @@ function Application() {
             projectId={route.projectId}
             projectName={nameOf(route.projectId)}
             actions={{
+              // The mission's Spec view once a stage registers it; until then, the mission.
               openOrigin: (key) =>
-                setNavigation((before) => goMissionView(before, route.projectId, key, 'spec')),
+                setNavigation((before) =>
+                  'spec' in MISSION_VIEWS
+                    ? goMissionView(before, route.projectId, key, 'spec')
+                    : go(before, { kind: 'mission', projectId: route.projectId, key }),
+                ),
               openModels: () =>
                 goTo({ kind: 'projectSettings', id: route.projectId, section: 'models' }),
             }}
