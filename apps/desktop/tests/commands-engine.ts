@@ -56,6 +56,7 @@ export function commandsEngine(
     | 'snapshots'
     | 'ticketProviders'
     | 'ticketSync'
+    | 'building'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
 ) {

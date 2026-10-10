@@ -479,6 +479,8 @@ describe('The registry of event kinds', () => {
       ['ticket-status', true, null],
       ['ticket-write-failed', true, 'error'],
       ['can-be-built', true, 'done'],
+      ['workspace-prepared', true, 'done'],
+      ['workspace-preparation-failed', true, 'error'],
     ])
   })
 })
@@ -504,6 +506,8 @@ describe('The switches are the application’s, listed from the registry', () =>
       ['ticket-status', true],
       ['ticket-write-failed', true],
       ['can-be-built', true],
+      ['workspace-prepared', true],
+      ['workspace-preparation-failed', true],
     ])
     expect(settings.sounds.map((one) => [one.sound, one.on])).toEqual([
       ['needs-you', true],

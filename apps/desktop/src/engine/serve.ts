@@ -19,6 +19,13 @@ import { Effect } from 'effect'
 
 import { observed, observedStream, type Log } from '../main/diagnostic.ts'
 import { Agents, machineAgentsLayer } from './agents/service.ts'
+import {
+  backToPlanningFromCheck,
+  checkMission,
+  checkView,
+  chooseBuilderModel,
+} from './building/check.ts'
+import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import type { StartedProfile } from './profile.ts'
 import {
   addRepository,
@@ -689,6 +696,23 @@ export const engineHandlers = (
       use(dependenciesOf(missionId)).pipe(observed('dependencies.list', log)),
     'dependencies.decide': ({ id, accept }) =>
       use(decideDependency(id, accept)).pipe(observed('dependencies.decide', log)),
+    // The pre-launch check and the launch (#139): both the user's.
+    'building.check': ({ missionId }) =>
+      use(checkMission(missionId)).pipe(observed('building.check', log)),
+    'building.checkView': ({ checkId }) =>
+      use(checkView(checkId)).pipe(observed('building.checkView', log)),
+    'building.launch': ({ missionId, checkId, choice }) =>
+      use(launchMission(missionId, checkId, choice)).pipe(observed('building.launch', log)),
+    'building.backToPlanning': ({ missionId, checkId }) =>
+      use(backToPlanningFromCheck(missionId, checkId)).pipe(
+        observed('building.backToPlanning', log),
+      ),
+    'building.preparation': ({ missionId }) =>
+      use(preparationOf(missionId)).pipe(observed('building.preparation', log)),
+    'building.chooseModel': ({ missionId, setting }) =>
+      use(chooseBuilderModel(missionId, setting)).pipe(observed('building.chooseModel', log)),
+    'building.changed': ({ missionId }) =>
+      follow(buildingChanges(missionId)).pipe(observedStream('building.changed', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
 }

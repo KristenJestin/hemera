@@ -574,6 +574,32 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),
+  defineKind({
+    id: 'workspace-prepared',
+    label: 'A mission’s Workspace preparation done: it is Building',
+    byDefault: true,
+    sound: 'done',
+    importance: IMPORTANCE.done,
+    tone: 'done',
+    source: 'building.workspace_ready',
+    facts: triaged,
+    words: (facts) => ({ subject: facts.title, what: 'its Workspace is ready: Building' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'workspace-preparation-failed',
+    label: 'A mission’s Workspace preparation failed: it stays Ready',
+    byDefault: true,
+    sound: 'error',
+    importance: IMPORTANCE.error,
+    tone: 'failed',
+    source: 'building.workspace_failed',
+    facts: triaged,
+    words: (facts) => ({ subject: facts.title, what: 'the preparation of its Workspace failed' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
 ]
 
 /** The registry of this version, checked when the engine loads: a bad one is a defect. */

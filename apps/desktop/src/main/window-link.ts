@@ -660,6 +660,35 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('missions.returnToPlanning', log),
       ),
+    'building.check': (request) =>
+      engine['building.check'](request).pipe(closedAs(gone), observed('building.check', log)),
+    'building.checkView': (request) =>
+      engine['building.checkView'](request).pipe(
+        closedAs(gone),
+        observed('building.checkView', log),
+      ),
+    'building.launch': (request) =>
+      engine['building.launch'](request).pipe(closedAs(gone), observed('building.launch', log)),
+    'building.backToPlanning': (request) =>
+      engine['building.backToPlanning'](request).pipe(
+        closedAs(gone),
+        observed('building.backToPlanning', log),
+      ),
+    'building.preparation': (request) =>
+      engine['building.preparation'](request).pipe(
+        closedAs(gone),
+        observed('building.preparation', log),
+      ),
+    'building.chooseModel': (request) =>
+      engine['building.chooseModel'](request).pipe(
+        closedAs(gone),
+        observed('building.chooseModel', log),
+      ),
+    'building.changed': (request) =>
+      engine['building.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('building.changed', log),
+      ),
     'dependencies.list': (request) =>
       engine['dependencies.list'](request).pipe(closedAs(gone), observed('dependencies.list', log)),
     'dependencies.decide': (request) =>

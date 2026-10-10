@@ -37,6 +37,14 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
+import {
+  type BuildingStart,
+  buildingLaunchesLayer,
+  buildingStartUnfilled,
+  BUILDING_NEEDS,
+} from './building/launch.ts'
+import { BUILDING_MAPPERS } from './building/journal.ts'
+import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
 import { AutomationGate, automationGateLayer } from './gate.ts'
 import { DATABASE_FILE, openProfile } from './migrate.ts'
@@ -234,6 +242,8 @@ export interface ProfileParts {
   readonly snapshots?: Layer.Layer<FileSnapshots, never, Secrets>
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** Where a launched mission's Building starts (#139): #141's port, one doing nothing otherwise. */
+  readonly building?: { readonly start?: Layer.Layer<BuildingStart> } | undefined
   /**
    * The network a Jira call goes through, its limit, and how a sealed token is opened (#96):
    * Node's `fetch`, 30 seconds and no opener otherwise.
@@ -430,6 +440,8 @@ export const startProfile = (
     const postLayer = Layer.succeedContext(postContext)
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
+    // The launches, and where their failed preparations' Retry goes (#139).
+    const launches = buildingLaunchesLayer(log)
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -439,6 +451,7 @@ export const startProfile = (
         [PERMISSION_REQUESTS, requestsHandler],
         [RESOURCE_NEEDS, resources.handler],
         [TICKET_WRITES, ticketWritesNeeds],
+        [BUILDING_NEEDS, launches.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -491,6 +504,7 @@ export const startProfile = (
         ...COLD_READ_MAPPERS,
         ...FREEZE_MAPPERS,
         ...TICKET_MAPPERS,
+        ...BUILDING_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -512,6 +526,8 @@ export const startProfile = (
         ticketSyncLayer({ log, schedules: parts.ticketSync?.schedules }),
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
+        checkRunsLayer({ log }),
+        launches.layer.pipe(Layer.provide(parts.building?.start ?? buildingStartUnfilled)),
       ).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),

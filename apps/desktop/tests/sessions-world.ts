@@ -127,6 +127,8 @@ export const sessionsEngine = (
     readonly ticketSync?: ProfileParts['ticketSync']
     /** The steps of a restore's reconciliation, when a suite holds the gate with one. */
     readonly reconciliationSteps?: ProfileParts['reconciliationSteps']
+    /** Where a launched mission's Building starts, when a suite counts it (#139). */
+    readonly building?: ProfileParts['building']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -158,6 +160,7 @@ export const sessionsEngine = (
     gh: options.gh,
     ticketProviders: options.ticketProviders,
     ticketSync: options.ticketSync,
+    building: options.building,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,
