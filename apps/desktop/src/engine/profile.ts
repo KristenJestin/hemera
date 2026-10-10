@@ -60,7 +60,7 @@ import type { Delivery } from './permissions/delivery.ts'
 import type { HemeraAuto } from './permissions/hemera-auto.ts'
 import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
-import { SYSTEM_GIT, gitLayer, spawnGit } from './git.ts'
+import { SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
 import { Secrets, type SecretsRegistry, secretsRegistry, registerAllVariables } from './secrets.ts'
 import { resumeInterrupted } from './preparation.ts'
@@ -153,6 +153,8 @@ import { agentOffersLayer, agentOffersServed } from './planning/offers.ts'
 import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type FileSnapshots, databaseSnapshots } from './planning/snapshots.ts'
+import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
+import { type Snapshots, snapshotsLayer } from './building/snapshots.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -310,6 +312,8 @@ export type EngineServices =
   | LivingSpec
   | ProbeDesk
   | FileSnapshots
+  | Snapshots
+  | Checkpoints
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -518,6 +522,9 @@ export const startProfile = (
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       parts.snapshots ?? databaseSnapshots,
+      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+        Layer.provideMerge(snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))),
+      ),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

@@ -23,6 +23,7 @@ import { type Table, eq, getTableName, inArray, notInArray, sql } from 'drizzle-
 import { Effect } from 'effect'
 
 import { DIAGNOSTIC_FILE, DIAGNOSTIC_GENERATION, TRACES_FOLDER } from '../main/diagnostic.ts'
+import { SNAPSHOTS_FOLDER } from './building/snapshots.ts'
 import { MISSIONS_FOLDER } from './memory/files.ts'
 import { Database, refusedWhile } from './storage/database.ts'
 import { agentSessions, commandRuns, missions, sessionThreads } from './storage/schema.ts'
@@ -126,6 +127,12 @@ export const TABLE_CLASSES = {
   jira_tokens: 'state',
   cold_reads: 'permanent',
   cold_read_findings: 'permanent',
+  file_contents: 'heavy',
+  snapshot_files: 'permanent',
+  snapshot_changes: 'permanent',
+  checkpoints: 'permanent',
+  checkpoint_repositories: 'permanent',
+  checkpoint_files: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**
@@ -137,6 +144,8 @@ export const FILE_CLASSES = {
   [TRACES_FOLDER]: 'diagnostic',
   // The Memory's evidence, and the markdown files regenerated from the database beside it.
   [MISSIONS_FOLDER]: 'heavy',
+  // Hemera's Git object store per Project, the snapshot trees of its missions (#140).
+  [SNAPSHOTS_FOLDER]: 'heavy',
 } as const satisfies Record<string, RetentionClass>
 
 /** The tables among these that have no class: what a later ticket forgot to declare. */
