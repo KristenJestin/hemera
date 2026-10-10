@@ -445,6 +445,32 @@ describe('A read-only Git command does not ask (#170)', () => {
   })
 })
 
+describe('Without a judge, what only reads is allowed by the rules (#170)', () => {
+  test('reads, listings, searches and read-only Git pass; a write, a command that may write, or a read outside asks', async () => {
+    const { answer, questions } = await withBuilder(({ builder }) =>
+      Effect.all([
+        read(builder, 'README.md'),
+        callTool(builder, 'fs_list', { path: '.' }),
+        callTool(builder, 'search', { pattern: 'acme' }),
+        callTool(builder, 'commands_list', {}),
+        run(builder, 'ls'),
+        run(builder, 'git status'),
+        callTool(builder, 'fs_write', { path: 'notes.md', content: 'x' }),
+        run(builder, 'node --version'),
+        read(builder, '../elsewhere.txt'),
+      ]),
+    )
+    expect(answer.slice(0, 6).map((one) => one.text)).not.toContain(
+      'refused: approvals are not available yet',
+    )
+    expect(questions).toEqual([
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
+      'outside the Workspace: ~/elsewhere.txt',
+    ])
+  })
+})
+
 describe("The refusals of a mission's agents, on the effective action", () => {
   test.each([
     ['git push', 'no agent of a mission may run git push'],
