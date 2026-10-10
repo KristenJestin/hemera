@@ -32,7 +32,7 @@ import { TRACES_FOLDER } from '../src/main/diagnostic.ts'
 import { listCommands } from '../src/engine/catalogue.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { domainEvents, permissionRequests } from '../src/engine/storage/schema.ts'
+import { domainEvents, permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
 import { listVariables } from '../src/engine/variables.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { held, sessionsEngine, until, within } from './sessions-world.ts'
@@ -391,6 +391,26 @@ describe('A variable’s value is hidden', () => {
       ),
     )
     expect(after).toMatchObject({ state: 'pending', refusal: VALUE_FORGOTTEN })
+  })
+
+  test('a short value, which masking does not know, is still in no table nor any file: the call’s record keeps it as •••', async () => {
+    const SHORT = 'k7q2z'
+    const { run } = sessionsEngine(data, () =>
+      proposing([{ kind: 'variable', name: 'ACME_PIN', value: SHORT }]),
+    )
+    const recorded = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const database = yield* Database
+          return yield* database.select({ arguments: toolCalls.arguments }).from(toolCalls)
+        }),
+      ),
+    )
+    expect(recorded.map((one) => one.arguments).join('\n')).toContain('"value":"•••"')
+    expect(everything(data)).not.toContain(SHORT)
   })
 
   test('a call refused for a change of a kind it does not know still hides its value', async () => {

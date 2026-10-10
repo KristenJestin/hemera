@@ -26,6 +26,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  MASK,
   type Masked,
   ROLE_NAMES,
   ROLE_PLACES,
@@ -224,9 +225,38 @@ const REASON_KEPT = 500
 const ARGUMENTS_KEPT = 2000
 
 const readArgumentFields = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+const readProposedChanges = Schema.decodeUnknownOption(
+  Schema.Struct({ changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)) }),
+)
+
+/**
+ * The arguments of a call as a record may hold them: a setup proposal's values by their name,
+ * `value`, as `•••`, whatever their length; masking alone would keep a short one in clear.
+ */
+const withoutProposedValues = (tool: string, args: Schema.Json): Schema.Json =>
+  tool !== 'setup_propose'
+    ? args
+    : Option.match(readProposedChanges(args), {
+        onNone: () => args,
+        onSome: ({ changes }) => ({
+          changes: changes.map((change) =>
+            Object.fromEntries(
+              Object.entries(change).map(([name, value]) => [
+                name,
+                name === 'value' ? MASK : value,
+              ]),
+            ),
+          ),
+        }),
+      })
 
 /** A call's arguments as its record keeps them: masked whole, then cut. */
-const argumentsKept = (secrets: SecretsRegistry, args: Schema.Json): Masked<string> => {
+const argumentsKept = (
+  secrets: SecretsRegistry,
+  tool: string,
+  given: Schema.Json,
+): Masked<string> => {
+  const args = withoutProposedValues(tool, given)
   const masked = Option.match(readArgumentFields(args), {
     onNone: () => secrets.mask(JSON.stringify(args)),
     onSome: (fields) => maskedJson(secrets.maskRecord(fields)),
@@ -503,7 +533,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                 verdictBy: noted.verdictBy,
                 outcome,
                 reason: answer.ok ? null : secrets.mask(answer.text.slice(0, REASON_KEPT)),
-                arguments: args === null ? null : argumentsKept(secrets, args),
+                arguments: args === null ? null : argumentsKept(secrets, tool, args),
                 callKey,
                 durationMs: Math.round(performance.now() - began),
                 calledAt: new Date().toISOString(),
