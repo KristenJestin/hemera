@@ -2111,3 +2111,90 @@ export const ticketWrites = sqliteTable(
   },
   (table) => [index('ticket_writes_of_mission').on(table.missionId)],
 )
+
+/**
+ * The pre-launch checks of a mission (#139): `full` when the user asked for one, `mechanical` when
+ * a dependency reaching Done ran its first three steps. `read` is the JSON of what a check holds
+ * for (the commit read per repository, the Spec version, each dependency's stage, the fingerprint
+ * of the validation settings); `results` the JSON of what it found, each step in words. The agent
+ * of a full check is a `prelaunch` session of its own lineage, reminded once (`reminded`); its
+ * summary is kept masked.
+ */
+export const prelaunchChecks = sqliteTable(
+  'prelaunch_checks',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    read: text('read').notNull(),
+    results: text('results').notNull(),
+    agentState: text('agent_state').notNull(),
+    lineage: text('lineage'),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull(),
+    summary: text('summary').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    index('prelaunch_checks_of_mission').on(table.missionId, table.startedAt),
+    uniqueIndex('prelaunch_check_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * The launches of a mission's Building (#139): on the check they were made on, with the user's
+ * choice, the Builder's setting resolved then, and the validation settings taken then (JSON). A
+ * launch is `preparing` while its Workspace is prepared, `failed` while a step waits on its need
+ * (`need_id`), `launched` once the mission moved to Building, `cancelled` with its mission. One
+ * launch per mission at most is under way: the database enforces it. `started_at` is set once
+ * `BuildingStart` was called.
+ */
+export const buildingLaunches = sqliteTable(
+  'building_launches',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    checkId: text('check_id')
+      .notNull()
+      .references(() => prelaunchChecks.id),
+    choice: text('choice').notNull(),
+    state: text('state').notNull(),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    branch: text('branch'),
+    setting: text('setting').notNull(),
+    settings: text('settings').notNull(),
+    needId: text('need_id'),
+    createdAt: text('created_at').notNull(),
+    launchedAt: text('launched_at'),
+    startedAt: text('started_at'),
+  },
+  (table) => [
+    uniqueIndex('building_launch_under_way')
+      .on(table.missionId)
+      .where(sql`${table.state} in ('preparing', 'failed')`),
+    index('building_launches_of_mission').on(table.missionId),
+  ],
+)
+
+/**
+ * The validation settings a mission's Building judges its result with (CT-34): copied at launch,
+ * one version per copy, each section a Schema-encoded value in `sections` (JSON). Readers read the
+ * mission's copy, never the Project.
+ */
+export const missionValidationSettings = sqliteTable(
+  'mission_validation_settings',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    takenAt: text('taken_at').notNull(),
+    sections: text('sections').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.version] })],
+)
