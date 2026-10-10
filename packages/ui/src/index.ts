@@ -178,6 +178,7 @@ export {
   probeViewId,
   type PlanningPageProps,
 } from './surfaces/planning/planning-page.tsx'
+export { planningViews, type PlanningViewsOf } from './surfaces/planning/planning-views.tsx'
 export {
   DiscussionThread,
   type DiscussionThreadProps,

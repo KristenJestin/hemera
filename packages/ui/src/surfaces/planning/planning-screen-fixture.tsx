@@ -1,19 +1,17 @@
 import { type ReactNode, useState } from 'react'
 
-import { DiscussionThread } from '../../blocks/planning/discussion-thread.tsx'
 import type {
   DiscussionHandlers,
   DiscussionItem,
   PlanningHandlers,
 } from '../../blocks/planning/planning-types.ts'
-import { ProbeReport } from '../../blocks/planning/probes.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
-import { IconMessages, IconTestPipe } from '../../icons.ts'
-import { MissionFrame, type MissionView } from '../mission/mission-frame.tsx'
+import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
 import * as moments from './planning-fixtures.ts'
 import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
+import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
 const MOMENTS = {
@@ -87,38 +85,16 @@ export function PlanningScreen({
     setFrame((now) => openView(now, probeViewId(id)))
   }
 
-  const discussions = [
-    ...(data?.discussions ?? []).map((discussion) => ({ item: discussion.item, discussion })),
-    ...(starting === null ? [] : [{ item: starting, discussion: null }]),
-  ]
-  const views: MissionView[] = [
-    ...discussions.map(({ item, discussion }) => ({
-      id: discussionViewId(item),
-      title:
-        discussion === null ? `Discuss ${item.id}` : `Discussion ${discussion.label} · ${item.id}`,
-      icon: <IconMessages size="md" />,
-      width: 'narrow' as const,
-      body: (
-        <div className="px-5 py-4">
-          <DiscussionThread
-            discussion={discussion}
-            on={item.id}
-            mentionables={MENTIONABLES}
-            onSay={onSay}
-            onAccept={onAccept}
-            onClose={onClose}
-          />
-        </div>
-      ),
-    })),
-    ...(data?.probes ?? []).map((probe) => ({
-      id: probeViewId(probe.id),
-      title: `Probe ${probe.label}`,
-      icon: <IconTestPipe size="md" />,
-      width: 'narrow' as const,
-      body: <ProbeReport probe={moments.probeById(probe.id)} />,
-    })),
-  ]
+  const views = planningViews({
+    discussions: data?.discussions ?? [],
+    starting: starting === null ? [] : [starting],
+    probes: data?.probes ?? [],
+    reports: new Map((data?.probes ?? []).map((probe) => [probe.id, moments.probeById(probe.id)])),
+    mentionables: MENTIONABLES,
+    onSay: (_item, text) => onSay(text),
+    onAccept: () => onAccept(),
+    onClose: (_item, decision) => onClose(decision),
+  })
 
   return (
     <MissionFrame
