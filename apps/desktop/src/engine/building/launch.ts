@@ -380,8 +380,7 @@ export const launchMission = (missionId: string, checkId: string, choice: Launch
       spec,
       checked.map((base) => base.repository),
     )
-    const chosen = checked.filter((base) => paths.includes(base.repository))
-    const prepared = chosen.length === 0 ? checked : chosen
+    const prepared = checked.filter((base) => paths.includes(base.repository))
     const bases = new Map<string, UpToDateBase>(
       prepared.map((base) => [
         base.repositoryId,

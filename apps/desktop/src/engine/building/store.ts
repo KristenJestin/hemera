@@ -32,12 +32,31 @@ import { missions, prelaunchChecks } from '../storage/schema.ts'
 
 export type CheckRow = typeof prelaunchChecks.$inferSelect
 
-/** A file's change since the Freeze, as the agent of the check is handed it. */
+/** The most files a check hands its agent; beyond, the rest is listed by name only. */
+export const HANDED_MOST = 200
+
+/** Why a file is handed without its diff. */
+export const SENSITIVE_WITHHELD = 'a sensitive place: its diff is never handed'
+
+/**
+ * A file's change since the Freeze, as the agent of the check is handed it: its diff masked, or
+ * none and why (a sensitive place).
+ */
 export const HandedPatch = Schema.Struct({
   repository: Schema.String,
   path: Schema.String,
   patch: Schema.String,
+  withheld: Schema.NullOr(Schema.String),
 })
+export type HandedPatch = typeof HandedPatch.Type
+
+/** A file that changed beyond what a check hands its agent: listed by name, never read. */
+export const UnhandedFile = Schema.Struct({
+  repository: Schema.String,
+  path: Schema.String,
+  status: Schema.String,
+})
+export type UnhandedFile = typeof UnhandedFile.Type
 
 /** What a check found, each step in words; the agent's step is said from its state. */
 export const CheckResults = Schema.Struct({
@@ -48,6 +67,7 @@ export const CheckResults = Schema.Struct({
   handed: Schema.Array(HandedItem),
   model: CheckModel,
   patches: Schema.Array(HandedPatch),
+  unhanded: Schema.Array(UnhandedFile),
   /** Why the check failed, or why its agent stopped. */
   failure: Schema.NullOr(Schema.String),
 })
@@ -96,6 +116,7 @@ const EMPTY: CheckResults = {
     recommendation: null,
   },
   patches: [],
+  unhanded: [],
   failure: 'This check cannot be read: check again.',
 }
 

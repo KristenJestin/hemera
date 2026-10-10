@@ -86,17 +86,16 @@ const prelaunchBriefOf = (owner: SessionOwner, session: BriefedSession) =>
     const results = resultsOf(check)
     let room = PATCHES_MOST
     const files = results.handed.map((item) => {
-      const patch =
-        results.patches.find((one) => one.repository === item.repository && one.path === item.path)
-          ?.patch ?? ''
-      const shown = cut(patch, Math.min(PATCH_MOST, room))
+      const found = results.patches.find(
+        (one) => one.repository === item.repository && one.path === item.path,
+      )
+      const named = `- ${item.repository}/${item.path} (${item.kind}, ${item.status})`
+      if (found?.withheld != null) {
+        return `${named}: ${found.withheld}; judge it by its name and status.`
+      }
+      const shown = cut(found?.patch ?? '', Math.min(PATCH_MOST, room))
       room -= shown.length
-      return [
-        `- ${item.repository}/${item.path} (${item.kind}, ${item.status})`,
-        '```diff',
-        shown,
-        '```',
-      ].join('\n')
+      return [named, '```diff', shown, '```'].join('\n')
     })
     const aimed: string[] = []
     for (const requirement of spec?.requirements ?? []) {
@@ -116,6 +115,15 @@ const prelaunchBriefOf = (owner: SessionOwner, session: BriefedSession) =>
         text: `${missionKey(mission.prefix, mission.number)} is Ready: its Spec is frozen at version ${String(spec?.version ?? 0)}. These files changed in the targeted repositories since the Freeze. Read each with its diff (spec_read gives the frozen Spec), then call prelaunch_report once, answering every file.`,
       },
       { label: 'Files changed since the Freeze', text: files.join('\n') },
+      {
+        label: `${String(results.unhanded.length)} more file(s) changed, listed by name only`,
+        text:
+          results.unhanded.length === 0
+            ? null
+            : results.unhanded
+                .map((one) => `- ${one.repository}/${one.path} (${one.status})`)
+                .join('\n'),
+      },
       {
         label: 'Living-spec requirements the Spec changes',
         text: aimed.length === 0 ? null : aimed.join('\n'),

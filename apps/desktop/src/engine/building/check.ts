@@ -19,6 +19,8 @@
  * an agent, and only marks the mission.
  */
 
+import { homedir } from 'node:os'
+
 import {
   type ModelSettingValue,
   type OutdatedReason,
@@ -26,6 +28,7 @@ import {
   dirtyAtFreezeSaid,
   handedKindOf,
   missionKey,
+  sensitivePlace,
 } from '@hemera/core/domain'
 import {
   BuildingRefused,
@@ -62,6 +65,10 @@ import { checkEvent } from './events.ts'
 import {
   type CheckRead,
   type CheckResults,
+  HANDED_MOST,
+  type HandedPatch,
+  SENSITIVE_WITHHELD,
+  type UnhandedFile,
   checkRowIn,
   checkView,
   latestCheckOf,
@@ -117,16 +124,19 @@ const writtenBy = (spec: Spec) => {
 
 /**
  * The repositories a launch prepares (open question 20): every one a frozen task targets or a
- * Proof block writes in, and every one the Impact section names as a word, in the Project's order.
+ * Proof block writes in, and every one the Impact section names as a word, in the Project's order;
+ * every one when the Spec names none.
  */
 export const preparedRepositories = (spec: Spec, paths: ReadonlyArray<string>) => {
   const { targets, proofs } = writtenBy(spec)
   const written = [...targets, ...proofs]
   const impact = spec.sections.find((one) => one.name === 'impact')?.body ?? ''
   const words = new Set(impact.split(/[^\w./-]+/).filter((word) => word !== ''))
-  return paths.filter(
+  const chosen = paths.filter(
     (path) => written.some((one) => one.startsWith(`${path}/`)) || words.has(path),
   )
+  // A Spec that names none of them: every repository, rather than a Workspace of none.
+  return chosen.length === 0 ? paths : chosen
 }
 
 /** What the check read of the mission at the start: its row, its Spec, its Freeze, its Project. */
@@ -203,10 +213,19 @@ const filesMoved = (
 ) =>
   Effect.gen(function* () {
     const git = yield* Git
+    const secrets = yield* Secrets
     const { targets, proofs } = writtenBy(spec)
+    // Only what the launch prepares is read by the agent: the rest is not built on.
+    const prepared = new Set(
+      preparedRepositories(
+        spec,
+        bases.map((base) => base.repository),
+      ),
+    )
     const found: Found[] = []
     const handed: HandedItem[] = []
-    const patches: { repository: string; path: string; patch: string }[] = []
+    const patches: HandedPatch[] = []
+    const unhanded: UnhandedFile[] = []
     for (const base of bases) {
       if (base.frozen === null || base.frozen === base.commit) continue
       const folder = `${main}/${base.repository}`
@@ -230,6 +249,11 @@ const filesMoved = (
           })
           continue
         }
+        if (!prepared.has(base.repository)) continue
+        if (handed.length >= HANDED_MOST) {
+          unhanded.push({ repository: base.repository, path: change.path, status: change.status })
+          continue
+        }
         handed.push({
           repository: base.repository,
           path: change.path,
@@ -237,14 +261,24 @@ const filesMoved = (
           status: change.status,
           answer: null,
         })
+        // A sensitive place is handed by its name and status only: its diff is never read.
+        const sensitive =
+          sensitivePlace(
+            change.path,
+            { home: homedir(), platform: process.platform },
+            { reading: true },
+          ) !== null
         patches.push({
           repository: base.repository,
           path: change.path,
-          patch: yield* git.diffBetween(folder, base.frozen, base.commit, change.path),
+          patch: sensitive
+            ? ''
+            : secrets.mask(yield* git.diffBetween(folder, base.frozen, base.commit, change.path)),
+          withheld: sensitive ? SENSITIVE_WITHHELD : null,
         })
       }
     }
-    return { found, handed, patches }
+    return { found, handed, patches, unhanded }
   })
 
 /** The living requirements and the dependencies' requirements that moved since they were read. */
@@ -399,7 +433,7 @@ const readToday = (missionId: string, mechanical: boolean) =>
     const reason: OutdatedReason = mechanical ? 'dependency-merged' : 'target-moved'
     const files =
       problems.length > 0
-        ? { found: [], handed: [], patches: [] }
+        ? { found: [], handed: [], patches: [], unhanded: [] }
         : yield* filesMoved(spec, main, bases, reason)
     const found = [
       ...files.found,
@@ -429,6 +463,7 @@ const readToday = (missionId: string, mechanical: boolean) =>
       found,
       handed: mechanical ? [] : files.handed,
       patches: mechanical ? [] : files.patches,
+      unhanded: mechanical ? [] : files.unhanded,
       model,
     }
   })
@@ -527,6 +562,7 @@ const writeCheck = (missionId: string, today: Today, mechanical: boolean) =>
       handed: today.handed,
       model: today.model,
       patches: today.patches,
+      unhanded: today.unhanded,
       failure: today.problems.length > 0 ? today.problems.join('\n') : null,
     }
     return yield* mutate('keeping the pre-launch check', (transaction) =>
