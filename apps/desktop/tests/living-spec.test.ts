@@ -567,6 +567,47 @@ describe('A run read again for good leaves nothing behind', () => {
   })
 })
 
+describe('Stopping a Project’s reading of its living spec', () => {
+  test('its run says stopped, its session ends, and nothing it proposes afterwards is kept', async () => {
+    const hold = held()
+    const { run } = living(() => ({
+      steps: [domain('Accounts'), domain('Billing'), DONE],
+      between: () => hold.promise,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* bootstrap(project.id)
+          yield* until(Effect.map(livingSessions(project.id), (rows) => rows.length === 1))
+          const [session] = yield* livingSessions(project.id)
+          if (session === undefined) return yield* Effect.die(new Error('no session'))
+          yield* LivingSpec.use((spec) => spec.stop(project.id, 'its Project was removed'))
+          yield* noLivingSession(project.id)
+          hold.release()
+          return {
+            runs: yield* runsOf(project.id),
+            ended: yield* getSession(session.id),
+            finished: yield* eventsOf(project.id, 'livingSpec.bootstrap_finished'),
+            domains: yield* domainsOf(project.id),
+            again: yield* LivingSpec.use((spec) => spec.stop(project.id, 'once more')),
+          }
+        }),
+      ),
+    )
+    expect(seen.runs).toHaveLength(1)
+    expect(seen.runs[0]).toMatchObject({ state: 'stopped', sentence: 'its Project was removed' })
+    expect(seen.ended).toMatchObject({ state: 'ended', stateReason: 'its Project was removed' })
+    expect(seen.finished.map((one) => JSON.parse(one.payload ?? '{}'))).toMatchObject([
+      { state: 'stopped', reason: 'its Project was removed' },
+    ])
+    expect(seen.domains.map((one) => one.name)).not.toContain('Billing')
+    // Nothing was running any more: a second stop changes nothing.
+    expect(seen.again).toBe(false)
+  })
+})
+
 describe('Proposals are proposals', () => {
   test('stored proposed, of origin bootstrap, with their uncertainty; living_spec_read labels them', async () => {
     const { world, run } = living(() => ({

@@ -44,6 +44,7 @@ import { and, asc, eq, inArray, max } from 'drizzle-orm'
 import { Effect, Option, Predicate, Schema } from 'effect'
 
 import type { EventPayload, NewEvent } from '../journal.ts'
+import { expireNeedIn } from '../needs.ts'
 import { getProject } from '../projects.ts'
 import { Secrets } from '../secrets.ts'
 import {
@@ -53,11 +54,13 @@ import {
   refusedWhile,
 } from '../storage/database.ts'
 import {
+  agentSessions,
   livingDomains,
   livingHistory,
   livingRequirements,
   livingRuns,
   missions,
+  sessionNeeds,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 
@@ -1139,6 +1142,42 @@ export const failRun = (runId: string, reason: string) =>
         payload: { run: runId, state: 'failed', reason },
       }
       return { result: true, events: [event] }
+    }),
+  )
+
+/**
+ * Stops a run that still runs, for a reason that is not its own (its Project removed): it reads as
+ * stopped, and what its sessions still ask expires with it. False when it no longer ran.
+ */
+export const stopRun = (runId: string, reason: string) =>
+  mutate('stopping a bootstrap run', (transaction) =>
+    Effect.gen(function* () {
+      const run = yield* runningIn(transaction, runId)
+      if (run === null) return { result: false, events: [] }
+      const expired: NewEvent[] = []
+      const asked = yield* transaction
+        .select({ id: sessionNeeds.needId })
+        .from(sessionNeeds)
+        .innerJoin(agentSessions, eq(agentSessions.id, sessionNeeds.sessionId))
+        .where(eq(agentSessions.lineage, run.lineage))
+        .pipe(Effect.mapError(refusedWhile('reading the needs of a run')))
+      for (const need of asked) {
+        expired.push(...(yield* expireNeedIn(transaction, need.id, reason)))
+      }
+      yield* transaction
+        .update(livingRuns)
+        .set({ state: 'stopped', stateReason: reason, endedAt: now() })
+        .where(eq(livingRuns.id, runId))
+        .pipe(Effect.mapError(refusedWhile('stopping a bootstrap run')))
+      const event: NewEvent = {
+        type: 'livingSpec.bootstrap_finished',
+        entityKind: 'project',
+        entityId: run.projectId,
+        source: 'system',
+        author: 'hemera',
+        payload: { run: runId, state: 'stopped', reason },
+      }
+      return { result: true, events: [...expired, event] }
     }),
   )
 
