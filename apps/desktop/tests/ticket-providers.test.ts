@@ -10,7 +10,7 @@ import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { GithubIssue } from '@hemera/core/domain'
-import { InvalidProviderConfig, type TicketsSettings } from '@hemera/ipc'
+import { InvalidProviderConfig, NoProviderToWrite, type TicketsSettings } from '@hemera/ipc'
 import { Effect, Exit, Fiber, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -147,6 +147,55 @@ describe('The Spec mode', () => {
     expect(before).toBe('local')
     expect(after).toBe('linked')
     expect(events).toContain('tickets.spec_mode_set')
+  })
+
+  test('remote is refused, in words, while the Project has no ticket provider', async () => {
+    const [refused, mode] = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme
+          const failure = yield* Effect.flip(setSpecMode(project.id, 'remote'))
+          return [failure, yield* specModeOf(project.id)] as const
+        }),
+      ),
+    )
+    expect(refused).toBeInstanceOf(NoProviderToWrite)
+    expect(refused.message).toBe(
+      'Remote Specs are written into tickets: add a ticket provider to this Project first.',
+    )
+    expect(mode).toBe('local')
+  })
+
+  test('remote is set once the Project has a provider', async () => {
+    const mode = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme
+          yield* addGithub(project.id, { host: 'github.com', repositories: ['acme/api'] })
+          return yield* setSpecMode(project.id, 'remote')
+        }),
+      ),
+    )
+    expect(mode).toBe('remote')
+  })
+
+  test('a Project in remote that loses its last provider keeps its mode', async () => {
+    const [mode, local] = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* acme
+          const provider = yield* addGithub(project.id, {
+            host: 'github.com',
+            repositories: ['acme/api'],
+          })
+          yield* setSpecMode(project.id, 'remote')
+          yield* removeProvider(provider.id)
+          return [yield* specModeOf(project.id), yield* setSpecMode(project.id, 'local')] as const
+        }),
+      ),
+    )
+    expect(mode).toBe('remote')
+    expect(local).toBe('local')
   })
 })
 
