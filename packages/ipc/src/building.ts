@@ -361,6 +361,25 @@ export const BuildingRpcs = RpcGroup.make(
     success: CheckModel,
     error: failing(...always, UnknownMission, BuildingRefused),
   }),
+  /** The mission's Building: its head, its plan with each task, its decisions; null before. */
+  Rpc.make('building.read', {
+    payload: ofMission,
+    success: Schema.NullOr(BuildingView),
+    error: failing(...always, UnknownMission),
+  }),
+  /** One task of the mission's Building, with its attempts. */
+  Rpc.make('building.task', {
+    payload: { ...ofMission, taskId: Schema.String },
+    success: BuildingTaskView,
+    error: failing(...always, UnknownMission, UnknownBuildingTask),
+  }),
+  /** The mission's Building as `building.read` reads it, then again at each change. */
+  Rpc.make('building.tasksChanged', {
+    payload: ofMission,
+    success: Schema.NullOr(BuildingView),
+    error: failing(...always, UnknownMission),
+    stream: true,
+  }),
   /** The mission's last check and its preparation, then again at each change. */
   Rpc.make('building.changed', {
     payload: ofMission,
