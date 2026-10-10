@@ -19,6 +19,7 @@ import { PROBE_ROLE } from '../planning/probe-role.ts'
 import { COLD_READ_ROLE } from '../planning/cold-read-role.ts'
 import { SETUP_ROLE } from '../setup/role.ts'
 import { TICKET_EVENT_ROLE } from '../tickets/event-role.ts'
+import { PRELAUNCH_ROLE } from '../building/prelaunch-role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -89,6 +90,7 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   PROBE_ROLE,
   COLD_READ_ROLE,
   TICKET_EVENT_ROLE,
+  PRELAUNCH_ROLE,
 ]
 
 /**

@@ -125,6 +125,7 @@ import { discussionProposeDecision, discussionReply } from '../planning/discussi
 import { dependencyProposeTool, reliesOnWriteTool } from '../planning/dependencies.ts'
 import { answerProposeTool } from '../planning/proposals-store.ts'
 import { ticketEventReportTool } from '../tickets/event-report.ts'
+import { prelaunchReportTool } from '../building/report.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import type { GhCli } from '../tickets/gh.ts'
@@ -382,6 +383,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.answer_propose.input)(raw)
     case 'ticket_event_report':
       return decoder(tool, TOOLS.ticket_event_report.input)(raw)
+    case 'prelaunch_report':
+      return decoder(tool, TOOLS.prelaunch_report.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -797,6 +800,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* answerProposeTool(grant, call.args)
             case 'ticket_event_report':
               return yield* ticketEventReportTool(grant, call.args)
+            case 'prelaunch_report':
+              return yield* prelaunchReportTool(grant, call.args)
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
