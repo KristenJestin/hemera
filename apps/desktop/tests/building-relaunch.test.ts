@@ -10,6 +10,7 @@
 import { realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { CHECK_EXPIRED } from '@hemera/core/domain'
 import { Effect, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -17,7 +18,7 @@ import { backToPlanningFromCheck, checkMission } from '../src/engine/building/ch
 import { launchMission, preparationOf } from '../src/engine/building/launch.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { getNeed, retryNeed } from '../src/engine/needs.ts'
-import { getProject } from '../src/engine/projects.ts'
+import { getProject, removeRepository } from '../src/engine/projects.ts'
 import { saveRecipe } from '../src/engine/recipe.ts'
 import { getWorkspace } from '../src/engine/workspaces.ts'
 import {
@@ -206,5 +207,25 @@ describe('A check is launched as is only when it checked everything it read', ()
     )
     expect(seen.view.agent.state).toBe('unanswered')
     expect(refusedWith(seen.plain)?.join(' ')).toMatch(/Launch anyway/)
+  })
+
+  test('a repository removed from the Project since the check makes the check expire', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acmeAt(work)
+          const { mission, view } = yield* checkedReady(project.id, main)
+          const fresh = yield* getProject(project.id)
+          const web = fresh.repositories.find((one) => one.path === 'web')
+          yield* removeRepository({ id: web?.id ?? '', version: fresh.version })
+          return yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
+        }),
+      ),
+    )
+    const reasons = refusedWith(seen)
+    expect(reasons?.[0]).toBe(CHECK_EXPIRED)
+    expect(reasons?.join('\n')).toMatch(/web was removed from the Project since the check/)
   })
 })

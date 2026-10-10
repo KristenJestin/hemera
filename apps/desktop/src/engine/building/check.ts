@@ -705,6 +705,11 @@ export const expiryOf = (missionId: string, read: CheckRead) =>
         )
       }
     }
+    for (const before of read.bases) {
+      if (!bases.some((base) => base.repository === before.repository)) {
+        reasons.push(`${before.repository} was removed from the Project since the check.`)
+      }
+    }
     const settings = fingerprintOf(yield* sectionsNow({ projectId: mission.projectId, spec }))
     if (settings !== read.settings) {
       reasons.push('The validation settings changed since the check.')
