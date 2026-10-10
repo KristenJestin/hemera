@@ -50,12 +50,7 @@ import { PlannerWake } from '../src/engine/planning/wake.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import {
-  type RoleSession,
-  getSession,
-  instructionsKept,
-  sessionsIn,
-} from '../src/engine/sessions/store.ts'
+import { type RoleSession, instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
@@ -148,37 +143,14 @@ const plannerStarted = (missionId: string) =>
     return planner
   })
 
-/**
- * Waits until a session has nothing left to do. A session opens with a first message (a Planner's
- * brief, a Builder's), and one whose first turn has not begun yet counts as settled: wait for that
- * message in its thread, unless the session ended before it.
- */
-const settled = (session: RoleSession) =>
-  Effect.gen(function* () {
-    yield* until(
-      Effect.gen(function* () {
-        const lines = yield* threadOf(session.id)
-        if (lines.some((line) => line.kind === 'sent')) return true
-        const now = yield* getSession(session.id)
-        return !LIVE.some((state) => state === now.state)
-      }),
-    )
-    yield* Sessions.use((sessions) => sessions.settled(session.id))
-  })
+/** Waits until a session has nothing left to do, its first message (the brief) included. */
+const settled = (session: RoleSession) => Sessions.use((sessions) => sessions.settled(session.id))
 
-/**
- * A mission of Acme, its Planner started on its own and its first turn over: the session is idle
- * once a turn ended (`settled` alone may answer before the brief's turn is handed over).
- */
+/** A mission of Acme, its Planner started on its own and its first turn over. */
 const missionPlanned = (projectId: string, sentence = 'Export the invoices as CSV') =>
   Effect.gen(function* () {
     const mission = yield* createMission({ projectId, idea: { sentence, ticket: null } })
     const planner = yield* plannerStarted(mission.id)
-    yield* until(
-      Effect.map(plannersOf(mission.id, ['idle']), (rows) =>
-        rows.some((row) => row.id === planner.id),
-      ),
-    )
     yield* settled(planner)
     return { mission, planner }
   })
@@ -1180,8 +1152,22 @@ describe('Nothing wakes the Planner but a delivery', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { planner } = yield* TestClock.withLive(
-            Effect.flatMap(acme, ({ project }) => missionPlanned(project.id)),
+          // Waited on the real clock: the engine's own waits are on the test clock.
+          const planner = yield* TestClock.withLive(
+            Effect.gen(function* () {
+              const { project } = yield* acme
+              const mission = yield* createMission({
+                projectId: project.id,
+                idea: { sentence: 'Export the invoices as CSV', ticket: null },
+              })
+              const started = yield* plannerStarted(mission.id)
+              yield* until(
+                Effect.map(plannersOf(mission.id, ['idle']), (rows) =>
+                  rows.some((row) => row.id === started.id),
+                ),
+              )
+              return started
+            }),
           )
           const before = yield* threadOf(planner.id)
           for (let hour = 0; hour < 24; hour += 1) {

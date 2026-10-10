@@ -462,7 +462,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             driver.lastSign = yield* Clock.currentTimeMillis
             driver.took = false
             driver.waiting = false
-            driver.turn = yield* runTurn(driver, text, sent).pipe(Effect.forkIn(scope))
+            // Started at once, so the runtime knows of the turn before anything can cancel it.
+            driver.turn = yield* runTurn(driver, text, sent).pipe(
+              Effect.forkIn(scope, { startImmediately: true }),
+            )
           }),
         ).pipe(run)
 
