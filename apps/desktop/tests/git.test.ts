@@ -22,9 +22,11 @@ import {
   type GitService,
   type GitSpawn,
   LIMITS,
+  SYSTEM_GIT,
   gitLayer,
   patchChangesOf,
   spawnGit,
+  spawnGitBytes,
 } from '../src/engine/git.ts'
 import { SideEffectInTransaction, mutate } from '../src/engine/transaction.ts'
 import { corrupted, git, remote, repository } from './repositories.ts'
@@ -210,6 +212,30 @@ describe('A Git read that hangs is cut at its limit and waited for', () => {
 
   test('Git is never left waiting on a prompt for credentials', async () => {
     expect(await Effect.runPromise(spawnGit(STUB)(folder, ['environment'], 'read'))).toBe('0')
+  })
+})
+
+describe('Git can be handed an environment and an input, and its bytes read as they are', () => {
+  test('a binary blob written into another object folder through stdin reads back byte for byte', async () => {
+    const api = repository(join(folder, 'api'))
+    const objects = join(folder, 'elsewhere')
+    mkdirSync(objects)
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0xff, 0xfe, 0x0a, 0x0d, 0x0a])
+    const through = { GIT_OBJECT_DIRECTORY: objects }
+    const run = spawnGitBytes(SYSTEM_GIT)
+
+    const written = await Effect.runPromise(
+      run(api, ['hash-object', '-w', '--stdin'], 'read', { env: through, input: bytes }),
+    )
+    const sha = written.toString('utf8').trim()
+    const read = await Effect.runPromise(
+      run(api, ['cat-file', 'blob', sha], 'read', { env: through }),
+    )
+
+    expect(read.equals(bytes)).toBe(true)
+    // The object went where the environment said, and not into the repository's own folder.
+    expect(existsSync(join(objects, sha.slice(0, 2), sha.slice(2)))).toBe(true)
+    expect(existsSync(join(api, '.git', 'objects', sha.slice(0, 2), sha.slice(2)))).toBe(false)
   })
 })
 
