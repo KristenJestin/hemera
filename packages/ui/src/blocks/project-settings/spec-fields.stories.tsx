@@ -125,13 +125,16 @@ export const RemoteRefused: Story = {
   args: {
     mode: 'local',
     modes: ['local', 'linked', 'remote'],
-    modeRefused: 'The Spec mode could not be saved: no ticket provider of this Project can write.',
+    modeRefused:
+      'The Spec mode could not be saved: Remote Specs are written into tickets: add a ticket provider to this Project first.',
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const select = canvas.getByRole('combobox', { name: 'Where Specs live' })
     await expect(select).toHaveTextContent('Local')
-    await expect(canvas.getByRole('alert')).toHaveTextContent('no ticket provider')
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'add a ticket provider to this Project first',
+    )
     await expect(canvas.getByText(SPEC_MODE_WORDS.local.does)).toBeVisible()
   },
 }

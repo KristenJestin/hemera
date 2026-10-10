@@ -4,7 +4,13 @@
  * after a later one, which is dropped.
  */
 
-import { InvalidKeyPrefix, InvalidSyncInterval, KeyPrefixTaken, StaleVersion } from '@hemera/ipc'
+import {
+  InvalidKeyPrefix,
+  InvalidSyncInterval,
+  KeyPrefixTaken,
+  NoProviderToWrite,
+  StaleVersion,
+} from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -80,6 +86,12 @@ describe('The words of a refused key prefix', () => {
 })
 
 describe('The words of a refused Spec setting', () => {
+  test('Remote asked of a Project with no provider says what to add', () => {
+    expect(settingWords('Spec mode', new NoProviderToWrite({ projectId: 'acme' }))).toBe(
+      'The Spec mode could not be saved: Remote Specs are written into tickets: add a ticket provider to this Project first.',
+    )
+  })
+
   test('name the setting and the engine’s reason', () => {
     expect(settingWords('Spec mode', new Error('no'))).toBe('The Spec mode could not be saved: no')
     expect(settingWords('Spec language', new Error('no'))).toBe(
