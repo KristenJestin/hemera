@@ -218,8 +218,8 @@ describe('A Git read that hangs is cut at its limit and waited for', () => {
     expect(refused).toMatchObject({ limit: 'output' })
   })
 
-  test('Git is never left waiting on a prompt for credentials', async () => {
-    expect(await Effect.runPromise(spawnGit(STUB)(folder, ['environment'], 'read'))).toBe('0')
+  test('Git is never left waiting on a prompt for credentials, its own or its credential manager’s', async () => {
+    expect(await Effect.runPromise(spawnGit(STUB)(folder, ['environment'], 'read'))).toBe('0 never')
   })
 })
 
