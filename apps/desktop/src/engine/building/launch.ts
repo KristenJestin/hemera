@@ -20,6 +20,8 @@
  * listening is read again at the start, so a launch never starts twice and never stays half done.
  */
 
+import { join } from 'node:path'
+
 import {
   CHECK_EXPIRED,
   EnvironmentFields,
@@ -47,29 +49,38 @@ import { Cause, Context, Effect, Layer, Match, Option, Result, Schema, Stream } 
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
+import { Git } from '../git.ts'
 import { AutomationGate } from '../gate.ts'
 import type { DomainEvent } from '../journal.ts'
 import { moveIn } from '../missions.ts'
 import { type NeedHandler, createNeedIn, needService, withdrawNeed } from '../needs.ts'
 import { hemeraNext, missionRow } from '../planning/store.ts'
 import { beginPreparation } from '../preparation.ts'
+import { getProject } from '../projects.ts'
 import { listResources } from '../resources/declarations.ts'
 import { ExclusiveResources } from '../resources/reservations.ts'
 import { Secrets } from '../secrets.ts'
 import { resolvedSetting } from '../sessions/cascade.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
-import { buildingLaunches } from '../storage/schema.ts'
+import { buildingLaunches, specs } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type WorkspaceServices, createWorkspace, getWorkspace } from '../workspaces.ts'
+import {
+  type WorkspaceServices,
+  createWorkspace,
+  getWorkspace,
+  listWorkspaces,
+  removeWorkspace,
+} from '../workspaces.ts'
 import {
   BUILDER,
   checkOfMission,
   expiryOf,
   mechanicalCheck,
   preparedRepositories,
+  readMission,
 } from './check.ts'
 import { checkEvent, launchEvent } from './events.ts'
-import { latestCheckOf, latestCheckRowIn, readOf, resultsOf, viewOf } from './store.ts'
+import { checkRowIn, latestCheckOf, latestCheckRowIn, readOf, resultsOf, viewOf } from './store.ts'
 import { copyIn, sectionsNow, writeSections } from './validation.ts'
 
 /**
@@ -466,7 +477,21 @@ const finalize = (row: LaunchRow, workspace: Workspace) =>
         .pipe(Effect.mapError(refusedWhile('launching the mission')))
       if (fresh === undefined) return { result: null, events: [] }
       const mission = yield* missionRow(transaction, row.missionId)
-      if (mission.stage !== 'ready') {
+      // The launch holds only while its check is the mission's latest, on the Spec it read.
+      const latest = yield* latestCheckRowIn(transaction, row.missionId)
+      const check = yield* checkRowIn(transaction, row.checkId)
+      const [spec] = yield* transaction
+        .select({ version: specs.version })
+        .from(specs)
+        .where(eq(specs.missionId, row.missionId))
+        .pipe(Effect.mapError(refusedWhile('reading the Spec')))
+      const read = check === null ? null : readOf(check)
+      if (
+        mission.stage !== 'ready' ||
+        latest?.id !== row.checkId ||
+        read === null ||
+        spec?.version !== read.specVersion
+      ) {
         yield* transaction
           .update(buildingLaunches)
           .set({ state: 'cancelled' })
@@ -597,7 +622,41 @@ const resumeLaunch = (needId: string) =>
     return true
   })
 
+/**
+ * What a launch that will not reach Building made goes: its Workspace through #6's removal, which
+ * never forces and refuses work not committed, then the mission's branch in each repository, only
+ * while it still points where the launch made it. What holds the user's work stays.
+ */
+const abandonWorkspace = (workspace: Workspace) =>
+  Effect.gen(function* () {
+    yield* removeWorkspace(workspace.id)
+    const { branch } = workspace
+    if (branch === null) return []
+    const project = yield* getProject(workspace.projectId)
+    const git = yield* Git
+    const kept: string[] = []
+    for (const repository of workspace.repositories) {
+      yield* git
+        .branchDeleteAt(join(project.mainCheckout, repository.path), branch, repository.base.commit)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() => {
+              kept.push(`${branch} in ${repository.path}: ${causeSaid(cause)}`)
+            }),
+          ),
+        )
+    }
+    return kept
+  })
+
+/** A cause in a sentence: what failed, or what died. */
+const causeSaid = (cause: Cause.Cause<unknown>): string => {
+  const inner = Cause.squash(cause)
+  return inner instanceof Error ? inner.message : String(inner)
+}
+
 type Needs =
+  | Git
   | WorkspaceServices
   | DomainEvents
   | Secrets
@@ -652,10 +711,25 @@ export const buildingLaunchesLayer = (log: Log) => {
           }
         })
 
+      /** A cancelled launch's Workspace goes, once its preparation no longer runs. */
+      const abandon = (row: LaunchRow) =>
+        Effect.gen(function* () {
+          if (row.workspaceId === null) return
+          const found = yield* Effect.result(getWorkspace(row.workspaceId))
+          if (Result.isFailure(found) || found.success.preparing) return
+          const kept = yield* abandonWorkspace(found.success)
+          for (const one of kept) yield* said(`a branch was kept: ${one}`)
+        }).pipe(
+          Effect.catchCause((cause) =>
+            said(`the Workspace of a cancelled launch was kept: ${String(cause)}`),
+          ),
+        )
+
       /** A preparation that ended, followed through for its launch. */
       const ended = (workspaceId: string) =>
         Effect.gen(function* () {
           const row = yield* launchOfWorkspace(workspaceId)
+          if (row?.state === 'cancelled') return yield* abandon(row)
           if (row?.state !== 'preparing') {
             if (row?.state === 'launched' && row.startedAt === null) yield* startOnce(row)
             return
@@ -664,7 +738,10 @@ export const buildingLaunchesLayer = (log: Log) => {
           if (workspace.preparing) return
           if (workspace.preparation === 'ready') {
             const launched = yield* finalize(row, workspace)
-            if (launched !== null) yield* startOnce(launched)
+            if (launched !== null) return yield* startOnce(launched)
+            // Its check no longer held: the launch was cancelled.
+            const after = yield* launchOfWorkspace(workspaceId)
+            if (after?.state === 'cancelled') yield* abandon(after)
           } else if (workspace.preparation === 'failed') {
             yield* failLaunch(row, workspace)
           }
@@ -684,8 +761,11 @@ export const buildingLaunchesLayer = (log: Log) => {
           )
         })
 
-      /** A mission cancelled: its launch under way is cancelled, its need withdrawn. */
-      const cancelled = (missionId: string) =>
+      /**
+       * A mission cancelled, or back to Planning: its launch under way is cancelled, its need
+       * withdrawn, its Workspace removed once its preparation no longer runs.
+       */
+      const cancelled = (missionId: string, why: string) =>
         Effect.gen(function* () {
           const rows = yield* mutate('cancelling the launch', (transaction) =>
             Effect.map(
@@ -704,7 +784,8 @@ export const buildingLaunchesLayer = (log: Log) => {
             ),
           )
           for (const row of rows) {
-            if (row.needId !== null) yield* withdrawNeed(row.needId, 'the mission was cancelled')
+            if (row.needId !== null) yield* withdrawNeed(row.needId, why)
+            yield* abandon(row)
           }
         })
 
@@ -721,7 +802,16 @@ export const buildingLaunchesLayer = (log: Log) => {
           Effect.gen(function* () {
             if (event.type === 'workspace.preparation_ended') yield* ended(event.entityId)
             if (event.type.startsWith('workspace.step_')) yield* stepped(event.entityId)
-            if (event.type === 'mission.cancelled') yield* cancelled(event.entityId)
+            if (event.type === 'mission.cancelled') {
+              yield* cancelled(event.entityId, 'the mission was cancelled')
+            }
+            if (
+              event.type === 'mission.moved' &&
+              event.payload['from'] === 'ready' &&
+              event.payload['to'] === 'planning'
+            ) {
+              yield* cancelled(event.entityId, 'the mission went back to Planning')
+            }
             // A dependency reached Done: the mechanical part of the check runs at once.
             if (event.type === 'dependency.done') yield* mechanicalCheck(event.entityId)
           }).pipe(
@@ -735,20 +825,45 @@ export const buildingLaunchesLayer = (log: Log) => {
         ),
       )
 
+      /** A Workspace made for the mission by a launch a stop cut before it was linked. */
+      const leftover = (missionId: string) =>
+        Effect.gen(function* () {
+          const { mission, spec } = yield* readMission(missionId)
+          const name = buildingBranchName(spec.key, spec.title)
+          const database = yield* Database
+          for (const workspace of yield* listWorkspaces(mission.projectId)) {
+            if (workspace.name !== name) continue
+            const [linked] = yield* database
+              .select({ id: buildingLaunches.id })
+              .from(buildingLaunches)
+              .where(eq(buildingLaunches.workspaceId, workspace.id))
+              .pipe(Effect.mapError(refusedWhile('reading the launches')))
+            if (linked === undefined && !workspace.preparing) yield* abandonWorkspace(workspace)
+          }
+        }).pipe(
+          Effect.catchCause((cause) => said(`a Workspace a stop left was kept: ${String(cause)}`)),
+        )
+
       // At every start: a launch a stop left is carried on, never started twice.
       const reconcile = Effect.gen(function* () {
         const database = yield* Database
         const rows = yield* database
           .select()
           .from(buildingLaunches)
-          .where(inArray(buildingLaunches.state, ['preparing', 'launched']))
+          .where(inArray(buildingLaunches.state, ['preparing', 'launched', 'cancelled']))
           .pipe(Effect.mapError(refusedWhile('reading the launches')))
         for (const row of rows) {
           if (row.state === 'launched') {
             if (row.startedAt === null) yield* startOnce(row)
             continue
           }
+          if (row.state === 'cancelled') {
+            yield* abandon(row)
+            continue
+          }
           if (row.workspaceId === null) {
+            // A Workspace made just before the stop, never linked, goes with it.
+            yield* leftover(row.missionId)
             // Claimed, nothing made: the launch goes, and the mission can be launched again.
             yield* mutate('undoing a launch a stop left', (transaction) =>
               transaction

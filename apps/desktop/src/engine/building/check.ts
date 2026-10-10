@@ -140,7 +140,7 @@ export const preparedRepositories = (spec: Spec, paths: ReadonlyArray<string>) =
 }
 
 /** What the check read of the mission at the start: its row, its Spec, its Freeze, its Project. */
-const readMission = (missionId: string) =>
+export const readMission = (missionId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     const read = yield* database.transaction((transaction) =>

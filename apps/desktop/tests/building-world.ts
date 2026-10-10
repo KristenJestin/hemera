@@ -25,8 +25,9 @@ import { markDelivered } from '../src/engine/planning/inputs.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, sessionDeliveries } from '../src/engine/storage/schema.ts'
-import { createProject } from '../src/engine/projects.ts'
-import { openSession } from '../src/engine/sessions/store.ts'
+import { createProject, getProject } from '../src/engine/projects.ts'
+import { saveRecipe } from '../src/engine/recipe.ts'
+import { openSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
 import { git, remote, repository } from './repositories.ts'
 import { BUILDER, HELPER, sessionsEngine, until } from './sessions-world.ts'
@@ -154,7 +155,7 @@ export const pushedOnRemote = (work: string, bare: string, change: (clone: strin
 }
 
 /** The grant of a session, its token minted. */
-const grantOf = (sessionId: string) =>
+export const grantOf = (sessionId: string) =>
   Effect.gen(function* () {
     const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(sessionId))
     const grant = yield* ToolAccess.use((access) => access.byToken(token))
@@ -379,3 +380,50 @@ export const refusedWith = (outcome: Result.Result<unknown, unknown>) =>
 
 /** A mission's marks, as their sentences. */
 export const marksOf = (mission: Mission) => mission.marks.map((one) => one.sentence)
+
+/**
+ * After a return to Planning: the fresh Planner declares the Spec complete again, the cold read
+ * numbered `pass` reads it, and the Spec is frozen anew.
+ */
+export const refrozen = (missionId: string, pass = 2) =>
+  Effect.gen(function* () {
+    const planners = Effect.map(
+      sessionsIn(['starting', 'working', 'idle'], { kind: 'mission', missionId }),
+      (rows) => rows.filter((one) => one.role === 'planner'),
+    )
+    yield* until(Effect.map(planners, (rows) => rows.length > 0))
+    const [planner] = yield* planners
+    const grantId = yield* grantOf(planner?.id ?? '')
+    yield* call(grantId, 'declare_complete', { why: 'A Builder can build it.' })
+    yield* readCold(missionId, pass)
+    return yield* freezeMission(missionId, (yield* readSpec(missionId)).version)
+  })
+
+/**
+ * A recipe whose one step, in `api`, waits until the file `held` exists: a launch's preparation
+ * stays under way until the test lets it go.
+ */
+export const heldRecipe = (work: string, projectId: string) =>
+  Effect.gen(function* () {
+    const held = join(work, 'held')
+    const fresh = yield* getProject(projectId)
+    const apiId = fresh.repositories.find((one) => one.path === 'api')?.id ?? null
+    writeFileSync(
+      join(work, 'wait.mjs'),
+      `import { existsSync } from 'node:fs'\nconst wait = () => existsSync(${JSON.stringify(held)}) ? process.exit(0) : setTimeout(wait, 20)\nwait()\n`,
+    )
+    yield* saveRecipe({
+      projectId,
+      version: fresh.version,
+      steps: [
+        {
+          kind: 'run',
+          repositoryId: apiId,
+          path: null,
+          commandId: null,
+          line: `node ${join(work, 'wait.mjs')}`,
+        },
+      ],
+    })
+    return { release: () => writeFileSync(held, '') }
+  })
