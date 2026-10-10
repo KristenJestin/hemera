@@ -43,10 +43,20 @@ export function checkbox(within: ReturnType<typeof $>, words: string) {
   return within.$(`label*=${words}`).$('[role="checkbox"]')
 }
 
-/** Chooses in a select of a dialog, by the select's name and the option's words. */
+/**
+ * Chooses in a select of a dialog, by the select's name and the option's words. The list closes
+ * with a transition, still shown over what lies below it meanwhile: a click on the next control
+ * before it is hidden lands on the closing list and is lost, so the choice ends once it is.
+ */
 export async function choose(within: ReturnType<typeof $>, select: string, words: string) {
   await within.$(`[aria-label="${select}"]`).click()
-  await $(`[role="option"]*=${words}`).click()
+  const option = $(`[role="option"]*=${words}`)
+  await option.waitForDisplayed()
+  await option.click()
+  await $(`[role="listbox"][aria-label="${select}"]`).waitForDisplayed({
+    reverse: true,
+    timeoutMsg: `the list of ${select} never closed`,
+  })
 }
 
 /** The window at the smaller of the two sizes the screens are designed at. */
