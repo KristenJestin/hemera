@@ -177,6 +177,17 @@ export const Moot: Story = {
   },
 }
 
+/** Made moot by the decision of its discussion: the discussion is read again from it. */
+export const MootAfterDiscussion: Story = {
+  args: { question: byId('Q7'), discussed: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Moot: D2/)).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Open the discussion' }))
+    await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q7' })
+  },
+}
+
 const PROPOSED: Question = {
   ...byId('Q6'),
   proposals: [
