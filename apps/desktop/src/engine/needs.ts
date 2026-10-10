@@ -423,9 +423,14 @@ const insertNeed = (
 /**
  * A need an engine service writes inside a transaction of its own, with what the transaction
  * writes beside it: its fields masked first (`Secrets`), its owner checked in the transaction.
- * Answers the body that writes it, for `mutate`.
+ * Answers the body that writes it, for `mutate`. `requestedBy` is the role of the agent that asked.
  */
-export const createNeedIn = (service: NeedService, owner: NeedOwner, fields: Fields) =>
+export const createNeedIn = (
+  service: NeedService,
+  owner: NeedOwner,
+  fields: Fields,
+  requestedBy: string | null = null,
+) =>
   Secrets.useSync((secrets) => {
     const masked = maskedJson(secrets.maskRecord(fields))
     return (transaction: EngineTransaction) =>
@@ -434,7 +439,7 @@ export const createNeedIn = (service: NeedService, owner: NeedOwner, fields: Fie
         owner,
         fields,
         masked,
-        requestedBy: null,
+        requestedBy,
         by: BY_HEMERA,
       })
   })

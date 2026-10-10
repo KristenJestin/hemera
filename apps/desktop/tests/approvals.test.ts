@@ -232,6 +232,42 @@ describe('A call that asks is answered at once, and waits for nobody', () => {
   })
 })
 
+describe('A request says what it asks, who asks, and why, in words (#170)', () => {
+  test('with no reason given, the call itself is said: the tool, its target and where', async () => {
+    const seen = await engine()(
+      inEngine(
+        Effect.gen(function* () {
+          const world = yield* acme
+          yield* callTool(world.builder.grantId, 'fs_write', {
+            path: '../elsewhere.txt',
+            content: 'x',
+          })
+          yield* callTool(world.builder.grantId, 'commands_run', { line: 'gh pr view 1' })
+          yield* callTool(world.builder.grantId, 'fs_edit', {
+            path: 'notes.md',
+            edits: [{ old: 'a', new: 'b' }],
+            why: 'fix the notes',
+          })
+          const rows = yield* requests
+          const needs = yield* Effect.forEach(rows, (row) => getNeed(row.needId))
+          return { rows, needs, sessionId: world.builder.sessionId }
+        }),
+      ),
+    )
+    expect(seen.rows.map((row) => row.agentReason)).toEqual([
+      'Write ~/elsewhere.txt, outside the Workspace',
+      'Run gh pr view 1',
+      'fix the notes',
+    ])
+    expect(seen.needs.map((need) => need.fields)).toMatchObject([
+      { agentReason: 'Write ~/elsewhere.txt, outside the Workspace' },
+      { agentReason: 'Run gh pr view 1', agent: seen.sessionId },
+      { agentReason: 'fix the notes', asked: 'Edit notes.md in the Workspace' },
+    ])
+    expect(seen.needs.map((need) => need.requestedBy)).toEqual(['builder', 'builder', 'builder'])
+  })
+})
+
 describe('The same idempotency key gives the same request', () => {
   test('two calls under one key, from two sessions of the mission, make one request and one need', async () => {
     const seen = await engine()(
