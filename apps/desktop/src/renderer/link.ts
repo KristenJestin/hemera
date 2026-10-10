@@ -23,6 +23,10 @@ import {
   type ChatLine,
   type ChatPage,
   type ChatSummary,
+  type ColdReadFreshness,
+  type ColdReadPass,
+  type Discussion,
+  type DiscussionItem,
   type ExclusiveResource,
   type FreezeReadiness,
   type GithubProviderConfig,
@@ -36,13 +40,23 @@ import {
   type LivingRequirementDetail,
   type LivingSeen,
   type LivingSpecState,
+  type MemoryChanged,
+  type MissionDependencies,
+  type DependencySeen,
+  type Now,
   type OpenQuestion,
+  type PlanningInput,
+  type PlanningVision,
+  type ProbeChip,
+  type ProbeDetail,
   type ResourceDraft,
   type ResourceHolding,
   type SincePage,
   type Spec,
+  type SpecChange,
   type StartCreate,
   type StartResult,
+  type TicketEventInfo,
   type TicketProviderInfo,
   type TicketsSettings,
   type DiagnosticsRetention,
@@ -93,6 +107,7 @@ import {
   type SoundStyle,
   type TesterFinding,
   type UpToDateBase,
+  type Wave,
   type VariableEdit,
   type VariableKey,
   type WindowNotice,
@@ -243,6 +258,86 @@ export interface Link {
   readonly freeze: (id: string, specVersion: number) => Promise<Mission>
   /** A mission's Spec as it stands. */
   readonly spec: (missionId: string) => Promise<Spec>
+  /** The Spec now, then again after each change of it. */
+  readonly onSpec: (
+    missionId: string,
+    listener: (spec: Spec) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Every item changed after a version of the Spec, in order. */
+  readonly changesSince: (missionId: string, version: number) => Promise<ReadonlyArray<SpecChange>>
+  /** The user read the Spec up to this version. */
+  readonly markRead: (missionId: string, version: number) => Promise<void>
+  readonly addVision: (missionId: string, text: string) => Promise<void>
+  /** The visions the user gave, the first first. */
+  readonly visions: (missionId: string) => Promise<ReadonlyArray<PlanningVision>>
+  /** The mission's waves of questions, with their answers, drafts and proposed answers. */
+  readonly waves: (missionId: string) => Promise<ReadonlyArray<Wave>>
+  readonly answer: (
+    missionId: string,
+    questionId: string,
+    answer: { readonly optionId: string } | { readonly text: string },
+  ) => Promise<void>
+  readonly waitOnSomeone: (
+    missionId: string,
+    questionId: string,
+    note: string | null,
+  ) => Promise<void>
+  /** The mission's human inputs and where each stands. */
+  readonly planningInputs: (missionId: string) => Promise<ReadonlyArray<PlanningInput>>
+  /** Accepts an answer proposed from the ticket, as proposed or in the user's text. */
+  readonly acceptProposedAnswer: (proposalId: string, text: string | null) => Promise<void>
+  readonly dismissProposedAnswer: (proposalId: string) => Promise<void>
+  /** The mission's discussions now, then again after each change. */
+  readonly onDiscussions: (
+    missionId: string,
+    listener: (discussions: ReadonlyArray<Discussion>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Opens a discussion on an item with the user's first message. */
+  readonly openDiscussion: (
+    missionId: string,
+    item: DiscussionItem,
+    text: string,
+  ) => Promise<Discussion>
+  readonly sayInDiscussion: (discussionId: string, text: string) => Promise<Discussion>
+  /** Closes it on the proposal the user read, named by when it was proposed. */
+  readonly acceptDiscussion: (discussionId: string, proposedAt: string) => Promise<Discussion>
+  /** Closes it on the user's decision, or without one with null. */
+  readonly closeDiscussion: (discussionId: string, decision: string | null) => Promise<Discussion>
+  /** The mission's Probes now, then again at each change of one of them. */
+  readonly onProbes: (
+    missionId: string,
+    listener: (probes: ReadonlyArray<ProbeChip>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly probe: (probeId: string) => Promise<ProbeDetail>
+  /** The mission's cold read passes now, then again at each change. */
+  readonly onColdReads: (
+    missionId: string,
+    listener: (passes: ReadonlyArray<ColdReadPass>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly coldReadAgain: (missionId: string) => Promise<ColdReadPass>
+  readonly dismissFinding: (missionId: string, findingId: string) => Promise<void>
+  /** What the last pass read against the Spec now. */
+  readonly coldReadFreshness: (missionId: string) => Promise<ColdReadFreshness>
+  readonly dependencies: (missionId: string) => Promise<MissionDependencies>
+  readonly decideDependency: (id: string, accept: boolean) => Promise<DependencySeen>
+  /** The changes of the mission's ticket, in the order found. */
+  readonly ticketEvents: (missionId: string) => Promise<ReadonlyArray<TicketEventInfo>>
+  /** The user saw a change of the ticket. */
+  readonly acknowledgeTicketEvent: (eventId: string) => Promise<TicketEventInfo>
+  /** Where a mission stands now. */
+  readonly memoryNow: (missionId: string) => Promise<Now>
+  /** Each change of a mission's Memory, with where it stands after it. */
+  readonly onMemory: (
+    missionId: string,
+    listener: (change: MemoryChanged) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** A mission's sessions, every state. */
+  readonly missionSessions: (missionId: string) => Promise<ReadonlyArray<SessionSummary>>
   /** The questions waiting on the user across the Profile. */
   readonly openQuestions: () => Promise<ReadonlyArray<OpenQuestion>>
   /** The open questions, then each change of them. */
@@ -590,6 +685,62 @@ export function linkOver(port: Port): Link {
       follow((ready) => ready['missions.freezeReadinessChanged']({ id }), listener, anError, onEnd),
     freeze: (id, specVersion) => call((ready) => ready['missions.freeze']({ id, specVersion })),
     spec: (missionId) => call((ready) => ready['planning.spec']({ missionId })),
+    onSpec: (missionId, listener, onEnd) =>
+      follow((ready) => ready['planning.changed']({ missionId }), listener, anError, onEnd),
+    changesSince: (missionId, version) =>
+      call((ready) => ready['planning.changesSince']({ missionId, version })),
+    markRead: (missionId, version) =>
+      call((ready) => ready['planning.markRead']({ missionId, version })),
+    addVision: (missionId, text) =>
+      call((ready) => ready['planning.addVision']({ missionId, text })),
+    visions: (missionId) => call((ready) => ready['planning.visions']({ missionId })),
+    waves: (missionId) => call((ready) => ready['planning.waves']({ missionId })),
+    answer: (missionId, questionId, answer) =>
+      call((ready) => ready['planning.answer']({ missionId, questionId, ...answer })),
+    waitOnSomeone: (missionId, questionId, note) =>
+      call((ready) => ready['planning.waitOnSomeone']({ missionId, questionId, note })),
+    planningInputs: (missionId) => call((ready) => ready['planning.inputs']({ missionId })),
+    acceptProposedAnswer: (proposalId, text) =>
+      call((ready) =>
+        ready['planning.acceptProposedAnswer'](
+          text === null ? { proposalId } : { proposalId, text },
+        ),
+      ),
+    dismissProposedAnswer: (proposalId) =>
+      call((ready) => ready['planning.dismissProposedAnswer']({ proposalId })),
+    onDiscussions: (missionId, listener, onEnd) =>
+      follow((ready) => ready['discussions.changed']({ missionId }), listener, anError, onEnd),
+    openDiscussion: (missionId, item, text) =>
+      call((ready) => ready['discussions.open']({ missionId, item, text })),
+    sayInDiscussion: (discussionId, text) =>
+      call((ready) => ready['discussions.say']({ discussionId, text })),
+    acceptDiscussion: (discussionId, proposedAt) =>
+      call((ready) => ready['discussions.accept']({ discussionId, proposedAt })),
+    closeDiscussion: (discussionId, decision) =>
+      call((ready) =>
+        ready['discussions.close']({
+          discussionId,
+          closing: decision === null ? { noDecision: true } : { decision },
+        }),
+      ),
+    onProbes: (missionId, listener, onEnd) =>
+      follow((ready) => ready['probes.changed']({ missionId }), listener, anError, onEnd),
+    probe: (probeId) => call((ready) => ready['probes.read']({ probeId })),
+    onColdReads: (missionId, listener, onEnd) =>
+      follow((ready) => ready['coldRead.changed']({ missionId }), listener, anError, onEnd),
+    coldReadAgain: (missionId) => call((ready) => ready['coldRead.again']({ missionId })),
+    dismissFinding: (missionId, findingId) =>
+      call((ready) => ready['coldRead.dismiss']({ missionId, findingId })),
+    coldReadFreshness: (missionId) => call((ready) => ready['coldRead.freshness']({ missionId })),
+    dependencies: (missionId) => call((ready) => ready['dependencies.list']({ missionId })),
+    decideDependency: (id, accept) => call((ready) => ready['dependencies.decide']({ id, accept })),
+    ticketEvents: (missionId) => call((ready) => ready['tickets.events']({ missionId })),
+    acknowledgeTicketEvent: (eventId) => call((ready) => ready['tickets.acknowledge']({ eventId })),
+    memoryNow: (missionId) => call((ready) => ready['memory.now']({ missionId })),
+    onMemory: (missionId, listener, onEnd) =>
+      follow((ready) => ready['memory.changes']({ missionId }), listener, anError, onEnd),
+    missionSessions: (missionId) =>
+      call((ready) => ready['sessions.list']({ ownerKind: 'mission', ownerId: missionId })),
     openQuestions: () => call((ready) => ready['planning.openQuestions']({})),
     onOpenQuestions: (listener, onEnd) =>
       follow((ready) => ready['planning.questionsChanged']({}), listener, anError, onEnd),
