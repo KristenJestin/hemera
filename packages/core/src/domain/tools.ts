@@ -34,6 +34,7 @@ import { RetireHow } from './questions.ts'
 import { ModelRecommend, ProofWrite, TasksWrite } from './proofs.ts'
 import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
+import { PrelaunchReport } from './building.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
@@ -44,6 +45,7 @@ export const ROLES = [
   'probe',
   'cold-read',
   'ticket-event',
+  'prelaunch',
   'builder',
   'helper',
   'documenter',
@@ -62,6 +64,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   probe: 'the Probe',
   'cold-read': 'the cold read',
   'ticket-event': 'the ticket-event Planner',
+  prelaunch: 'the pre-launch Planner',
   builder: 'the Builder',
   helper: 'a helper',
   documenter: 'the documenter',
@@ -93,6 +96,7 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   probe: { kind: 'own-worktree', readOnly: false },
   'cold-read': { kind: 'main-checkout', readOnly: true },
   'ticket-event': { kind: 'main-checkout', readOnly: true },
+  prelaunch: { kind: 'main-checkout', readOnly: true },
   builder: { kind: 'workspace', readOnly: false },
   helper: { kind: 'workspace', readOnly: false },
   documenter: { kind: 'workspace', readOnly: false },
@@ -792,6 +796,7 @@ const READERS: ReadonlyArray<Role> = [
   'probe',
   'cold-read',
   'ticket-event',
+  'prelaunch',
   'builder',
   'helper',
   'documenter',
@@ -961,7 +966,7 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner', 'cold-read', 'ticket-event'],
+    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1268,6 +1273,18 @@ export const TOOLS = {
       doing: 'Reporting a ticket change',
     },
   }),
+  prelaunch_report: tool({
+    roles: ['prelaunch'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: PrelaunchReport,
+    label: {
+      label: 'Report the pre-launch check',
+      mark: 'prelaunch-report',
+      doing: 'Reporting what moved since the Freeze',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1340,6 +1357,7 @@ export const TOOL_NAMES = [
   'relies_on_write',
   'answer_propose',
   'ticket_event_report',
+  'prelaunch_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
