@@ -962,7 +962,8 @@ export const taskAttempts = sqliteTable('task_attempts', {
 
 /**
  * What a session's agent reported it used, or an estimate when it reported nothing: tokens in and
- * out, the cost when given, and whether it was measured.
+ * out, those read from and written to the prompt cache (which `input_tokens` leaves out), the cost
+ * when given, and whether it was measured.
  */
 export const sessionUsage = sqliteTable('session_usage', {
   sessionId: text('session_id').primaryKey(),
@@ -970,6 +971,8 @@ export const sessionUsage = sqliteTable('session_usage', {
   ownerId: text('owner_id').notNull(),
   inputTokens: integer('input_tokens').notNull(),
   outputTokens: integer('output_tokens').notNull(),
+  cachedReadTokens: integer('cached_read_tokens').notNull().default(0),
+  cachedWriteTokens: integer('cached_write_tokens').notNull().default(0),
   costAmount: real('cost_amount'),
   costCurrency: text('cost_currency'),
   measured: integer('measured', { mode: 'boolean' }).notNull(),

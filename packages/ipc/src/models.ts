@@ -50,6 +50,11 @@ export type ProjectLimits = typeof ProjectLimits.Type
 export const MissionUsage = Schema.Struct({
   inputTokens: Schema.Number,
   outputTokens: Schema.Number,
+  /** What was read from and written to the prompt cache, which `inputTokens` leaves out. */
+  cachedReadTokens: Schema.Number,
+  cachedWriteTokens: Schema.Number,
+  /** The share of the input read from the cache, 0 to 1; null when there was no input. */
+  cachedShare: Schema.NullOr(Schema.Number),
   cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String })),
   /** False: an estimate, shown marked as such. */
   measured: Schema.Boolean,
