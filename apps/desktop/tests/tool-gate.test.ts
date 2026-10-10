@@ -191,8 +191,8 @@ describe('With the default order and no judge, what the rules do not allow asks'
     expect(answers[0].text).toBe('refused: approvals are not available yet')
     expect(answers[1].text).toBe('refused: approvals are not available yet')
     expect(questions.asked.map((one) => one.reason)).toEqual([
-      'no judge could rate it: no judge is set up',
-      'no judge could rate it: no judge is set up',
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
     ])
     expect(existsSync(join(work, 'acme', 'notes.md'))).toBe(false)
     // A read inside the place is allowed by the rules.

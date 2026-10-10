@@ -127,7 +127,7 @@ describe('The order of decision: each step, and only steps 1 and 2 refuse', () =
     expect(answer[3].text).toBe('refused: approvals are not available yet')
     expect(questions).toEqual([
       `outside the Workspace: ~/elsewhere.txt`,
-      'no judge could rate it: no judge is set up',
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
     ])
   })
 
@@ -464,7 +464,9 @@ describe("The refusals of a mission's agents, on the effective action", () => {
   test('a read of a forge CLI is not refused (it goes on, and asks without a judge)', async () => {
     const { answer, questions } = await withBuilder(({ builder }) => run(builder, 'gh pr view 1'))
     expect(answer.text).toBe('refused: approvals are not available yet')
-    expect(questions).toEqual(['no judge could rate it: no judge is set up'])
+    expect(questions).toEqual([
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
+    ])
   })
 
   test("the Chat's commands are not refused by the mission rules: they go through the order", async () => {

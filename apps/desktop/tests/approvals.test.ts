@@ -266,6 +266,23 @@ describe('A request says what it asks, who asks, and why, in words (#170)', () =
     ])
     expect(seen.needs.map((need) => need.requestedBy)).toEqual(['builder', 'builder', 'builder'])
   })
+
+  test('without a judge, Hemera says which rule is missing, never its own words', async () => {
+    const seen = await engine()(
+      inEngine(
+        Effect.gen(function* () {
+          const world = yield* acme
+          yield* callTool(world.builder.grantId, 'fs_write', { path: 'notes.md', content: 'x' })
+          yield* callTool(world.builder.grantId, 'commands_run', { line: 'gh pr view 1' })
+          return yield* requests
+        }),
+      ),
+    )
+    expect(seen.map((row) => row.hemeraReason)).toEqual([
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
+    ])
+  })
 })
 
 describe('The same idempotency key gives the same request', () => {

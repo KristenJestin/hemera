@@ -50,7 +50,7 @@ export class Judge extends Context.Service<
 
 /** No judge: whatever reaches step 5 asks. */
 export const noJudge = Layer.succeed(Judge, {
-  judge: () => Effect.succeed({ verdict: 'unavailable', reason: 'no judge is set up' }),
+  judge: () => Effect.succeed({ verdict: 'unavailable', reason: 'no judge is set up to rate it' }),
 })
 
 /**

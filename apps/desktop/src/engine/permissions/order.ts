@@ -110,6 +110,16 @@ export const JUDGE_LIMIT = Duration.seconds(10)
 const READS = new Set(['fs_read', 'fs_list', 'search'])
 /** The local tools without a path: they read Hemera's own state for the session. */
 const SESSION_READS = new Set(['commands_list', 'commands_output'])
+/** What a call is, as the reason of a question names it. */
+const KINDS: Partial<Record<JudgedCall['tool'], string>> = {
+  fs_read: 'read',
+  fs_list: 'read',
+  search: 'read',
+  fs_write: 'write',
+  fs_edit: 'write',
+  commands_run: 'command',
+}
+
 /** The tools that write a file, allowed by the rules only in a place of the session's own. */
 const WRITES = new Set(['fs_write', 'fs_edit'])
 
@@ -356,7 +366,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               onSome: (answer): Decision =>
                 answer.verdict === 'unavailable'
                   ? {
-                      ...decided('ask', [`no judge could rate it: ${answer.reason}`]),
+                      ...decided('ask', [
+                        `No rule of this Project allows this ${KINDS[call.tool] ?? 'call'} for ${ROLE_NAMES[call.session.role]}, and ${answer.reason}.`,
+                      ]),
                       failure: answer.failure ?? null,
                       roundTripMs: answer.roundTripMs ?? null,
                       settingsSection: answer.settingsSection ?? null,

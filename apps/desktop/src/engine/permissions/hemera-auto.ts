@@ -376,7 +376,7 @@ const FAILURES: Readonly<Record<Exclude<JevResult, Evaluated>['failure'], string
 }
 
 const NOT_READY = {
-  'no-key': 'no judge is set up',
+  'no-key': 'no judge is set up to rate it',
   undecrypted: 'the saved Jev key could not be read on this system',
   'no-consent': 'Hemera Auto waits for consent to send calls to Jev',
   refused: 'Jev refused the saved key',
