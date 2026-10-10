@@ -59,16 +59,24 @@ export const Filled: Story = {
   },
 }
 
+/**
+ * A refusal grows in under its field: it is read once it has finished, not once it has begun.
+ */
+const refusalDrawn = (canvas: ReturnType<typeof within>, words: string) =>
+  waitFor(() => {
+    const refusal = canvas.getByText(words)
+    expect(refusal).toBeVisible()
+    expect(getComputedStyle(refusal).opacity).toBe('1')
+    expect(refusal.getAnimations()).toHaveLength(0)
+  })
+
 /** A value that is not a whole number is refused under its field, in words. */
 export const Refused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const rounds = canvas.getByRole('textbox', { name: 'Automatic rounds' })
     await userEvent.type(rounds, 'many')
-    // The refusal grows in under its field.
-    await waitFor(() =>
-      expect(canvas.getByText('Write a whole number from 1 to 999.')).toBeVisible(),
-    )
+    await refusalDrawn(canvas, 'Write a whole number from 1 to 999.')
   },
 }
 
@@ -77,8 +85,7 @@ export const CapRefused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.type(canvas.getByRole('textbox', { name: 'Sub-agents at once' }), '7')
-    // The refusal grows in under its field.
-    await waitFor(() => expect(canvas.getByText('Write a whole number from 1 to 6.')).toBeVisible())
+    await refusalDrawn(canvas, 'Write a whole number from 1 to 6.')
   },
 }
 
