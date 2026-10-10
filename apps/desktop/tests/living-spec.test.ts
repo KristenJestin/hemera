@@ -38,8 +38,8 @@ import { readSpec } from '../src/engine/planning/store.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { getSession, sessionsIn } from '../src/engine/sessions/store.ts'
-import { instructionsKept, threadOf } from '../src/engine/sessions/thread.ts'
+import { getSession, instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
+import { threadOf } from '../src/engine/sessions/thread.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   domainEvents,

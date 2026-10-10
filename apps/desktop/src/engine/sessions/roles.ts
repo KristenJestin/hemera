@@ -104,15 +104,20 @@ const readRole = (id: string): Role | undefined => ROLES.find((role) => role ===
 
 /**
  * CT-06: every registered role of a mission that does not read the Memory yet has a Memory tool in
- * the role table, said in words. Empty when the contract holds. A Project's role has no mission
- * Memory of its own: what it reads of missions, it reads read-only (the Chat, #43).
+ * the role table, or is not in that table at all so that nothing can be checked, said in words.
+ * Empty when the contract holds. A Project's role has no mission Memory of its own: what it reads
+ * of missions, it reads read-only (the Chat, #43).
  */
 export const memoryContractBroken = (entries: ReadonlyArray<RoleEntry>): ReadonlyArray<string> =>
   entries.flatMap((entry) => {
     if (entry.readsMemory || entry.ownerKind === 'project') return []
     const role = readRole(entry.id)
-    const held =
-      role === undefined ? [] : toolsOf(role).filter((tool) => MEMORY_TOOLS.includes(tool))
+    if (role === undefined) {
+      return [
+        `${entry.id} does not read the Memory and is not a role of the tool table: its tools cannot be checked`,
+      ]
+    }
+    const held = toolsOf(role).filter((tool) => MEMORY_TOOLS.includes(tool))
     return held.length === 0
       ? []
       : [`${entry.id} does not read the Memory but has ${held.join(', ')}`]

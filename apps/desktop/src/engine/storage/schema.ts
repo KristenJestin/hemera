@@ -549,6 +549,11 @@ export const agentSessions = sqliteTable(
     endedAt: text('ended_at'),
     /** The level of the cascade its agent and model came from: app, Project or mission (#41). */
     modelLevel: text('model_level'),
+    /**
+     * The instructions its agent was first started with, as sent: every later start of its agent
+     * and every compaction sends them again, whatever became of its thread.
+     */
+    instructions: text('instructions'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

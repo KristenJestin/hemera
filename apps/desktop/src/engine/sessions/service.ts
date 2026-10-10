@@ -9,10 +9,12 @@
  * - **Channels.** Between turns (the default); urgent, as a note in the result of its next Hemera
  *   tool call, falling back to cancel-then-message when no call takes it within `NOTE_PICKUP`, or
  *   at once for an agent that does not obey notes; redirect, by cancelling the turn and sending.
- * - **Health (CT-12, CT-15).** A session in a turn with no update, no tool call, no command of its
- *   own running and no provider wait for 5 minutes is stuck: its parent is told, then it is
- *   replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
+ * - **Health (CT-12, CT-15).** A session in a turn with no update, no tool call and no command of
+ *   its own running for 5 minutes, and not waiting on its provider, is stuck: its parent is told,
+ *   then it is replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
  *   the brief again; past 80 % of its window, an agent with no such signal is replaced.
+ * - **Slots.** A child that counts in the cap, idle as long as a turn may be silent while a phase
+ *   of its Project waits for a slot, is ended: its slot goes to the phase, its parent is told.
  * - **Replacement.** The old session is stopped and kept, a fresh one of the same role, lineage
  *   and owner starts with the resume block and what was queued; one Journal line says why. The
  *   `ReplacementGuard` is asked first.
@@ -34,7 +36,7 @@ import {
   hemeraNote,
   saturates,
 } from '@hemera/core/domain'
-import { and, eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import {
   Cause,
   Clock,
@@ -62,10 +64,15 @@ import { Memory } from '../memory/index.ts'
 import type { MissionActivity } from '../missions.ts'
 import type { Need } from '@hemera/ipc'
 import type { Secrets } from '../secrets.ts'
-import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import { commandRuns, missions, runnerLeases } from '../storage/schema.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
-import type { ToolAccess } from '../tools/access.ts'
+import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
 import { type BriefSources, type Predecessor, briefOf } from './brief.ts'
 import {
@@ -80,7 +87,7 @@ import {
 } from './deliveries.ts'
 import { spendBudget } from '../budget.ts'
 import { Cap, type RequestedBy } from './cap.ts'
-import { assignWork } from './leases.ts'
+import { assignWorkIn } from './leases.ts'
 import {
   CHANGE_THE_MODEL,
   agentUnavailable,
@@ -102,13 +109,14 @@ import {
   endSession,
   getSession,
   insertSession,
+  instructionsKept,
   openSession,
   sessionEvent,
   sessionsIn,
   sessionsOfLineage,
   setState,
 } from './store.ts'
-import { addToThread, instructionsKept } from './thread.ts'
+import { addToThread } from './thread.ts'
 import { addUsage, estimatedTokens, setCost } from './usage.ts'
 
 /** A session refused before it opens: a role no ticket registered, or not its owner's kind. */
@@ -218,6 +226,8 @@ interface Driver {
   said: string[]
   /** Whether its agent took the turn running: it spoke, thought, called or waited on its provider. */
   took: boolean
+  /** Whether its provider is waited on (a retry, a rate limit): its next report ends the wait. */
+  waiting: boolean
   /** The urgent deliveries pinned as notes, each with the fiber that falls back at its pickup. */
   readonly pinned: Map<string, Fiber.Fiber<void>>
   /** Set once it is replaced, ended or failed: nothing is driven on it any more. */
@@ -227,6 +237,9 @@ interface Driver {
 }
 
 const LIVE_OR_STUCK = ['starting', 'working', 'idle', 'stuck'] as const
+
+/** Why an idle child was ended. */
+const IDLE_CHILD = 'idle while a phase waited for its slot'
 
 /** What an agent reports only once it took a turn's message. */
 const TOOK_THE_TURN = ['MessageChunk', 'ThoughtChunk', 'ToolCall', 'Plan', 'ProviderWait'] as const
@@ -434,6 +447,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             yield* addToThread(driver.session.id, 'sent', text)
             driver.lastSign = yield* Clock.currentTimeMillis
             driver.took = false
+            driver.waiting = false
             driver.turn = yield* runTurn(driver, text, sent).pipe(Effect.forkIn(scope))
           }),
         ).pipe(run)
@@ -547,6 +561,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
                 lastSign,
                 said: [],
                 took: false,
+                waiting: false,
                 pinned: new Map(),
                 gone: false,
                 limit: null,
@@ -720,41 +735,57 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           )
         }).pipe(run)
 
-      /** The leases a session held, now its successor's. */
-      const passLeases = (from: RoleSession, to: RoleSession) =>
+      /**
+       * The leases a session held, made its successor's in the transaction that opens it (CT-11):
+       * the events of their reassignments.
+       */
+      const passLeasesIn = (transaction: EngineTransaction, from: RoleSession, to: RoleSession) =>
         Effect.gen(function* () {
-          const database = yield* Database
-          const held = yield* database
+          const held = yield* transaction
             .select({ workItem: runnerLeases.workItem })
             .from(runnerLeases)
             .where(eq(runnerLeases.sessionId, from.id))
             .pipe(Effect.mapError(refusedWhile('reading the leases')))
-          yield* Effect.forEach(held, (lease) => assignWork(lease.workItem, to), { discard: true })
+          const passed = yield* Effect.forEach(held, (lease) =>
+            assignWorkIn(transaction, lease.workItem, to),
+          )
+          return passed.flatMap((one) => one.events)
         })
+
+      /** A session whose leases passed to its successor: its calls are refused from now on. */
+      const revokeIfLeased = (session: RoleSession, leased: boolean) =>
+        leased ? ToolAccess.use((access) => access.revoke(session.id)) : Effect.void
 
       /**
        * Stops a session and opens its successor in one transaction: the old one kept, replaced,
-       * the new one of the same role, lineage and owner at the next epoch, and the Journal's line.
+       * the new one of the same role, lineage and owner at the next epoch, its leases passed, and
+       * the Journal's line.
        */
       const succeed = (session: RoleSession, reason: string) =>
-        mutate('replacing a session', (transaction) =>
-          Effect.gen(function* () {
-            const stopped = yield* endSession(transaction, session, 'replaced', reason)
-            const successor = yield* insertSession(transaction, successorOf(session))
-            const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
-            return {
-              result: successor,
-              events: [
-                stopped,
-                sessionEvent('session.replaced', session, {
-                  replacement: successor.id,
-                  reason,
-                  roleName,
-                }),
-              ],
-            }
-          }),
-        )
+        Effect.gen(function* () {
+          const [successor, leased] = yield* mutate('replacing a session', (transaction) =>
+            Effect.gen(function* () {
+              const stopped = yield* endSession(transaction, session, 'replaced', reason)
+              const next = yield* insertSession(transaction, successorOf(session))
+              const passed = yield* passLeasesIn(transaction, session, next)
+              const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
+              return {
+                result: [next, passed.length > 0] as const,
+                events: [
+                  stopped,
+                  ...passed,
+                  sessionEvent('session.replaced', session, {
+                    replacement: next.id,
+                    reason,
+                    roleName,
+                  }),
+                ],
+              }
+            }),
+          )
+          yield* revokeIfLeased(session, leased)
+          return successor
+        })
 
       const replace = (sessionId: string, reason: string) =>
         Semaphore.withPermits(
@@ -788,7 +819,6 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (driver !== undefined) yield* letGo(driver)
             else yield* runtime.release(sessionId)
             const successor = yield* succeed(session, reason)
-            yield* passLeases(session, successor)
             yield* addToThread(session.id, 'state', `replaced: ${reason}`)
             yield* said(`replaced ${session.id} by ${successor.id}: ${reason}`)
             const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
@@ -812,6 +842,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           const driver = liveDriver(sessionId)
           if (driver === undefined) return
           driver.lastSign = yield* Clock.currentTimeMillis
+          // However long the provider makes it wait, the session is not stuck until it speaks again.
+          driver.waiting = !event.replay && Predicate.isTagged(event, 'ProviderWait')
           if (!event.replay && TOOK_THE_TURN.some((tag) => Predicate.isTagged(event, tag))) {
             driver.took = true
           }
@@ -864,31 +896,67 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           yield* post.ring
         })
 
-      /** Whether a command the session started still runs: its own time limit bounds it. */
-      const commandRunning = (sessionId: string) =>
+      /**
+       * When the commands the session started last showed it at work: now while one still runs
+       * (its own time limit bounds it), the end of the last one otherwise, or never.
+       */
+      const commandSign = (sessionId: string, now: number) =>
         Effect.gen(function* () {
           const database = yield* Database
           const rows = yield* database
-            .select({ id: commandRuns.id })
+            .select({ state: commandRuns.state, endedAt: commandRuns.endedAt })
             .from(commandRuns)
-            .where(
-              and(
-                eq(commandRuns.sessionId, sessionId),
-                inArray(commandRuns.state, [...LIVE_RUN_STATES]),
-              ),
-            )
-            .limit(1)
+            .where(eq(commandRuns.sessionId, sessionId))
             .pipe(Effect.mapError(refusedWhile('reading the runs')))
-          return rows.length > 0
+          if (rows.some((row) => LIVE_RUN_STATES.some((state) => state === row.state))) return now
+          return Math.max(
+            0,
+            ...rows.map((row) => (row.endedAt === null ? 0 : Date.parse(row.endedAt))),
+          )
         })
 
-      /** CT-12: a session silent too long in a turn is stuck, its parent told, then replaced. */
+      /** Whether an idle child holds a slot a phase of its Project waits for. */
+      const holdsBack = (driver: Driver, idleFor: number) =>
+        Effect.gen(function* () {
+          if (!counts(driver.entry) || driver.session.parent === null) return false
+          if (idleFor < Duration.toMillis(timings.stuckAfter)) return false
+          return yield* cap.waitsIn(yield* projectOf(driver.session.owner))
+        })
+
+      /** Ends an idle child, under the lock, unless a turn started: its slot goes to the phase. */
+      const endIdle = (driver: Driver) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            if (driver.gone || driver.turn !== null) return
+            if ((yield* queuedFor(driver.session)).length > 0) return
+            yield* endLive([driver.session], IDLE_CHILD)
+            yield* tellParent(
+              driver.session,
+              `Your ${driver.entry.displayName} session ended: ${IDLE_CHILD}.`,
+            )
+          }),
+        )
+
+      /**
+       * CT-12: a session silent too long in a turn is stuck, its parent told, then replaced. And
+       * an idle child holding back a phase gives its slot.
+       */
       const sweep = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis
         const limit = Duration.toMillis(timings.stuckAfter)
         for (const driver of [...drivers.values()]) {
-          if (driver.gone || driver.turn === null || now - driver.lastSign < limit) continue
-          if (yield* commandRunning(driver.session.id)) continue
+          if (driver.gone) continue
+          if (driver.turn === null) {
+            if (yield* holdsBack(driver, now - driver.lastSign)) yield* endIdle(driver)
+            continue
+          }
+          if (driver.waiting) continue
+          if (now - driver.lastSign < limit) continue
+          // A silent command that just ended is as recent a sign as the agent's own.
+          if (now - (yield* commandSign(driver.session.id, now)) < limit) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
           // Told to whoever follows the session's role (a Probe's chip, #89).
@@ -980,7 +1048,6 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             continue
           }
           const successor = yield* succeed(session, RESTARTED)
-          yield* passLeases(session, successor)
           rebuilt.push(successor)
           starts.push(() =>
             start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
@@ -1012,13 +1079,20 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             const live = yield* sessionsIn([...LIVE_OR_STUCK], session.owner)
             if (live.some((one) => one.lineage === session.lineage)) return null
             if (!(yield* active(session.owner))) return null
-            const successor = yield* mutate('starting a lineage again', (transaction) =>
-              Effect.map(insertSession(transaction, successorOf(session)), (next) => ({
-                result: next,
-                events: [sessionEvent('session.resumed', next, { predecessor: session.id })],
-              })),
+            const [successor, leased] = yield* mutate('starting a lineage again', (transaction) =>
+              Effect.gen(function* () {
+                const next = yield* insertSession(transaction, successorOf(session))
+                const passed = yield* passLeasesIn(transaction, session, next)
+                return {
+                  result: [next, passed.length > 0] as const,
+                  events: [
+                    ...passed,
+                    sessionEvent('session.resumed', next, { predecessor: session.id }),
+                  ],
+                }
+              }),
             )
-            yield* passLeases(session, successor)
+            yield* revokeIfLeased(session, leased)
             yield* said(`started ${session.lineage} again with ${successor.id}`)
             yield* start(successor, {
               lineage: session.lineage,
@@ -1089,30 +1163,33 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             })
           }
           const id = crypto.randomUUID()
-          if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
-          const setting =
-            asked.provider === undefined
-              ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
-              : null
-          const session = yield* openSession({
-            id,
-            lineage: at?.lineage,
-            epoch: at?.epoch,
-            provider: asked.provider ?? setting?.agent ?? 'claude',
-            owner: asked.owner,
-            role: asked.role,
-            folder: asked.folder,
-            parent:
-              asked.parent === undefined
-                ? null
-                : { lineage: asked.parent.lineage, depth: asked.parent.depth },
-            chosen: asked.chosen ?? {
-              model: setting?.model ?? null,
-              effort: setting?.effort ?? null,
-              mode: null,
-            },
-            modelLevel: setting?.level ?? null,
-          })
+          // Until its session is written, whatever stops an agent's launch gives back its slot.
+          const session = yield* Effect.gen(function* () {
+            if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
+            const setting =
+              asked.provider === undefined
+                ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
+                : null
+            return yield* openSession({
+              id,
+              lineage: at?.lineage,
+              epoch: at?.epoch,
+              provider: asked.provider ?? setting?.agent ?? 'claude',
+              owner: asked.owner,
+              role: asked.role,
+              folder: asked.folder,
+              parent:
+                asked.parent === undefined
+                  ? null
+                  : { lineage: asked.parent.lineage, depth: asked.parent.depth },
+              chosen: asked.chosen ?? {
+                model: setting?.model ?? null,
+                effort: setting?.effort ?? null,
+                mode: null,
+              },
+              modelLevel: setting?.level ?? null,
+            })
+          }).pipe(Effect.onError(() => Effect.ignore(cap.release(id))))
           yield* start(session, null).pipe(Effect.forkIn(scope))
           return session
         }).pipe(run)

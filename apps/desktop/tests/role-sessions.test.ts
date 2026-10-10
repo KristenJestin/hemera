@@ -8,7 +8,9 @@
 
 import { realpathSync } from 'node:fs'
 
-import { Deferred, Effect, Fiber } from 'effect'
+import { deliveryBlock } from '@hemera/core/domain'
+
+import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
@@ -17,6 +19,7 @@ import { createMission } from '../src/engine/missions.ts'
 import { Delivery } from '../src/engine/permissions/delivery.ts'
 import { startRun, stopRun } from '../src/engine/runs.ts'
 import { assignWork, holdsWork, leaseOf } from '../src/engine/sessions/leases.ts'
+import { SpecLanguage } from '../src/engine/sessions/ports.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
@@ -35,6 +38,7 @@ import {
   permissionRequests,
   queuedDeliveries,
   sessionDeliveries,
+  sessionThreads,
   supervisedProcesses,
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
@@ -55,7 +59,7 @@ import {
   until,
   within,
 } from './sessions-world.ts'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 
 let data: string
 let work: string
@@ -167,6 +171,28 @@ describe('The three layers are set once, at the session’s start, then the brie
     const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
     expect(meta.claudeCode.options.systemPrompt.prompt).not.toContain('## The Memory')
     expect(text(world.agents[0]?.answers.prompts[0] ?? [])).not.toContain('## Now')
+  })
+  test('instructions that cannot be read fail the start: no agent starts on a bare base', async () => {
+    const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
+      sessions: {
+        specLanguage: Layer.succeed(SpecLanguage, () =>
+          Effect.die(new Error('the Spec language could not be read')),
+        ),
+      },
+    })
+    const first = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.map(getSession(session.id), (now) => now.state === 'failed'))
+          return yield* getSession(session.id)
+        }),
+      ),
+    )
+    expect(first.stateReason).toContain('instructions')
+    expect(world.agents).toHaveLength(0)
   })
 })
 
@@ -515,6 +541,43 @@ describe('Silence, waiting and stuck (CT-12)', () => {
     expect(state).toBe('working')
   })
 
+  test('a session whose silent command ran past the bound is not stuck as the command ends', async () => {
+    const hold = held()
+    const { world, run } = engine(
+      (index) =>
+        index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+      { timings: SILENCE },
+    )
+    const state = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main, project, mission } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          const started = yield* startRun({
+            projectId: project.id,
+            workspaceId: null,
+            commandId: null,
+            line: nodeLine(script(STAYS_UP)),
+            folder: null,
+            startedBy: 'user',
+            sessionId: session.id,
+            missionId: mission.id,
+          })
+          yield* Effect.sleep('700 millis')
+          yield* stopRun(started.id)
+          // Swept more than once before the agent reports the command's end.
+          yield* Effect.sleep('250 millis')
+          const now = (yield* getSession(session.id)).state
+          hold.release()
+          return now
+        }),
+      ),
+    )
+    expect(state).toBe('working')
+  })
+
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
       timings: SILENCE,
@@ -535,15 +598,17 @@ describe('Silence, waiting and stuck (CT-12)', () => {
   })
 
   test('a provider’s wait keeps a long turn alive', async () => {
-    const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 150))
+    // One wait longer than the stuck bound: the provider's retry outlasts it, then the turn ends.
+    let seen = 0
+    const pause = () => {
+      seen += 1
+      return new Promise<void>((resolve) => setTimeout(resolve, seen === 2 ? 1000 : 0))
+    }
     const { world, run } = engine(
       () => ({
         between: pause,
         steps: [
           { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
           { does: 'says', text: 'done' },
         ],
       }),
@@ -586,6 +651,35 @@ describe('Compaction and saturation (CT-15)', () => {
     expect(again).toMatch(/^\[hemera:instructions\]\n# Hemera base \(every role\)/)
     expect(again).toContain(TEST_ROLE.template)
     expect(again).toContain('\n\n[hemera:brief]\n')
+  })
+
+  test('the instructions sent again are those it was started with, once its thread is gone', async () => {
+    const hold = held()
+    const { world, run } = engine((index) =>
+      index === 0 ? holding(hold, 0, [{ does: 'compacts', id: 'compact-1' }]) : {},
+    )
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          // The diagnostic retention removed its thread while it ran.
+          const database = yield* Database
+          yield* database.delete(sessionThreads).where(eq(sessionThreads.sessionId, session.id))
+          hold.release()
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2))
+          yield* settled(session.id)
+        }),
+      ),
+    )
+    const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
+    const started: string = meta.claudeCode.options.systemPrompt.prompt
+    const again = text(world.agents[0]?.answers.prompts[1] ?? [])
+    expect(again.startsWith(`${deliveryBlock('instructions', started)}\n\n[hemera:brief]\n`)).toBe(
+      true,
+    )
   })
 
   test('with no such signal, past 80 % of the window the session is replaced', async () => {
@@ -661,6 +755,31 @@ describe('Leases and epochs (CT-11)', () => {
     expect(answer).toMatchObject({ ok: false, refused: true })
     expect(lease?.epoch).toBe(1)
     expect(stillHolds).toBe(false)
+  })
+  test('a replacement whose lease cannot pass is not written: no lease is left on a replaced session', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const [lease, holder] = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* settled(session.id)
+          yield* assignWork('task-1', session)
+          const database = yield* Database
+          yield* database.run(sql`CREATE TRIGGER refuse_leases BEFORE UPDATE ON runner_leases
+            BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+          yield* Sessions.use((sessions) => sessions.replace(session.id, 'a test')).pipe(
+            Effect.ignore,
+          )
+          yield* database.run(sql`DROP TRIGGER refuse_leases`)
+          const now = yield* leaseOf('task-1')
+          return [now, yield* getSession(now?.sessionId ?? '')] as const
+        }),
+      ),
+    )
+    expect(lease?.epoch).toBe(0)
+    expect(holder.state).not.toBe('replaced')
   })
 })
 

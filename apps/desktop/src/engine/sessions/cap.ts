@@ -49,6 +49,8 @@ export class Cap extends Context.Service<
     readonly waiting: (lineage: string) => Effect.Effect<string | null, DatabaseError>
     /** Whether a lineage holds a slot, or waits for one. */
     readonly holds: (lineage: string) => Effect.Effect<boolean>
+    /** Whether a phase of a Project waits for a slot. */
+    readonly waitsIn: (projectId: string) => Effect.Effect<boolean>
   }
 >()('Cap') {}
 
@@ -181,6 +183,7 @@ export const capLayer = Layer.effect(
               queue.some((one) => one.asked.lineage === lineage),
             ),
         ),
+      waitsIn: (projectId) => Effect.sync(() => queueOf(projectId).length > 0),
     }
   }),
 )

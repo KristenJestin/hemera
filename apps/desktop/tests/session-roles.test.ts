@@ -88,6 +88,12 @@ describe('A role that does not read the Memory has no Memory tool (CT-06)', () =
     expect(memoryContractBroken(roles)).toEqual([])
   })
 
+  test('a role of a mission the tool table does not know cannot be checked, and is flagged', () => {
+    expect(memoryContractBroken([shaped('archivist', false)])).toEqual([
+      'archivist does not read the Memory and is not a role of the tool table: its tools cannot be checked',
+    ])
+  })
+
   test('a role registered as not reading the Memory while its tools write or read it fails', () => {
     expect(memoryContractBroken([shaped('builder', false)])).toEqual([
       'builder does not read the Memory but has memory_read, now_set, journal_add, note_add, notes_condense, evidence_add',
