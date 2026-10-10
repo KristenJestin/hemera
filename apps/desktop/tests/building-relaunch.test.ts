@@ -19,6 +19,7 @@ import { launchMission, preparationOf } from '../src/engine/building/launch.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject, removeRepository } from '../src/engine/projects.ts'
+import { returnToPlanning } from '../src/engine/planning/freeze.ts'
 import { saveRecipe } from '../src/engine/recipe.ts'
 import { getWorkspace, removeWorkspace } from '../src/engine/workspaces.ts'
 import {
@@ -157,6 +158,25 @@ describe('Back to Planning ends the launch under way', () => {
     expect(seen.branch).toBe(false)
     expect(starts.missions).toEqual([])
   })
+
+  test('a check from before a return to Planning and a new Freeze no longer holds', async () => {
+    const { run } = buildingEngine(data, work, agents(QUIET, READING))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acmeAt(work)
+          const { mission, view } = yield* checkedReady(project.id, main)
+          yield* returnToPlanning(mission.id, 'The totals are missing.')
+          yield* refrozen(mission.id)
+          return yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
+        }),
+      ),
+    )
+    const reasons = refusedWith(seen)
+    expect(reasons?.[0]).toBe(CHECK_EXPIRED)
+    expect(reasons?.join('\n')).toMatch(/The Spec changed since the check/)
+  })
 })
 
 describe('A launch that did not end in Building leaves nothing in the way', () => {
@@ -181,6 +201,29 @@ describe('A launch that did not end in Building leaves nothing in the way', () =
     expect(seen.mission.stage).toBe('cancelled')
     expect(seen.branch).toBe(false)
     expect(starts.missions).toEqual([])
+  })
+
+  test('a Workspace that cannot be made: the launch is refused and its row goes, so the mission launches once the cause is gone', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main, api } = yield* acmeAt(work)
+          const { mission, view } = yield* checkedReady(project.id, main)
+          // Someone made the mission's branch by hand.
+          git(api, 'branch', BRANCH)
+          const refused = yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
+          const after = yield* preparationOf(mission.id)
+          git(api, 'branch', '-D', BRANCH)
+          yield* launchMission(mission.id, view.id, 'launch')
+          yield* inStage(mission.id, 'building')
+          return { refused, after }
+        }),
+      ),
+    )
+    expect(refusedWith(seen.refused)?.[0]).toMatch(/The Workspace could not be made/)
+    expect(seen.after).toBeNull()
   })
 
   test('Retry when the failed launch’s Workspace was removed meanwhile: the launch stays failed and its need pending', async () => {

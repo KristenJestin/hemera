@@ -60,6 +60,7 @@ import {
   commandDraft,
   eventsOf,
   frozenIn,
+  heldRecipe,
   inStage,
   marksOf,
   plannedIn,
@@ -586,6 +587,8 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
         profile,
         Effect.gen(function* () {
           const { project, main } = yield* acme()
+          // The preparation is held: the first launch cannot reach Building before the second claims.
+          const held = yield* heldRecipe(work, project.id)
           const { mission } = yield* frozenIn(project.id, main)
           yield* checkMission(mission.id)
           const view = yield* checked(mission.id)
@@ -596,6 +599,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
             ],
             { concurrency: 'unbounded' },
           )
+          held.release()
           yield* inStage(mission.id, 'building')
           const again = yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
           return { one, other, again }

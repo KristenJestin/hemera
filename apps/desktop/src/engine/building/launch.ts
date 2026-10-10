@@ -305,17 +305,6 @@ const choiceRefusal = (missionId: string, checkId: string, choice: LaunchChoice)
     if (mission.stage !== 'ready') {
       return { check, reasons: [`${key} is not Ready: only a Ready mission is launched.`] }
     }
-    const [under] = yield* database
-      .select({ id: buildingLaunches.id })
-      .from(buildingLaunches)
-      .where(
-        and(
-          eq(buildingLaunches.missionId, missionId),
-          inArray(buildingLaunches.state, ['preparing', 'failed']),
-        ),
-      )
-      .pipe(Effect.mapError(refusedWhile('reading the launches')))
-    if (under !== undefined) return { check, reasons: [`${key} is already being launched.`] }
     const latest = yield* latestCheckRowIn(database, missionId)
     if (latest?.id !== check.id || check.kind !== 'full') {
       return { check, reasons: [CHECK_EXPIRED, 'A newer check ran since this one.'] }
