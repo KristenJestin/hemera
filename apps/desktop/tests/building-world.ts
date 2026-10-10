@@ -377,6 +377,23 @@ export const eventsOf = (missionId: string, type: string) =>
       .orderBy(asc(domainEvents.sequence))
   })
 
+/**
+ * Once a launch that will not reach Building is cleaned up: its `building.workspace_removed`,
+ * written after its branches. Failing, it says what the engine's log says it kept.
+ */
+export const removedIn = (missionId: string, lines: ReadonlyArray<string>) =>
+  until(
+    Effect.map(eventsOf(missionId, 'building.workspace_removed'), (seen) => seen.length > 0),
+  ).pipe(
+    Effect.catchCause(() =>
+      Effect.die(new Error(`the launch's Workspace was not cleaned up:\n${keptSaid(lines)}`)),
+    ),
+  )
+
+/** What the engine's log says a cleanup kept, for a failure's message. */
+export const keptSaid = (lines: ReadonlyArray<string>) =>
+  lines.filter((line) => line.startsWith('building:')).join('\n')
+
 export const refusedWith = (outcome: Result.Result<unknown, unknown>) =>
   Result.isFailure(outcome) && outcome.failure instanceof BuildingRefused
     ? outcome.failure.reasons

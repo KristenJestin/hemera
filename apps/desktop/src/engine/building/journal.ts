@@ -104,6 +104,15 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     ),
   ],
   [
+    'building.workspace_removed',
+    lineOf(byHemera, (payload) => {
+      const kept = stringsOf(payload, 'kept')
+      return kept.length === 0
+        ? 'The launch was cancelled: its Workspace and its branch were removed.'
+        : `The launch was cancelled: its Workspace was removed; kept ${kept.join('; ')}.`
+    }),
+  ],
+  [
     'building.launched',
     lineOf(
       byUser,

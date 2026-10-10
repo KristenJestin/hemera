@@ -791,8 +791,22 @@ export const buildingLaunchesLayer = (log: Log) => {
           if (row.workspaceId === null) return
           const found = yield* Effect.result(getWorkspace(row.workspaceId))
           if (Result.isFailure(found) || found.success.preparing) return
-          const kept = yield* abandonWorkspace(found.success)
+          const workspace = found.success
+          const kept = yield* abandonWorkspace(workspace)
           for (const one of kept) yield* said(`a branch was kept: ${one}`)
+          // Written once the branches are dealt with too: the cleanup has ended.
+          yield* mutate('saying the Workspace was removed', () =>
+            Effect.succeed({
+              result: undefined,
+              events: [
+                launchEvent('building.workspace_removed', row, workspace.projectId, {
+                  workspaceId: workspace.id,
+                  branch: workspace.branch,
+                  kept: [...kept],
+                }),
+              ],
+            }),
+          )
         }).pipe(
           Effect.catchCause((cause) =>
             said(`the Workspace of a cancelled launch was kept: ${String(cause)}`),

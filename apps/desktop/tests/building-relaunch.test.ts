@@ -34,8 +34,10 @@ import {
   frozenIn,
   heldRecipe,
   inStage,
+  keptSaid,
   pushedOnRemote,
   refrozen,
+  removedIn,
   refusedWith,
   startedIn,
 } from './building-world.ts'
@@ -89,7 +91,7 @@ describe('Back to Planning ends the launch under way', () => {
   test('a failed launch, then Back to Planning: the launch is cancelled, its need withdrawn, its Workspace and branch removed; Retry does nothing; after a new Freeze the mission launches again', async () => {
     // The cold read, then the fresh Planner, then the second cold read.
     const { run, starts } = buildingEngine(data, work, agents(QUIET, READING))
-    const seen = await run(({ profile }) =>
+    const seen = await run(({ profile, lines }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -101,14 +103,14 @@ describe('Back to Planning ends the launch under way', () => {
           const failed = yield* preparationOf(mission.id)
           yield* backToPlanningFromCheck(mission.id, view.id)
           yield* until(Effect.map(preparationOf(mission.id), (one) => one?.state === 'cancelled'))
-          yield* until(Effect.map(workspaceKept(failed?.workspaceId ?? ''), (kept) => !kept))
-          // The branch goes after the Workspace, in the same cleanup.
-          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
+          yield* removedIn(mission.id, lines)
           recipe.restore()
           yield* retryNeed(failed?.needId ?? '')
           const afterRetry = yield* getMission(mission.id)
           const need = yield* getNeed(failed?.needId ?? '')
           const branchAfter = hasBranch(api, BRANCH)
+          const workspaceAfter = yield* workspaceKept(failed?.workspaceId ?? '')
+          const kept = keptSaid(lines)
           yield* refrozen(mission.id)
           yield* checkMission(mission.id)
           const again = yield* checked(mission.id)
@@ -119,6 +121,8 @@ describe('Back to Planning ends the launch under way', () => {
             afterRetry,
             need,
             branchAfter,
+            workspaceAfter,
+            kept,
             launched: yield* eventsOf(mission.id, 'building.launched'),
           }
         }),
@@ -126,14 +130,15 @@ describe('Back to Planning ends the launch under way', () => {
     )
     expect(seen.need.state).toBe('withdrawn')
     expect(seen.afterRetry.stage).toBe('planning')
-    expect(seen.branchAfter).toBe(false)
+    expect(seen.workspaceAfter, seen.kept).toBe(false)
+    expect(seen.branchAfter, seen.kept).toBe(false)
     expect(seen.launched).toHaveLength(1)
     expect(starts.missions).toHaveLength(1)
   })
 
   test('a launch preparing, then Back to Planning and a new Freeze before its recipe ends: the recipe’s end moves nothing, and its Workspace goes', async () => {
     const { run, starts } = buildingEngine(data, work, agents(QUIET, READING))
-    const seen = await run(({ profile }) =>
+    const seen = await run(({ profile, lines }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -144,14 +149,14 @@ describe('Back to Planning ends the launch under way', () => {
           yield* backToPlanningFromCheck(mission.id, view.id)
           yield* refrozen(mission.id)
           held.release()
-          yield* until(Effect.map(workspaceKept(preparing.workspaceId ?? ''), (kept) => !kept))
-          // The branch goes after the Workspace, in the same cleanup.
-          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
+          yield* removedIn(mission.id, lines)
           return {
             mission: yield* getMission(mission.id),
             preparation: yield* preparationOf(mission.id),
             launched: yield* eventsOf(mission.id, 'building.launched'),
             branch: hasBranch(api, BRANCH),
+            workspace: yield* workspaceKept(preparing.workspaceId ?? ''),
+            kept: keptSaid(lines),
           }
         }),
       ),
@@ -159,7 +164,8 @@ describe('Back to Planning ends the launch under way', () => {
     expect(seen.mission.stage).toBe('ready')
     expect(seen.preparation?.state).toBe('cancelled')
     expect(seen.launched).toEqual([])
-    expect(seen.branch).toBe(false)
+    expect(seen.workspace, seen.kept).toBe(false)
+    expect(seen.branch, seen.kept).toBe(false)
     expect(starts.missions).toEqual([])
   })
 
@@ -186,7 +192,7 @@ describe('Back to Planning ends the launch under way', () => {
 describe('A launch that did not end in Building leaves nothing in the way', () => {
   test('a mission cancelled during its preparation: the launch is cancelled, its Workspace and branch go once the recipe ends, and nothing starts', async () => {
     const { run, starts } = buildingEngine(data, work, agents())
-    const seen = await run(({ profile }) =>
+    const seen = await run(({ profile, lines }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -197,15 +203,19 @@ describe('A launch that did not end in Building leaves nothing in the way', () =
           yield* moveMission(mission.id, 'cancel', 'user')
           yield* until(Effect.map(preparationOf(mission.id), (one) => one?.state === 'cancelled'))
           held.release()
-          yield* until(Effect.map(workspaceKept(preparing.workspaceId ?? ''), (kept) => !kept))
-          // The branch goes after the Workspace, in the same cleanup.
-          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
-          return { branch: hasBranch(api, BRANCH), mission: yield* getMission(mission.id) }
+          yield* removedIn(mission.id, lines)
+          return {
+            branch: hasBranch(api, BRANCH),
+            workspace: yield* workspaceKept(preparing.workspaceId ?? ''),
+            kept: keptSaid(lines),
+            mission: yield* getMission(mission.id),
+          }
         }),
       ),
     )
     expect(seen.mission.stage).toBe('cancelled')
-    expect(seen.branch).toBe(false)
+    expect(seen.workspace, seen.kept).toBe(false)
+    expect(seen.branch, seen.kept).toBe(false)
     expect(starts.missions).toEqual([])
   })
 
