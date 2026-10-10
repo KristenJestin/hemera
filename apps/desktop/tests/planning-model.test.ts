@@ -763,6 +763,42 @@ describe('Following a mission’s Planning', () => {
     expect(played.named('closeDiscussion')[0]?.args).toEqual(['d1', null])
   })
 
+  test('a living requirement that could not be read is asked again at the next read', async () => {
+    let asked = 0
+    const played = world({
+      livingSpecRequirement: (id) => {
+        asked += 1
+        if (asked === 1) return Promise.reject(new Error('The engine did not answer in time.'))
+        return Promise.resolve({
+          id,
+          domainId: 'notes',
+          domain: 'Notes',
+          text: 'A note is printed.',
+          scenarios: [],
+          origin: null,
+          state: 'validated',
+          uncertainty: '',
+          version: 1,
+          removed: false,
+          pending: null,
+          history: [],
+        })
+      },
+    })
+    played.listeners.spec(
+      spec({ requirements: [requirement({ delta: 'modified', livingRef: 'LR4' })] }),
+    )
+    await flush()
+    expect(played.last().data?.requirements[0]?.living?.text ?? null).toBeNull()
+    played.listeners.passes([PASS])
+    await flush()
+    expect(asked).toBe(2)
+    expect(played.last().data?.requirements[0]?.living?.text).toBe('A note is printed.')
+    played.listeners.passes([PASS])
+    await flush()
+    expect(asked).toBe(2)
+  })
+
   test('a Probe’s report is read when it is opened, and again when its Probe moves', async () => {
     const played = world()
     played.following.openProbe('p1')
