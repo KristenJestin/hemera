@@ -15,7 +15,18 @@ import { join } from 'node:path'
 import { SPEC_SECTIONS, toolsOf } from '@hemera/core/domain'
 import { and, asc, eq } from 'drizzle-orm'
 import { MissionTarget } from '@hemera/ipc'
-import { Deferred, Effect, Exit, Fiber, Option, Predicate, type Schema, Stream } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Predicate,
+  type Schema,
+  Stream,
+} from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -1159,12 +1170,33 @@ describe('A cancel racing the Planner’s first start leaves nothing running', (
 })
 
 describe('Nothing wakes the Planner but a delivery', () => {
-  test('no file of Planning holds a timer', () => {
-    const folder = join(import.meta.dirname, '..', 'src', 'engine', 'planning')
-    for (const file of readdirSync(folder)) {
-      const source = readFileSync(join(folder, file), 'utf8')
-      expect(source, file).not.toMatch(/Schedule\.|Effect\.sleep|setTimeout|setInterval/)
-    }
+  test('hours pass with nothing delivered: no Planner is started or woken', async () => {
+    // The engine's own sweeps run at a pace of minutes, so a day passes in a few seconds.
+    const { world, run } = planning(() => QUIET, {
+      testClock: true,
+      timings: { sweepEvery: Duration.minutes(10), notePickup: Duration.minutes(10) },
+    })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { planner } = yield* TestClock.withLive(
+            Effect.flatMap(acme, ({ project }) => missionPlanned(project.id)),
+          )
+          const before = yield* threadOf(planner.id)
+          for (let hour = 0; hour < 24; hour += 1) {
+            yield* TestClock.adjust(Duration.hours(1))
+            yield* TestClock.withLive(Effect.sleep('5 millis'))
+          }
+          return { before, after: yield* threadOf(planner.id) }
+        }),
+      ),
+    )
+    expect(seen.after.filter((line) => line.kind === 'sent')).toEqual(
+      seen.before.filter((line) => line.kind === 'sent'),
+    )
+    expect(world.agents).toHaveLength(1)
+    expect(world.agents[0]?.answers.prompts).toHaveLength(1)
   })
 
   test('a Planner that ended is not started again, by a restart or a second mission.started', async () => {
