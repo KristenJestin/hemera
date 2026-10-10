@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { browser } from '@wdio/globals'
+
 import { FAKE_GH_SPECS, RUNS_FAKE_GH, fakeGhOf } from './e2e/fake-gh.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
@@ -90,5 +92,20 @@ export const config: WebdriverIO.Config = {
   },
   onWorkerStart(_cid, _capabilities, specs) {
     process.env.PATH = pathFor(specs[0] ?? '')
+  },
+  // The Electron service drives the main process through Node's inspector and never lets go of
+  // it, and a Node process asked to exit while a debugger is attached waits for it to leave: the
+  // driver ending the session then waits about seventy seconds for the application to exit before
+  // giving up on it, on every spec file. Once the spec file is done the inspector has no more use,
+  // so the main process closes it, a moment after answering, and quits as soon as it is told to.
+  // A main process that is gone already has nothing to close, which is not a failure of the run.
+  async after() {
+    try {
+      await browser.electron.execute(() => {
+        setTimeout(() => process.getBuiltinModule('node:inspector').close(), 0)
+      })
+    } catch {
+      // Nothing left to close.
+    }
   },
 }
