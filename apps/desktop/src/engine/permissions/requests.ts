@@ -16,7 +16,9 @@
  * again (CT-10: the role's guards, the "never" list, the resolution of the paths, the mission's
  * stage, the task, the place, the fingerprint of the file it writes, the identity of what it runs),
  * and only then is the call run through the gate's executor. Whatever no longer holds expires the
- * need ("the situation changed since you allowed it") and nothing runs.
+ * need ("the situation changed since you allowed it") and nothing runs. On a sensitive place, the
+ * values of the files the call names are registered as secrets before it runs, so its result is
+ * kept masked wherever it goes.
  *
  * Every result is a `permission.result` event of the owner (the Memory shows it, so a replacement
  * session reads it there) and is handed to the `Delivery` port exactly once, keyed by the request.
@@ -24,7 +26,9 @@
  */
 
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { parseEnv } from 'node:util'
 
 import {
   ActionIdentity,
@@ -64,6 +68,7 @@ import {
   type JudgedCall,
   PermissionRequests,
   type RequestAsked,
+  SensitivePlaces,
 } from '../tools/ports.ts'
 import { fingerprintFile } from '../tools/read.ts'
 import { Delivery } from './delivery.ts'
@@ -144,6 +149,32 @@ const described = (call: JudgedCall, home: string): string => {
   return call.path === null ? call.tool : `${call.tool} ${shownPath(call.path.resolved, home)}`
 }
 
+/** The paths a call names, as written and as they lead: its path, or the paths of its line. */
+const namedPaths = (call: JudgedCall, settings: RequestsSettings) =>
+  Effect.gen(function* () {
+    const root = call.session.place.root
+    if (call.path !== null) {
+      const named = /^~(?:$|[\\/])/.test(call.path.named)
+        ? join(settings.home, call.path.named.slice(1))
+        : call.path.named
+      return [{ written: resolve(root, named), led: call.path.resolved }]
+    }
+    const paths: Array<{ readonly written: string; readonly led: string }> = []
+    if (call.tool !== 'commands_run' || call.command !== null) return paths
+    const context: PlaceContext = {
+      home: settings.home,
+      user: userName(),
+      platform: settings.platform,
+    }
+    const folder = resolve(root, call.folder ?? '.')
+    const named = placesNamed(wordsOf(call.line ?? ''), context)
+    for (const path of named.paths) {
+      const led = yield* Effect.promise(() => resolvePath(root, folder, path, settings.home))
+      paths.push({ written: resolve(folder, path), led: led.path })
+    }
+    return paths
+  })
+
 /**
  * What the verdict saw, as it can be computed again before acting: the identity of the action,
  * where its path leads, the fingerprint of the file it writes, where the paths of its line lead,
@@ -159,20 +190,10 @@ const guardOf = (call: JudgedCall, frozen: FrozenCall, settings: RequestsSetting
       writes && call.path !== null
         ? yield* Effect.promise(() => fingerprintFile(call.path?.resolved ?? '').catch(() => null))
         : null
-    const places: string[] = []
-    if (call.tool === 'commands_run' && call.command === null) {
-      const context: PlaceContext = {
-        home: settings.home,
-        user: userName(),
-        platform: settings.platform,
-      }
-      const folder = resolve(root, call.folder ?? '.')
-      const named = placesNamed(wordsOf(call.line ?? ''), context)
-      for (const path of named.paths) {
-        const led = yield* Effect.promise(() => resolvePath(root, folder, path, settings.home))
-        places.push(led.path)
-      }
-    }
+    const places =
+      call.tool === 'commands_run' && call.command === null
+        ? (yield* namedPaths(call, settings)).map((path) => path.led)
+        : []
     let stage: string | null = null
     if (call.session.missionId !== null) {
       const [mission] = yield* database
@@ -198,6 +219,36 @@ const guardOf = (call: JudgedCall, frozen: FrozenCall, settings: RequestsSetting
     return {
       identity,
       guard: JSON.stringify({ identity, target, written, places, stage, place }),
+    }
+  })
+
+/** The largest sensitive file whose values are read before Hemera acts on it. */
+const VALUES_READ_UP_TO = 4 * 1024 * 1024
+
+/**
+ * Before Hemera acts on an allowed request on a sensitive place: the `KEY=VALUE` values of each
+ * sensitive file the call names (its path, or the paths of its line) are registered as secrets,
+ * so whatever keeps its result (the request, its event, the delivery, the thread, the trace, a
+ * run's output) masks them. They stay registered while the engine runs, under the file's own
+ * source, so reading the file again replaces them. What is not a file (a folder) has no values.
+ */
+const registerSensitiveValues = (call: JudgedCall, settings: RequestsSettings) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets
+    const places = yield* SensitivePlaces
+    const asked = { session: call.session, writes: false }
+    for (const { written, led } of yield* namedPaths(call, settings)) {
+      const sensitive =
+        (yield* places.sensitive(written, asked)) ?? (yield* places.sensitive(led, asked))
+      if (sensitive === null) continue
+      const text = yield* Effect.promise(async () => {
+        const found = await stat(led).catch(() => null)
+        if (found === null || !found.isFile() || found.size > VALUES_READ_UP_TO) return null
+        return readFile(led, 'utf8').catch(() => null)
+      })
+      if (text === null) continue
+      const values = Object.values(parseEnv(text)).filter(Predicate.isString)
+      secrets.register(`sensitive-file:${led}`, values)
     }
   })
 
@@ -475,7 +526,7 @@ export const approvalsLayer = (settings: RequestsSettings) =>
     Approvals,
     Effect.gen(function* () {
       const context = yield* Effect.context<
-        Database | DomainEvents | Secrets | ToolGate | Delivery | TaskStates
+        Database | DomainEvents | Secrets | SensitivePlaces | ToolGate | Delivery | TaskStates
       >()
       const settling = Semaphore.makeUnsafe(1)
       const { log } = settings
@@ -563,7 +614,9 @@ export const approvalsLayer = (settings: RequestsSettings) =>
                 if (!task) return 'its task ended'
               }
               const { guard } = yield* guardOf(call, frozen.value, settings)
-              return guard === row.guard ? null : 'what it acts on changed'
+              if (guard !== row.guard) return 'what it acts on changed'
+              if (row.sensitive) yield* registerSensitiveValues(call, settings)
+              return null
             }).pipe(
               Effect.provide(context),
               Effect.catchCause(() => Effect.succeed('it could not be checked again')),
