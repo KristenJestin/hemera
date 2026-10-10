@@ -161,14 +161,14 @@ entries: there D read 6,830 and wrote 3,185, and E read 8,077 and wrote 637.)
   mission read 8,077 and wrote 640 (F). The first session of that form pays the full 8,714 once
   (E), because the blocks sit in a cache space of their own.
 - **Tester mode** changes the tool list, which comes before the instructions: nothing after the
-  tools can be read, and the tool list is its own cache entry. The grant is computed at each process
-  start from the preference (`tools/index.ts:126,142`), so turning the mode on or off while a
-  session is idle makes its next start miss the whole conversation, and the kept instructions then
-  disagree with its tools.
-- **The commands of the Probe brief's resources** are read without `ORDER BY`
-  (`resources/declarations.ts:48-57`). The brief is built once per session, so it only matters when
-  it is built again (compaction, replacement); in practice SQLite returns insertion order, but the
-  order is not guaranteed.
+  tools can be read, and the tool list is its own cache entry. The grant used to be computed at
+  each process start from the preference, so turning the mode on or off while a session was idle
+  made its next start miss the whole conversation, and the kept instructions then disagreed with
+  its tools. Now the grant follows the instructions the session kept (`tools/index.ts`): the tester
+  tools stay as the session started with them until it is replaced, or compacted, which writes its
+  instructions again (`sessions/provider.ts`).
+- **The commands of the Probe brief's resources** are read by name (`resources/declarations.ts`),
+  so a brief built again reads the same text.
 
 One thing outside the prefix: the adapter asks Claude Code for a generated title at the end of the
 turns until one is settled (`claude-agent-acp/dist/session-titles.js`). That is a separate small
