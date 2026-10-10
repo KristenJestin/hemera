@@ -10,6 +10,7 @@
     "src/agents/**/*.ts",
     "src/preload/**/*.ts",
     "src/renderer/bridge.d.ts",
+    "scripts/**/*.ts",
     "bundles.ts",
     "build.ts",
     "dev.ts"
