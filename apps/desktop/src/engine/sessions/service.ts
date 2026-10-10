@@ -13,6 +13,8 @@
  *   its own running for 5 minutes, and not waiting on its provider, is stuck: its parent is told,
  *   then it is replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
  *   the brief again; past 80 % of its window, an agent with no such signal is replaced.
+ * - **Slots.** A child that counts in the cap, idle as long as a turn may be silent while a phase
+ *   of its Project waits for a slot, is ended: its slot goes to the phase, its parent is told.
  * - **Replacement.** The old session is stopped and kept, a fresh one of the same role, lineage
  *   and owner starts with the resume block and what was queued; one Journal line says why. The
  *   `ReplacementGuard` is asked first.
@@ -235,6 +237,9 @@ interface Driver {
 }
 
 const LIVE_OR_STUCK = ['starting', 'working', 'idle', 'stuck'] as const
+
+/** Why an idle child was ended. */
+const IDLE_CHILD = 'idle while a phase waited for its slot'
 
 /** What an agent reports only once it took a turn's message. */
 const TOOK_THE_TURN = ['MessageChunk', 'ThoughtChunk', 'ToolCall', 'Plan', 'ProviderWait'] as const
@@ -910,12 +915,45 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           )
         })
 
-      /** CT-12: a session silent too long in a turn is stuck, its parent told, then replaced. */
+      /** Whether an idle child holds a slot a phase of its Project waits for. */
+      const holdsBack = (driver: Driver, idleFor: number) =>
+        Effect.gen(function* () {
+          if (!counts(driver.entry) || driver.session.parent === null) return false
+          if (idleFor < Duration.toMillis(timings.stuckAfter)) return false
+          return yield* cap.waitsIn(yield* projectOf(driver.session.owner))
+        })
+
+      /** Ends an idle child, under the lock, unless a turn started: its slot goes to the phase. */
+      const endIdle = (driver: Driver) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            if (driver.gone || driver.turn !== null) return
+            if ((yield* queuedFor(driver.session)).length > 0) return
+            yield* endLive([driver.session], IDLE_CHILD)
+            yield* tellParent(
+              driver.session,
+              `Your ${driver.entry.displayName} session ended: ${IDLE_CHILD}.`,
+            )
+          }),
+        )
+
+      /**
+       * CT-12: a session silent too long in a turn is stuck, its parent told, then replaced. And
+       * an idle child holding back a phase gives its slot.
+       */
       const sweep = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis
         const limit = Duration.toMillis(timings.stuckAfter)
         for (const driver of [...drivers.values()]) {
-          if (driver.gone || driver.turn === null || driver.waiting) continue
+          if (driver.gone) continue
+          if (driver.turn === null) {
+            if (yield* holdsBack(driver, now - driver.lastSign)) yield* endIdle(driver)
+            continue
+          }
+          if (driver.waiting) continue
           if (now - driver.lastSign < limit) continue
           // A silent command that just ended is as recent a sign as the agent's own.
           if (now - (yield* commandSign(driver.session.id, now)) < limit) continue
@@ -1125,30 +1163,33 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             })
           }
           const id = crypto.randomUUID()
-          if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
-          const setting =
-            asked.provider === undefined
-              ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
-              : null
-          const session = yield* openSession({
-            id,
-            lineage: at?.lineage,
-            epoch: at?.epoch,
-            provider: asked.provider ?? setting?.agent ?? 'claude',
-            owner: asked.owner,
-            role: asked.role,
-            folder: asked.folder,
-            parent:
-              asked.parent === undefined
-                ? null
-                : { lineage: asked.parent.lineage, depth: asked.parent.depth },
-            chosen: asked.chosen ?? {
-              model: setting?.model ?? null,
-              effort: setting?.effort ?? null,
-              mode: null,
-            },
-            modelLevel: setting?.level ?? null,
-          })
+          // Until its session is written, whatever stops an agent's launch gives back its slot.
+          const session = yield* Effect.gen(function* () {
+            if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
+            const setting =
+              asked.provider === undefined
+                ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
+                : null
+            return yield* openSession({
+              id,
+              lineage: at?.lineage,
+              epoch: at?.epoch,
+              provider: asked.provider ?? setting?.agent ?? 'claude',
+              owner: asked.owner,
+              role: asked.role,
+              folder: asked.folder,
+              parent:
+                asked.parent === undefined
+                  ? null
+                  : { lineage: asked.parent.lineage, depth: asked.parent.depth },
+              chosen: asked.chosen ?? {
+                model: setting?.model ?? null,
+                effort: setting?.effort ?? null,
+                mode: null,
+              },
+              modelLevel: setting?.level ?? null,
+            })
+          }).pipe(Effect.onError(() => Effect.ignore(cap.release(id))))
           yield* start(session, null).pipe(Effect.forkIn(scope))
           return session
         }).pipe(run)

@@ -10,7 +10,7 @@ import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ChosenAnswer, capRefusal } from '@hemera/core/domain'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { Duration, Effect, Predicate, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -28,9 +28,9 @@ import { createProject } from '../src/engine/projects.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import { type RoleSession, getSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { memoryJournal } from '../src/engine/storage/schema.ts'
+import { memoryJournal, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { BUILDER, HELPER, acmeIn, held, sessionsEngine, until, within } from './sessions-world.ts'
@@ -176,6 +176,85 @@ describe('The cap of sub-agents (CT-13)', () => {
     expect(seen.startedBefore).toBe(3)
     expect(Result.isSuccess(seen.elsewhere)).toBe(true)
     expect(seen.after.slotWait).toBeNull()
+  })
+})
+
+describe('A slot goes back once nothing uses it', () => {
+  test('an idle helper gives its slot to a phase waiting for one, and its parent is told', async () => {
+    const { run } = sessionsEngine(data, () => SAYS_DONE, {
+      roles: ROLES,
+      timings: { stuckAfter: Duration.millis(400) },
+    })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main, project } = yield* acme
+          const limits = yield* projectLimits(project.id)
+          yield* setProjectLimits(project.id, { cap: 1, budget: limits.budget })
+          const builder = yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', folder: main }),
+          )
+          const helper = yield* Sessions.use((sessions) =>
+            sessions.open({
+              owner,
+              role: 'helper',
+              folder: main,
+              parent: builder,
+              requestedBy: 'agent',
+            }),
+          )
+          yield* Sessions.use((sessions) => sessions.settled(helper.id))
+          yield* launched(owner, main, 'documenter', 'hemera')
+          yield* until(
+            Effect.map(live, (sessions) =>
+              sessions.some((one) => one.role === 'documenter' && one.state !== 'starting'),
+            ),
+          )
+          const told = yield* Effect.flatMap(Database, (database) =>
+            database
+              .select()
+              .from(sessionDeliveries)
+              .where(eq(sessionDeliveries.targetLineage, builder.lineage)),
+          )
+          return { helper: yield* getSession(helper.id), told }
+        }),
+      ),
+    )
+    expect(seen.helper.state).toBe('ended')
+    expect(seen.helper.stateReason).toBe('idle while a phase waited for its slot')
+    expect(seen.told.map((one) => [one.kind, one.body])).toEqual([
+      ['child', 'Your a helper session ended: idle while a phase waited for its slot.'],
+    ])
+  })
+
+  test('an agent’s launch that fails after its slot was taken gives the slot back', async () => {
+    const { run } = sessionsEngine(data, () => SAYS_DONE, { roles: ROLES })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main, project } = yield* acme
+          const limits = yield* projectLimits(project.id)
+          yield* setProjectLimits(project.id, { cap: 1, budget: limits.budget })
+          const database = yield* Database
+          // The budget cannot be spent, then the session cannot be written.
+          yield* database.run(sql`CREATE TRIGGER refuse_spending BEFORE INSERT ON mission_spent
+            BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+          const unspent = yield* launched(owner, main, 'helper', 'agent')
+          yield* database.run(sql`DROP TRIGGER refuse_spending`)
+          yield* database.run(sql`CREATE TRIGGER refuse_helpers BEFORE INSERT ON agent_sessions
+            WHEN NEW.role = 'helper' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+          const unwritten = yield* launched(owner, main, 'helper', 'agent')
+          yield* database.run(sql`DROP TRIGGER refuse_helpers`)
+          const through = yield* launched(owner, main, 'helper', 'agent')
+          return { unspent, unwritten, through }
+        }),
+      ),
+    )
+    expect(Result.isFailure(seen.unspent)).toBe(true)
+    expect(Result.isFailure(seen.unwritten)).toBe(true)
+    expect(Result.isSuccess(seen.through)).toBe(true)
   })
 })
 
