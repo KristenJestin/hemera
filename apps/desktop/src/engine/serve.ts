@@ -145,6 +145,7 @@ import {
   readSpec,
   setSpecLanguage,
   specLanguageOf,
+  visionsSeen,
 } from './planning/store.ts'
 import {
   createWorkspace,
@@ -612,6 +613,8 @@ export const engineHandlers = (
       follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
     'planning.inputs': ({ missionId }) =>
       use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
+    'planning.visions': ({ missionId }) =>
+      use(visionsSeen(missionId)).pipe(observed('planning.visions', log)),
     // Answers proposed from the ticket's comments (#97).
     'planning.acceptProposedAnswer': ({ proposalId, text }) =>
       use(acceptProposedAnswer(proposalId, text)).pipe(

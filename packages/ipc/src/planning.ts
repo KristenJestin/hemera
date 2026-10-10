@@ -281,6 +281,16 @@ export const PlanningInput = Schema.Struct({
 })
 export type PlanningInput = typeof PlanningInput.Type
 
+/** A vision the user gave, and the input it made (CT-26), for the Planning page (#103). */
+export const PlanningVision = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  at: Schema.String,
+  /** The input it made, whose state `planning.inputs` gives. */
+  input: Schema.NullOr(Schema.String),
+})
+export type PlanningVision = typeof PlanningVision.Type
+
 /** A question that waits for the user, as Home's Questions group lists it (#102). */
 export const OpenQuestion = Schema.Struct({
   missionId: Schema.String,
@@ -339,6 +349,12 @@ export const PlanningRpcs = RpcGroup.make(
     payload: { ...ofMission, text: Schema.String },
     success: Schema.Void,
     error: failing(...always, UnknownMission, PlanningRefused),
+  }),
+  /** The visions the user gave, the first first (#103). */
+  Rpc.make('planning.visions', {
+    payload: ofMission,
+    success: Schema.Array(PlanningVision),
+    error: failing(...always, UnknownMission),
   }),
   /** The user keeps planning a mission the Planner triaged. */
   Rpc.make('planning.keepAfterTriage', {
