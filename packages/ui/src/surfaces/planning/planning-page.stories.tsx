@@ -75,6 +75,23 @@ export const Error: Story = {
   },
 }
 
+/**
+ * The page was drawn, then stopped hearing the engine: what it shows may be behind. It says so
+ * above the columns, with the cause and Try again, and keeps what it had read.
+ */
+export const StoppedFollowing: Story = {
+  args: { moment: 'wave', failure: 'The engine did not answer in time.' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = page(canvasElement)
+    const alert = canvas.getByRole('alert')
+    await expect(alert).toHaveTextContent('may be behind')
+    await expect(alert).toHaveTextContent('did not answer in time')
+    await expect(canvas.getByRole('region', { name: 'Why' })).toBeVisible()
+    await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await expect(args.onRetry).toHaveBeenCalled()
+  },
+}
+
 /** The Planner writes the first draft: its Now line, a section being written, nothing asked yet. */
 export const PlannerWriting: Story = {
   args: { moment: 'writing' },

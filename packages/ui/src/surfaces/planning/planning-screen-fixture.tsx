@@ -46,6 +46,8 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   moment: MomentName
   /** A view open over the page as the story starts. */
   opened?: string | undefined
+  /** Why the page stopped following the engine after it was drawn. */
+  failure?: string | undefined
   onFreeze: () => void
   onRetry: () => void
 }
@@ -58,6 +60,7 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
 export function PlanningScreen({
   moment,
   opened,
+  failure,
   onFreeze,
   onRetry,
   onSay,
@@ -118,7 +121,7 @@ export function PlanningScreen({
       base={
         <PlanningPage
           data={data}
-          error={moment === 'error' ? 'The engine did not answer in time.' : undefined}
+          error={moment === 'error' ? 'The engine did not answer in time.' : failure}
           refused={head.refused}
           mentionables={MENTIONABLES}
           onRetry={onRetry}
