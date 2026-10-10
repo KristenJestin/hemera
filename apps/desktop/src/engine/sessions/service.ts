@@ -355,12 +355,25 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (spoken.trim() !== '') yield* addToThread(driver.session.id, 'said', spoken)
           if (Result.isSuccess(outcome)) {
             const usage = outcome.success.usage
-            yield* addUsage(
-              driver.session,
+            const tokens =
               usage === null
-                ? { input: estimatedTokens(text), output: estimatedTokens(spoken) }
-                : { input: usage.inputTokens, output: usage.outputTokens },
-              usage !== null,
+                ? {
+                    input: estimatedTokens(text),
+                    output: estimatedTokens(spoken),
+                    cachedRead: 0,
+                    cachedWrite: 0,
+                  }
+                : {
+                    input: usage.inputTokens,
+                    output: usage.outputTokens,
+                    cachedRead: usage.cachedReadTokens ?? 0,
+                    cachedWrite: usage.cachedWriteTokens ?? 0,
+                  }
+            yield* addUsage(driver.session, tokens, usage !== null)
+            yield* said(
+              `${driver.session.id} turn used (${usage === null ? 'estimated' : 'measured'}): ` +
+                `input ${String(tokens.input)}, output ${String(tokens.output)}, ` +
+                `cache read ${String(tokens.cachedRead)}, cache write ${String(tokens.cachedWrite)}`,
             )
           }
           if (driver.gone) return

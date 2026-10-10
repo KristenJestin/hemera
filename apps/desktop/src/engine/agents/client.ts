@@ -293,6 +293,12 @@ export const TokenUsage = Schema.Struct({
   inputTokens: Schema.Number,
   outputTokens: Schema.Number,
   thoughtTokens: Schema.NullOr(Schema.Number),
+  /**
+   * What the turn read from and wrote to the provider's prompt cache, null when the agent says
+   * nothing. `inputTokens` leaves both out: the input is the three added up.
+   */
+  cachedReadTokens: Schema.NullOr(Schema.Number),
+  cachedWriteTokens: Schema.NullOr(Schema.Number),
 })
 
 /**
@@ -689,6 +695,8 @@ const usageOf = (usage: Usage | null | undefined) =>
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         thoughtTokens: usage.thoughtTokens ?? null,
+        cachedReadTokens: usage.cachedReadTokens ?? null,
+        cachedWriteTokens: usage.cachedWriteTokens ?? null,
       }
 
 const blockOf = (block: PromptBlock, embeds: boolean): ContentBlock =>

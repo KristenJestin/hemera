@@ -1,6 +1,6 @@
 /**
  * What the sessions used (#41): per session, the tokens in and out its agent reported at the end
- * of each turn and the cost it gave, marked measured; when it reports nothing, an estimate from
+ * of each turn, with those it read from and wrote to the prompt cache, and the cost it gave, marked measured; when it reports nothing, an estimate from
  * the text sent and said (four characters a token), marked estimated. A mission's usage is the sum
  * of its sessions', measured only when every part of it was; nothing when no session ran.
  */
@@ -27,7 +27,12 @@ const rowOf = (session: RoleSession) => ({
 /** Adds a turn's tokens to a session's usage; one estimated turn makes the whole an estimate. */
 export const addUsage = (
   session: RoleSession,
-  tokens: { readonly input: number; readonly output: number },
+  tokens: {
+    readonly input: number
+    readonly output: number
+    readonly cachedRead: number
+    readonly cachedWrite: number
+  },
   measured: boolean,
 ) =>
   mutate('counting a session’s usage', (transaction) =>
@@ -40,6 +45,8 @@ export const addUsage = (
       const usage = {
         inputTokens: (kept?.inputTokens ?? 0) + tokens.input,
         outputTokens: (kept?.outputTokens ?? 0) + tokens.output,
+        cachedReadTokens: (kept?.cachedReadTokens ?? 0) + tokens.cachedRead,
+        cachedWriteTokens: (kept?.cachedWriteTokens ?? 0) + tokens.cachedWrite,
         measured: (kept?.measured ?? true) && measured,
       }
       yield* transaction
@@ -63,6 +70,8 @@ export const setCost = (
         ...rowOf(session),
         inputTokens: 0,
         outputTokens: 0,
+        cachedReadTokens: 0,
+        cachedWriteTokens: 0,
         measured: true,
         costAmount: cost.amount,
         costCurrency: cost.currency,
@@ -80,6 +89,8 @@ export const setCost = (
 export interface Usage {
   readonly inputTokens: number
   readonly outputTokens: number
+  readonly cachedReadTokens: number
+  readonly cachedWriteTokens: number
   /** Null when no session gave one, or they gave it in different currencies. */
   readonly cost: { readonly amount: number; readonly currency: string } | null
   readonly measured: boolean
@@ -105,6 +116,8 @@ export const missionUsage = (missionId: string) =>
     const usage: Usage = {
       inputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0),
       outputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0),
+      cachedReadTokens: rows.reduce((sum, row) => sum + row.cachedReadTokens, 0),
+      cachedWriteTokens: rows.reduce((sum, row) => sum + row.cachedWriteTokens, 0),
       cost:
         currency === undefined || currencies.size > 1
           ? null

@@ -369,8 +369,34 @@ describe('A turn', () => {
     expect(events[5]).toMatchObject({ used: 1200, size: 200_000, cost: null })
     expect(ended).toEqual({
       stopReason: 'end_turn',
-      usage: { totalTokens: 120, inputTokens: 100, outputTokens: 20, thoughtTokens: null },
+      usage: {
+        totalTokens: 120,
+        inputTokens: 100,
+        outputTokens: 20,
+        thoughtTokens: null,
+        cachedReadTokens: null,
+        cachedWriteTokens: null,
+      },
     })
+  })
+
+  test('the cache tokens a turn reports reach its outcome', async () => {
+    const ended = await run(
+      Effect.gen(function* () {
+        const { session } = yield* opened({
+          steps: [{ does: 'says', text: 'Read it' }],
+          usage: {
+            totalTokens: 7800,
+            inputTokens: 300,
+            outputTokens: 100,
+            cachedReadTokens: 6000,
+            cachedWriteTokens: 1400,
+          },
+        })
+        return yield* session.prompt([TextBlock.make({ text: 'read it back' })])
+      }),
+    )
+    expect(ended.usage).toMatchObject({ cachedReadTokens: 6000, cachedWriteTokens: 1400 })
   })
 
   test('a compaction and a wait on the provider arrive as their own events', async () => {
