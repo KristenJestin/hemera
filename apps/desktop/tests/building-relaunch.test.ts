@@ -102,6 +102,8 @@ describe('Back to Planning ends the launch under way', () => {
           yield* backToPlanningFromCheck(mission.id, view.id)
           yield* until(Effect.map(preparationOf(mission.id), (one) => one?.state === 'cancelled'))
           yield* until(Effect.map(workspaceKept(failed?.workspaceId ?? ''), (kept) => !kept))
+          // The branch goes after the Workspace, in the same cleanup.
+          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
           recipe.restore()
           yield* retryNeed(failed?.needId ?? '')
           const afterRetry = yield* getMission(mission.id)
@@ -143,6 +145,8 @@ describe('Back to Planning ends the launch under way', () => {
           yield* refrozen(mission.id)
           held.release()
           yield* until(Effect.map(workspaceKept(preparing.workspaceId ?? ''), (kept) => !kept))
+          // The branch goes after the Workspace, in the same cleanup.
+          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
           return {
             mission: yield* getMission(mission.id),
             preparation: yield* preparationOf(mission.id),
@@ -194,6 +198,8 @@ describe('A launch that did not end in Building leaves nothing in the way', () =
           yield* until(Effect.map(preparationOf(mission.id), (one) => one?.state === 'cancelled'))
           held.release()
           yield* until(Effect.map(workspaceKept(preparing.workspaceId ?? ''), (kept) => !kept))
+          // The branch goes after the Workspace, in the same cleanup.
+          yield* until(Effect.sync(() => !hasBranch(api, BRANCH)))
           return { branch: hasBranch(api, BRANCH), mission: yield* getMission(mission.id) }
         }),
       ),
