@@ -23,7 +23,15 @@
 
 import { isUtf8 } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
@@ -286,6 +294,21 @@ const ABSENT_MODE = '000000'
 const SUBMODULE_MODE = '160000'
 const STATUSES: ReadonlyArray<ChangeStatus> = ['A', 'M', 'D', 'R', 'T']
 
+/**
+ * What a snapshot's tree holds in place of a sensitive file's content: its fingerprint and its
+ * size, never its bytes, so neither the store nor a backup of it holds the value (CT-01, CT-16).
+ */
+export const withheldBlob = (bytes: Uint8Array): string =>
+  `Hemera withheld this file's content.\nsha256 ${sha256Of(bytes)}\nsize ${String(bytes.length)}\n`
+
+/** The fingerprint and size a withheld blob records, or null for any other content. */
+export function withheldOf(bytes: Buffer): { sha256: string; size: number } | null {
+  const match = /^Hemera withheld this file's content\.\nsha256 ([0-9a-f]{64})\nsize (\d+)\n$/.exec(
+    bytes.toString('utf8'),
+  )
+  return match === null ? null : { sha256: match[1] ?? '', size: Number(match[2]) }
+}
+
 /** The blobs a change's sides hold: none for a side it does not have, or a submodule's commit. */
 const blobsOf = (change: RawChange): ReadonlyArray<string> =>
   [
@@ -454,6 +477,15 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
       const { dataFolder } = yield* ProfileHome
       const context = { home: homedir(), platform: process.platform }
       const text = (bytes: Buffer) => bytes.toString('utf8')
+      const sensitive = (path: string) => sensitivePlace(path, context) !== null
+      /** Lines are not counted for a withheld file: they would be the stand-in's. */
+      const countsFor = (
+        change: RawChange,
+        counts: ReturnType<typeof countsOf>,
+      ): { added: number | null; removed: number | null } =>
+        sensitive(change.path) || (change.oldPath !== null && sensitive(change.oldPath))
+          ? { added: null, removed: null }
+          : (counts.get(change.path) ?? { added: null, removed: null })
 
       /** The side of a file as it is kept, from its original bytes. */
       const sideOf = (path: string, mode: string, bytes: Buffer): FileSide => {
@@ -467,10 +499,11 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
             masked: false,
           }
         }
-        if (sensitivePlace(path, context) !== null) {
+        if (sensitive(path)) {
+          const recorded = withheldOf(bytes)
           return {
-            sha256,
-            size: bytes.length,
+            sha256: recorded?.sha256 ?? sha256,
+            size: recorded?.size ?? bytes.length,
             content: null,
             withheld: `content withheld: ${path}`,
             masked: false,
@@ -551,7 +584,26 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                     }),
                   ),
                 )
-          return { raw, counts, sizes }
+          // A sensitive file's side in a snapshot tree is its stand-in: its size is the one recorded.
+          const standIns = [
+            ...new Set(
+              raw
+                .flatMap((change) => [
+                  ...(sensitive(change.oldPath ?? change.path) ? [change.blobBefore] : []),
+                  ...(sensitive(change.path) ? [change.blobAfter] : []),
+                ])
+                .filter((blob) => sizes.has(blob)),
+            ),
+          ]
+          const recorded = new Map(sizes)
+          if (standIns.length > 0) {
+            const read = yield* contentsOf(store, env, standIns, sizes)
+            for (const [blob, bytes] of read) {
+              const withheld = withheldOf(bytes)
+              if (withheld !== null) recorded.set(blob, withheld.size)
+            }
+          }
+          return { raw, counts, sizes: recorded }
         })
 
       /** The contents of blobs, read from the store in batches; a missing one fails the read. */
@@ -607,8 +659,8 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
             path: change.path,
             oldPath: change.oldPath,
             status: change.status,
-            added: counts.get(change.path)?.added ?? null,
-            removed: counts.get(change.path)?.removed ?? null,
+            added: countsFor(change, counts).added,
+            removed: countsFor(change, counts).removed,
             before: side(change.oldPath ?? change.path, change.modeBefore, change.blobBefore),
             after: side(change.path, change.modeAfter, change.blobAfter),
           }))
@@ -682,7 +734,58 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                   GIT_INDEX_FILE: copy,
                   GIT_OBJECT_DIRECTORY: join(store, 'objects'),
                 }
-                yield* run(repository.folder, ['add', '--all'], 'work', { env })
+                // A sensitive file Git would add (untracked, or changed) is left out of `add`, and
+                // a stand-in holding only its fingerprint takes its place in the copied index.
+                const pending = fields(
+                  text(
+                    yield* run(
+                      repository.folder,
+                      [
+                        '--no-optional-locks',
+                        'ls-files',
+                        '-z',
+                        '--others',
+                        '--modified',
+                        '--exclude-standard',
+                      ],
+                      'read',
+                      { env },
+                    ),
+                  ),
+                )
+                const withheld = [...new Set(pending)].filter(
+                  (path) => sensitive(path) && regularFile(join(repository.folder, path)),
+                )
+                yield* run(
+                  repository.folder,
+                  [
+                    'add',
+                    '--all',
+                    '--',
+                    '.',
+                    ...withheld.map((path) => `:(exclude,literal)${path}`),
+                  ],
+                  'work',
+                  { env },
+                )
+                for (const path of withheld) {
+                  const bytes = yield* Effect.try({
+                    try: () => readFileSync(join(repository.folder, path)),
+                    catch: String,
+                  })
+                  const blob = text(
+                    yield* run(repository.folder, ['hash-object', '-w', '--stdin'], 'work', {
+                      env,
+                      input: Buffer.from(withheldBlob(bytes)),
+                    }),
+                  ).trim()
+                  yield* run(
+                    repository.folder,
+                    ['update-index', '--add', '--cacheinfo', '100644', blob, path],
+                    'work',
+                    { env },
+                  )
+                }
                 return text(yield* run(repository.folder, ['write-tree'], 'work', { env })).trim()
               }),
             // A folder left behind is litter in the temporary directory, not a failed snapshot.
@@ -716,8 +819,8 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
             path: change.path,
             oldPath: change.oldPath,
             status: change.status,
-            added: counts.get(change.path)?.added ?? null,
-            removed: counts.get(change.path)?.removed ?? null,
+            added: countsFor(change, counts).added,
+            removed: countsFor(change, counts).removed,
             sizeBefore:
               change.modeBefore === ABSENT_MODE ? null : (sizes.get(change.blobBefore) ?? 0),
             sizeAfter: change.modeAfter === ABSENT_MODE ? null : (sizes.get(change.blobAfter) ?? 0),
@@ -912,6 +1015,15 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
       return service
     }),
   )
+
+/** Whether a path is a regular file: a link or a folder is never read as a sensitive content. */
+function regularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile()
+  } catch {
+    return false
+  }
+}
 
 /** The user's index copied to where the snapshot writes, or nothing when there is none yet. */
 function copyIndex(from: string, to: string): void {

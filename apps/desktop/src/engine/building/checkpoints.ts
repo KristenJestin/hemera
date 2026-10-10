@@ -297,7 +297,8 @@ export const checkpointsLayer = (run: GitBytesSpawn) =>
                 status: statusOf(row),
                 added: row.added,
                 removed: row.removed,
-                binary: row.added === null,
+                binary:
+                  row.added === null && row.beforeWithheld === null && row.afterWithheld === null,
                 untracked: row.untracked,
                 sizeBefore: row.beforeSize,
                 sizeAfter: row.afterSize,

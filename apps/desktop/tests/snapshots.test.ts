@@ -8,6 +8,7 @@
  * and a linked worktree of it standing for the Workspace.
  */
 
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -31,6 +32,7 @@ import {
   type SnapshotOwner,
   Snapshots,
 } from '../src/engine/building/snapshots.ts'
+import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { createMission } from '../src/engine/missions.ts'
 import { DATABASE_FILE } from '../src/engine/migrate.ts'
 import { createProject } from '../src/engine/projects.ts'
@@ -556,6 +558,78 @@ describe('A sensitive file is never copied', () => {
     ])
     expect(seen.rows[0]?.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(foundIn(data, 'hidden-value')).toEqual([])
+  })
+})
+
+describe('A sensitive file never reaches the snapshot store', () => {
+  test('an unignored .env and a changed tracked config/.env.local: the tree names them, but no object of the store and no table holds their values', async () => {
+    const { main, worktree } = workspace()
+    mkdirSync(join(worktree, 'config'))
+    writeFileSync(join(worktree, 'config', '.env.local'), 'MODE=committed-before\n')
+    git(worktree, 'add', '.')
+    git(worktree, 'commit', '-q', '-m', 'config')
+    const untracked = 'API_KEY=store-must-not-hold-71'
+    const changed = 'API_KEY=store-must-not-hold-93'
+
+    const seen = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const checkpointsService = yield* Checkpoints
+          const acme = { name: 'acme', folder: worktree }
+          const start = yield* snapshots.take(acme, attempt(missionId, 'start'))
+          writeFileSync(join(worktree, '.env'), `${untracked}\n`)
+          writeFileSync(join(worktree, 'config', '.env.local'), `${changed}\n`)
+          const end = yield* snapshots.take(acme, attempt(missionId, 'end'))
+          const files = yield* snapshots.changed(missionId, acme, start, end)
+          yield* snapshots.capture(missionId, acme, start, end, files)
+          const checkpoint = yield* checkpointsService.take(missionId, 'review', [
+            { name: 'acme', folder: worktree, baseRef: 'origin/main', baseCommit: null },
+          ])
+          const diff = yield* snapshots.diff(missionId, acme, start, end)
+          const checkpointFiles = yield* checkpointsService.files(checkpoint)
+          return { projectId, end, diff, checkpointFiles }
+        }),
+      ),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const everything = execFileSync(
+      'git',
+      ['cat-file', '--batch-all-objects', '--batch', '--unordered'],
+      { cwd: store },
+    )
+    expect(everything.includes('store-must-not-hold')).toBe(false)
+    expect(
+      filesUnder(store).filter((file) => readFileSync(file).includes('store-must-not-hold')),
+    ).toEqual([])
+    expect(foundIn(data, 'store-must-not-hold')).toEqual([])
+    // The tree still names both files, so a diff lists them, content withheld.
+    expect(treeFiles(store, seen.end, objectsOf(main))).toEqual(
+      expect.arrayContaining(['.env', 'config/.env.local']),
+    )
+    const env = seen.diff.find((file) => file.path === '.env')
+    expect(env).toMatchObject({ status: 'A', added: null, removed: null, before: null })
+    expect(env?.after).toMatchObject({
+      content: null,
+      withheld: 'content withheld: .env',
+      size: untracked.length + 1,
+      sha256: createHash('sha256').update(`${untracked}\n`).digest('hex'),
+    })
+    const local = seen.diff.find((file) => file.path === 'config/.env.local')
+    expect(local?.before?.sha256).toBe(
+      createHash('sha256').update('MODE=committed-before\n').digest('hex'),
+    )
+    expect(local?.after).toMatchObject({
+      content: null,
+      withheld: 'content withheld: config/.env.local',
+      size: changed.length + 1,
+    })
+    expect(seen.checkpointFiles.filter((file) => file.path.includes('.env'))).toMatchObject([
+      { path: '.env', binary: false, sizeAfter: untracked.length + 1 },
+      { path: 'config/.env.local', binary: false, sizeAfter: changed.length + 1 },
+    ])
   })
 })
 
