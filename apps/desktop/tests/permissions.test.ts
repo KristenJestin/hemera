@@ -407,6 +407,44 @@ describe('A Probe writes in its own folder without asking (#170)', () => {
   })
 })
 
+describe('A read-only Git command does not ask (#170)', () => {
+  test.each([
+    'git rev-parse HEAD',
+    'git status --short',
+    'git log --oneline -n 1',
+    'git diff',
+    'git show HEAD:README.md',
+  ])('%s runs without a question', async (line) => {
+    const { answer, questions } = await withProbe(({ probe }) => run(probe, line))
+    expect(questions).toEqual([])
+    expect(answer.text).not.toContain('approvals')
+  })
+
+  test.each([
+    'git -c core.hooksPath=/tmp/hooks status',
+    'git -C .. status',
+    'git diff --output=notes.txt',
+    'git diff --no-index ../2/README.md README.md',
+    'git rev-parse HEAD | sh',
+    `sh -c 'git rev-parse HEAD'`,
+    'git stash',
+    'git checkout -- README.md',
+  ])('%s still asks', async (line) => {
+    const { questions } = await withProbe(({ probe }) => run(probe, line))
+    expect(questions).toHaveLength(1)
+  })
+
+  test('a Project that never allows git log is still refused', async () => {
+    const { answer } = await withBuilder(({ builder, projectId }) =>
+      Effect.gen(function* () {
+        yield* setNeverList(projectId, [NeverProgram.make({ words: ['git', 'log'] })])
+        return yield* run(builder, 'git log --oneline')
+      }),
+    )
+    expect(answer.text).toBe('refused: the Project never allows git log')
+  })
+})
+
 describe("The refusals of a mission's agents, on the effective action", () => {
   test.each([
     ['git push', 'no agent of a mission may run git push'],

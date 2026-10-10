@@ -13,8 +13,8 @@
  *     place, or words that do not read, ask, and so does a catalogue command marked "ask before
  *     running";
  *  4. the local allows, only for what is fully understood: a read inside, a write inside a
- *     Probe's own folder, a plain listing, a catalogue command of the place that does not go
- *     through a shell;
+ *     Probe's own folder, a plain listing, a read-only Git command, a catalogue command of the
+ *     place that does not go through a shell;
  *  5. the judge, which allows or asks;
  *  6. any failure of the judge asks. Never an allow on an error path.
  *
@@ -42,6 +42,7 @@ import {
   neverSaid,
   placesNamed,
   plainListing,
+  readOnlyGit,
   runsAShell,
   wordsOf,
 } from '@hemera/core/domain'
@@ -338,12 +339,8 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           runsAShell(program) ||
           (invocationOf([program, ...args], platform, lookup)?.verbatim ?? false)
         if (call.command !== null) return !call.command.askBeforeRunning && !shell
-        return plainListing({
-          program,
-          args,
-          shell,
-          resolved: findOnPath(program, lookup, platform),
-        })
+        const resolved = { program, args, shell, resolved: findOnPath(program, lookup, platform) }
+        return plainListing(resolved) || readOnlyGit(resolved)
       }
 
       /** Steps 5 and 6: the judge, whose every failure asks. */

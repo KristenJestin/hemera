@@ -576,6 +576,36 @@ export function plainListing(command: ResolvedCommand): boolean {
   )
 }
 
+/** The Git subcommands that only read the repository. */
+const GIT_READS = new Set(['rev-parse', 'status', 'log', 'diff', 'show'])
+/**
+ * What makes one of them write, run something or read outside the repository: a file written by
+ * `--output`, a diff or a conversion program the configuration names, files compared outside the
+ * repository, and an order file read from anywhere (`-O`).
+ */
+const GIT_READ_WRITES = /^(?:(?:--output|--ext-diff|--textconv|--no-index)(?:=|$)|-O)/
+/** Shell syntax in a word: no shell reads it, but a word that holds some is not understood. */
+const SHELL_SYNTAX = /[|&;<>$`\n\r]/
+
+/**
+ * Whether a line is a Git command that only reads: `git` found on the `PATH` as itself, no shell,
+ * no option of Git's own before the subcommand (`-c`, `-C`, `--git-dir`… change what it runs or
+ * where), one of `rev-parse`, `status`, `log`, `diff` or `show`, and nothing after it that writes
+ * a file or runs a program.
+ */
+export function readOnlyGit(command: ResolvedCommand): boolean {
+  if (command.shell || command.resolved === null) return false
+  const written = command.program.replaceAll('\\', '/')
+  const [sub = '', ...rest] = command.args
+  return (
+    programName(command.program) === 'git' &&
+    programName(command.resolved) === 'git' &&
+    (!written.includes('/') || written === command.resolved.replaceAll('\\', '/')) &&
+    GIT_READS.has(sub) &&
+    rest.every((word) => !GIT_READ_WRITES.test(word) && !SHELL_SYNTAX.test(word))
+  )
+}
+
 /** The programs that read code given as a string: running one is going through a shell. */
 const SHELLS = new Set([
   'sh',

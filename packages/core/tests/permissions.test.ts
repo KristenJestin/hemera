@@ -19,6 +19,7 @@ import {
   missionRefusal,
   neverMatch,
   plainListing,
+  readOnlyGit,
   unwrapped,
 } from '../src/domain/index.ts'
 
@@ -341,6 +342,69 @@ describe('A plain listing inside is the only command allowed by the rules', () =
     expect(plainListing({ program: 'ls', args: [], shell: true, resolved: '/usr/bin/ls' })).toBe(
       false,
     )
+  })
+})
+
+describe('A read-only Git command is allowed by the rules (#170)', () => {
+  const git = (args: ReadonlyArray<string>, resolved: string | null = '/usr/bin/git') =>
+    readOnlyGit({ program: 'git', args, shell: false, resolved })
+
+  test.each([
+    [['rev-parse', 'HEAD']],
+    [['rev-parse', '--abbrev-ref', 'HEAD']],
+    [['status']],
+    [['status', '--porcelain=v1', '--short']],
+    [['log', '--oneline', '-n', '5']],
+    [['log', 'main..HEAD', '--', 'src']],
+    [['diff']],
+    [['diff', '--stat', 'HEAD~1']],
+    [['show', 'HEAD:package.json']],
+  ] as const)('git %j reads', (args) => {
+    expect(git(args)).toBe(true)
+  })
+
+  test('git.exe found on the PATH of Windows reads too', () => {
+    expect(git(['status'], 'C:\\Program Files\\Git\\cmd\\git.exe')).toBe(true)
+  })
+
+  test.each([
+    [['-c', 'core.hooksPath=/tmp/hooks', 'status']],
+    [['-c', 'core.pager=sh', 'log']],
+    [['-C', '/elsewhere', 'status']],
+    [['--git-dir=/elsewhere/.git', 'log']],
+    [['--exec-path=/tmp', 'status']],
+    [['-p', 'log']],
+    [['diff', '--output=/tmp/out.txt']],
+    [['log', '--output', 'notes.txt']],
+    [['diff', '--ext-diff']],
+    [['show', '--textconv', 'HEAD']],
+    [['diff', '--no-index', '/etc/passwd', 'x']],
+    [['diff', '-O/etc/passwd']],
+    [['rev-parse', 'HEAD', '|', 'sh']],
+    [['log', '$(touch x)']],
+    [['status', ';', 'rm', 'x']],
+    [['commit', '-m', 'x']],
+    [['add', '.']],
+    [['checkout', '--', 'src']],
+    [['stash']],
+    [['branch', 'new']],
+    [[]],
+  ] as const)('git %j does not', (args) => {
+    expect(git(args)).toBe(false)
+  })
+
+  test('through a shell, a program that is not git itself, or none on the PATH, never', () => {
+    expect(
+      readOnlyGit({ program: 'git', args: ['status'], shell: true, resolved: '/usr/bin/git' }),
+    ).toBe(false)
+    expect(git(['status'], '/tmp/evil/git-wrapper')).toBe(false)
+    expect(git(['status'], null)).toBe(false)
+    expect(
+      readOnlyGit({ program: './git', args: ['status'], shell: false, resolved: '/work/git' }),
+    ).toBe(false)
+    expect(
+      readOnlyGit({ program: 'sh', args: ['-c', 'git status'], shell: false, resolved: '/bin/sh' }),
+    ).toBe(false)
   })
 })
 
