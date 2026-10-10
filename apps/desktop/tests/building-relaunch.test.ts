@@ -21,6 +21,7 @@ import { getProject } from '../src/engine/projects.ts'
 import { saveRecipe } from '../src/engine/recipe.ts'
 import { getWorkspace } from '../src/engine/workspaces.ts'
 import {
+  PACKAGE,
   QUIET,
   READING,
   acmeAt,
@@ -31,7 +32,9 @@ import {
   frozenIn,
   heldRecipe,
   inStage,
+  pushedOnRemote,
   refrozen,
+  refusedWith,
   startedIn,
 } from './building-world.ts'
 import { git } from './repositories.ts'
@@ -177,5 +180,31 @@ describe('A launch that did not end in Building leaves nothing in the way', () =
     expect(seen.mission.stage).toBe('cancelled')
     expect(seen.branch).toBe(false)
     expect(starts.missions).toEqual([])
+  })
+})
+
+describe('A check is launched as is only when it checked everything it read', () => {
+  test('a check whose agent did not answer needs Launch anyway', async () => {
+    const { run } = buildingEngine(data, work, agents(QUIET))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main, bare } = yield* acmeAt(work)
+          const { mission } = yield* frozenIn(project.id, main)
+          pushedOnRemote(work, bare, (clone) =>
+            writeFileSync(join(clone, 'package.json'), PACKAGE.replace('{}', '{ "csv": "1.0.0" }')),
+          )
+          yield* checkMission(mission.id)
+          const view = yield* checked(mission.id)
+          const plain = yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
+          yield* launchMission(mission.id, view.id, 'launch_anyway')
+          yield* inStage(mission.id, 'building')
+          return { view, plain }
+        }),
+      ),
+    )
+    expect(seen.view.agent.state).toBe('unanswered')
+    expect(refusedWith(seen.plain)?.join(' ')).toMatch(/Launch anyway/)
   })
 })

@@ -322,7 +322,8 @@ const choiceRefusal = (missionId: string, checkId: string, choice: LaunchChoice)
     }
     if (check.state === 'running') return { check, reasons: ['The check is still running.'] }
     if (check.state === 'failed') return { check, reasons: ['The check failed: check again.'] }
-    const verdict = viewOf(check, key).verdict
+    const view = viewOf(check, key)
+    const { verdict } = view
     if (verdict.blockedBy.length > 0) {
       return {
         check,
@@ -335,6 +336,13 @@ const choiceRefusal = (missionId: string, checkId: string, choice: LaunchChoice)
       return {
         check,
         reasons: ['Something moved since the Freeze: Launch anyway, or go back to Planning.'],
+      }
+    }
+    // What the agent was handed and did not judge was not checked: launched only knowingly.
+    if (view.agent.state === 'unanswered' && choice !== 'launch_anyway') {
+      return {
+        check,
+        reasons: ['The agent of the check did not answer: Launch anyway, or check again.'],
       }
     }
     return { check, reasons: [] }
