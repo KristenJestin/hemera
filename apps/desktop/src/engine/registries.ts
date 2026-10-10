@@ -4,9 +4,10 @@
  * restored Profile with the world, in their order.
  */
 
+import { SNAPSHOTS_FOLDER } from './building/snapshots.ts'
 import { MISSIONS_FOLDER } from './memory/files.ts'
 import { RESTORED_REQUESTS } from './permissions/requests.ts'
 import { RESTORED_PROBES } from './planning/probes.ts'
 
-export const BACKUP_FOLDERS: ReadonlyArray<string> = [MISSIONS_FOLDER]
+export const BACKUP_FOLDERS: ReadonlyArray<string> = [MISSIONS_FOLDER, SNAPSHOTS_FOLDER]
 export const RECONCILIATION_STEPS = [RESTORED_REQUESTS, RESTORED_PROBES] as const

@@ -30,6 +30,7 @@ import { ModelsRpcs } from './models.ts'
 import { ChatsRpcs } from './chats.ts'
 import { SetupRpcs } from './setup.ts'
 import { TesterRpcs } from './tester.ts'
+import { DeveloperRpcs } from './developer.ts'
 import { StartRpcs } from './start.ts'
 import { JiraTokenEngineRpcs, TicketsRpcs } from './tickets.ts'
 import { PlanningRpcs } from './planning.ts'
@@ -137,6 +138,7 @@ export const EngineRpcs = RpcGroup.make(
   ChatsRpcs,
   SetupRpcs,
   TesterRpcs,
+  DeveloperRpcs,
   StartRpcs,
   PlanningRpcs,
   ResourcesRpcs,
