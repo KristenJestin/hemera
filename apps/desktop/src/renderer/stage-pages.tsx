@@ -21,8 +21,6 @@ export interface StageFrame {
   now?: string | undefined
   /** Why a gesture of the page did not go through, in words. */
   notice?: string | undefined
-  /** Whether the needs are drawn above the page; Planning answers its own in its rail. */
-  needs?: boolean | undefined
 }
 
 /** What a stage's page is handed: the mission, and the way to open a view over it. */

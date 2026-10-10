@@ -16,7 +16,8 @@ const sameItem = (one: Planning.DiscussionItem, other: Planning.DiscussionItem):
 /**
  * The page of a mission in Planning: the Spec in the centre, what calls for the user in the rail,
  * and the views it opens over itself — a discussion, a Probe's report. The head says what the
- * Planner does; the needs are not drawn above it, the rail holds the questions.
+ * Planner does. The Planner's questions are not needs: the needs above the page are the others
+ * (a permission, something missing), drawn only when one waits.
  */
 export function PlanningStage({
   link,
@@ -80,6 +81,5 @@ export function PlanningStage({
     }),
     now: view.now,
     notice: view.refused,
-    needs: false,
   })
 }

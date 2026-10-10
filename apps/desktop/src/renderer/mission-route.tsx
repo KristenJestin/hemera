@@ -154,17 +154,15 @@ export function MissionPage({
         onCancel={header.cancel ? cancel : undefined}
         notice={notice ?? parts.notice}
         needs={
-          parts.needs === false ? undefined : (
-            <MissionFrameNeeds
-              rows={rows}
-              projects={project === null ? undefined : [project.name]}
-              on={needHandlersOf(mission, {
-                answer: actions.answer,
-                recheck: actions.recheck,
-                openSettings: actions.openSettings,
-              })}
-            />
-          )
+          <MissionFrameNeeds
+            rows={rows}
+            projects={project === null ? undefined : [project.name]}
+            on={needHandlersOf(mission, {
+              answer: actions.answer,
+              recheck: actions.recheck,
+              openSettings: actions.openSettings,
+            })}
+          />
         }
         base={parts.base}
         views={all}

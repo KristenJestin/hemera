@@ -204,7 +204,7 @@ describe('The base of each stage', () => {
     expect(STAGE_PAGES.Planning).toBeDefined()
   })
 
-  test('a page adds its views over itself, its Now line, and may leave the needs out', () => {
+  test('a page adds its views over itself and its Now line', () => {
     const pages = {
       Planning: ({ frame }: StagePageProps): ReactNode =>
         frame({
@@ -219,16 +219,13 @@ describe('The base of each stage', () => {
             },
           ],
           now: 'Writing the requirements',
-          needs: false,
         }),
     }
-    const waiting = mission({ needs: [need('n1', 'Who may read the audit log?')] })
     const frame: MissionFrameState = { open: ['probe:p1'], shown: 'probe:p1' }
-    const markup = drawn({ pages, mission: waiting, frame })
+    const markup = drawn({ pages, frame })
     expect(markup).toContain('What Probe #1 found')
     expect(markup).toMatch(/data-base=""[^>]*inert/)
     expect(markup).toMatch(/data-now=""[^>]*>Writing the requirements</)
-    expect(markup).not.toContain('Who may read the audit log?')
   })
 
   test('a page is told why its Freeze was refused, and may say why a gesture was', () => {
