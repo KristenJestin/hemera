@@ -554,7 +554,8 @@ export const agentSessions = sqliteTable(
     modelLevel: text('model_level'),
     /**
      * The instructions its agent was first started with, as sent: every later start of its agent
-     * and every compaction sends them again, whatever became of its thread.
+     * sends them again, whatever became of its thread. A compaction writes them again, and the
+     * tools its agent is granted follow what they say of the tester mode.
      */
     instructions: text('instructions'),
     createdAt: text('created_at').notNull(),

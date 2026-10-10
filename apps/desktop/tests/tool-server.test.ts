@@ -241,7 +241,10 @@ describe('An agent started bare reaches Hemera’s tools over real MCP', () => {
               }),
               acpTracesLayer(data),
               defaultPermissionAnswerLayer,
-              Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
+              Layer.succeed(SessionInstructions, {
+                of: () => Effect.succeed('# Instructions'),
+                renewed: () => Effect.succeed('# Instructions'),
+              }),
             )
             yield* AgentRuntime.use((runtime) =>
               runtime.prompt(session.id, [TextBlock.make({ text: 'say hello to Acme' })]),

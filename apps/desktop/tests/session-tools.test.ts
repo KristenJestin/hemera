@@ -1,7 +1,7 @@
 /**
  * The tools of a role session across its restarts (#154): the tester mode's two tools are handed
  * from the preference at the session's first start, then kept with its instructions until the
- * session is replaced, so a restart keeps the cached tool list in front of the
+ * session is replaced or compacted, so a restart keeps the cached tool list in front of the
  * conversation and the tools never disagree with the instructions.
  */
 
@@ -18,7 +18,7 @@ import { writePreferences } from '../src/engine/preferences.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { instructionsKept } from '../src/engine/sessions/store.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { type World, acmeIn, sessionsEngine, within } from './sessions-world.ts'
+import { type World, acmeIn, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 
 let data: string
 let work: string
@@ -156,6 +156,42 @@ describe('A session keeps the tester tools it started with, across its restarts'
       ),
     )
     expect(withoutTesterTools(before)).toBe(true)
+    expect(withTesterTools(after)).toBe(true)
+  })
+
+  test('a compaction the agent signals follows the preference again, instructions and tools', async () => {
+    const hold = held()
+    let seen = 0
+    const { world, run } = engine((index) =>
+      index === 0
+        ? {
+            turns: [[{ does: 'compacts', id: 'compact-1' }]],
+            steps: [{ does: 'says', text: 'done' }],
+            between: () => {
+              seen += 1
+              return seen === 1 ? hold.promise : Promise.resolve()
+            },
+          }
+        : { steps: [{ does: 'says', text: 'done' }] },
+    )
+    const [before, after] = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          const started = yield* toolsOfAgent(world, 0)
+          yield* tester(true)
+          hold.release()
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2))
+          yield* settled(session.id)
+          return [started, yield* toolsAtNextStart(session.id)] as const
+        }),
+      ),
+    )
+    expect(withoutTesterTools(before)).toBe(true)
+    expect(text(world.agents[0]?.answers.prompts[1] ?? [])).toContain(TESTER_PARAGRAPH)
     expect(withTesterTools(after)).toBe(true)
   })
 })

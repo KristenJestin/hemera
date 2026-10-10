@@ -11,8 +11,8 @@
  *   at once for an agent that does not obey notes; redirect, by cancelling the turn and sending.
  * - **Health (CT-12, CT-15).** A session in a turn with no update, no tool call and no command of
  *   its own running for 5 minutes, and not waiting on its provider, is stuck: its parent is told,
- *   then it is replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
- *   the brief again; past 80 % of its window, an agent with no such signal is replaced.
+ *   then it is replaced. A dead agent is replaced. A compaction the agent signals writes the instructions
+ *   again and sends them with the brief; past 80 % of its window, an agent with no such signal is replaced.
  * - **Slots.** A child that counts in the cap, idle as long as a turn may be silent while a phase
  *   of its Project waits for a slot, is ended: its slot goes to the phase, its parent is told.
  * - **Replacement.** The old session is stopped and kept, a fresh one of the same role, lineage
@@ -57,7 +57,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { ADAPTERS } from '../agents/adapters/index.ts'
 import { type AgentEvent, type ImageNotAccepted, TextBlock } from '../agents/client.ts'
 import { Discovery } from '../agents/discovery.ts'
-import { type AgentFailure, AgentRuntime } from '../agents/runtime.ts'
+import { type AgentFailure, AgentRuntime, SessionInstructions } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import { Memory } from '../memory/index.ts'
@@ -109,7 +109,6 @@ import {
   endSession,
   getSession,
   insertSession,
-  instructionsKept,
   openSession,
   sessionEvent,
   sessionsIn,
@@ -293,6 +292,7 @@ const capitalized = (text: string): string => `${text.charAt(0).toUpperCase()}${
 
 type Needs =
   | Database
+  | SessionInstructions
   | DomainEvents
   | Secrets
   | AgentRuntime
@@ -898,7 +898,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       /** After a compaction: the three layers and the brief again, at the next safe point. */
       const instructAgain = (driver: Driver) =>
         Effect.gen(function* () {
-          const instructions = (yield* instructionsKept(driver.session.id)) ?? ''
+          // Written again: the conversation is rebuilt, so it takes the tester mode as it is now.
+          const instructions = yield* SessionInstructions.use((one) =>
+            one.renewed(driver.session.id),
+          )
           driver.brief = yield* briefOf(driver.entry, driver.session.owner, driver.session, null)
           yield* storeDelivery({
             owner: driver.session.owner,

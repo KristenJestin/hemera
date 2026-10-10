@@ -70,11 +70,9 @@ const unknownRole = (id: string): RoleEntry => ({
   ledByUser: false,
 })
 
-/** A session's three layers, written once, kept on the session. */
-const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
+/** A session's three layers, written from what holds now and kept on the session. */
+const writeInstructions = (sessionId: string, platform: NodeJS.Platform) =>
   Effect.gen(function* () {
-    const kept = yield* instructionsKept(sessionId)
-    if (kept !== null) return kept
     const session = yield* getSession(sessionId)
     const registry = yield* RoleRegistry
     const role = roleNamed(registry, session.role) ?? unknownRole(session.role)
@@ -109,6 +107,13 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
     return text
   })
 
+/** A session's three layers, written once, kept on the session. */
+const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
+  Effect.gen(function* () {
+    const kept = yield* instructionsKept(sessionId)
+    return kept ?? (yield* writeInstructions(sessionId, platform))
+  })
+
 /** The runtime's `SessionInstructions`, from the role registry and the session's place. */
 export const sessionInstructionsLayer = (platform: NodeJS.Platform = process.platform) =>
   Layer.effect(
@@ -117,19 +122,21 @@ export const sessionInstructionsLayer = (platform: NodeJS.Platform = process.pla
       const context = yield* Effect.context<
         Database | DomainEvents | Secrets | RoleRegistry | SpecLanguage | TesterMode
       >()
-      return {
-        of: (sessionId) =>
-          instructionsOf(sessionId, platform).pipe(
-            Effect.provide(context),
-            // Instructions that cannot be read are never invented: the start fails, in words.
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.fail(
-                    refusedWhile('reading the session’s instructions')(Cause.squash(cause)),
-                  ),
-            ),
+      // Instructions that cannot be read are never invented: the start fails, in words.
+      const refused = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provide(context),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.fail(
+                  refusedWhile('reading the session’s instructions')(Cause.squash(cause)),
+                ),
           ),
+        )
+      return {
+        of: (sessionId) => refused(instructionsOf(sessionId, platform)),
+        renewed: (sessionId) => refused(writeInstructions(sessionId, platform)),
       }
     }),
   )

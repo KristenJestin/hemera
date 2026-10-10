@@ -113,6 +113,7 @@ const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void>
           asked.push('instructions')
           return `# Instructions of ${session}`
         }),
+      renewed: (session) => Effect.succeed(`# Instructions of ${session}`),
     }),
   )
   return { agents, tokens, asked, layers }
