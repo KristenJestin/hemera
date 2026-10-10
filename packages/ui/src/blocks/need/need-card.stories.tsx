@@ -302,3 +302,54 @@ export const EnvironmentOpensSettings: Story = {
     await expect(args.onSettings).toHaveBeenCalled()
   },
 }
+
+/**
+ * A Probe's request with no reason of its own and no judge: who asks (the band), what in words
+ * (the title), why in plain words and how to stop being asked, and the three choices.
+ */
+export const PermissionWithoutJudge: Story = {
+  args: {
+    title: 'Write tests/cli/install.test.ts in its Probe folder',
+    text: undefined,
+    role: 'probe',
+    ask: {
+      kind: 'permission',
+      command: 'fs_write ~/.hemera/probes/ACME-12/1/tests/cli/install.test.ts',
+      hemeraReason:
+        'No rule of this Project allows this write for the Probe, and no judge is set up to rate it.',
+      settings: 'Hemera Auto',
+      choices: ['allow-once', 'allow-for-mission', 'deny'],
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/no judge is set up to rate it/)).toBeVisible()
+    await expect(canvas.getByText(/Allow for this mission stops these questions/)).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Open Settings › Hemera Auto' }))
+    await expect(args.onSettings).toHaveBeenCalled()
+    for (const name of ['Allow once', 'Allow for this mission', 'Deny']) {
+      await expect(canvas.getByRole('button', { name })).toBeVisible()
+    }
+  },
+}
+
+/** Outside a mission, nothing lasts beyond one answer: only the setting is offered as a way out. */
+export const PermissionWithoutJudgeOutsideMission: Story = {
+  args: {
+    ...PermissionWithoutJudge.args,
+    missionKey: undefined,
+    ask: {
+      kind: 'permission',
+      command: 'git status',
+      hemeraReason:
+        'No rule of this Project allows this command for the Chat, and no judge is set up to rate it.',
+      settings: 'Hemera Auto',
+      choices: ['allow-once', 'deny'],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByText(/Allow for this mission stops/)).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Open Settings › Hemera Auto' })).toBeVisible()
+  },
+}
