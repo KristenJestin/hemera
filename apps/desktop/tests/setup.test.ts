@@ -248,6 +248,108 @@ describe('Every change is a proposal the user accepts', () => {
   })
 })
 
+describe('A batch is checked against the setup as it will stand', () => {
+  test('with no repository in main, a command and a step for a repository proposed earlier in the run are cards, and Accept all applies them', async () => {
+    const { world, run } = sessionsEngine(data, () =>
+      proposing(
+        [{ kind: 'repository', path: 'web' }],
+        [{ kind: 'command', name: 'web: test', type: 'test', line: 'npm test', repository: 'web' }],
+        [
+          { kind: 'repository', path: 'shared' },
+          { kind: 'step', step: 'run', repository: 'shared', command: 'web: test' },
+        ],
+      ),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const cards = yield* cardsOf(project.id)
+          const all = yield* acceptAll(project.id)
+          return { cards, all, commands: yield* listCommands(project.id) }
+        }),
+      ),
+    )
+    const answers = world.agents[0]?.answers.toolAnswers.map((one) => one.text) ?? []
+    expect(answers.filter((text) => text.startsWith('refused'))).toEqual([])
+    expect(seen.cards.map((card) => card.title)).toEqual([
+      'Declare the repository web',
+      'Add the command web: test',
+      'Declare the repository shared',
+      'Add a preparation step that runs web: test',
+    ])
+    expect(seen.all.map((card) => card.state)).toEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+      'accepted',
+    ])
+    expect(seen.commands.map((one) => one.name)).toEqual(['web: test'])
+  })
+
+  test('a command accepted while its repository card waits is refused at the click, and accepted once the repository is', async () => {
+    const { run } = sessionsEngine(data, () =>
+      proposing(
+        [{ kind: 'repository', path: 'web' }],
+        [{ kind: 'command', name: 'web: test', type: 'test', line: 'npm test', repository: 'web' }],
+      ),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [web, command] = yield* cardsOf(project.id)
+          if (web === undefined || command === undefined) {
+            return yield* Effect.die(new Error('two cards'))
+          }
+          const early = yield* acceptCard(command.id)
+          yield* acceptCard(web.id)
+          return { early, later: yield* acceptCard(command.id) }
+        }),
+      ),
+    )
+    expect(seen.early).toMatchObject({
+      state: 'pending',
+      refusal: 'its repository web is still a proposal: accept it first',
+    })
+    expect(seen.later.state).toBe('accepted')
+  })
+
+  test('a second run proposing the same changes adds no duplicate of a pending card, and Accept all goes through', async () => {
+    const { world, run } = sessionsEngine(data, () =>
+      proposing(
+        [{ kind: 'repository', path: 'web' }],
+        [{ kind: 'command', name: 'web: test', type: 'test', line: 'npm test', repository: 'web' }],
+        [{ kind: 'variable', name: 'ACME_REGION', value: 'eu-west-1' }],
+      ),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          yield* setUp(project.id)
+          const cards = yield* cardsOf(project.id)
+          return { cards, all: yield* acceptAll(project.id) }
+        }),
+      ),
+    )
+    expect(seen.cards.map((card) => card.title)).toEqual([
+      'Declare the repository web',
+      'Add the command web: test',
+      'Set the variable ACME_REGION',
+    ])
+    expect(seen.all.map((card) => card.state)).toEqual(['accepted', 'accepted', 'accepted'])
+    const second = world.agents[1]?.answers.toolAnswers[1]?.text
+    expect(second).toContain('already proposed')
+  })
+})
+
 /** Every file under a folder, as text, to look for a value in. */
 const everything = (folder: string): string =>
   readdirSync(folder, { recursive: true, withFileTypes: true })

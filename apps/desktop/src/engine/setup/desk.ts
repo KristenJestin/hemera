@@ -122,7 +122,11 @@ export const setupDeskLayer = Layer.effect(
             answered(
               [
                 `Proposed ${String(cards.length)} change(s), one card each; nothing changes until the user accepts a card:`,
-                ...cards.map((card) => `- ${card.title}`),
+                ...cards.map((card) =>
+                  card.already
+                    ? `- ${card.title} (already proposed, its card still waits)`
+                    : `- ${card.title}`,
+                ),
               ].join('\n'),
             ),
           ),
