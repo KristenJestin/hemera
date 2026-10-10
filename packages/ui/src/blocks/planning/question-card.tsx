@@ -53,8 +53,19 @@ function ChangedAnswer({ question }: { question: Question }): ReactNode {
   )
 }
 
-/** A question the Planner withdrew, replaced or made moot: readable, with its reason. */
-function RetiredQuestion({ question }: { question: Question }): ReactNode {
+/**
+ * A question the Planner withdrew, replaced or made moot: readable, with its reason, and the
+ * discussion held on it read again from it.
+ */
+function RetiredQuestion({
+  question,
+  discussed,
+  onDiscuss,
+}: {
+  question: Question
+  discussed: boolean
+  onDiscuss: QuestionCardProps['onDiscuss']
+}): ReactNode {
   const why = RETIRED_WORDS[question.state]?.(question) ?? ''
   return (
     <article
@@ -66,6 +77,16 @@ function RetiredQuestion({ question }: { question: Question }): ReactNode {
         <span className="line-clamp-2 break-words">{question.text}</span>
         <span className="text-xs break-words">{why}</span>
       </div>
+      {discussed && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onDiscuss({ kind: 'question', id: question.id })}
+        >
+          <IconMessages size="sm" />
+          Open the discussion
+        </Button>
+      )}
     </article>
   )
 }
@@ -280,7 +301,9 @@ export function QuestionCard({
   // Answered before the page opened: one line. Answered here: the card stays in place, answered.
   const [answeredBefore] = useState(question.state === 'answered')
   const answer = latest(question)
-  if (RETIRED.has(question.state)) return <RetiredQuestion question={question} />
+  if (RETIRED.has(question.state)) {
+    return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
+  }
   if (foldAnswered && answeredBefore && answer !== undefined && !changing) {
     return <AnsweredLine question={question} answer={answer} onChange={() => setChanging(true)} />
   }
