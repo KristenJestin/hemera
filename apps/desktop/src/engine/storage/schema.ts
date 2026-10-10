@@ -14,6 +14,7 @@ import type { Masked } from '@hemera/core/domain'
 import { sql } from 'drizzle-orm'
 import {
   type AnySQLiteColumn,
+  blob,
   check,
   index,
   integer,
@@ -2110,6 +2111,139 @@ export const ticketWrites = sqliteTable(
     updatedAt: text('updated_at').notNull(),
   },
   (table) => [index('ticket_writes_of_mission').on(table.missionId)],
+)
+
+/**
+ * The contents the snapshots and the checkpoints copied (#140, CT-01), once each across the
+ * Profile, keyed by the sha256 of the original bytes: what reads a diff back once the Workspace
+ * and Git's objects are gone. `bytes` is the content as it is kept: masked when `masked` says so
+ * (a text in which masking replaced something), the original bytes otherwise, binaries included.
+ * `size` is the original's. A sensitive file's content is never here.
+ */
+export const fileContents = sqliteTable('file_contents', {
+  sha256: text('sha256').primaryKey(),
+  bytes: blob('bytes', { mode: 'buffer' }).notNull(),
+  size: integer('size').notNull(),
+  masked: integer('masked', { mode: 'boolean' }).notNull(),
+})
+
+/**
+ * One side of a file a snapshot captured (#140): the file at `path` in `tree`, a tree of the
+ * mission's snapshot store, for one repository of its Workspace by its name. `sha256` is the
+ * fingerprint of its original bytes and the key of its content; `withheld` says why the content
+ * was not copied ("content withheld: .env"), and is null when it was. A file absent from the tree
+ * has no row.
+ */
+export const snapshotFiles = sqliteTable(
+  'snapshot_files',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    tree: text('tree').notNull(),
+    path: text('path').notNull(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    withheld: text('withheld'),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repository, table.tree, table.path] })],
+)
+
+/**
+ * The files changed between two trees of a repository, as a capture listed them (#140), in Git's
+ * order (`position`): Git's status letter, the path before a rename, and the lines added and
+ * removed, null for a binary file.
+ */
+export const snapshotChanges = sqliteTable(
+  'snapshot_changes',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    fromTree: text('from_tree').notNull(),
+    toTree: text('to_tree').notNull(),
+    position: integer('position').notNull(),
+    path: text('path').notNull(),
+    oldPath: text('old_path'),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.missionId, table.repository, table.fromTree, table.toTree, table.path],
+    }),
+  ],
+)
+
+/**
+ * A checkpoint of a mission's Workspace (#140): the moment it names (`review`, `review_entry`,
+ * `round_end`) and when it was taken. Its repositories and its files are copied beside it.
+ */
+export const checkpoints = sqliteTable(
+  'checkpoints',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    takenAt: text('taken_at').notNull(),
+  },
+  (table) => [index('checkpoints_of_mission').on(table.missionId)],
+)
+
+/**
+ * One repository of a checkpoint, by its name in the Workspace: its `HEAD` (null with no commit
+ * yet), the snapshot tree of its working tree, its base branch and the merge base the files are
+ * listed from (null when there is no commit at all).
+ */
+export const checkpointRepositories = sqliteTable(
+  'checkpoint_repositories',
+  {
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    position: integer('position').notNull(),
+    head: text('head'),
+    tree: text('tree').notNull(),
+    base: text('base'),
+    mergeBase: text('merge_base'),
+  },
+  (table) => [primaryKey({ columns: [table.checkpointId, table.repository] })],
+)
+
+/**
+ * One file of a checkpoint, from the merge base to the tree, in Git's order: its status letter,
+ * its path before a rename, its lines added and removed (null for a binary), whether Git does not
+ * track it, and each side's fingerprint, size and why its content was withheld, if it was. A side
+ * the file does not have (before an addition, after a deletion) is null.
+ */
+export const checkpointFiles = sqliteTable(
+  'checkpoint_files',
+  {
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    position: integer('position').notNull(),
+    path: text('path').notNull(),
+    oldPath: text('old_path'),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+    untracked: integer('untracked', { mode: 'boolean' }).notNull(),
+    beforeSha256: text('before_sha256'),
+    beforeSize: integer('before_size'),
+    beforeWithheld: text('before_withheld'),
+    afterSha256: text('after_sha256'),
+    afterSize: integer('after_size'),
+    afterWithheld: text('after_withheld'),
+  },
+  (table) => [primaryKey({ columns: [table.checkpointId, table.repository, table.path] })],
 )
 
 /**

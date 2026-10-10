@@ -86,18 +86,32 @@ function end(child: ChildProcess): void {
 const exited = (child: ChildProcess): boolean =>
   child.pid === undefined || child.exitCode !== null || child.signalCode !== null
 
+/** What a call may hand Git beyond its arguments: variables of its environment, and its input. */
+export interface GitCallOptions {
+  readonly env?: Readonly<Record<string, string>>
+  readonly input?: Uint8Array
+}
+
+/** Runs one command in `folder` and answers the bytes it printed, as they are. */
+export type GitBytesSpawn = (
+  folder: string,
+  args: ReadonlyArray<string>,
+  kind: CallClass,
+  options?: GitCallOptions,
+) => Effect.Effect<Buffer, GitRefusal>
+
 /**
  * The machine's spawn: a child with its arguments and no shell. Abandoned (interrupted, or cut at
  * its limit), it is ended, and the interruption returns once it has exited, not once it was told
- * to go.
+ * to go. What it printed is answered as bytes: a blob is not text.
  */
-export const spawnGit =
-  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitSpawn =>
-  (folder, args, kind) => {
-    const run = Effect.callback<string, GitRefusal>((resume) => {
+export const spawnGitBytes =
+  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitBytesSpawn =>
+  (folder, args, kind, options = {}) => {
+    const run = Effect.callback<Buffer, GitRefusal>((resume) => {
       const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...options.env, GIT_TERMINAL_PROMPT: '0' },
+        stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
         detached: process.platform !== 'win32',
       })
@@ -105,12 +119,17 @@ export const spawnGit =
       const err: Buffer[] = []
       let printed = 0
       let settled = false
-      const settle = (answer: Effect.Effect<string, GitRefusal>) => {
+      const settle = (answer: Effect.Effect<Buffer, GitRefusal>) => {
         if (settled) return
         settled = true
         resume(answer)
       }
-      child.stdout.on('data', (chunk: Buffer) => {
+      if (options.input !== undefined && child.stdin !== null) {
+        // A command that stops reading early closes its end: what is left is not its to read.
+        child.stdin.on('error', () => {})
+        child.stdin.end(options.input)
+      }
+      child.stdout?.on('data', (chunk: Buffer) => {
         printed += chunk.length
         if (printed > OUTPUT_LIMIT) {
           end(child)
@@ -128,7 +147,7 @@ export const spawnGit =
         }
         out.push(chunk)
       })
-      child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
+      child.stderr?.on('data', (chunk: Buffer) => err.push(chunk))
       child.once('error', (failure: NodeJS.ErrnoException) =>
         settle(
           failure.code === 'ENOENT'
@@ -141,7 +160,7 @@ export const spawnGit =
       child.once('close', (code) =>
         settle(
           code === 0
-            ? Effect.succeed(Buffer.concat(out).toString('utf8'))
+            ? Effect.succeed(Buffer.concat(out))
             : Effect.fail(
                 new GitFailed({
                   args: [...args],
@@ -168,6 +187,14 @@ export const spawnGit =
       }),
     )
   }
+
+/** The same spawn, answering what Git printed as text. */
+export const spawnGit =
+  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitSpawn =>
+  (folder, args, kind) =>
+    spawnGitBytes(program, mask)(folder, args, kind).pipe(
+      Effect.map((printed) => printed.toString('utf8')),
+    )
 
 /** A repository as `git status` reads it. */
 export interface GitStatus {

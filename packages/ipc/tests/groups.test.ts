@@ -272,6 +272,7 @@ const memoryHandlers = {
   'setup.changes': unused,
   'tester.findings': unused,
   'tester.folder': unused,
+  'snapshots.diagnose': unused,
   'start.search': unused,
   'start.create': unused,
   'home.sinceYouLeft': unused,
