@@ -1,9 +1,11 @@
+import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { Menu } from '../../components/menu/menu.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { type SheetView, type SheetWidth, SheetStack } from '../../components/sheet/sheet.tsx'
 import { IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
+import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
 import { type Ball, BALL_LEGENDS, BallMark } from '../../blocks/ball/ball-mark.tsx'
 import { TicketLink } from '../../blocks/mission/mission-marks.tsx'
 import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
@@ -168,7 +170,7 @@ export function MissionFrame({
           <span className={KEY}>{missionKey}</span>
           <h1 className={TITLE}>{title}</h1>
           <div className={END}>
-            {action}
+            <StageAction action={action} />
             {onCancel !== undefined && (
               <CancelMission missionKey={missionKey} onCancel={onCancel} />
             )}
@@ -240,6 +242,30 @@ export function MissionFrame({
         />
       </div>
     </div>
+  )
+}
+
+/**
+ * The stage's action, fading in when the engine offers it — Freeze as Planning settles — and out
+ * when it is gone, on `crossfade`: it comes to its place, nothing beside it moves.
+ */
+function StageAction({ action }: { action: ReactNode }): ReactNode {
+  const fade = useTransition(crossfade)
+  return (
+    <AnimatePresence initial={false}>
+      {action !== undefined && action !== null && action !== false && (
+        <motion.div
+          key="action"
+          className="flex"
+          initial={CROSSFADE.from}
+          animate={CROSSFADE.to}
+          exit={CROSSFADE.from}
+          transition={fade}
+        >
+          {action}
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
