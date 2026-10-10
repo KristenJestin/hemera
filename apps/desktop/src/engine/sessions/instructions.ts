@@ -1,13 +1,19 @@
 /**
  * A session's instructions, in three layers set once at its start:
  *
- * 1. Hemera's base, every role (`base.ts`, its placeholders filled here);
+ * 1. Hemera's base, every role (`base.ts`, its placeholders filled here), then the session's own
+ *    part of it: its owner, the languages and the tester paragraph;
  * 2. the role's layer, from the role registry;
  * 3. the Project's layer: the repositories' own instruction files (`CLAUDE.md`, `AGENTS.md`), sent
  *    only to an agent that does not read them itself when run bare, never both.
  *
- * Claude Code takes them as its custom system prompt; Codex and OpenCode as an `embedded_resource`
- * in the first message. A later change of a template applies to the next session.
+ * What every session of a role shares comes first (the base, the role's layer), then the cache
+ * boundary (`agents/prompt-blocks.ts`), then what belongs to the session (its part of the base,
+ * the Project's layer): the provider reads the first part again for the next mission.
+ *
+ * Claude Code takes them as its custom system prompt, in blocks around the boundary; Codex and
+ * OpenCode as an `embedded_resource` in the first message, in one text. A later change of a
+ * template applies to the next session.
  */
 
 import { readFileSync } from 'node:fs'
@@ -22,7 +28,8 @@ import { asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { AgentProvider } from '@hemera/core/domain'
 
-import { BASE } from './base.ts'
+import { SYSTEM_PROMPT_BOUNDARY } from '../agents/prompt-blocks.ts'
+import { BASE, SESSION } from './base.ts'
 import type { RoleEntry } from './roles.ts'
 
 /** What the base layer's placeholders are filled with. */
@@ -58,25 +65,27 @@ const kept = (template: string, name: string, keep: boolean): string =>
     (_, inside: string) => (keep ? inside : ''),
   )
 
-/** Hemera's base, its placeholders filled and its conditional blocks kept or dropped. */
+const finished = (text: string): string => text.replace(/\n{3,}/g, '\n\n').trim()
+
+/** Hemera's base, shared by every session of a role: its role's blocks kept, the rest dropped. */
 export function renderBase(values: BaseValues, template: string = BASE): string {
   const blocks = kept(
-    kept(
-      kept(template, 'readsMemory', values.readsMemory),
-      'testerMode',
-      values.testerMode !== null,
-    ),
+    kept(template, 'readsMemory', values.readsMemory),
     'hemeraOnly',
     values.hemeraOnly,
   )
-  return blocks
-    .replaceAll('{owner}', values.owner)
-    .replaceAll('{role}', values.role)
-    .replaceAll('{user.language}', languageName(values.userLanguage))
-    .replaceAll('{project.specLanguage}', languageName(values.specLanguage))
-    .replaceAll('{testerModeParagraph}', values.testerMode ?? '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return finished(blocks.replaceAll('{role}', values.role))
+}
+
+/** What belongs to one session: its owner, the two languages, the tester paragraph when on. */
+export function renderSession(values: BaseValues, template: string = SESSION): string {
+  return finished(
+    kept(template, 'testerMode', values.testerMode !== null)
+      .replaceAll('{owner}', values.owner)
+      .replaceAll('{user.language}', languageName(values.userLanguage))
+      .replaceAll('{project.specLanguage}', languageName(values.specLanguage))
+      .replaceAll('{testerModeParagraph}', values.testerMode ?? ''),
+  )
 }
 
 /** A repository of a session's place: its name in the Project, and its folder on disk. */
@@ -137,23 +146,24 @@ export function projectLayer(files: ReadonlyArray<InstructionFile>): string {
 }
 
 /**
- * The three layers, in their order, an empty one left out. The role's layer takes the user's
- * language and the Spec language where it names them.
+ * The layers, in their order, an empty one left out: the base and the role's layer, the cache
+ * boundary, then the session's part of the base and the Project's layer. The role's layer takes
+ * the user's language and the Spec language where it names them.
  */
 export function instructionsText(
-  base: string,
+  values: BaseValues,
   role: RoleEntry,
   files: ReadonlyArray<InstructionFile>,
-  userLanguage: string,
-  specLanguage: string,
 ): string {
   const template = role.template
-    .replaceAll('{user.language}', languageName(userLanguage))
-    .replaceAll('{project.specLanguage}', languageName(specLanguage))
+    .replaceAll('{user.language}', languageName(values.userLanguage))
+    .replaceAll('{project.specLanguage}', languageName(values.specLanguage))
     .trim()
-  return [base, template, role.projectLayer ? projectLayer(files) : '']
-    .filter((layer) => layer !== '')
-    .join('\n\n---\n\n')
+  const layered = (layers: ReadonlyArray<string>) =>
+    layers.filter((layer) => layer !== '').join('\n\n---\n\n')
+  const shared = layered([renderBase(values), template])
+  const session = layered([renderSession(values), role.projectLayer ? projectLayer(files) : ''])
+  return `${shared}\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n${session}`
 }
 
 /**

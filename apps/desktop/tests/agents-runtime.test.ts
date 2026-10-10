@@ -232,8 +232,7 @@ describe('A session’s instructions are set once, at its start', () => {
 })
 
 describe('Instructions kept with a cache boundary reach each agent as it reads them', () => {
-  const kept = (session: string) =>
-    `# Shared by the role\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n# Of ${session}`
+  const kept = (id: string) => `# Shared by the role\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n# Of ${id}`
 
   test('Codex takes them as one text, the boundary left out', async () => {
     const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, kept)

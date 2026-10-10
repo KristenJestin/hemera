@@ -27,6 +27,7 @@ export interface HemeraAccess {
 export interface BareInput {
   /** Hemera's own folder for this agent, `<data>/agents/<provider>`. */
   readonly agentDirectory: string
+  /** The session's instructions as kept; Claude Code cuts them at the cache boundary. */
   readonly systemPrompt: string
   readonly hemera: HemeraAccess
   /**
@@ -48,7 +49,7 @@ export interface ClaudeCodeMeta {
       readonly strictMcpConfig: boolean
       readonly systemPrompt: {
         readonly type: 'custom'
-        readonly prompt: string
+        readonly prompt: string | ReadonlyArray<string>
         readonly snapshot: boolean
       }
       readonly env: Readonly<Record<string, string>>

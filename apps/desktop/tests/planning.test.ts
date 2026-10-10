@@ -279,7 +279,7 @@ describe('Creating a mission starts one Planner', () => {
       chosen: { model: null },
     })
     expect(seen.planner.folder).toBe(join(work, 'acme'))
-    expect(seen.instructions).toContain('with the role **the Planner**')
+    expect(seen.instructions).toContain('the role **the Planner**')
     expect(seen.instructions).toContain('# Role: Planner')
     expect(seen.instructions).toContain('**Write in the Spec language** (English)')
     expect(seen.started).toHaveLength(1)

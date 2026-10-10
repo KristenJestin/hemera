@@ -14,6 +14,7 @@ import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
+import { SYSTEM_PROMPT_BOUNDARY, promptText } from '../src/engine/agents/prompt-blocks.ts'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { createMission } from '../src/engine/missions.ts'
 import { Delivery } from '../src/engine/permissions/delivery.ts'
@@ -22,6 +23,7 @@ import { assignWork, holdsWork, leaseOf } from '../src/engine/sessions/leases.ts
 import { SpecLanguage } from '../src/engine/sessions/ports.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
+import { keptPrompt } from './system-prompt.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import {
@@ -119,12 +121,20 @@ describe('The three layers are set once, at the session’s start, then the brie
       ),
     )
     const agent = world.agents[0]
-    const meta = JSON.parse(agent?.answers.metas[0] ?? '{}')
-    const prompt: string = meta.claudeCode.options.systemPrompt.prompt
-    expect(prompt).toContain('one session of mission ACME-1, with the role **the Builder**')
+    const prompt = keptPrompt(agent?.answers.metas[0])
+    expect(prompt).toContain('the role **the Builder**')
+    expect(prompt).toContain('You are one session of mission ACME-1.')
     expect(prompt).toContain(TEST_ROLE.template)
     expect(prompt).toContain('## api/CLAUDE.md\n\napi: run pnpm test before saying done.')
     expect(prompt).not.toContain('api: agents read this.')
+    // Claude Code gets blocks: what the role shares, the boundary, then what is the mission's.
+    const [shared, boundary, own] = JSON.parse(agent?.answers.metas[0] ?? '{}').claudeCode.options
+      .systemPrompt.prompt
+    expect(boundary).toBe(SYSTEM_PROMPT_BOUNDARY)
+    expect(shared).toContain(TEST_ROLE.template)
+    expect(shared).not.toContain('ACME-1')
+    expect(own).toContain('You are one session of mission ACME-1.')
+    expect(own).toContain('## api/CLAUDE.md')
     const [first, second] = agent?.answers.prompts ?? []
     expect(text(first ?? [])).toMatch(
       /^\[hemera:brief\]\n## Your task\n\nExport the invoices as CSV\./,
@@ -168,8 +178,7 @@ describe('The three layers are set once, at the session’s start, then the brie
         }),
       ),
     )
-    const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
-    expect(meta.claudeCode.options.systemPrompt.prompt).not.toContain('## The Memory')
+    expect(keptPrompt(world.agents[0]?.answers.metas[0])).not.toContain('## The Memory')
     expect(text(world.agents[0]?.answers.prompts[0] ?? [])).not.toContain('## Now')
   })
   test('instructions that cannot be read fail the start: no agent starts on a bare base', async () => {
@@ -674,8 +683,7 @@ describe('Compaction and saturation (CT-15)', () => {
         }),
       ),
     )
-    const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
-    const started: string = meta.claudeCode.options.systemPrompt.prompt
+    const started = promptText(keptPrompt(world.agents[0]?.answers.metas[0]))
     const again = text(world.agents[0]?.answers.prompts[1] ?? [])
     expect(again.startsWith(`${deliveryBlock('instructions', started)}\n\n[hemera:brief]\n`)).toBe(
       true,
