@@ -37,12 +37,16 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
+import { type BuildingStart, buildingLaunchesLayer, BUILDING_NEEDS } from './building/launch.ts'
 import {
-  type BuildingStart,
-  buildingLaunchesLayer,
-  buildingStartUnfilled,
-  BUILDING_NEEDS,
-} from './building/launch.ts'
+  BUILDER_NEEDS,
+  type BuildingEnd,
+  type TaskVerdict,
+  builderLayer,
+  noCheckVerdict,
+  tasksDoneEnd,
+} from './building/builder.ts'
+import { buildDeskLayer, claimGuards } from './building/desk.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -244,8 +248,17 @@ export interface ProfileParts {
   readonly snapshots?: Layer.Layer<FileSnapshots, never, Secrets>
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
-  /** Where a launched mission's Building starts (#139): #141's port, one doing nothing otherwise. */
-  readonly building?: { readonly start?: Layer.Layer<BuildingStart> } | undefined
+  /**
+   * Where a launched mission's Building starts (#139), how a finished task is judged and where the
+   * end of the tasks goes (#141): the Builder, no check and `building.tasks_done` otherwise.
+   */
+  readonly building?:
+    | {
+        readonly start?: Layer.Layer<BuildingStart>
+        readonly verdict?: Layer.Layer<TaskVerdict>
+        readonly end?: Layer.Layer<BuildingEnd>
+      }
+    | undefined
   /**
    * The network a Jira call goes through, its limit, and how a sealed token is opened (#96):
    * Node's `fetch`, 30 seconds and no opener otherwise.
@@ -323,6 +336,7 @@ export type EngineServices =
   | ProbeDesk
   | FileSnapshots
   | Snapshots
+  | BuildingStart
   | Checkpoints
   | FreezeLog
   | TicketProviders
@@ -408,6 +422,8 @@ export const startProfile = (
     const desk = Context.get(deskContext, ProbeDesk)
     // Where the gate reads what an agent offers, served by the agents' runtime above it (#90).
     const offersContext = yield* Layer.build(agentOffersLayer)
+    // Where the gate reaches the Builder's tools and the claims, served by the Builder (#141).
+    const buildContext = yield* Layer.build(buildDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -419,6 +435,7 @@ export const startProfile = (
       parts.probes?.cleanup ?? noProbeCleanup,
       Layer.succeedContext(deskContext),
       Layer.succeedContext(offersContext),
+      Layer.succeedContext(buildContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -446,6 +463,10 @@ export const startProfile = (
     const resources = exclusiveReservations(log)
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
+    // The Builder, and where its needs' answers go (#141).
+    const builder = builderLayer(log)
+    // One store of the snapshots, for the checkpoints and the Builder alike (#140).
+    const snapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -456,6 +477,7 @@ export const startProfile = (
         [RESOURCE_NEEDS, resources.handler],
         [TICKET_WRITES, ticketWritesNeeds],
         [BUILDING_NEEDS, launches.handler],
+        [BUILDER_NEEDS, builder.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -517,8 +539,15 @@ export const startProfile = (
       notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
       setup: setupDeskLayer,
+      guards:
+        parts.tools?.guards ?? claimGuards.pipe(Layer.provide(Layer.succeedContext(buildContext))),
     }
-    const roles = roleRegistryLayer([...ROLES_REGISTERED, ...(parts.sessions?.roles ?? [])])
+    // A suite's role stands in for a registered role of the same id, in its place.
+    const suiteRoles = parts.sessions?.roles ?? []
+    const roles = roleRegistryLayer([
+      ...ROLES_REGISTERED.map((role) => suiteRoles.find((one) => one.id === role.id) ?? role),
+      ...suiteRoles.filter((one) => !ROLES_REGISTERED.some((role) => role.id === one.id)),
+    ])
     // The Chats and the setup's runs over the role sessions, over the agents' runtime, over the tools.
     const sessionsLayers = Layer.mergeAll(
       chatsLayer,
@@ -531,16 +560,27 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
-        launches.layer.pipe(Layer.provide(parts.building?.start ?? buildingStartUnfilled)),
+        launches.layer.pipe(
+          Layer.provideMerge(
+            parts.building?.start ??
+              builder.layer.pipe(
+                Layer.provide(
+                  Layer.mergeAll(
+                    parts.building?.verdict ?? noCheckVerdict,
+                    parts.building?.end ?? tasksDoneEnd,
+                    snapshots,
+                  ),
+                ),
+              ),
+          ),
+        ),
       ).pipe(
         Layer.provideMerge(plannerLayer({ log, starts: parts.sessions?.plannerStarts ?? false })),
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       parts.snapshots ?? databaseSnapshots,
-      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
-        Layer.provideMerge(snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))),
-      ),
+      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

@@ -12,6 +12,9 @@ import {
   LaunchChoice,
   LaunchState,
   ModelSettingValue,
+  TaskOrigin,
+  TaskState,
+  TaskTarget,
   MoveRefused,
   PrelaunchAction,
   SettingLevel,
@@ -197,6 +200,121 @@ export class UnknownCheck extends Schema.TaggedError<UnknownCheck>()('UnknownChe
 }) {
   override get message(): string {
     return 'This check no longer exists.'
+  }
+}
+
+/** A tree of one repository a snapshot took (#140). */
+export const BuildingTree = Schema.Struct({ repository: Schema.String, tree: Schema.String })
+export type BuildingTree = typeof BuildingTree.Type
+
+/** One attempt at a task: its snapshots, how it ended, and the paths changed outside its targets. */
+export const BuildingAttemptView = Schema.Struct({
+  number: Schema.Number,
+  runner: Schema.String,
+  startedAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+  outcome: Schema.NullOr(Schema.String),
+  summary: Schema.NullOr(Schema.String),
+  starts: Schema.Array(BuildingTree),
+  ends: Schema.NullOr(Schema.Array(BuildingTree)),
+  outside: Schema.Array(Schema.String),
+})
+export type BuildingAttemptView = typeof BuildingAttemptView.Type
+
+/** A task of the effective plan as the Building page reads it. */
+export const BuildingTaskView = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  result: Schema.String,
+  origin: TaskOrigin,
+  requirements: Schema.Array(Schema.String),
+  scenarios: Schema.Array(Schema.String),
+  targets: Schema.Array(TaskTarget),
+  dependsOn: Schema.Array(Schema.String),
+  state: TaskState,
+  /** For a done task: whether a check verified it. Null before. */
+  verified: Schema.NullOr(Schema.Boolean),
+  /** The session lineage that runs it, or null. */
+  runner: Schema.NullOr(Schema.String),
+  /** Why it is blocked, in words: the need, or the task it depends on. */
+  blockedBy: Schema.NullOr(Schema.String),
+  skippedReason: Schema.NullOr(Schema.String),
+  replacedBy: Schema.Array(Schema.String),
+  /** The decision that brought it, for a task of an amendment. */
+  decisionId: Schema.NullOr(Schema.String),
+  attempts: Schema.Array(BuildingAttemptView),
+  /** Each state it took, dated. */
+  changes: Schema.Array(Schema.Struct({ state: TaskState, at: Schema.String })),
+})
+export type BuildingTaskView = typeof BuildingTaskView.Type
+
+/** A decision taken during Building, with the amendment it carries in words. */
+export const BuildingDecisionView = Schema.Struct({
+  id: Schema.String,
+  needId: Schema.String,
+  kind: Schema.String,
+  tasks: Schema.Array(Schema.String),
+  question: Schema.String,
+  options: Schema.Array(Schema.String),
+  recommended: Schema.NullOr(Schema.String),
+  amendment: Schema.NullOr(Schema.String),
+  state: Schema.String,
+  answer: Schema.NullOr(Schema.String),
+  applied: Schema.Boolean,
+  requestedAt: Schema.String,
+  answeredAt: Schema.NullOr(Schema.String),
+})
+export type BuildingDecisionView = typeof BuildingDecisionView.Type
+
+/** A requirement of the Spec, with the tasks that cover it. */
+export const BuildingRequirementView = Schema.Struct({
+  id: Schema.String,
+  done: Schema.Boolean,
+  tasks: Schema.Array(Schema.String),
+})
+
+/** A repository of the Building's Workspace. */
+export const BuildingRepository = Schema.Struct({
+  name: Schema.String,
+  folder: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  baseCommit: Schema.String,
+})
+
+/** A Building as its page reads it: the head, the plan, the decisions, the phase. */
+export const BuildingView = Schema.Struct({
+  missionId: Schema.String,
+  buildingId: Schema.String,
+  /** `Building`, or `Building · round N` once rounds exist. */
+  label: Schema.String,
+  /** The round, its number and points: always null until rounds (R2). */
+  round: Schema.NullOr(
+    Schema.Struct({ number: Schema.Number, points: Schema.Array(Schema.String) }),
+  ),
+  state: Schema.Literals(['active', 'ended', 'cancelled']),
+  phase: Schema.String,
+  /** Open question 24: done and skipped tasks over the effective plan, in %. */
+  percent: Schema.Number,
+  /** The special tasks, counted apart (CT-41): none until the end sequence adds them. */
+  special: Schema.Struct({ done: Schema.Number, total: Schema.Number }),
+  /** Open question 28: the time the engine ran since the start, in seconds. */
+  elapsedSeconds: Schema.Number,
+  startedAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+  repositories: Schema.Array(BuildingRepository),
+  requirements: Schema.Array(BuildingRequirementView),
+  tasks: Schema.Array(BuildingTaskView),
+  decisions: Schema.Array(BuildingDecisionView),
+  summary: Schema.NullOr(Schema.String),
+})
+export type BuildingView = typeof BuildingView.Type
+
+export class UnknownBuildingTask extends Schema.TaggedError<UnknownBuildingTask>()(
+  'UnknownBuildingTask',
+  { id: Schema.String },
+) {
+  override get message(): string {
+    return `The Building has no task ${this.id}.`
   }
 }
 
