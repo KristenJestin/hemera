@@ -6,12 +6,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 
+import { TESTER_PARAGRAPH } from '@hemera/core/domain'
 import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
+import { SYSTEM_PROMPT_BOUNDARY } from '../src/engine/agents/prompt-blocks.ts'
 import { openProfile } from '../src/engine/migrate.ts'
 import { SYSTEM_GIT, gitLayer, spawnGit } from '../src/engine/git.ts'
+import { startedWithTesterMode } from '../src/engine/tester/mode.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { repositoryStatusesLayer } from '../src/engine/repositories.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
@@ -24,6 +27,7 @@ import {
   languageName,
   placeRepositories,
   renderBase,
+  renderSession,
 } from '../src/engine/sessions/instructions.ts'
 import { TEST_ROLE } from './test-role.ts'
 import { repository } from './repositories.ts'
@@ -49,14 +53,13 @@ const VALUES = {
   hemeraOnly: true,
 }
 
-describe('Hemera’s base layer', () => {
-  test('its placeholders are filled: the owner, the role, the two languages', () => {
+describe('Hemera’s base layer, shared by every session of a role', () => {
+  test('its placeholders are filled with the role, and it names no mission and no language', () => {
     const base = renderBase(VALUES)
-    expect(base).toContain(
-      'You are\none session of mission ACME-12, with the role **the Builder**.',
-    )
-    expect(base).toContain('is in **French**.')
-    expect(base).toContain("the Project's Spec language, **English**.")
+    expect(base).toContain('You have\nthe role **the Builder**;')
+    expect(base).not.toContain('ACME-12')
+    expect(base).not.toContain('French')
+    expect(base).not.toContain('## Language')
     expect(base).not.toMatch(/\{[a-zA-Z#/]/)
   })
 
@@ -66,13 +69,6 @@ describe('Hemera’s base layer', () => {
     expect(without).not.toContain('## The Memory')
     expect(without).not.toContain('memory_read')
     expect(without).toContain('## How information reaches you')
-  })
-
-  test('the tester mode slot holds its paragraph only when the mode is on', () => {
-    expect(renderBase(VALUES)).not.toContain('Tester mode')
-    expect(
-      renderBase({ ...VALUES, testerMode: 'Tester mode is on: report what you find.' }),
-    ).toMatch(/Tester mode is on: report what you find\.$/)
   })
 
   test('only Hemera writes to a role but the Chat: the user writes to the Chat directly', () => {
@@ -89,27 +85,81 @@ describe('Hemera’s base layer', () => {
   })
 })
 
-describe('The three layers', () => {
-  test('base, then the role, then the Project’s files, an empty layer left out', () => {
-    const files = [{ repository: 'api', file: 'CLAUDE.md' as const, text: 'Run pnpm test.' }]
-    const text = instructionsText('BASE', TEST_ROLE, files, 'en', 'en')
-    expect(text.split('\n\n---\n\n')).toEqual([
-      'BASE',
-      TEST_ROLE.template,
+describe('What belongs to one session', () => {
+  test('the owner and the two languages are filled', () => {
+    const session = renderSession(VALUES)
+    expect(session).toContain('You are one session of mission ACME-12.')
+    expect(session).toContain('is in **French**.')
+    expect(session).toContain("the Project's Spec language, **English**.")
+    expect(session).not.toMatch(/\{[a-zA-Z#/]/)
+  })
+
+  test('the tester mode slot holds its paragraph only when the mode is on', () => {
+    expect(renderSession(VALUES)).not.toContain('Tester mode')
+    expect(
+      renderSession({ ...VALUES, testerMode: 'Tester mode is on: report what you find.' }),
+    ).toMatch(/Tester mode is on: report what you find\.$/)
+  })
+})
+
+describe('The instructions around the cache boundary', () => {
+  const files = [{ repository: 'api', file: 'CLAUDE.md' as const, text: 'Run pnpm test.' }]
+  const layers = (text: string) => text.split(`\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n`)
+
+  test('the base and the role’s layer, then the boundary, then the session and the Project’s files', () => {
+    const [shared, session] = layers(instructionsText(VALUES, TEST_ROLE, files))
+    expect(shared?.split('\n\n---\n\n')).toEqual([renderBase(VALUES), TEST_ROLE.template])
+    expect(session?.split('\n\n---\n\n')).toEqual([
+      renderSession(VALUES),
       '# The Project’s own instructions\n\n## api/CLAUDE.md\n\nRun pnpm test.',
     ])
-    expect(instructionsText('BASE', TEST_ROLE, [], 'en', 'en').split('\n\n---\n\n')).toHaveLength(2)
+  })
+
+  test('an empty layer is left out, the boundary stays', () => {
+    const [shared, session] = layers(instructionsText(VALUES, TEST_ROLE, []))
+    expect(shared?.split('\n\n---\n\n')).toHaveLength(2)
+    expect(session).toBe(renderSession(VALUES))
+    const bare = layers(instructionsText(VALUES, { ...TEST_ROLE, template: '' }, []))
+    expect(bare[0]).toBe(renderBase(VALUES))
+    const unfiled = layers(instructionsText(VALUES, { ...TEST_ROLE, projectLayer: false }, files))
+    expect(unfiled[1]).toBe(renderSession(VALUES))
+  })
+
+  test('the role’s layer takes the languages where it names them', () => {
     const speaking = { ...TEST_ROLE, template: 'Answer in {user.language}, briefly.' }
-    expect(instructionsText('BASE', speaking, [], 'fr', 'en')).toContain(
-      'Answer in French, briefly.',
-    )
+    expect(instructionsText(VALUES, speaking, [])).toContain('Answer in French, briefly.')
     const writing = { ...TEST_ROLE, template: 'Write in {project.specLanguage}.' }
-    expect(instructionsText('BASE', writing, [], 'en', 'de')).toContain('Write in German.')
-    expect(
-      instructionsText('BASE', { ...TEST_ROLE, projectLayer: false }, files, 'en', 'en').split(
-        '\n\n---\n\n',
+    expect(instructionsText({ ...VALUES, specLanguage: 'de' }, writing, [])).toContain(
+      'Write in German.',
+    )
+  })
+
+  test('another mission, the other languages, the tester mode and the Project’s files change nothing before the boundary', () => {
+    const [reference] = layers(instructionsText(VALUES, TEST_ROLE, []))
+    const [other] = layers(
+      instructionsText(
+        {
+          ...VALUES,
+          owner: 'mission ACME-13',
+          testerMode: TESTER_PARAGRAPH,
+        },
+        TEST_ROLE,
+        files,
       ),
-    ).toHaveLength(2)
+    )
+    expect(other).toBe(reference)
+  })
+
+  test('the owner, the languages and the tester paragraph come after it', () => {
+    const text = instructionsText({ ...VALUES, testerMode: TESTER_PARAGRAPH }, TEST_ROLE, files)
+    const [shared, session] = layers(text)
+    expect(shared).not.toContain('ACME-12')
+    expect(shared).not.toContain(TESTER_PARAGRAPH)
+    expect(session).toContain('mission ACME-12')
+    expect(session).toContain(TESTER_PARAGRAPH)
+    // The tester tools follow the kept text (#154): the paragraph stays findable after the boundary.
+    expect(startedWithTesterMode(text)).toBe(true)
+    expect(startedWithTesterMode(instructionsText(VALUES, TEST_ROLE, files))).toBe(false)
   })
 })
 

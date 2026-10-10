@@ -10,7 +10,7 @@
  *
  * Bare mode goes through `session/new` `_meta.claudeCode.options`: no built-in tool, no settings
  * source (so it reads neither `CLAUDE.md` nor `AGENTS.md` on its own), only the MCP servers
- * handed in, and Hemera's system prompt. `CLAUDE_CONFIG_DIR` is left where the user has it: the
+ * handed in, and Hemera's system prompt, in blocks around the cache boundary when its text holds one. `CLAUDE_CONFIG_DIR` is left where the user has it: the
  * login lives there.
  */
 
@@ -20,6 +20,7 @@ import { Qualified } from '@hemera/ipc'
 
 import type { AgentAdapter } from '../adapter.ts'
 import { hemeraServer } from '../bare.ts'
+import { promptBlocks } from '../prompt-blocks.ts'
 
 /** How long the agent waits on one of Hemera's tools, which may wait on the user: ten minutes. */
 export const TOOL_WAIT_MS = 600_000
@@ -61,7 +62,11 @@ export const claude: AgentAdapter = {
           allowedTools: input.allowedTools ?? [],
           settingSources: [],
           strictMcpConfig: true,
-          systemPrompt: { type: 'custom', prompt: input.systemPrompt, snapshot: true },
+          systemPrompt: {
+            type: 'custom',
+            prompt: promptBlocks(input.systemPrompt),
+            snapshot: true,
+          },
           env: {
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
             ENABLE_CLAUDEAI_MCP_SERVERS: 'false',

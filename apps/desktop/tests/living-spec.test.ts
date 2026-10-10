@@ -287,7 +287,7 @@ describe('Adding a Project starts exactly one reading of its living spec', () =>
       commits: [{ repository: 'api', commit: seen.commit }],
     })
     expect(seen.session).toMatchObject({ role: 'living-spec', folder: seen.main })
-    expect(seen.instructions).toContain('with the role **the living spec agent**')
+    expect(seen.instructions).toContain('the role **the living spec agent**')
     expect(seen.instructions).toContain('# Role: Living spec')
     expect(seen.instructions).toContain("Write in the Project's Spec language, English.")
     const brief = text(world.agents[0]?.answers.prompts[0] ?? [])

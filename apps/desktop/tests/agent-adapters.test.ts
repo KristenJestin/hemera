@@ -28,6 +28,7 @@ import {
   refusedUnlessQualified,
 } from '../src/engine/agents/bare.ts'
 import { AGENT_MODES } from '../src/engine/agents/modes.ts'
+import { SYSTEM_PROMPT_BOUNDARY } from '../src/engine/agents/prompt-blocks.ts'
 
 const HOME = '/home/ana'
 
@@ -59,7 +60,7 @@ const ClaudeMeta = Schema.Struct({
       strictMcpConfig: Schema.Boolean,
       systemPrompt: Schema.Struct({
         type: Schema.Literal('custom'),
-        prompt: Schema.String,
+        prompt: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
         snapshot: Schema.Boolean,
       }),
       env: Schema.Record(Schema.String, Schema.String),
@@ -212,6 +213,19 @@ describe("Each agent's bare options contain no built-in tool and only the hemera
     })
     expect(options.env).toEqual({})
     expect(options.systemPromptAs).toBe('session-meta')
+  })
+
+  test('Claude Code: instructions with a cache boundary are sent as blocks around it, still recorded', () => {
+    const options = claude.bareOptions({
+      ...input,
+      systemPrompt: `Shared by the role.\n\n${SYSTEM_PROMPT_BOUNDARY}\n\nOf this mission.`,
+    })
+    const meta = Schema.decodeUnknownSync(ClaudeMeta)(options.meta)
+    expect(meta.claudeCode.options.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: ['Shared by the role.', '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__', 'Of this mission.'],
+      snapshot: true,
+    })
   })
 
   test("Codex: the patch's bare session, every optional feature and tool off", () => {

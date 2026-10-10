@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm'
 import { Cause, Effect, Layer, Option, Schema } from 'effect'
 
 import { ADAPTERS } from '../agents/adapters/index.ts'
+import { promptText } from '../agents/prompt-blocks.ts'
 import { SessionInstructions } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { JournalMapper } from '../memory/index.ts'
@@ -23,7 +24,7 @@ import { getProject } from '../projects.ts'
 import type { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
-import { filesToSend, instructionsText, placeRepositories, renderBase } from './instructions.ts'
+import { filesToSend, instructionsText, placeRepositories } from './instructions.ts'
 import { SpecLanguage, TesterMode } from './ports.ts'
 import { RoleRegistry, type RoleEntry, roleNamed } from './roles.ts'
 import { type RoleSession, getSession, instructionsKept, keepInstructions } from './store.ts'
@@ -81,7 +82,7 @@ const writeInstructions = (sessionId: string, platform: NodeJS.Platform) =>
     const specLanguage =
       owner.projectId === null ? 'en' : yield* (yield* SpecLanguage)(session.owner)
     const testerMode = owner.projectId === null ? null : yield* (yield* TesterMode)(owner.projectId)
-    const base = renderBase({
+    const values = {
       owner: owner.said,
       role: role.displayName,
       userLanguage: preferences.userLanguage,
@@ -89,7 +90,7 @@ const writeInstructions = (sessionId: string, platform: NodeJS.Platform) =>
       readsMemory: role.readsMemory,
       testerMode,
       hemeraOnly: !role.ledByUser,
-    })
+    }
     const provider = AGENT_PROVIDERS.find((one) => one === session.provider) ?? 'claude'
     const files =
       role.projectLayer && owner.projectId !== null
@@ -101,9 +102,9 @@ const writeInstructions = (sessionId: string, platform: NodeJS.Platform) =>
             ),
           )
         : []
-    const text = instructionsText(base, role, files, preferences.userLanguage, specLanguage)
+    const text = instructionsText(values, role, files)
     yield* keepInstructions(sessionId, text)
-    yield* addToThread(sessionId, 'instructions', text)
+    yield* addToThread(sessionId, 'instructions', promptText(text))
     return text
   })
 

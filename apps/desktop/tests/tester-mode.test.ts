@@ -18,6 +18,7 @@ import { writePreferences } from '../src/engine/preferences.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { acmeIn, sessionsEngine, within } from './sessions-world.ts'
+import { keptPrompt } from './system-prompt.ts'
 
 let data: string
 let work: string
@@ -67,9 +68,6 @@ const findingsOf = (folder: string) => {
     : []
 }
 
-const systemPrompt = (meta: string | null | undefined): string =>
-  JSON.parse(meta ?? '{}').claudeCode?.options?.systemPrompt?.prompt ?? ''
-
 describe('The tester mode off', () => {
   test('no paragraph, no tester tool, and nothing written', async () => {
     const { world, run } = sessionsEngine(data, () => TESTING)
@@ -86,7 +84,7 @@ describe('The tester mode off', () => {
       ),
     )
     const agent = world.agents[0]
-    expect(systemPrompt(agent?.answers.metas[0])).not.toContain('## Tester mode')
+    expect(keptPrompt(agent?.answers.metas[0])).not.toContain('## Tester mode')
     const [, report, reports] = agent?.answers.toolAnswers ?? []
     expect(report?.text).toBe('refused: the Builder has no tool hemera_report')
     expect(reports?.text).toBe('refused: the Builder has no tool hemera_reports')
@@ -147,7 +145,7 @@ describe('The tester mode on', () => {
       ),
     )
     for (const agent of world.agents) {
-      const prompt = systemPrompt(agent.answers.metas[0])
+      const prompt = keptPrompt(agent.answers.metas[0])
       expect(prompt.split('## Tester mode')).toHaveLength(2)
       expect(prompt).toContain(TESTER_PARAGRAPH)
     }

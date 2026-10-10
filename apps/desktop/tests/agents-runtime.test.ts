@@ -17,6 +17,7 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { type FakeAgent, type FakeScript, fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
+import { SYSTEM_PROMPT_BOUNDARY } from '../src/engine/agents/prompt-blocks.ts'
 import {
   AgentRuntime,
   AgentStarter,
@@ -61,7 +62,11 @@ const OFFERED: FakeScript = {
  * The world the runtime runs in: one fake agent per process started, and the endpoint's log. Each
  * start goes through `starting` first: what holds an agent's process before it is up.
  */
-const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void> = Effect.void) => {
+const world = (
+  scripts: ReadonlyArray<FakeScript>,
+  starting: Effect.Effect<void> = Effect.void,
+  instructionsOf: (session: string) => string = (session) => `# Instructions of ${session}`,
+) => {
   const agents: FakeAgent[] = []
   const tokens: string[] = []
   /** What a start asks of the session, in the order it asks. */
@@ -111,9 +116,9 @@ const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void>
       of: (session) =>
         Effect.sync(() => {
           asked.push('instructions')
-          return `# Instructions of ${session}`
+          return instructionsOf(session)
         }),
-      renewed: (session) => Effect.succeed(`# Instructions of ${session}`),
+      renewed: (session) => Effect.succeed(instructionsOf(session)),
     }),
   )
   return { agents, tokens, asked, layers }
@@ -223,6 +228,68 @@ describe('A session’s instructions are set once, at its start', () => {
       { type: 'text', text: '[hemera:brief]' },
     ])
     expect(second).toEqual([{ type: 'text', text: 'next' }])
+  })
+})
+
+describe('Instructions kept with a cache boundary reach each agent as it reads them', () => {
+  const kept = (id: string) => `# Shared by the role\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n# Of ${id}`
+
+  test('Claude Code takes them as blocks around the boundary, recorded once', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, kept)
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        return opened.id
+      }),
+    )
+    const meta = JSON.parse(built.agents[0]?.answers.metas[0] ?? '{}')
+    expect(meta.claudeCode.options.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: ['# Shared by the role', SYSTEM_PROMPT_BOUNDARY, `# Of ${id}`],
+      snapshot: true,
+    })
+  })
+
+  test('a session started before the boundary existed keeps its recorded text, as one', async () => {
+    const recorded = (id: string) => `# Instructions of ${id}\n\nThe mission key is ACME-12.`
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, recorded)
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        return opened.id
+      }),
+    )
+    const meta = JSON.parse(built.agents[0]?.answers.metas[0] ?? '{}')
+    expect(meta.claudeCode.options.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: recorded(id),
+      snapshot: true,
+    })
+  })
+
+  test('Codex takes them as one text, the boundary left out', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, kept)
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('codex')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        return opened.id
+      }),
+    )
+    const [first] = built.agents[0]?.answers.prompts ?? []
+    expect(first?.[0]).toEqual({
+      type: 'resource',
+      resource: {
+        uri: 'hemera://instructions',
+        mimeType: 'text/markdown',
+        text: `# Shared by the role\n\n---\n\n# Of ${id}`,
+      },
+    })
   })
 })
 

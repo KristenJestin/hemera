@@ -45,7 +45,7 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 
 import { claude } from '../../src/engine/agents/adapters/claude.ts'
 import { PROBE_ROLE } from '../../src/engine/planning/probe-role.ts'
-import { renderBase, instructionsText } from '../../src/engine/sessions/instructions.ts'
+import { instructionsText } from '../../src/engine/sessions/instructions.ts'
 import { ToolAccess, toolAccessLayer } from '../../src/engine/tools/access.ts'
 import { ToolGate } from '../../src/engine/tools/gate.ts'
 import { ToolServer, toolServerLayer } from '../../src/engine/tools/server.ts'
@@ -103,15 +103,14 @@ interface Sdk {
     readonly prompt: AsyncIterable<UserTurn>
     readonly options: SdkOptions
   }) => SdkQuery
-  readonly SYSTEM_PROMPT_DYNAMIC_BOUNDARY: string
 }
 
 /** The SDK is not a dependency of the application: it is read where the ACP adapter reads it. */
 const loadSdk = async (): Promise<Sdk> => {
   const adapter = fileURLToPath(import.meta.resolve('@agentclientprotocol/claude-agent-acp'))
   const entry = createRequire(adapter).resolve('@anthropic-ai/claude-agent-sdk')
-  // SAFETY: `query` and `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` are exported by the SDK's `sdk.d.ts`
-  // with these shapes; the rest of its surface is not used here.
+  // SAFETY: `query` is exported by the SDK's `sdk.d.ts` with this shape; the rest of its
+  // surface is not used here.
   return (await import(pathToFileURL(entry).href)) as Sdk
 }
 
@@ -124,17 +123,10 @@ const TurnEnded = Schema.Struct({
 })
 const readTurnEnd = Schema.decodeUnknownOption(TurnEnded)
 
-/** The instructions of a session. */
-type Instructions =
-  | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'blocks'; readonly blocks: ReadonlyArray<string> }
-
-const one = (text: string): Instructions => ({ kind: 'text', text })
-
 /** What a session is started with. */
 interface SessionSetup {
-  /** Hemera's instructions: one text as Hemera sends them, or blocks when the boundary is tried. */
-  readonly system: Instructions
+  /** Hemera's instructions as a session keeps them: the boundary is in the text. */
+  readonly instructions: string
   readonly role: Role
   readonly tester: boolean
   /** Who the session belongs to, as the base instructions name it: `mission ACME-12`. */
@@ -197,7 +189,7 @@ const startSession = async (ports: Ports, setup: SessionSetup): Promise<Session>
   const token = await ports.mint(nativeId, setup.role, setup.tester, ports.folder)
   const bare = claude.bareOptions({
     agentDirectory: ports.folder,
-    systemPrompt: setup.system.kind === 'text' ? setup.system.text : '',
+    systemPrompt: setup.instructions,
     hemera: { url: ports.serverUrl, token },
   })
   if (bare.meta === undefined || !('claudeCode' in bare.meta)) {
@@ -213,10 +205,7 @@ const startSession = async (ports: Ports, setup: SessionSetup): Promise<Session>
     allowedTools: own.allowedTools,
     settingSources: own.settingSources,
     strictMcpConfig: own.strictMcpConfig,
-    systemPrompt:
-      setup.system.kind === 'text'
-        ? own.systemPrompt
-        : { type: 'custom', prompt: setup.system.blocks, snapshot: true },
+    systemPrompt: own.systemPrompt,
     env,
     cwd: ports.folder,
     model: setup.model,
@@ -271,7 +260,7 @@ const BRIEF = (variant: string): string =>
 
 const instructionsFor = (owner: string, tester: boolean): string =>
   instructionsText(
-    renderBase({
+    {
       owner,
       role: PROBE_ROLE.displayName,
       userLanguage: 'en',
@@ -279,11 +268,9 @@ const instructionsFor = (owner: string, tester: boolean): string =>
       readsMemory: PROBE_ROLE.readsMemory,
       testerMode: tester ? TESTER_PARAGRAPH : null,
       hemeraOnly: true,
-    }),
+    },
     PROBE_ROLE,
     [],
-    'en',
-    'en',
   )
 
 // --- the scenarios ---------------------------------------------------------------------------
@@ -320,20 +307,12 @@ const resume = async (ports: Ports, setup: SessionSetup, gap: number) => {
   return requests
 }
 
-/** A cache is read by prefix: each variant changes one thing before the conversation. */
+/**
+ * A cache is read by prefix: each variant changes one thing before the conversation. The
+ * instructions are the ones Hemera keeps, so the mission sits after the cache boundary.
+ */
 const prefix = async (ports: Ports, setup: SessionSetup) => {
   const { owner } = setup
-  const split = (name: string): Instructions => ({
-    kind: 'blocks',
-    blocks: [
-      instructionsFor('the mission you are given', false),
-      ports.sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-      `You are one session of ${name}.`,
-    ],
-  })
-  // The same split, sent as the one text Hemera sends today: no boundary, the owner last.
-  const last = (name: string): Instructions =>
-    one(`${instructionsFor('the mission you are given', false)}\n\nYou are one session of ${name}.`)
   const variants: ReadonlyArray<{
     readonly label: string
     readonly setup: SessionSetup
@@ -341,47 +320,32 @@ const prefix = async (ports: Ports, setup: SessionSetup) => {
   }> = [
     {
       label: 'A reference',
-      setup: { ...setup, system: one(instructionsFor(owner, false)) },
+      setup: { ...setup, instructions: instructionsFor(owner, false) },
       brief: 'first',
     },
     {
       label: 'B other brief',
-      setup: { ...setup, system: one(instructionsFor(owner, false)) },
+      setup: { ...setup, instructions: instructionsFor(owner, false) },
       brief: 'second',
     },
     {
-      label: 'C other owner',
-      setup: { ...setup, system: one(instructionsFor(`${owner}-bis`, false)) },
+      label: 'C other mission',
+      setup: { ...setup, instructions: instructionsFor(`${owner}-bis`, false) },
       brief: 'first',
     },
     {
       label: 'D tester mode',
-      setup: { ...setup, system: one(instructionsFor(owner, true)), tester: true },
+      setup: { ...setup, instructions: instructionsFor(owner, true), tester: true },
       brief: 'first',
     },
     {
-      label: 'E owner last, mission 12',
-      setup: { ...setup, system: split(owner) },
-      brief: 'first',
-    },
-    {
-      label: 'F owner last, mission 13',
-      setup: { ...setup, system: split(`${owner}-bis`) },
-      brief: 'first',
-    },
-    {
-      label: 'H owner last, one text, mission 12',
-      setup: { ...setup, system: last(owner) },
-      brief: 'first',
-    },
-    {
-      label: 'I owner last, one text, mission 13',
-      setup: { ...setup, system: last(`${owner}-bis`) },
+      label: 'E tester mode, other mission',
+      setup: { ...setup, instructions: instructionsFor(`${owner}-ter`, true), tester: true },
       brief: 'first',
     },
     {
       label: 'G reference again',
-      setup: { ...setup, system: one(instructionsFor(owner, false)) },
+      setup: { ...setup, instructions: instructionsFor(owner, false) },
       brief: 'first',
     },
   ]
@@ -477,7 +441,7 @@ const main = Effect.gen(function* () {
   }
   const owner = values.owner ?? 'mission ACME-12'
   const setup: SessionSetup = {
-    system: one(instructionsFor(owner, false)),
+    instructions: instructionsFor(owner, false),
     role,
     tester: false,
     owner,
