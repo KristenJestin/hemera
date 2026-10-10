@@ -10,6 +10,7 @@
 
 import { Predicate, Schema } from 'effect'
 
+import { wordsOf } from './commands.ts'
 import { type PlaceContext, placesNamed } from './places.ts'
 
 // ---------------------------------------------------------------------------------------------
@@ -412,6 +413,70 @@ export function chatMustAsk(sequences: ReadonlyArray<ReadonlyArray<string>>): st
     }
   }
   return null
+}
+
+/** The package managers whose `run` starts a script of the folder's `package.json`. */
+const SCRIPT_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun'])
+
+/** The scripts npm runs by a command of their own name, without `run`. */
+const NPM_SCRIPT_COMMANDS = new Set(['test', 't', 'tst', 'start', 'stop', 'restart'])
+
+/**
+ * The script a package manager's words may start, by its name: `npm run x`, `npm test`,
+ * `pnpm run x`, `pnpm x`, `yarn x`, `yarn run x`, `bun run x`. Null when they name none. Whether
+ * the folder has such a script is the caller's to say.
+ */
+function scriptNamed(manager: string, args: ReadonlyArray<string>): string | null {
+  const words = args.filter((word) => !word.startsWith('-'))
+  const [first, second] = words
+  if (first === undefined) return null
+  if (first === 'run' || first === 'run-script') return second ?? null
+  if (manager === 'npm') return NPM_SCRIPT_COMMANDS.has(first) ? first : null
+  return manager === 'bun' ? null : first
+}
+
+/** How deep scripts calling scripts are read. */
+const SCRIPTS_READ_DEPTH = 8
+
+/**
+ * What the Chat always asks before, read on a line and on the `package.json` scripts it runs, as
+ * deep as they call one another (with their `pre` and `post` scripts): `pnpm run release` whose
+ * script pushes asks as `git push` does. `scriptOf` answers a script of the folder the line runs
+ * in, by its name, or null. A script read under another folder (`pnpm -C web run x`, a workspace
+ * filter), a Makefile target or a shell script is not read: the rest of the order judges it.
+ */
+export function chatMustAskThroughScripts(
+  line: string,
+  context: PlaceContext,
+  scriptOf: (name: string) => string | null,
+): string | null {
+  /** The reason, and the innermost script it was read in (null for the line itself). */
+  const read = (
+    words: ReadonlyArray<string>,
+    depth: number,
+  ): { readonly reason: string; readonly script: string | null } | null => {
+    const { sequences } = effectiveAction(words, context)
+    const reason = chatMustAsk(sequences)
+    if (reason !== null) return { reason, script: null }
+    if (depth >= SCRIPTS_READ_DEPTH) return null
+    for (const sequence of sequences) {
+      for (const [at, word] of sequence.entries()) {
+        const manager = programName(word)
+        if (!SCRIPT_RUNNERS.has(manager)) continue
+        const name = scriptNamed(manager, sequence.slice(at + 1))
+        if (name === null) continue
+        for (const each of [`pre${name}`, name, `post${name}`]) {
+          const script = scriptOf(each)
+          const found = script === null ? null : read(['sh', '-c', script], depth + 1)
+          if (found !== null) return { reason: found.reason, script: found.script ?? each }
+        }
+      }
+    }
+    return null
+  }
+  const found = read(wordsOf(line), 0)
+  if (found === null) return null
+  return found.script === null ? found.reason : `${found.reason}, in the script ${found.script}`
 }
 
 // ---------------------------------------------------------------------------------------------

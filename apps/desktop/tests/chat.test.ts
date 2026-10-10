@@ -264,8 +264,14 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
     expect(text(world.agents[1]?.answers.prompts.flat() ?? [])).toContain('[hemera:approval]')
   })
 
-  test('git push, sh -c "git push", npx gh pr create and npm publish always ask, with their reason', async () => {
-    const lines = ['git push', 'sh -c "git push"', 'npx gh pr create', 'npm publish']
+  test('git push, sh -c "git push", npx gh pr create, npm publish and a script that pushes always ask, with their reason', async () => {
+    const lines = [
+      'git push',
+      'sh -c "git push"',
+      'npx gh pr create',
+      'npm publish',
+      'pnpm run release',
+    ]
     const steps: ReadonlyArray<FakeStep> = lines.map((line, at) => ({
       does: 'uses',
       id: `toolu_${String(at)}`,
@@ -279,7 +285,11 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { project } = yield* acme
+          const { project, main } = yield* acme
+          writeFileSync(
+            join(main, 'package.json'),
+            JSON.stringify({ scripts: { release: 'pnpm build && git push --follow-tags' } }),
+          )
           const chat = yield* created(project.id)
           yield* send(chat.id, 'Push it.')
           yield* settledChat(chat.id)
@@ -290,13 +300,14 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
       ),
     )
     const answers = world.agents[0]?.answers.toolAnswers.map((one) => one.text) ?? []
-    expect(answers).toHaveLength(4)
+    expect(answers).toHaveLength(5)
     expect(answers.every((answer) => WAITING.test(answer))).toBe(true)
     expect(reasons).toEqual([
       'the Chat always asks before git push',
       'the Chat always asks before git push',
       'the Chat always asks before gh writes to the forge',
       'the Chat always asks before publishing a package (npm)',
+      'the Chat always asks before git push, in the script release',
     ])
   })
 })
@@ -387,6 +398,39 @@ describe('The Chat reads missions and creates drafts, and writes into none', () 
     expect(seen.transcript.entries.map((entry) => entry.text)).toContain(
       'Mission ACME-2 created: Export the invoices as JSON',
     )
+  })
+})
+
+describe('The missions a draft looks like', () => {
+  test('share words that say something: a title alike only by "the" or "and" is not one', async () => {
+    const drafting = (title: string, at: number): FakeStep => ({
+      does: 'uses',
+      id: `toolu_draft_${String(at)}`,
+      tool: 'spec_create_draft',
+      arguments: { title, idea: 'An idea.' },
+    })
+    const { world, run } = sessionsEngine(data, () => ({
+      steps: [
+        drafting('Fix the login and the signup', 0),
+        drafting('Export the invoices as PDF', 1),
+        { does: 'says', text: 'Created.' },
+      ],
+    }))
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Make two missions.')
+          yield* settledChat(chat.id)
+        }),
+      ),
+    )
+    const [login, pdf] = world.agents[0]?.answers.toolAnswers ?? []
+    expect(login?.text).toContain('No other mission of the Project has a title like it.')
+    expect(pdf?.text).toContain('- ACME-1 · Export the invoices as CSV · building')
+    expect(pdf?.text).not.toContain('Fix the login and the signup')
   })
 })
 

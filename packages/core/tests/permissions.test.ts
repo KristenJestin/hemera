@@ -13,6 +13,7 @@ import {
   PERMISSION_POLICY,
   type PlaceContext,
   chatMustAsk,
+  chatMustAskThroughScripts,
   deletesGit,
   effectiveAction,
   missionRefusal,
@@ -371,5 +372,48 @@ describe('What the Chat always asks before, through any wrapper (#43)', () => {
     [['npm', 'test']],
   ])('%j is left to the rest of the order', (words) => {
     expect(askedOf(words)).toBeNull()
+  })
+})
+
+describe('What the Chat always asks before, through the package scripts a line runs', () => {
+  const SCRIPTS = new Map([
+    ['release', 'pnpm build && pnpm run ship'],
+    ['ship', 'semantic-release && git push --follow-tags'],
+    ['prebundle', 'npm publish --dry-run'],
+    ['bundle', 'tsc -b'],
+    ['deploy:docs', 'gh workflow run docs.yml'],
+    ['build', 'tsc -b'],
+    ['loop', 'npm run loop'],
+  ])
+  const askedOf = (line: string) =>
+    chatMustAskThroughScripts(line, LINUX, (name) => SCRIPTS.get(name) ?? null)
+
+  test.each([
+    ['pnpm run release', 'the Chat always asks before git push, in the script ship'],
+    ['pnpm release', 'the Chat always asks before git push, in the script ship'],
+    ['npm run ship', 'the Chat always asks before git push, in the script ship'],
+    ['yarn ship', 'the Chat always asks before git push, in the script ship'],
+    ['bun run ship', 'the Chat always asks before git push, in the script ship'],
+    [
+      'npm run bundle',
+      'the Chat always asks before publishing a package (npm), in the script prebundle',
+    ],
+    [
+      'npm run deploy:docs',
+      'the Chat always asks before gh writes to the forge, in the script deploy:docs',
+    ],
+    ['sh -c "pnpm run ship"', 'the Chat always asks before git push, in the script ship'],
+  ])('%s asks', (line, reason) => {
+    expect(askedOf(line)).toBe(reason)
+  })
+
+  test.each([
+    ['pnpm run build'],
+    ['pnpm build'],
+    ['npm run missing'],
+    ['npm run loop'],
+    ['pnpm exec tsc'],
+  ])('%s is left to the rest of the order', (line) => {
+    expect(askedOf(line)).toBeNull()
   })
 })

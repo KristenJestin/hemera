@@ -1,10 +1,17 @@
 /**
  * The Chat's own tools (#43), as the gate executes them: `missions_list`, the Project's missions
  * read-only, and `spec_create_draft`, a mission created in Planning from the conversation, which
- * answers its key and the missions whose titles look like it. Nothing here writes into a mission.
+ * answers its key and the missions whose titles look like it, by the words that say something. Nothing here writes into a mission.
  */
 
-import { MISSIONS_LISTED_MAX, type ToolArguments, draftNotice, isLive } from '@hemera/core/domain'
+import {
+  MISSIONS_LISTED_MAX,
+  SIMILAR_TITLE,
+  type ToolArguments,
+  draftNotice,
+  isLive,
+  titleSimilarity,
+} from '@hemera/core/domain'
 import { Effect } from 'effect'
 
 import { ballSaid } from '../memory/render.ts'
@@ -77,8 +84,8 @@ export const specCreateDraft = (grant: Grant, args: ToolArguments<'spec_create_d
       { fromChat: chat.title },
     )
     yield* addEntry(chat.id, { kind: 'notice', text: draftNotice(mission.key, mission.title) })
-    const titled = wordsOf(args.title)
-    const similar = before.filter((one) => [...wordsOf(one.title)].some((word) => titled.has(word)))
+    // Alike as tester mode tells two findings apart: by the words that say something.
+    const similar = before.filter((one) => titleSimilarity(one.title, args.title) >= SIMILAR_TITLE)
     return answered(
       [
         `Created ${mission.key} in Planning: ${mission.title}. Give the user its key.`,
