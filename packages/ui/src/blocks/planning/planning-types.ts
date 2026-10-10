@@ -302,19 +302,22 @@ export interface PlanningData {
   ticket: { key: string; changes: readonly TicketChange[] } | null
 }
 
-/** What the user can do on the page; the page acts at once, no second confirmation. */
+/**
+ * What the user can do on the page; the page acts at once, no second confirmation. A handler that
+ * returns a promise settles it once the engine has taken what was sent, or refused it.
+ */
 export interface PlanningHandlers {
-  onAnswer: (questionId: string, answer: { optionId: string } | { text: string }) => void
+  onAnswer: (questionId: string, answer: { optionId: string } | { text: string }) => Promise<void>
   onWaitOnSomeone: (questionId: string, note: string | null) => void
   onCopyDraft: (text: string) => void
-  onAcceptProposed: (proposalId: string, text: string | null) => void
+  onAcceptProposed: (proposalId: string, text: string | null) => Promise<void>
   onDismissProposed: (proposalId: string) => void
   onDiscuss: (item: DiscussionItem) => void
   onOpenProbe: (probeId: string) => void
   onDismissFinding: (findingId: string) => void
   onRunColdRead: () => void
   onDecideDependency: (id: string, accept: boolean) => void
-  onGiveVision: (text: string) => void
+  onGiveVision: (text: string) => Promise<void>
   onMarkRead: () => void
   onKeepPlanning: () => void
   onOpenMission: (key: string) => void
@@ -324,9 +327,9 @@ export interface PlanningHandlers {
 /** What a discussion's view can do. */
 export interface DiscussionHandlers {
   /** The first message opens the discussion; the next ones are said in it. */
-  onSay: (text: string) => void
+  onSay: (text: string) => Promise<void>
   onAccept: () => void
-  onClose: (decision: string | null) => void
+  onClose: (decision: string | null) => Promise<void>
 }
 
 /** The questions that still wait for the user or for someone. */

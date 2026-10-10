@@ -28,25 +28,30 @@ export function usePlanning(
       setView(LOADING_PLANNING)
     }
   }, [link, engineReady, id, projectId])
+  // Before the engine follows the mission, a gesture has nowhere to go: it is done with.
+  const sent = (send: (current: PlanningFollowing) => Promise<void>): Promise<void> =>
+    following.current === null ? Promise.resolve() : send(following.current)
   return [
     view,
     {
-      answer: (questionId, answer) => following.current?.answer(questionId, answer),
-      waitOnSomeone: (questionId, note) => following.current?.waitOnSomeone(questionId, note),
-      acceptProposed: (proposalId, text) => following.current?.acceptProposed(proposalId, text),
-      dismissProposed: (proposalId) => following.current?.dismissProposed(proposalId),
-      dismissFinding: (findingId) => following.current?.dismissFinding(findingId),
-      runColdRead: () => following.current?.runColdRead(),
+      answer: (questionId, answer) => sent((current) => current.answer(questionId, answer)),
+      waitOnSomeone: (questionId, note) =>
+        sent((current) => current.waitOnSomeone(questionId, note)),
+      acceptProposed: (proposalId, text) =>
+        sent((current) => current.acceptProposed(proposalId, text)),
+      dismissProposed: (proposalId) => sent((current) => current.dismissProposed(proposalId)),
+      dismissFinding: (findingId) => sent((current) => current.dismissFinding(findingId)),
+      runColdRead: () => sent((current) => current.runColdRead()),
       decideDependency: (dependency, accept) =>
-        following.current?.decideDependency(dependency, accept),
-      giveVision: (text) => following.current?.giveVision(text),
-      markRead: () => following.current?.markRead(),
-      keepPlanning: () => following.current?.keepPlanning(),
-      seenTicketChange: (eventId) => following.current?.seenTicketChange(eventId),
+        sent((current) => current.decideDependency(dependency, accept)),
+      giveVision: (text) => sent((current) => current.giveVision(text)),
+      markRead: () => sent((current) => current.markRead()),
+      keepPlanning: () => sent((current) => current.keepPlanning()),
+      seenTicketChange: (eventId) => sent((current) => current.seenTicketChange(eventId)),
       openProbe: (probeId) => following.current?.openProbe(probeId),
-      say: (item, text) => following.current?.say(item, text),
-      accept: (item) => following.current?.accept(item),
-      close: (item, decision) => following.current?.close(item, decision),
+      say: (item, text) => sent((current) => current.say(item, text)),
+      accept: (item) => sent((current) => current.accept(item)),
+      close: (item, decision) => sent((current) => current.close(item, decision)),
       retry: () => following.current?.retry(),
     },
   ]

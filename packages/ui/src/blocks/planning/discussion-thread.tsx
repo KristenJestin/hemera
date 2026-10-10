@@ -7,6 +7,7 @@ import type { Mentionable } from '../../components/mention-field/mention-field.t
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { IconCheck } from '../../icons.ts'
 import type { Discussion, DiscussionHandlers } from './planning-types.ts'
+import { NotSent, useSending } from './sending.tsx'
 
 const QUIET = 'text-xs text-muted-foreground'
 
@@ -33,13 +34,17 @@ export function DiscussionThread({
 }: DiscussionThreadProps): ReactNode {
   const [text, setText] = useState('')
   const [deciding, setDeciding] = useState(false)
+  const sending = useSending()
   const submit = (): void => {
     const said = text.trim()
     if (said === '') return
-    if (deciding) onClose(said)
-    else onSay(said)
-    setText('')
-    setDeciding(false)
+    sending.send(
+      () => (deciding ? onClose(said) : onSay(said)),
+      () => {
+        setText('')
+        setDeciding(false)
+      },
+    )
   }
   if (discussion === null) {
     return (
@@ -51,8 +56,10 @@ export function DiscussionThread({
           onValueChange={(value) => setText(value)}
           mentionables={mentionables}
           onSubmit={submit}
+          disabled={sending.busy}
           autoFocus
         />
+        <NotSent refusal={sending.refusal} />
       </section>
     )
   }
@@ -131,7 +138,9 @@ export function DiscussionThread({
             onValueChange={(value) => setText(value)}
             mentionables={mentionables}
             onSubmit={submit}
+            disabled={sending.busy}
           />
+          <NotSent refusal={sending.refusal} />
           <div className="flex flex-wrap gap-1">
             <Button
               variant="ghost"
@@ -141,7 +150,7 @@ export function DiscussionThread({
             >
               Write a decision
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => onClose(null)}>
+            <Button variant="ghost" size="sm" onClick={() => sending.send(() => onClose(null))}>
               Close without a decision
             </Button>
           </div>

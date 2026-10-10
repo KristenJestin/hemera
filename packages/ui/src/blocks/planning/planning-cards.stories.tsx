@@ -7,6 +7,7 @@ import type { Mentionable } from '../../components/mention-field/mention-field.t
 import { DEPENDENCIES, outdated, triaged } from '../../surfaces/planning/planning-fixtures.ts'
 import type { PlanningData } from './planning-types.ts'
 import { DependenciesCard, TicketCard, TriageCard, VisionCard } from './planning-cards.tsx'
+import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
 
 /**
  * What else the rail of the Planning page asks of the user, beside the questions: the Planner's
@@ -54,7 +55,7 @@ interface CardsProps {
   onOpenMission: (key: string) => void
   onSeenTicketChange: (id: string) => void
   onDecideDependency: (id: string, accept: boolean) => void
-  onGiveVision: (text: string) => void
+  onGiveVision: (text: string) => Promise<void>
 }
 
 const meta = {
@@ -72,7 +73,7 @@ const meta = {
     onOpenMission: fn(),
     onSeenTicketChange: fn(),
     onDecideDependency: fn(),
-    onGiveVision: fn(),
+    onGiveVision: fn(() => Promise.resolve()),
   },
   decorators: [
     (Story) => (
@@ -118,12 +119,12 @@ export const VisionGiven: Story = {
 
 /** A vision sent: the field empties once the engine has taken it, not before. */
 export const VisionSent: Story = {
+  loaders: EDITOR_LOADED,
   args: { onGiveVision: fn(() => Promise.resolve()) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const field = await canvas.findByRole('textbox', { name: 'Your vision' })
-    await userEvent.click(field)
-    await userEvent.keyboard('One file per note{Enter}')
+    await writeAndSend(field, 'One file per note')
     await expect(args.onGiveVision).toHaveBeenCalledWith('One file per note')
     await waitFor(() => expect(field).toHaveTextContent(''))
     await expect(canvas.queryByRole('alert')).toBeNull()
@@ -132,12 +133,12 @@ export const VisionSent: Story = {
 
 /** A vision the engine refuses: what was written stays, and why is said under the field. */
 export const VisionRefused: Story = {
+  loaders: EDITOR_LOADED,
   args: { onGiveVision: fn(() => Promise.reject(new Error('The mission is frozen.'))) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const field = await canvas.findByRole('textbox', { name: 'Your vision' })
-    await userEvent.click(field)
-    await userEvent.keyboard('One file per note{Enter}')
+    await writeAndSend(field, 'One file per note')
     const why = await canvas.findByRole('alert')
     await expect(why).toHaveTextContent('Not sent: The mission is frozen.')
     await expect(field).toHaveTextContent('One file per note')

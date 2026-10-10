@@ -10,6 +10,7 @@ import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { InputDot } from './planning-marks.tsx'
+import { NotSent, useSending } from './sending.tsx'
 import {
   type AnswerVersion,
   type PlanningHandlers,
@@ -298,6 +299,7 @@ export function QuestionCard({
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
   const [changing, setChanging] = useState(false)
+  const answering = useSending()
   // Answered before the page opened: one line. Answered here: the card stays in place, answered.
   const [answeredBefore] = useState(question.state === 'answered')
   const answer = latest(question)
@@ -311,11 +313,15 @@ export function QuestionCard({
   const submit = (): void => {
     const said = text.trim()
     if (said === '') return
-    if (editing !== null) onAcceptProposed(editing, said)
-    else onAnswer(question.id, { text: said })
-    setText('')
-    setEditing(null)
-    setOwnWords(false)
+    answering.send(
+      () =>
+        editing === null ? onAnswer(question.id, { text: said }) : onAcceptProposed(editing, said),
+      () => {
+        setText('')
+        setEditing(null)
+        setOwnWords(false)
+      },
+    )
   }
   const wait = (): void => {
     onWaitOnSomeone(question.id, note.trim() === '' ? null : note.trim())
@@ -364,14 +370,18 @@ export function QuestionCard({
         />
       )}
       <Unfold open={ownWords}>
-        <MentionField
-          label={`Your answer to ${question.id}`}
-          placeholder="In your own words…"
-          value={text}
-          onValueChange={(value) => setText(value)}
-          mentionables={mentionables}
-          onSubmit={submit}
-        />
+        <div className="flex flex-col gap-1">
+          <MentionField
+            label={`Your answer to ${question.id}`}
+            placeholder="In your own words…"
+            value={text}
+            onValueChange={(value) => setText(value)}
+            mentionables={mentionables}
+            onSubmit={submit}
+            disabled={answering.busy}
+          />
+          <NotSent refusal={answering.refusal} />
+        </div>
       </Unfold>
       <Unfold open={noting}>
         <Input

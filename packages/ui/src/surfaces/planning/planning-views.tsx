@@ -21,9 +21,9 @@ export interface PlanningViewsOf {
   /** The report of each Probe opened; null or missing while it is read. */
   reports: ReadonlyMap<string, ProbeDetail | null>
   mentionables: readonly Mentionable[]
-  onSay: (item: DiscussionItem, text: string) => void
+  onSay: (item: DiscussionItem, text: string) => Promise<void>
   onAccept: (item: DiscussionItem) => void
-  onClose: (item: DiscussionItem, decision: string | null) => void
+  onClose: (item: DiscussionItem, decision: string | null) => Promise<void>
 }
 
 const sameItem = (one: DiscussionItem, other: DiscussionItem): boolean =>

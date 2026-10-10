@@ -4,6 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { DISCUSSION } from '../../surfaces/planning/planning-fixtures.ts'
 import { DiscussionThread } from './discussion-thread.tsx'
+import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
 
 /**
  * A Discuss conversation with the Planner on one question, opened as a view over the Planning
@@ -19,9 +20,9 @@ const meta = {
     discussion: DISCUSSION,
     on: 'Q5',
     mentionables: MENTIONABLES,
-    onSay: fn(),
+    onSay: fn(() => Promise.resolve()),
     onAccept: fn(),
-    onClose: fn(),
+    onClose: fn(() => Promise.resolve()),
   },
   decorators: [
     (Story) => (
@@ -49,6 +50,7 @@ export const Starting: Story = {
 
 /** A first message the engine refuses: it stays in the field, and why is said under it. */
 export const FirstMessageRefused: Story = {
+  loaders: EDITOR_LOADED,
   args: {
     discussion: null,
     onSay: fn(() => Promise.reject(new Error('A discussion is already open on Q5.'))),
@@ -56,8 +58,7 @@ export const FirstMessageRefused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const field = await canvas.findByRole('textbox', { name: 'Your first message on Q5' })
-    await userEvent.click(field)
-    await userEvent.keyboard('Who reads it?{Enter}')
+    await writeAndSend(field, 'Who reads it?')
     const why = await canvas.findByRole('alert')
     await expect(why).toHaveTextContent('Not sent: A discussion is already open on Q5.')
     await expect(field).toHaveTextContent('Who reads it?')

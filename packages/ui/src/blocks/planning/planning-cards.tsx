@@ -16,6 +16,7 @@ import {
 } from '../../icons.ts'
 import { STAGE_DOT } from '../mission/vocabulary.ts'
 import { InputDot } from './planning-marks.tsx'
+import { NotSent, useSending } from './sending.tsx'
 import type { Dependency, PlanningData, Triage, Vision } from './planning-types.ts'
 
 const ROW = 'flex min-w-0 items-start gap-2 border-b border-border px-4 py-2.5 last:border-b-0'
@@ -211,9 +212,10 @@ export function VisionCard({
 }: {
   visions: readonly Vision[]
   mentionables: readonly Mentionable[]
-  onGive: (text: string) => void
+  onGive: (text: string) => Promise<void>
 }): ReactNode {
   const [text, setText] = useState('')
+  const giving = useSending()
   return (
     <section aria-label="Your vision">
       <Frame header={<FrameHeader icon={<IconBolt size="md" />} title="Your vision" />}>
@@ -237,13 +239,17 @@ export function VisionCard({
             value={text}
             onValueChange={(value) => setText(value)}
             mentionables={mentionables}
+            disabled={giving.busy}
             onSubmit={() => {
               const said = text.trim()
               if (said === '') return
-              onGive(said)
-              setText('')
+              giving.send(
+                () => onGive(said),
+                () => setText(''),
+              )
             }}
           />
+          <NotSent refusal={giving.refusal} />
         </div>
       </Frame>
     </section>

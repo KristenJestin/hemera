@@ -5,6 +5,7 @@ import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtu
 import { WAVES } from '../../surfaces/planning/planning-fixtures.ts'
 import type { Question } from './planning-types.ts'
 import { QuestionCard } from './question-card.tsx'
+import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
 
 /**
  * A question of the Planner, as the rail of the Planning page holds it: its options by their
@@ -31,10 +32,10 @@ const meta = {
     discussed: false,
     foldAnswered: true,
     mentionables: MENTIONABLES,
-    onAnswer: fn(),
+    onAnswer: fn(() => Promise.resolve()),
     onWaitOnSomeone: fn(),
     onCopyDraft: fn(),
-    onAcceptProposed: fn(),
+    onAcceptProposed: fn(() => Promise.resolve()),
     onDismissProposed: fn(),
     onDiscuss: fn(),
   },
@@ -103,13 +104,13 @@ export const OwnWords: Story = {
 
 /** An answer in the user's own words the engine refuses: the words stay, and why is said. */
 export const OwnWordsRefused: Story = {
+  loaders: EDITOR_LOADED,
   args: { onAnswer: fn(() => Promise.reject(new Error('Q5 is no longer open.'))) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'In my own words' }))
     const field = await canvas.findByRole('textbox', { name: 'Your answer to Q5' })
-    await userEvent.click(field)
-    await userEvent.keyboard('Only the team{Enter}')
+    await writeAndSend(field, 'Only the team')
     await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { text: 'Only the team' })
     const why = await canvas.findByRole('alert')
     await expect(why).toHaveTextContent('Not sent: Q5 is no longer open.')

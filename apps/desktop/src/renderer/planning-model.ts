@@ -364,25 +364,32 @@ export interface PlanningView {
 
 export const LOADING_PLANNING: PlanningView = { data: null, mentionables: [], reports: new Map() }
 
+/**
+ * What the page can do. A gesture settles once the engine has taken it; one that sends what the
+ * user wrote is refused to its field, any other refusal is said in the head.
+ */
 export interface PlanningFollowing {
-  readonly answer: (questionId: string, answer: { optionId: string } | { text: string }) => void
-  readonly waitOnSomeone: (questionId: string, note: string | null) => void
-  readonly acceptProposed: (proposalId: string, text: string | null) => void
-  readonly dismissProposed: (proposalId: string) => void
-  readonly dismissFinding: (findingId: string) => void
-  readonly runColdRead: () => void
-  readonly decideDependency: (id: string, accept: boolean) => void
-  readonly giveVision: (text: string) => void
-  readonly markRead: () => void
-  readonly keepPlanning: () => void
-  readonly seenTicketChange: (eventId: string) => void
+  readonly answer: (
+    questionId: string,
+    answer: { optionId: string } | { text: string },
+  ) => Promise<void>
+  readonly waitOnSomeone: (questionId: string, note: string | null) => Promise<void>
+  readonly acceptProposed: (proposalId: string, text: string | null) => Promise<void>
+  readonly dismissProposed: (proposalId: string) => Promise<void>
+  readonly dismissFinding: (findingId: string) => Promise<void>
+  readonly runColdRead: () => Promise<void>
+  readonly decideDependency: (id: string, accept: boolean) => Promise<void>
+  readonly giveVision: (text: string) => Promise<void>
+  readonly markRead: () => Promise<void>
+  readonly keepPlanning: () => Promise<void>
+  readonly seenTicketChange: (eventId: string) => Promise<void>
   /** Reads a Probe's report, for its view. */
   readonly openProbe: (probeId: string) => void
   /** The first message on an item opens its discussion; the next ones are said in it. */
-  readonly say: (item: DiscussionItem, text: string) => void
+  readonly say: (item: DiscussionItem, text: string) => Promise<void>
   /** Closes the item's discussion on the proposal the user read. */
-  readonly accept: (item: DiscussionItem) => void
-  readonly close: (item: DiscussionItem, decision: string | null) => void
+  readonly accept: (item: DiscussionItem) => Promise<void>
+  readonly close: (item: DiscussionItem, decision: string | null) => Promise<void>
   /** Reads again, after a failure. */
   readonly retry: () => void
   readonly stop: () => void
@@ -647,13 +654,18 @@ export function followPlanning(
     )
   }
 
-  /** Sends a gesture: what it changes comes back on the streams, or by the next read. */
-  const gesture = <A>(send: () => Promise<A>): void => {
+  /**
+   * Sends a gesture: what it changes comes back on the streams, or by the next read. A refusal of
+   * what the user wrote is handed back to its field, which keeps the words and says why; any
+   * other refusal is said in the head.
+   */
+  const gesture = <A>(send: () => Promise<A>, written = false): Promise<void> => {
     refused = undefined
     emit()
-    send().then(
+    return send().then(
       () => refresh(),
       (failure: Error) => {
+        if (written) throw failure
         if (stopped) return
         refused = failure.message
         emit()
@@ -667,21 +679,21 @@ export function followPlanning(
   start()
 
   return {
-    answer: (questionId, answer) => gesture(() => link.answer(missionId, questionId, answer)),
+    answer: (questionId, answer) =>
+      gesture(() => link.answer(missionId, questionId, answer), 'text' in answer),
     waitOnSomeone: (questionId, note) =>
       gesture(() => link.waitOnSomeone(missionId, questionId, note)),
     acceptProposed: (proposalId, text) =>
-      gesture(() => link.acceptProposedAnswer(proposalId, text)),
+      gesture(() => link.acceptProposedAnswer(proposalId, text), text !== null),
     dismissProposed: (proposalId) => gesture(() => link.dismissProposedAnswer(proposalId)),
     dismissFinding: (findingId) => gesture(() => link.dismissFinding(missionId, findingId)),
     runColdRead: () => gesture(() => link.coldReadAgain(missionId)),
     decideDependency: (id, accept) => gesture(() => link.decideDependency(id, accept)),
-    giveVision: (text) => gesture(() => link.addVision(missionId, text)),
+    giveVision: (text) => gesture(() => link.addVision(missionId, text), true),
     markRead: () => {
-      if (spec !== null) {
-        const version = spec.version
-        gesture(() => link.markRead(missionId, version))
-      }
+      if (spec === null) return Promise.resolve()
+      const version = spec.version
+      return gesture(() => link.markRead(missionId, version))
     },
     keepPlanning: () => gesture(() => link.keepAfterTriage(missionId)),
     seenTicketChange: (eventId) => gesture(() => link.acknowledgeTicketEvent(eventId)),
@@ -692,22 +704,26 @@ export function followPlanning(
     },
     say: (item, text) => {
       const open = discussionOn(item)
-      gesture(() =>
-        open === undefined
-          ? link.openDiscussion(missionId, item, text)
-          : link.sayInDiscussion(open.id, text),
+      return gesture(
+        () =>
+          open === undefined
+            ? link.openDiscussion(missionId, item, text)
+            : link.sayInDiscussion(open.id, text),
+        true,
       )
     },
     accept: (item) => {
       const open = discussionOn(item)
       const proposal = open?.proposal
-      if (open === undefined || proposal === null || proposal === undefined) return
-      gesture(() => link.acceptDiscussion(open.id, proposal.at))
+      if (open === undefined || proposal === null || proposal === undefined) {
+        return Promise.resolve()
+      }
+      return gesture(() => link.acceptDiscussion(open.id, proposal.at))
     },
     close: (item, decision) => {
       const open = discussionOn(item)
-      if (open === undefined) return
-      gesture(() => link.closeDiscussion(open.id, decision))
+      if (open === undefined) return Promise.resolve()
+      return gesture(() => link.closeDiscussion(open.id, decision), decision !== null)
     },
     retry: () => {
       for (const stop of unsubscribe) stop()
