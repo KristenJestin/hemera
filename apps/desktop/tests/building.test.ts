@@ -13,8 +13,8 @@ import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'no
 import { join } from 'node:path'
 
 import { MaskedText } from '@hemera/core/domain'
-import { BuildingRefused, type CheckedBase, type Mission } from '@hemera/ipc'
-import { and, asc, eq } from 'drizzle-orm'
+import type { CheckedBase } from '@hemera/ipc'
+import { and, eq } from 'drizzle-orm'
 import { Effect, Predicate, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -40,7 +40,6 @@ import { ROLES_REGISTERED } from '../src/engine/sessions/roles.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
-  domainEvents,
   missionTickets,
   missions,
   sessionDeliveries,
@@ -52,16 +51,21 @@ import {
   INVOICES,
   PACKAGE,
   QUIET,
-  READING,
   acmeAt,
+  agents,
   answered,
   buildingEngine,
   call,
+  checked,
   commandDraft,
+  eventsOf,
   frozenIn,
+  inStage,
+  marksOf,
   plannedIn,
   plannerTook,
   pushedOnRemote,
+  refusedWith,
   reporting,
   settledAndFrozen,
 } from './building-world.ts'
@@ -78,51 +82,13 @@ beforeEach(() => {
 })
 afterEach(removeFolders)
 
-/** The cold reads first (one per Freeze), then the agents of the checks, each as given. */
-const agents =
-  (...checks: ReadonlyArray<typeof QUIET>) =>
-  (index: number) =>
-    index === 0 ? READING : (checks[index - 1] ?? READING)
-
 const acme = () => acmeAt(work)
-
-/** Waits until the mission's last check has ended (done or failed), and answers it. */
-const checked = (missionId: string) =>
-  Effect.gen(function* () {
-    yield* until(
-      Effect.map(latestCheckOf(missionId), (view) => view !== null && view.state !== 'running'),
-    )
-    const view = yield* latestCheckOf(missionId)
-    if (view === null) return yield* Effect.die(new Error('no check'))
-    return view
-  })
-
-/** Waits until the mission is in this stage. */
-const inStage = (missionId: string, stage: Mission['stage']) =>
-  until(Effect.map(getMission(missionId), (mission) => mission.stage === stage))
-
-const eventsOf = (missionId: string, type: string) =>
-  Effect.gen(function* () {
-    const database = yield* Database
-    return yield* database
-      .select({ payload: domainEvents.payload })
-      .from(domainEvents)
-      .where(and(eq(domainEvents.entityId, missionId), eq(domainEvents.type, type)))
-      .orderBy(asc(domainEvents.sequence))
-  })
-
-const refusedWith = (outcome: Result.Result<unknown, unknown>) =>
-  Result.isFailure(outcome) && outcome.failure instanceof BuildingRefused
-    ? outcome.failure.reasons
-    : null
 
 const FRESHNESS = ['FetchedNow', 'NotFetchedSince', 'LocalBranch'] as const
 
 /** How fresh a base the check read is, by its tag. */
 const freshnessOf = (base: CheckedBase) =>
   FRESHNESS.find((tag) => Predicate.isTagged(base.freshness, tag)) ?? null
-
-const marksOf = (mission: Mission) => mission.marks.map((one) => one.sentence)
 
 /** The remote's `invoices.ts` changed by someone else: a file the task targets. */
 const targetMoved = (bare: string) =>

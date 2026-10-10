@@ -10,20 +10,21 @@ import { writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { DEFAULT_BASE_BRANCH, SPEC_SECTIONS } from '@hemera/core/domain'
-import type { CommandDraft } from '@hemera/ipc'
-import { and, eq } from 'drizzle-orm'
-import { Effect, Layer, type Schema } from 'effect'
+import { BuildingRefused, type CommandDraft, type Mission } from '@hemera/ipc'
+import { and, asc, eq } from 'drizzle-orm'
+import { Effect, Layer, Result, type Schema } from 'effect'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
+import { latestCheckOf } from '../src/engine/building/check.ts'
 import { BuildingStart } from '../src/engine/building/launch.ts'
-import { createMission } from '../src/engine/missions.ts'
+import { createMission, getMission } from '../src/engine/missions.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
 import { freezeMission } from '../src/engine/planning/freeze.ts'
 import { markDelivered } from '../src/engine/planning/inputs.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { sessionDeliveries } from '../src/engine/storage/schema.ts'
+import { domainEvents, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
@@ -339,3 +340,42 @@ export const commandDraft = (
   writeGlobs: [],
   ...more,
 })
+
+/** The cold reads first (one per Freeze), then the agents of the checks, each as given. */
+export const agents =
+  (...checks: ReadonlyArray<typeof QUIET>) =>
+  (index: number) =>
+    index === 0 ? READING : (checks[index - 1] ?? READING)
+
+/** Waits until the mission's last check has ended (done or failed), and answers it. */
+export const checked = (missionId: string) =>
+  Effect.gen(function* () {
+    yield* until(
+      Effect.map(latestCheckOf(missionId), (view) => view !== null && view.state !== 'running'),
+    )
+    const view = yield* latestCheckOf(missionId)
+    if (view === null) return yield* Effect.die(new Error('no check'))
+    return view
+  })
+
+/** Waits until the mission is in this stage. */
+export const inStage = (missionId: string, stage: Mission['stage']) =>
+  until(Effect.map(getMission(missionId), (mission) => mission.stage === stage))
+
+export const eventsOf = (missionId: string, type: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select({ payload: domainEvents.payload })
+      .from(domainEvents)
+      .where(and(eq(domainEvents.entityId, missionId), eq(domainEvents.type, type)))
+      .orderBy(asc(domainEvents.sequence))
+  })
+
+export const refusedWith = (outcome: Result.Result<unknown, unknown>) =>
+  Result.isFailure(outcome) && outcome.failure instanceof BuildingRefused
+    ? outcome.failure.reasons
+    : null
+
+/** A mission's marks, as their sentences. */
+export const marksOf = (mission: Mission) => mission.marks.map((one) => one.sentence)
