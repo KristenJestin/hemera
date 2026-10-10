@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "be9f10ea-c205-4b50-a610-1624e60739e9",
-  "prevIds": ["344a4eef-3d9a-4490-8528-e77caeac17bc"],
+  "id": "dc526278-3dc9-4e69-a477-15507095c6da",
+  "prevIds": ["947a40e7-a7ce-46b9-82cd-59bdb74116ea"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -7041,6 +7041,26 @@
       "default": null,
       "generated": null,
       "name": "output_tokens",
+      "entityType": "columns",
+      "table": "session_usage"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "cached_read_tokens",
+      "entityType": "columns",
+      "table": "session_usage"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "cached_write_tokens",
       "entityType": "columns",
       "table": "session_usage"
     },
