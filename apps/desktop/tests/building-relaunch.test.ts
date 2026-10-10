@@ -20,7 +20,7 @@ import { getMission, moveMission } from '../src/engine/missions.ts'
 import { getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject, removeRepository } from '../src/engine/projects.ts'
 import { saveRecipe } from '../src/engine/recipe.ts'
-import { getWorkspace } from '../src/engine/workspaces.ts'
+import { getWorkspace, removeWorkspace } from '../src/engine/workspaces.ts'
 import {
   PACKAGE,
   QUIET,
@@ -181,6 +181,31 @@ describe('A launch that did not end in Building leaves nothing in the way', () =
     expect(seen.mission.stage).toBe('cancelled')
     expect(seen.branch).toBe(false)
     expect(starts.missions).toEqual([])
+  })
+
+  test('Retry when the failed launch’s Workspace was removed meanwhile: the launch stays failed and its need pending', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main, api } = yield* acmeAt(work)
+          yield* failingRecipe(project.id, api)
+          const { mission, view } = yield* checkedReady(project.id, main)
+          yield* launchMission(mission.id, view.id, 'launch')
+          yield* until(Effect.map(preparationOf(mission.id), (one) => one?.state === 'failed'))
+          const failed = yield* preparationOf(mission.id)
+          yield* removeWorkspace(failed?.workspaceId ?? '')
+          yield* retryNeed(failed?.needId ?? '')
+          return {
+            preparation: yield* preparationOf(mission.id),
+            need: yield* getNeed(failed?.needId ?? ''),
+          }
+        }),
+      ),
+    )
+    expect(seen.preparation?.state).toBe('failed')
+    expect(seen.need.state).toBe('pending')
   })
 })
 

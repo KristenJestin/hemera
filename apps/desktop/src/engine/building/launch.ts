@@ -627,11 +627,32 @@ const resumeLaunch = (needId: string) =>
         }
       }),
     )
-    if (resumed?.workspaceId == null) return false
-    yield* beginPreparation(resumed.workspaceId, true).pipe(
-      Effect.catchTag('PreparationRunning', () => Effect.void),
+    if (resumed === null) return false
+    const begun =
+      resumed.workspaceId === null
+        ? null
+        : yield* beginPreparation(resumed.workspaceId, true).pipe(
+            Effect.catchTag('PreparationRunning', () => Effect.void),
+            Effect.exit,
+          )
+    if (begun !== null && Exit.isSuccess(begun)) return true
+    // Not resumed (its Workspace gone, or its recipe refused): the launch stays failed, its need on.
+    yield* mutate('saying the preparation was not resumed', (transaction) =>
+      Effect.gen(function* () {
+        yield* transaction
+          .update(buildingLaunches)
+          .set({ state: 'failed', needId })
+          .where(and(eq(buildingLaunches.id, resumed.id), eq(buildingLaunches.state, 'preparing')))
+          .pipe(Effect.mapError(refusedWhile('saying the preparation was not resumed')))
+        const next = yield* hemeraNext(
+          transaction,
+          resumed.missionId,
+          'Preparation failed: it could not be resumed',
+        )
+        return { result: undefined, events: [next] }
+      }),
     )
-    return true
+    return false
   })
 
 /**
