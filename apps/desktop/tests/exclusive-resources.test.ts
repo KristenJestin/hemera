@@ -333,6 +333,43 @@ describe('The declaration of an exclusive resource', () => {
   })
 })
 
+describe('The commands of a resource are listed in a fixed order', () => {
+  test('whatever order they were declared in, they come back by name: the Probe’s brief reads the same text twice', async () => {
+    const [first, second] = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const acmeProject = yield* project('Acme')
+          const ids = new Map<string, string>()
+          for (const name of ['zeta', 'echo', 'delta', 'charlie', 'bravo', 'alpha']) {
+            ids.set(name, (yield* command(acmeProject.id, name, nodeLine(writes, log, name))).id)
+          }
+          const named = (...names: ReadonlyArray<string>) =>
+            names.map((name) => ids.get(name) ?? name)
+          const listedAs = (uses: ReadonlyArray<string>, changes: ReadonlyArray<string>) =>
+            Effect.gen(function* () {
+              yield* saveResources(acmeProject.id, [
+                resource({ uses: named(...uses), changes: named(...changes) }),
+              ])
+              const [listed] = yield* listResources(acmeProject.id)
+              const names = (listedIds: ReadonlyArray<string> | undefined) =>
+                (listedIds ?? []).map((id) => [...ids].find(([, known]) => known === id)?.[0] ?? id)
+              return { uses: names(listed?.uses), changes: names(listed?.changes) }
+            })
+          return [
+            yield* listedAs(['zeta', 'charlie', 'alpha'], ['echo', 'delta', 'bravo']),
+            yield* listedAs(['alpha', 'charlie', 'zeta'], ['bravo', 'delta', 'echo']),
+          ] as const
+        }),
+      ),
+    )
+    expect(first).toEqual({
+      uses: ['alpha', 'charlie', 'zeta'],
+      changes: ['bravo', 'delta', 'echo'],
+    })
+    expect(second).toEqual(first)
+  })
+})
+
 describe('One mission at a time runs the commands declared on a resource', () => {
   test('two missions of one Project: the second one’s declared command waits, blocked by shared database · ACME-1; it starts when the first Building ends, and the mark clears', async () => {
     const seen = await engine()(({ profile }) =>

@@ -631,7 +631,10 @@ describe('One human question per call: the agent’s own requests are Hemera’s
             }),
             acpTracesLayer(data),
             defaultPermissionAnswerLayer,
-            Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
+            Layer.succeed(SessionInstructions, {
+              of: () => Effect.succeed('# Instructions'),
+              renewed: () => Effect.succeed('# Instructions'),
+            }),
           )
           yield* AgentRuntime.use((runtime) =>
             runtime.prompt(session.id, [TextBlock.make({ text: 'write the notes' })]),

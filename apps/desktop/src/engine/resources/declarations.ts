@@ -23,7 +23,11 @@ import { Effect } from 'effect'
 import { getCommand, listCommands } from '../catalogue.ts'
 import { getProject } from '../projects.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { exclusiveResourceCommands, exclusiveResources } from '../storage/schema.ts'
+import {
+  exclusiveResourceCommands,
+  exclusiveResources,
+  projectCommands,
+} from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 
 /** A resource's identity on the whole machine: its name, trimmed and case-folded. */
@@ -46,14 +50,22 @@ export const listResources = (projectId: string) =>
       rows.length === 0
         ? []
         : yield* database
-            .select()
+            .select({
+              resourceId: exclusiveResourceCommands.resourceId,
+              commandId: exclusiveResourceCommands.commandId,
+              role: exclusiveResourceCommands.role,
+            })
             .from(exclusiveResourceCommands)
+            .innerJoin(projectCommands, eq(projectCommands.id, exclusiveResourceCommands.commandId))
             .where(
               inArray(
                 exclusiveResourceCommands.resourceId,
                 rows.map((row) => row.id),
               ),
             )
+            // By name, whatever the order they were declared in: the Probe's brief is built from
+            // this list, and a brief that reads differently each time breaks the prompt cache.
+            .orderBy(asc(projectCommands.name), asc(exclusiveResourceCommands.commandId))
             .pipe(Effect.mapError(refusedWhile('reading the exclusive resources')))
     const listed = (resourceId: string, role: string) =>
       commands

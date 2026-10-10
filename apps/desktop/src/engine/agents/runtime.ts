@@ -73,10 +73,14 @@ export type AgentDied = typeof AgentDied.Type
 /**
  * A session's instructions, set once when its agent opens it: Claude Code's custom system prompt,
  * the others' first-message resource. The role sessions write them (base, role, Project).
+ * `renewed` writes them again from what holds now, for a session whose conversation was compacted.
  */
 export class SessionInstructions extends Context.Service<
   SessionInstructions,
-  { readonly of: (sessionId: string) => Effect.Effect<string, DatabaseError> }
+  {
+    readonly of: (sessionId: string) => Effect.Effect<string, DatabaseError>
+    readonly renewed: (sessionId: string) => Effect.Effect<string, DatabaseError>
+  }
 >()('SessionInstructions') {}
 
 /** What a session's agent reported, as it reported it. */
@@ -204,8 +208,9 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
           const record = yield* getAgentSession(sessionId)
           const resolved = yield* Discovery.use((discovery) => discovery.resolve(record.provider))
           const url = yield* endpoint.url
-          const token = yield* endpoint.mint(sessionId)
+          // The instructions first: the tools a token grants follow the ones the session has kept.
           const systemPrompt = yield* instructions.of(sessionId)
+          const token = yield* endpoint.mint(sessionId)
           const bare = resolved.adapter.bareOptions({
             agentDirectory: agentDirectoryOf(settings.dataFolder, record.provider),
             systemPrompt,

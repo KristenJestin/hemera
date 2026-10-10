@@ -775,7 +775,10 @@ describe('An agent over real MCP is never held by a question', () => {
         }),
         acpTracesLayer(data),
         defaultPermissionAnswerLayer,
-        Layer.succeed(SessionInstructions, { of: () => Effect.succeed('# Instructions') }),
+        Layer.succeed(SessionInstructions, {
+          of: () => Effect.succeed('# Instructions'),
+          renewed: () => Effect.succeed('# Instructions'),
+        }),
       )
       const began = performance.now()
       yield* AgentRuntime.use((runtime) =>
