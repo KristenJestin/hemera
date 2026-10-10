@@ -38,8 +38,13 @@ import { PlannerWake } from '../src/engine/planning/wake.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { type RoleSession, getSession, sessionsIn } from '../src/engine/sessions/store.ts'
-import { instructionsKept, threadOf } from '../src/engine/sessions/thread.ts'
+import {
+  type RoleSession,
+  getSession,
+  instructionsKept,
+  sessionsIn,
+} from '../src/engine/sessions/store.ts'
+import { threadOf } from '../src/engine/sessions/thread.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
 import { Secrets } from '../src/engine/secrets.ts'

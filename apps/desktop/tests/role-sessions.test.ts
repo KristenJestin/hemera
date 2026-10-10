@@ -8,7 +8,9 @@
 
 import { realpathSync } from 'node:fs'
 
-import { Deferred, Effect, Fiber } from 'effect'
+import { deliveryBlock } from '@hemera/core/domain'
+
+import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
@@ -17,6 +19,7 @@ import { createMission } from '../src/engine/missions.ts'
 import { Delivery } from '../src/engine/permissions/delivery.ts'
 import { startRun, stopRun } from '../src/engine/runs.ts'
 import { assignWork, holdsWork, leaseOf } from '../src/engine/sessions/leases.ts'
+import { SpecLanguage } from '../src/engine/sessions/ports.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
@@ -35,6 +38,7 @@ import {
   permissionRequests,
   queuedDeliveries,
   sessionDeliveries,
+  sessionThreads,
   supervisedProcesses,
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
@@ -167,6 +171,28 @@ describe('The three layers are set once, at the session’s start, then the brie
     const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
     expect(meta.claudeCode.options.systemPrompt.prompt).not.toContain('## The Memory')
     expect(text(world.agents[0]?.answers.prompts[0] ?? [])).not.toContain('## Now')
+  })
+  test('instructions that cannot be read fail the start: no agent starts on a bare base', async () => {
+    const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
+      sessions: {
+        specLanguage: Layer.succeed(SpecLanguage, () =>
+          Effect.die(new Error('the Spec language could not be read')),
+        ),
+      },
+    })
+    const first = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.map(getSession(session.id), (now) => now.state === 'failed'))
+          return yield* getSession(session.id)
+        }),
+      ),
+    )
+    expect(first.stateReason).toContain('instructions')
+    expect(world.agents).toHaveLength(0)
   })
 })
 
@@ -625,6 +651,35 @@ describe('Compaction and saturation (CT-15)', () => {
     expect(again).toMatch(/^\[hemera:instructions\]\n# Hemera base \(every role\)/)
     expect(again).toContain(TEST_ROLE.template)
     expect(again).toContain('\n\n[hemera:brief]\n')
+  })
+
+  test('the instructions sent again are those it was started with, once its thread is gone', async () => {
+    const hold = held()
+    const { world, run } = engine((index) =>
+      index === 0 ? holding(hold, 0, [{ does: 'compacts', id: 'compact-1' }]) : {},
+    )
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          // The diagnostic retention removed its thread while it ran.
+          const database = yield* Database
+          yield* database.delete(sessionThreads).where(eq(sessionThreads.sessionId, session.id))
+          hold.release()
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2))
+          yield* settled(session.id)
+        }),
+      ),
+    )
+    const meta = JSON.parse(world.agents[0]?.answers.metas[0] ?? '{}')
+    const started: string = meta.claudeCode.options.systemPrompt.prompt
+    const again = text(world.agents[0]?.answers.prompts[1] ?? [])
+    expect(again.startsWith(`${deliveryBlock('instructions', started)}\n\n[hemera:brief]\n`)).toBe(
+      true,
+    )
   })
 
   test('with no such signal, past 80 % of the window the session is replaced', async () => {

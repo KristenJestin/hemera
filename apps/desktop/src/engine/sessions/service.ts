@@ -107,13 +107,14 @@ import {
   endSession,
   getSession,
   insertSession,
+  instructionsKept,
   openSession,
   sessionEvent,
   sessionsIn,
   sessionsOfLineage,
   setState,
 } from './store.ts'
-import { addToThread, instructionsKept } from './thread.ts'
+import { addToThread } from './thread.ts'
 import { addUsage, estimatedTokens, setCost } from './usage.ts'
 
 /** A session refused before it opens: a role no ticket registered, or not its owner's kind. */

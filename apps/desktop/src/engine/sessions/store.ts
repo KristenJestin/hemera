@@ -276,6 +276,31 @@ export const writeState = (
       .pipe(Effect.mapError(refusedWhile('writing a session’s state')))
   })
 
+/** The instructions a session's agent was first started with, as sent, or null before. */
+export const instructionsKept = (sessionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [row] = yield* database
+      .select({ instructions: agentSessions.instructions })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .pipe(Effect.mapError(refusedWhile('reading a session’s instructions')))
+    return row?.instructions ?? null
+  })
+
+/** Keeps the instructions a session's agent was first started with, as sent. */
+export const keepInstructions = (sessionId: string, instructions: string) =>
+  mutate('keeping a session’s instructions', (transaction) =>
+    transaction
+      .update(agentSessions)
+      .set({ instructions })
+      .where(eq(agentSessions.id, sessionId))
+      .pipe(
+        Effect.mapError(refusedWhile('keeping a session’s instructions')),
+        Effect.as({ result: undefined, events: [] }),
+      ),
+  )
+
 /** A session's state outside any other change: `working`, `idle`, `stuck`. */
 export const setState = (sessionId: string, state: SessionState, reason: string | null = null) =>
   mutate('writing a session’s state', (transaction) =>

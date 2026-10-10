@@ -1,7 +1,8 @@
 /**
  * What the agents' runtime asks when it starts a session's agent: the session's instructions,
- * the three layers written once and kept in its thread, so every later start of its agent (an
- * idle release, a death of the process) is handed the same text. A later change of a template
+ * the three layers written once and kept on the session as sent, so every later start of its
+ * agent (an idle release, a death of the process) is handed the same text; its thread has a
+ * masked copy, for diagnosis. A later change of a template
  * applies to the next session.
  *
  * And the Journal's lines of a replacement and of a refusal: a launch above the cap, a counter of
@@ -11,7 +12,7 @@
 import { AGENT_PROVIDERS } from '@hemera/core/domain'
 import { HemeraAuthor } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Option, Schema } from 'effect'
+import { Cause, Effect, Layer, Option, Schema } from 'effect'
 
 import { ADAPTERS } from '../agents/adapters/index.ts'
 import { SessionInstructions } from '../agents/runtime.ts'
@@ -25,8 +26,8 @@ import { missions } from '../storage/schema.ts'
 import { filesToSend, instructionsText, placeRepositories, renderBase } from './instructions.ts'
 import { SpecLanguage, TesterMode } from './ports.ts'
 import { RoleRegistry, type RoleEntry, roleNamed } from './roles.ts'
-import { type RoleSession, getSession } from './store.ts'
-import { addToThread, instructionsKept } from './thread.ts'
+import { type RoleSession, getSession, instructionsKept, keepInstructions } from './store.ts'
+import { addToThread } from './thread.ts'
 
 /** The owner as the base layer names it, and the Project it belongs to. */
 const ownerNamed = (session: RoleSession) =>
@@ -69,7 +70,7 @@ const unknownRole = (id: string): RoleEntry => ({
   ledByUser: false,
 })
 
-/** A session's three layers, written once, kept in its thread. */
+/** A session's three layers, written once, kept on the session. */
 const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
   Effect.gen(function* () {
     const kept = yield* instructionsKept(sessionId)
@@ -103,6 +104,7 @@ const instructionsOf = (sessionId: string, platform: NodeJS.Platform) =>
           )
         : []
     const text = instructionsText(base, role, files, preferences.userLanguage, specLanguage)
+    yield* keepInstructions(sessionId, text)
     yield* addToThread(sessionId, 'instructions', text)
     return text
   })
@@ -119,19 +121,13 @@ export const sessionInstructionsLayer = (platform: NodeJS.Platform = process.pla
         of: (sessionId) =>
           instructionsOf(sessionId, platform).pipe(
             Effect.provide(context),
-            // Instructions that cannot be read are never invented: the base alone, said plainly.
-            Effect.catchCause(() =>
-              Effect.succeed(
-                renderBase({
-                  owner: 'a mission',
-                  role: 'this session’s role',
-                  userLanguage: 'en',
-                  specLanguage: 'en',
-                  readsMemory: false,
-                  testerMode: null,
-                  hemeraOnly: true,
-                }),
-              ),
+            // Instructions that cannot be read are never invented: the start fails, in words.
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.fail(
+                    refusedWhile('reading the session’s instructions')(Cause.squash(cause)),
+                  ),
             ),
           ),
       }

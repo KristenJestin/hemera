@@ -54,10 +54,3 @@ export const threadOf = (sessionId: string) =>
       text: row.text,
     }))
   })
-
-/** The instructions a session was started with, as its thread kept them, or null. */
-export const instructionsKept = (sessionId: string) =>
-  Effect.map(
-    threadOf(sessionId),
-    (lines) => lines.find((line) => line.kind === 'instructions')?.text ?? null,
-  )

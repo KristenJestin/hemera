@@ -76,7 +76,7 @@ export type AgentDied = typeof AgentDied.Type
  */
 export class SessionInstructions extends Context.Service<
   SessionInstructions,
-  { readonly of: (sessionId: string) => Effect.Effect<string> }
+  { readonly of: (sessionId: string) => Effect.Effect<string, DatabaseError> }
 >()('SessionInstructions') {}
 
 /** What a session's agent reported, as it reported it. */
