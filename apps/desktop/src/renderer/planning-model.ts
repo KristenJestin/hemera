@@ -515,6 +515,7 @@ export function followPlanning(
   const refresh = (): void => {
     if (spec === null) return
     const shown = spec
+    readLiving(shown)
     const mine = ++reads
     const since = shown.readVersion
     Promise.all([
@@ -541,7 +542,10 @@ export function followPlanning(
     )
   }
 
-  /** Reads the text of each living requirement the Spec changes, once each. */
+  /**
+   * Reads the text of each living requirement the Spec changes, once each; a read that failed is
+   * asked again at the next.
+   */
   const readLiving = (heard: Spec): void => {
     for (const one of heard.requirements) {
       const ref = one.livingRef
@@ -552,8 +556,10 @@ export function followPlanning(
           living.set(ref, detail.text)
           emit()
         },
-        // Without it, the requirement says which living requirement it changes, not its text.
-        () => undefined,
+        // Meanwhile the requirement says which living requirement it changes, not its text.
+        () => {
+          asked.delete(ref)
+        },
       )
     }
   }
@@ -582,7 +588,6 @@ export function followPlanning(
       markedOnce = true
       link.markRead(missionId, heard.version).catch(() => undefined)
     }
-    readLiving(heard)
     refresh()
     emit()
   }
