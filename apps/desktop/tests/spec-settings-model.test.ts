@@ -8,9 +8,9 @@ import { InvalidKeyPrefix, InvalidSyncInterval, KeyPrefixTaken, StaleVersion } f
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
-  OFFERED_MODES,
   answerGate,
   lastCheckWords,
+  modesOffered,
   pendingPrefix,
   prefixEditOf,
   prefixWords,
@@ -19,8 +19,32 @@ import {
 } from '../src/renderer/spec-settings-model.ts'
 
 describe('The modes the Spec settings offer', () => {
-  test('are Local and Linked, never Remote', () => {
-    expect(OFFERED_MODES).toEqual(['local', 'linked'])
+  const github = { kind: 'github' } as const
+  const jira = { kind: 'jira' } as const
+
+  test('are Local and Linked while the Project has no provider', () => {
+    expect(modesOffered('local', [])).toEqual(['local', 'linked'])
+  })
+
+  test('are Local and Linked while the providers are not read yet', () => {
+    expect(modesOffered('local', null)).toEqual(['local', 'linked'])
+  })
+
+  test('add Remote once the Project has a GitHub provider', () => {
+    expect(modesOffered('local', [github])).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('add Remote once the Project has a Jira provider', () => {
+    expect(modesOffered('linked', [jira])).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('keep Remote while the Project is in it, even with no provider left', () => {
+    expect(modesOffered('remote', [])).toEqual(['local', 'linked', 'remote'])
+    expect(modesOffered('remote', null)).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('offer Local and Linked alone while the mode is not read', () => {
+    expect(modesOffered(null, [])).toEqual(['local', 'linked'])
   })
 })
 
