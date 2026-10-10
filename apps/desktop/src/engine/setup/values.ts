@@ -5,9 +5,8 @@
  * moment it arrives, so every copy of the call's arguments shows `•••`; once the call is recorded
  * only the values its cards hold stay secrets, until each card is decided. A change its card keeps
  * masked (a command line carrying a token) is held whole here the same way, for the click to apply
- * it as proposed. A number, a boolean or
- * a value shorter than six characters is never one (the registry's rule). An engine that stops
- * forgets them: their cards are then refused at the click.
+ * it as proposed. A boolean or a value shorter than six characters is never one (the registry's
+ * rule). An engine that stops forgets them: their cards are then refused at the click.
  */
 
 import type { SetupChange } from '@hemera/core/domain'

@@ -57,7 +57,7 @@ describe('The registry masks what is registered, and only while it is', () => {
     expect(secrets.values()).toEqual(['abc123'])
   })
 
-  test('a number, a boolean or a value under six characters is not registered, so `1` or `dev` stays in clear inside other words', () => {
+  test('a boolean or a value under six characters is not registered, so `1` or `dev` stays in clear inside other words', () => {
     const secrets = secretsRegistry()
     secrets.register('project-variables:acme', [
       '1',
@@ -81,6 +81,15 @@ describe('The registry masks what is registered, and only while it is', () => {
         'curl https://dev.example.com/v1?key=quartz-violet-4471&page=1 --idquartz-violet-4471x',
       ),
     ).toBe(`curl https://dev.example.com/v1?key=${MASK}&page=1 --id${MASK}x`)
+  })
+
+  test('a number of six characters or more is a secret like any value: a 10-digit account id is masked inside a line, `3000` and `1` stay in clear', () => {
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', ['8421397701', '3000', '1'])
+    expect(secrets.values()).toEqual(['8421397701'])
+    expect(secrets.mask('account 8421397701 on port 3000, retry 1')).toBe(
+      `account ${MASK} on port 3000, retry 1`,
+    )
   })
 
   test('a source registered again replaces its values', () => {

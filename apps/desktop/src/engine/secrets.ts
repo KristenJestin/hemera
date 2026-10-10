@@ -7,9 +7,10 @@
  * memory only: never in the database, never in a log. The registry is rebuilt at each start from
  * its sources, the variables of the Profile first.
  *
- * A known value is masked as a part of any text, so a value that is a number, a boolean or
- * shorter than six characters is never registered: masked inside other words, a variable valued
- * `1` or `dev` would hide every `1` and every `dev`, and such a value says nothing worth hiding.
+ * A known value is masked as a part of any text, so a value that is a boolean or shorter than six
+ * characters is never registered: masked inside other words, a variable valued `1`, `3000` or
+ * `dev` would hide every `1`, `3000` and `dev`, and such a value says nothing worth hiding. A
+ * number of six characters or more (a PIN, an account id) is registered like any value.
  * Matching on word boundaries instead would let a real secret glued to other characters (a
  * query string, a path, a longer token) through, so the rule is on the value, not on the match.
  */
@@ -33,14 +34,13 @@ export interface SecretsRegistry {
   readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
 
-/** Whether a value is worth masking: not a number, not a boolean, six characters or more. */
+/**
+ * Whether a value is worth masking: six characters or more, and not a boolean. A long number
+ * (a PIN, an account id, a numeric token) is one; a short one (a port, a count) is not.
+ */
 export const secretWorthy = (value: string): boolean => {
   const trimmed = value.trim()
-  return (
-    trimmed.length >= 6 &&
-    !/^[-+]?\d+(?:[.,]\d+)?$/.test(trimmed) &&
-    !['true', 'false'].includes(trimmed.toLowerCase())
-  )
+  return trimmed.length >= 6 && !['true', 'false'].includes(trimmed.toLowerCase())
 }
 
 export function secretsRegistry(): SecretsRegistry {
