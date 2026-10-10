@@ -161,8 +161,15 @@ describe('Every Git call declares its class, and its class sets its limit', () =
     ['changedFiles', 'read', (one: GitService) => one.changedFiles('/r')],
     ['dirtyFiles', 'read', (one: GitService) => one.dirtyFiles('/r')],
     ['aheadBehind', 'read', (one: GitService) => one.aheadBehind('/r', 'abc')],
+    ['diffBetween', 'read', (one: GitService) => one.diffBetween('/r', 'a', 'b', 'x.ts')],
   ] as const)('%s runs as a %s', async (_, kind, call) => {
     expect(await classesOf((one: GitService) => Effect.asVoid(call(one)))).toEqual([kind])
+  })
+
+  test('changesBetween runs as two reads: the letters, then the lines', async () => {
+    expect(
+      await classesOf((one: GitService) => Effect.asVoid(one.changesBetween('/r', 'a', 'b'))),
+    ).toEqual(['read', 'read'])
   })
 })
 
@@ -461,6 +468,47 @@ describe('The dirty files of a main checkout are named with how they differ (#92
   test('a clean checkout has none', async () => {
     const api = repository(join(folder, 'api'))
     expect(await asked(Git.use((one) => one.dirtyFiles(api)))).toEqual([])
+  })
+})
+
+describe('What changed between two commits is read, no checkout touched (#139)', () => {
+  test('each file with its status letter and its lines added and removed; a binary file has no lines', () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'kept.ts'), 'one\ntwo\n')
+    writeFileSync(join(api, 'gone.ts'), 'gone\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'first')
+    const from = git(api, 'rev-parse', 'HEAD')
+    writeFileSync(join(api, 'kept.ts'), 'one\nthree\nfour\n')
+    rmSync(join(api, 'gone.ts'))
+    mkdirSync(join(api, 'sub dir'))
+    writeFileSync(join(api, 'sub dir', 'new.bin'), Buffer.from([0, 1, 2, 0, 255]))
+    git(api, 'add', '-A')
+    git(api, 'commit', '-q', '-m', 'second')
+    const to = git(api, 'rev-parse', 'HEAD')
+    // The working tree moves on: never read.
+    writeFileSync(join(api, 'kept.ts'), 'dirty\n')
+    return asked(
+      Effect.all([
+        Git.use((one) => one.changesBetween(api, from, to)),
+        Git.use((one) => one.diffBetween(api, from, to, 'kept.ts')),
+      ]),
+    ).then(([changes, patch]) => {
+      expect([...changes].toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
+        { path: 'gone.ts', status: 'D', added: 0, removed: 1 },
+        { path: 'kept.ts', status: 'M', added: 2, removed: 1 },
+        { path: 'sub dir/new.bin', status: 'A', added: null, removed: null },
+      ])
+      expect(patch).toContain('-two')
+      expect(patch).toContain('+four')
+      expect(patch).not.toContain('dirty')
+    })
+  })
+
+  test('the same commit twice has no change', async () => {
+    const api = repository(join(folder, 'api'))
+    const head = git(api, 'rev-parse', 'HEAD')
+    expect(await asked(Git.use((one) => one.changesBetween(api, head, head)))).toEqual([])
   })
 })
 
