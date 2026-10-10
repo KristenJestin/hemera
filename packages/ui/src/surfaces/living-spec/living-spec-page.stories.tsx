@@ -106,6 +106,48 @@ export const Reading: Story = {
   },
 }
 
+/** The reading's chip, pressed while it runs: its glance opens, with the step it is on. */
+export const ReadingGlance: Story = {
+  args: { data: RUNNING },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Reading Acme, running' }))
+    const glance = await within(document.body).findByRole('dialog', { name: 'Reading Acme' })
+    // The glance rises in: what it says is read once it has.
+    await waitFor(() => expect(within(glance).getByText(/^Running for/)).toBeVisible())
+    await expect(within(glance).getByText('Reading the code')).toBeVisible()
+  },
+}
+
+/** The reading's chip, pressed once it ended: its glance asks for the review its proposals wait for. */
+export const ReadingDoneGlance: Story = {
+  args: { data: JUST_READ },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Reading Acme, done, waits for you' }))
+    const glance = await within(document.body).findByRole('dialog', { name: 'Reading Acme' })
+    // The glance rises in: what it says is read once it has.
+    await waitFor(() => expect(within(glance).getByText(/^Done in/)).toBeVisible())
+    await userEvent.click(within(glance).getByRole('button', { name: 'Review the proposals' }))
+    await expect(args.onOpenDomain).toHaveBeenCalledWith('checkout')
+  },
+}
+
+/** The reading's chip, pressed once it failed: its glance says why, and offers to try again. */
+export const ReadingFailedGlance: Story = {
+  args: { data: FAILED },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Reading Acme, failed' }))
+    const glance = await within(document.body).findByRole('dialog', { name: 'Reading Acme' })
+    // The glance rises in: what it says is read once it has.
+    await waitFor(() => expect(within(glance).getByText(/^Failed after/)).toBeVisible())
+    await expect(within(glance).getByText(/usage limit is reached/)).toBeVisible()
+    await userEvent.click(within(glance).getByRole('button', { name: 'Try again' }))
+    await expect(args.onRead).toHaveBeenCalled()
+  },
+}
+
 /** The first reading failed: why, in words, and Try again. */
 export const ReadingFailed: Story = {
   args: { data: FAILED },
