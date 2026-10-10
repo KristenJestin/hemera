@@ -32,6 +32,7 @@ import {
   heldRecipe,
   inStage,
   refrozen,
+  startedIn,
 } from './building-world.ts'
 import { git } from './repositories.ts'
 import { until, within } from './sessions-world.ts'
@@ -106,6 +107,7 @@ describe('Back to Planning ends the launch under way', () => {
           const again = yield* checked(mission.id)
           yield* launchMission(mission.id, again.id, 'launch')
           yield* inStage(mission.id, 'building')
+          yield* startedIn(starts)
           return {
             afterRetry,
             need,

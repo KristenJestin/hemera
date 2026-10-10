@@ -94,6 +94,10 @@ export const startsSeen = () => {
   return { missions, layer }
 }
 
+/** Once `BuildingStart` was called: the start runs after the move to Building, in the background. */
+export const startedIn = (starts: { readonly missions: ReadonlyArray<string> }) =>
+  until(Effect.sync(() => starts.missions.length > 0))
+
 /**
  * The engine over `data`, its agents scripted in their start order (the cold read first unless
  * said), `BuildingStart` counting its calls.

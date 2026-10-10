@@ -68,6 +68,7 @@ import {
   refusedWith,
   reporting,
   settledAndFrozen,
+  startedIn,
 } from './building-world.ts'
 import { git } from './repositories.ts'
 import { text, until, within } from './sessions-world.ts'
@@ -162,6 +163,7 @@ describe('The check lists what moved since the Freeze, and the choice stays the 
           const refused = yield* Effect.result(launchMission(mission.id, view.id, 'launch'))
           yield* launchMission(mission.id, view.id, 'launch_anyway')
           yield* inStage(mission.id, 'building')
+          yield* startedIn(starts)
           return {
             started,
             view,
@@ -518,6 +520,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
           const view = yield* checked(mission.id)
           const preparing = yield* launchMission(mission.id, view.id, 'launch')
           yield* inStage(mission.id, 'building')
+          yield* startedIn(starts)
           const done = yield* preparationOf(mission.id)
           const workspace = yield* getWorkspace(done?.workspaceId ?? '')
           const copy = yield* validationSettingsOf(mission.id)
@@ -636,6 +639,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
           writeFileSync(join(api, '.env'), 'TOKEN=local\n')
           yield* retryNeed(need.id)
           yield* inStage(mission.id, 'building')
+          yield* startedIn(starts)
           return {
             failed,
             need,
@@ -710,6 +714,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
         profile,
         Effect.gen(function* () {
           yield* inStage(ids.missionId, 'building')
+          yield* startedIn(first.starts)
           return {
             launched: yield* eventsOf(ids.missionId, 'building.launched'),
             mission: yield* getMission(ids.missionId),

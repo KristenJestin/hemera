@@ -45,7 +45,7 @@ import {
   type Workspace,
 } from '@hemera/ipc'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { Cause, Context, Effect, Layer, Match, Option, Result, Schema, Stream } from 'effect'
+import { Cause, Context, Effect, Exit, Layer, Match, Option, Result, Schema, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
@@ -86,6 +86,10 @@ import { copyIn, sectionsNow, writeSections } from './validation.ts'
 /**
  * Where the Building starts once its Workspace is ready: #141 fills it. Until then, nothing starts
  * and the mission waits in Building with no agent.
+ *
+ * Called at least once per launch: the start is recorded only once the port returned, so a stop
+ * or a failure in between calls it again. A second call for a mission already started does
+ * nothing.
  */
 export class BuildingStart extends Context.Service<
   BuildingStart,
@@ -682,33 +686,85 @@ export const buildingLaunchesLayer = (log: Log) => {
       const said = (line: string) => Effect.sync(() => log(`building: ${line}`))
       const provided = <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.provide(effect, context)
 
-      /** BuildingStart once per launch, then the reservations for the whole Building. */
+      const scope = yield* Effect.scope
+      /** The launches whose start runs now, so that two followers never start one twice. */
+      const starting = new Set<string>()
+
+      /** The Building did not start: an environment need on the mission, its Retry starting it. */
+      const startFailed = (row: LaunchRow, why: string) =>
+        Effect.gen(function* () {
+          const projectId = yield* projectIdOf(row.missionId)
+          const write = yield* createNeedIn(
+            BUILDING_NEEDS,
+            MissionOwner.make({ projectId, missionId: row.missionId, taskId: null }),
+            EnvironmentFields.make({
+              missing: `The Building did not start: ${why}`,
+              action: 'Fix what it says, then Retry: the Building starts again.',
+              settingsSection: null,
+            }),
+          )
+          yield* mutate('saying the Building did not start', (transaction) =>
+            Effect.gen(function* () {
+              const need = yield* write(transaction)
+              yield* transaction
+                .update(buildingLaunches)
+                .set({ needId: need.id })
+                .where(eq(buildingLaunches.id, row.id))
+                .pipe(Effect.mapError(refusedWhile('saying the Building did not start')))
+              return { result: undefined, events: need.events }
+            }),
+          )
+        })
+
+      /**
+       * The Project's exclusive resources held for the whole Building, then `BuildingStart`, then
+       * the start recorded: a stop in between starts it again. A resource that cannot be held, or a
+       * start that fails, is a need.
+       */
+      const startNow = (row: LaunchRow) =>
+        Effect.gen(function* () {
+          const projectId = yield* projectIdOf(row.missionId)
+          const reservations = yield* ExclusiveResources
+          for (const resource of yield* listResources(projectId)) {
+            const held = yield* Effect.exit(reservations.acquire(resource.name, row.missionId))
+            if (Exit.isFailure(held)) {
+              if (Cause.hasInterruptsOnly(held.cause)) return
+              return yield* startFailed(
+                row,
+                `${resource.name} could not be reserved: ${causeSaid(held.cause)}`,
+              )
+            }
+          }
+          const started = yield* Effect.exit(BuildingStart.use((port) => port.start(row.missionId)))
+          if (Exit.isFailure(started)) {
+            if (Cause.hasInterruptsOnly(started.cause)) return
+            return yield* startFailed(row, causeSaid(started.cause))
+          }
+          yield* mutate('recording the start', (transaction) =>
+            transaction
+              .update(buildingLaunches)
+              .set({ startedAt: now() })
+              .where(and(eq(buildingLaunches.id, row.id), isNull(buildingLaunches.startedAt)))
+              .pipe(
+                Effect.mapError(refusedWhile('recording the start')),
+                Effect.as({ result: undefined, events: [] }),
+              ),
+          )
+        })
+
+      /** The start of a launched launch, in the background: a resource may be waited for. */
       const startOnce = (row: LaunchRow) =>
         Effect.gen(function* () {
-          const taken = yield* mutate('starting the Building', (transaction) =>
-            Effect.map(
-              transaction
-                .update(buildingLaunches)
-                .set({ startedAt: now() })
-                .where(and(eq(buildingLaunches.id, row.id), isNull(buildingLaunches.startedAt)))
-                .returning({ id: buildingLaunches.id })
-                .pipe(Effect.mapError(refusedWhile('starting the Building'))),
-              (rows) => ({ result: rows.length > 0, events: [] }),
+          if (starting.has(row.id)) return
+          starting.add(row.id)
+          yield* startNow(row).pipe(
+            provided,
+            Effect.catchCause((cause) =>
+              said(`the Building of ${row.missionId} did not start: ${String(cause)}`),
             ),
+            Effect.ensuring(Effect.sync(() => starting.delete(row.id))),
+            Effect.forkIn(scope),
           )
-          if (!taken) return
-          yield* BuildingStart.use((port) => port.start(row.missionId))
-          const projectId = yield* projectIdOf(row.missionId)
-          const resources = yield* listResources(projectId)
-          const reservations = yield* ExclusiveResources
-          for (const resource of resources) {
-            yield* reservations.acquire(resource.name, row.missionId).pipe(
-              Effect.catchCause((cause) =>
-                said(`${resource.name} was not reserved for ${row.missionId}: ${String(cause)}`),
-              ),
-              Effect.forkDetach,
-            )
-          }
         })
 
       /** A cancelled launch's Workspace goes, once its preparation no longer runs. */
@@ -789,8 +845,32 @@ export const buildingLaunchesLayer = (log: Log) => {
           }
         })
 
+      /** Retry of a launched launch's need: its start again. */
+      const restart = (needId: string) =>
+        Effect.gen(function* () {
+          const rows = yield* mutate('starting the Building again', (transaction) =>
+            Effect.map(
+              transaction
+                .update(buildingLaunches)
+                .set({ needId: null })
+                .where(
+                  and(eq(buildingLaunches.needId, needId), eq(buildingLaunches.state, 'launched')),
+                )
+                .returning()
+                .pipe(Effect.mapError(refusedWhile('starting the Building again'))),
+              (result) => ({ result, events: [] }),
+            ),
+          )
+          for (const row of rows) yield* startOnce(row)
+          return rows.length > 0
+        })
+
       resume = (needId) =>
-        provided(resumeLaunch(needId)).pipe(
+        provided(
+          Effect.flatMap(restart(needId), (started) =>
+            started ? Effect.succeed(true) : resumeLaunch(needId),
+          ),
+        ).pipe(
           Effect.catchCause((cause) =>
             Effect.as(said(`the preparation was not resumed: ${String(cause)}`), false),
           ),
@@ -854,7 +934,7 @@ export const buildingLaunchesLayer = (log: Log) => {
           .pipe(Effect.mapError(refusedWhile('reading the launches')))
         for (const row of rows) {
           if (row.state === 'launched') {
-            if (row.startedAt === null) yield* startOnce(row)
+            if (row.startedAt === null && row.needId === null) yield* startOnce(row)
             continue
           }
           if (row.state === 'cancelled') {
