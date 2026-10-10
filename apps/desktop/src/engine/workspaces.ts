@@ -44,6 +44,7 @@ import {
   type Repository,
   UnknownRepository,
   UnknownWorkspace,
+  type UpToDateBase,
   type Workspace,
   type WorkspaceBase,
   type WorkspaceChange,
@@ -398,8 +399,16 @@ interface Plan {
   readonly worktrees: ReadonlyArray<PlannedWorktree>
 }
 
-/** Worktrees on `<branch prefix>/<name>`, each from its repository's up-to-date base. */
-const onNewBranch = (project: Project, name: string, repositories: ReadonlyArray<Repository>) =>
+/**
+ * Worktrees on `<branch prefix>/<name>`, each from its repository's up-to-date base, or from the
+ * base given for it (a launch starts from the commits its check read, #139).
+ */
+const onNewBranch = (
+  project: Project,
+  name: string,
+  repositories: ReadonlyArray<Repository>,
+  given: ReadonlyMap<string, UpToDateBase>,
+) =>
   Effect.gen(function* () {
     const git = yield* Git
     const { dataFolder } = yield* ProfileHome
@@ -415,7 +424,7 @@ const onNewBranch = (project: Project, name: string, repositories: ReadonlyArray
       if (Option.isSome(there)) {
         return yield* refused(`the branch ${branch} already exists in ${repository.path}`)
       }
-      const base = yield* upToDateBase(repository.id)
+      const base = given.get(repository.id) ?? (yield* upToDateBase(repository.id))
       worktrees.push({
         repository,
         worktree: worktreeOf(folder, repository.path),
@@ -461,9 +470,13 @@ const detachedAt = (
 
 /**
  * A Workspace made over the repositories chosen: checked, then recorded with its preparation's
- * steps, and nothing made on disk yet.
+ * steps, and nothing made on disk yet. `bases`, by repository id, overrides the up-to-date base of
+ * a new branch's worktrees.
  */
-export const createWorkspace = (asked: NewWorkspace) =>
+export const createWorkspace = (
+  asked: NewWorkspace,
+  bases: ReadonlyMap<string, UpToDateBase> = new Map(),
+) =>
   Effect.gen(function* () {
     const project = yield* getProject(asked.projectId)
     const name = yield* Effect.fromResult(workspaceName(asked.name))
@@ -475,7 +488,7 @@ export const createWorkspace = (asked: NewWorkspace) =>
       worktrees: planned,
     } = yield* Match.value(asked.mode).pipe(
       Match.tagsExhaustive({
-        NewBranch: () => onNewBranch(project, name, repositories),
+        NewBranch: () => onNewBranch(project, name, repositories, bases),
         DetachedAt: (mode) => detachedAt(project, repositories, mode),
       }),
     )

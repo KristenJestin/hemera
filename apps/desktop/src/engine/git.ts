@@ -285,6 +285,15 @@ export interface GitService {
    */
   readonly worktreeRemoveForced: (folder: string, path: string) => Effect.Effect<void, GitRefusal>
   /**
+   * Deletes a branch only while it still points at `commit`: a branch that moved since, work
+   * committed on it, is kept, in Git's words.
+   */
+  readonly branchDeleteAt: (
+    folder: string,
+    branch: string,
+    commit: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /**
    * What a worktree holds against a commit, whatever was committed since: each file created or
    * modified, tracked ones first, then the untracked; ignored ones left out.
    */
@@ -292,6 +301,23 @@ export interface GitService {
     folder: string,
     commit: string,
   ) => Effect.Effect<ReadonlyArray<WorktreeChange>, GitRefusal>
+  /**
+   * Each file that differs between two commits of a repository, renames as a removal and an
+   * addition: its path, Git's status letter, and the lines added and removed (null for a binary
+   * file). No checkout is read.
+   */
+  readonly changesBetween: (
+    folder: string,
+    from: string,
+    to: string,
+  ) => Effect.Effect<ReadonlyArray<CommitChange>, GitRefusal>
+  /** The patch of one file between two commits. */
+  readonly diffBetween: (
+    folder: string,
+    from: string,
+    to: string,
+    path: string,
+  ) => Effect.Effect<string, GitRefusal>
   /** The patch of one file of a worktree against a commit. */
   readonly fileDiff: (
     folder: string,
@@ -337,6 +363,47 @@ export interface GitService {
    * the paths it touches, and each file it creates, deletes, renames or copies.
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
+}
+
+/** A file that differs between two commits. */
+export interface CommitChange {
+  readonly path: string
+  /** `A`, `M`, `D` or `T`, as Git prints it. */
+  readonly status: string
+  /** Null for a binary file. */
+  readonly added: number | null
+  readonly removed: number | null
+}
+
+/**
+ * What `git diff --name-status -z` and `git diff --numstat -z` printed for the same two commits,
+ * renames off: each file with its letter and its lines.
+ */
+export function commitChangesOf(named: string, counted: string): ReadonlyArray<CommitChange> {
+  const lines = new Map<
+    string,
+    { readonly added: number | null; readonly removed: number | null }
+  >()
+  const counts = counted.split('\0')
+  for (const entry of counts) {
+    const [added = '', removed = '', ...rest] = entry.split('\t')
+    const path = rest.join('\t')
+    if (path === '') continue
+    lines.set(path, {
+      added: added === '-' ? null : Number(added),
+      removed: removed === '-' ? null : Number(removed),
+    })
+  }
+  const fields = named.split('\0')
+  const changes: CommitChange[] = []
+  for (let at = 0; at + 1 < fields.length; at += 2) {
+    const status = fields[at] ?? ''
+    const path = fields[at + 1] ?? ''
+    if (status === '' || path === '') continue
+    const lineCounts = lines.get(path) ?? { added: null, removed: null }
+    changes.push({ path, status: status.slice(0, 1), ...lineCounts })
+  }
+  return changes
 }
 
 /** What a patch does to the files it touches. */
@@ -532,6 +599,8 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
       ),
     worktreeRemoveForced: (folder, path) =>
       run(folder, ['worktree', 'remove', '--force', '--force', path], 'work').pipe(Effect.asVoid),
+    branchDeleteAt: (folder, branch, commit) =>
+      run(folder, ['update-ref', '-d', `refs/heads/${branch}`, commit], 'work').pipe(Effect.asVoid),
     worktreeChanges: (folder, commit) =>
       Effect.all([
         run(
@@ -554,6 +623,38 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
           'read',
         ),
       ]).pipe(Effect.map(([diffed, untracked]) => worktreeChangesOf(diffed, untracked))),
+    changesBetween: (folder, from, to) =>
+      Effect.all([
+        run(
+          folder,
+          ['diff', '--name-status', '-z', '--no-renames', '--end-of-options', from, to, '--'],
+          'read',
+        ),
+        run(
+          folder,
+          ['diff', '--numstat', '-z', '--no-renames', '--end-of-options', from, to, '--'],
+          'read',
+        ),
+      ]).pipe(Effect.map(([named, counted]) => commitChangesOf(named, counted))),
+    diffBetween: (folder, from, to, path) =>
+      run(
+        folder,
+        [
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--no-renames',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          '--end-of-options',
+          from,
+          to,
+          '--',
+          path,
+        ],
+        'read',
+      ),
     fileDiff: (folder, commit, path) =>
       run(
         folder,

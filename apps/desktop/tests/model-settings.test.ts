@@ -62,6 +62,7 @@ describe('Models by role', () => {
       'probe',
       'cold-read',
       'ticket-event',
+      'prelaunch',
       'builder',
       'helper',
       'code-reviewer',

@@ -40,6 +40,7 @@ import { ProbesRpcs } from './probes.ts'
 import { DiscussionsRpcs } from './discussions.ts'
 import { ColdReadRpcs } from './cold-read.ts'
 import { DependenciesRpcs, FreezeRpcs } from './freeze.ts'
+import { BuildingRpcs } from './building.ts'
 import { HomeRpcs } from './home.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
@@ -150,6 +151,7 @@ export const EngineRpcs = RpcGroup.make(
   FreezeRpcs,
   DependenciesRpcs,
   HomeRpcs,
+  BuildingRpcs,
 )
 
 /**

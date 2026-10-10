@@ -2283,6 +2283,64 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Report, once, whether each file of your brief matters for what the frozen Spec asks, and why. Then end your turn.",
+      "properties": {
+        "items": {
+          "description": "Every file of your brief, each answered once.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "matters": {
+                "description": "True when the frozen Spec, a proof, a task or a decision would be wrong or incomplete against this change.",
+                "type": "boolean",
+              },
+              "path": {
+                "description": "The file, as your brief names it.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "repository": {
+                "description": "The repository of the file, as your brief names it.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+              "why": {
+                "description": "Why it matters, or why not, from what you read: "does not matter" needs a reason.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "repository",
+              "path",
+              "matters",
+              "why",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "summary": {
+          "description": "What you read, in a few sentences.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "summary",
+        "items",
+      ],
+      "type": "object",
+    },
+    "name": "prelaunch_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {
