@@ -60,6 +60,13 @@ const field = (canvasElement: HTMLElement) =>
   within(canvasElement).getByRole('textbox', { name: 'Message' })
 const menu = () => within(document.body)
 
+/**
+ * An element of the menu once the menu is drawn: the popup is in the document a frame before it
+ * is visible, so being found is not being shown. It is asked for again at each try, as the menu
+ * is drawn anew while the typing is read.
+ */
+const shown = (find: () => HTMLElement) => waitFor(() => expect(find()).toBeVisible(), LOADED)
+
 /** The menu follows typing a key at a time: on a busy runner it is given the time that takes. */
 const LOADED = { timeout: 5000 }
 
@@ -144,7 +151,7 @@ export const Mentioning: Story = {
 export const MissionsAndCommands: Story = {
   play: async ({ canvasElement }) => {
     await typeIn(field(canvasElement), '@acme')
-    await expect(await menu().findByRole('option', { name: /ACME-14/ }, LOADED)).toBeVisible()
+    await shown(() => menu().getByRole('option', { name: /ACME-14/ }))
   },
 }
 
@@ -152,7 +159,7 @@ export const MissionsAndCommands: Story = {
 export const NoMatch: Story = {
   play: async ({ canvasElement }) => {
     await typeIn(field(canvasElement), '@zzzz')
-    await expect(await menu().findByText('Nothing matches “zzzz”', {}, LOADED)).toBeVisible()
+    await shown(() => menu().getByText('Nothing matches “zzzz”'))
   },
 }
 
@@ -160,9 +167,7 @@ export const NoMatch: Story = {
 export const LongPath: Story = {
   play: async ({ canvasElement }) => {
     await typeIn(field(canvasElement), '@columns')
-    await expect(
-      await menu().findByRole('option', { name: /choose-columns-and-format\.tsx/ }, LOADED),
-    ).toBeVisible()
+    await shown(() => menu().getByRole('option', { name: /choose-columns-and-format\.tsx/ }))
   },
 }
 
@@ -316,9 +321,7 @@ export const SearchingASource: Story = {
     const height = box?.getBoundingClientRect().height
     await typeIn(field(canvasElement), '@report')
     await menu().findByRole('listbox', { name: 'Mentions', busy: true }, LOADED)
-    await expect(
-      await menu().findByRole('option', { name: /monthly-report\.ts/ }, LOADED),
-    ).toBeVisible()
+    await shown(() => menu().getByRole('option', { name: /monthly-report\.ts/ }))
     await expect(box?.getBoundingClientRect().height).toBe(height)
   },
 }
@@ -330,8 +333,6 @@ export const SearchFailed: Story = {
   },
   play: async ({ canvasElement }) => {
     await typeIn(field(canvasElement), '@zzzz')
-    await expect(
-      await menu().findByText('The file list could not be read.', {}, LOADED),
-    ).toBeVisible()
+    await shown(() => menu().getByText('The file list could not be read.'))
   },
 }
