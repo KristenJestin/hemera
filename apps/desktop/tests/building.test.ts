@@ -319,7 +319,9 @@ describe('The check lists what moved since the Freeze, and the choice stays the 
     )
     const api = seen.workspace.repositories.find((one) => one.path === 'api')
     expect(api?.base.commit).toBe(seen.head)
-    expect(readFileSync(join(api?.worktree ?? '', 'invoices.ts'), 'utf8')).toBe(INVOICES)
+    // Git may check the file out with CRLF (Windows): its lines are compared, not its line ends.
+    const made = readFileSync(join(api?.worktree ?? '', 'invoices.ts'), 'utf8')
+    expect(made.replaceAll('\r\n', '\n')).toBe(INVOICES)
   })
 
   test('offline, the check takes the last tracking ref and says "not fetched since", without blocking', async () => {
