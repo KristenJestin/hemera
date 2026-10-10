@@ -15,6 +15,7 @@ import {
 } from '@hemera/core/domain'
 import { Effect } from 'effect'
 
+import { buildingPartOf } from '../building/tasks.ts'
 import type { Grant } from '../tools/access.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
 import {
@@ -76,9 +77,13 @@ export const specRead = (grant: Grant, args: ToolArguments<'spec_read'>) =>
       return paged(kept.text, kept.header, args.cursor)
     }
     const spec = yield* readSpec(grant.missionId)
+    // In Building, the whole Spec ends with the decisions taken since the Freeze and the plan (#141).
+    const building = args.section === undefined ? yield* buildingPartOf(grant.missionId) : null
     const text =
       args.section === undefined
-        ? renderSpecMarkdown(spec, { versions: true })
+        ? [renderSpecMarkdown(spec, { versions: true }), building]
+            .filter((part) => part !== null)
+            .join('\n\n')
         : specPartMarkdown(spec, args.section)
     return paged(
       text,

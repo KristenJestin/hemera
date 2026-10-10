@@ -26,6 +26,7 @@ import {
   chooseBuilderModel,
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
+import { buildingOf, buildingTaskChanges, buildingTaskOf } from './building/tasks.ts'
 import type { StartedProfile } from './profile.ts'
 import {
   addRepository,
@@ -718,6 +719,13 @@ export const engineHandlers = (
       use(chooseBuilderModel(missionId, setting)).pipe(observed('building.chooseModel', log)),
     'building.changed': ({ missionId }) =>
       follow(buildingChanges(missionId)).pipe(observedStream('building.changed', log)),
+    // The Building's tasks (#141): read-only for the window.
+    'building.read': ({ missionId }) =>
+      use(buildingOf(missionId)).pipe(observed('building.read', log)),
+    'building.task': ({ missionId, taskId }) =>
+      use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
+    'building.tasksChanged': ({ missionId }) =>
+      follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
 }

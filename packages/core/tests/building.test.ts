@@ -155,7 +155,12 @@ describe('The prelaunch role reads and reports, and nothing launches', () => {
   })
 
   test('no tool in the MCP catalogue can launch a Building', () => {
-    // `probe_launch` starts a Probe in Planning (#89), never a Building.
-    expect(TOOL_NAMES.filter((name) => /(^|_)launch|build/.test(name))).toEqual(['probe_launch'])
+    // `probe_launch` starts a Probe in Planning (#89), never a Building; `build_read` and
+    // `build_summary` (#141) read and report on a Building already launched.
+    expect(TOOL_NAMES.filter((name) => /(^|_)launch|build/.test(name))).toEqual([
+      'probe_launch',
+      'build_read',
+      'build_summary',
+    ])
   })
 })
