@@ -312,6 +312,34 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
   })
 })
 
+describe('A package.json that does not read', () => {
+  test('is no scripts: the call is still judged, and a push still asks', async () => {
+    const { world, run } = sessionsEngine(data, () => ({
+      steps: [
+        { does: 'uses', id: 'toolu_push', tool: 'commands_run', arguments: { line: 'git push' } },
+        { does: 'says', text: 'done' },
+      ],
+    }))
+    const reasons = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          mkdirSync(join(main, 'package.json'))
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Push it.')
+          yield* settledChat(chat.id)
+          return (yield* pendingNeeds).map((need) =>
+            Predicate.isTagged(need.fields, 'Permission') ? need.fields.hemeraReason : '',
+          )
+        }),
+      ),
+    )
+    expect(world.agents[0]?.answers.toolAnswers[0]?.text).toMatch(WAITING)
+    expect(reasons).toEqual(['the Chat always asks before git push'])
+  })
+})
+
 describe('The Chat reads missions and creates drafts, and writes into none', () => {
   test('memory_read reads a mission of its Project and refuses another Project’s', async () => {
     const steps = (key: string): FakeStep => ({

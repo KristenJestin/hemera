@@ -22,7 +22,7 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -66,15 +66,20 @@ const PackageScripts = Schema.fromJsonString(
 )
 const readPackageScripts = Schema.decodeUnknownOption(PackageScripts)
 
-/** The scripts of the `package.json` of a folder, by name; none when it has none or does not read. */
-const scriptsIn = (folder: string): ReadonlyMap<string, string> => {
-  const path = join(folder, 'package.json')
-  const text = existsSync(path) ? readFileSync(path, 'utf8') : ''
-  return Option.match(readPackageScripts(text), {
-    onNone: () => new Map(),
-    onSome: (read) => new Map(Object.entries(read.scripts ?? {})),
-  })
-}
+/**
+ * The scripts of the `package.json` of a folder, by name; none when it has none, or when it does
+ * not read (a folder of that name, a file it may not open, text that is not JSON).
+ */
+const scriptsIn = (folder: string) =>
+  Effect.try(() => readFileSync(join(folder, 'package.json'), 'utf8')).pipe(
+    Effect.map((text) =>
+      Option.match(readPackageScripts(text), {
+        onNone: () => new Map<string, string>(),
+        onSome: (read) => new Map(Object.entries(read.scripts ?? {})),
+      }),
+    ),
+    Effect.orElseSucceed(() => new Map<string, string>()),
+  )
 
 /**
  * The folder a call runs in: a free line's, under its place; a catalogue command's, its
@@ -231,7 +236,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           if (call.tool !== 'commands_run' || call.session.role !== 'chat') return null
           const line = call.command?.line ?? call.line ?? ''
           const folder = yield* runFolder(call).pipe(Effect.orElseSucceed(() => null))
-          const scripts = folder === null ? new Map<string, string>() : scriptsIn(folder)
+          const scripts = folder === null ? new Map<string, string>() : yield* scriptsIn(folder)
           return chatMustAskThroughScripts(line, context, (name) => scripts.get(name) ?? null)
         })
 
