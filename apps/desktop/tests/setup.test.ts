@@ -311,6 +311,90 @@ describe('A variable’s value is hidden', () => {
   })
 })
 
+/** A token recognised by its shape alone, as a command line may carry it. */
+const TOKEN = 'ghp_acmeNotARealToken000001'
+
+describe('A credential in a proposed command is masked on its card', () => {
+  test('its change and details hold no token, no table holds it in clear, and accepting saves the line as proposed', async () => {
+    const line = `node deploy.js --auth ${TOKEN}`
+    const { run } = sessionsEngine(data, () =>
+      proposing([{ kind: 'command', name: 'deploy', type: 'build', line }]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          const stored = everything(data)
+          const accepted = yield* acceptCard(card.id)
+          return { card, stored, accepted, commands: yield* listCommands(project.id) }
+        }),
+      ),
+    )
+    expect(JSON.stringify(seen.card)).not.toContain(TOKEN)
+    expect(seen.card.change).toMatchObject({ line: 'node deploy.js --auth •••' })
+    expect(seen.card.details).toContainEqual({ label: 'Line', value: 'node deploy.js --auth •••' })
+    expect(seen.stored).not.toContain(TOKEN)
+    expect(seen.accepted.state).toBe('accepted')
+    expect(seen.commands.map((one) => one.line)).toEqual([line])
+  })
+
+  test('after a restart, a card whose change was masked is refused at the click rather than saved masked', async () => {
+    const first = sessionsEngine(data, () =>
+      proposing([
+        { kind: 'command', name: 'deploy', type: 'build', line: `node deploy.js ${TOKEN}` },
+      ]),
+    )
+    const projectId = await first.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          return project.id
+        }),
+      ),
+    )
+    const after = await sessionsEngine(data, () => proposing()).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const [card] = yield* cardsOf(projectId)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          return { card: yield* acceptCard(card.id), commands: yield* listCommands(projectId) }
+        }),
+      ),
+    )
+    expect(after.card).toMatchObject({ state: 'pending', refusal: VALUE_FORGOTTEN })
+    expect(after.commands).toEqual([])
+  })
+})
+
+describe('A refused step is named by its place in the recipe', () => {
+  test('the proposals before it that are not steps do not count', async () => {
+    const { world, run } = sessionsEngine(data, () =>
+      proposing([
+        { kind: 'variable', name: 'ACME_REGION', value: 'eu-west' },
+        { kind: 'step', step: 'copy' },
+      ]),
+    )
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+        }),
+      ),
+    )
+    const proposed = world.agents[0]?.answers.toolAnswers[1]
+    expect(proposed?.text).toContain('Step 1 of the recipe is refused')
+  })
+})
+
 describe('The setup session', () => {
   test('one at a time per Project: a second request while one runs is refused', async () => {
     const hold = held()

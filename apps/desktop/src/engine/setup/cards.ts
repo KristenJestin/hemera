@@ -9,9 +9,12 @@
  *   is the use case's to refuse, and keeps the card pending with its reason.
  * - Decline changes nothing. A decided card is never decided again.
  * - Accept all goes in the order proposed and stops at the first refusal.
+ * - A card keeps its title, change and details masked; a change masking altered is held whole in
+ *   memory, as a variable's value is, and refused at the click once an engine stopped.
  */
 
 import {
+  MASK,
   type SetupCardState,
   type SetupChange,
   type SetupDetail,
@@ -20,6 +23,7 @@ import {
   SetupChange as SetupChangeSchema,
   VALUE_FORGOTTEN,
   checkedTemplate,
+  maskedJson,
   setupChangeDetails,
   setupChangeTitle,
   variableKey,
@@ -249,9 +253,10 @@ export const propose = (
     const project = yield* getProject(projectId)
     const commands = yield* listCommands(projectId)
     const variables = (yield* listVariables({ projectId, workspaceId: null })).map((one) => one.key)
-    const steps = (yield* getRecipe(projectId)).length
-    for (const [at, proposal] of proposals.entries()) {
-      const refused = yield* refusalOf(project, commands, proposal, steps + at + 1)
+    let steps = (yield* getRecipe(projectId)).length
+    for (const proposal of proposals) {
+      if (proposal.kind === 'step') steps += 1
+      const refused = yield* refusalOf(project, commands, proposal, steps)
       if (refused !== null) {
         const title = setupChangeTitle(changeOf(commands, variables, proposal))
         return yield* new ProposalRefused({ reason: `${title}: ${refused}` })
@@ -269,9 +274,8 @@ export const propose = (
         sessionId,
         batch,
         position,
-        change: JSON.stringify(change),
+        change,
         title: setupChangeTitle(change),
-        details: JSON.stringify(setupChangeDetails(change)),
         state: 'pending',
         refusal: null,
         createdAt: at,
@@ -285,10 +289,27 @@ export const propose = (
         yield* values.hold(card.id, proposal.value)
       }
     }
+    // A card keeps its change masked; a change masking altered is held whole in memory instead.
+    const rows = yield* Effect.forEach(written, ({ change, ...row }) =>
+      Effect.gen(function* () {
+        const masked = maskedJson(secrets.maskRecord(change))
+        if (masked !== JSON.stringify(change)) yield* values.holdChange(row.id, change)
+        const details = setupChangeDetails(change).map((detail) => ({
+          label: detail.label,
+          value: secrets.mask(detail.value),
+        }))
+        return {
+          ...row,
+          change: masked,
+          title: secrets.mask(row.title),
+          details: JSON.stringify(details),
+        }
+      }),
+    )
     yield* mutate('storing the setup cards', (transaction) =>
       transaction
         .insert(setupCards)
-        .values(written.map((row) => ({ ...row, title: secrets.mask(row.title) })))
+        .values(rows)
         .pipe(
           Effect.mapError(refusedWhile('storing the setup cards')),
           Effect.as({
@@ -332,7 +353,12 @@ const rowOf = (id: string) =>
 /** Applies a change through the settings' own use cases; the use case's refusal, in words. */
 const apply = (card: SetupCard) =>
   Effect.gen(function* () {
-    const change = card.change
+    // A change its card keeps masked is applied as held; forgotten by a stopped engine, refused.
+    const held = yield* SetupValues.use((values) => values.changeOf(card.id))
+    if (held === null && JSON.stringify(card.change).includes(MASK)) {
+      return yield* new ProposalRefused({ reason: VALUE_FORGOTTEN })
+    }
+    const change = held ?? card.change
     const project = yield* getProject(card.projectId)
     switch (change.kind) {
       case 'repository': {
