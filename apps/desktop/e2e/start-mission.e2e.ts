@@ -36,12 +36,14 @@ const ISSUE = JSON.stringify({
   },
 })
 
+// Every API call is made with `--include`, so each answer starts with an HTTP status line. The
+// GraphQL query asks for the issue's author, so only a call that starts with \`auth\` is one.
 const FAKE = `#!/bin/sh
 case "$*" in
-  *--version*) echo "gh version 2.81.0" ;;
-  *auth*) exit 0 ;;
-  *search/issues*) echo '{"items":[]}' ;;
-  *graphql*) cat <<'JSON'
+  --version*) echo "gh version 2.81.0" ;;
+  auth\\ *) exit 0 ;;
+  *search/issues*) printf 'HTTP/2.0 200 OK\\n\\n{"items":[]}\\n' ;;
+  *graphql*) printf 'HTTP/2.0 200 OK\\n\\n'; cat <<'JSON'
 ${ISSUE}
 JSON
   ;;
@@ -106,8 +108,8 @@ describe('A mission started from the Project’s field', () => {
   itWithFake('adds a GitHub provider, then starts a mission from a ticket reference', async () => {
     await places().$('button*=Acme').click()
     await settingsOf('Acme')
-    await section('Tickets and Specs')
-    await $('button[aria-label="Add a provider"]').click()
+    await section('Tickets and Specs', 'Ticket providers')
+    await $('section[aria-label="Ticket providers"]').$('button=Add a provider').click()
     await $('[role="menuitem"]*=GitHub').click()
     const adding = dialog()
     await write(field(adding, 'Another repository'), 'acme/api')
