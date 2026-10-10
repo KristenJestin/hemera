@@ -52,6 +52,7 @@ const FIRST: FindingContext = {
     durationMs: 12,
     position: 41,
     line: 'refused: a command line with shell syntax',
+    arguments: null,
     at: '2026-10-06T14:32:07.000Z',
   },
 }

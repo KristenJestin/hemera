@@ -26,6 +26,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  type Masked,
   ROLE_NAMES,
   ROLE_PLACES,
   ROOT_REPOSITORY,
@@ -35,6 +36,7 @@ import {
   type ToolName,
   admitTool,
   lineFor,
+  maskedJson,
   neutralised,
 } from '@hemera/core/domain'
 import { formatSchemaError } from '@hemera/core/schema'
@@ -48,7 +50,7 @@ import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
 import type { RunServices } from '../runs.ts'
-import { Secrets } from '../secrets.ts'
+import { Secrets, type SecretsRegistry } from '../secrets.ts'
 import { refusedWhile } from '../storage/database.ts'
 import type { Database } from '../storage/database.ts'
 import { toolCalls } from '../storage/schema.ts'
@@ -217,6 +219,22 @@ const SESSIONS_KEPT = 64
 
 /** The longest reason a record keeps. */
 const REASON_KEPT = 500
+
+/** How much of a call's arguments its record keeps: enough to read it, never a whole file. */
+const ARGUMENTS_KEPT = 2000
+
+const readArgumentFields = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+
+/** A call's arguments as its record keeps them: masked whole, then cut. */
+const argumentsKept = (secrets: SecretsRegistry, args: Schema.Json): Masked<string> => {
+  const masked = Option.match(readArgumentFields(args), {
+    onNone: () => secrets.mask(JSON.stringify(args)),
+    onSome: (fields) => maskedJson(secrets.maskRecord(fields)),
+  })
+  return masked.length > ARGUMENTS_KEPT
+    ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
+    : masked
+}
 
 /** A call decoded, its tool and its arguments read by that tool's schema. */
 type Decoded = {
@@ -465,6 +483,7 @@ export const toolGateLayer = (settings: GateSettings) =>
         answer: ToolAnswer,
         callKey: string | null,
         began: number,
+        args: Schema.Json | null = null,
       ) =>
         Effect.gen(function* () {
           const secrets = yield* Secrets
@@ -484,6 +503,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                 verdictBy: noted.verdictBy,
                 outcome,
                 reason: answer.ok ? null : secrets.mask(answer.text.slice(0, REASON_KEPT)),
+                arguments: args === null ? null : argumentsKept(secrets, args),
                 callKey,
                 durationMs: Math.round(performance.now() - began),
                 calledAt: new Date().toISOString(),
@@ -879,10 +899,11 @@ export const toolGateLayer = (settings: GateSettings) =>
                 { ok: false, refused: false, text: 'the agent stopped waiting for this call' },
                 asked.callKey,
                 began,
+                asked.arguments,
               ),
             ),
           )
-          yield* record(grant, asked.tool, noted, answer, asked.callKey, began)
+          yield* record(grant, asked.tool, noted, answer, asked.callKey, began, asked.arguments)
           return answer
         }).pipe(
           // A proposal recorded or refused: its values are masked as asked no longer.

@@ -274,7 +274,11 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
             Stream.runForEach((event) => PubSub.publish(activity, { sessionId, event })),
             Effect.forkIn(processScope),
           )
-          yield* recordNativeSession(sessionId, started.session.nativeSessionId)
+          yield* recordNativeSession(
+            sessionId,
+            started.session.nativeSessionId,
+            started.connection.handshake.agentVersion,
+          )
           yield* reapplyChoices(sessionId, started.session)
           // A death is an end nobody asked for: the turn closes as interrupted (the client does
           // it), the token is revoked, and the death is told. Nothing starts the agent again here.

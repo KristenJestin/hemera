@@ -88,7 +88,7 @@ describe('The chosen model survives every restart', () => {
           folder: '/tmp/acme',
         })
         const { session } = yield* agentProcess(OFFERED, null)
-        yield* recordNativeSession(record.id, session.nativeSessionId)
+        yield* recordNativeSession(record.id, session.nativeSessionId, null)
         // Chosen in another order than the one a restart applies them in.
         yield* chooseOption(record.id, session, 'mode', 'plan')
         yield* chooseOption(record.id, session, 'effort', 'low')

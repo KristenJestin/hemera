@@ -177,6 +177,12 @@ export function readFindingFile(written: string): Finding | null {
   })
 }
 
+/**
+ * When a finding was seen, as an instant: two offsets (a change of the clocks) never order it by
+ * their text. A date a hand removed or broke reads as the oldest.
+ */
+const instantOf = (at: string): number => Date.parse(at) || 0
+
 /** Where a finding's number is read from its file's name, whatever its front matter says. */
 const NUMBERED = /^(\d+)-.*\.md$/
 
@@ -195,8 +201,19 @@ export interface TesterIdentity {
   readonly os: string
 }
 
+/** How a file is renamed over another: the system's own, unless a test says otherwise. */
+export interface TesterFiles {
+  readonly rename: (from: string, to: string) => Promise<void>
+}
+
+/** What a rename refused for a moment says: an editor or a scanner holds the file (Windows). */
+const HELD_OPEN = new Set(['EPERM', 'EACCES', 'EBUSY'])
+/** How often a rename refused for a moment is tried, and how long apart. */
+const RENAME_TRIES = 5
+const RENAME_PAUSE_MS = 50
+
 /** The findings of a data folder, on files, written one report at a time. */
-export const testerFindingsLayer = (identity: TesterIdentity) =>
+export const testerFindingsLayer = (identity: TesterIdentity, system: TesterFiles = { rename }) =>
   Layer.effect(
     TesterFindings,
     Effect.gen(function* () {
@@ -215,13 +232,25 @@ export const testerFindingsLayer = (identity: TesterIdentity) =>
             }),
         })
 
+      /**
+       * A rename over a file that Windows refuses while another program holds it open (an editor
+       * on the README), tried again a few times before the refusal is said.
+       */
+      const renamedOver = (from: string, to: string, tried = 1): Promise<void> =>
+        system.rename(from, to).catch(async (cause: unknown) => {
+          const held = Predicate.hasProperty(cause, 'code') && HELD_OPEN.has(String(cause.code))
+          if (!held || tried >= RENAME_TRIES) throw cause
+          await new Promise((done) => setTimeout(done, RENAME_PAUSE_MS * tried))
+          return renamedOver(from, to, tried + 1)
+        })
+
       /** A file replaced whole: written beside it, then renamed over it. */
       const replaced = (path: string, content: string) =>
         attempt(`writing ${path}`, async () => {
           const beside = `${path}.${crypto.randomUUID()}.tmp`
           try {
             await writeFile(beside, content, 'utf8')
-            await rename(beside, path)
+            await renamedOver(beside, path)
           } catch (cause) {
             await rm(beside, { force: true })
             throw cause
@@ -292,6 +321,7 @@ export const testerFindingsLayer = (identity: TesterIdentity) =>
               : {
                   ...context.call,
                   line: context.call.line === null ? null : mask(context.call.line),
+                  arguments: context.call.arguments === null ? null : mask(context.call.arguments),
                 },
         },
       })
@@ -348,7 +378,9 @@ export const testerFindingsLayer = (identity: TesterIdentity) =>
         list: names.pipe(
           Effect.flatMap(readAll),
           Effect.map((all) =>
-            all.toSorted((one, other) => (one.head.lastSeen < other.head.lastSeen ? 1 : -1)),
+            all.toSorted(
+              (one, other) => instantOf(other.head.lastSeen) - instantOf(one.head.lastSeen),
+            ),
           ),
         ),
       }

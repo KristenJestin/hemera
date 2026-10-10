@@ -5,6 +5,7 @@
  */
 
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { FindingContext, ReportedFinding } from '@hemera/core/domain'
@@ -180,6 +181,78 @@ describe('The index lists them all', () => {
       }),
     )
     expect(listed.map((one) => one.head.number)).toEqual([2, 1])
+  })
+})
+
+describe('The list across a change of the clocks', () => {
+  test('is ordered by the instant each was last seen, whatever offset it was written with', async () => {
+    const listed = await withFindings(
+      Effect.gen(function* () {
+        // 00:30 UTC, written in summer time; then 01:10 UTC, written once the clocks went back.
+        yield* report(REDIRECT, { ...CONTEXT, at: '2026-10-25T02:30:00.000+02:00' })
+        yield* report(
+          { ...REDIRECT, title: 'The notice never came', kind: 'interface', place: 'notices' },
+          { ...CONTEXT, at: '2026-10-25T02:10:00.000+01:00' },
+        )
+        return yield* TesterFindings.use((findings) => findings.list)
+      }),
+    )
+    expect(listed.map((one) => one.head.number)).toEqual([2, 1])
+  })
+})
+
+describe('A file renamed over one an editor holds open', () => {
+  test('is tried again when the system refuses it for a moment, and the report is written', async () => {
+    let refused = 0
+    const registry = secretsRegistry()
+    const answer = await Effect.runPromise(
+      report(REDIRECT).pipe(
+        Effect.provide(
+          testerFindingsLayer(
+            { dataFolder: folder, version: '1.0.0', channel: 'dev', os: 'Windows' },
+            {
+              rename: async (from, to) => {
+                if (to.endsWith('README.md') && refused < 2) {
+                  refused += 1
+                  throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+                }
+                await rename(from, to)
+              },
+            },
+          ).pipe(Layer.provide(Layer.succeed(Secrets, registry))),
+        ),
+      ),
+    )
+    expect(refused).toBe(2)
+    expect(answer.number).toBe(1)
+    expect(readFileSync(join(folder, 'tester', 'README.md'), 'utf8')).toContain('#1')
+  })
+})
+
+describe('The call a finding is about', () => {
+  test('keeps its arguments, masked', async () => {
+    await withFindings(
+      report(REDIRECT, {
+        ...CONTEXT,
+        call: {
+          id: 'toolu_01',
+          tool: 'commands_run',
+          outcome: 'refused',
+          durationMs: 3,
+          position: 1,
+          line: null,
+          arguments:
+            '{"line":"pnpm test > out.txt","why":"deploy with ghp_acmeNotARealToken000001"}',
+          at: CONTEXT.at,
+        },
+      }),
+    )
+    const [file] = readdirSync(findingsFolder())
+    const written = readFileSync(join(findingsFolder(), file ?? ''), 'utf8')
+    expect(written).toContain(
+      '  - Arguments: `{"line":"pnpm test > out.txt","why":"deploy with •••"}`',
+    )
+    expect(written).not.toContain('ghp_acmeNotARealToken000001')
   })
 })
 

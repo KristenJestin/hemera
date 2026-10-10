@@ -524,6 +524,8 @@ export const agentSessions = sqliteTable(
     role: text('role').notNull(),
     folder: text('folder').notNull(),
     nativeId: text('native_id'),
+    /** The version its agent said at its last start, when it said one. */
+    agentVersion: text('agent_version'),
     chosenModel: text('chosen_model'),
     chosenEffort: text('chosen_effort'),
     chosenMode: text('chosen_mode'),
@@ -668,6 +670,8 @@ export const toolCalls = sqliteTable(
     verdictBy: text('verdict_by'),
     outcome: text('outcome').notNull(),
     reason: text('reason').$type<Masked<string>>(),
+    /** The call's arguments as JSON, masked, cut to their first characters. */
+    arguments: text('arguments').$type<Masked<string>>(),
     callKey: text('call_key'),
     durationMs: integer('duration_ms').notNull(),
     calledAt: text('called_at').notNull(),
