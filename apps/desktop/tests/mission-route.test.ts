@@ -14,7 +14,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { MissionPage, MissionRoute, type MissionPageProps } from '../src/renderer/mission-route.tsx'
-import { MISSION_VIEWS, STAGE_PAGES } from '../src/renderer/stage-pages.tsx'
+import { MISSION_VIEWS, STAGE_PAGES, type StagePageProps } from '../src/renderer/stage-pages.tsx'
 import { SILENT_LINK } from './fake-link.ts'
 
 const NOW = new Date('2026-10-05T09:04:00.000Z')
@@ -82,6 +82,7 @@ const pageOf = (more: Partial<MissionPageProps> = {}): MissionPageProps => ({
     show: none,
     close: none,
     goProject: none,
+    goMission: none,
     answer: none,
     recheck: none,
     openSettings: none,
@@ -166,6 +167,8 @@ describe('The needs at the top', () => {
   test('are listed under Needs you, with the mission’s key', () => {
     const markup = drawn({
       mission: mission({
+        stage: 'building',
+        frozen: true,
         needs: [need('n1', 'Who may read the audit log?'), need('n2', 'How long is the log kept?')],
       }),
     })
@@ -181,20 +184,64 @@ describe('The needs at the top', () => {
 
 describe('The base of each stage', () => {
   test('is the empty base with the stage’s name when no page is registered', () => {
-    expect(STAGE_PAGES.Planning).toBeUndefined()
-    expect(drawn()).toContain('The Planning page')
+    expect(STAGE_PAGES.Building).toBeUndefined()
     expect(drawn({ mission: mission({ stage: 'building' }) })).toContain('The Building page')
   })
 
   test('is the registered page of the stage, given the mission', () => {
     const pages = {
-      Planning: ({ mission: shown }: { mission: Mission }): ReactNode =>
-        createElement('p', null, `Planning page of ${shown.key}`),
+      Planning: ({ mission: shown, frame }: StagePageProps): ReactNode =>
+        frame({ base: createElement('p', null, `Planning page of ${shown.key}`) }),
     }
     const markup = drawn({ pages })
     expect(markup).toContain('Planning page of ACME-14')
     expect(markup).not.toContain('The Planning page')
+    expect(markup).toMatch(/<h1[^>]*>An audit log of who read what<\/h1>/)
     expect(drawn({ pages, mission: mission({ stage: 'ready' }) })).toContain('The Ready page')
+  })
+
+  test('Planning has its page', () => {
+    expect(STAGE_PAGES.Planning).toBeDefined()
+  })
+
+  test('a page adds its views over itself, its Now line, and may leave the needs out', () => {
+    const pages = {
+      Planning: ({ frame }: StagePageProps): ReactNode =>
+        frame({
+          base: createElement('p', null, 'The Spec'),
+          views: [
+            {
+              id: 'probe:p1',
+              title: 'Probe #1',
+              icon: null,
+              width: 'narrow',
+              body: createElement('p', null, 'What Probe #1 found'),
+            },
+          ],
+          now: 'Writing the requirements',
+          needs: false,
+        }),
+    }
+    const waiting = mission({ needs: [need('n1', 'Who may read the audit log?')] })
+    const frame: MissionFrameState = { open: ['probe:p1'], shown: 'probe:p1' }
+    const markup = drawn({ pages, mission: waiting, frame })
+    expect(markup).toContain('What Probe #1 found')
+    expect(markup).toMatch(/data-base=""[^>]*inert/)
+    expect(markup).toMatch(/data-now=""[^>]*>Writing the requirements</)
+    expect(markup).not.toContain('Who may read the audit log?')
+  })
+
+  test('a page is told why its Freeze was refused, and may say why a gesture was', () => {
+    let told: ReadonlyArray<string> | undefined
+    const pages = {
+      Planning: ({ frame, refused }: StagePageProps): ReactNode => {
+        told = refused
+        return frame({ base: null, notice: 'The mission is no longer in Planning.' })
+      },
+    }
+    const markup = drawn({ pages, refused: ['The Spec changed since you read it.'] })
+    expect(told).toEqual(['The Spec changed since you read it.'])
+    expect(markup).toMatch(/role="alert"[^>]*>The mission is no longer in Planning\./)
   })
 })
 

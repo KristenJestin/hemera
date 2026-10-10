@@ -1,4 +1,4 @@
-import type { FreezeReadiness, Mission, Project } from '@hemera/ipc'
+import { FreezeRefused, type FreezeReadiness, type Mission, type Project } from '@hemera/ipc'
 import {
   Button,
   MissionFrame,
@@ -23,7 +23,12 @@ import {
 } from './mission-header-model.ts'
 import { lineOf } from './missions.ts'
 import type { ShellActions } from './shell.tsx'
-import { MISSION_VIEWS, STAGE_PAGES, type MissionViewEntry } from './stage-pages.tsx'
+import {
+  MISSION_VIEWS,
+  STAGE_PAGES,
+  type MissionViewEntry,
+  type StageFrame,
+} from './stage-pages.tsx'
 import { useMissions } from './use-missions.ts'
 
 export interface MissionRouteProps {
@@ -39,6 +44,8 @@ export interface MissionRouteProps {
     show: (view: string | null) => void
     close: (view: string) => void
     goProject: () => void
+    /** Goes to another mission of the Project, by its key. */
+    goMission: (key: string) => void
     answer: ShellActions['answer']
     recheck: ShellActions['recheck']
     openSettings: (section: AppSection) => void
@@ -53,6 +60,8 @@ export interface MissionPageProps extends Omit<MissionRouteProps, 'projectId' | 
   readiness: FreezeReadiness | null
   /** Why the last Freeze or Cancel did not go through, in words. */
   notice?: string | undefined
+  /** Why the last Freeze was refused, each reason in words, for the page to list. */
+  refused?: ReadonlyArray<string> | undefined
   freeze: () => void
   /** Whether a Freeze is in flight: Freeze is then not offered again. */
   freezing?: boolean | undefined
@@ -85,6 +94,7 @@ export function MissionPage({
   project,
   readiness,
   notice,
+  refused,
   now,
   frame,
   actions,
@@ -97,72 +107,85 @@ export function MissionPage({
   const line = lineOf(mission, repositoryNamer(project))
   const header = headerOf(line, readiness)
   const sheets = viewsOf(views, mission)
-  const known = new Set(sheets.map((sheet) => sheet.id))
-  const open = frame.open.filter((id) => known.has(id))
-  const shown = frame.shown !== null && known.has(frame.shown) ? frame.shown : null
   const Page = pageOf(pages, line.stage)
   const rows = needRowsOfMission(mission, project?.name ?? 'Project', now)
   const ticketUrl = line.ticket?.url ?? null
-  return (
-    <MissionFrame
-      missionKey={line.key}
-      title={line.title}
-      stage={line.stage}
-      round={line.round}
-      frozen={frozenOf(line)}
-      type={line.type}
-      ball={line.ball}
-      marks={line.marks}
-      onOpenOutdated={'difference' in views ? () => actions.open('difference') : undefined}
-      ticket={
-        line.ticket === null
-          ? null
-          : {
-              key: line.ticket.key,
-              onOpen:
-                ticketUrl === null ? undefined : () => window.open(ticketUrl, '_blank', 'noopener'),
-            }
-      }
-      onOpenSpec={'spec' in views ? () => actions.open('spec') : undefined}
-      action={
-        header.freeze ? (
-          <Button
-            variant="primary"
-            size="sm"
-            state={freezing ? 'loading' : 'idle'}
-            onClick={freeze}
-          >
-            Freeze
-          </Button>
-        ) : undefined
-      }
-      onCancel={header.cancel ? cancel : undefined}
-      notice={notice}
-      needs={
-        <MissionFrameNeeds
-          rows={rows}
-          projects={project === null ? undefined : [project.name]}
-          on={needHandlersOf(mission, {
-            answer: actions.answer,
-            recheck: actions.recheck,
-            openSettings: actions.openSettings,
-          })}
-        />
-      }
-      base={
-        Page === undefined ? (
-          <MissionFrameBase stage={line.stage} />
-        ) : (
-          createElement(Page, { link, engineReady, mission, open: actions.open })
-        )
-      }
-      views={sheets}
-      open={open}
-      shown={shown}
-      onShow={actions.show}
-      onClose={actions.close}
-    />
-  )
+  const draw = (parts: StageFrame): ReactNode => {
+    const all = [...sheets, ...(parts.views ?? [])]
+    const known = new Set(all.map((sheet) => sheet.id))
+    const open = frame.open.filter((id) => known.has(id))
+    const shown = frame.shown !== null && known.has(frame.shown) ? frame.shown : null
+    return (
+      <MissionFrame
+        missionKey={line.key}
+        title={line.title}
+        stage={line.stage}
+        round={line.round}
+        frozen={frozenOf(line)}
+        type={line.type}
+        ball={line.ball}
+        now={parts.now}
+        marks={line.marks}
+        onOpenOutdated={'difference' in views ? () => actions.open('difference') : undefined}
+        ticket={
+          line.ticket === null
+            ? null
+            : {
+                key: line.ticket.key,
+                onOpen:
+                  ticketUrl === null
+                    ? undefined
+                    : () => window.open(ticketUrl, '_blank', 'noopener'),
+              }
+        }
+        onOpenSpec={'spec' in views ? () => actions.open('spec') : undefined}
+        action={
+          header.freeze ? (
+            <Button
+              variant="primary"
+              size="sm"
+              state={freezing ? 'loading' : 'idle'}
+              onClick={freeze}
+            >
+              Freeze
+            </Button>
+          ) : undefined
+        }
+        onCancel={header.cancel ? cancel : undefined}
+        notice={notice ?? parts.notice}
+        needs={
+          parts.needs === false ? undefined : (
+            <MissionFrameNeeds
+              rows={rows}
+              projects={project === null ? undefined : [project.name]}
+              on={needHandlersOf(mission, {
+                answer: actions.answer,
+                recheck: actions.recheck,
+                openSettings: actions.openSettings,
+              })}
+            />
+          )
+        }
+        base={parts.base}
+        views={all}
+        open={open}
+        shown={shown}
+        onShow={actions.show}
+        onClose={actions.close}
+      />
+    )
+  }
+  return Page === undefined
+    ? draw({ base: <MissionFrameBase stage={line.stage} /> })
+    : createElement(Page, {
+        link,
+        engineReady,
+        mission,
+        open: actions.open,
+        goMission: actions.goMission,
+        refused,
+        frame: draw,
+      })
 }
 
 /** A mission's page: read from its Project's missions, followed as they change. */
@@ -179,6 +202,7 @@ export function MissionRoute({
   const [project, setProject] = useState<Project | null>(null)
   const [readiness, setReadiness] = useState<FreezeReadiness | null>(null)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  const [refused, setRefused] = useState<ReadonlyArray<string> | undefined>(undefined)
   const [freezing, setFreezing] = useState(false)
   const [once] = useState(() => oneAtATime(setFreezing))
   const mission =
@@ -236,8 +260,10 @@ export function MissionRoute({
   const freeze = (): void => {
     if (readiness === null) return
     setNotice(undefined)
+    setRefused(undefined)
+    // A refusal's reasons are listed by the page; any other failure is said in the head.
     once(() => freezeShown(link, mission.id, readiness)).catch((failure: Error) =>
-      setNotice(failure.message),
+      failure instanceof FreezeRefused ? setRefused(failure.reasons) : setNotice(failure.message),
     )
   }
   const cancel = (): void => {
@@ -253,6 +279,7 @@ export function MissionRoute({
       project={project}
       readiness={readiness}
       notice={notice}
+      refused={refused}
       now={now}
       frame={frame}
       actions={actions}
