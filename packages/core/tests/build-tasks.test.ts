@@ -22,6 +22,7 @@ import {
   readySet,
   requirementDone,
   settled,
+  toolsOf,
 } from '../src/domain/index.ts'
 
 const task = (id: string, more: Partial<BuildTaskNow> = {}): BuildTaskNow => ({
@@ -269,6 +270,35 @@ describe('An amendment changes the effective plan, never a frozen task (CT-33)',
     expect(after.added.map((one) => [one.id, one.dependsOn])).toEqual([
       ['T21a', []],
       ['T21b', ['T21a']],
+    ])
+  })
+})
+
+describe('The Builder has the tools of Building, and none that pushes, merges or launches', () => {
+  test('it starts, finishes and blocks tasks, asks for a need and writes its summary', () => {
+    expect(toolsOf('builder')).toEqual(
+      expect.arrayContaining([
+        'spec_read',
+        'build_read',
+        'task_start',
+        'task_finished',
+        'task_blocked',
+        'report_need',
+        'build_summary',
+      ]),
+    )
+  })
+
+  test('no tool of its role pushes, merges or launches', () => {
+    expect(toolsOf('builder').filter((name) => /push|merge|launch/.test(name))).toEqual([])
+  })
+
+  test('a helper runs a task, and neither asks for a need nor writes the summary', () => {
+    expect(toolsOf('helper').filter((name) => /^(build_|task_|report_need)/.test(name))).toEqual([
+      'build_read',
+      'task_start',
+      'task_finished',
+      'task_blocked',
     ])
   })
 })

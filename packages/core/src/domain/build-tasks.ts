@@ -157,6 +157,11 @@ export const claimHolder = (
 /** A task an amendment brings: an id of its own, and what a frozen task holds. */
 export const AmendedTask = Schema.Struct({
   ...TaskAsked.fields,
+  depends_on: Schema.Array(
+    Schema.String.check(Schema.isNonEmpty()).annotate({
+      description: 'A task done before it, by its id: one of the plan (`T1`) or of this amendment.',
+    }),
+  ),
   id: Schema.String.check(
     Schema.isPattern(/^T[0-9]+[a-z]*$/, { message: 'a task id, as `T21a` or `T30`' }),
   ).annotate({

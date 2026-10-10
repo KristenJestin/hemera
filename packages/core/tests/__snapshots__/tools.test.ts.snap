@@ -2341,6 +2341,462 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Read the build: the ready set, every task with its state, runner and attempts, the files the running tasks hold, the needs and the decisions. With \`task\`: that task in full, with each attempt.",
+      "properties": {
+        "task": {
+          "description": "The task, by its id (\`T4\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "build_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Start a task of the ready set before writing for it: it moves to in progress, its target files become its claims, and its attempt opens. Refused when its files overlap a running task’s: the answer names that task, and the task is delivered again once its files are free.",
+      "properties": {
+        "task": {
+          "description": "The task, by its id (\`T4\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "task",
+      ],
+      "type": "object",
+    },
+    "name": "task_start",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Say a task you run is finished, once you verified it yourself. Hemera takes its end state and judges it: never call it to see what the checks say.",
+      "properties": {
+        "summary": {
+          "description": "What you did and how you verified it, in the language of the user.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "task": {
+          "description": "The task, by its id (\`T4\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "task",
+        "summary",
+      ],
+      "type": "object",
+    },
+    "name": "task_finished",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Say a task you run is blocked: Hemera checks the request and asks the user a decision. The task and the tasks that depend on it wait; go on with the others. An amendment of the plan applies only if the user chooses your recommended option.",
+      "properties": {
+        "amendment": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "by": {
+                  "description": "The tasks that replace it, with their targets and scenarios.",
+                  "items": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "depends_on": {
+                        "items": {
+                          "description": "A task done before it, by its id: one of the plan (\`T1\`) or of this amendment.",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                      "id": {
+                        "description": "Its id: \`T21a\`, \`T21b\` for a replacement, a new number for an addition.",
+                        "type": "string",
+                      },
+                      "requirements": {
+                        "items": {
+                          "description": "A requirement it covers (\`R1\`).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                      "result": {
+                        "description": "What is true once it is done.",
+                        "maxLength": 2000,
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "scenarios": {
+                        "items": {
+                          "description": "A scenario it covers (\`R1.S2\`).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                      "targets": {
+                        "description": "The files it creates or changes.",
+                        "items": {
+                          "additionalProperties": true,
+                          "properties": {
+                            "intent": {
+                              "description": "\`create\` (the path does not exist at the base commit) or \`change\` (it does).",
+                              "enum": [
+                                "create",
+                                "change",
+                              ],
+                              "type": "string",
+                            },
+                            "path": {
+                              "description": "Its path, relative to that repository, with forward slashes.",
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                            "repository": {
+                              "description": "The repository, by its path as the Project names it (\`api\`).",
+                              "minLength": 1,
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "repository",
+                            "path",
+                            "intent",
+                          ],
+                          "type": "object",
+                        },
+                        "type": "array",
+                      },
+                      "title": {
+                        "description": "What the task builds, in a few words.",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "result",
+                      "requirements",
+                      "scenarios",
+                      "targets",
+                      "depends_on",
+                    ],
+                    "type": "object",
+                  },
+                  "minItems": 1,
+                  "type": "array",
+                },
+                "kind": {
+                  "enum": [
+                    "replace",
+                  ],
+                  "type": "string",
+                },
+                "task": {
+                  "description": "A task of the plan, by its id (\`T21\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "kind",
+                "task",
+                "by",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "remove",
+                  ],
+                  "type": "string",
+                },
+                "reason": {
+                  "description": "Why the task became useless.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "task": {
+                  "description": "A task of the plan, by its id (\`T21\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "kind",
+                "task",
+                "reason",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "add",
+                  ],
+                  "type": "string",
+                },
+                "task": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "depends_on": {
+                      "items": {
+                        "description": "A task done before it, by its id: one of the plan (\`T1\`) or of this amendment.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "id": {
+                      "description": "Its id: \`T21a\`, \`T21b\` for a replacement, a new number for an addition.",
+                      "type": "string",
+                    },
+                    "requirements": {
+                      "items": {
+                        "description": "A requirement it covers (\`R1\`).",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "result": {
+                      "description": "What is true once it is done.",
+                      "maxLength": 2000,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "scenarios": {
+                      "items": {
+                        "description": "A scenario it covers (\`R1.S2\`).",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "targets": {
+                      "description": "The files it creates or changes.",
+                      "items": {
+                        "additionalProperties": true,
+                        "properties": {
+                          "intent": {
+                            "description": "\`create\` (the path does not exist at the base commit) or \`change\` (it does).",
+                            "enum": [
+                              "create",
+                              "change",
+                            ],
+                            "type": "string",
+                          },
+                          "path": {
+                            "description": "Its path, relative to that repository, with forward slashes.",
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                          "repository": {
+                            "description": "The repository, by its path as the Project names it (\`api\`).",
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "repository",
+                          "path",
+                          "intent",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "title": {
+                      "description": "What the task builds, in a few words.",
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "result",
+                    "requirements",
+                    "scenarios",
+                    "targets",
+                    "depends_on",
+                  ],
+                  "type": "object",
+                },
+              },
+              "required": [
+                "kind",
+                "task",
+              ],
+              "type": "object",
+            },
+          ],
+          "description": "A change of the plan, applied only if the user chooses your recommended option: \`replace\` a task by others, \`remove\` it with the reason, or \`add\` one. Every scenario must stay covered.",
+        },
+        "kind": {
+          "description": "\`impossible\`: the task cannot be built as written; \`decision\`: the Spec does not settle a choice the user would care about.",
+          "enum": [
+            "decision",
+            "impossible",
+          ],
+          "type": "string",
+        },
+        "options": {
+          "description": "The options the user chooses from.",
+          "items": {
+            "description": "One option, in a few words.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "type": "array",
+        },
+        "reason": {
+          "description": "What blocks it, as the user will read it.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "recommended": {
+          "description": "The option you recommend: one of \`options\`.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "recommended_reason": {
+          "description": "Why you recommend it.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "task": {
+          "description": "The task, by its id (\`T4\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "task",
+        "kind",
+        "reason",
+        "options",
+        "recommended",
+        "recommended_reason",
+      ],
+      "type": "object",
+    },
+    "name": "task_blocked",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Ask the user for what is not one task’s: Hemera checks the request and creates the need.",
+      "properties": {
+        "action": {
+          "description": "For \`environment\`: what the user should do.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "\`environment\`: something outside the code fails or is missing (a VPN, a vault, a quota, a step only the user can do); \`decision\`: a choice that is no one task’s.",
+          "enum": [
+            "environment",
+            "decision",
+          ],
+          "type": "string",
+        },
+        "options": {
+          "description": "For \`decision\`: the options the user chooses from.",
+          "items": {
+            "description": "One option, in a few words.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "type": "array",
+        },
+        "recommended": {
+          "description": "For \`decision\`: the option you recommend.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "tasks": {
+          "description": "The tasks it holds: they and their dependants wait. Empty when it holds none.",
+          "items": {
+            "description": "The task, by its id (\`T4\`).",
+            "maxLength": 20,
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "text": {
+          "description": "What is missing, or the question, as the user will read it.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "text",
+        "tasks",
+      ],
+      "type": "object",
+    },
+    "name": "report_need",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write the final summary of the build, once Hemera says every task is done.",
+      "properties": {
+        "text": {
+          "description": "What was built, what was not and why, every failure said.",
+          "maxLength": 8000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "build_summary",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {
