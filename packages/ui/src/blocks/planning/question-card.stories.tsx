@@ -74,6 +74,23 @@ export const Answering: Story = {
   },
 }
 
+/** An option pressed twice before the engine has it: sent once, the options busy meanwhile. */
+export const AnsweringTwice: Story = {
+  args: { onAnswer: fn(() => new Promise<void>(() => undefined)) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const option = canvas.getByRole('button', { name: /Only its owner/ })
+    await userEvent.click(option)
+    await userEvent.click(option)
+    await expect(args.onAnswer).toHaveBeenCalledTimes(1)
+    await expect(option).toHaveAttribute('aria-busy', 'true')
+    await expect(canvas.getByRole('button', { name: /Anyone who can read it/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  },
+}
+
 /** The keyboard path: Tab reaches the options in order, Enter answers, the ring shows. */
 export const AnsweringByKeyboard: Story = {
   play: async ({ canvasElement, args }) => {

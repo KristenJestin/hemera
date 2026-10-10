@@ -145,6 +145,22 @@ export const VisionRefused: Story = {
   },
 }
 
+/** A dependency accepted twice before the engine has it: sent once, Accept busy meanwhile. */
+export const DecidingTwice: Story = {
+  args: {
+    dependencies: DEPENDENCIES,
+    onDecideDependency: fn(() => new Promise<void>(() => undefined)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const accept = canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' })
+    await userEvent.click(accept)
+    await userEvent.click(accept)
+    await expect(args.onDecideDependency).toHaveBeenCalledTimes(1)
+    await expect(accept).toHaveAttribute('aria-disabled', 'true')
+  },
+}
+
 /** The triage answer: where it belongs, Keep planning, or open the other mission. */
 export const Triage: Story = {
   args: { triage: triaged().data.triage },

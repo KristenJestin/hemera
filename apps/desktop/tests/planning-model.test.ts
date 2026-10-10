@@ -704,6 +704,43 @@ describe('Following a mission’s Planning', () => {
     await expect(played.following.giveVision('Keep it small')).resolves.toBeUndefined()
   })
 
+  test('an answer pressed again while the first is on its way is sent once', async () => {
+    const sent: Array<() => void> = []
+    const played = world({
+      answer: () =>
+        new Promise<void>((resolve) => {
+          sent.push(resolve)
+        }),
+    })
+    played.listeners.spec(spec())
+    await flush()
+    const first = played.following.answer('Q1', { optionId: 'A' })
+    const again = played.following.answer('Q1', { optionId: 'A' })
+    expect(again).toBe(first)
+    expect(sent).toHaveLength(1)
+    sent[0]?.()
+    await first
+    void played.following.answer('Q1', { optionId: 'B' })
+    expect(sent).toHaveLength(2)
+  })
+
+  test('a second quick message on an item does not open its discussion again', async () => {
+    let opened = 0
+    const played = world({
+      openDiscussion: () => {
+        opened += 1
+        return new Promise(() => undefined)
+      },
+    })
+    played.listeners.spec(spec())
+    await flush()
+    const item = { kind: 'question' as const, id: 'Q2' }
+    const first = played.following.say(item, 'Why not both?')
+    const again = played.following.say(item, 'And for a shared note?')
+    expect(again).toBe(first)
+    expect(opened).toBe(1)
+  })
+
   test('the first message on an item opens its discussion; the next ones are said in it', async () => {
     const played = world()
     played.listeners.spec(spec())

@@ -76,6 +76,19 @@ export const Proposed: Story = {
   },
 }
 
+/** Accept pressed twice before the engine has it: sent once, and Accept shows it works. */
+export const AcceptingTwice: Story = {
+  args: { onAccept: fn(() => new Promise<void>(() => undefined)) },
+  play: async ({ canvasElement, args }) => {
+    const proposal = within(canvasElement).getByRole('group', { name: 'Proposed decision' })
+    const accept = within(proposal).getByRole('button', { name: /Accept/ })
+    await userEvent.click(accept)
+    await userEvent.click(accept)
+    await expect(args.onAccept).toHaveBeenCalledTimes(1)
+    await expect(accept).toHaveAttribute('aria-disabled', 'true')
+  },
+}
+
 /** The user writes the decision instead. */
 export const WritingADecision: Story = {
   play: async ({ canvasElement }) => {
