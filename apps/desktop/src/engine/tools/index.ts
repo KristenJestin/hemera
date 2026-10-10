@@ -68,6 +68,8 @@ import type { ProjectServices } from '../repositories.ts'
 import type { SetupValues } from '../setup/values.ts'
 import type { Preparations } from '../workspaces.ts'
 import { readPreferences } from '../preferences.ts'
+import { instructionsKept } from '../sessions/store.ts'
+import { startedWithTesterMode } from '../tester/mode.ts'
 
 export { HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
@@ -122,8 +124,12 @@ const grantOf = (sessionId: string) =>
             .where(eq(missions.id, missionId))
             .pipe(Effect.mapError(refusedWhile('reading the mission'))))[0]?.projectId ?? '')
     const project = yield* getProject(projectId)
-    // The tester mode's tools are handed only while the mode is on (#45).
-    const testing = (yield* readPreferences).testerMode
+    // The tester mode's tools are handed only while the mode is on (#45): as it was when the
+    // session's instructions were written, which keeps its tool list and its instructions in
+    // step until it is replaced or compacted, and the preference before it has any.
+    const kept = yield* instructionsKept(sessionId)
+    const testing =
+      kept === null ? (yield* readPreferences).testerMode : startedWithTesterMode(kept)
     const folder = resolve(session.folder)
     const [workspace] = yield* database
       .select({ id: workspaces.id })

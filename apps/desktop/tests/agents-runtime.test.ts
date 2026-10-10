@@ -64,6 +64,8 @@ const OFFERED: FakeScript = {
 const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void> = Effect.void) => {
   const agents: FakeAgent[] = []
   const tokens: string[] = []
+  /** What a start asks of the session, in the order it asks. */
+  const asked: string[] = []
   const layers = Layer.mergeAll(
     Layer.succeed(AgentStarter, {
       start: () =>
@@ -94,6 +96,7 @@ const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void>
       mint: (session) =>
         Effect.sync(() => {
           tokens.push(`mint ${session}`)
+          asked.push('token')
           return `token-${String(tokens.length)}`
         }),
       revoke: (session) => Effect.sync(() => void tokens.push(`revoke ${session}`)),
@@ -105,10 +108,14 @@ const world = (scripts: ReadonlyArray<FakeScript>, starting: Effect.Effect<void>
     }),
     defaultPermissionAnswerLayer,
     Layer.succeed(SessionInstructions, {
-      of: (session) => Effect.succeed(`# Instructions of ${session}`),
+      of: (session) =>
+        Effect.sync(() => {
+          asked.push('instructions')
+          return `# Instructions of ${session}`
+        }),
     }),
   )
-  return { agents, tokens, layers }
+  return { agents, tokens, asked, layers }
 }
 
 const run = <A, E>(
@@ -177,6 +184,18 @@ describe('A session’s instructions are set once, at its start', () => {
       [{ type: 'text', text: '[hemera:brief]' }],
       [{ type: 'text', text: 'next' }],
     ])
+  })
+
+  test('they are read before the token is minted: the tools a token grants follow them', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }])
+    await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+      }),
+    )
+    expect(built.asked).toEqual(['instructions', 'token'])
   })
 
   test('Codex takes them as an embedded resource before its first message, and never again', async () => {

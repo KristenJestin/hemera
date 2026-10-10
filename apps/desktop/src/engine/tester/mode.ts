@@ -11,6 +11,10 @@ import { readPreferences } from '../preferences.ts'
 import { TesterMode } from '../sessions/ports.ts'
 import type { Database } from '../storage/database.ts'
 
+/** Whether instructions were written with the tester mode on: its paragraph is in them. */
+export const startedWithTesterMode = (instructions: string): boolean =>
+  instructions.includes(TESTER_PARAGRAPH)
+
 export const testerModeLayer = Layer.effect(
   TesterMode,
   Effect.map(
