@@ -72,6 +72,7 @@ const withBuilder = <A, E>(
     readonly main: string
     readonly projectId: string
     readonly missionKey: string
+    readonly missionId: string
     readonly started: Started
   }) => Effect.Effect<A, E, EngineServices>,
   parts: NonNullable<Engine> = {},
@@ -93,6 +94,7 @@ const withBuilder = <A, E>(
             main,
             projectId: project.id,
             missionKey: mission.key,
+            missionId: mission.id,
             started,
           })
         }),
@@ -329,6 +331,79 @@ describe("CT-17: the data folder's missions/ exception keeps missions isolated",
     expect(said[2]).toMatch(/^sensitive place: .*AC-2$/)
     expect(said[3]).toMatch(/^sensitive place: .*AC-3$/)
     expect(said[4]).toMatch(/^sensitive place: .*\.env$/)
+  })
+})
+
+/**
+ * A Probe of Acme's mission working in its own folder under the data folder, as the planning
+ * desk makes it (`probes/<mission>/<n>`), a Git repository with one commit.
+ */
+const withProbe = <A, E>(
+  body: (world: {
+    readonly probe: string
+    readonly folder: string
+  }) => Effect.Effect<A, E, EngineServices>,
+) =>
+  withBuilder(({ missionKey, missionId }) =>
+    Effect.gen(function* () {
+      const folder = join(data, 'probes', missionKey, '1')
+      mkdirSync(join(folder, 'tests'), { recursive: true })
+      writeFileSync(join(folder, 'README.md'), 'acme\n')
+      for (const args of [
+        ['init', '-q'],
+        ['add', '.'],
+        ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'one'],
+      ]) {
+        spawnSync('git', args, { cwd: folder })
+      }
+      const probe = yield* sessionOf('probe', folder, { kind: 'mission', id: missionId })
+      return yield* body({ probe: probe.grantId, folder })
+    }),
+  )
+
+describe('A Probe writes in its own folder without asking (#170)', () => {
+  test('a new test file in its folder, and an edit of one, are allowed by the rules', async () => {
+    const { answer, questions } = await withProbe(({ probe }) =>
+      Effect.gen(function* () {
+        const written = yield* callTool(probe, 'fs_write', {
+          path: 'tests/cli/install.test.ts',
+          content: 'fails today\n',
+        })
+        yield* read(probe, 'tests/cli/install.test.ts')
+        const edited = yield* callTool(probe, 'fs_edit', {
+          path: 'tests/cli/install.test.ts',
+          edits: [{ old: 'today', new: 'on main' }],
+        })
+        return [written, edited]
+      }),
+    )
+    expect(questions).toEqual([])
+    expect(answer.map((one) => one.ok)).toEqual([true, true])
+  })
+
+  test('a write one folder up, through a link that leaves it, or into its .env still asks', async () => {
+    const { answer, questions } = await withProbe(({ probe, folder }) =>
+      Effect.gen(function* () {
+        symlinkSync(work, join(folder, 'out'))
+        return yield* Effect.all([
+          callTool(probe, 'fs_write', { path: '../2/notes.md', content: 'x' }),
+          callTool(probe, 'fs_write', { path: 'out/notes.md', content: 'x' }),
+          callTool(probe, 'fs_write', { path: '.env', content: 'TOKEN=x' }),
+        ])
+      }),
+    )
+    expect(answer.map((one) => one.ok)).toEqual([false, false, false])
+    expect(questions).toHaveLength(3)
+    expect(questions[0]).toMatch(/^outside its worktree: /)
+    expect(questions[1]).toMatch(/^outside its worktree: /)
+    expect(questions[2]).toMatch(/^sensitive place: /)
+  })
+
+  test("a Builder's write in its Workspace still goes to the judge", async () => {
+    const { questions } = await withBuilder(({ builder }) =>
+      callTool(builder, 'fs_write', { path: 'notes.md', content: 'x' }),
+    )
+    expect(questions).toHaveLength(1)
   })
 })
 

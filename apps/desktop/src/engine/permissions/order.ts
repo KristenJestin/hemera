@@ -12,8 +12,9 @@
  *     for this mission" grant for the same action allows it); then a path outside the role's
  *     place, or words that do not read, ask, and so does a catalogue command marked "ask before
  *     running";
- *  4. the local allows, only for what is fully understood: a read inside, a plain listing, a
- *     catalogue command of the place that does not go through a shell;
+ *  4. the local allows, only for what is fully understood: a read inside, a write inside a
+ *     Probe's own folder, a plain listing, a catalogue command of the place that does not go
+ *     through a shell;
  *  5. the judge, which allows or asks;
  *  6. any failure of the judge asks. Never an allow on an error path.
  *
@@ -31,6 +32,7 @@ import {
   PLACE_NAMES,
   type PlaceContext,
   ROLE_NAMES,
+  ROLE_PLACES,
   concernSaid,
   deletesGit,
   effectiveAction,
@@ -107,6 +109,25 @@ export const JUDGE_LIMIT = Duration.seconds(10)
 const READS = new Set(['fs_read', 'fs_list', 'search'])
 /** The local tools without a path: they read Hemera's own state for the session. */
 const SESSION_READS = new Set(['commands_list', 'commands_output'])
+/** The tools that write a file, allowed by the rules only in a place of the session's own. */
+const WRITES = new Set(['fs_write', 'fs_edit'])
+
+/**
+ * Whether a call's path is certainly inside a place that is the session's own (a Probe's
+ * worktree), the role's own and not read-only: never a Workspace nor the main checkout.
+ */
+const ownFolder = (call: JudgedCall): boolean => {
+  const { place, role } = call.session
+  return (
+    place.kind === 'own-worktree' &&
+    ROLE_PLACES[role].kind === 'own-worktree' &&
+    !place.readOnly &&
+    !ROLE_PLACES[role].readOnly &&
+    call.path !== null &&
+    call.path.inside &&
+    call.path.certain
+  )
+}
 
 export interface OrderSettings {
   readonly log: Log
@@ -306,6 +327,8 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
       /** Step 4: whether the rules allow it, all being understood. */
       const allowedLocally = (call: JudgedCall): boolean => {
         if (READS.has(call.tool) || SESSION_READS.has(call.tool)) return true
+        // A Probe's folder is its own, made for it and thrown away: it writes there freely.
+        if (WRITES.has(call.tool) && ownFolder(call)) return true
         if (call.tool !== 'commands_run') return false
         const line = call.command?.line ?? call.line ?? ''
         const [program = '', ...args] = wordsOf(line)
