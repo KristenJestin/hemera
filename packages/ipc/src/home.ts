@@ -61,7 +61,7 @@ const always = Schema.Union([StorageFailed, EngineGone])
 
 /**
  * Home's reads. `home.sinceYouLeftChanged` answers the first page, then again after each event
- * worth telling; `home.looked` moves the cursor to the latest event; `home.recent` is at most
+ * worth telling; `home.looked` moves the cursor to the last event drawn; `home.recent` is at most
  * eight missions, the last opened first.
  */
 export const HomeRpcs = RpcGroup.make(
@@ -71,7 +71,12 @@ export const HomeRpcs = RpcGroup.make(
     error: always,
   }),
   Rpc.make('home.sinceYouLeftChanged', { success: SincePage, error: always, stream: true }),
-  Rpc.make('home.looked', { success: Schema.Void, error: always }),
+  Rpc.make('home.looked', {
+    /** The highest sequence of the events drawn; without it, everything there is. */
+    payload: { upTo: Schema.optionalKey(Schema.Number) },
+    success: Schema.Void,
+    error: always,
+  }),
   Rpc.make('home.recent', { success: Schema.Array(Mission), error: always }),
   Rpc.make('home.opened', {
     payload: { missionId: Schema.String },

@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { EngineState } from '../src/renderer/engine-start.ts'
-import { START, go, type Route } from '../src/renderer/navigation.ts'
+import { START, go, open, type Route } from '../src/renderer/navigation.ts'
 import type { NeedsState } from '../src/renderer/needs.ts'
 import type { ProjectState, ProjectsState } from '../src/renderer/projects.ts'
 import { HomeRoute } from '../src/renderer/home-route.tsx'
@@ -94,6 +94,8 @@ interface Drawn {
   folded?: boolean
   needs?: NeedsState
   opened?: ReadonlySet<string>
+  /** The views opened over the mission shown, in order. */
+  views?: readonly string[]
 }
 
 const drawn = ({
@@ -104,13 +106,14 @@ const drawn = ({
   folded = false,
   needs = { kind: 'ready', needs: [], missions: new Map(), answers: new Map() },
   opened = new Set(),
+  views = [],
 }: Drawn): string => {
   const props: ShellProps = {
     engine,
     projects,
     project,
     needs,
-    navigation: go(START, route),
+    navigation: views.reduce(open, go(START, route)),
     folded,
     opened,
     home: createElement(HomeRoute, {
@@ -254,7 +257,15 @@ describe('The sidebar and Home', () => {
     const markup = drawn({})
     expect(markup).toMatch(/<button[^>]*aria-current="page"[^>]*>.*?Home/)
     expect(markup).toContain('>Acme<')
-    expect(markup).toContain('No mission yet.')
+  })
+
+  test('Home’s lists are rows’ shapes while their reads have not answered', () => {
+    const markup = drawn({})
+    expect(markup).toContain('<ul aria-label="Since you left" aria-busy="true"')
+    expect(markup).toContain('<ul aria-label="Recent" aria-busy="true"')
+    expect(markup).toContain('data-row-skeleton')
+    expect(markup).not.toContain('No mission yet.')
+    expect(markup).not.toContain('All quiet')
   })
 
   test('Projects that cannot be read are said in words, where they would be and on Home', () => {
@@ -275,7 +286,7 @@ describe('The sidebar and Home', () => {
 })
 
 describe('The pages', () => {
-  test('a Project’s page: its name, its repositories, the entry to its settings, no mission yet', () => {
+  test('a Project’s page: its name, its repositories, the entry to its settings, its missions on their way', () => {
     const markup = drawn({
       route: { kind: 'project', id: 'acme' },
       project: { kind: 'ready', project: ACME },
@@ -284,7 +295,9 @@ describe('The pages', () => {
     expect(markup).toContain('>api<')
     expect(markup).toContain('>web<')
     expect(markup).toContain('Settings of Acme')
-    expect(markup).toContain('No mission yet')
+    // The missions are rows' shapes until their read answers, never "No mission yet" before it.
+    expect(markup).toContain('<ul aria-label="Missions" aria-busy="true"')
+    expect(markup).not.toContain('No mission yet')
   })
 
   test('a Project’s page on its way, and one that cannot be read', () => {
@@ -333,6 +346,15 @@ describe('The pages', () => {
     expect(renderToStaticMarkup(createElement(MissionRoute, missionProps))).toBe('')
   })
 
+  test('a view opened over a mission is named in the trail by its title, not its id', () => {
+    const markup = drawn({
+      route: { kind: 'mission', projectId: 'acme', key: 'ACME-12' },
+      views: ['difference'],
+    })
+    expect(markup).toMatch(/aria-label="Where you are".*ACME-12.*What changed/)
+    expect(markup).not.toContain('>difference<')
+  })
+
   test('the living spec is a page under its Project, drawn by its own route', () => {
     const markup = drawn({ route: { kind: 'livingSpec', projectId: 'acme' } })
     expect(markup).toMatch(/<h1[^>]*>.*Living spec.*<\/h1>/)
@@ -341,19 +363,20 @@ describe('The pages', () => {
     )
   })
 
-  test('the Project page’s start field and the sidebar’s missions are parts that draw nothing yet', () => {
-    expect(
-      renderToStaticMarkup(
-        createElement(StartFieldPart, {
-          link: SILENT_LINK,
-          engineReady: true,
-          projectId: 'acme',
-          projectName: 'Acme',
-          onOpenMission: nothing,
-          onOpenChat: nothing,
-        }),
-      ),
-    ).toBe('')
+  test('the start field is drawn empty, with nothing found; the sidebar’s missions wait for their read', () => {
+    const field = renderToStaticMarkup(
+      createElement(StartFieldPart, {
+        link: SILENT_LINK,
+        engineReady: true,
+        projectId: 'acme',
+        projectName: 'Acme',
+        onOpenMission: nothing,
+        onOpenChat: nothing,
+      }),
+    )
+    expect(field).toContain('Start a mission in Acme')
+    expect(field).toContain('placeholder="A ticket, an idea…"')
+    expect(field).not.toContain('aria-label="Found"')
     expect(
       renderToStaticMarkup(
         createElement(SidebarMissions, {

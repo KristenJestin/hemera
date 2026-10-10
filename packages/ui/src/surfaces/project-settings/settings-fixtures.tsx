@@ -74,6 +74,7 @@ import {
   IconAdjustments,
   IconBan,
   IconChecklist,
+  IconDatabase,
   IconFileText,
   IconGauge,
   IconGitBranch,
@@ -124,6 +125,7 @@ export const SECTIONS: readonly SettingsSection[] = [
 /** The sections later slices add to the same frame: fourteen in all. */
 export const LATER_SECTIONS: readonly SettingsSection[] = [
   { id: 'tickets', label: 'Tickets and Specs', icon: <IconStack2 size="sm" /> },
+  { id: 'resources', label: 'Exclusive resources', icon: <IconDatabase size="sm" /> },
   { id: 'checks', label: 'Checks', icon: <IconChecklist size="sm" /> },
   { id: 'documentation', label: 'Documentation recipes', icon: <IconStack2 size="sm" /> },
   { id: 'delivery', label: 'Delivery rules', icon: <IconSettings size="sm" /> },
@@ -499,6 +501,7 @@ export function SettingsFixture({
   })()
 
   const unreadable = repositories.filter((one) => one.unreadable !== undefined)
+  // The later sections, exclusive resources among them, have no problem drawn in this fixture.
   const problems = new Map<string, string | undefined>(
     Object.entries({
       repositories:

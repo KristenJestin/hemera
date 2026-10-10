@@ -28,13 +28,14 @@ import {
   TicketFound,
   type Project,
 } from '@hemera/ipc'
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { Effect, Predicate, Stream } from 'effect'
 
 import { createMission, getMission, linkedMission, linkedTo, missionsOf } from '../missions.ts'
+import { lastLines } from '../home/journal-tail.ts'
 import { getProject } from '../projects.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
-import { memoryJournal, missions } from '../storage/schema.ts'
+import { missions } from '../storage/schema.ts'
 import { readForCreation } from '../tickets/link.ts'
 import { TicketSearch } from './tickets.ts'
 
@@ -96,36 +97,6 @@ const byWords = (projectId: string, text: string, besides: string | null) =>
       .orderBy(asc(ENDED), desc(missions.updatedAt), desc(sql`rowid`))
       .limit(LOCAL_RESULTS)
       .pipe(Effect.mapError(refusedWhile('searching the missions'))),
-  )
-
-/** The last Journal line of each of these missions, by mission. */
-const lastLines = (ids: ReadonlyArray<string>) =>
-  Database.use((database) =>
-    ids.length === 0
-      ? Effect.succeed(new Map<string, { at: string; text: string }>())
-      : database
-          .select({
-            missionId: memoryJournal.missionId,
-            at: memoryJournal.at,
-            text: memoryJournal.text,
-          })
-          .from(memoryJournal)
-          .where(
-            inArray(
-              memoryJournal.sequence,
-              database
-                .select({ sequence: sql<number>`max(${memoryJournal.sequence})` })
-                .from(memoryJournal)
-                .where(inArray(memoryJournal.missionId, [...ids]))
-                .groupBy(memoryJournal.missionId),
-            ),
-          )
-          .pipe(
-            Effect.mapError(refusedWhile('reading the Journal')),
-            Effect.map(
-              (rows) => new Map(rows.map((row) => [row.missionId, { at: row.at, text: row.text }])),
-            ),
-          ),
   )
 
 /**

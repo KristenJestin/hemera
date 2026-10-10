@@ -222,9 +222,13 @@ export interface Link {
     text: string,
     listener: (result: StartResult) => void,
     onEnd: (error: Error) => void,
+    /** The stream ended: nothing more will be found for this text. */
+    onDone?: () => void,
   ) => () => void
   /** Creates the mission of the user's explicit choice; the same key twice creates one. */
   readonly createStart: (create: StartCreate) => Promise<Mission>
+  /** The user keeps the mission the Planner triaged as not new work: it goes on planning. */
+  readonly keepAfterTriage: (missionId: string) => Promise<void>
   /** Stops everything the mission runs; rejects with `MoveRefused` when its stage does not allow it. */
   readonly cancelMission: (id: string) => Promise<Mission>
   /** What stands between a mission in Planning and its Freeze. */
@@ -253,8 +257,8 @@ export interface Link {
     listener: (page: SincePage) => void,
     onEnd: (error: Error) => void,
   ) => () => void
-  /** The user looked at Home: what happened up to now is not new any more. */
-  readonly lookedAtHome: () => Promise<void>
+  /** The user looked at Home: the events up to the sequence `upTo`, the last drawn, are not new any more. */
+  readonly lookedAtHome: (upTo: number) => Promise<void>
   /** At most eight missions, the last opened first. */
   readonly recentMissions: () => Promise<ReadonlyArray<Mission>>
   /** The user opened a mission: it leads Recent. */
@@ -315,6 +319,12 @@ export interface Link {
   readonly saveJiraToken: (providerId: string, token: string) => Promise<JiraTokenStatus>
   readonly removeJiraToken: (providerId: string) => Promise<JiraTokenStatus>
   readonly jiraTokenStatus: (providerId: string) => Promise<JiraTokenStatus>
+  /** How often the Project's linked tickets are checked, in minutes. */
+  readonly syncInterval: (projectId: string) => Promise<number>
+  /** Rejects with `InvalidSyncInterval` under the engine's minimum; answers the interval kept. */
+  readonly setSyncInterval: (projectId: string, minutes: number) => Promise<number>
+  /** When the linked tickets were last checked with every provider; null before the first. */
+  readonly lastCheck: (projectId: string) => Promise<string | null>
   /** The language the Spec is written in. */
   readonly specLanguage: (projectId: string) => Promise<string>
   readonly setSpecLanguage: (projectId: string, language: string) => Promise<string>
@@ -441,6 +451,7 @@ export function linkOver(port: Port): Link {
     ends: (error: E) => error is F,
     onEnd: (error: F) => void,
     onOpen?: () => void,
+    onDone?: () => void,
   ): (() => void) => {
     let stopped = false
     let stop = (): void => {
@@ -452,7 +463,10 @@ export function linkOver(port: Port): Link {
         Stream.runForEach(open(ready), (value) => Effect.sync(() => listener(value))),
       )
       fiber.addObserver((exit) => {
-        if (Exit.isSuccess(exit)) return
+        if (Exit.isSuccess(exit)) {
+          if (!stopped) onDone?.()
+          return
+        }
         const failure = Cause.findErrorOption(exit.cause)
         if (Option.isSome(failure) && ends(failure.value)) onEnd(failure.value)
       })
@@ -558,9 +572,18 @@ export function linkOver(port: Port): Link {
         onEnd,
       ),
     missions: (projectId) => call((ready) => ready['missions.list']({ projectId })),
-    searchStart: (projectId, text, listener, onEnd) =>
-      follow((ready) => ready['start.search']({ projectId, text }), listener, anError, onEnd),
+    searchStart: (projectId, text, listener, onEnd, onDone) =>
+      follow(
+        (ready) => ready['start.search']({ projectId, text }),
+        listener,
+        anError,
+        onEnd,
+        undefined,
+        onDone,
+      ),
     createStart: (create) => call((ready) => ready['start.create'](create)),
+    keepAfterTriage: (missionId) =>
+      call((ready) => ready['planning.keepAfterTriage']({ missionId })),
     cancelMission: (id) => call((ready) => ready['missions.cancel']({ id })),
     freezeReadiness: (id) => call((ready) => ready['missions.freezeReadiness']({ id })),
     onFreezeReadiness: (id, listener, onEnd) =>
@@ -573,7 +596,7 @@ export function linkOver(port: Port): Link {
     sinceYouLeft: (before) => call((ready) => ready['home.sinceYouLeft']({ before })),
     onSinceYouLeft: (listener, onEnd) =>
       follow((ready) => ready['home.sinceYouLeftChanged'](), listener, anError, onEnd),
-    lookedAtHome: () => call((ready) => ready['home.looked']()),
+    lookedAtHome: (upTo) => call((ready) => ready['home.looked']({ upTo })),
     recentMissions: () => call((ready) => ready['home.recent']()),
     missionOpened: (missionId) => call((ready) => ready['home.opened']({ missionId })),
     journalTail: (missionIds) => call((ready) => ready['memory.journalTail']({ missionIds })),
@@ -622,6 +645,10 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['tickets.removeJiraToken']({ providerId })),
     jiraTokenStatus: (providerId) =>
       call((ready) => ready['tickets.jiraTokenStatus']({ providerId })),
+    syncInterval: (projectId) => call((ready) => ready['tickets.syncInterval']({ projectId })),
+    setSyncInterval: (projectId, minutes) =>
+      call((ready) => ready['tickets.setSyncInterval']({ projectId, minutes })),
+    lastCheck: (projectId) => call((ready) => ready['tickets.lastCheck']({ projectId })),
     specLanguage: (projectId) => call((ready) => ready['planning.specLanguage']({ projectId })),
     setSpecLanguage: (projectId, language) =>
       call((ready) => ready['planning.setSpecLanguage']({ projectId, language })),

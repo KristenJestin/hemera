@@ -1,119 +1,15 @@
 /**
- * The living spec of the neutral Project "Acme", in the shapes the engine answers it in
- * (`livingSpec.changed`, `livingSpec.requirements`, `livingSpec.requirement`): the two proposals
- * of this exploration draw the same data, so what differs between them is only how it is drawn.
+ * The living spec of the neutral Project "Acme", in the shapes the window gives the page
+ * (`LivingSpecData`): the stories of the page draw from these.
  */
 
-/** A domain or a requirement: proposed by the reading of the code until the user validates it. */
-export type LivingState = 'proposed' | 'validated'
-
-export interface LivingScenario {
-  readonly when: string
-  readonly then: string
-}
-
-/** The mission a requirement comes from, and the Review round that changed it; null: the reading. */
-export type LivingOrigin = {
-  readonly missionId: string
-  readonly key: string | null
-  readonly round: number | null
-} | null
-
-/**
- * What a re-read of a domain proposes on a requirement already there: the engine's tagged
- * `Replace` and `Obsolete`, told apart here by a plain `kind`.
- */
-export type LivingPending =
-  | {
-      readonly kind: 'replace'
-      readonly text: string
-      readonly scenarios: readonly LivingScenario[]
-      readonly uncertainty: string
-    }
-  | { readonly kind: 'obsolete'; readonly reason: string }
-
-export interface LivingRequirement {
-  readonly id: string
-  readonly domainId: string
-  readonly text: string
-  readonly scenarios: readonly LivingScenario[]
-  readonly origin: LivingOrigin
-  readonly state: LivingState
-  /** What the agent was not sure of; empty when it was. */
-  readonly uncertainty: string
-  readonly version: number
-  readonly removed: boolean
-  readonly pending: LivingPending | null
-}
-
-/** One change of a requirement, for its history. */
-export interface LivingChange {
-  readonly what:
-    | 'proposed'
-    | 'validated'
-    | 'rejected'
-    | 'dropped'
-    | 'added'
-    | 'modified'
-    | 'removed'
-  readonly textBefore: string | null
-  readonly textAfter: string | null
-  readonly by: 'bootstrap' | 'mission' | 'user'
-  readonly byMission: LivingOrigin
-  /** As the page says it: `3 Oct`, `yesterday`. */
-  readonly at: string
-}
-
-export interface LivingDomain {
-  readonly id: string
-  readonly name: string
-  readonly summary: string
-  readonly uncertainty: string
-  readonly state: LivingState
-  readonly proposed: number
-  readonly validated: number
-  readonly pending: number
-  /** As the page says it. */
-  readonly lastChange: string
-}
-
-/** Where a reading of the code stands. */
-export type BootstrapState = 'waiting_for_slot' | 'running' | 'done' | 'failed' | 'stopped'
-
-export interface BootstrapRun {
-  readonly id: string
-  /** The domain of a re-read; null for the whole living spec. */
-  readonly domainId: string | null
-  readonly state: BootstrapState
-  /** The cap's wait, or why it failed. */
-  readonly sentence: string | null
-  readonly startedAt: number
-  readonly endedAt: number | null
-}
-
-/** Everything one view of the living spec is drawn from. */
-export interface LivingSpecData {
-  readonly domains: readonly LivingDomain[]
-  readonly requirements: Readonly<Record<string, readonly LivingRequirement[]>>
-  /** The newest first. */
-  readonly runs: readonly BootstrapRun[]
-  /** No model is set for the reading: a need of the Project, which opens Models by role. */
-  readonly noModel?: boolean | undefined
-}
-
-/** How an origin is said: `bootstrap`, `ACME-12`, `ACME-12, round 1`. */
-export function originWords(origin: LivingOrigin): string {
-  if (origin === null) return 'bootstrap'
-  const key = origin.key ?? 'a deleted mission'
-  return origin.round === null ? key : `${key}, round ${String(origin.round)}`
-}
-
-/** The requirements of a domain that wait on the user. */
-export function waitingOf(requirements: readonly LivingRequirement[]): LivingRequirement[] {
-  return requirements.filter(
-    (one) => !one.removed && (one.state === 'proposed' || one.pending !== null),
-  )
-}
+import type {
+  LivingChange,
+  LivingDomain,
+  LivingOrigin,
+  LivingRequirement,
+  LivingSpecData,
+} from './living-spec-types.ts'
 
 const MISSION_12 = { missionId: 'm12', key: 'ACME-12', round: null }
 const MISSION_12_ROUND = { missionId: 'm12', key: 'ACME-12', round: 1 }
@@ -480,7 +376,9 @@ export const DENSE: LivingSpecData = {
       id,
       name,
       summary:
-        index === 0 ? FILLED.domains[0]!.summary : `What Acme does about ${name.toLowerCase()}.`,
+        index === 0
+          ? 'The basket, discounts, shipping costs and payment.'
+          : `What Acme does about ${name.toLowerCase()}.`,
       uncertainty: '',
       state: proposedState ? 'proposed' : 'validated',
       proposed: proposedState ? 6 : 0,
@@ -512,4 +410,23 @@ export const DENSE: LivingSpecData = {
     }),
   ),
   runs: [],
+}
+
+/** The Catalogue search domain once the user validated it: its proposals are requirements. */
+export const SEARCH_VALIDATED: LivingSpecData = {
+  ...FILLED,
+  domains: FILLED.domains.map((domain) => validatedDomain(domain)),
+  requirements: {
+    ...FILLED.requirements,
+    search: (FILLED.requirements['search'] ?? []).map((one) => validatedRequirement(one)),
+  },
+}
+
+function validatedDomain(domain: LivingDomain): LivingDomain {
+  if (domain.id !== 'search') return domain
+  return { ...domain, state: 'validated', proposed: 0, validated: domain.proposed }
+}
+
+function validatedRequirement(one: LivingRequirement): LivingRequirement {
+  return { ...one, state: 'validated', uncertainty: '' }
 }

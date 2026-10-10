@@ -352,6 +352,7 @@ const recording = (asked: string[]) => {
     'missions.freezeReadinessChanged': stream('missions.freezeReadinessChanged'),
     'missions.freeze': call('missions.freeze'),
     'planning.spec': call('planning.spec'),
+    'planning.keepAfterTriage': call('planning.keepAfterTriage'),
     'planning.openQuestions': call('planning.openQuestions'),
     'planning.questionsChanged': stream('planning.questionsChanged'),
     'planning.specLanguage': call('planning.specLanguage'),
@@ -383,6 +384,9 @@ const recording = (asked: string[]) => {
     'tickets.saveJiraToken': call('tickets.saveJiraToken'),
     'tickets.removeJiraToken': call('tickets.removeJiraToken'),
     'tickets.jiraTokenStatus': call('tickets.jiraTokenStatus'),
+    'tickets.syncInterval': call('tickets.syncInterval'),
+    'tickets.setSyncInterval': call('tickets.setSyncInterval'),
+    'tickets.lastCheck': call('tickets.lastCheck'),
     'resources.list': call('resources.list'),
     'resources.save': call('resources.save'),
     'resources.holders': call('resources.holders'),
@@ -643,6 +647,11 @@ const WIRINGS: ReadonlyArray<Wiring> = [
     asks: 'missions.freezeReadinessChanged {"id":"m1"}',
   },
   {
+    method: 'keepAfterTriage',
+    run: (link) => ask(link.keepAfterTriage('m1')),
+    asks: 'planning.keepAfterTriage {"missionId":"m1"}',
+  },
+  {
     method: 'freeze',
     run: (link) => ask(link.freeze('m1', 3)),
     asks: 'missions.freeze {"id":"m1","specVersion":3}',
@@ -672,7 +681,11 @@ const WIRINGS: ReadonlyArray<Wiring> = [
     },
     asks: 'home.sinceYouLeftChanged',
   },
-  { method: 'lookedAtHome', run: (link) => ask(link.lookedAtHome()), asks: 'home.looked' },
+  {
+    method: 'lookedAtHome',
+    run: (link) => ask(link.lookedAtHome(7)),
+    asks: 'home.looked {"upTo":7}',
+  },
   { method: 'recentMissions', run: (link) => ask(link.recentMissions()), asks: 'home.recent' },
   {
     method: 'missionOpened',
@@ -812,6 +825,21 @@ const WIRINGS: ReadonlyArray<Wiring> = [
     method: 'jiraTokenStatus',
     run: (link) => ask(link.jiraTokenStatus('p1')),
     asks: 'tickets.jiraTokenStatus {"providerId":"p1"}',
+  },
+  {
+    method: 'syncInterval',
+    run: (link) => ask(link.syncInterval('acme')),
+    asks: 'tickets.syncInterval {"projectId":"acme"}',
+  },
+  {
+    method: 'setSyncInterval',
+    run: (link) => ask(link.setSyncInterval('acme', 30)),
+    asks: 'tickets.setSyncInterval {"projectId":"acme","minutes":30}',
+  },
+  {
+    method: 'lastCheck',
+    run: (link) => ask(link.lastCheck('acme')),
+    asks: 'tickets.lastCheck {"projectId":"acme"}',
   },
   {
     method: 'specLanguage',

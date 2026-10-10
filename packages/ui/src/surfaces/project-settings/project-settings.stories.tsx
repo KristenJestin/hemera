@@ -102,7 +102,7 @@ export const Dense: Story = {
     const canvas = within(canvasElement)
     const nav = canvas.getByRole('navigation', { name: 'Settings of the Project' })
     // Never run stands under the catalogue, not as a section of its own.
-    expect(within(nav).getAllByRole('button')).toHaveLength(13)
+    expect(within(nav).getAllByRole('button')).toHaveLength(14)
     // The problem is found from any section: its glyph is in the list.
     expect(
       within(nav).getByRole('button', { name: 'Repositories, billing cannot be read' }),

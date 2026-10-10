@@ -325,3 +325,4 @@ export {
   type SetupTaskProps,
 } from './surfaces/project-setup/setup-task.tsx'
 export { FirstLaunch, type FirstLaunchProps } from './surfaces/first-launch/first-launch.tsx'
+export * from './blocks/start/start-field.tsx'

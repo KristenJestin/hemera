@@ -13,6 +13,11 @@ import { $, browser, expect } from '@wdio/globals'
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
 
 const SPEC = 'memory-killed.e2e.ts'
+/**
+ * The veil over the sheet once the engine stopped, by its own mark: a page's own alert, such as
+ * Home's when a read fails as the engine goes, stands before it in the page.
+ */
+const veil = () => $('[role="alert"][data-engine="stopped"]')
 
 describe('An engine killed while an agent writes in the Journal', () => {
   afterEach(function () {
@@ -38,7 +43,7 @@ describe('An engine killed while an agent writes in the Journal', () => {
       const pid = globalThis.hemeraProbe?.enginePid()
       if (pid !== undefined) process.kill(pid, 'SIGKILL')
     })
-    await expect($('[role="alert"]')).toHaveText('Hemera stopped', { containing: true })
+    await expect(veil()).toHaveText('Hemera stopped', { containing: true })
     console.log(`memory-killed, before the kill: ${JSON.stringify(before)}`)
     expect(before?.agentEvents ?? 0).toBeLessThan(2000)
   })

@@ -2,7 +2,6 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { BallMark } from '../blocks/ball/ball-mark.tsx'
 import { ContentHeader } from './content-header.tsx'
 import {
   CHATS,
@@ -13,32 +12,18 @@ import {
   PROJECTS,
 } from './shell-fixtures.tsx'
 import {
-  Sidebar,
-  SidebarChatRow,
-  type SidebarChatRowProps,
-  type SidebarPlace,
-  SidebarRow,
-} from './sidebar.tsx'
+  SIDEBAR_MISSIONS,
+  type SidebarMissionEntry,
+  SidebarMissionGroups,
+} from './sidebar-shell-fixture.tsx'
+import { Sidebar, SidebarChatRow, type SidebarChatRowProps, type SidebarPlace } from './sidebar.tsx'
 
 /**
  * The sidebar alone, on the page surface it stands on: Hemera's head, Home and its count, the
  * Projects and the missions under each, Settings at the bottom; open, and folded to its rail.
  */
 const UNDER_ACME = (
-  <>
-    <SidebarRow
-      missionKey={MISSION.key}
-      title={MISSION.title}
-      trailing={<BallMark ball="you" />}
-      onPress={fn()}
-    />
-    <SidebarRow
-      missionKey="ACME-15"
-      title="Retry a failed webhook from its row"
-      trailing={<BallMark ball="agent" />}
-      onPress={fn()}
-    />
-  </>
+  <SidebarMissionGroups missions={SIDEBAR_MISSIONS} current={{ kind: 'home' }} onMission={fn()} />
 )
 
 const meta = {
@@ -241,12 +226,10 @@ export const OnAMission: Story = {
       {
         ...PROJECTS[0]!,
         under: (
-          <SidebarRow
-            missionKey={MISSION.key}
-            title={MISSION.title}
-            trailing={<BallMark ball="you" />}
-            current
-            onPress={fn()}
+          <SidebarMissionGroups
+            missions={SIDEBAR_MISSIONS}
+            current={{ kind: 'mission', key: MISSION.key }}
+            onMission={fn()}
           />
         ),
       },
@@ -397,5 +380,173 @@ export const NewChatRefused: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('alert')).toHaveTextContent('could not be started')
     expect(canvas.getByRole('button', { name: 'New Chat' })).toBeEnabled()
+  },
+}
+
+/** The missions under a Project by stage, in the stages' order, each group with its count. */
+export const MissionsByStage: Story = {
+  args: {
+    projects: [{ ...PROJECTS[0]!, under: UNDER_ACME }, PROJECTS[1]!],
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const groups = canvas.getAllByRole('group').map((group) => group.getAttribute('aria-label'))
+    expect(groups).toEqual(['Review', 'Building', 'Planning', 'Done', 'Cancelled'])
+    const review = within(canvas.getByRole('group', { name: 'Review' }))
+    expect(review.getByText('1')).toBeVisible()
+    expect(review.getByRole('button', { name: /ACME-12/ })).toBeVisible()
+    // The row's second line: the last event in words.
+    expect(canvas.getByText('T3 done in api, T4 started in web')).toBeVisible()
+    expect(canvas.getByText('60%')).toBeVisible()
+  },
+}
+
+/** Done and Cancelled are folded: their heading opens them, and folds them back. */
+export const FoldedStages: Story = {
+  args: {
+    projects: [{ ...PROJECTS[0]!, under: UNDER_ACME }, PROJECTS[1]!],
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const done = canvas.getByRole('button', { name: /^Done/ })
+    expect(done).toHaveAttribute('aria-expanded', 'false')
+    expect(canvas.getByRole('button', { name: /^Cancelled/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(canvas.queryByRole('button', { name: /ACME-9/ })).toBeNull()
+    await userEvent.click(done)
+    expect(done).toHaveAttribute('aria-expanded', 'true')
+    expect(await canvas.findByRole('button', { name: /ACME-9/ })).toBeVisible()
+    await userEvent.click(done)
+    await waitFor(() => {
+      expect(canvas.queryByRole('button', { name: /ACME-9/ })).toBeNull()
+    })
+  },
+}
+
+/** A mission that needs the user wears a dot in the warning tone, named for a screen reader. */
+export const NeedsYou: Story = {
+  args: {
+    projects: [{ ...PROJECTS[0]!, under: UNDER_ACME }, PROJECTS[1]!],
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /ACME-12/ })
+    expect(within(row).getByRole('img', { name: 'Needs you' })).toBeInTheDocument()
+    expect(
+      within(canvas.getByRole('button', { name: /ACME-15/ })).queryByRole('img', {
+        name: 'Needs you',
+      }),
+    ).toBeNull()
+  },
+}
+
+/** A long title and a long event end in an ellipsis: the row keeps its two lines. */
+export const LongTitles: Story = {
+  args: {
+    projects: [
+      {
+        ...PROJECTS[0]!,
+        under: (
+          <SidebarMissionGroups
+            missions={SIDEBAR_MISSIONS.map((mission) => ({
+              ...mission,
+              title: `${mission.title}, with the customer filters kept and a progress for the long ones`,
+              event: 'The agent wrote the tests of the export of every invoice of every customer',
+            }))}
+            current={{ kind: 'home' }}
+            onMission={fn()}
+          />
+        ),
+      },
+      PROJECTS[1]!,
+    ],
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /ACME-12/ })
+    const title = within(row).getByText(/^Export invoices as CSV/)
+    expect(title.scrollWidth).toBeGreaterThan(title.clientWidth)
+    expect(row.getBoundingClientRect().height).toBeLessThan(64)
+  },
+}
+
+/**
+ * A mission that changes stage moves to the other group: ACME-14 goes from Planning to Ready
+ * when the control beside the sidebar says so, and the sidebar draws the new group in place.
+ */
+export const MovesStage: Story = {
+  args: { projects: [PROJECTS[0]!, PROJECTS[1]!], opened: new Set(['acme']) },
+  render: (args) => {
+    const [stage, setStage] = useState<SidebarMissionEntry['stage']>('Planning')
+    const missions = SIDEBAR_MISSIONS.map((mission) =>
+      mission.missionKey === 'ACME-14' ? Object.assign({}, mission, { stage }) : mission,
+    )
+    return (
+      <div className="flex h-screen bg-surface-page">
+        <Sidebar
+          {...args}
+          projects={[
+            {
+              ...PROJECTS[0]!,
+              under: (
+                <SidebarMissionGroups
+                  missions={missions}
+                  current={{ kind: 'home' }}
+                  onMission={fn()}
+                />
+              ),
+            },
+            PROJECTS[1]!,
+          ]}
+        />
+        <div className="p-4">
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1.5 text-sm"
+            onClick={() => setStage(stage === 'Planning' ? 'Ready' : 'Planning')}
+          >
+            Move ACME-14 to {stage === 'Planning' ? 'Ready' : 'Planning'}
+          </button>
+        </div>
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(
+      within(canvas.getByRole('group', { name: 'Planning' })).getByRole('button', {
+        name: /ACME-14/,
+      }),
+    ).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Move ACME-14 to Ready' }))
+    await waitFor(() => {
+      expect(canvas.queryByRole('group', { name: 'Planning' })).toBeNull()
+      expect(
+        within(canvas.getByRole('group', { name: 'Ready' })).getByRole('button', {
+          name: /ACME-14/,
+        }),
+      ).toBeVisible()
+    })
+  },
+}
+
+/** Folded to its rail, a Project keeps its missions out of the way: nothing of them is drawn. */
+export const FoldedRail: Story = {
+  args: {
+    folded: true,
+    projects: [{ ...PROJECTS[0]!, under: UNDER_ACME }, PROJECTS[1]!],
+    opened: new Set(['acme']),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: 'Home, 2 waiting' })).toBeInTheDocument()
+    expect(canvas.queryByRole('button', { name: /ACME-12/ })).toBeNull()
+    expect(canvas.queryByRole('group')).toBeNull()
   },
 }

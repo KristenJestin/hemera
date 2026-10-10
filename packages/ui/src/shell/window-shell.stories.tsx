@@ -47,6 +47,27 @@ export const Filled: Story = {
   },
 }
 
+/** The 1366 by 768 laptop screen, the sidebar open: Needs you's rows are whole in their column. */
+export const Laptop: Story = {
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  render: () => <AppFixture withMissions />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const list = within(canvas.getByRole('region', { name: 'Needs you' })).getByRole('list', {
+      name: 'Needs you',
+    })
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      for (const action of within(row).getAllByRole('button')) {
+        expect(action.getBoundingClientRect().right).toBeLessThanOrEqual(
+          row.getBoundingClientRect().right,
+        )
+      }
+    }
+  },
+}
+
 /** Twelve Projects, long names everywhere, every list long: nothing overflows its row. */
 export const Dense: Story = {
   render: () => <AppFixture projects={MANY_PROJECTS} waiting={23} withMissions dense />,

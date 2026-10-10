@@ -73,7 +73,7 @@ const ACTIONS: Record<NeedKind, string> = {
   environment: 'Retry here',
 }
 
-const ROW = 'flex h-control-md min-w-0 items-center gap-3 px-4 text-sm'
+const ROW = 'flex h-control-md min-w-0 items-center gap-2 px-4 text-sm'
 const KEY = 'w-16 shrink-0 font-mono text-xs text-muted-foreground'
 const TITLE = 'min-w-0 shrink truncate font-medium'
 const DETAIL = 'min-w-0 flex-1 truncate text-muted-foreground'

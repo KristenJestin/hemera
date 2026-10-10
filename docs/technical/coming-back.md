@@ -1,14 +1,18 @@
 # The Project page, the mission frame and coming back
 
-The validated design for the Project page, the mission frame and Home. It is drawn in Storybook
-under **Explorations › Coming back › Two lines and a rail**, on a neutral journey: a Project
-"Acme" with `api`, `web` and `shared`, missions `ACME-5` to `ACME-19`, the ticket `acme/shop#41`,
-and Hemera as a second Project on Home. The eighteen stories cover the Project filled, empty, with
-thirty missions, searching, the three triage answers and the keyboard path to the field; the
-mission in Planning, blocked by a dependency, blocked by a shared resource, in Review (outside
-change, fixing, a need), waiting on someone in Shipping, outdated, and Cancel's confirmation; and
-Home the morning after a night with failures and finishes, without questions, and empty. Light and
-dark come from the toolbar; 1920×1080 and 1366×768 from the viewports.
+The validated design for the Project page, the mission frame and Home, now built. The screens are
+drawn in Storybook on a neutral journey: a Project "Acme" with `api`, `web` and `shared`, missions
+`ACME-5` to `ACME-19`, the ticket `acme/shop#41`, and Hemera as a second Project on Home. Light
+and dark come from the toolbar; 1920×1080 and 1366×768 from the viewports.
+
+| Screen        | Stories                                                     |
+| ------------- | ----------------------------------------------------------- |
+| Project page  | `Surfaces/Project page`                                     |
+| Start field   | `Blocks/Start/StartField`                                   |
+| Sidebar       | `Shell/Sidebar`                                             |
+| Mission frame | `Surfaces/Mission`                                          |
+| Home          | `Surfaces/Home`                                             |
+| The window    | `Shell/Window`, every screen in the sidebar and its header  |
 
 ## What the screens share
 

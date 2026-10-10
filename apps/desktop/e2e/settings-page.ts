@@ -35,6 +35,14 @@ export async function write(input: ReturnType<typeof $>, text: string): Promise<
   await expect(input).toHaveValue(text)
 }
 
+/**
+ * A checkbox of a dialog, by the words beside it. The box is named by the label around it, which
+ * holds its words in a span of their own: found by its name, the span could answer in its place.
+ */
+export function checkbox(within: ReturnType<typeof $>, words: string) {
+  return within.$(`label*=${words}`).$('[role="checkbox"]')
+}
+
 /** Chooses in a select of a dialog, by the select's name and the option's words. */
 export async function choose(within: ReturnType<typeof $>, select: string, words: string) {
   await within.$(`[aria-label="${select}"]`).click()
@@ -48,10 +56,16 @@ export async function designSize(): Promise<void> {
   })
 }
 
-/** Goes to a section of the settings, from the list beside it. */
-export async function section(label: string): Promise<void> {
-  await $('nav[aria-label="Settings of the Project"]').$(`button*=${label}`).click()
-  await expect($(`section[aria-label="${label}"]`)).toBeDisplayed()
+/**
+ * Goes to a section of the settings, from the list beside it: the entry is the one chosen, and the
+ * section named `shown` stands beside the list. A section is drawn under its own name unless it is
+ * made of parts: Tickets and Specs is the ticket providers, then the Specs.
+ */
+export async function section(label: string, shown: string = label): Promise<void> {
+  const entry = $('nav[aria-label="Settings of the Project"]').$(`button*=${label}`)
+  await entry.click()
+  await expect(entry).toHaveAttribute('aria-current', 'page')
+  await expect($(`section[aria-label="${shown}"]`)).toBeDisplayed()
 }
 
 /** Opens a Project's settings from its page, by the gear in its header. */

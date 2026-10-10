@@ -72,7 +72,10 @@ async function endRun(): Promise<void> {
 export const config: WebdriverIO.Config = {
   ...suite,
   onPrepare: [...[suite.onPrepare ?? []].flat(), ...(compositor ? [useCompositor] : [])],
-  onWorkerStart: compositor ? [async () => await openCompositor(compositor)] : [],
+  onWorkerStart: [
+    ...[suite.onWorkerStart ?? []].flat(),
+    ...(compositor ? [async () => await openCompositor(compositor)] : []),
+  ],
   onWorkerEnd: compositor ? [closeCompositor] : [],
   onComplete: [...[suite.onComplete ?? []].flat(), ...(compositor ? [endRun] : [])],
 }

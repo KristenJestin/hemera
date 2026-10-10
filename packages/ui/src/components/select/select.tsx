@@ -62,7 +62,12 @@ export interface SelectProps<Value extends string> {
   label: string
   /** The items to choose from, flat or in named groups. */
   items: SelectItem<Value>[] | SelectGroup<Value>[]
-  value?: Value | undefined
+  /**
+   * The value chosen. Null: nothing chosen yet, the placeholder shown, and the select still the
+   * caller's to fill: a value that arrives later is shown. Undefined: the select holds its own,
+   * from `defaultValue`, and a value given later is never shown.
+   */
+  value?: Value | null | undefined
   defaultValue?: Value | undefined
   onValueChange?: ((value: Value) => void) | undefined
   placeholder?: string | undefined

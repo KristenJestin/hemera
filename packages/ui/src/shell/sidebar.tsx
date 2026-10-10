@@ -1,7 +1,9 @@
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
+import { type Ball, BallMark } from '../blocks/ball/ball-mark.tsx'
+import { type MissionStage, STAGE_DOT } from '../blocks/mission/vocabulary.ts'
 import { Face } from '../components/face/face.tsx'
 import { LetterAvatar } from '../components/letter-avatar/letter-avatar.tsx'
 import { type Identity, ProjectMark } from '../components/project-mark/project-mark.tsx'
@@ -112,6 +114,16 @@ const ROW =
   'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm whitespace-nowrap text-muted-foreground outline-none select-none hover:bg-accent hover:text-foreground focus-ring hover-motion aria-[current=page]:text-foreground'
 
 const ROW_KEY = 'shrink-0 font-mono text-xs'
+
+const ROW_PERCENT = 'shrink-0 text-xs tabular-nums'
+
+/** A mission's row: two lines where a Chat's row has one. */
+const MISSION_ROW =
+  'flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2 py-1 text-left text-sm whitespace-nowrap text-muted-foreground outline-none select-none hover:bg-accent hover:text-foreground focus-ring hover-motion aria-[current=page]:text-foreground'
+
+/** The heading of a stage under a Project: small, quiet, one step under the rows' keys. */
+const STAGE_HEAD =
+  'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs font-medium whitespace-nowrap text-muted-foreground select-none'
 
 /** Where the user is, as the sidebar tells it. */
 export type SidebarPlace =
@@ -395,17 +407,29 @@ export interface SidebarRowProps {
   /** The mission's key, `ACME-12`. */
   missionKey: string
   title: string
-  /** Who has the ball, drawn at the end: the ball's glyph. */
-  trailing?: ReactNode
+  /** Who has the ball, drawn at the start of the second line. */
+  ball: Ball
+  /** The last event in words, after the ball. */
+  event?: string | undefined
+  /** Whether something waits for the user in this mission: a dot after the title. */
+  needsYou: boolean
+  /** Building's percentage, after the title; empty until the engine has one. */
+  percent?: number | undefined
   current?: boolean | undefined
   onPress: () => void
 }
 
-/** A mission's row under its Project: the key, the title, and who has the ball at the end. */
+/**
+ * A mission's row under its Project, on two lines: the key and the title (with its percentage
+ * and, when the user is called, a dot), then who has the ball and what happened last.
+ */
 export function SidebarRow({
   missionKey,
   title,
-  trailing,
+  ball,
+  event,
+  needsYou,
+  percent,
   current = false,
   onPress,
 }: SidebarRowProps): ReactNode {
@@ -414,13 +438,90 @@ export function SidebarRow({
       type="button"
       data-mark={`mission:${missionKey}`}
       aria-current={current ? 'page' : undefined}
-      className={cn(ROW, current && OVER_MARK)}
+      className={cn(MISSION_ROW, current && OVER_MARK)}
       onClick={onPress}
     >
-      <span className={cn(OVER_MARK, ROW_KEY)}>{missionKey}</span>
-      <span className={cn(OVER_MARK, NAME)}>{title}</span>
-      {trailing !== undefined && <span className={cn(OVER_MARK, 'ml-auto flex')}>{trailing}</span>}
+      <span className={cn(OVER_MARK, 'flex min-w-0 items-center gap-2')}>
+        <span className={ROW_KEY}>{missionKey}</span>
+        <span className={NAME}>{title}</span>
+        {percent !== undefined && <span className={ROW_PERCENT}>{`${String(percent)}%`}</span>}
+        {needsYou && (
+          <span
+            role="img"
+            aria-label="Needs you"
+            className="size-1.5 shrink-0 rounded-full bg-warning"
+          />
+        )}
+      </span>
+      <span className={cn(OVER_MARK, 'flex min-w-0 items-center gap-2 text-xs')}>
+        <span className="flex size-icon-sm shrink-0 items-center justify-center">
+          <BallMark ball={ball} />
+        </span>
+        <span className={NAME}>{event}</span>
+      </span>
     </button>
+  )
+}
+
+export interface SidebarStageGroupProps {
+  stage: MissionStage
+  /** How many missions the stage holds, after its name. */
+  count: number
+  /** Whether the stage is folded away at first: Done and Cancelled, a heading that opens them. */
+  folded?: boolean | undefined
+  /** The stage's rows. */
+  children: ReactNode
+}
+
+/**
+ * The missions of one stage under a Project: a small heading with the stage's dot, its name and
+ * its count, then the rows. A stage that starts folded makes its heading a button that opens the
+ * rows and folds them back on the `fold` kind.
+ */
+export function SidebarStageGroup({
+  stage,
+  count,
+  folded = false,
+  children,
+}: SidebarStageGroupProps): ReactNode {
+  const folding = useTransition(fold)
+  const [open, setOpen] = useState(!folded)
+  const words = (
+    <>
+      <span aria-hidden="true" className={STAGE_DOT[stage]} />
+      <span>{stage}</span>
+      <span className="tabular-nums">{count}</span>
+    </>
+  )
+  return (
+    <div role="group" aria-label={stage} className="flex flex-col gap-0.5">
+      {folded ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          className={cn(OVER_MARK, STAGE_HEAD, 'outline-none hover:text-foreground focus-ring')}
+          onClick={() => setOpen(!open)}
+        >
+          {words}
+        </button>
+      ) : (
+        <div className={cn(OVER_MARK, STAGE_HEAD)}>{words}</div>
+      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="rows"
+            className="flex flex-col gap-0.5 overflow-clip"
+            initial={folded ? collapse : false}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 

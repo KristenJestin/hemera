@@ -20,7 +20,7 @@ describe('The application opens its window', () => {
     const places = $('nav[aria-label="Places"]')
     await expect(places).toBeDisplayed()
     await expect(places).toHaveText('Hemera', { containing: true })
-    await expect(places.$('button=Home')).toBeDisplayed()
+    await expect(places.$('button*=Home')).toBeDisplayed()
     await expect(places.$('button=Settings')).toBeDisplayed()
   })
 
