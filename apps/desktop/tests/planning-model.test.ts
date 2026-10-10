@@ -666,15 +666,42 @@ describe('Following a mission’s Planning', () => {
 
   test('a refused gesture says why, and the next one clears it', async () => {
     const played = world({
-      addVision: () => Promise.reject(new Error('The mission is no longer in Planning.')),
+      coldReadAgain: () => Promise.reject(new Error('The mission is no longer in Planning.')),
     })
     played.listeners.spec(spec())
     await flush()
-    played.following.giveVision('Keep it small')
-    await flush()
+    await played.following.runColdRead()
     expect(played.last().refused).toBe('The mission is no longer in Planning.')
     played.following.keepPlanning()
     expect(played.last().refused).toBeUndefined()
+  })
+
+  test('what the user wrote and the engine refused is refused to its field, not said in the head', async () => {
+    const refusal = new Error('The mission is no longer in Planning.')
+    const played = world({
+      addVision: () => Promise.reject(refusal),
+      answer: () => Promise.reject(refusal),
+      acceptProposedAnswer: () => Promise.reject(refusal),
+      openDiscussion: () => Promise.reject(refusal),
+      closeDiscussion: () => Promise.reject(refusal),
+    })
+    played.listeners.spec(spec())
+    played.listeners.discussions([DISCUSSION])
+    await flush()
+    const item = { kind: 'question' as const, id: 'Q2' }
+    await expect(played.following.giveVision('Keep it small')).rejects.toBe(refusal)
+    await expect(played.following.answer('Q1', { text: 'Only me' })).rejects.toBe(refusal)
+    await expect(played.following.acceptProposed('a1', 'Only me')).rejects.toBe(refusal)
+    await expect(played.following.say(item, 'Why not both?')).rejects.toBe(refusal)
+    await expect(played.following.close(DISCUSSION.item, 'Only me')).rejects.toBe(refusal)
+    expect(played.last().refused).toBeUndefined()
+  })
+
+  test('what the engine takes is said done once it is taken', async () => {
+    const played = world()
+    played.listeners.spec(spec())
+    await flush()
+    await expect(played.following.giveVision('Keep it small')).resolves.toBeUndefined()
   })
 
   test('the first message on an item opens its discussion; the next ones are said in it', async () => {

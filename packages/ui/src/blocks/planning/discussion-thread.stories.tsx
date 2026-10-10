@@ -47,6 +47,23 @@ export const Starting: Story = {
   },
 }
 
+/** A first message the engine refuses: it stays in the field, and why is said under it. */
+export const FirstMessageRefused: Story = {
+  args: {
+    discussion: null,
+    onSay: fn(() => Promise.reject(new Error('A discussion is already open on Q5.'))),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const field = await canvas.findByRole('textbox', { name: 'Your first message on Q5' })
+    await userEvent.click(field)
+    await userEvent.keyboard('Who reads it?{Enter}')
+    const why = await canvas.findByRole('alert')
+    await expect(why).toHaveTextContent('Not sent: A discussion is already open on Q5.')
+    await expect(field).toHaveTextContent('Who reads it?')
+  },
+}
+
 /** Open, the agent's decision proposed: Accept closes it on that decision. */
 export const Proposed: Story = {
   play: async ({ canvasElement, args }) => {

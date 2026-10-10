@@ -116,6 +116,34 @@ export const VisionGiven: Story = {
   },
 }
 
+/** A vision sent: the field empties once the engine has taken it, not before. */
+export const VisionSent: Story = {
+  args: { onGiveVision: fn(() => Promise.resolve()) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const field = await canvas.findByRole('textbox', { name: 'Your vision' })
+    await userEvent.click(field)
+    await userEvent.keyboard('One file per note{Enter}')
+    await expect(args.onGiveVision).toHaveBeenCalledWith('One file per note')
+    await waitFor(() => expect(field).toHaveTextContent(''))
+    await expect(canvas.queryByRole('alert')).toBeNull()
+  },
+}
+
+/** A vision the engine refuses: what was written stays, and why is said under the field. */
+export const VisionRefused: Story = {
+  args: { onGiveVision: fn(() => Promise.reject(new Error('The mission is frozen.'))) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const field = await canvas.findByRole('textbox', { name: 'Your vision' })
+    await userEvent.click(field)
+    await userEvent.keyboard('One file per note{Enter}')
+    const why = await canvas.findByRole('alert')
+    await expect(why).toHaveTextContent('Not sent: The mission is frozen.')
+    await expect(field).toHaveTextContent('One file per note')
+  },
+}
+
 /** The triage answer: where it belongs, Keep planning, or open the other mission. */
 export const Triage: Story = {
   args: { triage: triaged().data.triage },

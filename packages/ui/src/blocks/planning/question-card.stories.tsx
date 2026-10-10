@@ -101,6 +101,22 @@ export const OwnWords: Story = {
   },
 }
 
+/** An answer in the user's own words the engine refuses: the words stay, and why is said. */
+export const OwnWordsRefused: Story = {
+  args: { onAnswer: fn(() => Promise.reject(new Error('Q5 is no longer open.'))) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'In my own words' }))
+    const field = await canvas.findByRole('textbox', { name: 'Your answer to Q5' })
+    await userEvent.click(field)
+    await userEvent.keyboard('Only the team{Enter}')
+    await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { text: 'Only the team' })
+    const why = await canvas.findByRole('alert')
+    await expect(why).toHaveTextContent('Not sent: Q5 is no longer open.')
+    await expect(field).toHaveTextContent('Only the team')
+  },
+}
+
 /** "I'm waiting on someone": a note, optional, and the question waits. */
 export const MarkingWaiting: Story = {
   play: async ({ canvasElement, args }) => {
