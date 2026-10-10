@@ -147,11 +147,15 @@ export const Discussing: Story = {
     await userEvent.click(discuss)
     await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q5' })
     const body = within(document.body)
-    await waitFor(() =>
-      expect(body.getByRole('textbox', { name: 'Your first message on Q5' })).toBeVisible(),
-    )
+    // The view is closed once it has finished coming in, its field holding the focus.
+    await waitFor(() => {
+      const field = body.getByRole('textbox', { name: 'Your first message on Q5' })
+      expect(field).toBeVisible()
+      expect(field).toHaveFocus()
+      expect(field.closest('[data-view]')?.getAnimations({ subtree: true })).toHaveLength(0)
+    })
     await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(discuss).toHaveFocus())
+    await waitFor(() => expect(discuss).toHaveFocus(), { timeout: 3000 })
   },
 }
 
