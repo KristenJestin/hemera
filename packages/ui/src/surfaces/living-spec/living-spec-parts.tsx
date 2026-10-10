@@ -27,6 +27,14 @@ const LIVE: Record<Exclude<BootstrapRun['state'], 'waiting_for_slot'>, LiveState
   stopped: 'stopped',
 }
 
+/** The step each state of a reading is in, as its glance says it. */
+const STEPS: Record<Exclude<BootstrapRun['state'], 'waiting_for_slot'>, string> = {
+  running: 'Reading the code',
+  done: 'Proposed what it found',
+  failed: 'The reading stopped',
+  stopped: 'The reading was stopped',
+}
+
 /**
  * The newest reading as a chip, while it runs and once it ended; a reading waiting for a slot has
  * no chip: it says so in words where the chip would be.
@@ -35,10 +43,16 @@ export function ReadingChip({
   projectName,
   data,
   names,
+  onReview,
+  onRetry,
 }: {
   projectName: string
   data: LivingSpecData
   names: Readonly<Record<string, string>>
+  /** Opens a domain whose proposals wait for the user. */
+  onReview: (domainId: string) => void
+  /** Reads the Project again. */
+  onRetry: () => void
 }): ReactNode {
   const run = data.runs[0]
   if (run === undefined) return null
@@ -51,6 +65,7 @@ export function ReadingChip({
     )
   }
   const waits = Object.values(data.requirements).some((list) => waitingOf(list).length > 0)
+  const waiting = data.domains.find((domain) => domain.proposed + domain.pending > 0)
   const name =
     run.domainId === null
       ? `Reading ${projectName}`
@@ -63,6 +78,17 @@ export function ReadingChip({
       startedAt={run.startedAt}
       endedAt={run.endedAt}
       calls={run.state === 'done' && waits}
+      glance={{
+        kind: 'helper',
+        type: run.domainId === null ? 'Reading of the code' : 'Re-reading of a domain',
+        step: run.state === 'failed' ? (run.sentence ?? STEPS.failed) : STEPS[run.state],
+        ask:
+          run.state === 'failed'
+            ? { label: 'Try again', onPress: onRetry }
+            : run.state === 'done' && waiting !== undefined
+              ? { label: 'Review the proposals', onPress: () => onReview(waiting.id) }
+              : undefined,
+      }}
     />
   )
 }
