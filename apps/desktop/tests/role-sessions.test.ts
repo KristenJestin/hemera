@@ -535,15 +535,17 @@ describe('Silence, waiting and stuck (CT-12)', () => {
   })
 
   test('a provider’s wait keeps a long turn alive', async () => {
-    const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 150))
+    // One wait longer than the stuck bound: the provider's retry outlasts it, then the turn ends.
+    let seen = 0
+    const pause = () => {
+      seen += 1
+      return new Promise<void>((resolve) => setTimeout(resolve, seen === 2 ? 1000 : 0))
+    }
     const { world, run } = engine(
       () => ({
         between: pause,
         steps: [
           { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 2 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 3 of 10.' },
-          { does: 'waits', title: 'Retrying Claude, attempt 4 of 10.' },
           { does: 'says', text: 'done' },
         ],
       }),

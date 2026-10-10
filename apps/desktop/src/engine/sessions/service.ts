@@ -9,9 +9,9 @@
  * - **Channels.** Between turns (the default); urgent, as a note in the result of its next Hemera
  *   tool call, falling back to cancel-then-message when no call takes it within `NOTE_PICKUP`, or
  *   at once for an agent that does not obey notes; redirect, by cancelling the turn and sending.
- * - **Health (CT-12, CT-15).** A session in a turn with no update, no tool call, no command of its
- *   own running and no provider wait for 5 minutes is stuck: its parent is told, then it is
- *   replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
+ * - **Health (CT-12, CT-15).** A session in a turn with no update, no tool call and no command of
+ *   its own running for 5 minutes, and not waiting on its provider, is stuck: its parent is told,
+ *   then it is replaced. A dead agent is replaced. A compaction the agent signals sends the instructions and
  *   the brief again; past 80 % of its window, an agent with no such signal is replaced.
  * - **Replacement.** The old session is stopped and kept, a fresh one of the same role, lineage
  *   and owner starts with the resume block and what was queued; one Journal line says why. The
@@ -218,6 +218,8 @@ interface Driver {
   said: string[]
   /** Whether its agent took the turn running: it spoke, thought, called or waited on its provider. */
   took: boolean
+  /** Whether its provider is waited on (a retry, a rate limit): its next report ends the wait. */
+  waiting: boolean
   /** The urgent deliveries pinned as notes, each with the fiber that falls back at its pickup. */
   readonly pinned: Map<string, Fiber.Fiber<void>>
   /** Set once it is replaced, ended or failed: nothing is driven on it any more. */
@@ -434,6 +436,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             yield* addToThread(driver.session.id, 'sent', text)
             driver.lastSign = yield* Clock.currentTimeMillis
             driver.took = false
+            driver.waiting = false
             driver.turn = yield* runTurn(driver, text, sent).pipe(Effect.forkIn(scope))
           }),
         ).pipe(run)
@@ -547,6 +550,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
                 lastSign,
                 said: [],
                 took: false,
+                waiting: false,
                 pinned: new Map(),
                 gone: false,
                 limit: null,
@@ -812,6 +816,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           const driver = liveDriver(sessionId)
           if (driver === undefined) return
           driver.lastSign = yield* Clock.currentTimeMillis
+          // However long the provider makes it wait, the session is not stuck until it speaks again.
+          driver.waiting = !event.replay && Predicate.isTagged(event, 'ProviderWait')
           if (!event.replay && TOOK_THE_TURN.some((tag) => Predicate.isTagged(event, tag))) {
             driver.took = true
           }
@@ -887,7 +893,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         const now = yield* Clock.currentTimeMillis
         const limit = Duration.toMillis(timings.stuckAfter)
         for (const driver of [...drivers.values()]) {
-          if (driver.gone || driver.turn === null || now - driver.lastSign < limit) continue
+          if (driver.gone || driver.turn === null || driver.waiting) continue
+          if (now - driver.lastSign < limit) continue
           if (yield* commandRunning(driver.session.id)) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
