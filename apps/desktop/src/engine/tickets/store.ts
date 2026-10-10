@@ -15,6 +15,7 @@ import {
   InvalidProviderConfig,
   type JiraProviderConfig,
   JiraProviderConfig as JiraConfigSchema,
+  NoProviderToWrite,
   ProviderInUse,
   type TicketProviderInfo,
   type TicketsSettings,
@@ -335,10 +336,23 @@ export const specModeOf = (projectId: string) =>
     return Option.getOrElse(readMode(row.mode), (): SpecMode => 'local')
   })
 
-/** Sets the Project's Spec mode: it applies to the missions created afterwards. */
+/**
+ * Sets the Project's Spec mode: it applies to the missions created afterwards. Remote is refused
+ * while the Project has no ticket provider to write into; a Project already in remote that loses
+ * its last provider is not touched by this call.
+ */
 export const setSpecMode = (projectId: string, mode: SpecMode) =>
   mutate('setting the Spec mode', (transaction) =>
     Effect.gen(function* () {
+      if (mode === 'remote') {
+        const [provider] = yield* transaction
+          .select({ id: ticketProviders.id })
+          .from(ticketProviders)
+          .where(eq(ticketProviders.projectId, projectId))
+          .limit(1)
+          .pipe(Effect.mapError(refusedWhile('reading the ticket providers')))
+        if (provider === undefined) return yield* new NoProviderToWrite({ projectId })
+      }
       const [row] = yield* transaction
         .update(projects)
         .set({ specMode: mode })
