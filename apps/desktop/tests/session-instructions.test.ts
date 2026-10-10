@@ -4,7 +4,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -15,6 +15,8 @@ import { SYSTEM_GIT, gitLayer, spawnGit } from '../src/engine/git.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { repositoryStatusesLayer } from '../src/engine/repositories.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { workspaceRepositories, workspaces } from '../src/engine/storage/schema.ts'
 import {
   filesToSend,
   instructionFilesOf,
@@ -139,6 +141,52 @@ describe('The Project’s layer, and bare mode', () => {
 
   test('an agent that reads them itself is sent none, never both', () => {
     expect(filesToSend(ADAPTERS.codex, 'linux', twoRepositories())).toEqual([])
+  })
+
+  test('a place written another way is the same place: a trailing separator, a drive letter in another case', async () => {
+    const main = join(work, 'acme')
+    repository(join(main, 'api'))
+    const workspace = join(work, 'acme-export')
+    const [onWindows, inWorkspace] = await on(
+      data,
+      Effect.gen(function* () {
+        const project = yield* createProject({
+          name: 'Acme',
+          mainCheckout: main,
+          repositories: ['api'],
+        })
+        const database = yield* Database
+        yield* database.insert(workspaces).values({
+          id: 'workspace-1',
+          projectId: project.id,
+          name: 'export',
+          folder: workspace,
+          createdAt: new Date().toISOString(),
+        })
+        yield* database.insert(workspaceRepositories).values({
+          id: 'worktree-1',
+          workspaceId: 'workspace-1',
+          repositoryId: 'api',
+          path: 'api',
+          worktree: join(workspace, 'api'),
+          position: 0,
+          baseCommit: 'abc123',
+        })
+        return [
+          yield* placeRepositories(project.id, `${main.toUpperCase()}${sep}`, 'win32'),
+          yield* placeRepositories(project.id, `${workspace}${sep}`),
+        ] as const
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            gitLayer(spawnGit(SYSTEM_GIT, secretsRegistry().mask)),
+            repositoryStatusesLayer,
+          ),
+        ),
+      ),
+    )
+    expect(onWindows).toEqual([{ repository: 'api', folder: join(main, 'api') }])
+    expect(inWorkspace).toEqual([{ repository: 'api', folder: join(workspace, 'api') }])
   })
 
   test('the repositories of the main checkout, and for the settings what each agent does with them', async () => {

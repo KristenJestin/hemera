@@ -11,7 +11,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, posix, resolve, win32 } from 'node:path'
 
 import { ADAPTERS } from '../agents/adapters/index.ts'
 import type { AgentAdapter } from '../agents/adapter.ts'
@@ -157,15 +157,26 @@ export function instructionsText(
 }
 
 /**
+ * A folder as a comparison of places reads it: resolved, without a trailing separator, and in one
+ * case on Windows, where a drive letter or a folder written in another case is the same folder.
+ */
+const placeKey = (folder: string, platform: NodeJS.Platform): string =>
+  platform === 'win32' ? win32.resolve(folder).toLowerCase() : posix.resolve(folder)
+
+/**
  * The repositories of a session's place: a Workspace's worktrees, the main checkout's
  * repositories, or the folder itself when it is neither.
  */
-export const placeRepositories = (projectId: string, folder: string) =>
+export const placeRepositories = (
+  projectId: string,
+  folder: string,
+  platform: NodeJS.Platform = process.platform,
+) =>
   Effect.gen(function* () {
     const database = yield* Database
     const project = yield* getProject(projectId)
-    const place = resolve(folder)
-    if (resolve(project.mainCheckout) === place) {
+    const place = placeKey(folder, platform)
+    if (placeKey(project.mainCheckout, platform) === place) {
       const rows = yield* database
         .select({ path: projectRepositories.path })
         .from(projectRepositories)
@@ -178,16 +189,21 @@ export const placeRepositories = (projectId: string, folder: string) =>
       }))
     }
     const worktrees = yield* database
-      .select({ path: workspaceRepositories.path, worktree: workspaceRepositories.worktree })
+      .select({
+        folder: workspaces.folder,
+        path: workspaceRepositories.path,
+        worktree: workspaceRepositories.worktree,
+      })
       .from(workspaceRepositories)
       .innerJoin(workspaces, eq(workspaces.id, workspaceRepositories.workspaceId))
-      .where(eq(workspaces.folder, folder))
+      .where(eq(workspaces.projectId, projectId))
       .orderBy(asc(workspaceRepositories.position))
       .pipe(Effect.mapError(refusedWhile('reading the Workspace')))
-    if (worktrees.length > 0) {
-      return worktrees.map((row) => ({ repository: row.path, folder: row.worktree }))
+    const mine = worktrees.filter((row) => placeKey(row.folder, platform) === place)
+    if (mine.length > 0) {
+      return mine.map((row) => ({ repository: row.path, folder: row.worktree }))
     }
-    return [{ repository: '.', folder: place }]
+    return [{ repository: '.', folder: resolve(folder) }]
   })
 
 /** What one agent does with a repository's instruction files. */
