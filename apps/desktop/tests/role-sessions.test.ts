@@ -685,6 +685,7 @@ describe('Compaction and saturation (CT-15)', () => {
     )
     const started = promptText(keptPrompt(world.agents[0]?.answers.metas[0]))
     const again = text(world.agents[0]?.answers.prompts[1] ?? [])
+    expect(again).not.toContain(SYSTEM_PROMPT_BOUNDARY)
     expect(again.startsWith(`${deliveryBlock('instructions', started)}\n\n[hemera:brief]\n`)).toBe(
       true,
     )

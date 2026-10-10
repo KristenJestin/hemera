@@ -234,6 +234,43 @@ describe('A session’s instructions are set once, at its start', () => {
 describe('Instructions kept with a cache boundary reach each agent as it reads them', () => {
   const kept = (id: string) => `# Shared by the role\n\n${SYSTEM_PROMPT_BOUNDARY}\n\n# Of ${id}`
 
+  test('Claude Code takes them as blocks around the boundary, recorded once', async () => {
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, kept)
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        return opened.id
+      }),
+    )
+    const meta = JSON.parse(built.agents[0]?.answers.metas[0] ?? '{}')
+    expect(meta.claudeCode.options.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: ['# Shared by the role', SYSTEM_PROMPT_BOUNDARY, `# Of ${id}`],
+      snapshot: true,
+    })
+  })
+
+  test('a session started before the boundary existed keeps its recorded text, as one', async () => {
+    const recorded = (id: string) => `# Instructions of ${id}\n\nThe mission key is ACME-12.`
+    const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, recorded)
+    const id = await run(
+      built,
+      Effect.gen(function* () {
+        const opened = yield* session('claude')
+        yield* AgentRuntime.use((runtime) => runtime.prompt(opened.id, say('[hemera:brief]')))
+        return opened.id
+      }),
+    )
+    const meta = JSON.parse(built.agents[0]?.answers.metas[0] ?? '{}')
+    expect(meta.claudeCode.options.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: recorded(id),
+      snapshot: true,
+    })
+  })
+
   test('Codex takes them as one text, the boundary left out', async () => {
     const built = world([{ steps: [{ does: 'says', text: 'done' }] }], Effect.void, kept)
     const id = await run(
