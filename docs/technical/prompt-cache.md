@@ -122,9 +122,9 @@ text, then Hemera's instructions), then the conversation, whose first message is
 | --- | --- | --- | --- |
 | `_meta` options, environment | `adapters/claude.ts:55-78` | stable | stable |
 | tool list | `tools/server.ts:100-112`, order of `TOOL_NAMES` | stable | differs with tester mode |
-| base instructions | `sessions/base.ts`, kept at `sessions/provider.ts:76,107` | stable | the mission key (`base.ts:10`), the two languages (`:73-74`), the tester paragraph (`:94-95`) |
-| role layer | `planning/*-role.ts` | stable | languages only |
-| project layer | `sessions/instructions.ts:112-137` | stable | when a `CLAUDE.md` or `AGENTS.md` changes |
+| base instructions | `sessions/base.ts`, kept at `sessions/provider.ts` | stable | the session's part (`SESSION`: the mission key, the two languages, the tester paragraph), after the cache boundary |
+| role layer | `planning/*-role.ts` | stable | languages only, for the few roles that name them |
+| project layer | `sessions/instructions.ts` | stable | when a `CLAUDE.md` or `AGENTS.md` changes; after the cache boundary |
 | brief, first message | `sessions/brief.ts:63-86`, the role's `brief` | stable | always: the Spec, the Memory, the Journal tail |
 | resume block | `sessions/brief.ts:83-84` | — | always: `stoppedAt` and the last Journal line |
 
@@ -153,7 +153,12 @@ new session (letters are the variants of the script):
 (A to G are from one run; H and I from a second run, where the cache already held the first run's
 entries: there D read 6,830 and wrote 3,185, and E read 8,077 and wrote 637.)
 
-- **The mission key** sits on the instructions' fourth line, so each new mission writes the 2,900
+The letters are those of the prototype run. Since #155 the script has the variants A to D and G
+unchanged in meaning, C being another mission, plus E (tester mode, another mission), all through
+the instructions Hemera keeps; the E to I of the table above (a boundary tried by hand) are gone.
+
+- **The mission key** sat on the instructions' fourth line (since #155 it is after the cache
+  boundary, see recommendation 3), so each new mission writes the 2,900
   tokens of base and role again, for each role: about 5,800 units at one hour (C). Moving the key to
   the end of one text does not help (I): the provider reads a block whole or not at all. The SDK
   takes the system prompt as blocks split by `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, the blocks before it
@@ -220,7 +225,10 @@ session start (the mission key and the tester mode), and that Hemera cannot see 
    Draft below.
 3. **Put the mission key, the languages and the tester paragraph after a cache boundary.** Expected
    effect, measured: about 2,300 tokens fewer written per new session of another mission (2,924
-   against 640), one 8,714-token write per role and hour for the new form. Draft below.
+   against 640), one 8,714-token write per role and hour for the new form. Done in #155: the kept
+   instructions hold the boundary (`engine/agents/prompt-blocks.ts`), Claude Code is handed blocks
+   and every other reader one text. The numbers above were measured on a prototype of that split;
+   `probe.ts prefix` now measures the shipped instructions. Draft below.
 4. **Keep the tool list of a running session fixed.** Expected effect: no full miss for a session
    started again after tester mode was turned on or off. Draft below.
 5. **Codex: nothing to change.** Its cache is automatic and keyed per thread, and its lifetime is
