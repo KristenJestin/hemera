@@ -57,6 +57,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { ADAPTERS } from '../agents/adapters/index.ts'
 import { type AgentEvent, type ImageNotAccepted, TextBlock } from '../agents/client.ts'
 import { Discovery } from '../agents/discovery.ts'
+import { promptText } from '../agents/prompt-blocks.ts'
 import { type AgentFailure, AgentRuntime, SessionInstructions } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
@@ -907,7 +908,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             owner: driver.session.owner,
             target: { lineage: driver.session.lineage },
             kind: 'instructions',
-            body: instructions,
+            body: promptText(instructions),
           })
           yield* post.ring
         })

@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm'
 import { Cause, Effect, Layer, Option, Schema } from 'effect'
 
 import { ADAPTERS } from '../agents/adapters/index.ts'
+import { promptText } from '../agents/prompt-blocks.ts'
 import { SessionInstructions } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { JournalMapper } from '../memory/index.ts'
@@ -103,7 +104,7 @@ const writeInstructions = (sessionId: string, platform: NodeJS.Platform) =>
         : []
     const text = instructionsText(base, role, files, preferences.userLanguage, specLanguage)
     yield* keepInstructions(sessionId, text)
-    yield* addToThread(sessionId, 'instructions', text)
+    yield* addToThread(sessionId, 'instructions', promptText(text))
     return text
   })
 

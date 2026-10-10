@@ -44,6 +44,7 @@ import {
 import { Discovery, type ResolvedAgent, type UnusableAgent } from './discovery.ts'
 import { type EndpointUnavailable, HemeraEndpoint } from './endpoint.ts'
 import { IdleAgents } from './idle.ts'
+import { promptText } from './prompt-blocks.ts'
 import {
   type Choice,
   type UnknownAgentSession,
@@ -261,7 +262,7 @@ export const agentRuntimeLayer = (settings: RuntimeSettings) =>
                   ResourceBlock.make({
                     uri: INSTRUCTIONS_URI,
                     mimeType: 'text/markdown',
-                    text: systemPrompt,
+                    text: promptText(systemPrompt),
                   }),
                 ]
               : []
