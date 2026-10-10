@@ -526,7 +526,7 @@ describe('What a stopped engine left running', () => {
 describe('The RecipeRunner runs the recipe’s run steps', () => {
   test("a step's line runs in its folder with the variables, and its outcome is the step's state", async () => {
     const prints = script(
-      'console.log("PORT=" + process.env.PORT + " in " + process.cwd())\nprocess.exit(Number(process.argv[2]))\n',
+      'console.log("ACME_REGION=" + process.env.ACME_REGION + " in " + process.cwd())\nprocess.exit(Number(process.argv[2]))\n',
     )
     const workspace = await commandsEngine(data)(({ profile }) =>
       profile.use(
@@ -557,8 +557,8 @@ describe('The RecipeRunner runs the recipe’s run steps', () => {
           yield* setVariable({
             projectId: project.id,
             workspaceId: null,
-            key: 'PORT',
-            value: '3100',
+            key: 'ACME_REGION',
+            value: 'quartz-violet-3100',
           })
           const made = yield* createWorkspace({
             projectId: project.id,
@@ -575,8 +575,8 @@ describe('The RecipeRunner runs the recipe’s run steps', () => {
     const steps = workspace.prepared.steps.filter((step) => step.kind === 'run')
     expect(steps.map((step) => step.state)).toEqual(['done', 'failed'])
     // A variable's value is a known secret, masked wherever it shows, a port included.
-    expect(steps[1]?.failure?.output).toContain(`PORT=${MASK}`)
-    expect(steps[1]?.failure?.output).not.toContain('3100')
+    expect(steps[1]?.failure?.output).toContain(`ACME_REGION=${MASK}`)
+    expect(steps[1]?.failure?.output).not.toContain('quartz-violet-3100')
     expect(workspace.runs.map((run) => [run.startedBy, run.state, run.exitCode])).toEqual([
       ['hemera', 'failed', 4],
       ['hemera', 'done', 0],

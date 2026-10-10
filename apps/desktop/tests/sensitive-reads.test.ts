@@ -167,4 +167,33 @@ process.stdout.write(readFileSync(process.argv[2], 'utf8'))
     expect(foundIn(REGION)).toEqual([])
     expect(foundIn(BUCKET)).toEqual([])
   })
+
+  test('a .env holding trivial values beside a secret: the trivial ones stay in clear, the secret masked', async () => {
+    const prints = script(`
+import { readFileSync } from 'node:fs'
+process.stdout.write(readFileSync(process.argv[2], 'utf8'))
+`)
+    const ended = await commandsEngine(data, { tools: { home: work } })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          writeFileSync(join(main, '.env'), `ACME_DEBUG=1\nACME_STAGE=dev\n${DOTENV}`)
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          yield* callTool(builder.grantId, 'commands_run', { line: nodeLine(prints, '.env') })
+          const [asked] = yield* requests
+          if (asked === undefined) return yield* Effect.die(new Error('no request'))
+          yield* allowOnce(asked.needId)
+          return yield* polled(
+            requestNamed(asked.id),
+            (row) => row?.state === 'ended' && row.handedOverAt !== null,
+          )
+        }),
+      ),
+    )
+    expect(ended).toMatchObject({ sensitive: true, result: 'done' })
+    expect(ended?.resultText).toContain('ACME_DEBUG=1\nACME_STAGE=dev\n')
+    expect(ended?.resultText).toContain('ACME_REGION=•••')
+    expect(foundIn(REGION)).toEqual([])
+    expect(foundIn(BUCKET)).toEqual([])
+  })
 })

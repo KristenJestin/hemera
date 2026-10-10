@@ -4,14 +4,13 @@
  * session's hidden thread, the trace or a log. Each value is a known secret for #35's masking the
  * moment it arrives, so every copy of the call's arguments shows `•••`; once the call is recorded
  * only the values its cards hold stay secrets, until each card is decided. A number, a boolean or
- * a value shorter than six characters is never one: masked as a part of any text, it would hide
- * the words that hold it. An engine that stops forgets them: their cards are then refused at the
- * click.
+ * a value shorter than six characters is never one (the registry's rule). An engine that stops
+ * forgets them: their cards are then refused at the click.
  */
 
 import { Context, Effect, Layer, Option, Predicate, Schema, Semaphore } from 'effect'
 
-import { Secrets } from '../secrets.ts'
+import { Secrets, secretWorthy } from '../secrets.ts'
 
 /** The masking source of the values a call carried, before its cards exist. */
 const ASKED = 'setup-asked'
@@ -49,16 +48,6 @@ export const valuesIn = (raw: Schema.Json): ReadonlyArray<string> =>
     onSome: (asked) =>
       asked.changes.flatMap((change) => (Predicate.isString(change.value) ? [change.value] : [])),
   })
-
-/** Whether a value is worth masking: not a number, not a boolean, six characters or more. */
-const secretWorthy = (value: string): boolean => {
-  const trimmed = value.trim()
-  return (
-    trimmed.length >= 6 &&
-    !/^[-+]?\d+(?:[.,]\d+)?$/.test(trimmed) &&
-    !['true', 'false'].includes(trimmed.toLowerCase())
-  )
-}
 
 export const setupValuesLayer = Layer.effect(
   SetupValues,
