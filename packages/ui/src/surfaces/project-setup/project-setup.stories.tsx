@@ -71,6 +71,9 @@ export const Waiting: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('img', { name: 'Setup agent, waiting for a free slot' })).toBeVisible()
+    for (const name of ['Repositories', 'Commands', 'Preparation', 'Variables', 'Never run']) {
+      expect(card(canvasElement, name)).toHaveAttribute('aria-busy', 'true')
+    }
     // Nothing to review while every card is still read.
     expect(canvas.queryByRole('button', { name: 'Accept all' })).toBeNull()
     expect(canvas.queryByRole('button', { name: /^(Review|Hide)$/ })).toBeNull()
@@ -82,10 +85,17 @@ export const Reading: Story = {
   args: { agent: 'working', arriving: ['preparation', 'variables', 'never'] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(
-      canvas.getByRole('button', { name: /^Setup agent, running(, waits for you)?$/ }),
-    ).toBeVisible()
-    expect(card(canvasElement, 'Preparation')).toHaveAttribute('aria-busy', 'true')
+    // The batches arrive on a timer started with the story, which a slow machine may have passed,
+    // in part or whole, before the play begins. What holds whenever it is read, in one go: the
+    // cards still read are the last batches, in order, and while one is the agent is running.
+    const busy = ['Preparation', 'Variables', 'Never run'].map(
+      (name) => card(canvasElement, name).getAttribute('aria-busy') === 'true',
+    )
+    expect(busy).toEqual(busy.toSorted())
+    const running = canvas.queryByRole('button', {
+      name: /^Setup agent, running(, waits for you)?$/,
+    })
+    if (busy.includes(true)) expect(running).toBeVisible()
     expect(
       within(card(canvasElement, 'Commands')).getByRole('button', { name: 'Accept' }),
     ).toBeVisible()
@@ -414,7 +424,10 @@ export const TaskProposed: Story = {
     const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
     await userEvent.click(within(menu).getByRole('button', { name: 'Review 2 proposals' }))
     const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
-    expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
+    // The dialog fades in from nothing: what it holds is visible once its entrance has played.
+    await waitFor(() => {
+      expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
+    })
     expect(within(details).getByText('Found pnpm workspaces in api and web')).toBeVisible()
     await userEvent.click(within(details).getByRole('button', { name: 'Accept all' }))
     expect(HANDLERS.onAcceptAll).toHaveBeenCalled()
