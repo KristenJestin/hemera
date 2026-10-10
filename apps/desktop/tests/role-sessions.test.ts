@@ -515,6 +515,43 @@ describe('Silence, waiting and stuck (CT-12)', () => {
     expect(state).toBe('working')
   })
 
+  test('a session whose silent command ran past the bound is not stuck as the command ends', async () => {
+    const hold = held()
+    const { world, run } = engine(
+      (index) =>
+        index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
+      { timings: SILENCE },
+    )
+    const state = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main, project, mission } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          const started = yield* startRun({
+            projectId: project.id,
+            workspaceId: null,
+            commandId: null,
+            line: nodeLine(script(STAYS_UP)),
+            folder: null,
+            startedBy: 'user',
+            sessionId: session.id,
+            missionId: mission.id,
+          })
+          yield* Effect.sleep('700 millis')
+          yield* stopRun(started.id)
+          // Swept more than once before the agent reports the command's end.
+          yield* Effect.sleep('250 millis')
+          const now = (yield* getSession(session.id)).state
+          hold.release()
+          return now
+        }),
+      ),
+    )
+    expect(state).toBe('working')
+  })
+
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
     const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
       timings: SILENCE,

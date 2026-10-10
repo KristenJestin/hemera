@@ -34,7 +34,7 @@ import {
   hemeraNote,
   saturates,
 } from '@hemera/core/domain'
-import { and, eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import {
   Cause,
   Clock,
@@ -870,22 +870,23 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           yield* post.ring
         })
 
-      /** Whether a command the session started still runs: its own time limit bounds it. */
-      const commandRunning = (sessionId: string) =>
+      /**
+       * When the commands the session started last showed it at work: now while one still runs
+       * (its own time limit bounds it), the end of the last one otherwise, or never.
+       */
+      const commandSign = (sessionId: string, now: number) =>
         Effect.gen(function* () {
           const database = yield* Database
           const rows = yield* database
-            .select({ id: commandRuns.id })
+            .select({ state: commandRuns.state, endedAt: commandRuns.endedAt })
             .from(commandRuns)
-            .where(
-              and(
-                eq(commandRuns.sessionId, sessionId),
-                inArray(commandRuns.state, [...LIVE_RUN_STATES]),
-              ),
-            )
-            .limit(1)
+            .where(eq(commandRuns.sessionId, sessionId))
             .pipe(Effect.mapError(refusedWhile('reading the runs')))
-          return rows.length > 0
+          if (rows.some((row) => LIVE_RUN_STATES.some((state) => state === row.state))) return now
+          return Math.max(
+            0,
+            ...rows.map((row) => (row.endedAt === null ? 0 : Date.parse(row.endedAt))),
+          )
         })
 
       /** CT-12: a session silent too long in a turn is stuck, its parent told, then replaced. */
@@ -895,7 +896,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         for (const driver of [...drivers.values()]) {
           if (driver.gone || driver.turn === null || driver.waiting) continue
           if (now - driver.lastSign < limit) continue
-          if (yield* commandRunning(driver.session.id)) continue
+          // A silent command that just ended is as recent a sign as the agent's own.
+          if (now - (yield* commandSign(driver.session.id, now)) < limit) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
           // Told to whoever follows the session's role (a Probe's chip, #89).
