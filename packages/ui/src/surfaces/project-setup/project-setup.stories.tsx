@@ -408,6 +408,74 @@ export const TaskReading: Story = {
 }
 
 /**
+ * The details opened while the agent works: they say so — the agent at work, its step and how long
+ * — instead of "No proposal yet"; the proposals come under it as they are written.
+ */
+export const TaskReadingDetails: Story = {
+  render: () => (
+    <Held
+      {...BASE}
+      open
+      agent="working"
+      startedAt={Date.now() - 12_000}
+      endedAt={null}
+      cards={[]}
+      glance={{ kind: 'helper', type: 'Setup agent', step: 'Reading the Project folder' }}
+    />
+  ),
+  play: async () => {
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    const work = await within(details).findByRole('group', { name: 'Setup agent at work' })
+    await waitFor(() => expect(work).toBeVisible())
+    expect(within(work).getByText('Reading the Project folder')).toBeVisible()
+    expect(within(work).getByText(/^\d+s$/)).toBeVisible()
+    expect(within(details).queryByText('No proposal yet.')).toBeNull()
+  },
+}
+
+/** The agent still works while its first proposals are there: the line stays above the cards. */
+export const TaskReadingWithProposals: Story = {
+  render: () => (
+    <Held
+      {...BASE}
+      open
+      agent="working"
+      startedAt={Date.now() - 30_000}
+      endedAt={null}
+      glance={{ kind: 'helper', type: 'Setup agent', step: 'Proposing the commands' }}
+    />
+  ),
+  play: async () => {
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    const work = await within(details).findByRole('group', { name: 'Setup agent at work' })
+    expect(within(work).getByText('Proposing the commands')).toBeVisible()
+    await waitFor(() => {
+      expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
+    })
+  },
+}
+
+/** The agent waits for a free slot: the details say that, and nothing is proposed yet. */
+export const TaskWaitingDetails: Story = {
+  render: () => (
+    <Held
+      {...BASE}
+      open
+      agent="waiting"
+      endedAt={null}
+      cards={[]}
+      glance={{ kind: 'helper', type: 'Setup agent', step: 'Waiting for a free slot' }}
+    />
+  ),
+  play: async () => {
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    const work = await within(details).findByRole('group', { name: 'Setup agent at work' })
+    expect(within(work).getByText('Waiting for a free slot')).toBeVisible()
+    expect(within(details).queryByText('No proposal yet.')).toBeNull()
+  },
+}
+
+/**
  * Proposals wait: the chip wears the dot of what waits for you, and nothing beside it. Its menu's
  * main button is what it asks, "Review 2 proposals": the details, as ⓘ opens them, where the
  * proposals are answered. The page does not move.
