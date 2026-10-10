@@ -32,6 +32,7 @@ import {
   readSpec,
   setSpecLanguage,
   specLanguageOf,
+  visionsSeen,
   writeSection,
 } from '../src/engine/planning/store.ts'
 import { PlannerWake } from '../src/engine/planning/wake.ts'
@@ -1075,6 +1076,28 @@ describe('The vision reaches the Planner as [hemera:vision]', () => {
     expect(first).toMatch(/^\[hemera:brief\]/)
     expect(first).toContain('## Vision\n\n- ')
     expect(first).toContain('[hemera:vision]')
+  })
+
+  test('the visions given are read back for the page, the first first, each with its input', async () => {
+    const { run } = planning(() => QUIET)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const { mission, planner } = yield* missionPlanned(project.id)
+          yield* giveVision(mission.id, 'One file per month.')
+          yield* giveVision(mission.id, 'No archive before the first export works.')
+          yield* settled(planner)
+          return yield* visionsSeen(mission.id)
+        }),
+      ),
+    )
+    expect(seen.map((vision) => vision.text)).toEqual([
+      'One file per month.',
+      'No archive before the first export works.',
+    ])
+    expect(seen.every((vision) => vision.input !== null)).toBe(true)
   })
 
   test('outside Planning a vision is refused and no Planner starts', async () => {

@@ -403,6 +403,8 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('planning.addVision', log),
       ),
+    'planning.visions': (request) =>
+      engine['planning.visions'](request).pipe(closedAs(gone), observed('planning.visions', log)),
     'planning.keepAfterTriage': (request) =>
       engine['planning.keepAfterTriage'](request).pipe(
         closedAs(gone),

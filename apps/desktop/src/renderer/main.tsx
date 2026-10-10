@@ -267,6 +267,7 @@ function Application() {
               show: (view) => setNavigation((before) => show(before, view)),
               close: (view) => setNavigation((before) => closeView(before, view)),
               goProject: () => goTo({ kind: 'project', id: route.projectId }),
+              goMission: (key) => goTo({ kind: 'mission', projectId: route.projectId, key }),
               answer: answering.answer,
               recheck: answering.recheck,
               openSettings: (section) => goTo(linkedSettings(section)),

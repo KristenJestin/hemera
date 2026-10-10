@@ -170,6 +170,20 @@ export * from './blocks/mission/mission-marks.tsx'
 export * from './blocks/mission/mission-row.tsx'
 export * from './surfaces/living-spec/living-spec-types.ts'
 export * from './surfaces/living-spec/living-spec-page.tsx'
+/** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Wave`. */
+export * as Planning from './blocks/planning/planning-types.ts'
+export {
+  PlanningPage,
+  discussionViewId,
+  probeViewId,
+  type PlanningPageProps,
+} from './surfaces/planning/planning-page.tsx'
+export { planningViews, type PlanningViewsOf } from './surfaces/planning/planning-views.tsx'
+export {
+  DiscussionThread,
+  type DiscussionThreadProps,
+} from './blocks/planning/discussion-thread.tsx'
+export { ProbeReport } from './blocks/planning/probes.tsx'
 export * from './blocks/project-settings/ticket-providers.tsx'
 export * from './blocks/project-settings/spec-fields.tsx'
 export * from './blocks/project-settings/exclusive-resources.tsx'

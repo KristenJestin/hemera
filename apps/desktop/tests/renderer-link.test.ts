@@ -242,6 +242,7 @@ const noProjects = {
   'planning.changesSince': unused,
   'planning.markRead': unused,
   'planning.addVision': unused,
+  'planning.visions': unused,
   'planning.keepAfterTriage': unused,
   'planning.changed': unused,
   'planning.specLanguage': unused,
@@ -391,6 +392,35 @@ const recording = (asked: string[]) => {
     'resources.save': call('resources.save'),
     'resources.holders': call('resources.holders'),
     'resources.changed': stream('resources.changed'),
+    'planning.changesSince': call('planning.changesSince'),
+    'planning.markRead': call('planning.markRead'),
+    'planning.addVision': call('planning.addVision'),
+    'planning.visions': call('planning.visions'),
+    'planning.waves': call('planning.waves'),
+    'planning.answer': call('planning.answer'),
+    'planning.waitOnSomeone': call('planning.waitOnSomeone'),
+    'planning.inputs': call('planning.inputs'),
+    'planning.acceptProposedAnswer': call('planning.acceptProposedAnswer'),
+    'planning.dismissProposedAnswer': call('planning.dismissProposedAnswer'),
+    'discussions.open': call('discussions.open'),
+    'discussions.say': call('discussions.say'),
+    'discussions.accept': call('discussions.accept'),
+    'discussions.close': call('discussions.close'),
+    'probes.read': call('probes.read'),
+    'coldRead.again': call('coldRead.again'),
+    'coldRead.dismiss': call('coldRead.dismiss'),
+    'coldRead.freshness': call('coldRead.freshness'),
+    'dependencies.list': call('dependencies.list'),
+    'dependencies.decide': call('dependencies.decide'),
+    'tickets.events': call('tickets.events'),
+    'tickets.acknowledge': call('tickets.acknowledge'),
+    'memory.now': call('memory.now'),
+    'sessions.list': call('sessions.list'),
+    'planning.changed': stream('planning.changed'),
+    'discussions.changed': stream('discussions.changed'),
+    'probes.changed': stream('probes.changed'),
+    'coldRead.changed': stream('coldRead.changed'),
+    'memory.changes': stream('memory.changes'),
   }
 }
 
@@ -877,6 +907,161 @@ const WIRINGS: ReadonlyArray<Wiring> = [
       link.onResourceHolders(NO_END, NO_END)
     },
     asks: 'resources.changed',
+  },
+  {
+    method: 'onSpec',
+    run: (link) => {
+      link.onSpec('m1', NO_END, NO_END)
+    },
+    asks: 'planning.changed {"missionId":"m1"}',
+  },
+  {
+    method: 'changesSince',
+    run: (link) => ask(link.changesSince('m1', 4)),
+    asks: 'planning.changesSince {"missionId":"m1","version":4}',
+  },
+  {
+    method: 'markRead',
+    run: (link) => ask(link.markRead('m1', 5)),
+    asks: 'planning.markRead {"missionId":"m1","version":5}',
+  },
+  {
+    method: 'addVision',
+    run: (link) => ask(link.addVision('m1', 'Keep it small')),
+    asks: 'planning.addVision {"missionId":"m1","text":"Keep it small"}',
+  },
+  {
+    method: 'visions',
+    run: (link) => ask(link.visions('m1')),
+    asks: 'planning.visions {"missionId":"m1"}',
+  },
+  {
+    method: 'waves',
+    run: (link) => ask(link.waves('m1')),
+    asks: 'planning.waves {"missionId":"m1"}',
+  },
+  {
+    method: 'answer',
+    run: (link) => ask(link.answer('m1', 'Q1', { optionId: 'A' })),
+    asks: 'planning.answer {"missionId":"m1","questionId":"Q1","optionId":"A"}',
+  },
+  {
+    method: 'waitOnSomeone',
+    run: (link) => ask(link.waitOnSomeone('m1', 'Q2', 'The design team')),
+    asks: 'planning.waitOnSomeone {"missionId":"m1","questionId":"Q2","note":"The design team"}',
+  },
+  {
+    method: 'planningInputs',
+    run: (link) => ask(link.planningInputs('m1')),
+    asks: 'planning.inputs {"missionId":"m1"}',
+  },
+  {
+    method: 'acceptProposedAnswer',
+    run: (link) => ask(link.acceptProposedAnswer('pa1', null)),
+    asks: 'planning.acceptProposedAnswer {"proposalId":"pa1"}',
+  },
+  {
+    method: 'dismissProposedAnswer',
+    run: (link) => ask(link.dismissProposedAnswer('pa1')),
+    asks: 'planning.dismissProposedAnswer {"proposalId":"pa1"}',
+  },
+  {
+    method: 'onDiscussions',
+    run: (link) => {
+      link.onDiscussions('m1', NO_END, NO_END)
+    },
+    asks: 'discussions.changed {"missionId":"m1"}',
+  },
+  {
+    method: 'openDiscussion',
+    run: (link) => ask(link.openDiscussion('m1', { kind: 'question', id: 'Q1' }, 'Why?')),
+    asks: 'discussions.open {"missionId":"m1","item":{"kind":"question","id":"Q1"},"text":"Why?"}',
+  },
+  {
+    method: 'sayInDiscussion',
+    run: (link) => ask(link.sayInDiscussion('d1', 'And then?')),
+    asks: 'discussions.say {"discussionId":"d1","text":"And then?"}',
+  },
+  {
+    method: 'acceptDiscussion',
+    run: (link) => ask(link.acceptDiscussion('d1', '2026-10-05T09:00:00.000Z')),
+    asks: 'discussions.accept {"discussionId":"d1","proposedAt":"2026-10-05T09:00:00.000Z"}',
+  },
+  {
+    method: 'closeDiscussion',
+    run: (link) => ask(link.closeDiscussion('d1', null)),
+    asks: 'discussions.close {"discussionId":"d1","closing":{"noDecision":true}}',
+  },
+  {
+    method: 'onProbes',
+    run: (link) => {
+      link.onProbes('m1', NO_END, NO_END)
+    },
+    asks: 'probes.changed {"missionId":"m1"}',
+  },
+  {
+    method: 'probe',
+    run: (link) => ask(link.probe('p1')),
+    asks: 'probes.read {"probeId":"p1"}',
+  },
+  {
+    method: 'onColdReads',
+    run: (link) => {
+      link.onColdReads('m1', NO_END, NO_END)
+    },
+    asks: 'coldRead.changed {"missionId":"m1"}',
+  },
+  {
+    method: 'coldReadAgain',
+    run: (link) => ask(link.coldReadAgain('m1')),
+    asks: 'coldRead.again {"missionId":"m1"}',
+  },
+  {
+    method: 'dismissFinding',
+    run: (link) => ask(link.dismissFinding('m1', 'C1.F2')),
+    asks: 'coldRead.dismiss {"missionId":"m1","findingId":"C1.F2"}',
+  },
+  {
+    method: 'coldReadFreshness',
+    run: (link) => ask(link.coldReadFreshness('m1')),
+    asks: 'coldRead.freshness {"missionId":"m1"}',
+  },
+  {
+    method: 'dependencies',
+    run: (link) => ask(link.dependencies('m1')),
+    asks: 'dependencies.list {"missionId":"m1"}',
+  },
+  {
+    method: 'decideDependency',
+    run: (link) => ask(link.decideDependency('dep1', true)),
+    asks: 'dependencies.decide {"id":"dep1","accept":true}',
+  },
+  {
+    method: 'ticketEvents',
+    run: (link) => ask(link.ticketEvents('m1')),
+    asks: 'tickets.events {"missionId":"m1"}',
+  },
+  {
+    method: 'acknowledgeTicketEvent',
+    run: (link) => ask(link.acknowledgeTicketEvent('te1')),
+    asks: 'tickets.acknowledge {"eventId":"te1"}',
+  },
+  {
+    method: 'memoryNow',
+    run: (link) => ask(link.memoryNow('m1')),
+    asks: 'memory.now {"missionId":"m1"}',
+  },
+  {
+    method: 'onMemory',
+    run: (link) => {
+      link.onMemory('m1', NO_END, NO_END)
+    },
+    asks: 'memory.changes {"missionId":"m1"}',
+  },
+  {
+    method: 'missionSessions',
+    run: (link) => ask(link.missionSessions('m1')),
+    asks: 'sessions.list {"ownerKind":"mission","ownerId":"m1"}',
   },
 ]
 

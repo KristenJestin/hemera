@@ -282,6 +282,7 @@ const memoryHandlers = {
   'planning.changesSince': unused,
   'planning.markRead': unused,
   'planning.addVision': unused,
+  'planning.visions': unused,
   'planning.keepAfterTriage': unused,
   'planning.changed': unused,
   'planning.specLanguage': unused,

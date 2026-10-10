@@ -36,6 +36,7 @@ import {
 import {
   InvalidSpecLanguage,
   PlanningRefused,
+  type PlanningVision,
   type Spec,
   type SpecChange,
   type SpecRequirement,
@@ -54,6 +55,7 @@ import { Database, type EngineTransaction, refusedWhile } from '../storage/datab
 import {
   memoryNext,
   missions,
+  planningInputs,
   projects,
   specChanges,
   specReads,
@@ -1147,6 +1149,35 @@ export const changesSince = (missionId: string, version: number) =>
       after: row.after,
       at: row.at,
     }))
+  })
+
+/** The visions the user gave, the first first, each with the input it made (CT-26). */
+export const visionsSeen = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database.transaction((transaction) =>
+      Effect.gen(function* () {
+        yield* missionRow(transaction, missionId)
+        const read = refusedWhile('reading the visions')
+        const rows = yield* transaction
+          .select()
+          .from(specVisions)
+          .where(eq(specVisions.missionId, missionId))
+          .orderBy(asc(specVisions.at))
+          .pipe(Effect.mapError(read))
+        const inputs = yield* transaction
+          .select({ id: planningInputs.id, item: planningInputs.item })
+          .from(planningInputs)
+          .where(and(eq(planningInputs.missionId, missionId), eq(planningInputs.kind, 'vision')))
+          .pipe(Effect.mapError(read))
+        return rows.map((row): PlanningVision => ({
+          id: row.id,
+          text: row.text,
+          at: row.at,
+          input: inputs.find((input) => input.item === row.id)?.id ?? null,
+        }))
+      }),
+    )
   })
 
 /** The user read the Spec up to a version it has reached. */
