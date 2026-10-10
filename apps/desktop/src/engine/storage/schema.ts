@@ -2336,3 +2336,158 @@ export const missionValidationSettings = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.missionId, table.version] })],
 )
+
+/**
+ * A Building of a mission (#141): the first, and later each round (`round`, null until R2). It
+ * names its Workspace, the base snapshot of each repository taken at its start (`bases`, JSON:
+ * repository, folder, commit, tree), its phase, and the Builder's final summary. One active
+ * Building per mission at most, which a second start finds and leaves.
+ */
+export const buildings = sqliteTable(
+  'buildings',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    round: integer('round'),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    bases: text('bases').notNull(),
+    phase: text('phase').notNull(),
+    state: text('state').notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    /** When every task was done or skipped and `BuildingEnd` was called, once. */
+    tasksDoneAt: text('tasks_done_at'),
+    summary: text('summary').$type<Masked<string>>(),
+  },
+  (table) => [
+    uniqueIndex('building_active_of_mission')
+      .on(table.missionId)
+      .where(sql`${table.state} = 'active'`),
+  ],
+)
+
+/**
+ * The intervals the engine ran while a Building was active (open question 28): one per engine
+ * start, its end moved forward while the engine runs. Elapsed time is their sum.
+ */
+export const buildingActivity = sqliteTable(
+  'building_activity',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    startedAt: text('started_at').notNull(),
+    seenAt: text('seen_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.startedAt] })],
+)
+
+/**
+ * One task of a Building's effective plan: a frozen task copied at the start, or one an amendment
+ * brought (`origin`, `decision_id`). Hemera owns its state; `changes` (JSON) dates each one,
+ * `blocked_by` (JSON) names the cause of a block, `replaced_by` (JSON) the tasks that replace a
+ * skipped one, and `held_back` the running task whose claim made its start wait.
+ */
+export const buildingTasks = sqliteTable(
+  'building_tasks',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    rank: integer('rank').notNull(),
+    origin: text('origin').notNull(),
+    decisionId: text('decision_id'),
+    title: text('title').$type<Masked<string>>().notNull(),
+    result: text('result').$type<Masked<string>>().notNull(),
+    requirements: text('requirements').notNull(),
+    scenarios: text('scenarios').notNull(),
+    targets: text('targets').$type<Masked<string>>().notNull(),
+    dependsOn: text('depends_on').notNull(),
+    state: text('state').notNull(),
+    verified: integer('verified', { mode: 'boolean' }),
+    /** The session lineage working on it, and its epoch when it last acted on it. */
+    runner: text('runner'),
+    epoch: integer('epoch'),
+    blockedBy: text('blocked_by'),
+    skippedReason: text('skipped_reason').$type<Masked<string>>(),
+    replacedBy: text('replaced_by').notNull(),
+    heldBack: text('held_back'),
+    changes: text('changes').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.id] })],
+)
+
+/**
+ * One attempt at a task (or at none, for a requirement or end scope #142 uses): its runner, the
+ * start and end snapshot of each repository (JSON trees by repository), and the paths it changed
+ * outside its task's targets (JSON).
+ */
+export const buildingAttempts = sqliteTable(
+  'building_attempts',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    taskId: text('task_id'),
+    number: integer('number').notNull(),
+    runner: text('runner').notNull(),
+    epoch: integer('epoch').notNull(),
+    starts: text('starts').notNull(),
+    ends: text('ends'),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    outcome: text('outcome'),
+    summary: text('summary').$type<Masked<string>>(),
+    outside: text('outside').notNull(),
+  },
+  (table) => [index('building_attempts_of_task').on(table.buildingId, table.taskId)],
+)
+
+/** The files a running task holds, from its targets: one holder per file of a Building. */
+export const buildingClaims = sqliteTable(
+  'building_claims',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    runner: text('runner').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
+)
+
+/**
+ * The decisions taken during a Building: the need a request became, the tasks it holds (JSON), its
+ * question and options, the amendment proposed (JSON, CT-33), and once answered the answer and
+ * whether the amendment was applied.
+ */
+export const buildingDecisions = sqliteTable(
+  'building_decisions',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    needId: text('need_id').notNull(),
+    kind: text('kind').notNull(),
+    tasks: text('tasks').notNull(),
+    question: text('question').$type<Masked<string>>().notNull(),
+    options: text('options').$type<Masked<string>>().notNull(),
+    recommended: text('recommended').$type<Masked<string>>(),
+    amendment: text('amendment').$type<Masked<string>>(),
+    state: text('state').notNull(),
+    answer: text('answer').$type<Masked<string>>(),
+    applied: integer('applied', { mode: 'boolean' }).notNull().default(false),
+    requestedBy: text('requested_by').notNull(),
+    requestedAt: text('requested_at').notNull(),
+    answeredAt: text('answered_at'),
+  },
+  (table) => [uniqueIndex('building_decision_of_need').on(table.needId)],
+)
