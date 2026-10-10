@@ -80,6 +80,7 @@ import {
   validateDomain,
 } from './living-spec/store.ts'
 import { TesterFindings } from './tester/findings.ts'
+import { Snapshots } from './building/snapshots.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
@@ -427,6 +428,10 @@ export const engineHandlers = (
     'tester.folder': () =>
       use(TesterFindings.use((findings) => Effect.succeed(findings.folder))).pipe(
         observed('tester.folder', log),
+      ),
+    'snapshots.diagnose': ({ missionId }) =>
+      use(Snapshots.use((snapshots) => snapshots.diagnose(missionId))).pipe(
+        observed('snapshots.diagnose', log),
       ),
     'resources.list': ({ projectId }) =>
       use(listResources(projectId)).pipe(observed('resources.list', log)),

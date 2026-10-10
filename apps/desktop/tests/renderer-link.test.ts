@@ -230,6 +230,7 @@ const noProjects = {
   'setup.changes': unused,
   'tester.findings': unused,
   'tester.folder': unused,
+  'snapshots.diagnose': unused,
   'start.search': unused,
   'home.sinceYouLeft': unused,
   'home.sinceYouLeftChanged': unused,
