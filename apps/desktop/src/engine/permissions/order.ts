@@ -22,6 +22,7 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
+import { readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -33,7 +34,7 @@ import {
   concernSaid,
   deletesGit,
   effectiveAction,
-  chatMustAsk,
+  chatMustAskThroughScripts,
   missionRefusal,
   neverMatch,
   neverSaid,
@@ -42,20 +43,57 @@ import {
   runsAShell,
   wordsOf,
 } from '@hemera/core/domain'
-import { Clock, Duration, Effect, Layer, Option, Result } from 'effect'
+import { Clock, Duration, Effect, Layer, Option, Result, Schema } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
+import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { Database } from '../storage/database.ts'
 import { findOnPath, hostLookup, invocationOf } from '../command-line.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
+import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
 import { resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
 import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
+
+/** A `package.json` as its scripts are read. */
+const PackageScripts = Schema.fromJsonString(
+  Schema.Struct({ scripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)) }),
+)
+const readPackageScripts = Schema.decodeUnknownOption(PackageScripts)
+
+/**
+ * The scripts of the `package.json` of a folder, by name; none when it has none, or when it does
+ * not read (a folder of that name, a file it may not open, text that is not JSON).
+ */
+const scriptsIn = (folder: string) =>
+  Effect.try(() => readFileSync(join(folder, 'package.json'), 'utf8')).pipe(
+    Effect.map((text) =>
+      Option.match(readPackageScripts(text), {
+        onNone: () => new Map<string, string>(),
+        onSome: (read) => new Map(Object.entries(read.scripts ?? {})),
+      }),
+    ),
+    Effect.orElseSucceed(() => new Map<string, string>()),
+  )
+
+/**
+ * The folder a call runs in: a free line's, under its place; a catalogue command's, its
+ * repository then its own folder (a folder written with a template is read unfilled).
+ */
+const runFolder = (call: JudgedCall) =>
+  Effect.gen(function* () {
+    const root = call.session.place.root
+    if (call.command === null) return resolve(root, call.folder ?? '.')
+    const command = yield* getCommand(call.session.projectId, call.command.id)
+    const project = yield* getProject(call.session.projectId)
+    const repository = project.repositories.find((one) => one.id === command.repositoryId)
+    return join(root, repository?.path ?? '.', command.folder ?? '')
+  })
 
 /** A question the step 3 asks about, besides a sensitive place. */
 type Concern =
@@ -189,12 +227,18 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           return null
         })
 
-      /** What the Chat always asks before, read on the effective action; null otherwise. */
-      const chatMustAskOf = (call: JudgedCall): string | null => {
-        if (call.tool !== 'commands_run' || call.session.role !== 'chat') return null
-        const line = call.command?.line ?? call.line ?? ''
-        return chatMustAsk(effectiveAction(wordsOf(line), context).sequences)
-      }
+      /**
+       * What the Chat always asks before, read on the effective action and on the scripts of the
+       * `package.json` of the folder it runs in; null otherwise.
+       */
+      const chatMustAskOf = (call: JudgedCall) =>
+        Effect.gen(function* () {
+          if (call.tool !== 'commands_run' || call.session.role !== 'chat') return null
+          const line = call.command?.line ?? call.line ?? ''
+          const folder = yield* runFolder(call).pipe(Effect.orElseSucceed(() => null))
+          const scripts = folder === null ? new Map<string, string>() : yield* scriptsIn(folder)
+          return chatMustAskThroughScripts(line, context, (name) => scripts.get(name) ?? null)
+        })
 
       /** Step 3: what the call points at, sensitive or not, and what may be lifted by a grant. */
       const places = (call: JudgedCall) =>
@@ -315,7 +359,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           const refused = yield* refusals(call)
           if (refused !== null) return refused
           // The Chat always asks before a push, a forge write or a publication (#43).
-          const chatAsks = chatMustAskOf(call)
+          const chatAsks = yield* chatMustAskOf(call)
           if (chatAsks !== null) return decided('ask', [chatAsks])
           const pointed = yield* places(call)
           // A sensitive place always asks, and no grant lifts it: every concern is said.

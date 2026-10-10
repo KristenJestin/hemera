@@ -104,6 +104,8 @@ export interface FindingCall {
   readonly position: number
   /** Its line in the session's thread, or the reason it was refused, masked; null when neither. */
   readonly line: string | null
+  /** Its arguments as the gate recorded them, masked and cut; null when it kept none. */
+  readonly arguments: string | null
   readonly at: string
 }
 
@@ -354,6 +356,7 @@ const occurrenceSection = (
       `- Call: ${joined([`${code(call.tool)} ${code(call.id)}`, call.outcome, `${String(call.durationMs)} ms`, `call ${String(call.position)} of the session`, call.at])}`,
     )
     if (call.line !== null) lines.push(`  - ${call.line}`)
+    if (call.arguments !== null) lines.push(`  - Arguments: ${code(call.arguments)}`)
   } else if (reported.callId !== undefined) {
     lines.push(`- Call: ${code(reported.callId)}, not found among the session's calls`)
   }

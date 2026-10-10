@@ -20,7 +20,7 @@ import { createMission } from '../src/engine/missions.ts'
 import { getNeed, requestFromAgent } from '../src/engine/needs.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { awaitRun, runOutput, startRun } from '../src/engine/runs.ts'
-import { secretsRegistry } from '../src/engine/secrets.ts'
+import { secretWorthy, secretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { commandRuns, needs } from '../src/engine/storage/schema.ts'
 import { removeVariable, setVariable } from '../src/engine/variables.ts'
@@ -57,6 +57,41 @@ describe('The registry masks what is registered, and only while it is', () => {
     expect(secrets.values()).toEqual(['abc123'])
   })
 
+  test('a boolean or a value under six characters is not registered, so `1` or `dev` stays in clear inside other words', () => {
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', [
+      '1',
+      'dev',
+      'true',
+      '3000',
+      '12.5',
+      'quartz-violet-4471',
+    ])
+    expect(secrets.values()).toEqual(['quartz-violet-4471'])
+    expect(secrets.mask('pnpm dev on port 3001, devices 1 to 10, true')).toBe(
+      'pnpm dev on port 3001, devices 1 to 10, true',
+    )
+  })
+
+  test('a real secret beside trivial values is still masked wherever it stands, inside a longer line too', () => {
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', ['1', 'dev', 'quartz-violet-4471'])
+    expect(
+      secrets.mask(
+        'curl https://dev.example.com/v1?key=quartz-violet-4471&page=1 --idquartz-violet-4471x',
+      ),
+    ).toBe(`curl https://dev.example.com/v1?key=${MASK}&page=1 --id${MASK}x`)
+  })
+
+  test('a number of six characters or more is a secret like any value: a 10-digit account id is masked inside a line, `3000` and `1` stay in clear', () => {
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', ['8421397701', '3000', '1'])
+    expect(secrets.values()).toEqual(['8421397701'])
+    expect(secrets.mask('account 8421397701 on port 3000, retry 1')).toBe(
+      `account ${MASK} on port 3000, retry 1`,
+    )
+  })
+
   test('a source registered again replaces its values', () => {
     const secrets = secretsRegistry()
     secrets.register('project-variables:acme', ['first-value'])
@@ -70,8 +105,8 @@ describe('Every line written through the diagnostic sink is masked', () => {
     fc.assert(
       fc.property(
         fc
-          .string({ minLength: 4, maxLength: 20, unit: 'grapheme-ascii' })
-          .filter((value) => value.trim().length >= 4 && !value.includes('\n')),
+          .string({ minLength: 6, maxLength: 20, unit: 'grapheme-ascii' })
+          .filter((value) => secretWorthy(value) && !value.includes('\n')),
         fc.string({ maxLength: 30, unit: 'grapheme-ascii' }),
         (value, words) => {
           const folder = temporaryFolder('secrets-sink')

@@ -6,6 +6,13 @@
  * they are gone; registering a source again replaces its values. The values live in the engine's
  * memory only: never in the database, never in a log. The registry is rebuilt at each start from
  * its sources, the variables of the Profile first.
+ *
+ * A known value is masked as a part of any text, so a value that is a boolean or shorter than six
+ * characters is never registered: masked inside other words, a variable valued `1`, `3000` or
+ * `dev` would hide every `1`, `3000` and `dev`, and such a value says nothing worth hiding. A
+ * number of six characters or more (a PIN, an account id) is registered like any value.
+ * Matching on word boundaries instead would let a real secret glued to other characters (a
+ * query string, a path, a longer token) through, so the rule is on the value, not on the match.
  */
 
 import { MAIN_CHECKOUT_NAME, type Masked, maskRecord, maskText } from '@hemera/core/domain'
@@ -17,7 +24,15 @@ import { Database, refusedWhile } from './storage/database.ts'
 import { environmentVariables } from './storage/schema.ts'
 
 export interface SecretsRegistry {
-  readonly register: (source: string, values: ReadonlyArray<string>) => void
+  /**
+   * Registers a source's values, those the rule finds worth masking; `whole` are registered
+   * whatever their length (a value its name says is secret).
+   */
+  readonly register: (
+    source: string,
+    values: ReadonlyArray<string>,
+    whole?: ReadonlyArray<string>,
+  ) => void
   readonly unregister: (source: string) => void
   /** Every value registered now, once each. */
   readonly values: () => ReadonlyArray<string>
@@ -27,15 +42,24 @@ export interface SecretsRegistry {
   readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
 
+/**
+ * Whether a value is worth masking: six characters or more, and not a boolean. A long number
+ * (a PIN, an account id, a numeric token) is one; a short one (a port, a count) is not.
+ */
+export const secretWorthy = (value: string): boolean => {
+  const trimmed = value.trim()
+  return trimmed.length >= 6 && !['true', 'false'].includes(trimmed.toLowerCase())
+}
+
 export function secretsRegistry(): SecretsRegistry {
   const sources = new Map<string, ReadonlyArray<string>>()
   const values = () => [...new Set([...sources.values()].flat())]
   return {
-    register: (source, given) => {
-      sources.set(
-        source,
-        given.filter((value) => value !== ''),
-      )
+    register: (source, given, whole = []) => {
+      sources.set(source, [
+        ...given.filter(secretWorthy),
+        ...whole.filter((value) => value.trim() !== ''),
+      ])
     },
     unregister: (source) => {
       sources.delete(source)

@@ -3,15 +3,16 @@
  * under the card's id, until the card is decided; never in the database, a card, the Journal, the
  * session's hidden thread, the trace or a log. Each value is a known secret for #35's masking the
  * moment it arrives, so every copy of the call's arguments shows `•••`; once the call is recorded
- * only the values its cards hold stay secrets, until each card is decided. A number, a boolean or
- * a value shorter than six characters is never one: masked as a part of any text, it would hide
- * the words that hold it. An engine that stops forgets them: their cards are then refused at the
- * click.
+ * only the values its cards hold stay secrets, until each card is decided. A change its card keeps
+ * masked (a command line carrying a token) is held whole here the same way, for the click to apply
+ * it as proposed. A boolean or a value shorter than six characters is never one (the registry's
+ * rule). An engine that stops forgets them: their cards are then refused at the click.
  */
 
+import type { SetupChange } from '@hemera/core/domain'
 import { Context, Effect, Layer, Option, Predicate, Schema, Semaphore } from 'effect'
 
-import { Secrets } from '../secrets.ts'
+import { Secrets, secretWorthy } from '../secrets.ts'
 
 /** The masking source of the values a call carried, before its cards exist. */
 const ASKED = 'setup-asked'
@@ -28,7 +29,11 @@ export class SetupValues extends Context.Service<
     readonly hold: (cardId: string, value: string) => Effect.Effect<void>
     /** The value of a card, or null when it is no longer held. */
     readonly valueOf: (cardId: string) => Effect.Effect<string | null>
-    /** The card is decided: its value is let go of. */
+    /** A change whose card keeps it masked, held whole until the card is decided. */
+    readonly holdChange: (cardId: string, change: SetupChange) => Effect.Effect<void>
+    /** The change of a card as proposed, or null when its card keeps it whole or it is forgotten. */
+    readonly changeOf: (cardId: string) => Effect.Effect<SetupChange | null>
+    /** The card is decided: its value and its change are let go of. */
     readonly forget: (cardId: string) => Effect.Effect<void>
     /** One decision at a time per Project, so a card read again inside is decided once. */
     readonly deciding: (
@@ -50,21 +55,12 @@ export const valuesIn = (raw: Schema.Json): ReadonlyArray<string> =>
       asked.changes.flatMap((change) => (Predicate.isString(change.value) ? [change.value] : [])),
   })
 
-/** Whether a value is worth masking: not a number, not a boolean, six characters or more. */
-const secretWorthy = (value: string): boolean => {
-  const trimmed = value.trim()
-  return (
-    trimmed.length >= 6 &&
-    !/^[-+]?\d+(?:[.,]\d+)?$/.test(trimmed) &&
-    !['true', 'false'].includes(trimmed.toLowerCase())
-  )
-}
-
 export const setupValuesLayer = Layer.effect(
   SetupValues,
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const held = new Map<string, string>()
+    const changes = new Map<string, SetupChange>()
     const asked = new Set<string>()
     const decisions = new Map<string, Semaphore.Semaphore>()
     const register = () => {
@@ -89,9 +85,15 @@ export const setupValuesLayer = Layer.effect(
           register()
         }),
       valueOf: (cardId) => Effect.sync(() => held.get(cardId) ?? null),
+      holdChange: (cardId, change) =>
+        Effect.sync(() => {
+          changes.set(cardId, change)
+        }),
+      changeOf: (cardId) => Effect.sync(() => changes.get(cardId) ?? null),
       forget: (cardId) =>
         Effect.sync(() => {
           held.delete(cardId)
+          changes.delete(cardId)
           register()
         }),
       deciding: (projectId) => {

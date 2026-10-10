@@ -64,7 +64,10 @@ const callIn = (sessionId: string, callId: string | undefined) =>
     const recorded = calls[position]
     if (recorded === undefined) return null
     const thread = yield* threadOf(sessionId)
-    const line = thread.find((one) => one.kind === 'tool' && one.text.includes(callId))
+    // A thread's line ends with its call's id, whole: `toolu_1` is not `toolu_12`.
+    const line = thread.find(
+      (one) => one.kind === 'tool' && (one.text === callId || one.text.endsWith(` · ${callId}`)),
+    )
     const call: FindingCall = {
       id: callId,
       tool: recorded.tool,
@@ -72,6 +75,7 @@ const callIn = (sessionId: string, callId: string | undefined) =>
       durationMs: recorded.durationMs,
       position: position + 1,
       line: line?.text ?? recorded.reason,
+      arguments: recorded.arguments,
       at: recorded.calledAt,
     }
     return call
@@ -103,6 +107,7 @@ const agentOf = (sessionId: string) =>
       .select({
         provider: agentSessions.provider,
         model: agentSessions.chosenModel,
+        version: agentSessions.agentVersion,
         effort: agentSessions.chosenEffort,
         taken: agentSessions.takenModel,
       })
@@ -112,7 +117,7 @@ const agentOf = (sessionId: string) =>
     const provider = AGENT_PROVIDERS.find((one) => one === session?.provider)
     return {
       name: provider === undefined ? (session?.provider ?? 'an agent') : ADAPTERS[provider].label,
-      version: null,
+      version: session?.version ?? null,
       model: session?.taken ?? session?.model ?? null,
       effort: session?.effort ?? null,
     }

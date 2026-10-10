@@ -295,7 +295,7 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
   test('an action whose destination holds a registered secret is not sent, and asks', async () => {
     const { questions } = await withJev(({ builder }) =>
       Effect.gen(function* () {
-        yield* Secrets.useSync((secrets) => secrets.register('suite', ['acme']))
+        yield* Secrets.useSync((secrets) => secrets.register('suite', ['notes.md']))
         return yield* write(builder)
       }),
     )

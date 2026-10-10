@@ -166,9 +166,42 @@ describe('The tester mode on', () => {
     expect(finding).toMatch(
       /- Call: `fs_read` `toolu_read` · done · \d+ ms · call 1 of the session/,
     )
+    // The agent's version, as it said it at its start, and the call's arguments.
+    expect(finding).toContain('- Agent: Claude Code 1.0.0')
+    expect(finding).toContain('  - Arguments: `{"path":"api/CLAUDE.md"}`')
     expect(readFileSync(join(data, 'tester', 'README.md'), 'utf8')).toContain(
       '1 finding · 2 occurrences',
     )
+  })
+})
+
+describe('The call a report names', () => {
+  test('is found by its whole id: one id that begins another is not it', async () => {
+    const { run } = sessionsEngine(data, () => ({
+      steps: [
+        uses('toolu_12', 'fs_read', { path: 'api/README.md' }),
+        uses('toolu_1', 'fs_read', { path: 'api/CLAUDE.md' }),
+        uses('toolu_report', 'hemera_report', { ...REPORT, callId: 'toolu_1' }),
+        { does: 'says', text: 'Done.' },
+      ],
+    }))
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* writePreferences({ testerMode: true })
+          const { owner, main } = yield* acme
+          const session = yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', provider: 'claude', folder: main }),
+          )
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
+        }),
+      ),
+    )
+    const [finding] = findingsOf(data)
+    expect(finding).toMatch(/- Call: `fs_read` `toolu_1` · done · \d+ ms · call 2 of the session/)
+    expect(finding).toContain('  - mcp__hemera__fs_read · toolu_1\n')
+    expect(finding).not.toContain('toolu_12')
   })
 })
 

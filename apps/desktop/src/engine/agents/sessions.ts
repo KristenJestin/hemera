@@ -145,9 +145,9 @@ const write = (
       ),
   )
 
-/** The agent's own session id, once it gave one. */
-export const recordNativeSession = (id: string, nativeId: string) =>
-  write(id, 'recording an agent’s session id', { nativeId }, null)
+/** The agent's own session id, once it gave one, and the version it said it was. */
+export const recordNativeSession = (id: string, nativeId: string, agentVersion: string | null) =>
+  write(id, 'recording an agent’s session id', { nativeId, agentVersion }, null)
 
 /** The option of a session that is the one choice names, if the agent offers one. */
 const optionFor = (options: ReadonlyArray<AgentOption>, choice: Choice): AgentOption | undefined =>

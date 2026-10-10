@@ -211,10 +211,67 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
     expect(before?.held).toMatchObject({ needId: seen.need.id, answer: 'waiting' })
     expect(before?.held?.command).toContain('.env')
     expect(action?.held).toMatchObject({ needId: seen.need.id, answer: 'allowed' })
+    // Delivered to the live session, the result is the agent's to tell, not a line of its own.
+    expect(seen.transcript.entries.filter((entry) => entry.kind === 'notice')).toEqual([])
   })
 
-  test('git push, sh -c "git push", npx gh pr create and npm publish always ask, with their reason', async () => {
-    const lines = ['git push', 'sh -c "git push"', 'npx gh pr create', 'npm publish']
+  test('an approval’s result whose session is gone is written into the transcript, and handed to the next session', async () => {
+    const uses: FakeStep = {
+      does: 'uses',
+      id: 'toolu_env',
+      tool: 'fs_read',
+      arguments: { path: '.env' },
+    }
+    const { world, run } = sessionsEngine(data, (index) =>
+      index === 0
+        ? { steps: [uses, { does: 'says', text: 'It waits for your approval.' }] }
+        : SAYS('done'),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          writeFileSync(join(main, '.env'), 'ACME_REGION=example\n')
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Read the .env file.')
+          yield* until(Effect.map(pendingNeeds, (needs) => needs.length === 1))
+          const [need] = yield* pendingNeeds
+          if (need === undefined) return yield* Effect.die(new Error('no need'))
+          yield* settledChat(chat.id)
+          const { lineage } = yield* getChat(chat.id)
+          if (lineage === null) return yield* Effect.die(new Error('no lineage'))
+          yield* Sessions.use((sessions) => sessions.end(lineage, 'the test ends it'))
+          yield* answerNeed({
+            id: need.id,
+            key: 'allow',
+            answer: PermissionAnswer.make({ choice: 'allow-once' }),
+          })
+          yield* until(
+            Effect.map(transcriptOf(chat.id, null), ({ entries }) =>
+              entries.some((entry) => entry.kind === 'notice' && entry.text.includes('#1')),
+            ),
+          )
+          const transcript = yield* transcriptOf(chat.id, null)
+          yield* send(chat.id, 'Go on.')
+          yield* until(Effect.sync(() => (world.agents[1]?.answers.prompts.length ?? 0) >= 1))
+          return { transcript }
+        }),
+      ),
+    )
+    const notice = seen.transcript.entries.find((entry) => entry.kind === 'notice')
+    expect(notice?.text).toContain('ACME_REGION=•••')
+    expect(text(world.agents[1]?.answers.prompts.flat() ?? [])).toContain('[hemera:approval]')
+  })
+
+  test('git push, sh -c "git push", npx gh pr create, npm publish and a script that pushes always ask, with their reason', async () => {
+    const lines = [
+      'git push',
+      'sh -c "git push"',
+      'npx gh pr create',
+      'npm publish',
+      'pnpm run release',
+    ]
     const steps: ReadonlyArray<FakeStep> = lines.map((line, at) => ({
       does: 'uses',
       id: `toolu_${String(at)}`,
@@ -228,7 +285,11 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { project } = yield* acme
+          const { project, main } = yield* acme
+          writeFileSync(
+            join(main, 'package.json'),
+            JSON.stringify({ scripts: { release: 'pnpm build && git push --follow-tags' } }),
+          )
           const chat = yield* created(project.id)
           yield* send(chat.id, 'Push it.')
           yield* settledChat(chat.id)
@@ -239,14 +300,43 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
       ),
     )
     const answers = world.agents[0]?.answers.toolAnswers.map((one) => one.text) ?? []
-    expect(answers).toHaveLength(4)
+    expect(answers).toHaveLength(5)
     expect(answers.every((answer) => WAITING.test(answer))).toBe(true)
     expect(reasons).toEqual([
       'the Chat always asks before git push',
       'the Chat always asks before git push',
       'the Chat always asks before gh writes to the forge',
       'the Chat always asks before publishing a package (npm)',
+      'the Chat always asks before git push, in the script release',
     ])
+  })
+})
+
+describe('A package.json that does not read', () => {
+  test('is no scripts: the call is still judged, and a push still asks', async () => {
+    const { world, run } = sessionsEngine(data, () => ({
+      steps: [
+        { does: 'uses', id: 'toolu_push', tool: 'commands_run', arguments: { line: 'git push' } },
+        { does: 'says', text: 'done' },
+      ],
+    }))
+    const reasons = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          mkdirSync(join(main, 'package.json'))
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Push it.')
+          yield* settledChat(chat.id)
+          return (yield* pendingNeeds).map((need) =>
+            Predicate.isTagged(need.fields, 'Permission') ? need.fields.hemeraReason : '',
+          )
+        }),
+      ),
+    )
+    expect(world.agents[0]?.answers.toolAnswers[0]?.text).toMatch(WAITING)
+    expect(reasons).toEqual(['the Chat always asks before git push'])
   })
 })
 
@@ -336,6 +426,39 @@ describe('The Chat reads missions and creates drafts, and writes into none', () 
     expect(seen.transcript.entries.map((entry) => entry.text)).toContain(
       'Mission ACME-2 created: Export the invoices as JSON',
     )
+  })
+})
+
+describe('The missions a draft looks like', () => {
+  test('share words that say something: a title alike only by "the" or "and" is not one', async () => {
+    const drafting = (title: string, at: number): FakeStep => ({
+      does: 'uses',
+      id: `toolu_draft_${String(at)}`,
+      tool: 'spec_create_draft',
+      arguments: { title, idea: 'An idea.' },
+    })
+    const { world, run } = sessionsEngine(data, () => ({
+      steps: [
+        drafting('Fix the login and the signup', 0),
+        drafting('Export the invoices as PDF', 1),
+        { does: 'says', text: 'Created.' },
+      ],
+    }))
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Make two missions.')
+          yield* settledChat(chat.id)
+        }),
+      ),
+    )
+    const [login, pdf] = world.agents[0]?.answers.toolAnswers ?? []
+    expect(login?.text).toContain('No other mission of the Project has a title like it.')
+    expect(pdf?.text).toContain('- ACME-1 · Export the invoices as CSV · building')
+    expect(pdf?.text).not.toContain('Fix the login and the signup')
   })
 })
 

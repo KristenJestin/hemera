@@ -9,9 +9,13 @@
  *   is the use case's to refuse, and keeps the card pending with its reason.
  * - Decline changes nothing. A decided card is never decided again.
  * - Accept all goes in the order proposed and stops at the first refusal.
+ * - A card keeps its title, change and details masked; a change masking altered is held whole in
+ *   memory, as a variable's value is, and refused at the click once an engine stopped.
  */
 
 import {
+  DEFAULT_BASE_BRANCH,
+  MASK,
   type SetupCardState,
   type SetupChange,
   type SetupDetail,
@@ -20,6 +24,7 @@ import {
   SetupChange as SetupChangeSchema,
   VALUE_FORGOTTEN,
   checkedTemplate,
+  maskedJson,
   setupChangeDetails,
   setupChangeTitle,
   variableKey,
@@ -148,7 +153,7 @@ const commandDraft = (
 /** What the settings would write of a proposed step, or why they would not. */
 const stepDraft = (
   project: Project,
-  commands: ReadonlyArray<Command>,
+  commands: ReadonlyArray<Pick<Command, 'id' | 'name'>>,
   change: Extract<SetupProposal, { readonly kind: 'step' }>,
 ) => {
   const repository =
@@ -173,13 +178,50 @@ const stepDraft = (
   return Result.succeed(draft)
 }
 
-/** The first thing the settings would refuse of a change, as their sentence; null when none. */
-const refusalOf = (
-  project: Project,
-  commands: ReadonlyArray<Command>,
-  change: SetupProposal,
-  position: number,
-) =>
+/**
+ * The setup as it will stand once what waits is accepted: the Project with the repositories its
+ * pending cards and the call's earlier changes declare, and the catalogue with their commands.
+ */
+interface Planned {
+  readonly project: Project
+  readonly commands: ReadonlyArray<Pick<Command, 'id' | 'name'>>
+}
+
+/** What a proposed repository or command adds to the setup as it will stand. */
+const plannedWith = (planned: Planned, change: SetupChange): Planned => {
+  switch (change.kind) {
+    case 'repository': {
+      if (planned.project.repositories.some((one) => one.path === change.path)) return planned
+      const repository = {
+        id: `proposed:${change.path}`,
+        projectId: planned.project.id,
+        path: change.path,
+        includedByDefault: true,
+        remote: change.remote ?? null,
+        baseBranch: change.baseBranch ?? DEFAULT_BASE_BRANCH,
+        lastFetchedAt: null,
+      }
+      const repositories = [...planned.project.repositories, repository]
+      return { ...planned, project: { ...planned.project, repositories } }
+    }
+    case 'command':
+      return planned.commands.some((one) => one.name === change.name)
+        ? planned
+        : {
+            ...planned,
+            commands: [...planned.commands, { id: `proposed:${change.name}`, name: change.name }],
+          }
+    default:
+      return planned
+  }
+}
+
+/**
+ * The first thing the settings would refuse of a change, as their sentence; null when none. A
+ * repository is checked against the Project as it stands, a command or a step against the setup
+ * as it will stand.
+ */
+const refusalOf = (project: Project, planned: Planned, change: SetupProposal, position: number) =>
   Effect.gen(function* () {
     const said = (failure: { readonly message: string }) => failure.message
     switch (change.kind) {
@@ -191,15 +233,17 @@ const refusalOf = (
           : null
       }
       case 'command': {
-        const draft = commandDraft(project, change)
+        const draft = commandDraft(planned.project, change)
         if (Result.isFailure(draft)) return draft.failure
-        const checked = yield* checkedCommand(project, draft.success).pipe(Effect.result)
+        const checked = yield* checkedCommand(planned.project, draft.success).pipe(Effect.result)
         return Result.isFailure(checked) ? said(checked.failure) : null
       }
       case 'step': {
-        const draft = stepDraft(project, commands, change)
+        const draft = stepDraft(planned.project, planned.commands, change)
         if (Result.isFailure(draft)) return draft.failure
-        const checked = yield* checkedStep(project, draft.success, position).pipe(Effect.result)
+        const checked = yield* checkedStep(planned.project, draft.success, position).pipe(
+          Effect.result,
+        )
         return Result.isFailure(checked) ? said(checked.failure) : null
       }
       case 'variable': {
@@ -236,9 +280,16 @@ export class ProposalRefused extends Schema.TaggedError<ProposalRefused>()('Prop
   }
 }
 
+/** A change as two cards compare it, whatever the order of its fields. */
+const sameChange = (one: Schema.JsonObject, other: Schema.JsonObject): boolean =>
+  JSON.stringify(one, Object.keys(one).toSorted()) ===
+  JSON.stringify(other, Object.keys(other).toSorted())
+
 /**
- * Checks a whole call as the settings would, then stores one card per change in one batch, the
- * values of its variables held in memory only. Answers the cards.
+ * Checks a whole call as the settings would, against the setup as it will stand once the pending
+ * cards are accepted, then stores one card per change in one batch, the values of its variables
+ * held in memory only. A change a pending card already proposes (a variable: with the same value)
+ * is not stored again. Answers the cards, the ones already pending said so.
  */
 export const propose = (
   projectId: string,
@@ -249,55 +300,89 @@ export const propose = (
     const project = yield* getProject(projectId)
     const commands = yield* listCommands(projectId)
     const variables = (yield* listVariables({ projectId, workspaceId: null })).map((one) => one.key)
-    const steps = (yield* getRecipe(projectId)).length
-    for (const [at, proposal] of proposals.entries()) {
-      const refused = yield* refusalOf(project, commands, proposal, steps + at + 1)
+    const secrets = yield* Secrets
+    const values = yield* SetupValues
+    const pending = (yield* cardsOf(projectId)).filter((card) => card.state === 'pending')
+    let planned: Planned = { project, commands }
+    for (const card of pending) planned = plannedWith(planned, card.change)
+    let steps =
+      (yield* getRecipe(projectId)).length +
+      pending.filter((card) => card.change.kind === 'step').length
+    for (const proposal of proposals) {
+      if (proposal.kind === 'step') steps += 1
+      const refused = yield* refusalOf(project, planned, proposal, steps)
       if (refused !== null) {
         const title = setupChangeTitle(changeOf(commands, variables, proposal))
         return yield* new ProposalRefused({ reason: `${title}: ${refused}` })
       }
+      planned = plannedWith(planned, changeOf(commands, variables, proposal))
     }
     const batch = crypto.randomUUID()
     const at = new Date().toISOString()
-    const secrets = yield* Secrets
-    const values = yield* SetupValues
-    const written = proposals.map((proposal, position) => {
-      const change = changeOf(commands, variables, proposal)
-      return {
-        id: crypto.randomUUID(),
-        projectId,
-        sessionId,
-        batch,
-        position,
-        change: JSON.stringify(change),
-        title: setupChangeTitle(change),
-        details: JSON.stringify(setupChangeDetails(change)),
-        state: 'pending',
-        refusal: null,
-        createdAt: at,
-        decidedAt: null,
-      }
-    })
-    // The values stay in memory, under their card's id; the cards never hold one.
-    for (const [position, proposal] of proposals.entries()) {
-      const card = written[position]
-      if (proposal.kind === 'variable' && card !== undefined) {
-        yield* values.hold(card.id, proposal.value)
-      }
-    }
-    yield* mutate('storing the setup cards', (transaction) =>
-      transaction
-        .insert(setupCards)
-        .values(written.map((row) => ({ ...row, title: secrets.mask(row.title) })))
-        .pipe(
-          Effect.mapError(refusedWhile('storing the setup cards')),
-          Effect.as({
-            result: undefined,
-            events: [setupEvent('setup.proposed', projectId, { batch })],
-          }),
-        ),
+    const proposed = yield* Effect.forEach(proposals, (proposal, position) =>
+      Effect.gen(function* () {
+        const change = changeOf(commands, variables, proposal)
+        const card = {
+          id: crypto.randomUUID(),
+          projectId,
+          sessionId,
+          batch,
+          position,
+          change,
+          title: setupChangeTitle(change),
+          state: 'pending',
+          refusal: null,
+          createdAt: at,
+          decidedAt: null,
+        }
+        for (const one of pending) {
+          if (!sameChange(one.change, secrets.maskRecord(change))) continue
+          if (proposal.kind !== 'variable' || (yield* values.valueOf(one.id)) === proposal.value) {
+            return { card, waits: one }
+          }
+        }
+        // The values stay in memory, under their card's id; the cards never hold one.
+        if (proposal.kind === 'variable') yield* values.hold(card.id, proposal.value)
+        return { card, waits: null }
+      }),
     )
-    return written.map((card) => ({ id: card.id, title: card.title }))
+    const written = proposed.flatMap((one) => (one.waits === null ? [one.card] : []))
+    // A card keeps its change masked; a change masking altered is held whole in memory instead.
+    const rows = yield* Effect.forEach(written, ({ change, ...row }) =>
+      Effect.gen(function* () {
+        const masked = maskedJson(secrets.maskRecord(change))
+        if (masked !== JSON.stringify(change)) yield* values.holdChange(row.id, change)
+        const details = setupChangeDetails(change).map((detail) => ({
+          label: detail.label,
+          value: secrets.mask(detail.value),
+        }))
+        return {
+          ...row,
+          change: masked,
+          title: secrets.mask(row.title),
+          details: JSON.stringify(details),
+        }
+      }),
+    )
+    if (rows.length > 0) {
+      yield* mutate('storing the setup cards', (transaction) =>
+        transaction
+          .insert(setupCards)
+          .values(rows)
+          .pipe(
+            Effect.mapError(refusedWhile('storing the setup cards')),
+            Effect.as({
+              result: undefined,
+              events: [setupEvent('setup.proposed', projectId, { batch })],
+            }),
+          ),
+      )
+    }
+    return proposed.map(({ card, waits }) =>
+      waits === null
+        ? { id: card.id, title: card.title, already: false }
+        : { id: waits.id, title: waits.title, already: true },
+    )
   })
 
 const setupEvent = (
@@ -329,11 +414,45 @@ const rowOf = (id: string) =>
     return row
   })
 
+/**
+ * What a command or a step needs that only a pending card proposes (its repository, the command
+ * it runs), as the refusal at the click says it; null when nothing it needs waits.
+ */
+const waitingOn = (card: SetupCard, project: Project, change: SetupChange) =>
+  Effect.gen(function* () {
+    if (change.kind !== 'command' && change.kind !== 'step') return null
+    const pending = (yield* cardsOf(card.projectId)).filter(
+      (one) => one.state === 'pending' && one.id !== card.id,
+    )
+    const repository = change.repository
+    if (
+      repository !== undefined &&
+      !project.repositories.some((one) => one.path === repository) &&
+      pending.some((one) => one.change.kind === 'repository' && one.change.path === repository)
+    ) {
+      return `its repository ${repository} is still a proposal: accept it first`
+    }
+    if (change.kind !== 'step' || change.command === undefined) return null
+    const command = change.command
+    const commands = yield* listCommands(project.id)
+    return !commands.some((one) => one.name === command) &&
+      pending.some((one) => one.change.kind === 'command' && one.change.name === command)
+      ? `the command ${command} is still a proposal: accept it first`
+      : null
+  })
+
 /** Applies a change through the settings' own use cases; the use case's refusal, in words. */
 const apply = (card: SetupCard) =>
   Effect.gen(function* () {
-    const change = card.change
+    // A change its card keeps masked is applied as held; forgotten by a stopped engine, refused.
+    const held = yield* SetupValues.use((values) => values.changeOf(card.id))
+    if (held === null && JSON.stringify(card.change).includes(MASK)) {
+      return yield* new ProposalRefused({ reason: VALUE_FORGOTTEN })
+    }
+    const change = held ?? card.change
     const project = yield* getProject(card.projectId)
+    const waits = yield* waitingOn(card, project, change)
+    if (waits !== null) return yield* new ProposalRefused({ reason: waits })
     switch (change.kind) {
       case 'repository': {
         // The remote is Git's to confirm before anything is declared, so a refusal changes nothing.
