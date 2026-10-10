@@ -9,7 +9,8 @@
  *   conversation first and what was queued for the lineage (an approval's result).
  * - **The transcript** holds the user's messages, the agent's (written at the end of each turn),
  *   each of its tool calls folded to one line with its outcome and, when held, the approval
- *   request, and Hemera's notices. Masked; permanent.
+ *   request, and Hemera's notices, among them an approval's result whose session is gone.
+ *   Masked; permanent.
  * - **Stop** cancels the turn; the conversation stays.
  * - **The model** is the cascade's for the `chat` role when the Chat is made; a change applies
  *   from the next turn, on a fresh session.
@@ -70,6 +71,11 @@ type ChatFailure = DatabaseError | UnknownChat
 /** How a session ended, as its `session.stopped` event says it. */
 const readStopped = Schema.decodeUnknownOption(
   Schema.Struct({ state: Schema.String, reason: Schema.String }),
+)
+
+/** The session that asked a request, and its result as the agent reads it, masked. */
+const readResult = Schema.decodeUnknownOption(
+  Schema.Struct({ sessionId: Schema.String, text: Schema.String }),
 )
 
 export class Chats extends Context.Service<
@@ -296,22 +302,6 @@ export const chatsLayer = Layer.effect(
         Effect.catchCause(() => Effect.sync(() => book.forget(sessionId))),
       )
 
-    const committed = yield* DomainEvents.use((events) => events.subscribe)
-    yield* committed.pipe(
-      Stream.runForEach((event) =>
-        event.type === 'session.stopped'
-          ? ended(
-              event.entityId,
-              Option.match(readStopped(event.payload), {
-                onNone: () => null,
-                onSome: ({ state, reason }) => (state === 'failed' ? reason : null),
-              }),
-            )
-          : Effect.void,
-      ),
-      Effect.forkIn(scope),
-    )
-
     /** The session a Chat's lineage runs on now, and the last one it ran on. */
     const sessionsOf = (chat: Chat) =>
       Effect.gen(function* () {
@@ -327,6 +317,43 @@ export const chatsLayer = Layer.effect(
         const live = last !== null && LIVE.some((state) => state === last.state) ? last : null
         return { live, last }
       })
+
+    /**
+     * The result of a Chat's request, once the session that asked is gone and none holds its
+     * lineage: written into the transcript, as the next session's brief also hands it over.
+     */
+    const resulted = (sessionId: string, said: string) =>
+      Effect.gen(function* () {
+        const chatId = yield* chatOf(sessionId)
+        if (chatId === null) return
+        const { live } = yield* sessionsOf(yield* getChat(chatId))
+        if (live === null) yield* addEntry(chatId, { kind: 'notice', text: said })
+      }).pipe(
+        run,
+        Effect.catchCause(() => Effect.void),
+      )
+
+    const committed = yield* DomainEvents.use((events) => events.subscribe)
+    yield* committed.pipe(
+      Stream.runForEach((event) => {
+        if (event.type === 'permission.result') {
+          return Option.match(readResult(event.payload), {
+            onNone: () => Effect.void,
+            onSome: (result) => resulted(result.sessionId, result.text),
+          })
+        }
+        return event.type === 'session.stopped'
+          ? ended(
+              event.entityId,
+              Option.match(readStopped(event.payload), {
+                onNone: () => null,
+                onSome: ({ state, reason }) => (state === 'failed' ? reason : null),
+              }),
+            )
+          : Effect.void
+      }),
+      Effect.forkIn(scope),
+    )
 
     const sameSetting = (session: RoleSession, setting: ModelSettingValue) =>
       session.provider === setting.agent &&

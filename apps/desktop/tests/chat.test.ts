@@ -211,6 +211,57 @@ describe('The Chat’s permissions: all tools, the same gate, no grace', () => {
     expect(before?.held).toMatchObject({ needId: seen.need.id, answer: 'waiting' })
     expect(before?.held?.command).toContain('.env')
     expect(action?.held).toMatchObject({ needId: seen.need.id, answer: 'allowed' })
+    // Delivered to the live session, the result is the agent's to tell, not a line of its own.
+    expect(seen.transcript.entries.filter((entry) => entry.kind === 'notice')).toEqual([])
+  })
+
+  test('an approval’s result whose session is gone is written into the transcript, and handed to the next session', async () => {
+    const uses: FakeStep = {
+      does: 'uses',
+      id: 'toolu_env',
+      tool: 'fs_read',
+      arguments: { path: '.env' },
+    }
+    const { world, run } = sessionsEngine(data, (index) =>
+      index === 0
+        ? { steps: [uses, { does: 'says', text: 'It waits for your approval.' }] }
+        : SAYS('done'),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          writeFileSync(join(main, '.env'), 'ACME_REGION=example\n')
+          const chat = yield* created(project.id)
+          yield* send(chat.id, 'Read the .env file.')
+          yield* until(Effect.map(pendingNeeds, (needs) => needs.length === 1))
+          const [need] = yield* pendingNeeds
+          if (need === undefined) return yield* Effect.die(new Error('no need'))
+          yield* settledChat(chat.id)
+          const { lineage } = yield* getChat(chat.id)
+          if (lineage === null) return yield* Effect.die(new Error('no lineage'))
+          yield* Sessions.use((sessions) => sessions.end(lineage, 'the test ends it'))
+          yield* answerNeed({
+            id: need.id,
+            key: 'allow',
+            answer: PermissionAnswer.make({ choice: 'allow-once' }),
+          })
+          yield* until(
+            Effect.map(transcriptOf(chat.id, null), ({ entries }) =>
+              entries.some((entry) => entry.kind === 'notice' && entry.text.includes('#1')),
+            ),
+          )
+          const transcript = yield* transcriptOf(chat.id, null)
+          yield* send(chat.id, 'Go on.')
+          yield* until(Effect.sync(() => (world.agents[1]?.answers.prompts.length ?? 0) >= 1))
+          return { transcript }
+        }),
+      ),
+    )
+    const notice = seen.transcript.entries.find((entry) => entry.kind === 'notice')
+    expect(notice?.text).toContain('ACME_REGION=•••')
+    expect(text(world.agents[1]?.answers.prompts.flat() ?? [])).toContain('[hemera:approval]')
   })
 
   test('git push, sh -c "git push", npx gh pr create and npm publish always ask, with their reason', async () => {
