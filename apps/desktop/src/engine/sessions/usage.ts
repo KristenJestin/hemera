@@ -91,6 +91,11 @@ export interface Usage {
   readonly outputTokens: number
   readonly cachedReadTokens: number
   readonly cachedWriteTokens: number
+  /**
+   * The share of the input read from the prompt cache, from 0 to 1: the input is what the agents
+   * called input, plus what they read from and wrote to the cache. Null when there was no input.
+   */
+  readonly cachedShare: number | null
   /** Null when no session gave one, or they gave it in different currencies. */
   readonly cost: { readonly amount: number; readonly currency: string } | null
   readonly measured: boolean
@@ -113,11 +118,16 @@ export const missionUsage = (missionId: string) =>
     )
     const currencies = new Set(costs.map((cost) => cost.currency))
     const [currency] = currencies
+    const inputTokens = rows.reduce((sum, row) => sum + row.inputTokens, 0)
+    const cachedReadTokens = rows.reduce((sum, row) => sum + row.cachedReadTokens, 0)
+    const cachedWriteTokens = rows.reduce((sum, row) => sum + row.cachedWriteTokens, 0)
+    const sent = inputTokens + cachedReadTokens + cachedWriteTokens
     const usage: Usage = {
-      inputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0),
+      inputTokens,
       outputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0),
-      cachedReadTokens: rows.reduce((sum, row) => sum + row.cachedReadTokens, 0),
-      cachedWriteTokens: rows.reduce((sum, row) => sum + row.cachedWriteTokens, 0),
+      cachedReadTokens,
+      cachedWriteTokens,
+      cachedShare: sent === 0 ? null : cachedReadTokens / sent,
       cost:
         currency === undefined || currencies.size > 1
           ? null

@@ -74,6 +74,7 @@ describe('Usage', () => {
       outputTokens: 600,
       cachedReadTokens: 0,
       cachedWriteTokens: 0,
+      cachedShare: 0,
       cost: { amount: 0.5, currency: 'USD' },
       measured: true,
     })
@@ -87,7 +88,7 @@ describe('Usage', () => {
     expect(usage.after?.cost).toBeNull()
   })
 
-  test('the cache tokens of a turn are kept, summed per mission', async () => {
+  test('the cache tokens of a turn are kept, summed per mission, with the share read from the cache', async () => {
     // Both adapters report the input that was neither read nor written as `inputTokens`.
     const usage = await usageAfterOneTurn(
       {
@@ -109,14 +110,28 @@ describe('Usage', () => {
       cachedWriteTokens: 2800,
       measured: true,
     })
+    // 12,000 read of the 15,400 the two turns sent in all: 600 + 12,000 + 2,800.
+    expect(usage.after?.cachedShare).toBeCloseTo(12_000 / 15_400, 10)
   })
 
-  test('an agent that reports no cache tokens counts none', async () => {
+  test('an agent that reports no cache tokens counts none, and its share is 0', async () => {
     const usage = await usageAfterOneTurn({
       steps: [{ does: 'says', text: 'done' }],
       usage: { totalTokens: 1300, inputTokens: 1000, outputTokens: 300 },
     })
-    expect(usage.after).toMatchObject({ cachedReadTokens: 0, cachedWriteTokens: 0 })
+    expect(usage.after).toMatchObject({
+      cachedReadTokens: 0,
+      cachedWriteTokens: 0,
+      cachedShare: 0,
+    })
+  })
+
+  test('a turn with no input at all has no share, not a division by zero', async () => {
+    const usage = await usageAfterOneTurn({
+      steps: [{ does: 'says', text: 'done' }],
+      usage: { totalTokens: 40, inputTokens: 0, outputTokens: 40 },
+    })
+    expect(usage.after).toMatchObject({ inputTokens: 0, cachedReadTokens: 0, cachedShare: null })
   })
 
   test('the diagnostic log says what a turn used, cache tokens included', async () => {
