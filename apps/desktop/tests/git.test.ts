@@ -158,6 +158,7 @@ describe('Every Git call declares its class, and its class sets its limit', () =
     ['worktreeRemove', 'work', (one: GitService) => one.worktreeRemove('/r', '/w')],
     ['worktreePrune', 'work', (one: GitService) => one.worktreePrune('/r')],
     ['worktreeDetach', 'work', (one: GitService) => one.worktreeDetach('/r', '/w', 'abc')],
+    ['branchDeleteAt', 'work', (one: GitService) => one.branchDeleteAt('/r', 'b', 'abc')],
     ['repositoryOf', 'read', (one: GitService) => one.repositoryOf('/w')],
     ['worktrees', 'read', (one: GitService) => one.worktrees('/r')],
     ['changedFiles', 'read', (one: GitService) => one.changedFiles('/r')],
@@ -535,6 +536,31 @@ describe('What changed between two commits is read, no checkout touched (#139)',
     const api = repository(join(folder, 'api'))
     const head = git(api, 'rev-parse', 'HEAD')
     expect(await asked(Git.use((one) => one.changesBetween(api, head, head)))).toEqual([])
+  })
+})
+
+describe('A branch is deleted only where it was made (#139)', () => {
+  test('a branch still at its commit is deleted', async () => {
+    const api = repository(join(folder, 'api'))
+    const head = git(api, 'rev-parse', 'HEAD')
+    git(api, 'branch', 'acme/made')
+    await asked(Git.use((one) => one.branchDeleteAt(api, 'acme/made', head)))
+    expect(git(api, 'branch', '--list', 'acme/made')).toBe('')
+  })
+
+  test('a branch that moved since is kept, and Git says why', async () => {
+    const api = repository(join(folder, 'api'))
+    const head = git(api, 'rev-parse', 'HEAD')
+    git(api, 'checkout', '-q', '-b', 'acme/made')
+    writeFileSync(join(api, 'work.ts'), 'kept\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'work')
+    git(api, 'checkout', '-q', '-')
+    const refused = await asked(
+      Effect.flip(Git.use((one) => one.branchDeleteAt(api, 'acme/made', head))),
+    )
+    expect(refused).toBeInstanceOf(GitFailed)
+    expect(git(api, 'branch', '--list', 'acme/made')).toContain('acme/made')
   })
 })
 

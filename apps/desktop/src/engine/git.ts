@@ -285,6 +285,15 @@ export interface GitService {
    */
   readonly worktreeRemoveForced: (folder: string, path: string) => Effect.Effect<void, GitRefusal>
   /**
+   * Deletes a branch only while it still points at `commit`: a branch that moved since, work
+   * committed on it, is kept, in Git's words.
+   */
+  readonly branchDeleteAt: (
+    folder: string,
+    branch: string,
+    commit: string,
+  ) => Effect.Effect<void, GitRefusal>
+  /**
    * What a worktree holds against a commit, whatever was committed since: each file created or
    * modified, tracked ones first, then the untracked; ignored ones left out.
    */
@@ -590,6 +599,8 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
       ),
     worktreeRemoveForced: (folder, path) =>
       run(folder, ['worktree', 'remove', '--force', '--force', path], 'work').pipe(Effect.asVoid),
+    branchDeleteAt: (folder, branch, commit) =>
+      run(folder, ['update-ref', '-d', `refs/heads/${branch}`, commit], 'work').pipe(Effect.asVoid),
     worktreeChanges: (folder, commit) =>
       Effect.all([
         run(
