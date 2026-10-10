@@ -27,6 +27,7 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
+import { PageError } from '../page.tsx'
 
 /**
  * The Planning page: the base of a mission's frame while the Planner writes the Spec with the
@@ -54,7 +55,10 @@ export const probeViewId = (id: string): string => `probe:${id}`
 export interface PlanningPageProps extends PlanningHandlers {
   /** The page's data; null while the first read is on its way. */
   data: PlanningData | null
-  /** Why it could not be read, in words. */
+  /**
+   * Why it could not be read, in words; once drawn, why it stopped following the engine, said
+   * above the columns with Try again while what was read stays.
+   */
   error?: string | undefined
   onRetry: () => void
   /** The reasons of a Freeze just refused, each naming what blocks it. */
@@ -195,6 +199,19 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
   }
   return (
     <div className="flex min-w-0 flex-col">
+      {error !== undefined && (
+        <div className="px-8 pb-3">
+          <PageError
+            action={
+              <Button variant="link" size="sm" onClick={props.onRetry}>
+                Try again
+              </Button>
+            }
+          >
+            {`What is shown may be behind: ${error}`}
+          </PageError>
+        </div>
+      )}
       {refused !== undefined && refused.length > 0 && (
         <div className="px-8 pb-3">
           <FreezeRefusal reasons={refused} />
