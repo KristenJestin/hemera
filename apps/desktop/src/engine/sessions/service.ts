@@ -62,10 +62,15 @@ import { Memory } from '../memory/index.ts'
 import type { MissionActivity } from '../missions.ts'
 import type { Need } from '@hemera/ipc'
 import type { Secrets } from '../secrets.ts'
-import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import { commandRuns, missions, runnerLeases } from '../storage/schema.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
-import type { ToolAccess } from '../tools/access.ts'
+import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
 import { type BriefSources, type Predecessor, briefOf } from './brief.ts'
 import {
@@ -80,7 +85,7 @@ import {
 } from './deliveries.ts'
 import { spendBudget } from '../budget.ts'
 import { Cap, type RequestedBy } from './cap.ts'
-import { assignWork } from './leases.ts'
+import { assignWorkIn } from './leases.ts'
 import {
   CHANGE_THE_MODEL,
   agentUnavailable,
@@ -724,41 +729,57 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           )
         }).pipe(run)
 
-      /** The leases a session held, now its successor's. */
-      const passLeases = (from: RoleSession, to: RoleSession) =>
+      /**
+       * The leases a session held, made its successor's in the transaction that opens it (CT-11):
+       * the events of their reassignments.
+       */
+      const passLeasesIn = (transaction: EngineTransaction, from: RoleSession, to: RoleSession) =>
         Effect.gen(function* () {
-          const database = yield* Database
-          const held = yield* database
+          const held = yield* transaction
             .select({ workItem: runnerLeases.workItem })
             .from(runnerLeases)
             .where(eq(runnerLeases.sessionId, from.id))
             .pipe(Effect.mapError(refusedWhile('reading the leases')))
-          yield* Effect.forEach(held, (lease) => assignWork(lease.workItem, to), { discard: true })
+          const passed = yield* Effect.forEach(held, (lease) =>
+            assignWorkIn(transaction, lease.workItem, to),
+          )
+          return passed.flatMap((one) => one.events)
         })
+
+      /** A session whose leases passed to its successor: its calls are refused from now on. */
+      const revokeIfLeased = (session: RoleSession, leased: boolean) =>
+        leased ? ToolAccess.use((access) => access.revoke(session.id)) : Effect.void
 
       /**
        * Stops a session and opens its successor in one transaction: the old one kept, replaced,
-       * the new one of the same role, lineage and owner at the next epoch, and the Journal's line.
+       * the new one of the same role, lineage and owner at the next epoch, its leases passed, and
+       * the Journal's line.
        */
       const succeed = (session: RoleSession, reason: string) =>
-        mutate('replacing a session', (transaction) =>
-          Effect.gen(function* () {
-            const stopped = yield* endSession(transaction, session, 'replaced', reason)
-            const successor = yield* insertSession(transaction, successorOf(session))
-            const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
-            return {
-              result: successor,
-              events: [
-                stopped,
-                sessionEvent('session.replaced', session, {
-                  replacement: successor.id,
-                  reason,
-                  roleName,
-                }),
-              ],
-            }
-          }),
-        )
+        Effect.gen(function* () {
+          const [successor, leased] = yield* mutate('replacing a session', (transaction) =>
+            Effect.gen(function* () {
+              const stopped = yield* endSession(transaction, session, 'replaced', reason)
+              const next = yield* insertSession(transaction, successorOf(session))
+              const passed = yield* passLeasesIn(transaction, session, next)
+              const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
+              return {
+                result: [next, passed.length > 0] as const,
+                events: [
+                  stopped,
+                  ...passed,
+                  sessionEvent('session.replaced', session, {
+                    replacement: next.id,
+                    reason,
+                    roleName,
+                  }),
+                ],
+              }
+            }),
+          )
+          yield* revokeIfLeased(session, leased)
+          return successor
+        })
 
       const replace = (sessionId: string, reason: string) =>
         Semaphore.withPermits(
@@ -792,7 +813,6 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (driver !== undefined) yield* letGo(driver)
             else yield* runtime.release(sessionId)
             const successor = yield* succeed(session, reason)
-            yield* passLeases(session, successor)
             yield* addToThread(session.id, 'state', `replaced: ${reason}`)
             yield* said(`replaced ${session.id} by ${successor.id}: ${reason}`)
             const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
@@ -989,7 +1009,6 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             continue
           }
           const successor = yield* succeed(session, RESTARTED)
-          yield* passLeases(session, successor)
           rebuilt.push(successor)
           starts.push(() =>
             start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
@@ -1021,13 +1040,20 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             const live = yield* sessionsIn([...LIVE_OR_STUCK], session.owner)
             if (live.some((one) => one.lineage === session.lineage)) return null
             if (!(yield* active(session.owner))) return null
-            const successor = yield* mutate('starting a lineage again', (transaction) =>
-              Effect.map(insertSession(transaction, successorOf(session)), (next) => ({
-                result: next,
-                events: [sessionEvent('session.resumed', next, { predecessor: session.id })],
-              })),
+            const [successor, leased] = yield* mutate('starting a lineage again', (transaction) =>
+              Effect.gen(function* () {
+                const next = yield* insertSession(transaction, successorOf(session))
+                const passed = yield* passLeasesIn(transaction, session, next)
+                return {
+                  result: [next, passed.length > 0] as const,
+                  events: [
+                    ...passed,
+                    sessionEvent('session.resumed', next, { predecessor: session.id }),
+                  ],
+                }
+              }),
             )
-            yield* passLeases(session, successor)
+            yield* revokeIfLeased(session, leased)
             yield* said(`started ${session.lineage} again with ${successor.id}`)
             yield* start(successor, {
               lineage: session.lineage,

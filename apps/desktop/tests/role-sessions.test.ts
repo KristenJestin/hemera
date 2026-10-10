@@ -55,7 +55,7 @@ import {
   until,
   within,
 } from './sessions-world.ts'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 
 let data: string
 let work: string
@@ -700,6 +700,31 @@ describe('Leases and epochs (CT-11)', () => {
     expect(answer).toMatchObject({ ok: false, refused: true })
     expect(lease?.epoch).toBe(1)
     expect(stillHolds).toBe(false)
+  })
+  test('a replacement whose lease cannot pass is not written: no lease is left on a replaced session', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const [lease, holder] = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* settled(session.id)
+          yield* assignWork('task-1', session)
+          const database = yield* Database
+          yield* database.run(sql`CREATE TRIGGER refuse_leases BEFORE UPDATE ON runner_leases
+            BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+          yield* Sessions.use((sessions) => sessions.replace(session.id, 'a test')).pipe(
+            Effect.ignore,
+          )
+          yield* database.run(sql`DROP TRIGGER refuse_leases`)
+          const now = yield* leaseOf('task-1')
+          return [now, yield* getSession(now?.sessionId ?? '')] as const
+        }),
+      ),
+    )
+    expect(lease?.epoch).toBe(0)
+    expect(holder.state).not.toBe('replaced')
   })
 })
 
