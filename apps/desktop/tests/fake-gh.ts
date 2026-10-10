@@ -28,6 +28,8 @@ export interface GhRule {
   readonly aliasesUpdatedAt?: string
   /** Answers these aliases as not found. */
   readonly missing?: ReadonlyArray<string>
+  /** Answers only this many calls, then lets the next rules answer. */
+  readonly times?: number
 }
 
 export interface GhCall {
@@ -49,7 +51,7 @@ export const RECORDED_ENV = [
 ] as const
 
 const FAKE = `
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 const args = process.argv.slice(2)
 const rules = JSON.parse(readFileSync(process.env.FAKE_GH_RULES, 'utf8'))
 const env = {}
@@ -59,9 +61,16 @@ process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => { stdin += chunk })
 process.stdin.on('end', () => {
   appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, env, stdin, pid: process.pid }) + '\\n')
-  const rule = rules.find((one) =>
+  const used = JSON.parse(readFileSync(process.env.FAKE_GH_USED, 'utf8'))
+  const index = rules.findIndex((one, at) =>
     (one.host === undefined || one.host === process.env.GH_HOST) &&
+    (one.times === undefined || (used[at] ?? 0) < one.times) &&
     one.when.every((word) => args.some((arg) => arg.includes(word))))
+  const rule = index < 0 ? undefined : rules[index]
+  if (rule !== undefined) {
+    used[index] = (used[index] ?? 0) + 1
+    writeFileSync(process.env.FAKE_GH_USED, JSON.stringify(used))
+  }
   if (rule === undefined) {
     process.stderr.write('fake gh: no rule for ' + args.join(' ') + '\\n')
     process.exit(1)
@@ -108,9 +117,11 @@ export function fakeGh(
   const script = join(folder, 'gh.mjs')
   const rulesFile = join(folder, 'rules.json')
   const log = join(folder, 'calls.jsonl')
+  const used = join(folder, 'used.json')
   writeFileSync(script, FAKE)
   writeFileSync(rulesFile, JSON.stringify(rules))
   writeFileSync(log, '')
+  writeFileSync(used, '{}')
   return {
     settings: {
       program: { command: process.execPath, leading: [script] },
@@ -119,6 +130,7 @@ export function fakeGh(
         SYSTEMROOT: process.env['SYSTEMROOT'] ?? '',
         FAKE_GH_RULES: rulesFile,
         FAKE_GH_LOG: log,
+        FAKE_GH_USED: used,
         ...options.env,
       },
       limitMillis: options.limitMillis,
@@ -132,7 +144,10 @@ export function fakeGh(
           const call = JSON.parse(line) as GhCall
           return call
         }),
-    answer: (next) => writeFileSync(rulesFile, JSON.stringify(next)),
+    answer: (next) => {
+      writeFileSync(rulesFile, JSON.stringify(next))
+      writeFileSync(used, '{}')
+    },
   }
 }
 

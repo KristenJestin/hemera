@@ -2058,3 +2058,47 @@ export const proposedAnswers = sqliteTable(
   },
   (table) => [index('proposed_answers_of_question').on(table.missionId, table.questionId)],
 )
+
+/**
+ * The writes of a remote Spec into its mission's ticket (#98), one per Freeze in remote mode: the
+ * Spec version, the rendered text (masked) for its target (`markdown`, `adf` or `wiki`) and the
+ * fingerprint of the description it is to read back as; its `state` (`queued`, `waiting_offline`,
+ * `started`, `done`, `failed`, `conflict`, `indeterminate`) and its masked `error`. `events_seen`
+ * is the last ticket event of the mission the write knows of: those a "Write the Spec over it" marks
+ * seen. `expected_version_id` is the version the write knows (at the Freeze, then the one read
+ * before the intent); a description that differs from it is a conflict (CT-53);
+ * `conflict_version_id` the one a conflict found; `need_id` the decision a conflict asks and
+ * `resolution` its answer (`kept`, `written_over`); `retried` says the one try again a restart gives
+ * a write that did not land was used.
+ */
+export const ticketWrites = sqliteTable(
+  'ticket_writes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id').references(() => ticketProviders.id, {
+      onDelete: 'set null',
+    }),
+    reference: text('reference').notNull(),
+    key: text('key').notNull(),
+    specVersion: integer('spec_version').notNull(),
+    target: text('target').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    state: text('state').notNull(),
+    error: text('error').$type<Masked<string>>(),
+    eventsSeen: integer('events_seen').notNull(),
+    expectedVersionId: text('expected_version_id').references(() => ticketVersions.id),
+    conflictVersionId: text('conflict_version_id').references(() => ticketVersions.id),
+    needId: text('need_id'),
+    resolution: text('resolution'),
+    retried: integer('retried', { mode: 'boolean' }).notNull(),
+    queuedAt: text('queued_at').notNull(),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('ticket_writes_of_mission').on(table.missionId)],
+)

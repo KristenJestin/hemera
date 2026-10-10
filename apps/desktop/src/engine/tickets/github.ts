@@ -9,6 +9,10 @@
  *   update date. The text is the value of the `q` field, so it is never read as a flag.
  * - `changedSince`: one GraphQL query per batch of 50 issues, one alias per issue, asking only its
  *   update date.
+ * - `write` (#98): the issue read again, then its body replaced with `gh api --method PATCH`, the
+ *   JSON body on the standard input (`--input -`), never in an argument; then read back. A refusal
+ *   (the account may read the repository but not write to it) is `TicketForbidden`, masked; a body
+ *   refused as sent (400, 422) is a Spec too long when GitHub says so, `TicketWriteRejected` else.
  *
  * Every API call asks for the response's headers too (`--include`): a rate limit's reset is in
  * `x-ratelimit-reset`. An answer with no HTTP status at all is a call that never reached GitHub.
@@ -22,14 +26,18 @@ import {
   ProviderNotAuthenticated,
   type ProviderStatus,
   ProviderUnreachable,
+  REMOTE_SPEC_LIMITS,
   type TicketError,
   TicketForbidden,
   TicketNotFound,
+  TicketTooLong,
+  TicketWriteRejected,
   type TicketReference,
   TicketUnreadable,
   type TicketVersion,
   canonicalTicket,
   readSections,
+  remoteSpecTooLong,
   ticketKeyOf,
 } from '@hemera/core/domain'
 import { Effect, Option, Predicate, Result, Schema } from 'effect'
@@ -42,6 +50,7 @@ import {
   type TicketProvider,
   commentFingerprint,
   ticketFingerprint,
+  unmoved,
 } from './provider.ts'
 
 /** A GitHub provider's configuration: its host, and the repositories its search watches. */
@@ -132,7 +141,11 @@ const ChangedAnswer = Schema.Struct({
   errors: Schema.optionalKey(Schema.Array(GraphqlError)),
 })
 
-const ErrorsOnly = Schema.Struct({ errors: Schema.optionalKey(Schema.Array(GraphqlError)) })
+/** GraphQL's errors, or a REST answer's message (an edit refused, #98). */
+const ErrorsOnly = Schema.Struct({
+  errors: Schema.optionalKey(Schema.Array(GraphqlError)),
+  message: Schema.optionalKey(Schema.String),
+})
 
 const SearchAnswer = Schema.Struct({
   items: Schema.Array(
@@ -221,6 +234,19 @@ export const githubProvider = (config: GithubConfig) =>
     const said = (answer: GhAnswer, fallback: string) =>
       answer.stderr.trim().split('\n')[0] || fallback
 
+    /** GitHub's message in an answer, masked. */
+    const wordsOf = (
+      answer: GhAnswer,
+      response: { readonly status: number; readonly body: string },
+    ) => {
+      const decoded = Option.getOrNull(readErrors(response.body))
+      return gh.mask(
+        (decoded?.errors ?? []).map((error) => error.message).join(' ') ||
+          (decoded?.message ?? '') ||
+          said(answer, `HTTP ${String(response.status)}`),
+      )
+    }
+
     /** What a failed answer is, as an error of the port. */
     const failureOf = (key: string, answer: GhAnswer): TicketError => {
       if (answer.code === 4) {
@@ -239,14 +265,8 @@ export const githubProvider = (config: GithubConfig) =>
               detail: said(answer, `gh ended with ${String(answer.code)}`),
             })
       }
-      const errors = Option.match(readErrors(response.body), {
-        onNone: () => [],
-        onSome: (decoded) => decoded.errors ?? [],
-      })
-      const words = gh.mask(
-        errors.map((error) => error.message).join(' ') ||
-          said(answer, `HTTP ${String(response.status)}`),
-      )
+      const errors = Option.getOrNull(readErrors(response.body))?.errors ?? []
+      const words = wordsOf(answer, response)
       const remaining = response.headers.get('x-ratelimit-remaining')
       if (
         errors.some((error) => error.type === 'RATE_LIMITED') ||
@@ -525,5 +545,46 @@ export const githubProvider = (config: GithubConfig) =>
         return changes
       })
 
-    return { kind: 'github', label, status, reads, read, search, changedSince }
+    const write = (reference: TicketReference, text: string, expected: { fingerprint: string }) =>
+      Effect.gen(function* () {
+        const key = ticketKeyOf(reference)
+        if (!Predicate.isTagged(reference, 'GithubIssue')) {
+          return yield* new TicketUnreadable({ key, detail: `${key} is not a GitHub issue.` })
+        }
+        if (remoteSpecTooLong(text, REMOTE_SPEC_LIMITS.github)) {
+          return yield* new TicketTooLong({ key, limit: REMOTE_SPEC_LIMITS.github })
+        }
+        yield* unmoved(yield* read(reference), expected)
+        const issue = GithubIssue.make({ ...reference, host })
+        const answer = yield* gh.run(
+          host,
+          [
+            'api',
+            '--method',
+            'PATCH',
+            `repos/${issue.owner}/${issue.repo}/issues/${String(issue.number)}`,
+            '--hostname',
+            host,
+            '--include',
+            '--input',
+            '-',
+          ],
+          JSON.stringify({ body: text }),
+        )
+        const response = responseOf(answer.stdout)
+        // The body refused as it was sent (400, 422): too long when GitHub says so, a refusal in
+        // its words otherwise; never a read's failure.
+        if (response !== null && (response.status === 400 || response.status === 422)) {
+          const words = wordsOf(answer, response)
+          return yield* /too long|maximum/i.test(words)
+            ? new TicketTooLong({ key, limit: REMOTE_SPEC_LIMITS.github })
+            : new TicketWriteRejected({ key, detail: words })
+        }
+        if (response === null || answer.code !== 0 || response.status >= 300) {
+          return yield* failureOf(key, answer)
+        }
+        return yield* read(reference)
+      })
+
+    return { kind: 'github', label, status, reads, read, search, changedSince, write }
   })

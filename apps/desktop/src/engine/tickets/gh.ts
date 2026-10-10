@@ -5,7 +5,8 @@
  * - `gh` is found on the user's `PATH` (`gh.exe` on Windows); a missing one is said, never
  *   installed.
  * - It runs as a program with an argument array, never through a shell, under the process
- *   supervisor, its standard input closed at once.
+ *   supervisor, its standard input closed at once, or once it carried the body of a write (#98):
+ *   a text Hemera sends goes on the standard input, never in an argument.
  * - It runs with the user's own environment and `gh` configuration, plus `GH_PROMPT_DISABLED`,
  *   `GH_NO_UPDATE_NOTIFIER` and `NO_COLOR`, and `GH_HOST` set to the provider's host. The empty
  *   configuration folder the permissions engine gives agents' commands never applies here. Hemera
@@ -80,10 +81,11 @@ export class GhCli extends Context.Service<
   {
     /** The `gh` this engine runs, or none when it is not on the PATH. */
     readonly program: Effect.Effect<Option.Option<GhProgram>>
-    /** Runs `gh` with these arguments, for this host. */
+    /** Runs `gh` with these arguments, for this host; `input` is written on its standard input. */
     readonly run: (
       host: string,
       args: ReadonlyArray<string>,
+      input?: string,
     ) => Effect.Effect<GhAnswer, ProviderCliMissing | ProviderUnreachable>
     /** Text with the known secret values masked, for what `gh` answered on its output. */
     readonly mask: (text: string) => string
@@ -105,7 +107,7 @@ export const ghCliLayer = (settings: GhSettings = {}) =>
         return found === null ? Option.none() : Option.some({ command: found, leading: [] })
       })
 
-      const run = (host: string, args: ReadonlyArray<string>) =>
+      const run = (host: string, args: ReadonlyArray<string>, input?: string) =>
         Effect.gen(function* () {
           const label = githubLabel(host)
           const found = yield* program
@@ -150,6 +152,7 @@ export const ghCliLayer = (settings: GhSettings = {}) =>
                     ),
                   ),
                 )
+              if (input !== undefined) yield* child.write(input)
               yield* child.closeInput
               const out: string[] = []
               const err: string[] = []

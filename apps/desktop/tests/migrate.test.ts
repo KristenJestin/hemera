@@ -214,6 +214,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'ticket_versions',
       'ticket_versions_by_mission',
       'ticket_versions_by_reference',
+      'ticket_writes',
+      'ticket_writes_of_mission',
       'tool_calls',
       'variables_by_scope',
       'waves',

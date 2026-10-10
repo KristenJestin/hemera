@@ -342,6 +342,8 @@ const memoryHandlers = {
   'tickets.events': unused,
   'tickets.difference': unused,
   'tickets.acknowledge': unused,
+  'tickets.writes': unused,
+  'tickets.retryWrite': unused,
   'tickets.changed': () => Stream.die('not asked of this engine'),
   'missions.freezeReadiness': unused,
   'missions.freezeReadinessChanged': () => Stream.die('not asked of this engine'),

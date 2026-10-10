@@ -19,6 +19,8 @@
  *   declaration cleared, the Freeze's stops still owed dropped, the ticket's changes found after the
  *   Freeze made inputs of the new Planning (#97), and `[hemera:update]` stored in the same
  *   transaction, then handed to a fresh Planner with those inputs.
+ * - **Remote Specs** (#98): in remote mode the Freeze queues the write of the frozen Spec into the
+ *   mission's ticket in its own transaction, and a return to Planning drops a write not sent yet.
  *
  * A mission's Freezes and returns run one at a time, and never beside one of its discussions'
  * gestures. No path here reaches Building.
@@ -86,6 +88,7 @@ import {
   specs,
 } from '../storage/schema.ts'
 import { ticketEventsToPlanningIn } from '../tickets/events.ts'
+import { dropWritesIn, queueWriteIn } from '../tickets/writes.ts'
 import { mutate } from '../transaction.ts'
 import { SpecBoard } from './board.ts'
 import { deliverInputs } from './calls.ts'
@@ -462,6 +465,8 @@ export const freezeMission = (missionId: string, specVersion: number) =>
           const moved = yield* moveIn(transaction, { ...mission, stage }, 'freeze', 'user')
           const cleared = yield* clearOutdatedIn(transaction, missionId)
           const blocked = yield* blockIn(transaction, missionId)
+          // In remote mode, the frozen Spec's write into the ticket, queued: sent after (#98).
+          const queued = yield* queueWriteIn(transaction, missionId)
           // Owed until done: a stop before they ran leaves them to the next start.
           yield* transaction
             .insert(missionStops)
@@ -485,7 +490,7 @@ export const freezeMission = (missionId: string, specVersion: number) =>
           }
           return {
             result: { refused: [], told: null },
-            events: [moved, frozen, ...cleared, ...blocked],
+            events: [moved, frozen, ...cleared, ...blocked, ...queued],
           }
         }),
       )
@@ -584,6 +589,8 @@ export const returnToPlanning = (missionId: string, reason: string | null) =>
           const unblocked = yield* unblockIn(transaction, missionId)
           // The ticket's changes found after the Freeze are the new Planning's inputs (#97).
           const ticket = yield* ticketEventsToPlanningIn(transaction, missionId)
+          // A write of the frozen Spec not sent yet is dropped: the next Freeze writes (#98).
+          const dropped = yield* dropWritesIn(transaction, missionId)
           const body = updateDelivery({
             key,
             version,
@@ -607,7 +614,7 @@ export const returnToPlanning = (missionId: string, reason: string | null) =>
           }
           return {
             result: { deliveryId, body, inputs: ticket.inputs },
-            events: [moved, back, ...unblocked, ...ticket.events],
+            events: [moved, back, ...unblocked, ...ticket.events, ...dropped],
           }
         }),
       )

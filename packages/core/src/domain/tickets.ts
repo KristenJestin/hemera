@@ -20,9 +20,10 @@ export type ProviderKind = typeof ProviderKind.Type
 
 /**
  * Where a Project's Specs live (#94, section 3): `local` (the default) reads a ticket once as the
- * idea; `linked` also watches it. #98 adds `remote`.
+ * idea; `linked` also watches it; `remote` watches it too, and writes the frozen Spec into it
+ * (#98).
  */
-export const SPEC_MODES = ['local', 'linked'] as const
+export const SPEC_MODES = ['local', 'linked', 'remote'] as const
 export const SpecMode = Schema.Literals(SPEC_MODES)
 export type SpecMode = typeof SpecMode.Type
 
@@ -241,6 +242,42 @@ export class TicketUnreadable extends Schema.TaggedError<TicketUnreadable>()('Ti
   }
 }
 
+/**
+ * A write refused before anything was sent: the ticket changed since the version Hemera expected
+ * (CT-53). `version` is the ticket as it was read just now.
+ */
+export class TicketMoved extends Schema.TaggedError<TicketMoved>()('TicketMoved', {
+  key: Schema.String,
+  version: TicketVersion,
+}) {
+  override get message(): string {
+    return `${this.key} changed since Hemera last read it: nothing was written.`
+  }
+}
+
+/** A Spec longer than the tracker accepts: never cut, never sent. */
+export class TicketTooLong extends Schema.TaggedError<TicketTooLong>()('TicketTooLong', {
+  key: Schema.String,
+  limit: Schema.Number,
+}) {
+  override get message(): string {
+    return `The Spec is too long for ${this.key}'s description (${String(this.limit)} characters at most): it stays in Hemera.`
+  }
+}
+
+/**
+ * A description the tracker refused as it was sent (a 400 on the write): not applied, said in the
+ * tracker's own words, masked.
+ */
+export class TicketWriteRejected extends Schema.TaggedError<TicketWriteRejected>()(
+  'TicketWriteRejected',
+  { key: Schema.String, detail: Schema.String },
+) {
+  override get message(): string {
+    return `${this.key} refused the Spec as its description: ${this.detail}`
+  }
+}
+
 export type TicketError =
   | TicketNotFound
   | TicketForbidden
@@ -259,6 +296,34 @@ export const TicketErrorSchema = Schema.Union([
   ProviderLimited,
   TicketUnreadable,
 ])
+
+/**
+ * What a provider's write may fail with: a read's errors, a moved ticket, a text too long, a
+ * description refused.
+ */
+export type TicketWriteError = TicketError | TicketMoved | TicketTooLong | TicketWriteRejected
+
+/**
+ * Where a write of a remote Spec stands (#98): `queued` at the Freeze; `waiting_offline` while the
+ * provider is out of reach; `started` once its intent is written (CT-09); then `done`, `failed`
+ * (with its masked sentence) or `conflict` (the ticket changed since Hemera last read it, CT-53);
+ * `indeterminate` when an engine stopped between the intent and the outcome.
+ */
+export const TICKET_WRITE_STATES = [
+  'queued',
+  'waiting_offline',
+  'started',
+  'done',
+  'failed',
+  'conflict',
+  'indeterminate',
+] as const
+export const TicketWriteState = Schema.Literals(TICKET_WRITE_STATES)
+export type TicketWriteState = typeof TicketWriteState.Type
+
+/** The two answers of the decision a conflict asks (open question 18). */
+export const KEEP_TICKET_CHANGE = 'Keep the ticket’s change'
+export const WRITE_SPEC_OVER = 'Write the Spec over it'
 
 // --- The fingerprint ------------------------------------------------------------------------------
 
@@ -441,6 +506,20 @@ const ONE_LINE = /^WHEN\s+(.+?)\s+THEN\s+(.+)$/
 const WHEN_ALONE = /^WHEN\s+(.+)$/
 const THEN_ALONE = /^THEN\s+(.+)$/
 
+/**
+ * A scenario's text as people read it: a backslash escape (Markdown's, wiki markup's) its
+ * character, `&lt;`, `&gt;` and `&amp;` theirs, and the zero-width joiner a remote Spec writes after
+ * a `@` or a `#` (#98) left out.
+ */
+const unescaped = (text: string): string =>
+  text
+    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
+    .replace(/([@#])\u200d/g, '$1')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim()
+
 /** The `WHEN … THEN …` scenarios of a Requirements text; anything else stays text only. */
 const scenariosOf = (text: string): ReadonlyArray<TicketScenario> => {
   const lines = text
@@ -451,13 +530,13 @@ const scenariosOf = (text: string): ReadonlyArray<TicketScenario> => {
     const line = lines[index] ?? ''
     const both = ONE_LINE.exec(line)
     if (both !== null) {
-      scenarios.push({ when: (both[1] ?? '').trim(), then: (both[2] ?? '').trim() })
+      scenarios.push({ when: unescaped(both[1] ?? ''), then: unescaped(both[2] ?? '') })
       continue
     }
     const when = WHEN_ALONE.exec(line)
     const then = THEN_ALONE.exec(lines[index + 1] ?? '')
     if (when !== null && then !== null) {
-      scenarios.push({ when: (when[1] ?? '').trim(), then: (then[1] ?? '').trim() })
+      scenarios.push({ when: unescaped(when[1] ?? ''), then: unescaped(then[1] ?? '') })
       index += 1
     }
   }

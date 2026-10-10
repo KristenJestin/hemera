@@ -23,6 +23,7 @@ import {
   ProviderLimited,
   type TicketError,
   TicketErrorSchema,
+  type TicketWriteError,
   type TicketReference,
   parseTicketReference,
   ticketKeyOf,
@@ -155,7 +156,10 @@ const waiting = (label: string, until: string) =>
  * A call on a provider, its outage kept: refused at once during a rate limit, the first failure of
  * an outage said once, the next success said once.
  */
-export const observed = <A, R>(live: LiveProvider, call: Effect.Effect<A, TicketError, R>) =>
+export const observed = <A, E extends TicketWriteError, R>(
+  live: LiveProvider,
+  call: Effect.Effect<A, E, R>,
+) =>
   Effect.gen(function* () {
     const { info, provider } = live
     const limited = yield* limitedUntilOf(info.id)
@@ -305,7 +309,7 @@ export const missionTicket = (missionId: string) =>
       reference: CanonicalTicket.make(row.reference),
       key: row.key,
       url: row.url,
-      mode: row.link.mode === 'linked' ? 'linked' : 'local',
+      mode: row.link.mode === 'linked' || row.link.mode === 'remote' ? row.link.mode : 'local',
       base: byId(row.link.baseVersionId),
       last: byId(row.link.lastVersionId),
     } satisfies MissionTicket

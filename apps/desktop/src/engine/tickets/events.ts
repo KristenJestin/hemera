@@ -35,7 +35,7 @@ import {
   ticketChanges,
 } from '@hemera/core/domain'
 import { type TicketEventInfo, TicketEventRefused, UnknownTicketEvent } from '@hemera/ipc'
-import { and, asc, desc, eq, inArray, isNull, max } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, max } from 'drizzle-orm'
 import { Effect, Option, Schema } from 'effect'
 
 import type { NewEvent } from '../journal.ts'
@@ -52,8 +52,10 @@ import {
   ticketEventRuns,
   ticketEvents,
   ticketVersions,
+  ticketWrites,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { specFingerprint } from './provider.ts'
 import { insertVersion, maskedVersion, projectOfIn, versionOf } from './versions.ts'
 
 const now = (): string => new Date().toISOString()
@@ -139,7 +141,10 @@ const eventSaid = (row: EventRow, author: string | null): string =>
 const ticketMark = (key: string, difference: string) =>
   OutdatedMark.make({ reason: 'ticket-changed', reference: key, difference })
 
-/** Whether a Project watches the tickets of its live missions: in linked mode (#94, section 3). */
+/**
+ * Whether a Project watches the tickets of its live missions: in linked and remote mode (#94,
+ * section 3; #98).
+ */
 const watchingIn = (transaction: EngineTransaction, projectId: string) =>
   Effect.map(
     transaction
@@ -147,7 +152,33 @@ const watchingIn = (transaction: EngineTransaction, projectId: string) =>
       .from(projects)
       .where(eq(projects.id, projectId))
       .pipe(Effect.mapError(refusedWhile('reading the Project'))),
-    ([row]) => row?.mode === 'linked',
+    ([row]) => row?.mode === 'linked' || row?.mode === 'remote',
+  )
+
+/**
+ * Whether a description is a remote Spec Hemera wrote, or is writing, into the mission's ticket
+ * (#98): a read that finds it, whichever path read it, never makes it a change (CT-53).
+ */
+export const writtenByHemeraIn = (
+  transaction: EngineTransaction,
+  missionId: string,
+  description: string,
+) =>
+  Effect.map(
+    transaction
+      .select({ fingerprint: ticketWrites.fingerprint })
+      .from(ticketWrites)
+      .where(
+        and(
+          eq(ticketWrites.missionId, missionId),
+          inArray(ticketWrites.state, ['started', 'indeterminate', 'done']),
+        ),
+      )
+      .pipe(Effect.mapError(refusedWhile('reading the writes of the Spec'))),
+    (rows) => {
+      const read = specFingerprint(description)
+      return rows.some((row) => row.fingerprint === read)
+    },
   )
 
 /** The mission's last event number. */
@@ -309,8 +340,13 @@ export const keepVersionIn = (
     if (staleAgainst(version, last)) return NOTHING
     const before = versionOf(last)
     const after = maskedVersion(version, secrets.mask)
-    const changes =
+    const found =
       compared?.lastVersionId === last.id ? compared.changes : ticketChanges(before, after)
+    // Hemera's own remote Spec read back before its write could keep it is no change (#98).
+    const own =
+      found.some((change) => change.kind === 'description_changed') &&
+      (yield* writtenByHemeraIn(transaction, missionId, version.description))
+    const changes = own ? found.filter((change) => change.kind !== 'description_changed') : found
     if (changes.length === 0 && last.updatedAt === version.updatedAt) return NOTHING
     const id = yield* insertVersion(transaction, missionId, providerId, version, secrets.mask)
     yield* keep(id, false)
@@ -779,4 +815,38 @@ export const acknowledgeEvent = (eventId: string) =>
       .pipe(Effect.mapError(refusedWhile('reading a ticket event')))
     if (row === undefined) return yield* new UnknownTicketEvent({ id: eventId })
     return infoOf(row.event, row.input)
+  })
+
+/**
+ * The user chose to write the Spec over the ticket's changes (#98): the changes of its description
+ * found up to `upTo` that still wait are seen by them, as `acknowledge` marks them, and the mark
+ * lifts once no change waits. Answers the events.
+ */
+export const seenOverWriteIn = (transaction: EngineTransaction, missionId: string, upTo: number) =>
+  Effect.gen(function* () {
+    const rows = yield* transaction
+      .update(ticketEvents)
+      .set({ state: 'seen', seenAt: now() })
+      .where(
+        and(
+          eq(ticketEvents.missionId, missionId),
+          eq(ticketEvents.kind, 'description_changed'),
+          lte(ticketEvents.sequence, upTo),
+          isNull(ticketEvents.inputId),
+          inArray(ticketEvents.state, [...PENDING]),
+        ),
+      )
+      .returning()
+      .pipe(Effect.mapError(refusedWhile('marking the ticket’s changes seen')))
+    if (rows.length === 0) return []
+    const projectId = yield* projectOfIn(transaction, missionId)
+    const seen = rows.map((row): NewEvent => ({
+      type: 'tickets.event_seen',
+      entityKind: 'mission',
+      entityId: missionId,
+      source: 'ui',
+      author: 'human',
+      payload: { projectId, event: row.id, kind: row.kind, key: row.key },
+    }))
+    return [...seen, ...(yield* settleMarkIn(transaction, missionId))]
   })

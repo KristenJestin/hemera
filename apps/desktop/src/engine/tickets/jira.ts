@@ -12,6 +12,9 @@
  *   `changedSince`: one JQL `key in (…)` request per 50 keys, asking only `updated`; Hemera
  *   compares the dates as instants itself, so the user's Jira time zone never matters. A key
  *   answered under another key (a moved issue) is read alone by the key asked.
+ * - `write` (#98): the issue read again, then its description replaced (`PUT …/issue/{key}`, the
+ *   `description` field only: ADF on Cloud, wiki markup on Data Center), then read back. A 400 on
+ *   the write is the description refused: too long when Jira says so, a refusal in its words else.
  * - Descriptions and comments become Markdown (ADF or wiki markup) and go through `readSections`;
  *   the fingerprint is taken on Jira's own text.
  * - Jira's messages come as they are, masked.
@@ -25,11 +28,15 @@ import {
   ProviderNotAuthenticated,
   type ProviderStatus,
   ProviderUnreachable,
+  REMOTE_SPEC_LIMITS,
   type TicketError,
   TicketForbidden,
   TicketNotFound,
+  TicketTooLong,
   type TicketReference,
   TicketUnreadable,
+  TicketWriteRejected,
+  type TicketWriteError,
   type TicketVersion,
   adfFingerprintText,
   adfToMarkdown,
@@ -37,6 +44,7 @@ import {
   jiraInstant,
   jqlString,
   readSections,
+  remoteSpecTooLong,
   wikiToMarkdown,
 } from '@hemera/core/domain'
 import type { JiraProviderConfig, TicketProviderInfo } from '@hemera/ipc'
@@ -54,6 +62,7 @@ import {
   type TicketProvider,
   commentFingerprint,
   ticketFingerprint,
+  unmoved,
 } from './provider.ts'
 
 /** How many hits a search answers. */
@@ -167,6 +176,7 @@ const readIssue = Schema.decodeUnknownOption(Schema.fromJsonString(IssueAnswer))
 const readComments = Schema.decodeUnknownOption(Schema.fromJsonString(CommentsAnswer))
 const readSearch = Schema.decodeUnknownOption(Schema.fromJsonString(SearchAnswer))
 const readMyself = Schema.decodeUnknownOption(Schema.fromJsonString(Myself))
+const readDocument = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 /** A status as Hemera says it: closed in Jira's `done` category, open otherwise, in Jira's words. */
 const statusOf = (status: typeof Status.Type | undefined) =>
@@ -215,12 +225,21 @@ interface SearchRequest {
   readonly fields: ReadonlyArray<string>
 }
 
+/** A description written as Hemera writes it (#98): ADF on Cloud, wiki markup on Data Center. */
+interface DescriptionWrite {
+  readonly fields: { readonly description: Schema.Json }
+}
+
 /** One call's requests, with the credential it was opened with. */
 interface Session {
   readonly get: (path: string) => Effect.Effect<JiraAnswer, ProviderUnreachable>
   readonly post: (
     path: string,
     body: SearchRequest,
+  ) => Effect.Effect<JiraAnswer, ProviderUnreachable>
+  readonly put: (
+    path: string,
+    body: DescriptionWrite,
   ) => Effect.Effect<JiraAnswer, ProviderUnreachable>
 }
 
@@ -246,16 +265,17 @@ const sessionWith = (provider: JiraProviderInfo, token: string, source: string) 
           headers: { ...headers, 'content-type': 'application/json' },
           body: JSON.stringify(body),
         }),
+      put: (path, body) =>
+        link.request(site, `${api}${path}`, {
+          method: 'PUT',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
     } satisfies Session
   })
 
-/** What a failed answer is, as an error of the port, Jira's message as is and masked. */
-const failureOf = (
-  label: string,
-  key: string,
-  answer: JiraAnswer,
-  mask: (text: string) => string,
-): TicketError => {
+/** Jira's message in a failed answer, masked. */
+const wordsOf = (answer: JiraAnswer, mask: (text: string) => string): string => {
   const decoded = Option.getOrNull(readError(answer.body))
   const said = [
     ...(decoded?.errorMessages ?? []),
@@ -264,8 +284,17 @@ const failureOf = (
   ].join(' ')
   // The whole body is masked before it is cut: a cut first could leave part of a secret unknown to
   // the mask.
-  const words =
-    mask(said) || mask(answer.body.trim()).slice(0, 300) || `HTTP ${String(answer.status)}`
+  return mask(said) || mask(answer.body.trim()).slice(0, 300) || `HTTP ${String(answer.status)}`
+}
+
+/** What a failed answer is, as an error of the port, Jira's message as is and masked. */
+const failureOf = (
+  label: string,
+  key: string,
+  answer: JiraAnswer,
+  mask: (text: string) => string,
+): TicketError => {
+  const words = wordsOf(answer, mask)
   switch (answer.status) {
     case 401:
       return new ProviderNotAuthenticated({
@@ -288,6 +317,23 @@ const failureOf = (
         ? new ProviderUnreachable({ provider: label, detail: words })
         : new TicketUnreadable({ key, detail: `${key} could not be read: ${words}` })
   }
+}
+
+/**
+ * What a failed write is: a description refused as it was sent (400) is no read's failure, but a
+ * Spec too long when Jira says so, and a refusal in its words otherwise; anything else as a read's.
+ */
+const writeFailureOf = (
+  label: string,
+  key: string,
+  answer: JiraAnswer,
+  mask: (text: string) => string,
+): TicketWriteError => {
+  if (answer.status !== 400) return failureOf(label, key, answer, mask)
+  const words = wordsOf(answer, mask)
+  return /too long|exceed|limit|length/i.test(words)
+    ? new TicketTooLong({ key, limit: REMOTE_SPEC_LIMITS.jira })
+    : new TicketWriteRejected({ key, detail: words })
 }
 
 /** Checks a token against the site, before it is stored: the name Jira knows its owner by. */
@@ -364,6 +410,7 @@ export const jiraProvider = (info: TicketProviderInfo, jira: JiraProviderConfig)
       return {
         get: (path) => watched(session.get(path)),
         post: (path, body) => watched(session.post(path, body)),
+        put: (path, body) => watched(session.put(path, body)),
       } satisfies Session
     })
 
@@ -621,6 +668,37 @@ export const jiraProvider = (info: TicketProviderInfo, jira: JiraProviderConfig)
         }),
       )
 
+    const write = (reference: TicketReference, text: string, expected: { fingerprint: string }) =>
+      inContext(
+        Effect.gen(function* () {
+          if (!Predicate.isTagged(reference, 'JiraKey')) {
+            return yield* new TicketUnreadable({
+              key: label,
+              detail: 'This reference is not a Jira key.',
+            })
+          }
+          const target = jira.deployment === 'cloud' ? 'adf' : 'wiki'
+          if (remoteSpecTooLong(text, REMOTE_SPEC_LIMITS.jira)) {
+            return yield* new TicketTooLong({ key: reference.key, limit: REMOTE_SPEC_LIMITS.jira })
+          }
+          const description: Schema.Json | null =
+            target === 'adf' ? Option.getOrNull(readDocument(text)) : text
+          if (description === null) {
+            return yield* new TicketUnreadable({
+              key: reference.key,
+              detail: `The Spec for ${reference.key} is not a document Jira reads.`,
+            })
+          }
+          const before = yield* unmoved(yield* read(reference), expected)
+          const session = yield* opened
+          const answer = yield* session.put(`/issue/${encodeURIComponent(before.key)}`, {
+            fields: { description },
+          })
+          if (answer.status >= 300) return yield* writeFailureOf(label, before.key, answer, mask)
+          return yield* read(referenceOf(before.key))
+        }),
+      )
+
     return {
       kind: 'jira',
       label,
@@ -629,5 +707,6 @@ export const jiraProvider = (info: TicketProviderInfo, jira: JiraProviderConfig)
       read,
       search,
       changedSince,
+      write,
     } satisfies TicketProvider
   })

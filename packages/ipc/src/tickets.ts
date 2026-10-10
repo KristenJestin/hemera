@@ -14,6 +14,7 @@ import {
   TicketEventMatters,
   TicketEventState,
   TicketVersion,
+  TicketWriteState,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
@@ -227,6 +228,49 @@ export class InvalidSyncInterval extends Schema.TaggedError<InvalidSyncInterval>
   }
 }
 
+/**
+ * A write of a remote Spec into its mission's ticket (#98), one per Freeze in remote mode: where it
+ * stands, the masked sentence of a failure, and the decision a conflict asks (answered through the
+ * needs) with its answer.
+ */
+export const TicketWriteInfo = Schema.Struct({
+  id: Schema.String,
+  missionId: Schema.String,
+  key: Schema.String,
+  /** The version of the frozen Spec it writes. */
+  specVersion: Schema.Number,
+  state: TicketWriteState,
+  /** Why it failed, in a sentence; null otherwise. */
+  error: Schema.NullOr(Schema.String),
+  /** The decision a conflict asks; null without a conflict. */
+  needId: Schema.NullOr(Schema.String),
+  /** What the user answered a conflict: the ticket's change kept, or the Spec written over it. */
+  resolution: Schema.NullOr(Schema.Literals(['kept', 'written_over'])),
+  queuedAt: Schema.String,
+  startedAt: Schema.NullOr(Schema.String),
+  endedAt: Schema.NullOr(Schema.String),
+})
+export type TicketWriteInfo = typeof TicketWriteInfo.Type
+
+export class UnknownTicketWrite extends Schema.TaggedError<UnknownTicketWrite>()(
+  'UnknownTicketWrite',
+  { id: Schema.String },
+) {
+  override get message(): string {
+    return 'This write of the Spec no longer exists.'
+  }
+}
+
+/** A Retry refused, with the reason. */
+export class TicketWriteRefused extends Schema.TaggedError<TicketWriteRefused>()(
+  'TicketWriteRefused',
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason
+  }
+}
+
 const always = [StorageFailed, EngineGone] as const
 
 const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Errors) =>
@@ -341,6 +385,21 @@ export const TicketsRpcs = RpcGroup.make(
     payload: { eventId: Schema.String },
     success: TicketEventInfo,
     error: failing(...always, UnknownTicketEvent, TicketEventRefused),
+  }),
+  /** The writes of a mission's remote Spec into its ticket (#98), the first first. */
+  Rpc.make('tickets.writes', {
+    payload: { missionId: Schema.String },
+    success: Schema.Array(TicketWriteInfo),
+    error: failing(...always),
+  }),
+  /**
+   * Retry: a failed write of the mission's latest Freeze is queued again, and runs the whole
+   * procedure (read again, compare, write). A conflict is answered through its decision instead.
+   */
+  Rpc.make('tickets.retryWrite', {
+    payload: { writeId: Schema.String },
+    success: TicketWriteInfo,
+    error: failing(...always, UnknownTicketWrite, TicketWriteRefused),
   }),
   /** The Project's ticket settings now, then again after each change. */
   Rpc.make('tickets.changed', {

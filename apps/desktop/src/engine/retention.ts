@@ -120,6 +120,7 @@ export const TABLE_CLASSES = {
   ticket_versions: 'permanent',
   mission_tickets: 'permanent',
   ticket_events: 'permanent',
+  ticket_writes: 'permanent',
   ticket_event_runs: 'permanent',
   proposed_answers: 'permanent',
   jira_tokens: 'state',

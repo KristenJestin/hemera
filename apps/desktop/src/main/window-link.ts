@@ -633,6 +633,13 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('tickets.acknowledge', log),
       ),
+    'tickets.writes': (request) =>
+      engine['tickets.writes'](request).pipe(closedAs(gone), observed('tickets.writes', log)),
+    'tickets.retryWrite': (request) =>
+      engine['tickets.retryWrite'](request).pipe(
+        closedAs(gone),
+        observed('tickets.retryWrite', log),
+      ),
     'missions.freezeReadiness': (request) =>
       engine['missions.freezeReadiness'](request).pipe(
         closedAs(gone),

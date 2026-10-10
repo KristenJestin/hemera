@@ -9,7 +9,7 @@
 
 import { join } from 'node:path'
 
-import { LIVE_STAGES, type SpecMode, missionKey } from '@hemera/core/domain'
+import { LIVE_STAGES, SpecMode, missionKey } from '@hemera/core/domain'
 import {
   type GithubProviderConfig,
   InvalidProviderConfig,
@@ -320,11 +320,9 @@ export const removeProvider = (id: string) =>
     }),
   )
 
-const readMode = Schema.decodeUnknownOption(
-  Schema.Literals(['local', 'linked'] satisfies ReadonlyArray<SpecMode>),
-)
+const readMode = Schema.decodeUnknownOption(SpecMode)
 
-/** The Project's Spec mode: `local` unless the user chose `linked`. */
+/** The Project's Spec mode: `local` unless the user chose `linked` or `remote`. */
 export const specModeOf = (projectId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
