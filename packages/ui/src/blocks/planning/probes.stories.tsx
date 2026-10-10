@@ -14,7 +14,7 @@ const meta = {
   title: 'Blocks/Planning/ProbesCard',
   component: ProbesCard,
   args: {
-    probes: Object.values(PROBES),
+    probes: PROBES,
     onOpen: fn(),
   },
   decorators: [

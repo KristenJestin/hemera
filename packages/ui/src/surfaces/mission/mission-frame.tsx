@@ -17,9 +17,9 @@ import { CancelMission, HeaderMarks, StageTrack } from './mission-header.tsx'
  * The header is three lines. The first: the key in the mono face, the title, and at its end the
  * stage's action, the `…` with the rest when there is one, and Cancel, visible at every stage
  * before Done. The second: the stage as a track of the stages of a mission's life, the current
- * one lit and the lock of the frozen Spec on Planning. The third, quiet: who has the ball, the
- * marks with the causes of those that have one written out, the type, the ticket it comes from,
- * the branch when it is known, and the Spec, which opens from here on every stage because it is
+ * one lit and the lock of the frozen Spec on Planning. The third, quiet: who has the ball (with the
+ * Now line of its agent when the stage gives one), the marks with the causes of those that have
+ * one written out, the type, the ticket it comes from, the branch when it is known, and the Spec, which opens from here on every stage because it is
  * what the mission is. What the stage's action does is a later ticket's; here is where it sits.
  *
  * The needs of the mission stand under the header, above the base, whatever the stage.
@@ -70,6 +70,11 @@ export interface MissionFrameProps {
   /** What kind of work it is, as the header says it. */
   type: 'feature' | 'bug' | 'maintenance'
   ball: Ball
+  /**
+   * What the stage's main agent does now, in words (its Now line), or a turn that ended without a
+   * word said in words; the ball's legend when left out.
+   */
+  now?: string | undefined
   /** The marks of the mission after its ball: a glyph each, the causes written out. */
   marks?: readonly MissionMarkView[] | undefined
   /** Opens what moved, from the outdated mark. */
@@ -137,6 +142,7 @@ export function MissionFrame({
   frozen,
   type,
   ball,
+  now,
   marks = [],
   onOpenOutdated,
   ticket,
@@ -185,7 +191,9 @@ export function MissionFrame({
         <div className={META}>
           <span className={META_ITEM}>
             <BallMark ball={ball} legend face />
-            <span>{BALL_LEGENDS[ball]}</span>
+            <span className="truncate" data-now={now === undefined ? undefined : ''}>
+              {now ?? BALL_LEGENDS[ball]}
+            </span>
           </span>
           <HeaderMarks marks={marks} onOpenOutdated={onOpenOutdated} />
           <span className="capitalize">{type}</span>

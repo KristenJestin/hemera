@@ -94,7 +94,8 @@ export function PlanningScreen({
   const views: MissionView[] = [
     ...discussions.map(({ item, discussion }) => ({
       id: discussionViewId(item),
-      title: discussion === null ? `Discuss ${item.id}` : `Discussion ${discussion.label} · ${item.id}`,
+      title:
+        discussion === null ? `Discuss ${item.id}` : `Discussion ${discussion.label} · ${item.id}`,
       icon: <IconMessages size="md" />,
       width: 'narrow' as const,
       body: (
@@ -115,7 +116,7 @@ export function PlanningScreen({
       title: `Probe ${probe.label}`,
       icon: <IconTestPipe size="md" />,
       width: 'narrow' as const,
-      body: <ProbeReport probe={moments.PROBES[probe.id] ?? null} />,
+      body: <ProbeReport probe={moments.probeById(probe.id)} />,
     })),
   ]
 

@@ -95,7 +95,9 @@ export const OwnWords: Story = {
     const own = canvas.getByRole('button', { name: 'In my own words' })
     await userEvent.click(own)
     await expect(own).toHaveAttribute('aria-expanded', 'true')
-    await waitFor(() => expect(canvas.getByLabelText('Your answer to Q5')).toBeVisible())
+    await waitFor(() =>
+      expect(canvas.getByRole('textbox', { name: 'Your answer to Q5' })).toBeVisible(),
+    )
   },
 }
 
@@ -210,7 +212,9 @@ export const ProposedEdited: Story = {
     const proposal = canvas.getByRole('group', { name: 'Proposed from the ticket' })
     await userEvent.click(within(proposal).getByRole('button', { name: 'Edit' }))
     await waitFor(() =>
-      expect(canvas.getByLabelText('Your answer to Q6')).toHaveTextContent(/5 000 notes/),
+      expect(canvas.getByRole('textbox', { name: 'Your answer to Q6' })).toHaveTextContent(
+        /5 000 notes/,
+      ),
     )
   },
 }
@@ -235,7 +239,9 @@ export const LongText: Story = {
       ...OPEN,
       text: `${LONG}${OPEN.text}`,
       recommendedReason: `${LONG}${OPEN.recommendedReason}`,
-      options: OPEN.options.map((option) => ({ ...option, label: `${option.label}, ${LONG}` })),
+      options: OPEN.options.map((option) =>
+        Object.assign({}, option, { label: `${option.label}, ${LONG}` }),
+      ),
     },
   },
   play: async ({ canvasElement }) => {

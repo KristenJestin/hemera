@@ -24,7 +24,9 @@ function Cards(props: CardsProps): ReactNode {
           onOpenMission={props.onOpenMission}
         />
       )}
-      {props.ticket !== null && <TicketCard ticket={props.ticket} onSeen={props.onSeenTicketChange} />}
+      {props.ticket !== null && (
+        <TicketCard ticket={props.ticket} onSeen={props.onSeenTicketChange} />
+      )}
       <DependenciesCard
         dependencies={props.dependencies}
         frozen={props.frozen}
@@ -89,7 +91,7 @@ export const VisionOnly: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByRole('region')).toHaveLength(1)
-    await waitFor(() => expect(canvas.getByLabelText('Your vision')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('textbox', { name: 'Your vision' })).toBeVisible())
   },
 }
 
@@ -97,7 +99,12 @@ export const VisionOnly: Story = {
 export const VisionGiven: Story = {
   args: {
     visions: [
-      { id: 'v1', text: 'Keep it boring: one file per note.', at: '09:05', inputState: 'integrated' },
+      {
+        id: 'v1',
+        text: 'Keep it boring: one file per note.',
+        at: '09:05',
+        inputState: 'integrated',
+      },
       { id: 'v2', text: 'A notebook export can wait.', at: '11:40', inputState: 'received' },
     ],
   },
@@ -154,7 +161,7 @@ export const Frozen: Story = {
   args: { frozen: true, dependencies: [{ ...DEPENDENCIES[0]!, state: 'accepted' }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.queryByLabelText('Your vision')).toBeNull()
+    await expect(canvas.queryByRole('textbox', { name: 'Your vision' })).toBeNull()
     await expect(canvas.queryByRole('button')).toBeNull()
   },
 }

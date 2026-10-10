@@ -36,13 +36,22 @@ type Story = StoryObj<typeof meta>
 export const Running: Story = {
   args: {
     passes: [
-      { ...FINDINGS_PASS, state: 'running', startedAt: Date.now() - 42_000, endedAt: null, findings: [] },
+      {
+        ...FINDINGS_PASS,
+        state: 'running',
+        startedAt: Date.now() - 42_000,
+        endedAt: null,
+        findings: [],
+      },
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: /Cold read C1/ })).toBeVisible()
-    await expect(canvas.getByRole('list', { name: 'Findings' })).toHaveAttribute('aria-busy', 'true')
+    await expect(canvas.getByRole('list', { name: 'Findings' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    )
     await expect(canvas.queryByRole('button', { name: 'Run another cold read' })).toBeNull()
   },
 }
@@ -71,7 +80,9 @@ export const EarlierText: Story = {
     const line = canvas.getByRole('button', { name: /The cold read read an earlier text/ })
     await expect(line).toHaveAttribute('aria-expanded', 'false')
     await userEvent.click(line)
-    await expect(await canvas.findByRole('list', { name: 'Changed since the cold read' })).toBeVisible()
+    await expect(
+      await canvas.findByRole('list', { name: 'Changed since the cold read' }),
+    ).toBeVisible()
     await expect(canvas.queryByText(/version/i)).toBeNull()
   },
 }

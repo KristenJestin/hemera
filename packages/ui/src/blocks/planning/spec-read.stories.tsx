@@ -1,12 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import {
-  CHANGES,
-  REQUIREMENTS,
-  TASKS,
-  WRITTEN,
-} from '../../surfaces/planning/planning-fixtures.ts'
+import { CHANGES, REQUIREMENTS, TASKS, WRITTEN } from '../../surfaces/planning/planning-fixtures.ts'
 import { SpecRead } from './spec-read.tsx'
 
 /**
@@ -75,9 +70,7 @@ export const ChangedSinceLastRead: Story = {
     await expect(canvas.getAllByRole('img', { name: 'Changed since your last read' })).toHaveLength(
       2,
     )
-    await expect(canvas.getByRole('region', { name: 'Decisions' })).toHaveAttribute(
-      'data-changed',
-    )
+    await expect(canvas.getByRole('region', { name: 'Decisions' })).toHaveAttribute('data-changed')
   },
 }
 
@@ -124,11 +117,12 @@ const LONG =
 /** Long text everywhere: the prose keeps its measure, nothing overflows. */
 export const LongText: Story = {
   args: {
-    requirements: REQUIREMENTS.map((requirement) => ({
-      ...requirement,
-      text: `${LONG}${requirement.text}`,
-    })),
-    sections: WRITTEN.map((section) => ({ ...section, body: `${LONG}${section.body}` })),
+    requirements: REQUIREMENTS.map((requirement) =>
+      Object.assign({}, requirement, { text: `${LONG}${requirement.text}` }),
+    ),
+    sections: WRITTEN.map((section) =>
+      Object.assign({}, section, { body: `${LONG}${section.body}` }),
+    ),
   },
   play: async ({ canvasElement }) => {
     const region = within(canvasElement).getByRole('region', { name: 'Requirements' })

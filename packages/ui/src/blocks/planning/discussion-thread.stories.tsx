@@ -40,7 +40,9 @@ export const Starting: Story = {
   args: { discussion: null },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await waitFor(() => expect(canvas.getByLabelText('Your first message on Q5')).toBeVisible())
+    await waitFor(() =>
+      expect(canvas.getByRole('textbox', { name: 'Your first message on Q5' })).toBeVisible(),
+    )
     await expect(canvas.queryByRole('button', { name: 'Close without a decision' })).toBeNull()
   },
 }
@@ -63,7 +65,9 @@ export const WritingADecision: Story = {
     const write = canvas.getByRole('button', { name: 'Write a decision' })
     await userEvent.click(write)
     await expect(write).toHaveAttribute('aria-pressed', 'true')
-    await waitFor(() => expect(canvas.getByLabelText('Your decision on #1')).toBeVisible())
+    await waitFor(() =>
+      expect(canvas.getByRole('textbox', { name: 'Your decision on #1' })).toBeVisible(),
+    )
   },
 }
 
@@ -80,7 +84,9 @@ export const ClosingWithoutDecision: Story = {
 export const AgentAnswering: Story = {
   args: { discussion: { ...DISCUSSION, proposal: null, waitsOn: 'agent' } },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole('status', { name: 'Hemera answers' })).toBeVisible()
+    await expect(
+      within(canvasElement).getByRole('status', { name: 'Hemera answers' }),
+    ).toBeVisible()
   },
 }
 

@@ -621,12 +621,12 @@ export const DEPENDENCIES: readonly Dependency[] = [
 /** The probes as their chips show them, without their reports. */
 const chip = ({ report: _report, failure: _failure, ...probe }: ProbeDetail) => probe
 
-/** Every Probe whole, by id: what a report opened over the page reads. */
-export const PROBES: Readonly<Record<string, ProbeDetail>> = {
-  [SLASH_PROBE.id]: SLASH_PROBE,
-  [SIZE_PROBE.id]: SIZE_PROBE,
-  [EMOJI_PROBE.id]: EMOJI_PROBE,
-}
+/** Every Probe whole, the first launched first: what a report opened over the page reads. */
+export const PROBES: readonly ProbeDetail[] = [SLASH_PROBE, SIZE_PROBE, EMOJI_PROBE]
+
+/** One Probe whole, by its id. */
+export const probeById = (id: string): ProbeDetail | null =>
+  PROBES.find((probe) => probe.id === id) ?? null
 
 /** What the mission's head says at a moment of the journey, beside the page. */
 export interface PlanningHead {

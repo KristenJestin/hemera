@@ -108,7 +108,8 @@ export const Answering: Story = {
     const canvas = rail(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
     await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { optionId: 'B' })
-    await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
+    const card = within(canvas.getByRole('article', { name: /^Q5/ }))
+    await expect(card.queryByRole('button', { name: 'Send' })).toBeNull()
   },
 }
 
@@ -132,7 +133,7 @@ export const DiscussionOpen: Story = {
     await waitFor(() =>
       expect(body.getByRole('group', { name: 'Proposed decision' })).toBeVisible(),
     )
-    await expect(page(canvasElement).getByRole('region', { name: 'Spec' }).closest('[inert]')).not.toBeNull()
+    await expect(canvasElement.querySelector('[data-base]')).toHaveAttribute('inert')
   },
 }
 
@@ -146,7 +147,9 @@ export const Discussing: Story = {
     await userEvent.click(discuss)
     await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q5' })
     const body = within(document.body)
-    await waitFor(() => expect(body.getByLabelText('Your first message on Q5')).toBeVisible())
+    await waitFor(() =>
+      expect(body.getByRole('textbox', { name: 'Your first message on Q5' })).toBeVisible(),
+    )
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(discuss).toHaveFocus())
   },
@@ -187,7 +190,9 @@ export const ColdReadFindings: Story = {
   args: { moment: 'findings' },
   play: async ({ canvasElement }) => {
     const canvas = rail(canvasElement)
-    await expect(canvas.getByRole('button', { name: /The cold read read an earlier text/ })).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: /The cold read read an earlier text/ }),
+    ).toBeVisible()
     await expect(canvas.getByRole('list', { name: 'Wave 3' })).toBeVisible()
   },
 }
@@ -200,7 +205,9 @@ export const ColdReadFailed: Story = {
     await expect(canvas.getByText(/The cold read failed/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Run another cold read' }))
     await expect(args.onRunColdRead).toHaveBeenCalled()
-    await expect(page(canvasElement).getByText('The cold read stopped without a report')).toBeVisible()
+    await expect(
+      page(canvasElement).getByText('The cold read stopped without a report'),
+    ).toBeVisible()
   },
 }
 
@@ -222,7 +229,9 @@ export const ChangedSinceLastRead: Story = {
     const spec = within(canvas.getByRole('region', { name: 'Spec' }))
     await expect(spec.getByText(/3 changes since your last read/)).toBeVisible()
     const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
-    await expect(nav.getAllByRole('img', { name: 'Changed since your last read' }).length).toBeGreaterThan(0)
+    await expect(
+      nav.getAllByRole('img', { name: 'Changed since your last read' }).length,
+    ).toBeGreaterThan(0)
     await userEvent.click(spec.getByRole('button', { name: 'Mark as read' }))
     await expect(args.onMarkRead).toHaveBeenCalled()
   },
@@ -234,7 +243,7 @@ export const Vision: Story = {
   play: async ({ canvasElement }) => {
     const canvas = rail(canvasElement)
     await expect(canvas.getByRole('list', { name: 'Your vision so far' })).toBeVisible()
-    await waitFor(() => expect(canvas.getByLabelText('Your vision')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('textbox', { name: 'Your vision' })).toBeVisible())
   },
 }
 
@@ -265,7 +274,7 @@ export const Frozen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = page(canvasElement)
     await expect(canvas.queryByRole('region', { name: 'Questions' })).toBeNull()
-    await expect(canvas.queryByLabelText('Your vision')).toBeNull()
+    await expect(canvas.queryByRole('textbox', { name: 'Your vision' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Freeze' })).toBeNull()
   },
 }
