@@ -5,17 +5,29 @@
  * React.
  */
 
+import type { SpecMode } from '@hemera/core/domain'
 import {
   InvalidKeyPrefix,
   InvalidSyncInterval,
   KeyPrefixTaken,
   type KeyPrefixEdit,
   type Project,
+  type TicketProviderInfo,
 } from '@hemera/ipc'
 import type { SpecModeChoice } from '@hemera/ui'
 
-/** The modes the select offers: one line to change when the remote mode can be used. */
-export const OFFERED_MODES: readonly SpecModeChoice[] = ['local', 'linked']
+/**
+ * The modes the select offers. Remote needs a provider that can write into a ticket, and both kinds
+ * (GitHub and Jira) can, so any provider will do; a Project already in Remote keeps it listed, so
+ * the select never shows a mode it does not offer.
+ */
+export function modesOffered(
+  mode: SpecMode | null,
+  providers: ReadonlyArray<Pick<TicketProviderInfo, 'kind'>> | null,
+): readonly SpecModeChoice[] {
+  const remote = mode === 'remote' || (providers?.length ?? 0) > 0
+  return remote ? ['local', 'linked', 'remote'] : ['local', 'linked']
+}
 
 /** How long the key prefix waits for the typing to settle before the engine is asked. */
 export const PREFIX_SETTLES_MS = 600

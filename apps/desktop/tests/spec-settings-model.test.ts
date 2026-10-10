@@ -4,13 +4,19 @@
  * after a later one, which is dropped.
  */
 
-import { InvalidKeyPrefix, InvalidSyncInterval, KeyPrefixTaken, StaleVersion } from '@hemera/ipc'
+import {
+  InvalidKeyPrefix,
+  InvalidSyncInterval,
+  KeyPrefixTaken,
+  NoProviderToWrite,
+  StaleVersion,
+} from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
-  OFFERED_MODES,
   answerGate,
   lastCheckWords,
+  modesOffered,
   pendingPrefix,
   prefixEditOf,
   prefixWords,
@@ -19,8 +25,32 @@ import {
 } from '../src/renderer/spec-settings-model.ts'
 
 describe('The modes the Spec settings offer', () => {
-  test('are Local and Linked, never Remote', () => {
-    expect(OFFERED_MODES).toEqual(['local', 'linked'])
+  const github = { kind: 'github' } as const
+  const jira = { kind: 'jira' } as const
+
+  test('are Local and Linked while the Project has no provider', () => {
+    expect(modesOffered('local', [])).toEqual(['local', 'linked'])
+  })
+
+  test('are Local and Linked while the providers are not read yet', () => {
+    expect(modesOffered('local', null)).toEqual(['local', 'linked'])
+  })
+
+  test('add Remote once the Project has a GitHub provider', () => {
+    expect(modesOffered('local', [github])).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('add Remote once the Project has a Jira provider', () => {
+    expect(modesOffered('linked', [jira])).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('keep Remote while the Project is in it, even with no provider left', () => {
+    expect(modesOffered('remote', [])).toEqual(['local', 'linked', 'remote'])
+    expect(modesOffered('remote', null)).toEqual(['local', 'linked', 'remote'])
+  })
+
+  test('offer Local and Linked alone while the mode is not read', () => {
+    expect(modesOffered(null, [])).toEqual(['local', 'linked'])
   })
 })
 
@@ -56,6 +86,12 @@ describe('The words of a refused key prefix', () => {
 })
 
 describe('The words of a refused Spec setting', () => {
+  test('Remote asked of a Project with no provider says what to add', () => {
+    expect(settingWords('Spec mode', new NoProviderToWrite({ projectId: 'acme' }))).toBe(
+      'The Spec mode could not be saved: Remote Specs are written into tickets: add a ticket provider to this Project first.',
+    )
+  })
+
   test('name the setting and the engine’s reason', () => {
     expect(settingWords('Spec mode', new Error('no'))).toBe('The Spec mode could not be saved: no')
     expect(settingWords('Spec language', new Error('no'))).toBe(

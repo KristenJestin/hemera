@@ -82,6 +82,16 @@ export class InvalidProviderConfig extends Schema.TaggedError<InvalidProviderCon
   }
 }
 
+/** The remote Spec mode was asked of a Project with no ticket provider to write into. */
+export class NoProviderToWrite extends Schema.TaggedError<NoProviderToWrite>()(
+  'NoProviderToWrite',
+  { projectId: Schema.String },
+) {
+  override get message(): string {
+    return 'Remote Specs are written into tickets: add a ticket provider to this Project first.'
+  }
+}
+
 /** A provider a live mission's ticket comes from: removing it is refused, the missions named. */
 export class ProviderInUse extends Schema.TaggedError<ProviderInUse>()('ProviderInUse', {
   missionKeys: Schema.Array(Schema.String),
@@ -342,7 +352,7 @@ export const TicketsRpcs = RpcGroup.make(
   Rpc.make('tickets.setSpecMode', {
     payload: { projectId: Schema.String, mode: SpecMode },
     success: SpecMode,
-    error: failing(...always, UnknownProject),
+    error: failing(...always, UnknownProject, NoProviderToWrite),
   }),
   /** The ticket a mission comes from, its base and last known versions; null for none. */
   Rpc.make('tickets.ticket', {

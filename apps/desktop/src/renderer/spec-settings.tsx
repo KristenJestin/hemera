@@ -7,15 +7,15 @@
  */
 
 import { MIN_SYNC_MINUTES, type SpecMode } from '@hemera/core/domain'
-import type { Project } from '@hemera/ipc'
+import type { Project, TicketProviderInfo } from '@hemera/ipc'
 import { SpecFields, type SpecModeChoice } from '@hemera/ui'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { Link } from './link.ts'
 import {
-  OFFERED_MODES,
   answerGate,
   lastCheckWords,
+  modesOffered,
   pendingPrefix,
   prefixEditOf,
   prefixWords,
@@ -33,6 +33,8 @@ export interface SpecSettingsPartProps {
 /** What the section has read of the Spec settings, and what it is writing. */
 interface Held {
   readonly mode: SpecMode | null
+  /** The Project's ticket providers, which say whether Remote is offered; null until read. */
+  readonly providers: ReadonlyArray<TicketProviderInfo> | null
   readonly language: string | null
   /** How often linked tickets are checked, in minutes; null until read. */
   readonly minutes: number | null
@@ -41,16 +43,20 @@ interface Held {
   /** The prefix as typed, until the engine has answered it. */
   readonly typed: string | null
   readonly prefixRefused: string | undefined
+  /** Why the engine refused the mode chosen, said under the mode field. */
+  readonly modeRefused: string | undefined
   readonly refused: string | undefined
 }
 
 const NOTHING: Held = {
   mode: null,
+  providers: null,
   language: null,
   minutes: null,
   lastCheck: null,
   typed: null,
   prefixRefused: undefined,
+  modeRefused: undefined,
   refused: undefined,
 }
 
@@ -108,7 +114,13 @@ export function SpecSettingsPart({
     const stop = link.onTicketSettings(
       projectId,
       (settings) => {
-        if (live) setHeld((before) => ({ ...before, mode: settings.specMode }))
+        if (live) {
+          setHeld((before) => ({
+            ...before,
+            mode: settings.specMode,
+            providers: settings.providers,
+          }))
+        }
         readLastCheck()
       },
       (failure) => {
@@ -151,18 +163,18 @@ export function SpecSettingsPart({
   }, [link, engineReady, projectId])
 
   const chooseMode = (choice: SpecModeChoice): void => {
-    if (choice === 'remote' || held.mode === null) return
+    if (held.mode === null) return
     const before = held.mode
     const ticket = gates.current.mode.begin()
     const gate = gates.current.mode
-    change({ mode: choice, refused: undefined })
+    change({ mode: choice, modeRefused: undefined, refused: undefined })
     link.setSpecMode(projectId, choice).then(
       (mode) => {
         if (gate.isLatest(ticket)) change({ mode })
       },
       (failure: Error) => {
         if (gate.isLatest(ticket)) {
-          change({ mode: before, refused: settingWords('Spec mode', failure) })
+          change({ mode: before, modeRefused: settingWords('Spec mode', failure) })
         }
       },
     )
@@ -230,8 +242,9 @@ export function SpecSettingsPart({
   return (
     <SpecFields
       mode={held.mode}
-      modes={OFFERED_MODES}
+      modes={modesOffered(held.mode, held.providers)}
       onMode={chooseMode}
+      modeRefused={held.modeRefused}
       language={held.language}
       onLanguage={chooseLanguage}
       prefix={held.typed ?? known?.keyPrefix ?? null}

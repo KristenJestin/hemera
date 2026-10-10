@@ -6,7 +6,7 @@ import { SPEC_MODE_WORDS, SpecFields } from './spec-fields.tsx'
 
 /**
  * The frame under the ticket providers: where Specs live (Local or Linked, with what the mode does
- * written under it), the language Specs are written in, how often a linked ticket is read, and the
+ * written under it), the language Specs are written in, how often a watched ticket is read, and the
  * key prefix the next missions take.
  */
 const meta = {
@@ -62,7 +62,7 @@ export const Local: Story = {
   },
 }
 
-/** The sync row is drawn for the linked mode only, and only once it is fed. */
+/** The sync row is drawn for the linked and remote modes only, and only once it is fed. */
 export const NoSyncYet: Story = {
   args: { sync: undefined },
   play: async ({ canvasElement }) => {
@@ -80,7 +80,7 @@ export const NeverChecked: Story = {
   },
 }
 
-/** Remote is never offered until it can be used. */
+/** Without a provider that can write, Remote is not offered: the list holds Local and Linked. */
 export const RemoteNotOffered: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -90,6 +90,52 @@ export const RemoteNotOffered: Story = {
     await expect(body().getByRole('option', { name: 'Linked' })).toBeInTheDocument()
     await expect(body().queryByRole('option', { name: 'Remote' })).toBeNull()
     await userEvent.keyboard('{Escape}')
+  },
+}
+
+/** With a provider that can write, Remote is offered after Linked, and choosing it tells the page. */
+export const RemoteOffered: Story = {
+  args: { modes: ['local', 'linked', 'remote'] },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('combobox', { name: 'Where Specs live' }))
+    const options = await body().findAllByRole('option')
+    await expect(options.map((one) => one.textContent)).toEqual(['Local', 'Linked', 'Remote'])
+    await userEvent.click(body().getByRole('option', { name: 'Remote' }))
+    await waitFor(() => expect(args.onMode).toHaveBeenCalledWith('remote'))
+  },
+}
+
+/** Remote chosen: the words of the mode, and the interval at which the ticket is read again. */
+export const Remote: Story = {
+  args: { mode: 'remote', modes: ['local', 'linked', 'remote'] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('combobox', { name: 'Where Specs live' })).toHaveTextContent(
+      'Remote',
+    )
+    await expect(canvas.getByText(SPEC_MODE_WORDS.remote.does)).toBeVisible()
+    await expect(canvas.getByRole('combobox', { name: 'Check linked tickets' })).toBeVisible()
+    await expect(canvas.getByText('Last checked at 09:41')).toBeVisible()
+  },
+}
+
+/** Remote refused: the engine's words sit under the mode field, and the mode stays as it was. */
+export const RemoteRefused: Story = {
+  args: {
+    mode: 'local',
+    modes: ['local', 'linked', 'remote'],
+    modeRefused:
+      'The Spec mode could not be saved: Remote Specs are written into tickets: add a ticket provider to this Project first.',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const select = canvas.getByRole('combobox', { name: 'Where Specs live' })
+    await expect(select).toHaveTextContent('Local')
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'add a ticket provider to this Project first',
+    )
+    await expect(canvas.getByText(SPEC_MODE_WORDS.local.does)).toBeVisible()
   },
 }
 

@@ -41,6 +41,8 @@ export interface SpecFieldsProps {
   /** The modes offered, in order. */
   modes: readonly SpecModeChoice[]
   onMode: (mode: SpecModeChoice) => void
+  /** Why the engine refused the mode chosen, in words, said under the field. */
+  modeRefused?: string | undefined
   language: string | null
   onLanguage: (tag: string) => void
   prefix: string | null
@@ -48,7 +50,7 @@ export interface SpecFieldsProps {
   onPrefix: (prefix: string) => void
   /** The prefix is done: the field lost focus or Enter was pressed. */
   onPrefixCommit?: (() => void) | undefined
-  /** Absent: the row is not drawn. Drawn only for the linked mode. */
+  /** Absent: the row is not drawn. Drawn for the linked and remote modes, which read tickets again. */
   sync?:
     | {
         minutes: number
@@ -92,6 +94,7 @@ export function SpecFields({
   mode,
   modes,
   onMode,
+  modeRefused,
   language,
   onLanguage,
   prefix,
@@ -121,6 +124,11 @@ export function SpecFields({
                 {SPEC_MODE_WORDS[mode].does}
               </p>
             )}
+            {modeRefused !== undefined && (
+              <p role="alert" className="max-w-measure text-sm text-destructive-muted-foreground">
+                {modeRefused}
+              </p>
+            )}
           </div>
           <Select
             label="Spec language"
@@ -129,7 +137,7 @@ export function SpecFields({
             disabled={language === null}
             onValueChange={onLanguage}
           />
-          {mode === 'linked' && sync !== undefined && (
+          {(mode === 'linked' || mode === 'remote') && sync !== undefined && (
             <div className="flex flex-col gap-1.5">
               <Select
                 label="Check linked tickets"
