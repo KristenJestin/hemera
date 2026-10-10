@@ -196,4 +196,38 @@ process.stdout.write(readFileSync(process.argv[2], 'utf8'))
     expect(foundIn(REGION)).toEqual([])
     expect(foundIn(BUCKET)).toEqual([])
   })
+
+  test('a short value whose name says it is secret is masked whatever its length; a short plain one stays in clear', async () => {
+    const prints = script(`
+import { readFileSync } from 'node:fs'
+process.stdout.write(readFileSync(process.argv[2], 'utf8'))
+`)
+    const ended = await commandsEngine(data, { tools: { home: work } })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          writeFileSync(
+            join(main, '.env'),
+            `DB_PASSWORD=zq7wx\nDB_PASS=vk3pm\nSIGNING_KEY=rt9bn\nApiToken=hd4kq\nAPP_NAME=acme1\n${DOTENV}`,
+          )
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          yield* callTool(builder.grantId, 'commands_run', { line: nodeLine(prints, '.env') })
+          const [asked] = yield* requests
+          if (asked === undefined) return yield* Effect.die(new Error('no request'))
+          yield* allowOnce(asked.needId)
+          return yield* polled(
+            requestNamed(asked.id),
+            (row) => row?.state === 'ended' && row.handedOverAt !== null,
+          )
+        }),
+      ),
+    )
+    expect(ended).toMatchObject({ sensitive: true, result: 'done' })
+    expect(ended?.resultText).toContain('APP_NAME=acme1\n')
+    expect(ended?.resultText).toContain('ACME_REGION=•••')
+    for (const value of ['zq7wx', 'vk3pm', 'rt9bn', 'hd4kq', REGION]) {
+      expect(foundIn(value)).toEqual([])
+    }
+    expect(foundIn(BUCKET)).toEqual([])
+  })
 })

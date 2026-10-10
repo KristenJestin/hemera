@@ -24,7 +24,15 @@ import { Database, refusedWhile } from './storage/database.ts'
 import { environmentVariables } from './storage/schema.ts'
 
 export interface SecretsRegistry {
-  readonly register: (source: string, values: ReadonlyArray<string>) => void
+  /**
+   * Registers a source's values, those the rule finds worth masking; `whole` are registered
+   * whatever their length (a value its name says is secret).
+   */
+  readonly register: (
+    source: string,
+    values: ReadonlyArray<string>,
+    whole?: ReadonlyArray<string>,
+  ) => void
   readonly unregister: (source: string) => void
   /** Every value registered now, once each. */
   readonly values: () => ReadonlyArray<string>
@@ -47,8 +55,11 @@ export function secretsRegistry(): SecretsRegistry {
   const sources = new Map<string, ReadonlyArray<string>>()
   const values = () => [...new Set([...sources.values()].flat())]
   return {
-    register: (source, given) => {
-      sources.set(source, given.filter(secretWorthy))
+    register: (source, given, whole = []) => {
+      sources.set(source, [
+        ...given.filter(secretWorthy),
+        ...whole.filter((value) => value.trim() !== ''),
+      ])
     },
     unregister: (source) => {
       sources.delete(source)

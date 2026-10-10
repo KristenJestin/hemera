@@ -222,14 +222,39 @@ const guardOf = (call: JudgedCall, frozen: FrozenCall, settings: RequestsSetting
     }
   })
 
+/** The words of a variable's name that say its value is secret. */
+const SECRET_WORDS = new Set([
+  'password',
+  'passwd',
+  'pass',
+  'pwd',
+  'secret',
+  'token',
+  'key',
+  'apikey',
+  'credential',
+  'credentials',
+])
+
+/**
+ * Whether a variable's name says its value is secret, by one of its words (`DB_PASS`,
+ * `SIGNING_KEY`, `apiToken`), case aside: such a value is masked whatever its length.
+ */
+const secretNamed = (key: string): boolean =>
+  key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .some((word) => SECRET_WORDS.has(word))
+
 /** The largest sensitive file whose values are read before Hemera acts on it. */
 const VALUES_READ_UP_TO = 4 * 1024 * 1024
 
 /**
  * Before Hemera acts on an allowed request on a sensitive place: the `KEY=VALUE` values of each
- * sensitive file the call names (its path, or the paths of its line) are registered as secrets,
- * so whatever keeps its result (the request, its event, the delivery, the thread, the trace, a
- * run's output) masks them. They stay registered while the engine runs, under the file's own
+ * sensitive file the call names (its path, or the paths of its line) are registered as secrets (a
+ * short one too when its name says it is secret, `DB_PASS=admin`), so whatever keeps its result
+ * (the request, its event, the delivery, the thread, the trace, a run's output) masks them. They stay registered while the engine runs, under the file's own
  * source, so reading the file again replaces them. What is not a file (a folder) has no values.
  */
 const registerSensitiveValues = (call: JudgedCall, settings: RequestsSettings) =>
@@ -247,8 +272,14 @@ const registerSensitiveValues = (call: JudgedCall, settings: RequestsSettings) =
         return readFile(led, 'utf8').catch(() => null)
       })
       if (text === null) continue
-      const values = Object.values(parseEnv(text)).filter(Predicate.isString)
-      secrets.register(`sensitive-file:${led}`, values)
+      const entries = Object.entries(parseEnv(text)).flatMap(([key, value]) =>
+        Predicate.isString(value) ? [{ key, value }] : [],
+      )
+      secrets.register(
+        `sensitive-file:${led}`,
+        entries.map((one) => one.value),
+        entries.filter((one) => secretNamed(one.key)).map((one) => one.value),
+      )
     }
   })
 
