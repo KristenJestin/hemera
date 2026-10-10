@@ -1,8 +1,8 @@
 /**
  * Hemera started again on the data folder `planning.e2e.ts` left, with Freeze offered: every
- * answer and where it stands, the question that was on hold and its drafted message, the decision
- * of the discussion, the Probe's chip, the vision and the cold read's report are found as they
- * were, and the Spec is frozen.
+ * answer and where it stands, the decision of the discussion (read again from its question), the
+ * Probe's chip, the vision and the cold read's report are found as they were, and the Spec is
+ * frozen.
  */
 
 import { readFileSync } from 'node:fs'
@@ -55,6 +55,15 @@ describe('A mission’s Planning, found again after Hemera started anew', () => 
     await expect(card('Q1')).toHaveText(expect.stringContaining('A · Anyone who can read it'))
     await expect(card('Q2')).toHaveText(expect.stringContaining('B · GitHub'))
     await expect(card('Q4')).toHaveText(expect.stringContaining(`Moot: ${DECISION}`))
+  })
+
+  it('reads the discussion again from its question, closed on its decision', async () => {
+    await card('Q4').$('button=Open the discussion').click()
+    await expect($('[data-view^="discussion:"]')).toHaveText(
+      expect.stringContaining(`Closed on a decision: ${DECISION}`),
+    )
+    await $('button[aria-label^="Close Discussion"]').click()
+    await expect($('[data-view^="discussion:"]')).not.toBeExisting()
   })
 
   it('keeps the vision, the Probe’s chip and the cold read’s report', async () => {
