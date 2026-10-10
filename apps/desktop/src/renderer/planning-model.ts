@@ -654,23 +654,33 @@ export function followPlanning(
     )
   }
 
+  /** The gestures on their way, by what they act on: each is sent once at a time. */
+  const flying = new Map<string, Promise<void>>()
+
   /**
-   * Sends a gesture: what it changes comes back on the streams, or by the next read. A refusal of
-   * what the user wrote is handed back to its field, which keeps the words and says why; any
-   * other refusal is said in the head.
+   * Sends a gesture: what it changes comes back on the streams, or by the next read. The same
+   * gesture pressed again while it is on its way is not sent again: the one on its way is handed
+   * back. A refusal of what the user wrote goes back to its field, which keeps the words and says
+   * why; any other refusal is said in the head.
    */
-  const gesture = <A>(send: () => Promise<A>, written = false): Promise<void> => {
+  const gesture = <A>(key: string, send: () => Promise<A>, written = false): Promise<void> => {
+    const onItsWay = flying.get(key)
+    if (onItsWay !== undefined) return onItsWay
     refused = undefined
     emit()
-    return send().then(
-      () => refresh(),
-      (failure: Error) => {
-        if (written) throw failure
-        if (stopped) return
-        refused = failure.message
-        emit()
-      },
-    )
+    const sent = send()
+      .then(
+        () => refresh(),
+        (failure: Error) => {
+          if (written) throw failure
+          if (stopped) return
+          refused = failure.message
+          emit()
+        },
+      )
+      .finally(() => flying.delete(key))
+    flying.set(key, sent)
+    return sent
   }
 
   const discussionOn = (item: DiscussionItem): EngineDiscussion | undefined =>
@@ -680,23 +690,35 @@ export function followPlanning(
 
   return {
     answer: (questionId, answer) =>
-      gesture(() => link.answer(missionId, questionId, answer), 'text' in answer),
+      gesture(
+        `answer ${questionId}`,
+        () => link.answer(missionId, questionId, answer),
+        'text' in answer,
+      ),
     waitOnSomeone: (questionId, note) =>
-      gesture(() => link.waitOnSomeone(missionId, questionId, note)),
+      gesture(`wait ${questionId}`, () => link.waitOnSomeone(missionId, questionId, note)),
     acceptProposed: (proposalId, text) =>
-      gesture(() => link.acceptProposedAnswer(proposalId, text), text !== null),
-    dismissProposed: (proposalId) => gesture(() => link.dismissProposedAnswer(proposalId)),
-    dismissFinding: (findingId) => gesture(() => link.dismissFinding(missionId, findingId)),
-    runColdRead: () => gesture(() => link.coldReadAgain(missionId)),
-    decideDependency: (id, accept) => gesture(() => link.decideDependency(id, accept)),
-    giveVision: (text) => gesture(() => link.addVision(missionId, text), true),
+      gesture(
+        `proposal ${proposalId}`,
+        () => link.acceptProposedAnswer(proposalId, text),
+        text !== null,
+      ),
+    dismissProposed: (proposalId) =>
+      gesture(`proposal ${proposalId}`, () => link.dismissProposedAnswer(proposalId)),
+    dismissFinding: (findingId) =>
+      gesture(`finding ${findingId}`, () => link.dismissFinding(missionId, findingId)),
+    runColdRead: () => gesture('cold read', () => link.coldReadAgain(missionId)),
+    decideDependency: (id, accept) =>
+      gesture(`dependency ${id}`, () => link.decideDependency(id, accept)),
+    giveVision: (text) => gesture('vision', () => link.addVision(missionId, text), true),
     markRead: () => {
       if (spec === null) return Promise.resolve()
       const version = spec.version
-      return gesture(() => link.markRead(missionId, version))
+      return gesture('read', () => link.markRead(missionId, version))
     },
-    keepPlanning: () => gesture(() => link.keepAfterTriage(missionId)),
-    seenTicketChange: (eventId) => gesture(() => link.acknowledgeTicketEvent(eventId)),
+    keepPlanning: () => gesture('triage', () => link.keepAfterTriage(missionId)),
+    seenTicketChange: (eventId) =>
+      gesture(`ticket ${eventId}`, () => link.acknowledgeTicketEvent(eventId)),
     openProbe: (probeId) => {
       if (!reports.has(probeId)) reports = new Map([...reports, [probeId, null]])
       emit()
@@ -705,6 +727,7 @@ export function followPlanning(
     say: (item, text) => {
       const open = discussionOn(item)
       return gesture(
+        `say ${item.kind} ${item.id}`,
         () =>
           open === undefined
             ? link.openDiscussion(missionId, item, text)
@@ -718,12 +741,16 @@ export function followPlanning(
       if (open === undefined || proposal === null || proposal === undefined) {
         return Promise.resolve()
       }
-      return gesture(() => link.acceptDiscussion(open.id, proposal.at))
+      return gesture(`discussion ${open.id}`, () => link.acceptDiscussion(open.id, proposal.at))
     },
     close: (item, decision) => {
       const open = discussionOn(item)
       if (open === undefined) return Promise.resolve()
-      return gesture(() => link.closeDiscussion(open.id, decision), decision !== null)
+      return gesture(
+        `discussion ${open.id}`,
+        () => link.closeDiscussion(open.id, decision),
+        decision !== null,
+      )
     },
     retry: () => {
       for (const stop of unsubscribe) stop()

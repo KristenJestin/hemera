@@ -22,7 +22,7 @@ export interface PlanningViewsOf {
   reports: ReadonlyMap<string, ProbeDetail | null>
   mentionables: readonly Mentionable[]
   onSay: (item: DiscussionItem, text: string) => Promise<void>
-  onAccept: (item: DiscussionItem) => void
+  onAccept: (item: DiscussionItem) => Promise<void>
   onClose: (item: DiscussionItem, decision: string | null) => Promise<void>
 }
 

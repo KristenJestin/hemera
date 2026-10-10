@@ -7,7 +7,7 @@ import type { Mentionable } from '../../components/mention-field/mention-field.t
 import { DEPENDENCIES, outdated, triaged } from '../../surfaces/planning/planning-fixtures.ts'
 import type { PlanningData } from './planning-types.ts'
 import { DependenciesCard, TicketCard, TriageCard, VisionCard } from './planning-cards.tsx'
-import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
+import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
 
 /**
  * What else the rail of the Planning page asks of the user, beside the questions: the Planner's
@@ -51,10 +51,10 @@ interface CardsProps {
   visions: PlanningData['visions']
   frozen: boolean
   mentionables: readonly Mentionable[]
-  onKeepPlanning: () => void
+  onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
-  onSeenTicketChange: (id: string) => void
-  onDecideDependency: (id: string, accept: boolean) => void
+  onSeenTicketChange: (id: string) => Promise<void>
+  onDecideDependency: (id: string, accept: boolean) => Promise<void>
   onGiveVision: (text: string) => Promise<void>
 }
 
@@ -69,10 +69,10 @@ const meta = {
     visions: [],
     frozen: false,
     mentionables: MENTIONABLES,
-    onKeepPlanning: fn(),
+    onKeepPlanning: fn(() => Promise.resolve()),
     onOpenMission: fn(),
-    onSeenTicketChange: fn(),
-    onDecideDependency: fn(),
+    onSeenTicketChange: fn(() => Promise.resolve()),
+    onDecideDependency: fn(() => Promise.resolve()),
     onGiveVision: fn(() => Promise.resolve()),
   },
   decorators: [
@@ -157,7 +157,7 @@ export const DecidingTwice: Story = {
     await userEvent.click(accept)
     await userEvent.click(accept)
     await expect(args.onDecideDependency).toHaveBeenCalledTimes(1)
-    await expect(accept).toHaveAttribute('aria-disabled', 'true')
+    await waitFor(() => expect(accept).toHaveAttribute('aria-disabled', 'true'))
   },
 }
 
@@ -170,8 +170,10 @@ export const Triage: Story = {
     await expect(card).toHaveTextContent('ACME-20 already moves the attachments')
     await userEvent.click(within(card).getByRole('button', { name: 'Open ACME-20' }))
     await expect(args.onOpenMission).toHaveBeenCalledWith('ACME-20')
-    await userEvent.click(within(card).getByRole('button', { name: 'Keep planning' }))
+    const keep = within(card).getByRole('button', { name: 'Keep planning' })
+    await userEvent.click(keep)
     await expect(args.onKeepPlanning).toHaveBeenCalled()
+    await settled(keep)
   },
 }
 
@@ -183,8 +185,10 @@ export const TicketChanged: Story = {
     const card = canvas.getByRole('region', { name: 'acme/shop#41 changed' })
     await expect(card).toHaveTextContent('a whole notebook as one archive')
     await expect(within(card).getByRole('img', { name: 'Delivered to the Planner' })).toBeVisible()
-    await userEvent.click(within(card).getByRole('button', { name: 'Seen' }))
+    const pressed = within(card).getByRole('button', { name: 'Seen' })
+    await userEvent.click(pressed)
     await expect(args.onSeenTicketChange).toHaveBeenCalledWith('e1')
+    await settled(pressed)
   },
 }
 
@@ -193,10 +197,14 @@ export const Dependencies: Story = {
   args: { dependencies: DEPENDENCIES },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' }))
+    const accept = canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' })
+    await userEvent.click(accept)
     await expect(args.onDecideDependency).toHaveBeenCalledWith('dep1', true)
-    await userEvent.click(canvas.getByRole('button', { name: 'Reject the dependency on ACME-20' }))
+    const reject = canvas.getByRole('button', { name: 'Reject the dependency on ACME-20' })
+    await userEvent.click(reject)
     await expect(args.onDecideDependency).toHaveBeenCalledWith('dep1', false)
+    await settled(accept)
+    await settled(reject)
     await expect(canvas.getByRole('img', { name: 'Accepted' })).toBeVisible()
   },
 }

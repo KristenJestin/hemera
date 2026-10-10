@@ -1,4 +1,4 @@
-import { userEvent } from 'storybook/test'
+import { expect, userEvent, waitFor } from 'storybook/test'
 
 import { loadMentionEditor } from '../../components/mention-field/mention-field.tsx'
 
@@ -17,3 +17,10 @@ export async function writeAndSend(field: HTMLElement, text: string): Promise<vo
   )
   await userEvent.keyboard('{Enter}')
 }
+
+/**
+ * A button that sent something works, then fades back once it is taken: a story ends once it is
+ * back, so what is read of it is the button at rest.
+ */
+export const settled = (button: HTMLElement): Promise<void> =>
+  waitFor(() => expect(getComputedStyle(button).opacity).toBe('1'))

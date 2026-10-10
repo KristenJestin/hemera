@@ -10,6 +10,7 @@ import {
   VisionCard,
 } from '../../blocks/planning/planning-cards.tsx'
 import { ChangedMark } from '../../blocks/planning/planning-marks.tsx'
+import { SendButton } from '../../blocks/planning/sending.tsx'
 import {
   type DiscussionItem,
   type PlanningData,
@@ -235,9 +236,9 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
                   ? '1 change since your last read, marked in the text'
                   : `${String(data.changes.length)} changes since your last read, marked in the text`}
               </span>
-              <Button variant="link" size="sm" onClick={props.onMarkRead}>
+              <SendButton variant="link" size="sm" onSend={props.onMarkRead}>
                 Mark as read
-              </Button>
+              </SendButton>
             </div>
           )}
           <SpecRead

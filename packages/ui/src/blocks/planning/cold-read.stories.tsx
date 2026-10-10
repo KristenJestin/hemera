@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CHANGES, FINDINGS_PASS } from '../../surfaces/planning/planning-fixtures.ts'
 import { ColdReadReport } from './cold-read.tsx'
+import { settled } from './planning-play.ts'
 
 /**
  * The cold read's report in the rail: its chip while a fresh reader goes through the Spec, its
@@ -17,8 +18,8 @@ const meta = {
   args: {
     passes: [FINDINGS_PASS],
     freshness: { current: true, changes: [] },
-    onDismiss: fn(),
-    onRunAgain: fn(),
+    onDismiss: fn(() => Promise.resolve()),
+    onRunAgain: fn(() => Promise.resolve()),
   },
   decorators: [
     (Story) => (
@@ -65,10 +66,14 @@ export const Findings: Story = {
     await expect(within(rows[0]!).getByRole('img', { name: 'Blocking' })).toBeVisible()
     await expect(rows[0]).toHaveTextContent('Asked as Q8')
     await expect(rows[1]).toHaveTextContent('Fixed by the Planner')
-    await userEvent.click(canvas.getByRole('button', { name: 'Dismiss C1.F3' }))
+    const pressed = canvas.getByRole('button', { name: 'Dismiss C1.F3' })
+    await userEvent.click(pressed)
     await expect(args.onDismiss).toHaveBeenCalledWith('C1.F3')
-    await userEvent.click(canvas.getByRole('button', { name: 'Run another cold read' }))
+    await settled(pressed)
+    const again = canvas.getByRole('button', { name: 'Run another cold read' })
+    await userEvent.click(again)
     await expect(args.onRunAgain).toHaveBeenCalled()
+    await settled(again)
   },
 }
 

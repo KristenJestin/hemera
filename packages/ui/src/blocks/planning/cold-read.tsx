@@ -2,13 +2,13 @@ import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
-import { Button } from '../../components/button/button.tsx'
 import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
 import { LiveChip, type LiveState } from '../../components/live-chip/live-chip.tsx'
 import { IconAlertTriangle, IconCheck, IconEye } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { SeverityMark } from './planning-marks.tsx'
 import type { ColdReadPass, Finding, Freshness, Severity } from './planning-types.ts'
+import { SendButton } from './sending.tsx'
 
 const ROW = 'flex min-w-0 items-start gap-2 border-b border-border px-4 py-2.5 last:border-b-0'
 
@@ -45,7 +45,7 @@ function FindingRow({
   onDismiss,
 }: {
   finding: Finding
-  onDismiss: ((id: string) => void) | undefined
+  onDismiss: ((id: string) => Promise<void>) | undefined
 }): ReactNode {
   // A finding on the tasks is fixed by the Planner without asking; the user may still dismiss it.
   const dismissable = finding.fate === 'open' || (finding.fate === 'fixed' && finding.tasksOnly)
@@ -72,14 +72,14 @@ function FindingRow({
         </p>
       </div>
       {dismissable && onDismiss !== undefined && (
-        <Button
+        <SendButton
           variant="ghost"
           size="sm"
           aria-label={`Dismiss ${finding.id}`}
-          onClick={() => onDismiss(finding.id)}
+          onSend={() => onDismiss(finding.id)}
         >
           Dismiss
-        </Button>
+        </SendButton>
       )}
     </li>
   )
@@ -131,8 +131,8 @@ export interface ColdReadReportProps {
   passes: readonly ColdReadPass[]
   freshness: Freshness
   /** Left out once frozen: nothing is dismissed or run again then. */
-  onDismiss?: ((findingId: string) => void) | undefined
-  onRunAgain?: (() => void) | undefined
+  onDismiss?: ((findingId: string) => Promise<void>) | undefined
+  onRunAgain?: (() => Promise<void>) | undefined
 }
 
 /**
@@ -169,9 +169,9 @@ export function ColdReadReport({
               busy ? (
                 <ColdReadChip pass={pass} />
               ) : onRunAgain === undefined ? undefined : (
-                <Button variant="link" size="sm" onClick={onRunAgain}>
+                <SendButton variant="link" size="sm" onSend={onRunAgain}>
                   Run another cold read
-                </Button>
+                </SendButton>
               )
             }
           />

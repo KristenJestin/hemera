@@ -5,7 +5,7 @@ import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtu
 import { WAVES } from '../../surfaces/planning/planning-fixtures.ts'
 import type { Question } from './planning-types.ts'
 import { QuestionCard } from './question-card.tsx'
-import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
+import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
 
 /**
  * A question of the Planner, as the rail of the Planning page holds it: its options by their
@@ -33,10 +33,10 @@ const meta = {
     foldAnswered: true,
     mentionables: MENTIONABLES,
     onAnswer: fn(() => Promise.resolve()),
-    onWaitOnSomeone: fn(),
+    onWaitOnSomeone: fn(() => Promise.resolve()),
     onCopyDraft: fn(),
     onAcceptProposed: fn(() => Promise.resolve()),
-    onDismissProposed: fn(),
+    onDismissProposed: fn(() => Promise.resolve()),
     onDiscuss: fn(),
   },
   decorators: [
@@ -83,7 +83,7 @@ export const AnsweringTwice: Story = {
     await userEvent.click(option)
     await userEvent.click(option)
     await expect(args.onAnswer).toHaveBeenCalledTimes(1)
-    await expect(option).toHaveAttribute('aria-busy', 'true')
+    await waitFor(() => expect(option).toHaveAttribute('aria-busy', 'true'))
     await expect(canvas.getByRole('button', { name: /Anyone who can read it/ })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -144,6 +144,8 @@ export const MarkingWaiting: Story = {
     await userEvent.type(note, 'The legal team')
     await userEvent.click(canvas.getByRole('button', { name: 'Wait' }))
     await expect(args.onWaitOnSomeone).toHaveBeenCalledWith('Q5', 'The legal team')
+    // Taken: the note folds away.
+    await waitFor(() => expect(canvas.queryByRole('button', { name: 'Wait' })).toBeNull())
   },
 }
 
@@ -242,10 +244,14 @@ export const ProposedFromTicket: Story = {
     const proposal = canvas.getByRole('group', { name: 'Proposed from the ticket' })
     await expect(proposal).toHaveTextContent('support-team')
     await expect(proposal).toHaveTextContent('41 000 notes')
-    await userEvent.click(within(proposal).getByRole('button', { name: 'Accept' }))
+    const accept = within(proposal).getByRole('button', { name: 'Accept' })
+    await userEvent.click(accept)
     await expect(args.onAcceptProposed).toHaveBeenCalledWith('pa1', null)
-    await userEvent.click(within(proposal).getByRole('button', { name: 'Dismiss' }))
+    const dismiss = within(proposal).getByRole('button', { name: 'Dismiss' })
+    await userEvent.click(dismiss)
     await expect(args.onDismissProposed).toHaveBeenCalledWith('pa1')
+    await settled(accept)
+    await settled(dismiss)
   },
 }
 

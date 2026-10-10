@@ -7,7 +7,7 @@ import type { Mentionable } from '../../components/mention-field/mention-field.t
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { IconCheck } from '../../icons.ts'
 import type { Discussion, DiscussionHandlers } from './planning-types.ts'
-import { NotSent, useSending } from './sending.tsx'
+import { NotSent, SendButton, useSending } from './sending.tsx'
 
 const QUIET = 'text-xs text-muted-foreground'
 
@@ -112,9 +112,9 @@ export function DiscussionThread({
               <span className={QUIET}>Proposed decision · {discussion.proposal.at}</span>
               <p className="text-sm font-medium break-words">{discussion.proposal.text}</p>
               <div>
-                <Button variant="primary" size="sm" onClick={onAccept}>
+                <SendButton variant="primary" size="sm" onSend={onAccept}>
                   Accept
-                </Button>
+                </SendButton>
               </div>
             </div>
           )}
@@ -150,9 +150,9 @@ export function DiscussionThread({
             >
               Write a decision
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => sending.send(() => onClose(null))}>
+            <SendButton variant="ghost" size="sm" onSend={() => onClose(null)}>
               Close without a decision
-            </Button>
+            </SendButton>
           </div>
         </>
       )}

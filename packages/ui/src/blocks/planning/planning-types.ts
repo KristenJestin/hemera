@@ -308,27 +308,27 @@ export interface PlanningData {
  */
 export interface PlanningHandlers {
   onAnswer: (questionId: string, answer: { optionId: string } | { text: string }) => Promise<void>
-  onWaitOnSomeone: (questionId: string, note: string | null) => void
+  onWaitOnSomeone: (questionId: string, note: string | null) => Promise<void>
   onCopyDraft: (text: string) => void
   onAcceptProposed: (proposalId: string, text: string | null) => Promise<void>
-  onDismissProposed: (proposalId: string) => void
+  onDismissProposed: (proposalId: string) => Promise<void>
   onDiscuss: (item: DiscussionItem) => void
   onOpenProbe: (probeId: string) => void
-  onDismissFinding: (findingId: string) => void
-  onRunColdRead: () => void
-  onDecideDependency: (id: string, accept: boolean) => void
+  onDismissFinding: (findingId: string) => Promise<void>
+  onRunColdRead: () => Promise<void>
+  onDecideDependency: (id: string, accept: boolean) => Promise<void>
   onGiveVision: (text: string) => Promise<void>
-  onMarkRead: () => void
-  onKeepPlanning: () => void
+  onMarkRead: () => Promise<void>
+  onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
-  onSeenTicketChange: (id: string) => void
+  onSeenTicketChange: (id: string) => Promise<void>
 }
 
 /** What a discussion's view can do. */
 export interface DiscussionHandlers {
   /** The first message opens the discussion; the next ones are said in it. */
   onSay: (text: string) => Promise<void>
-  onAccept: () => void
+  onAccept: () => Promise<void>
   onClose: (decision: string | null) => Promise<void>
 }
 

@@ -755,9 +755,9 @@ describe('Following a mission’s Planning', () => {
     ])
     played.listeners.discussions([DISCUSSION])
     played.following.say(item, 'And for a shared note?')
-    played.following.accept(item)
-    played.following.close(item, null)
-    await flush()
+    // Accept and Close both end it: one at a time.
+    await played.following.accept(item)
+    await played.following.close(item, null)
     expect(played.named('sayInDiscussion')[0]?.args).toEqual(['d1', 'And for a shared note?'])
     expect(played.named('acceptDiscussion')[0]?.args).toEqual(['d1', AT])
     expect(played.named('closeDiscussion')[0]?.args).toEqual(['d1', null])

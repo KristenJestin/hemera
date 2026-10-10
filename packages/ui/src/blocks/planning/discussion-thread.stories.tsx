@@ -4,7 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { DISCUSSION } from '../../surfaces/planning/planning-fixtures.ts'
 import { DiscussionThread } from './discussion-thread.tsx'
-import { EDITOR_LOADED, writeAndSend } from './planning-play.ts'
+import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
 
 /**
  * A Discuss conversation with the Planner on one question, opened as a view over the Planning
@@ -21,7 +21,7 @@ const meta = {
     on: 'Q5',
     mentionables: MENTIONABLES,
     onSay: fn(() => Promise.resolve()),
-    onAccept: fn(),
+    onAccept: fn(() => Promise.resolve()),
     onClose: fn(() => Promise.resolve()),
   },
   decorators: [
@@ -71,8 +71,10 @@ export const Proposed: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByRole('listitem')).toHaveLength(2)
     const proposal = canvas.getByRole('group', { name: 'Proposed decision' })
-    await userEvent.click(within(proposal).getByRole('button', { name: 'Accept' }))
+    const pressed = within(proposal).getByRole('button', { name: 'Accept' })
+    await userEvent.click(pressed)
     await expect(args.onAccept).toHaveBeenCalled()
+    await settled(pressed)
   },
 }
 
@@ -85,7 +87,7 @@ export const AcceptingTwice: Story = {
     await userEvent.click(accept)
     await userEvent.click(accept)
     await expect(args.onAccept).toHaveBeenCalledTimes(1)
-    await expect(accept).toHaveAttribute('aria-disabled', 'true')
+    await waitFor(() => expect(accept).toHaveAttribute('aria-disabled', 'true'))
   },
 }
 
@@ -106,8 +108,10 @@ export const WritingADecision: Story = {
 export const ClosingWithoutDecision: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Close without a decision' }))
+    const close = canvas.getByRole('button', { name: 'Close without a decision' })
+    await userEvent.click(close)
     await expect(args.onClose).toHaveBeenCalledWith(null)
+    await settled(close)
   },
 }
 

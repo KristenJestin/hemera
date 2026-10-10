@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { PlanningScreen } from './planning-screen-fixture.tsx'
+import { settled } from '../../blocks/planning/planning-play.ts'
 
 /**
  * The Planning page of a mission, the base of its frame while the Spec is written with the user.
@@ -19,22 +20,22 @@ const meta = {
   args: {
     moment: 'wave',
     onAnswer: fn(() => Promise.resolve()),
-    onWaitOnSomeone: fn(),
+    onWaitOnSomeone: fn(() => Promise.resolve()),
     onCopyDraft: fn(),
     onAcceptProposed: fn(() => Promise.resolve()),
-    onDismissProposed: fn(),
+    onDismissProposed: fn(() => Promise.resolve()),
     onDiscuss: fn(),
     onOpenProbe: fn(),
-    onDismissFinding: fn(),
-    onRunColdRead: fn(),
-    onDecideDependency: fn(),
+    onDismissFinding: fn(() => Promise.resolve()),
+    onRunColdRead: fn(() => Promise.resolve()),
+    onDecideDependency: fn(() => Promise.resolve()),
     onGiveVision: fn(() => Promise.resolve()),
-    onMarkRead: fn(),
-    onKeepPlanning: fn(),
+    onMarkRead: fn(() => Promise.resolve()),
+    onKeepPlanning: fn(() => Promise.resolve()),
     onOpenMission: fn(),
-    onSeenTicketChange: fn(),
+    onSeenTicketChange: fn(() => Promise.resolve()),
     onSay: fn(() => Promise.resolve()),
-    onAccept: fn(),
+    onAccept: fn(() => Promise.resolve()),
     onClose: fn(() => Promise.resolve()),
     onFreeze: fn(),
     onRetry: fn(),
@@ -224,8 +225,10 @@ export const ColdReadFailed: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = rail(canvasElement)
     await expect(canvas.getByText(/The cold read failed/)).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Run another cold read' }))
+    const again = canvas.getByRole('button', { name: 'Run another cold read' })
+    await userEvent.click(again)
     await expect(args.onRunColdRead).toHaveBeenCalled()
+    await settled(again)
     await expect(
       page(canvasElement).getByText('The cold read stopped without a report'),
     ).toBeVisible()
@@ -237,8 +240,10 @@ export const DependencyProposed: Story = {
   args: { moment: 'dependencyProposed' },
   play: async ({ canvasElement, args }) => {
     const canvas = rail(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' }))
+    const accept = canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' })
+    await userEvent.click(accept)
     await expect(args.onDecideDependency).toHaveBeenCalledWith('dep1', true)
+    await settled(accept)
   },
 }
 
@@ -253,8 +258,10 @@ export const ChangedSinceLastRead: Story = {
     await expect(
       nav.getAllByRole('img', { name: 'Changed since your last read' }).length,
     ).toBeGreaterThan(0)
-    await userEvent.click(spec.getByRole('button', { name: 'Mark as read' }))
+    const pressed = spec.getByRole('button', { name: 'Mark as read' })
+    await userEvent.click(pressed)
     await expect(args.onMarkRead).toHaveBeenCalled()
+    await settled(pressed)
   },
 }
 
@@ -314,8 +321,10 @@ export const Triage: Story = {
   args: { moment: 'triaged' },
   play: async ({ canvasElement, args }) => {
     const canvas = rail(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Keep planning' }))
+    const keep = canvas.getByRole('button', { name: 'Keep planning' })
+    await userEvent.click(keep)
     await expect(args.onKeepPlanning).toHaveBeenCalled()
+    await settled(keep)
   },
 }
 
@@ -325,8 +334,10 @@ export const ProposedAnswer: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = rail(canvasElement)
     const proposal = canvas.getByRole('group', { name: 'Proposed from the ticket' })
-    await userEvent.click(within(proposal).getByRole('button', { name: 'Accept' }))
+    const pressed = within(proposal).getByRole('button', { name: 'Accept' })
+    await userEvent.click(pressed)
     await expect(args.onAcceptProposed).toHaveBeenCalledWith('pa1', null)
+    await settled(pressed)
   },
 }
 

@@ -16,7 +16,7 @@ import {
 } from '../../icons.ts'
 import { STAGE_DOT } from '../mission/vocabulary.ts'
 import { InputDot } from './planning-marks.tsx'
-import { NotSent, useSending } from './sending.tsx'
+import { NotSent, SendButton, useSending } from './sending.tsx'
 import type { Dependency, PlanningData, Triage, Vision } from './planning-types.ts'
 
 const ROW = 'flex min-w-0 items-start gap-2 border-b border-border px-4 py-2.5 last:border-b-0'
@@ -39,7 +39,7 @@ export function TriageCard({
   onOpenMission,
 }: {
   triage: Triage
-  onKeepPlanning: () => void
+  onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
 }): ReactNode {
   const { ref } = triage
@@ -63,9 +63,9 @@ export function TriageCard({
             <p className={QUIET}>It rests on a requirement of the living spec still proposed.</p>
           )}
           <div className="flex flex-wrap gap-1">
-            <Button variant="secondary" size="sm" onClick={onKeepPlanning}>
+            <SendButton variant="secondary" size="sm" onSend={onKeepPlanning}>
               Keep planning
-            </Button>
+            </SendButton>
             {ref !== null && (
               <Button variant="ghost" size="sm" onClick={() => onOpenMission(ref)}>
                 Open {ref}
@@ -84,7 +84,7 @@ export function TicketCard({
   onSeen,
 }: {
   ticket: NonNullable<PlanningData['ticket']>
-  onSeen: (id: string) => void
+  onSeen: (id: string) => Promise<void>
 }): ReactNode {
   if (ticket.changes.length === 0) return null
   return (
@@ -126,9 +126,9 @@ export function TicketCard({
               <span className="flex pt-1">
                 <InputDot state={change.inputState} />
               </span>
-              <Button variant="ghost" size="sm" onClick={() => onSeen(change.id)}>
+              <SendButton variant="ghost" size="sm" onSend={() => onSeen(change.id)}>
                 Seen
-              </Button>
+              </SendButton>
             </li>
           ))}
         </ul>
@@ -148,7 +148,7 @@ export function DependenciesCard({
 }: {
   dependencies: readonly Dependency[]
   frozen: boolean
-  onDecide: (id: string, accept: boolean) => void
+  onDecide: (id: string, accept: boolean) => Promise<void>
 }): ReactNode {
   const shown = dependencies.filter((dependency) => dependency.state !== 'rejected')
   if (shown.length === 0) return null
@@ -172,22 +172,22 @@ export function DependenciesCard({
               </div>
               {dependency.state === 'proposed' && !frozen ? (
                 <div className="flex shrink-0 gap-1">
-                  <Button
+                  <SendButton
                     variant="secondary"
                     size="sm"
                     aria-label={`Accept the dependency on ${dependency.dependsOnKey}`}
-                    onClick={() => onDecide(dependency.id, true)}
+                    onSend={() => onDecide(dependency.id, true)}
                   >
                     Accept
-                  </Button>
-                  <Button
+                  </SendButton>
+                  <SendButton
                     variant="ghost"
                     size="sm"
                     aria-label={`Reject the dependency on ${dependency.dependsOnKey}`}
-                    onClick={() => onDecide(dependency.id, false)}
+                    onSend={() => onDecide(dependency.id, false)}
                   >
                     Reject
-                  </Button>
+                  </SendButton>
                 </div>
               ) : dependency.state === 'accepted' ? (
                 <Legend label="Accepted">

@@ -4,13 +4,14 @@ import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
+import { Loading } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { InputDot } from './planning-marks.tsx'
-import { NotSent, useSending } from './sending.tsx'
+import { NotSent, SendButton, useSending } from './sending.tsx'
 import {
   type AnswerVersion,
   type PlanningHandlers,
@@ -20,7 +21,7 @@ import {
 } from './planning-types.ts'
 
 const OPTION =
-  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-muted'
+  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-muted aria-disabled:opacity-50 aria-busy:opacity-100'
 
 const LETTER = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
 
@@ -129,15 +130,20 @@ function AnsweredLine({
   )
 }
 
-/** The options, the recommended one starred; a press answers at once. */
+/**
+ * The options, the recommended one starred; a press answers at once. While the answer is on its
+ * way, the option pressed works and the others wait: a second press sends nothing.
+ */
 function Options({
   question,
   onAnswer,
 }: {
   question: Question
-  onAnswer: (optionId: string) => void
+  onAnswer: (optionId: string) => Promise<void>
 }): ReactNode {
   const chosen = latest(question)?.optionId ?? null
+  const answering = useSending()
+  const [pressed, setPressed] = useState<string | null>(null)
   return (
     <ul aria-label={`Options of ${question.id}`} className="flex flex-col gap-1.5">
       {question.options.map((option) => (
@@ -146,11 +152,24 @@ function Options({
             type="button"
             className={OPTION}
             aria-pressed={chosen === option.id}
+            aria-busy={answering.busy && pressed === option.id}
+            aria-disabled={answering.busy}
             aria-label={`${option.id} ${option.label}${option.id === question.recommended ? ', recommended' : ''}`}
-            onClick={() => onAnswer(option.id)}
+            onClick={() =>
+              // A press while an answer is on its way sends nothing: `send` keeps to one.
+              answering.send(() => {
+                setPressed(option.id)
+                return onAnswer(option.id)
+              })
+            }
           >
             <span className={LETTER}>{option.id}</span>
             <span className="min-w-0 flex-1 font-medium break-words">{option.label}</span>
+            {answering.busy && pressed === option.id && (
+              <span className="flex shrink-0 pt-0.5">
+                <Loading size="sm" label="Sending" />
+              </span>
+            )}
             {option.id === question.recommended && (
               <span
                 aria-hidden="true"
@@ -228,9 +247,9 @@ function Proposed({
   onDismiss,
 }: {
   proposal: ProposedAnswer
-  onAccept: () => void
+  onAccept: () => Promise<void>
   onEdit: () => void
-  onDismiss: () => void
+  onDismiss: () => Promise<void>
 }): ReactNode {
   return (
     <div role="group" aria-label="Proposed from the ticket" className={BOX}>
@@ -242,15 +261,15 @@ function Proposed({
       </blockquote>
       <p className="text-sm break-words">{proposal.text}</p>
       <div className="flex flex-wrap gap-1">
-        <Button variant="secondary" size="sm" onClick={onAccept}>
+        <SendButton variant="secondary" size="sm" onSend={onAccept}>
           Accept
-        </Button>
+        </SendButton>
         <Button variant="ghost" size="sm" onClick={onEdit}>
           Edit
         </Button>
-        <Button variant="ghost" size="sm" onClick={onDismiss}>
+        <SendButton variant="ghost" size="sm" onSend={onDismiss}>
           Dismiss
-        </Button>
+        </SendButton>
       </div>
     </div>
   )
@@ -300,6 +319,7 @@ export function QuestionCard({
   const [note, setNote] = useState('')
   const [changing, setChanging] = useState(false)
   const answering = useSending()
+  const waiting = useSending()
   // Answered before the page opened: one line. Answered here: the card stays in place, answered.
   const [answeredBefore] = useState(question.state === 'answered')
   const answer = latest(question)
@@ -324,9 +344,13 @@ export function QuestionCard({
     )
   }
   const wait = (): void => {
-    onWaitOnSomeone(question.id, note.trim() === '' ? null : note.trim())
-    setNoting(false)
-    setNote('')
+    waiting.send(
+      () => onWaitOnSomeone(question.id, note.trim() === '' ? null : note.trim()),
+      () => {
+        setNoting(false)
+        setNote('')
+      },
+    )
   }
   return (
     <article
@@ -394,7 +418,12 @@ export function QuestionCard({
             if (event.key === 'Enter') wait()
           }}
           action={
-            <Button variant="secondary" size="sm" onClick={wait}>
+            <Button
+              variant="secondary"
+              size="sm"
+              state={waiting.busy ? 'loading' : 'idle'}
+              onClick={wait}
+            >
               Wait
             </Button>
           }
