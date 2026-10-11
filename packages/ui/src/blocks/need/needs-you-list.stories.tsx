@@ -262,3 +262,107 @@ export const Narrow: Story = {
     await expect(cut).toEqual([])
   },
 }
+
+/** What "Allow these" and the cards of the group answer, by need. */
+const answered = fn()
+
+/** Three Probes asking at once: each one's requests on one row. */
+const PROBE_ROWS: readonly NeedRow[] = [
+  ...['tests/cli/install.test.ts', 'tests/cli/update.test.ts', 'tests/cli/remove.test.ts'].map(
+    (path, at): NeedRow => ({
+      id: `probe-1-${String(at)}`,
+      project: 'Acme',
+      agent: { id: 'probe-1', name: 'the Probe' },
+      need: {
+        title: `Write ${path} in its Probe folder`,
+        missionKey: 'ACME-12',
+        when: `${String(3 - at)} min`,
+        role: 'probe',
+        ask: {
+          kind: 'permission',
+          command: `fs_write ~/.hemera/probes/ACME-12/1/${path}`,
+          hemeraReason:
+            'No rule of this Project allows this write for the Probe, and no judge is set up to rate it.',
+          settings: 'Hemera Auto',
+          choices: ['allow-once', 'allow-for-mission', 'deny'],
+        },
+      },
+    }),
+  ),
+  {
+    id: 'probe-2-0',
+    project: 'Acme',
+    agent: { id: 'probe-2', name: 'the Probe' },
+    need: {
+      title: 'Run git rev-parse HEAD',
+      missionKey: 'ACME-12',
+      when: '1 min',
+      role: 'probe',
+      ask: {
+        kind: 'permission',
+        command: 'git rev-parse HEAD',
+        hemeraReason:
+          'No rule of this Project allows this command for the Probe, and no judge is set up to rate it.',
+        settings: 'Hemera Auto',
+        choices: ['allow-once', 'allow-for-mission', 'deny'],
+      },
+    },
+  },
+]
+
+/**
+ * The requests of one agent on one row, with their count and "Allow these"; an agent with one
+ * request keeps its own row.
+ */
+export const GroupedByAgent: StoryObj<typeof NeedsYouList> = {
+  args: {
+    rows: [...PROBE_ROWS, ...ROWS.slice(2, 3)],
+    on: (id: string) => ({ onPermission: (choice) => answered(id, choice) }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('3 requests from the Probe')).toBeVisible()
+    await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(3)
+    answered.mockClear()
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow these' }))
+    await expect(answered).toHaveBeenCalledTimes(3)
+    await expect(answered).toHaveBeenCalledWith('probe-1-0', 'allow-once')
+    await expect(answered).toHaveBeenCalledWith('probe-1-2', 'allow-once')
+    await expect(answered).not.toHaveBeenCalledWith('probe-2-0', 'allow-once')
+  },
+}
+
+/** The group's own button opens its requests, each answered on its own. */
+export const GroupUnfolded: Story = {
+  args: { rows: [...PROBE_ROWS, ...ROWS.slice(2, 3)] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const [group] = canvas.getAllByRole('button', { name: 'Answer here' })
+    if (group === undefined) throw new globalThis.Error('the group is the first row')
+    await userEvent.click(group)
+    await expect(group).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() =>
+      expect(canvas.getByText('Write tests/cli/update.test.ts in its Probe folder')).toBeVisible(),
+    )
+    await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(6)
+  },
+}
+
+/** Once answered, a group's requests settle in place, and the group says what still waits. */
+export const GroupPartlyAnswered: Story = {
+  args: {
+    rows: PROBE_ROWS.map((row) =>
+      row.id === 'probe-1-0'
+        ? Object.assign({}, row, {
+            need: Object.assign({}, row.need, {
+              status: { state: 'applied', answer: 'Allowed once' },
+            }),
+          })
+        : row,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('2 requests from the Probe')).toBeVisible()
+  },
+}

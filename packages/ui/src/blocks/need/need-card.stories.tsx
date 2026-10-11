@@ -327,9 +327,9 @@ export const PermissionWithoutJudge: Story = {
     await expect(canvas.getByText(/Allow for this mission stops these questions/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Open Settings › Hemera Auto' }))
     await expect(args.onSettings).toHaveBeenCalled()
-    for (const name of ['Allow once', 'Allow for this mission', 'Deny']) {
-      await expect(canvas.getByRole('button', { name })).toBeVisible()
-    }
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Allow for this mission' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Deny' })).toBeVisible()
   },
 }
 
