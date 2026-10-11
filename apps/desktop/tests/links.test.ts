@@ -115,9 +115,9 @@ const chain = Effect.gen(function* () {
               displayed.push(preferences)
             }),
           notices: Stream.make(OPENED),
-          preview: (style, sound) =>
+          preview: (style, sound, volume) =>
             Effect.sync(() => {
-              previewed.push([style, sound])
+              previewed.push([style, sound, String(volume)])
               return 'played'
             }),
           hemeraAuto: {
@@ -181,16 +181,18 @@ describe('Notifications, between the window, main and the engine', () => {
       }),
     ))
 
-  test('the window chooses a sound style and previews a sound through main', () =>
+  test('the window chooses a sound style and a volume, and previews a sound through main', () =>
     run(
       Effect.gen(function* () {
         const { window, previewed } = yield* chain
         expect((yield* window['notifications.setStyle']({ style: 'zen' })).style).toBe('zen')
         expect((yield* window['notifications.settings']()).style).toBe('zen')
-        expect(yield* window['notifications.preview']({ style: 'zen', sound: 'error' })).toBe(
-          'played',
-        )
-        expect(previewed).toEqual([['zen', 'error']])
+        expect((yield* window['notifications.setVolume']({ volume: 20 })).volume).toBe(20)
+        expect((yield* window['notifications.settings']()).volume).toBe(20)
+        expect(
+          yield* window['notifications.preview']({ style: 'zen', sound: 'error', volume: 20 }),
+        ).toBe('played')
+        expect(previewed).toEqual([['zen', 'error', '20']])
       }),
     ))
 
