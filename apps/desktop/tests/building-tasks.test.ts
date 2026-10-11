@@ -55,6 +55,28 @@ const promptsOf = (world: {
   }>
 }) => world.agents.flatMap((agent) => agent.answers.prompts.map((prompt) => text(prompt)))
 
+/** A hold of the Builder at one point, armed by the test: the first pass after it is held. */
+const heldAt = (point: string) => {
+  const release = Promise.withResolvers<void>()
+  const reached = Promise.withResolvers<void>()
+  let armed = false
+  return {
+    arm: () => {
+      armed = true
+    },
+    reached: reached.promise,
+    release: () => release.resolve(),
+    hold: (at: string) =>
+      at !== point || !armed
+        ? Effect.void
+        : Effect.promise(() => {
+            armed = false
+            reached.resolve()
+            return release.promise
+          }),
+  }
+}
+
 /** The Builder starts a task and says it is finished. */
 const builds = (grantId: string, taskId: string) =>
   Effect.gen(function* () {
@@ -622,6 +644,64 @@ describe('The end and Cancel', () => {
     expect(seen.builder.state).toBe('ended')
     expect(seen.view.state).toBe('cancelled')
     expect(statesOf(seen.view)['T1']).toBe('in_progress')
+  })
+
+  test('a Cancel while the last task is judged ends nothing: BuildingEnd is not called and the task stays checking', async () => {
+    const ended: string[] = []
+    const end = Layer.succeed(BuildingEnd, {
+      end: (missionId: string) => Effect.sync(() => ended.push(missionId)).pipe(Effect.asVoid),
+    })
+    const gate = heldAt('judging')
+    const { run } = builderEngine(data, work, { end, hold: gate.hold })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          for (const id of ['T1', 'T2', 'T4']) yield* builds(grantId, id)
+          gate.arm()
+          yield* call(grantId, 'task_start', { task: 'T3' })
+          const late = yield* Effect.forkChild(
+            call(grantId, 'task_finished', { task: 'T3', summary: 'Done.' }),
+          )
+          yield* Effect.promise(() => gate.reached)
+          yield* moveMission(mission.id, 'cancel', 'user')
+          yield* until(Effect.map(buildingOf(mission.id), (view) => view?.state === 'cancelled'))
+          gate.release()
+          yield* Fiber.join(late)
+          yield* Effect.sleep('300 millis')
+          return yield* buildingNow(mission.id)
+        }),
+      ),
+    )
+    expect(ended).toEqual([])
+    expect(seen.state).toBe('cancelled')
+    expect(statesOf(seen)['T3']).toBe('checking')
+  })
+
+  test('a Cancel while a task starts leaves it available, with no claim', async () => {
+    const gate = heldAt('starting')
+    const { run } = builderEngine(data, work, { hold: gate.hold })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          gate.arm()
+          const late = yield* Effect.forkChild(call(grantId, 'task_start', { task: 'T1' }))
+          yield* Effect.promise(() => gate.reached)
+          yield* moveMission(mission.id, 'cancel', 'user')
+          yield* until(Effect.map(buildingOf(mission.id), (view) => view?.state === 'cancelled'))
+          gate.release()
+          const answer = yield* Fiber.join(late)
+          return { answer, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.answer).toBe('refused: the mission has no Building under way')
+    expect(statesOf(seen.view)['T1']).toBe('available')
   })
 
   test('BuildingStart called again for a mission already started begins nothing', async () => {

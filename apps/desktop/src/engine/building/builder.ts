@@ -523,6 +523,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           )
         })
 
+      /** Whether the Building is still the mission's active one: a Cancel may have ended it. */
+      const stillActive = (transaction: EngineTransaction, building: BuildingRow) =>
+        Effect.map(
+          activeBuildingIn(transaction, building.missionId),
+          (active) => active?.id === building.id,
+        )
+
       /** A finished task judged: done once the verdict says so, then what that lets on. */
       const judge = (building: BuildingRow, taskId: string, attemptId: string) =>
         Effect.gen(function* () {
@@ -538,6 +545,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* hold('judging')
           const done = yield* mutate('judging a task', (transaction) =>
             Effect.gen(function* () {
+              if (!(yield* stillActive(transaction, building))) return { result: false, events: [] }
               const task = taskIn(yield* tasksIn(transaction, building.id), taskId)
               if (task?.state !== 'checking') return { result: false, events: [] }
               const verified = judgement === 'verified'
@@ -639,6 +647,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* hold('starting')
           const outcome = yield* mutate('starting a task', (transaction) =>
             Effect.gen(function* () {
+              if (!(yield* stillActive(transaction, building)))
+                return { result: NO_BUILDING, events: [] }
               const current = taskIn(yield* tasksIn(transaction, building.id), task.id)
               if (current?.state !== 'available') {
                 return {
@@ -767,6 +777,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* hold('finishing')
           const written = yield* mutate('finishing a task', (transaction) =>
             Effect.gen(function* () {
+              if (!(yield* stillActive(transaction, building)))
+                return { result: NO_BUILDING, events: [] }
               const current = taskIn(yield* tasksIn(transaction, building.id), task.id)
               if (current?.state !== 'in_progress') {
                 return {
