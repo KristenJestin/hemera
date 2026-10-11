@@ -268,6 +268,7 @@ function Application() {
               close: (view) => setNavigation((before) => closeView(before, view)),
               goProject: () => goTo({ kind: 'project', id: route.projectId }),
               goMission: (key) => goTo({ kind: 'mission', projectId: route.projectId, key }),
+              openChat: (chatId) => openChat(route.projectId, chatId),
               answer: answering.answer,
               recheck: answering.recheck,
               openSettings: (section) => goTo(linkedSettings(section)),
