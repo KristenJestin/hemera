@@ -441,8 +441,13 @@ describe('A restart resumes the Building with no human action', () => {
             kind: 'mission',
             missionId: first.mission.id,
           })
+          const view = yield* buildingNow(first.mission.id)
+          // The fresh Builder runs T2 now: it finishes it.
+          const { grantId } = yield* builderOf(first.mission.id)
+          const finished = yield* call(grantId, 'task_finished', { task: 'T2', summary: 'Done.' })
           return {
-            view: yield* buildingNow(first.mission.id),
+            view,
+            finished,
             resumed: yield* eventsOf(first.mission.id, 'building.resumed'),
             builders: live.filter((one) => one.role === 'builder'),
           }
@@ -452,8 +457,42 @@ describe('A restart resumes the Building with no human action', () => {
     expect(statesOf(seen.view)).toMatchObject({ T1: 'done', T2: 'in_progress' })
     const t2 = seen.view.tasks.find((task) => task.id === 'T2')
     expect(t2?.attempts.map((one) => one.endedAt)).toEqual([null])
+    expect(seen.finished).toMatch(/T2 is done, not verified/)
     expect(seen.resumed).toHaveLength(1)
     expect(seen.builders.map((one) => one.lineage)).toEqual([first.builder.lineage])
+    expect(text(after.world.agents[0]?.answers.prompts[0] ?? [])).toContain('[hemera:resume]')
+  })
+})
+
+describe('A Builder that ended comes back with its tasks', () => {
+  test('a Builder ended before the restart is started again on its lineage, with the resume block and the task it ran', async () => {
+    const before = builderEngine(data, work)
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { session, grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* Sessions.use((sessions) => sessions.end(session.lineage, 'a test'))
+          return { mission, builder: session }
+        }),
+      ),
+    )
+    const after = builderEngine(data, work)
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { session, grantId } = yield* builderOf(first.mission.id)
+          const finished = yield* call(grantId, 'task_finished', { task: 'T1', summary: 'Done.' })
+          return { session, finished, view: yield* buildingNow(first.mission.id) }
+        }),
+      ),
+    )
+    expect(seen.session.lineage).toBe(first.builder.lineage)
+    expect(seen.finished).toMatch(/T1 is done, not verified/)
+    expect(statesOf(seen.view)['T1']).toBe('done')
     expect(text(after.world.agents[0]?.answers.prompts[0] ?? [])).toContain('[hemera:resume]')
   })
 })

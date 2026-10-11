@@ -294,23 +294,28 @@ export const builderLayer = (log: Log) => {
               Effect.catchTag('UnknownWorkspace', () => Effect.succeed(null)),
             )
 
-      /** The mission's Builder, opened when none lives: a fresh one of its lineage if it had one. */
+      /**
+       * The mission's Builder: opened when it never had one, its lineage started again when it
+       * stopped (#40's resume: its leases and the resume block pass to the fresh one). A stuck one
+       * is #40's to replace.
+       */
       const ensureBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           const owner = { kind: 'mission', missionId: building.missionId } as const
-          const live = yield* sessionsIn(['starting', 'working', 'idle'], owner)
+          const live = yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner)
           if (live.some((one) => one.role === 'builder')) return
+          const last = (yield* sessionsIn(['ended', 'failed', 'replaced'], owner))
+            .filter((one) => one.role === 'builder')
+            .toSorted((a, b) => b.epoch - a.epoch)[0]
+          if (last !== undefined) {
+            const resumed = yield* Sessions.use((sessions) => sessions.resume(last.id))
+            if (resumed === null)
+              yield* said(`the Builder of ${building.missionId} was not resumed`)
+            return
+          }
           const folder = yield* folderOf(building)
           if (folder === null) return yield* said(`no Workspace for ${building.missionId}`)
-          const asked = { owner, role: 'builder', folder }
-          const before = (yield* sessionsIn(['ended', 'replaced', 'failed', 'stuck'], owner)).find(
-            (one) => one.role === 'builder',
-          )
-          yield* Sessions.use((sessions) =>
-            before === undefined
-              ? sessions.open(asked)
-              : sessions.reopen(before.lineage, asked, 'the Building resumes'),
-          ).pipe(
+          yield* Sessions.use((sessions) => sessions.open({ owner, role: 'builder', folder })).pipe(
             Effect.catchTag('SessionRefused', (refused) =>
               said(`no Builder for ${building.missionId}: ${refused.message}`),
             ),
