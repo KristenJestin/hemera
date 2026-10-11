@@ -1298,7 +1298,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         }).pipe(Effect.provide(context))
 
       /** A need of the Builder's that no longer holds, or that the user's Retry withdrew. */
-      const needEnded = (needId: string, how: 'expired' | 'withdrawn') =>
+      const needEnded = (needId: string, how: 'expired' | 'withdrawn', reason: string | null) =>
         Effect.gen(function* () {
           const outcome = yield* mutate('releasing what a need held', (transaction) =>
             Effect.gen(function* () {
@@ -1306,6 +1306,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               if (found === null || found.building.state !== 'active') {
                 return { result: null, events: [] }
               }
+              // An answer whose amendment no longer applied expired it and released its tasks
+              // already: only the Builder is left to tell.
+              if (found.decision.state === how) return { result: found, events: [] }
               if (found.decision.state !== 'pending') return { result: null, events: [] }
               yield* transaction
                 .update(buildingDecisions)
@@ -1323,7 +1326,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             outcome.building,
             how === 'expired' ? 'expiry' : 'answer',
             how === 'expired'
-              ? `Your request no longer holds and expired: ${outcome.decision.question.split('\n')[0] ?? ''}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`
+              ? `Your request no longer holds and expired: ${outcome.decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`
               : `The user says it is fixed: ${outcome.decision.question}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
           )
         })
@@ -1398,6 +1401,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               yield* needEnded(
                 event.entityId,
                 event.type === 'need.expired' ? 'expired' : 'withdrawn',
+                Option.getOrNull(readString(payload['reason'])),
               )
             }
             if (event.type === 'mission.cancelled') yield* cancelled(event.entityId)

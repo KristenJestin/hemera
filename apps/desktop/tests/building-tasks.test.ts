@@ -539,6 +539,58 @@ describe('An amendment changes the plan only through the user’s answer (CT-33)
   })
 })
 
+describe('An amendment the plan moved under expires, and the Builder is told', () => {
+  test('a removal answered after another removal left its scenario uncovered expires, with an expiry delivery naming why', async () => {
+    const removing = (task: string, out: string) => ({
+      task,
+      kind: 'impossible',
+      reason: `${out} is not needed.`,
+      options: [`Remove ${out}`, 'Keep it'],
+      recommended: `Remove ${out}`,
+      recommended_reason: 'It does nothing more.',
+      amendment: { kind: 'remove', task: out, reason: 'Not needed.' },
+    })
+    const { world, run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* call(grantId, 'task_blocked', removing('T1', 'T4'))
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          yield* call(grantId, 'task_blocked', removing('T2', 'T1'))
+          const needs = (yield* getMission(mission.id)).needs
+          const needOf = (taskId: string) =>
+            needs.find(
+              (one) => Predicate.isTagged(one.owner, 'Mission') && one.owner.taskId === taskId,
+            )?.id ?? ''
+          yield* answerNeed({
+            id: needOf('T2'),
+            answer: ChosenAnswer.make({ option: 'Remove T1' }),
+            key: 'answer-t2',
+          })
+          yield* answerNeed({
+            id: needOf('T1'),
+            answer: ChosenAnswer.make({ option: 'Remove T4' }),
+            key: 'answer-t1',
+          })
+          yield* until(
+            Effect.sync(() => promptsOf(world).some((one) => one.includes('[hemera:expiry]'))),
+          )
+          return { view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    const expiry = promptsOf(world).find((one) => one.includes('[hemera:expiry]')) ?? ''
+    expect(expiry).toContain('Removing T4 leaves R1.S1 covered by no task of the plan.')
+    expect(statesOf(seen.view)['T4']).toBe('available')
+    const decision = seen.view.decisions.find((one) => one.tasks.includes('T1'))
+    expect(decision?.state).toBe('expired')
+  })
+})
+
 describe('A restart resumes the Building with no human action', () => {
   test('a fresh Builder with the resume block, the same states, the attempt still open; a task left checking is judged again', async () => {
     const holding = Layer.succeed(TaskVerdict, { judge: () => Effect.succeed('pending' as const) })
