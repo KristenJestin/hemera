@@ -44,6 +44,7 @@ export type PlanningTarget =
   | { kind: 'freeze' }
   | { kind: 'steps' }
   | { kind: 'vision' }
+  | { kind: 'questions' }
 
 export interface PlanningStep {
   id: StepId
@@ -73,7 +74,7 @@ const plural = (count: number, one: string, many: string): string =>
 const questionsOf = (data: PlanningData): Question[] => data.waves.flatMap((wave) => wave.questions)
 
 /** The questions as the steps count them: to answer, waiting on someone, on their way, answered. */
-function tally(data: PlanningData) {
+export function tally(data: PlanningData) {
   const questions = questionsOf(data)
   return {
     open: questions.filter((question) => question.state === 'open'),
@@ -123,6 +124,25 @@ function freezeReasons({ data }: PlanningFacts): string[] {
       ? [plural(deciding.length, 'dependency to decide', 'dependencies to decide')]
       : []),
   ]
+}
+
+/** How many questions are left to the user, in words: "2 to answer · 1 waits on someone". */
+export function leftToAnswer(data: PlanningData): string | null {
+  const { open, waiting } = tally(data)
+  const parts = [
+    ...(open.length > 0 ? [`${String(open.length)} to answer`] : []),
+    ...(waiting.length > 0 ? [plural(waiting.length, 'waits on someone', 'wait on someone')] : []),
+  ]
+  return parts.length === 0 ? null : parts.join(' · ')
+}
+
+/** Said in place of the questions once none is left to answer; null while one is. */
+export function allAnswered(data: PlanningData): string | null {
+  const { open, waiting, pending } = tally(data)
+  if (open.length > 0 || waiting.length > 0) return null
+  return pending.length > 0
+    ? 'All questions answered — the Planner takes them into account'
+    : 'All questions answered'
 }
 
 /** Freeze in the head: absent before the Spec is declared complete and once frozen; else with what stands before it. */

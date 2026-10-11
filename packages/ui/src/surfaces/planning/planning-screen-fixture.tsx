@@ -4,6 +4,7 @@ import type {
   DiscussionHandlers,
   DiscussionItem,
   PlanningHandlers,
+  Question,
 } from '../../blocks/planning/planning-types.ts'
 import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
@@ -20,6 +21,7 @@ import { planningViews } from './planning-views.tsx'
 const MOMENTS = {
   starting: moments.starting,
   writing: moments.writing,
+  waveToAnswer: moments.waveToAnswer,
   plannerFailed: moments.plannerFailed,
   plannerSilent: moments.plannerSilent,
   firstWave: moments.firstWave,
@@ -58,6 +60,38 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   onRetry: () => void
 }
 
+/** A moment with the answers the story's engine took, each sent and not yet read by the Planner. */
+function withAnswers(
+  moment: moments.PlanningMoment,
+  taken: ReadonlyMap<string, { optionId: string } | { text: string }>,
+): moments.PlanningMoment {
+  if (taken.size === 0) return moment
+  const waves = moment.data.waves.map((wave) =>
+    Object.assign({}, wave, {
+      questions: wave.questions.map((question): Question => {
+        const given = taken.get(question.id)
+        if (given === undefined) return question
+        return Object.assign({}, question, {
+          state: 'answered' as const,
+          answers: [
+            ...question.answers.map((version) =>
+              Object.assign({}, version, { inputState: 'superseded' as const }),
+            ),
+            {
+              version: question.answers.length + 1,
+              optionId: 'optionId' in given ? given.optionId : null,
+              text: 'text' in given ? given.text : null,
+              at: '11:50',
+              inputState: 'received' as const,
+            },
+          ],
+        })
+      }),
+    }),
+  )
+  return Object.assign({}, moment, { data: Object.assign({}, moment.data, { waves }) })
+}
+
 /**
  * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
  * renderer draws above it, the page as its base, and the views it opens over it — a discussion, a
@@ -74,7 +108,16 @@ export function PlanningScreen({
   onClose,
   ...handlers
 }: PlanningScreenProps): ReactNode {
-  const shown = moment === 'loading' || moment === 'error' ? null : MOMENTS[moment]()
+  // The story's engine: an answer it takes is sent, as the page reads it next.
+  const [taken, setTaken] = useState<ReadonlyMap<string, { optionId: string } | { text: string }>>(
+    new Map(),
+  )
+  const shown =
+    moment === 'loading' || moment === 'error' ? null : withAnswers(MOMENTS[moment](), taken)
+  const answer: PlanningHandlers['onAnswer'] = (questionId, given) =>
+    handlers.onAnswer(questionId, given).then(() => {
+      setTaken((before) => new Map(before).set(questionId, given))
+    })
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
   )
@@ -154,6 +197,7 @@ export function PlanningScreen({
           mentionables={MENTIONABLES}
           onRetry={onRetry}
           {...handlers}
+          onAnswer={answer}
           onDiscuss={discuss}
           onOpenProbe={openProbe}
         />

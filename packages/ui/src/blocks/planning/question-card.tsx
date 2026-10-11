@@ -107,14 +107,19 @@ function RetiredQuestion({
   )
 }
 
-/** A question whose answer is taken into account, as one line: its answer, its dot, and Change. */
+/**
+ * An answered question, as one line: its answer, where it stands (its dot and a word), and
+ * Change. It folds to it the moment the user answers.
+ */
 function AnsweredLine({
   question,
   answer,
+  step,
   onChange,
 }: {
   question: Question
-  answer: AnswerVersion
+  answer: Pick<AnswerVersion, 'optionId' | 'text'>
+  step: StepShown
   onChange: () => void
 }): ReactNode {
   const option = question.options.find((candidate) => candidate.id === answer.optionId)
@@ -133,7 +138,12 @@ function AnsweredLine({
         </span>
         <ChangedAnswer question={question} />
       </div>
-      <InputDot state={answer.inputState} />
+      <span className="flex shrink-0 items-center gap-1 leading-5">
+        <InputDot state={step === 'sending' ? 'received' : step} />
+        <span role="status" className="text-xs whitespace-nowrap text-muted-foreground">
+          {STEP_WORDS[step]}
+        </span>
+      </span>
       <Button
         variant="ghost"
         size="sm"
@@ -319,10 +329,10 @@ export interface QuestionCardProps extends Pick<
  * press that leaves at once (no Send) and fills the option at once, or in the user's own words
  * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
  * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
- * Where the answer stands is its dot and a word — Sending, Sent, With the Planner — and once taken
- * into account the card is one line with Change. A changed answer is said as a change; a retired
- * question stays, with its reason. Everything but a press on its way and Change is drawn from the
- * question: a card is the same live and after a restart.
+ * Answered, the card folds at once to one line with its answer and Change; its dot and a word say
+ * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
+ * is said as a change; a retired question stays, with its reason. Everything but a press on its
+ * way and Change is drawn from the question: a card is the same live and after a restart.
  */
 export function QuestionCard({
   question,
@@ -357,8 +367,12 @@ export function QuestionCard({
   if (RETIRED.has(question.state)) {
     return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
   }
-  // What it shows comes from the question alone: the same card live and after a restart.
-  const folded = answer?.inputState === 'integrated' && changingAt !== count && pressing === null
+  // Answered, it folds at once to its line — on the press, before the engine has it — and stays
+  // folded while the answer goes on its way. Apart from a press on its way and Change, what it
+  // shows comes from the question alone: the same card live and after a restart.
+  const folded =
+    pressing !== null ||
+    (question.state === 'answered' && answer !== undefined && changingAt !== count)
   const step: StepShown =
     pressing === null
       ? (answer?.inputState ?? 'unanswered')
@@ -395,10 +409,10 @@ export function QuestionCard({
       },
     )
   }
-  // Taken into account, the card folds to its line: the card collapses as the line comes, on `fold`.
+  // Answered, the card folds to its line: the card collapses as the line comes, on `fold`.
   return (
     <AnimatePresence initial={false}>
-      {folded && answer !== undefined ? (
+      {folded ? (
         <motion.div
           key="line"
           className="overflow-hidden"
@@ -407,7 +421,16 @@ export function QuestionCard({
           exit={collapse}
           transition={folding}
         >
-          <AnsweredLine question={question} answer={answer} onChange={() => setChangingAt(count)} />
+          <AnsweredLine
+            question={question}
+            answer={
+              pressing === null && answer !== undefined
+                ? answer
+                : { optionId: pressing, text: null }
+            }
+            step={step}
+            onChange={() => setChangingAt(count)}
+          />
         </motion.div>
       ) : (
         <motion.div

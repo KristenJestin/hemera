@@ -778,6 +778,43 @@ export function wave(): PlanningMoment {
   return scene({ data: base(), head: YOUR_TURN })
 }
 
+const TAGS: Question = {
+  ...DATES,
+  id: 'Q9',
+  text: 'Do a note’s tags go into its front matter?',
+  why: 'Tags live in their own table in api; an editor that reads front matter shows them as a list.',
+  options: [
+    { id: 'A', label: 'Yes, as a list', detail: 'Read by most editors that know front matter.' },
+    { id: 'B', label: 'No', detail: 'The file stays the note’s text and its title.' },
+  ],
+  recommended: 'A',
+  recommendedReason: 'Notes.R7 says a note is found by its tags; losing them loses that.',
+  section: 'R1',
+  state: 'open',
+  mootDecision: null,
+}
+
+/**
+ * A wave of three questions to answer, the first wave settled: answering one folds it and brings
+ * the next; the story's engine takes each answer as it comes.
+ */
+export function waveToAnswer(): PlanningMoment {
+  const [first, second] = WAVES
+  return scene({
+    data: {
+      ...base(),
+      waves: [
+        first!,
+        {
+          ...second!,
+          questions: [WHO, changing(SIZE, { state: 'open', waitingNote: null, drafts: [] }), TAGS],
+        },
+      ],
+    },
+    head: YOUR_TURN,
+  })
+}
+
 /** Only the first wave, before the second arrives. */
 export function firstWave(): PlanningMoment {
   return scene({ data: { ...base(), waves: WAVES.slice(0, 1) }, head: YOUR_TURN })

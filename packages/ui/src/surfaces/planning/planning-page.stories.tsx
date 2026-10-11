@@ -181,20 +181,51 @@ export const WaveWaitsForYou: Story = {
   },
 }
 
-/** Q5 answered and sent: the choice filled, "Sent" beside its dot, the card in place. */
+/**
+ * A wave of three questions: the header says how many are left. Answering Q5 folds it at once to
+ * its line and brings Q6 into view with the focus; answering the last says, in place, that every
+ * question is answered and the Planner takes them into account.
+ */
+export const AnsweringBringsTheNext: Story = {
+  args: { moment: 'waveToAnswer' },
+  play: async ({ canvasElement }) => {
+    const canvas = rail(canvasElement)
+    const questions = within(canvas.getByRole('region', { name: 'Questions' }))
+    await expect(questions.getByText('3 to answer')).toBeVisible()
+    await expect(
+      steps(canvasElement).getByRole('listitem', { name: /Your answers/ }),
+    ).toHaveTextContent('3 to answer')
+    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
+    const q6 = canvas.getByRole('article', { name: /^Q6/ })
+    await waitFor(() => expect(q6).toHaveFocus())
+    await expect(inView(q6)).toBe(true)
+    await waitFor(() => expect(questions.getByText('2 to answer')).toBeVisible())
+    const q5 = within(canvas.getByRole('article', { name: /^Q5/ }))
+    await expect(q5.getByText('B · Only its owner')).toBeVisible()
+    await expect(q5.getByRole('status')).toHaveTextContent('Sent')
+    await userEvent.click(within(q6).getByRole('button', { name: /5 000 notes/ }))
+    const q9 = canvas.getByRole('article', { name: /^Q9/ })
+    await waitFor(() => expect(q9).toHaveFocus())
+    await userEvent.click(within(q9).getByRole('button', { name: /Yes, as a list/ }))
+    const done = await questions.findByText(
+      'All questions answered — the Planner takes them into account',
+    )
+    await waitFor(() => expect(done).toHaveFocus())
+    await expect(questions.queryByText(/to answer$/)).toBeNull()
+  },
+}
+
+/** Q5 answered and sent: folded at once to its line, "Sent" beside its dot. */
 export const AnswerSent: Story = {
   args: { moment: 'answerReceived' },
   play: async ({ canvasElement }) => {
     const card = within(rail(canvasElement).getByRole('article', { name: /^Q5/ }))
+    await expect(card.getByText('B · Only its owner')).toBeVisible()
     await expect(card.getByRole('status')).toHaveTextContent('Sent')
-    await expect(card.getByRole('button', { name: /Only its owner/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
   },
 }
 
-/** With the Planner: the dot turns blue; the step says it is being taken into account. */
+/** With the Planner: the line's dot turns blue; the step says it is being taken into account. */
 export const AnswerWithThePlanner: Story = {
   args: { moment: 'answerDelivered' },
   play: async ({ canvasElement }) => {
@@ -206,12 +237,13 @@ export const AnswerWithThePlanner: Story = {
   },
 }
 
-/** Taken into account: Q5 folds to one line in place, its answer, the green dot and Change. */
+/** Taken into account: the same line, its dot green and its word, Change. */
 export const AnswerTakenIntoAccount: Story = {
   args: { moment: 'answerIntegrated' },
   play: async ({ canvasElement }) => {
     const card = within(rail(canvasElement).getByRole('article', { name: /^Q5/ }))
     await expect(card.getByText('B · Only its owner')).toBeVisible()
+    await expect(card.getByRole('status')).toHaveTextContent('Taken into account')
     await expect(card.getByRole('button', { name: 'Change the answer to Q5' })).toBeVisible()
   },
 }

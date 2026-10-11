@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { ColdReadReport } from '../../blocks/planning/cold-read.tsx'
 import {
@@ -12,6 +12,8 @@ import { ChangedMark } from '../../blocks/planning/planning-marks.tsx'
 import {
   type Planner,
   type PlanningTarget,
+  allAnswered,
+  leftToAnswer,
   planningSteps,
   targetId,
 } from '../../blocks/planning/planning-progress.ts'
@@ -24,7 +26,6 @@ import {
   type Wave,
   openBySection,
   unsettled,
-  waiting,
 } from '../../blocks/planning/planning-types.ts'
 import { ProbesCard } from '../../blocks/planning/probes.tsx'
 import { QuestionCard } from '../../blocks/planning/question-card.tsx'
@@ -35,7 +36,7 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { IconChevronRight } from '../../icons.ts'
+import { IconCheck, IconChevronRight } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { PageError } from '../page.tsx'
 
@@ -155,6 +156,23 @@ function WaveList({
   )
 }
 
+/**
+ * The question to answer after this one, as the rail lists them — the waves still open newest
+ * first — the one below first, else the first above; null when none is left.
+ */
+function nextToAnswer(data: PlanningData, answered: string): string | null {
+  const order = [...data.waves]
+    .reverse()
+    .flatMap((wave) => wave.questions)
+    .filter((question) => question.state === 'open')
+    .map((question) => question.id)
+  const at = order.indexOf(answered)
+  const rest = [...order.slice(at + 1), ...order.slice(0, Math.max(at, 0))].filter(
+    (id) => id !== answered,
+  )
+  return rest[0] ?? null
+}
+
 /** A wave whose every question is answered and taken into account, or retired. */
 const settledWave = (wave: Wave): boolean =>
   wave.questions.every((question) => !unsettled(question))
@@ -213,9 +231,34 @@ function Questions({ data, props }: { data: PlanningData; props: PlanningPagePro
   const newestFirst = [...data.waves].reverse()
   const open = newestFirst.filter((wave) => !settledWave(wave))
   const settled = newestFirst.filter(settledWave)
+  const left = leftToAnswer(data)
+  const done = allAnswered(data)
   return (
     <section aria-label="Questions" className="flex flex-col gap-3">
-      <SectionHead title="Questions" count={waiting(data.waves).length} calls />
+      <SectionHead
+        title="Questions"
+        actions={
+          left === null ? undefined : (
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-warning" />
+              {left}
+            </span>
+          )
+        }
+      />
+      {done !== null && (
+        <p
+          id={targetId({ kind: 'questions' })}
+          tabIndex={-1}
+          role="status"
+          className="flex items-center gap-2 rounded-sm text-sm outline-none focus-ring"
+        >
+          <span className="flex text-success">
+            <IconCheck size="sm" />
+          </span>
+          {done}
+        </p>
+      )}
       <AnimatePresence initial={false}>
         {open.map((wave) => (
           <motion.div
@@ -280,6 +323,14 @@ function Skeletons(): ReactNode {
 
 export function PlanningPage(props: PlanningPageProps): ReactNode {
   const { data, error } = props
+  // The last answer sent: once it is read back, the line saying none is left takes the focus.
+  const [lastSent, setLastSent] = useState(false)
+  const said = data === null ? null : allAnswered(data)
+  useEffect(() => {
+    if (!lastSent || said === null) return
+    setLastSent(false)
+    focusTarget({ kind: 'questions' })
+  }, [lastSent, said])
   if (data === null) {
     if (error !== undefined) {
       return (
@@ -295,6 +346,24 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
     return <Skeletons />
   }
   const open = openBySection(data.waves)
+  // An answer folds its question at once; the next one to answer comes into view with the focus,
+  // and once none is left, the line that says so.
+  const answering: PlanningPageProps = {
+    ...props,
+    onAnswer: (questionId, answer) => {
+      const next = nextToAnswer(data, questionId)
+      if (next !== null) focusTarget({ kind: 'question', id: next })
+      const sent = props.onAnswer(questionId, answer)
+      // The line saying none is left is drawn once the answer is read back: it then takes the focus.
+      if (next === null) {
+        sent.then(
+          () => setLastSent(true),
+          () => undefined,
+        )
+      }
+      return sent
+    },
+  }
   const steps = planningSteps({
     data,
     planner: props.planner ?? BETWEEN_TURNS,
@@ -362,7 +431,7 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
           {data.ticket !== null && (
             <TicketCard ticket={data.ticket} onSeen={props.onSeenTicketChange} />
           )}
-          <Questions data={data} props={props} />
+          <Questions data={data} props={answering} />
           <ProbesCard probes={data.probes} onOpen={props.onOpenProbe} />
           <ColdReadReport
             passes={data.passes}

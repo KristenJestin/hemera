@@ -80,37 +80,51 @@ export const Open: Story = {
   },
 }
 
+/** The card once folded: its one line, and nothing of the options left. */
+const foldedTo = async (canvasElement: HTMLElement, answer: string): Promise<void> => {
+  const canvas = within(canvasElement)
+  await waitFor(() => {
+    expect(canvas.getByText(answer)).toBeVisible()
+    expect(canvas.queryByRole('list', { name: /^Options of/ })).toBeNull()
+  })
+}
+
 /**
- * Chosen: a press fills the option at once with its check, dims the others, and the card says it
- * is on its way, before the engine has answered.
+ * Chosen: the card folds at once to its line — the answer, "Sending" beside its dot, Change —
+ * before the engine has answered.
  */
 export const Chosen: Story = {
   args: { onAnswer: fn(() => new Promise<void>(() => undefined)) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const option = canvas.getByRole('button', { name: /Only its owner/ })
-    await userEvent.click(option)
+    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
     await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { optionId: 'B' })
-    await expect(option).toHaveAttribute('aria-pressed', 'true')
-    await expect(option.querySelector('[data-chosen]')).not.toBeNull()
-    await expect(canvas.getByRole('button', { name: /Anyone who can read it/ })).toHaveAttribute(
-      'data-dimmed',
-      '',
-    )
+    await foldedTo(canvasElement, 'B · Only its owner')
     await waitFor(() => expect(canvas.getByRole('status')).toHaveTextContent('Sending'))
+    await expect(canvas.getByRole('button', { name: 'Change the answer to Q5' })).toBeVisible()
   },
 }
 
-/** Sent: the engine took it; the option stays filled, and the card says "Sent". */
+/** Sent: the engine took it; the line says "Sent". */
 export const Sent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
+    await foldedTo(canvasElement, 'B · Only its owner')
     await waitFor(() => expect(canvas.getByRole('status')).toHaveTextContent('Sent'))
-    await expect(canvas.getByRole('button', { name: /Only its owner/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+  },
+}
+
+/** The engine refused the answer: the card opens again, says why, and nothing is chosen. */
+export const ChosenRefused: Story = {
+  args: { onAnswer: fn(() => Promise.reject(new Error('Q5 is no longer open.'))) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
+    await waitFor(() =>
+      expect(canvas.getByRole('alert')).toHaveTextContent('Not sent: Q5 is no longer open.'),
     )
+    await expect(canvas.getAllByRole('button', { pressed: false })).toHaveLength(3)
   },
 }
 
@@ -123,33 +137,34 @@ const answeredQ5 = (
   answers: [{ version: 1, optionId, text: null, at: '11:02', inputState }],
 })
 
-/** Sent, as the engine says it: the same card a press leaves, drawn from the question alone. */
+/** Sent, as the engine says it: the same line a press leaves, drawn from the question alone. */
 export const SentAsRead: Story = {
   args: { question: answeredQ5('received') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await expect(canvas.getByText('B · Only its owner')).toBeVisible()
     await expect(canvas.getByRole('status')).toHaveTextContent('Sent')
     await expect(canvas.getByRole('img', { name: /^Sent/ })).toBeVisible()
   },
 }
 
-/** With the Planner: delivered, not yet in the Spec; the card stays open. */
+/** With the Planner: delivered, not yet in the Spec; the line's dot turns blue. */
 export const WithThePlanner: Story = {
   args: { question: answeredQ5('delivered') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('status')).toHaveTextContent('With the Planner')
     await expect(canvas.getByRole('img', { name: /^With the Planner/ })).toBeVisible()
-    await expect(canvas.getAllByRole('button', { pressed: true })).toHaveLength(1)
   },
 }
 
-/** Taken into account: the card folds to one line, its answer, the green dot and Change. */
+/** Taken into account: the green dot and its word on the line; Change opens the card again. */
 export const TakenIntoAccount: Story = {
   args: { question: answeredQ5('integrated') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('B · Only its owner')).toBeVisible()
+    await expect(canvas.getByRole('status')).toHaveTextContent('Taken into account')
     await expect(canvas.getByRole('img', { name: 'Taken into account in the Spec' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /Anyone who can read it/ })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Change the answer to Q5' }))
@@ -163,16 +178,20 @@ export const TakenIntoAccount: Story = {
 }
 
 /**
- * Answered with another option than the recommended one: the choice is filled, the recommended
- * one keeps its star only and is dimmed with the others.
+ * Answered with another option than the recommended one, opened with Change: the choice is
+ * filled, the recommended one keeps its star only and is dimmed with the others.
  */
 export const AnsweredAgainstTheRecommendation: Story = {
   args: { question: answeredQ5('delivered', 'C') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: /Its owner and its editors/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+    await expect(canvas.getByText('C · Its owner and its editors')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Change the answer to Q5' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: /Its owner and its editors/ })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
     )
     const recommended = canvas.getByRole('button', { name: /Anyone who can read it, recommended/ })
     await expect(recommended).toHaveAttribute('aria-pressed', 'false')
@@ -248,20 +267,16 @@ export const SameAfterARestart: Story = {
   },
 }
 
-/** An option pressed twice before the engine has it: sent once, the options busy meanwhile. */
+/** An option pressed twice before the engine has it: sent once, the card folded at the first. */
 export const AnsweringTwice: Story = {
   args: { onAnswer: fn(() => new Promise<void>(() => undefined)) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const option = canvas.getByRole('button', { name: /Only its owner/ })
     await userEvent.click(option)
-    await userEvent.click(option)
+    await userEvent.keyboard('{Enter}')
     await expect(args.onAnswer).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(option).toHaveAttribute('aria-busy', 'true'))
-    await expect(canvas.getByRole('button', { name: /Anyone who can read it/ })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
+    await foldedTo(canvasElement, 'B · Only its owner')
   },
 }
 
