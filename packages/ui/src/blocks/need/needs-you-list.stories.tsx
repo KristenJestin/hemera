@@ -103,6 +103,9 @@ const meta = {
   tags: ['autodocs'],
   title: 'Blocks/Needs you/Needs you list',
   component: NeedsYouList,
+  // The list is a grid that sizes itself to the column it is given, as Home's and a mission's
+  // are: the canvas gives it the page's width rather than shrinking around it.
+  parameters: { layout: 'padded' },
   args: {
     rows: ROWS,
     projects: ['Acme', 'Hemera'],
@@ -120,7 +123,7 @@ const meta = {
   },
   decorators: [
     (Story, context) => (
-      <section aria-label="Needs you" className="flex max-w-4xl flex-col gap-3 p-8">
+      <section aria-label="Needs you" className="flex w-full max-w-4xl flex-col gap-3 p-8">
         <SectionHead
           title="Needs you"
           count={context.args.loading === true ? undefined : context.args.rows.length || undefined}
@@ -367,39 +370,62 @@ export const GroupPartlyAnswered: Story = {
   },
 }
 
-/** Every kind of row, every length of time, and an agent's group: one column each for when and what to do. */
+/**
+ * Every kind of row, every length of time, a row without a key (Hemera's own), one without a
+ * detail, and an agent's group: one grid, every column on one edge.
+ */
 const ALIGNED: readonly NeedRow[] = [
   ...ROWS.map((row, at) =>
     Object.assign({}, row, {
-      need: Object.assign({}, row.need, { when: ['2 h', '25 min', '1 min', '3 d', 'now'][at] }),
+      need: Object.assign({}, row.need, {
+        when: ['2 h', '25 min', '1 min', '3 d', 'now'][at],
+        text: row.id === 'table' ? undefined : row.need.text,
+      }),
     }),
   ),
   ...PROBE_ROWS,
 ]
 
+/** The cells of the list, by column: each one's left edge, and the time's right edge. */
+const COLUMNS = ['project', 'key', 'kind', 'title', 'detail', 'when', 'action'] as const
+
+const edgesOf = (root: Element) =>
+  Object.fromEntries(
+    COLUMNS.map((column) => {
+      const cells = [...root.querySelectorAll(`[data-need-cell="${column}"]`)]
+      const lefts = new Set(cells.map((cell) => Math.round(cell.getBoundingClientRect().left)))
+      const rights = new Set(cells.map((cell) => Math.round(cell.getBoundingClientRect().right)))
+      return [column, { cells: cells.length, lefts: lefts.size, rights: rights.size }]
+    }),
+  )
+
+/** Every column on one edge, the times ending on one edge too. */
+const aligned = (cells: number) => {
+  const edges: Record<string, ReturnType<typeof expect.objectContaining>> = {}
+  for (const column of COLUMNS) {
+    edges[column] = expect.objectContaining({ cells, lefts: 1 })
+  }
+  edges.when = expect.objectContaining({ cells, lefts: 1, rights: 1 })
+  return edges
+}
+
 /**
- * The times end on one edge and the buttons share one column, whatever they say: Retry here,
- * Answer here and Choose here are the same width, an agent's group included.
+ * Needs you is a table: the Project, the key, the kind, the title, the detail, when and the
+ * action each start on one edge on every row, a row without a key or a detail keeping its empty
+ * cell; the times end on one edge; an agent's group and its unfolded rows share the columns.
  */
 export const Aligned: Story = {
   args: { rows: ALIGNED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const times = [...canvasElement.querySelectorAll('[data-need-when]')]
-    await expect(times.map((one) => one.textContent)).toEqual(
-      expect.arrayContaining(['2 h', '25 min', '1 min', '3 d']),
-    )
-    const rights = new Set(times.map((one) => Math.round(one.getBoundingClientRect().right)))
-    await expect(rights.size).toBe(1)
-    const edges = () => {
-      const actions = canvas.getAllByRole('button', { name: /here$/ })
-      return {
-        count: actions.length,
-        lefts: new Set(actions.map((one) => Math.round(one.getBoundingClientRect().left))).size,
-        rights: new Set(actions.map((one) => Math.round(one.getBoundingClientRect().right))).size,
-      }
-    }
-    await expect(edges()).toEqual({ count: 7, lefts: 1, rights: 1 })
+    await expect(edgesOf(canvasElement)).toEqual(aligned(7))
+    const actions = canvas.getAllByRole('button', { name: /here$/ })
+    await expect(
+      new Set(actions.map((one) => Math.round(one.getBoundingClientRect().right))).size,
+    ).toBe(1)
+    await expect(
+      new Set(actions.map((one) => Math.round(one.getBoundingClientRect().left))).size,
+    ).toBe(1)
     // An agent's group unfolded: its own rows keep the same columns.
     const group = canvas
       .getAllByRole('button', { name: 'Answer here' })
@@ -408,6 +434,6 @@ export const Aligned: Story = {
     await userEvent.click(group)
     // Under the hand a button grows by a pixel each side: the edges are read once it has left.
     await userEvent.unhover(group)
-    await waitFor(() => expect(edges()).toEqual({ count: 10, lefts: 1, rights: 1 }))
+    await waitFor(() => expect(edgesOf(canvasElement)).toEqual(aligned(10)))
   },
 }

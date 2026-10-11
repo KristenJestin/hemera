@@ -1,10 +1,11 @@
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { type HTMLAttributes, type ReactNode, type Ref, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { ProjectMark } from '../../components/project-mark/project-mark.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconChevronRight } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-card.tsx'
@@ -82,20 +83,143 @@ const ACTIONS: Record<NeedKind, string> = {
   environment: 'Retry here',
 }
 
-const ROW = 'flex h-control-md min-w-0 items-center gap-2 px-4 text-sm'
-const KEY = 'w-16 shrink-0 font-mono text-xs text-muted-foreground'
-const TITLE = 'min-w-0 shrink truncate font-medium'
-const DETAIL = 'min-w-0 flex-1 truncate text-muted-foreground'
-/** One column on every row: the time ends on the same edge, its figures of one width. */
-const WHEN =
-  'w-need-when shrink-0 text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums'
-/** One column on every row: every button its width, whatever it says. */
-const ACTION = 'flex w-need-action shrink-0'
-/** The time and the action, close together at the end of the row. */
-const END = 'flex shrink-0 items-center gap-1'
+/**
+ * The list is one grid whose columns every row shares (`grid-cols-needs`): the Project's mark,
+ * the mission's key, the kind's glyph, the title, the detail, when, and the action, between two
+ * narrow margins. A row and an unfolded group are subgrids of it, so a column starts on one edge
+ * on every row, and a cell left empty keeps its place.
+ */
+const LIST = '@container grid grid-cols-needs gap-x-2'
+/** A row of the grid: one line of cells, or a card across the whole width. */
+const LINE = 'col-span-full grid grid-cols-subgrid'
+const ROW = 'col-span-full grid h-control-md grid-cols-subgrid items-center text-sm'
+/** What spans the row between its margins: an unfolded card, a settled need's line. */
+const SPAN = 'col-start-2 -col-end-2'
+const MARK = 'col-start-2 flex'
+const KEY = 'font-mono text-xs text-muted-foreground'
+/**
+ * The key gives way after the detail: below a narrow column it is not drawn, its cell kept so
+ * the columns after it stay in their place.
+ */
+const KEY_TEXT = '@max-md:hidden'
+const TITLE = 'min-w-0 truncate font-medium'
+const DETAIL = 'flex min-w-0'
+const DETAIL_TEXT = 'min-w-0 truncate text-muted-foreground outline-none focus-ring'
+/** The time ends on one edge, its figures of one width. */
+const WHEN = 'text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums'
+/** The action ends the row; every button the same width, whatever it says. */
+const ACTION = 'flex justify-end gap-1'
+const BUTTON = 'flex w-need-action shrink-0'
 const RULE = 'border-b border-border last:border-b-0'
 /** A row, clipped while it grows in or folds out. */
-const PLACE = cn(RULE, 'overflow-hidden')
+const PLACE = cn(LINE, RULE, 'overflow-hidden')
+
+type DetailProps = Omit<HTMLAttributes<HTMLSpanElement>, 'children'> & {
+  text: string
+  ref?: Ref<HTMLSpanElement> | undefined
+}
+
+/** What the agent wrote, cut to its cell: the keyboard reaches it, and its tooltip says it whole. */
+function DetailText({ text, ref, ...handed }: DetailProps): ReactNode {
+  return (
+    <span {...handed} ref={ref} tabIndex={0} className={DETAIL_TEXT}>
+      {text}
+    </span>
+  )
+}
+
+/** The detail cell: empty when there is nothing to say, so the columns after it stay put. */
+function Detail({ text }: { text: string | undefined }): ReactNode {
+  return (
+    <span className={DETAIL} data-need-cell="detail">
+      {text !== undefined && text !== '' && (
+        <Tooltip label={text} quote>
+          <DetailText text={text} />
+        </Tooltip>
+      )}
+    </span>
+  )
+}
+
+/** The cells of a row, in the grid's order. */
+function Cells({
+  project,
+  projects,
+  missionKey,
+  kind,
+  title,
+  detail,
+  when,
+  action,
+}: {
+  project: string
+  projects: readonly string[] | undefined
+  missionKey: string | undefined
+  kind: NeedKind
+  title: string
+  detail: string | undefined
+  when: string
+  action: ReactNode
+}): ReactNode {
+  return (
+    <div className={ROW}>
+      <span className={MARK} data-need-cell="project">
+        <ProjectMark name={project} others={projects} legend />
+      </span>
+      <span className={KEY} data-need-cell="key">
+        <span className={KEY_TEXT}>{missionKey ?? ''}</span>
+      </span>
+      <span className="flex" data-need-cell="kind">
+        <NeedGlyph kind={kind} />
+      </span>
+      <span className={TITLE} data-need-cell="title">
+        {title}
+      </span>
+      <Detail text={detail} />
+      <span className={WHEN} data-need-cell="when">
+        {when}
+      </span>
+      <span className={ACTION} data-need-cell="action">
+        {action}
+      </span>
+    </div>
+  )
+}
+
+/** The row's own button, of the action column's width. */
+function Toggle({
+  label,
+  opened,
+  onToggle,
+}: {
+  label: string
+  opened: boolean
+  onToggle: () => void
+}): ReactNode {
+  return (
+    <span className={BUTTON}>
+      <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
+        {label}
+      </Button>
+    </span>
+  )
+}
+
+/** What opens under a row, across its whole width. */
+function Unfolded({ children }: { children: ReactNode }): ReactNode {
+  const folding = useTransition(fold)
+  return (
+    <motion.div
+      className={cn(LINE, 'overflow-hidden')}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 function Row({
   row,
@@ -115,7 +239,7 @@ function Row({
   const folding = useTransition(fold)
   const { need } = row
   const kind = need.ask.kind
-  const settled = need.status !== undefined && need.status.state !== 'waiting'
+  const settled = settledOf(row)
   return (
     <motion.li
       className={PLACE}
@@ -126,39 +250,25 @@ function Row({
       transition={folding}
     >
       {settled ? (
-        <div className="px-4 py-1">
+        <div className={cn(SPAN, 'py-1')}>
           <NeedCard {...need} missionKey={undefined} />
         </div>
       ) : (
-        <div className={ROW}>
-          <ProjectMark name={row.project} others={projects} legend />
-          <span className={KEY}>{need.missionKey ?? ''}</span>
-          <NeedGlyph kind={kind} />
-          <span className={TITLE}>{need.title}</span>
-          <span className={DETAIL}>{need.text ?? ''}</span>
-          {/* The action keeps its width: the title and what the agent wrote give way first. */}
-          <span className={END}>
-            <span className={WHEN} data-need-when="">
-              {need.when}
-            </span>
-            <span className={ACTION}>
-              <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
-                {ACTIONS[kind]}
-              </Button>
-            </span>
-          </span>
-        </div>
+        <Cells
+          project={row.project}
+          projects={projects}
+          missionKey={need.missionKey}
+          kind={kind}
+          title={need.title}
+          detail={need.text}
+          when={need.when}
+          action={<Toggle label={ACTIONS[kind]} opened={opened} onToggle={onToggle} />}
+        />
       )}
       <AnimatePresence initial={false}>
         {opened && !settled && (
-          <motion.div
-            className="overflow-hidden"
-            initial={collapse}
-            animate={expand}
-            exit={collapse}
-            transition={folding}
-          >
-            <div className="flex flex-col gap-2 px-4 pb-4">
+          <Unfolded>
+            <div className={cn(SPAN, 'flex flex-col gap-2 pb-4')}>
               <NeedCard {...need} missionKey={undefined} {...on} />
               {need.missionKey !== undefined && onOpenMission !== undefined && (
                 <Button variant="link" className="self-start" onClick={onOpenMission}>
@@ -167,14 +277,14 @@ function Row({
                 </Button>
               )}
             </div>
-          </motion.div>
+          </Unfolded>
         )}
       </AnimatePresence>
     </motion.li>
   )
 }
 
-/** The requests of one agent, on one row that unfolds to theirs. */
+/** The requests of one agent, on one row of the same columns that unfolds to theirs. */
 function GroupRow({
   rows,
   projects,
@@ -199,6 +309,7 @@ function GroupRow({
   const [first] = rows
   const last = rows.at(-1)
   if (first === undefined || last === undefined) return null
+  const name = first.agent?.name ?? 'an agent'
   return (
     <motion.li
       className={PLACE}
@@ -208,47 +319,34 @@ function GroupRow({
       exit={collapse}
       transition={folding}
     >
-      <div className={ROW}>
-        <ProjectMark name={first.project} others={projects} legend />
-        <span className={KEY}>{first.need.missionKey ?? ''}</span>
-        <NeedGlyph kind="permission" />
-        <span className={TITLE}>
-          {waiting.length} requests from {first.agent?.name ?? 'an agent'}
-        </span>
-        <span className={DETAIL}>{waiting.map((row) => row.need.title).join(' · ')}</span>
-        {/* Allow these stands before the time, so the time and the action keep their columns. */}
-        <span className="flex shrink-0">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              for (const row of waiting) on(row.id).onPermission?.('allow-once')
-            }}
-          >
-            Allow these
-          </Button>
-        </span>
-        <span className={END}>
-          <span className={WHEN} data-need-when="">
-            {last.need.when}
-          </span>
-          <span className={ACTION}>
-            <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
-              {ACTIONS.permission}
+      <Cells
+        project={first.project}
+        projects={projects}
+        missionKey={first.need.missionKey}
+        kind="permission"
+        title={`${String(waiting.length)} requests from ${name}`}
+        detail={waiting.map((row) => row.need.title).join(' · ')}
+        when={last.need.when}
+        action={
+          <>
+            {/* Allow these stands beside the action, in its column: the time keeps its place. */}
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                for (const row of waiting) on(row.id).onPermission?.('allow-once')
+              }}
+            >
+              Allow these
             </Button>
-          </span>
-        </span>
-      </div>
+            <Toggle label={ACTIONS.permission} opened={opened} onToggle={onToggle} />
+          </>
+        }
+      />
       <AnimatePresence initial={false}>
         {opened && (
-          <motion.div
-            className="overflow-hidden"
-            initial={collapse}
-            animate={expand}
-            exit={collapse}
-            transition={folding}
-          >
-            <ul aria-label={`Requests from ${first.agent?.name ?? 'an agent'}`} className="pl-6">
+          <Unfolded>
+            <ul aria-label={`Requests from ${name}`} className={LINE}>
               <AnimatePresence initial={false}>
                 {rows.map((row) => (
                   <Row
@@ -265,7 +363,7 @@ function GroupRow({
                 ))}
               </AnimatePresence>
             </ul>
-          </motion.div>
+          </Unfolded>
         )}
       </AnimatePresence>
     </motion.li>
@@ -304,27 +402,30 @@ function itemsOf(rows: readonly NeedRow[]): Item[] {
   return items
 }
 
-/** A row's shape while the rows are on their way. */
+/** A row's shape while the rows are on their way, in the same columns. */
 function RowSkeleton(): ReactNode {
   return (
-    <li aria-hidden="true" className={RULE} data-row-skeleton="">
+    <li aria-hidden="true" className={cn(LINE, RULE)} data-row-skeleton="">
       <span className={ROW}>
-        <Skeleton shape="block">
-          <ProjectMark name="A" />
-        </Skeleton>
-        <span className={KEY}>
-          <Skeleton>ACME-12</Skeleton>
+        <span className={MARK}>
+          <Skeleton shape="block">
+            <ProjectMark name="A" />
+          </Skeleton>
         </span>
+        <span className={KEY}>
+          <span className={KEY_TEXT}>
+            <Skeleton>ACME-12</Skeleton>
+          </span>
+        </span>
+        <span />
         <span className={TITLE}>
           <Skeleton>Which table holds the invoices?</Skeleton>
         </span>
-        <span className={DETAIL} />
-        <span className={END}>
-          <span className={WHEN}>
-            <Skeleton>4 min</Skeleton>
-          </span>
-          <span className={ACTION} />
+        <span />
+        <span className={WHEN}>
+          <Skeleton>4 min</Skeleton>
         </span>
+        <span />
       </span>
     </li>
   )
@@ -342,7 +443,7 @@ export function NeedsYouList({
   const [openedGroup, setOpenedGroup] = useState<string | null>(null)
   if (loading) {
     return (
-      <ul aria-label="Needs you" aria-busy="true" className="flex flex-col">
+      <ul aria-label="Needs you" aria-busy="true" className={LIST}>
         <RowSkeleton />
         <RowSkeleton />
         <RowSkeleton />
@@ -353,7 +454,7 @@ export function NeedsYouList({
     return <p className="px-4 py-3 text-sm text-muted-foreground">Nothing waits for you.</p>
   }
   return (
-    <ul aria-label="Needs you" className="flex flex-col">
+    <ul aria-label="Needs you" className={LIST}>
       <AnimatePresence initial={false}>
         {itemsOf(rows).map((item) => {
           if (item.kind === 'agent') {
