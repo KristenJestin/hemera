@@ -343,3 +343,24 @@ export function waiting(waves: readonly Wave[]): Question[] {
 export function latest(question: Question): AnswerVersion | undefined {
   return question.answers.at(-1)
 }
+
+/** Whether a question may still change the Spec: open, waiting, or its answer not yet in it. */
+export function unsettled(question: Question): boolean {
+  if (question.state === 'open' || question.state === 'waiting') return true
+  return question.state === 'answered' && latest(question)?.inputState !== 'integrated'
+}
+
+/** The section of the rail an item of the Spec belongs to: `R2.S1` is in Requirements. */
+export const sectionOfItem = (item: string): string => (/^R\d/.test(item) ? 'requirements' : item)
+
+/** How many questions may still change each section, by the section's name. */
+export function openBySection(waves: readonly Wave[]): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>()
+  for (const question of waves.flatMap((wave) => wave.questions)) {
+    if (question.section !== null && unsettled(question)) {
+      const name = sectionOfItem(question.section)
+      counts.set(name, (counts.get(name) ?? 0) + 1)
+    }
+  }
+  return counts
+}

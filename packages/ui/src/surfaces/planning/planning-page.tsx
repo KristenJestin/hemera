@@ -16,6 +16,7 @@ import {
   type PlanningData,
   type PlanningHandlers,
   type Wave,
+  openBySection,
   waiting,
 } from '../../blocks/planning/planning-types.ts'
 import { ProbesCard } from '../../blocks/planning/probes.tsx'
@@ -197,6 +198,7 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
     }
     return <Skeletons />
   }
+  const open = openBySection(data.waves)
   return (
     <div className="flex min-w-0 flex-col">
       {error !== undefined && (
@@ -224,6 +226,7 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
             requirementsState={data.requirementsState}
             changes={data.changes}
             tasks={data.tasks}
+            open={open}
           />
         </div>
         <section aria-label="Spec" className={MIDDLE}>
@@ -246,6 +249,7 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
             requirements={data.requirements}
             tasks={data.tasks}
             changes={data.changes}
+            open={open}
           />
         </section>
         <aside aria-label="What calls for you" className={RAIL}>
