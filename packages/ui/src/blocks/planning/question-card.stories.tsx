@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ComponentProps, type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+
+import { Button } from '../../components/button/button.tsx'
 
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { WAVES } from '../../surfaces/planning/planning-fixtures.ts'
@@ -8,11 +11,13 @@ import { QuestionCard } from './question-card.tsx'
 import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
 
 /**
- * A question of the Planner, as the rail of the Planning page holds it: its options by their
- * labels with the recommended one starred and why, answered by a press that leaves at once (there
- * is no Send), or in the user's own words; "I'm waiting on someone" with a note, and the Planner's
- * drafted message with Copy, never Send; the answer's state as a dot. A retired question stays
- * readable with its reason.
+ * A question of the Planner, as the rail of the Planning page holds it: its options, the
+ * recommended one starred and why (a star and a line, never a frame: the frame and the fill are the
+ * user's choice alone), answered by a press that shows at once (there is no Send), or in the user's
+ * own words; "I'm waiting on someone" with a note, and the Planner's drafted message with Copy,
+ * never Send. Its dot and a word say where the answer stands — sent, with the Planner, taken into
+ * account — and it folds to a line once taken into account. What it shows is drawn from the
+ * question alone: the same live as after a restart.
  */
 
 const byId = (id: string): Question => {
@@ -30,7 +35,6 @@ const meta = {
   args: {
     question: OPEN,
     discussed: false,
-    foldAnswered: true,
     mentionables: MENTIONABLES,
     onAnswer: fn(() => Promise.resolve()),
     onWaitOnSomeone: fn(() => Promise.resolve()),
@@ -51,26 +55,196 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Open: the options, the recommended one starred, why it is recommended. */
+/**
+ * Open, with a recommendation and no answer: the recommended option wears the star and nothing
+ * else — no frame, no fill — so nothing reads as chosen; the dot says it is not answered yet.
+ */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const card = canvas.getByRole('article', { name: /Q5/ })
     await expect(within(card).getAllByRole('button', { pressed: false })).toHaveLength(3)
-    await expect(
-      within(card).getByRole('button', { name: /Anyone who can read it, recommended/ }),
-    ).toBeVisible()
+    const recommended = within(card).getByRole('button', {
+      name: /Anyone who can read it, recommended/,
+    })
+    const other = within(card).getByRole('button', { name: /Only its owner/ })
+    await expect(getComputedStyle(recommended).borderColor).toBe(
+      getComputedStyle(other).borderColor,
+    )
+    await expect(getComputedStyle(recommended).backgroundColor).toBe(
+      getComputedStyle(other).backgroundColor,
+    )
     await expect(card).toHaveTextContent('Recommended A')
+    await expect(within(card).getByRole('img', { name: 'Not answered yet' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Send' })).toBeNull()
   },
 }
 
-/** A press answers at once: nothing else to confirm. */
-export const Answering: Story = {
+/**
+ * Chosen: a press fills the option at once with its check, dims the others, and the card says it
+ * is on its way, before the engine has answered.
+ */
+export const Chosen: Story = {
+  args: { onAnswer: fn(() => new Promise<void>(() => undefined)) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
+    const option = canvas.getByRole('button', { name: /Only its owner/ })
+    await userEvent.click(option)
     await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { optionId: 'B' })
+    await expect(option).toHaveAttribute('aria-pressed', 'true')
+    await expect(option.querySelector('[data-chosen]')).not.toBeNull()
+    await expect(canvas.getByRole('button', { name: /Anyone who can read it/ })).toHaveAttribute(
+      'data-dimmed',
+      '',
+    )
+    await waitFor(() => expect(canvas.getByRole('status')).toHaveTextContent('Sending'))
+  },
+}
+
+/** Sent: the engine took it; the option stays filled, and the card says "Sent". */
+export const Sent: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
+    await waitFor(() => expect(canvas.getByRole('status')).toHaveTextContent('Sent'))
+    await expect(canvas.getByRole('button', { name: /Only its owner/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  },
+}
+
+const answeredQ5 = (
+  inputState: 'received' | 'delivered' | 'integrated',
+  optionId = 'B',
+): Question => ({
+  ...OPEN,
+  state: 'answered',
+  answers: [{ version: 1, optionId, text: null, at: '11:02', inputState }],
+})
+
+/** Sent, as the engine says it: the same card a press leaves, drawn from the question alone. */
+export const SentAsRead: Story = {
+  args: { question: answeredQ5('received') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toHaveTextContent('Sent')
+    await expect(canvas.getByRole('img', { name: /^Sent/ })).toBeVisible()
+  },
+}
+
+/** With the Planner: delivered, not yet in the Spec; the card stays open. */
+export const WithThePlanner: Story = {
+  args: { question: answeredQ5('delivered') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toHaveTextContent('With the Planner')
+    await expect(canvas.getByRole('img', { name: /^With the Planner/ })).toBeVisible()
+    await expect(canvas.getAllByRole('button', { pressed: true })).toHaveLength(1)
+  },
+}
+
+/** Taken into account: the card folds to one line, its answer, the green dot and Change. */
+export const TakenIntoAccount: Story = {
+  args: { question: answeredQ5('integrated') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('B · Only its owner')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Taken into account in the Spec' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Anyone who can read it/ })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Change the answer to Q5' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: /Only its owner/ })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    )
+  },
+}
+
+/**
+ * Answered with another option than the recommended one: the choice is filled, the recommended
+ * one keeps its star only and is dimmed with the others.
+ */
+export const AnsweredAgainstTheRecommendation: Story = {
+  args: { question: answeredQ5('delivered', 'C') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: /Its owner and its editors/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    const recommended = canvas.getByRole('button', { name: /Anyone who can read it, recommended/ })
+    await expect(recommended).toHaveAttribute('aria-pressed', 'false')
+    await expect(recommended).toHaveAttribute('data-dimmed', '')
+  },
+}
+
+/** The four steps of one answer, the live card beside one drawn fresh from the same question. */
+function LiveAndRestarted(props: ComponentProps<typeof QuestionCard>): ReactNode {
+  const steps: readonly Question[] = [
+    OPEN,
+    answeredQ5('received'),
+    answeredQ5('delivered'),
+    answeredQ5('integrated'),
+  ]
+  const [step, setStep] = useState(0)
+  const question = steps[step] ?? OPEN
+  return (
+    <div className="flex flex-col gap-4">
+      <Button variant="secondary" size="sm" onClick={() => setStep((step + 1) % steps.length)}>
+        Next step
+      </Button>
+      <section aria-label="Live" className="rounded-md border border-border">
+        <QuestionCard {...props} question={question} />
+      </section>
+      <section aria-label="After a restart" className="rounded-md border border-border">
+        <QuestionCard key={step} {...props} question={question} />
+      </section>
+    </div>
+  )
+}
+
+/** What differs between two equal cards: generated ids, and the inline style an animation leaves. */
+const GENERATED = new Set(['id', 'aria-controls', 'aria-describedby', 'aria-labelledby', 'style'])
+
+/** The markup of a card, attributes in order, what is generated aside. */
+const shape = (node: Node): string => {
+  if (!(node instanceof Element)) return node.textContent ?? ''
+  const attributes = [...node.attributes]
+    .filter((attribute) => !GENERATED.has(attribute.name))
+    .map((attribute) => `${attribute.name}="${attribute.value}"`)
+    .toSorted()
+    .join(' ')
+  return `<${node.tagName} ${attributes}>${[...node.childNodes].map(shape).join('')}</>`
+}
+
+/**
+ * One display for a question, live or after a restart: at every step, the card that lived through
+ * the answer and a card drawn fresh from the same question are the same.
+ */
+export const SameAfterARestart: Story = {
+  render: (args) => <LiveAndRestarted {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const live = canvas.getByRole('region', { name: 'Live' })
+    const restarted = canvas.getByRole('region', { name: 'After a restart' })
+    const next = canvas.getByRole('button', { name: 'Next step' })
+    const steps = ['Not answered yet', 'Sent', 'With the Planner', 'Taken into account']
+    // One step after the other: each is checked, then the next is played.
+    await steps.reduce<Promise<void>>(
+      (before, step) =>
+        before.then(async () => {
+          await waitFor(() =>
+            expect(within(live).getByRole('img', { name: new RegExp(`^${step}`) })).toBeVisible(),
+          )
+          await waitFor(() =>
+            expect([...live.childNodes].map(shape)).toEqual([...restarted.childNodes].map(shape)),
+          )
+          await userEvent.click(next)
+        }),
+      Promise.resolve(),
+    )
   },
 }
 
@@ -163,25 +337,13 @@ export const WaitingOnSomeone: Story = {
   },
 }
 
-/** Answered before the page opened: one line, its answer and its dot, and Change. */
-export const AnsweredFolded: Story = {
-  args: { question: byId('Q1') },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('A · As links')).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Integrated in the Spec' })).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Change the answer to Q1' }))
-    await waitFor(() => expect(canvas.getAllByRole('button', { pressed: true })).toHaveLength(1))
-  },
-}
-
-/** A changed answer, said as the change it is; the new one delivered, not integrated yet. */
+/** A changed answer, said as the change it is; the new one with the Planner. */
 export const ChangedAnswer: Story = {
-  args: { question: byId('Q2'), foldAnswered: false },
+  args: { question: byId('Q2') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Now B, before A')).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Delivered to the Planner' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: /^With the Planner/ })).toBeVisible()
   },
 }
 

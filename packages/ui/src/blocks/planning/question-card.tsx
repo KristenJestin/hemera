@@ -4,14 +4,13 @@ import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
-import { Loading } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
+import { IconCheck, IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { InputDot } from './planning-marks.tsx'
-import { NotSent, SendButton, useSending } from './sending.tsx'
+import { type AnswerStep, INPUT_SHORT, InputDot } from './planning-marks.tsx'
+import { NotSent, SendButton, type Sending, useSending } from './sending.tsx'
 import {
   type AnswerVersion,
   type PlanningHandlers,
@@ -20,16 +19,28 @@ import {
   latest,
 } from './planning-types.ts'
 
+/**
+ * An option: a quiet frame until the user chooses it, then the primary's frame and fill, its check
+ * in the room of its letter, and the others dimmed. Nothing else wears a frame or a fill: the
+ * recommendation is a star and a line.
+ */
 const OPTION =
-  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-muted aria-disabled:opacity-50 aria-busy:opacity-100'
+  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-primary-muted data-dimmed:text-muted-foreground'
 
-const LETTER = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
+/** The option's letter, and its check once chosen, in a room of one width: the label never shifts. */
+const LETTER =
+  'flex w-icon-sm shrink-0 justify-center font-mono text-xs leading-5 text-muted-foreground'
 
 const QUIET = 'text-xs text-muted-foreground'
 
 const ID = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
 
 const BOX = 'flex flex-col gap-2 rounded-md border border-border px-3 py-2'
+
+/** Where the answer shown stands: on its way, or a step of its input. */
+type StepShown = 'sending' | AnswerStep
+
+const STEP_WORDS: Record<StepShown, string> = { sending: 'Sending', ...INPUT_SHORT }
 
 const RETIRED: ReadonlySet<Question['state']> = new Set(['withdrawn', 'replaced', 'moot'])
 
@@ -93,7 +104,7 @@ function RetiredQuestion({
   )
 }
 
-/** A question answered before the page opened, as one line: its answer, its dot, and Change. */
+/** A question whose answer is taken into account, as one line: its answer, its dot, and Change. */
 function AnsweredLine({
   question,
   answer,
@@ -131,19 +142,21 @@ function AnsweredLine({
 }
 
 /**
- * The options, the recommended one starred; a press answers at once. While the answer is on its
- * way, the option pressed works and the others wait: a second press sends nothing.
+ * The options, the recommended one starred; a press answers at once, and the option pressed is
+ * filled at once, before the engine has it. While it is on its way a second press sends nothing.
  */
 function Options({
   question,
-  onAnswer,
+  chosen,
+  answering,
+  onPress,
 }: {
   question: Question
-  onAnswer: (optionId: string) => Promise<void>
+  /** The option shown as chosen: the one pressed, else the latest answer's. */
+  chosen: string | null
+  answering: Sending
+  onPress: (optionId: string) => void
 }): ReactNode {
-  const chosen = latest(question)?.optionId ?? null
-  const answering = useSending()
-  const [pressed, setPressed] = useState<string | null>(null)
   return (
     <ul aria-label={`Options of ${question.id}`} className="flex flex-col gap-1.5">
       {question.options.map((option) => (
@@ -152,28 +165,33 @@ function Options({
             type="button"
             className={OPTION}
             aria-pressed={chosen === option.id}
-            aria-busy={answering.busy && pressed === option.id}
+            aria-busy={answering.busy && chosen === option.id}
             aria-disabled={answering.busy}
+            data-dimmed={chosen !== null && chosen !== option.id ? '' : undefined}
             aria-label={`${option.id} ${option.label}${option.id === question.recommended ? ', recommended' : ''}`}
-            onClick={() =>
-              // A press while an answer is on its way sends nothing: `send` keeps to one.
-              answering.send(() => {
-                setPressed(option.id)
-                return onAnswer(option.id)
-              })
-            }
+            onClick={() => onPress(option.id)}
           >
-            <span className={LETTER}>{option.id}</span>
-            <span className="min-w-0 flex-1 font-medium break-words">{option.label}</span>
-            {answering.busy && pressed === option.id && (
-              <span className="flex shrink-0 pt-0.5">
-                <Loading size="sm" label="Sending" />
+            {chosen === option.id ? (
+              <span
+                aria-hidden="true"
+                className="flex w-icon-sm shrink-0 justify-center pt-0.5 text-primary"
+                data-chosen=""
+              >
+                <IconCheck size="sm" />
               </span>
+            ) : (
+              <span className={LETTER}>{option.id}</span>
             )}
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="font-medium break-words">{option.label}</span>
+              {option.detail !== '' && (
+                <span className="text-xs break-words text-muted-foreground">{option.detail}</span>
+              )}
+            </span>
             {option.id === question.recommended && (
               <span
                 aria-hidden="true"
-                className="flex shrink-0 pt-0.5 text-primary"
+                className="flex shrink-0 pt-0.5 text-muted-foreground"
                 data-recommended=""
               >
                 <IconStar size="sm" />
@@ -287,23 +305,23 @@ export interface QuestionCardProps extends Pick<
   question: Question
   /** Whether a discussion on it exists already: Discuss then opens it. */
   discussed: boolean
-  /** An answered question as one line, its answer and its dot, until Change opens it again. */
-  foldAnswered: boolean
   /** What the user's own words can mention. */
   mentionables: readonly Mentionable[]
 }
 
 /**
- * A question of the Planner: its options with the recommended one and why, answered by a press
- * that leaves at once (no Send), or in the user's own words through the mention field; "I'm
- * waiting on someone" with an optional note, and the Planner's drafted message with Copy; an
- * answer proposed from the ticket with Accept, Edit and Dismiss; the answer's state as a dot, a
- * changed answer said as a change. A retired question stays, with its reason.
+ * A question of the Planner: its options with the recommended one starred and why, answered by a
+ * press that leaves at once (no Send) and fills the option at once, or in the user's own words
+ * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
+ * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
+ * Where the answer stands is its dot and a word — Sending, Sent, With the Planner — and once taken
+ * into account the card is one line with Change. A changed answer is said as a change; a retired
+ * question stays, with its reason. Everything but a press on its way and Change is drawn from the
+ * question: a card is the same live and after a restart.
  */
 export function QuestionCard({
   question,
   discussed,
-  foldAnswered,
   mentionables,
   onAnswer,
   onWaitOnSomeone,
@@ -317,17 +335,40 @@ export function QuestionCard({
   const [editing, setEditing] = useState<string | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
-  const [changing, setChanging] = useState(false)
+  // Change opens a folded card again until the next answer comes: the count of answers then.
+  const [changingAt, setChangingAt] = useState<number | null>(null)
+  // The option pressed, shown at once, until the answer it sent comes back with the question.
+  const [pressed, setPressed] = useState<{ optionId: string; after: number } | null>(null)
+  const choosing = useSending()
   const answering = useSending()
   const waiting = useSending()
-  // Answered before the page opened: one line. Answered here: the card stays in place, answered.
-  const [answeredBefore] = useState(question.state === 'answered')
   const answer = latest(question)
+  const count = question.answers.length
+  const pressing =
+    pressed !== null && pressed.after === count && choosing.refusal === undefined
+      ? pressed.optionId
+      : null
   if (RETIRED.has(question.state)) {
     return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
   }
-  if (foldAnswered && answeredBefore && answer !== undefined && !changing) {
-    return <AnsweredLine question={question} answer={answer} onChange={() => setChanging(true)} />
+  // What it shows comes from the question alone: the same card live and after a restart.
+  if (answer?.inputState === 'integrated' && changingAt !== count && pressing === null) {
+    return (
+      <AnsweredLine question={question} answer={answer} onChange={() => setChangingAt(count)} />
+    )
+  }
+  const step: StepShown =
+    pressing === null
+      ? (answer?.inputState ?? 'unanswered')
+      : choosing.busy
+        ? 'sending'
+        : 'received'
+  const press = (optionId: string): void => {
+    // A press while an answer is on its way sends nothing: `send` keeps to one.
+    choosing.send(() => {
+      setPressed({ optionId, after: count })
+      return onAnswer(question.id, { optionId })
+    })
   }
   const proposal = question.proposals[0]
   const submit = (): void => {
@@ -367,12 +408,31 @@ export function QuestionCard({
             </span>
           </Legend>
         )}
-        {answer !== undefined && <InputDot state={answer.inputState} />}
+        <span className="flex shrink-0 items-center gap-1 leading-5">
+          <InputDot state={step === 'sending' ? 'received' : step} />
+          {step !== 'unanswered' && (
+            <span role="status" className="text-xs whitespace-nowrap text-muted-foreground">
+              {STEP_WORDS[step]}
+            </span>
+          )}
+        </span>
       </div>
-      <Options question={question} onAnswer={(optionId) => onAnswer(question.id, { optionId })} />
-      <p className={cn(QUIET, 'break-words')}>
-        <span className="font-medium text-foreground">Recommended {question.recommended}</span>
-        {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
+      {question.why !== '' && <p className={cn(QUIET, 'break-words')}>{question.why}</p>}
+      <Options
+        question={question}
+        chosen={pressing ?? answer?.optionId ?? null}
+        answering={choosing}
+        onPress={press}
+      />
+      <NotSent refusal={choosing.refusal} />
+      <p className={cn(QUIET, 'flex min-w-0 items-start gap-1.5 break-words')}>
+        <span aria-hidden="true" className="flex shrink-0 pt-0.5">
+          <IconStar size="sm" />
+        </span>
+        <span className="min-w-0">
+          <span className="font-medium text-foreground">Recommended {question.recommended}</span>
+          {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
+        </span>
       </p>
       {answer !== undefined && answer.text !== null && (
         <blockquote className="border-l-2 border-border pl-3 text-sm break-words">

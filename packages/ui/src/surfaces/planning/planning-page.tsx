@@ -104,7 +104,6 @@ function WaveList({
             <li key={question.id}>
               <QuestionCard
                 question={question}
-                foldAnswered
                 discussed={data.discussions.some(
                   (discussion) =>
                     discussion.item.kind === 'question' && discussion.item.id === question.id,
