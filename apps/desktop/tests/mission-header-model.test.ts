@@ -16,7 +16,6 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   cancelOffered,
   differenceOf,
-  freezeOffered,
   freezeShown,
   frozenOf,
   headerOf,
@@ -112,19 +111,6 @@ describe('The frozen lock', () => {
   })
 })
 
-describe('Freeze', () => {
-  test('is offered in Planning once the engine says everything is settled', () => {
-    expect(freezeOffered('Planning', readiness(true))).toBe(true)
-  })
-
-  test('is absent while something is unsettled, before the engine answers, and past Planning', () => {
-    expect(freezeOffered('Planning', readiness(false))).toBe(false)
-    expect(freezeOffered('Planning', null)).toBe(false)
-    expect(freezeOffered('Ready', readiness(true))).toBe(false)
-    expect(freezeOffered('Review', readiness(true))).toBe(false)
-  })
-})
-
 describe('Cancel', () => {
   test('is offered at every stage before Done', () => {
     expect(
@@ -139,17 +125,12 @@ describe('Cancel', () => {
 })
 
 describe('The header as a whole', () => {
-  test('puts the lock, Freeze and Cancel together', () => {
-    expect(headerOf({ stage: 'Planning', frozen: false }, readiness(true))).toEqual({
+  test('puts the lock and Cancel together', () => {
+    expect(headerOf({ stage: 'Planning', frozen: false })).toEqual({
       frozen: false,
-      freeze: true,
       cancel: true,
     })
-    expect(headerOf({ stage: 'Done', frozen: true }, null)).toEqual({
-      frozen: true,
-      freeze: false,
-      cancel: false,
-    })
+    expect(headerOf({ stage: 'Done', frozen: true })).toEqual({ frozen: true, cancel: false })
   })
 })
 

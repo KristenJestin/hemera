@@ -1,6 +1,5 @@
 import { FreezeRefused, type FreezeReadiness, type Mission, type Project } from '@hemera/ipc'
 import {
-  Button,
   MissionFrame,
   MissionFrameBase,
   MissionFrameNeeds,
@@ -105,7 +104,7 @@ export function MissionPage({
   views = MISSION_VIEWS,
 }: MissionPageProps): ReactNode {
   const line = lineOf(mission, repositoryNamer(project))
-  const header = headerOf(line, readiness)
+  const header = headerOf(line)
   const sheets = viewsOf(views, mission)
   const Page = pageOf(pages, line.stage)
   const rows = needRowsOfMission(mission, project?.name ?? 'Project', now)
@@ -125,6 +124,8 @@ export function MissionPage({
         type={line.type}
         ball={line.ball}
         now={parts.now}
+        onNow={parts.onNow}
+        nowChip={parts.nowChip}
         marks={line.marks}
         onOpenOutdated={'difference' in views ? () => actions.open('difference') : undefined}
         ticket={
@@ -139,18 +140,8 @@ export function MissionPage({
               }
         }
         onOpenSpec={'spec' in views ? () => actions.open('spec') : undefined}
-        action={
-          header.freeze ? (
-            <Button
-              variant="primary"
-              size="sm"
-              state={freezing ? 'loading' : 'idle'}
-              onClick={freeze}
-            >
-              Freeze
-            </Button>
-          ) : undefined
-        }
+        action={parts.action}
+        actionNote={parts.actionNote}
         onCancel={header.cancel ? cancel : undefined}
         notice={notice ?? parts.notice}
         needs={
@@ -181,7 +172,10 @@ export function MissionPage({
         mission,
         open: actions.open,
         goMission: actions.goMission,
+        readiness,
         refused,
+        freeze,
+        freezing,
         frame: draw,
       })
 }

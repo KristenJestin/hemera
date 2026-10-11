@@ -314,7 +314,7 @@ export function planningNow(facts: PlanningFacts): PlanningNow {
   if (planner.state === 'working') {
     const section = sectionAtWork(data)
     return now(
-      planner.doing ?? 'The Planner works on the Spec',
+      planner.doing ?? 'The Planner is working and has not said on what yet',
       'agent',
       section === null ? { kind: 'steps' } : { kind: 'section', name: section },
     )

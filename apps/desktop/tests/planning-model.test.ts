@@ -8,6 +8,7 @@ import { AgentWorking } from '@hemera/core/domain'
 import type {
   ColdReadPass,
   Discussion,
+  FreezeReadiness,
   Mission,
   Now,
   PlanningInput,
@@ -21,10 +22,13 @@ import type {
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { Planning, answerStepOf, planningSteps } from '@hemera/ui'
+
 import {
   followPlanning,
-  nowLineOf,
   planningDataOf,
+  planningHeadOf,
+  plannerOf,
   type PlanningLink,
   type PlanningRead,
   type PlanningView,
@@ -391,37 +395,238 @@ describe('The Spec in the page’s words', () => {
   })
 })
 
-describe('The Now line of the head', () => {
-  test('says what the Planner does, else the slot it waits for', () => {
-    const doing = {
-      sessionId: 's1',
-      role: 'planner',
-      text: 'Writing the requirements',
-      main: true,
-      updatedAt: AT,
-    }
-    expect(nowLineOf(now({ doing: [doing] }), [])).toBe('Writing the requirements')
-    expect(nowLineOf(now({ slotWait: 'Waiting for a free slot' }), [])).toBe(
-      'Waiting for a free slot',
-    )
+const doingLine = (text: string, main = true) => ({
+  sessionId: 's1',
+  role: 'planner',
+  text,
+  main,
+  updatedAt: AT,
+})
+
+describe('The Planner as the page knows it', () => {
+  test('says what the Planner does while it works, and the next step it set', () => {
+    const next = { sessionId: 's1', role: 'planner', text: 'Ask about sharing', updatedAt: AT }
+    expect(
+      plannerOf(now({ doing: [doingLine('Writing the requirements')], next }), [session()]),
+    ).toEqual({
+      state: 'working',
+      doing: 'Writing the requirements',
+      next: 'Ask about sharing',
+      reason: null,
+    })
   })
 
-  test('says a Planner that gave no sign or stopped, and nothing otherwise', () => {
-    expect(nowLineOf(now(), [session({ state: 'stuck' })])).toBe(
-      'The Planner has given no sign for a while',
+  test('is between its turns once its session is idle, whatever its last line said', () => {
+    expect(
+      plannerOf(now({ doing: [doingLine('Waiting for Q4 to Q6')] }), [session({ state: 'idle' })])
+        .state,
+    ).toBe('idle')
+    expect(plannerOf(null, []).state).toBe('idle')
+  })
+
+  test('says a Planner that gave no sign or stopped, with why', () => {
+    expect(plannerOf(now(), [session({ state: 'stuck' })]).state).toBe('stuck')
+    expect(plannerOf(now(), [session({ state: 'failed', stateReason: 'Out of credit' })])).toEqual({
+      state: 'failed',
+      doing: null,
+      next: null,
+      reason: 'Out of credit',
+    })
+  })
+
+  test('a Planner starting says the slot it waits for', () => {
+    expect(
+      plannerOf(now({ slotWait: 'Waiting for a free slot (2 of 2 in use)' }), [
+        session({ state: 'starting' }),
+      ]),
+    ).toEqual({
+      state: 'working',
+      doing: 'Waiting for a free slot (2 of 2 in use)',
+      next: null,
+      reason: null,
+    })
+  })
+
+  test('the last Planner session is the one that counts', () => {
+    expect(
+      plannerOf(now(), [session({ id: 's0', state: 'failed' }), session({ state: 'idle' })]).state,
+    ).toBe('idle')
+  })
+})
+
+/** A follower's view, drawn from one read. */
+const viewOf = (more: Partial<PlanningView> = {}): PlanningView => ({
+  data: planningDataOf(read(), NOW),
+  mentionables: [],
+  reports: new Map(),
+  planner: { state: 'idle', doing: null, next: null, reason: null },
+  declaredComplete: false,
+  ...more,
+})
+
+const readiness = (ready: boolean, unsettled: string[] = []): FreezeReadiness => ({
+  ready,
+  unsettled,
+  freshness: { readVersion: 4, specVersion: 4, changes: [] },
+  dependencies: [],
+})
+
+const answered = (id: string, inputState: Question['answers'][number]['inputState']): Question =>
+  question({
+    id,
+    state: 'answered',
+    answers: [
+      { version: 1, optionId: 'A', text: null, author: 'user', at: AT, input: 'i1', inputState },
+    ],
+  })
+
+const complete = (more: Partial<PlanningRead> = {}): Planning.PlanningData =>
+  planningDataOf(
+    read({
+      spec: spec({ declaredCompleteVersion: 4 }),
+      waves: [{ number: 1, askedAt: AT, questions: [answered('Q1', 'integrated')] }],
+      ...more,
+    }),
+    NOW,
+  )
+
+describe('The head of the Planning page', () => {
+  test('the Now line says what the Planner does while it works', () => {
+    const head = planningHeadOf(
+      viewOf({
+        planner: { state: 'working', doing: 'Writing the requirements', next: null, reason: null },
+      }),
+      null,
     )
-    expect(nowLineOf(now(), [session({ state: 'failed', stateReason: 'Out of credit' })])).toBe(
-      'The Planner stopped: Out of credit',
-    )
-    expect(nowLineOf(now(), [session({ state: 'idle' })])).toBeUndefined()
-    expect(nowLineOf(null, [])).toBeUndefined()
+    expect(head.now?.text).toBe('Writing the requirements')
+    expect(head.now?.ball).toBe('agent')
   })
 
   test('says a silent turn: the Planner works and has not said on what', () => {
-    expect(nowLineOf(now(), [session({ state: 'working' })])).toBe(
-      'The Planner is working and has not said on what yet',
+    const head = planningHeadOf(
+      viewOf({ planner: { state: 'working', doing: null, next: null, reason: null } }),
+      null,
     )
-    expect(nowLineOf(null, [session({ state: 'starting' })])).toBeUndefined()
+    expect(head.now?.text).toBe('The Planner is working and has not said on what yet')
+  })
+
+  test('a Planner between turns is not believed over the facts: an open question is said', () => {
+    const data = planningDataOf(
+      read({ waves: [{ number: 1, askedAt: AT, questions: [question({ id: 'Q4' })] }] }),
+      NOW,
+    )
+    const head = planningHeadOf(
+      viewOf({
+        data,
+        planner: plannerOf(now({ doing: [doingLine('Nothing left to do in planning')] }), [
+          session({ state: 'idle' }),
+        ]),
+      }),
+      null,
+    )
+    expect(head.now?.text).toBe('Q4 waits for your answer')
+    expect(head.now?.target).toEqual({ kind: 'question', id: 'Q4' })
+  })
+
+  test('says nothing before the page is read', () => {
+    expect(planningHeadOf(viewOf({ data: null }), null)).toEqual({
+      now: null,
+      freeze: { shown: false },
+    })
+  })
+
+  test('Freeze is not in the head before the Spec is declared complete', () => {
+    expect(planningHeadOf(viewOf(), readiness(true)).freeze).toEqual({ shown: false })
+  })
+
+  test('from declared complete on, Freeze stays, disabled with what is left under it', () => {
+    const reading = complete({
+      passes: [{ ...PASS, state: 'running', endedAt: null }],
+    })
+    expect(
+      planningHeadOf(viewOf({ data: reading, declaredComplete: true }), readiness(false, ['x']))
+        .freeze,
+    ).toEqual({ shown: true, reasons: ['The cold read is reading the Spec'] })
+  })
+
+  test('Freeze is enabled once nothing is left and the engine says it is ready', () => {
+    const data = complete({ passes: [PASS] })
+    expect(
+      planningHeadOf(viewOf({ data, declaredComplete: true }), readiness(true)).freeze,
+    ).toEqual({ shown: true, reasons: [] })
+  })
+
+  test('the engine’s reasons are said when the page’s facts explain nothing', () => {
+    const data = complete({ passes: [PASS] })
+    expect(
+      planningHeadOf(
+        viewOf({ data, declaredComplete: true }),
+        readiness(false, ['An open discussion: #2']),
+      ).freeze,
+    ).toEqual({ shown: true, reasons: ['An open discussion: #2'] })
+    expect(planningHeadOf(viewOf({ data, declaredComplete: true }), null).freeze).toEqual({
+      shown: true,
+      reasons: ['Hemera checks what is left before Freeze'],
+    })
+  })
+
+  test('the Spec frozen: no Freeze, and the line says so', () => {
+    const data = complete({ spec: spec({ declaredCompleteVersion: 4, frozen: true }) })
+    const head = planningHeadOf(viewOf({ data, declaredComplete: true }), readiness(true))
+    expect(head.freeze).toEqual({ shown: false })
+    expect(head.now?.text).toBe('The Spec is frozen')
+  })
+})
+
+describe('A question’s dot', () => {
+  const dotOf = (one: Question, inputs: PlanningInput[] = []) => {
+    const data = planningDataOf(
+      read({ waves: [{ number: 1, askedAt: AT, questions: [one] }], inputs }),
+      NOW,
+    )
+    const shown = data.waves[0]?.questions[0]
+    if (shown === undefined) throw new Error('no question drawn')
+    return answerStepOf(shown)
+  }
+
+  test('follows the answer’s state: not answered, sent, with the Planner, taken into account', () => {
+    expect(dotOf(question())).toBe('unanswered')
+    expect(dotOf(answered('Q1', 'received'))).toBe('received')
+    expect(dotOf(answered('Q1', null))).toBe('received')
+    expect(dotOf(answered('Q1', 'delivered'))).toBe('delivered')
+    expect(dotOf(answered('Q1', 'integrated'))).toBe('integrated')
+  })
+
+  test('a question asked again after an answer is not answered, whatever its earlier answer', () => {
+    expect(dotOf({ ...answered('Q4', 'integrated'), state: 'waiting' })).toBe('unanswered')
+    expect(dotOf({ ...answered('Q5', 'integrated'), state: 'open' })).toBe('unanswered')
+  })
+})
+
+describe('Where Planning stands, from the engine', () => {
+  test('the steps follow the answers’ states', () => {
+    const stepsOf = (questions: Question[]) =>
+      planningSteps({
+        data: planningDataOf(read({ waves: [{ number: 1, askedAt: AT, questions }] }), NOW),
+        planner: { state: 'idle', doing: null, next: null, reason: null },
+        declaredComplete: false,
+      }).find((step) => step.id === 'questions')?.state
+    expect(stepsOf([question()])).toBe('waiting')
+    expect(stepsOf([answered('Q1', 'received')])).toBe('running')
+    expect(stepsOf([answered('Q1', 'delivered')])).toBe('running')
+    expect(stepsOf([answered('Q1', 'integrated')])).toBe('done')
+  })
+
+  test('a section is settled only once no open question touches it', () => {
+    const openOf = (questions: Question[]) =>
+      Planning.openBySection(
+        planningDataOf(read({ waves: [{ number: 1, askedAt: AT, questions }] }), NOW).waves,
+      ).get('decisions') ?? 0
+    expect(
+      openOf([question({ section: 'decisions' }), question({ id: 'Q2', section: 'decisions' })]),
+    ).toBe(2)
+    expect(openOf([{ ...answered('Q1', 'delivered'), section: 'decisions' }])).toBe(1)
+    expect(openOf([{ ...answered('Q1', 'integrated'), section: 'decisions' }])).toBe(0)
   })
 })
 
@@ -669,6 +874,50 @@ describe('Following a mission’s Planning', () => {
     await flush()
     expect(played.named('answer')[0]?.args).toEqual(['m12', 'Q1', '{"optionId":"A"}'])
     expect(played.named('waves')).toHaveLength(2)
+  })
+
+  test('one display for a question, live or after a restart: the same state draws the same page', async () => {
+    // The engine as it moves: an answer received, then delivered, then integrated.
+    let waves: Wave[] = [
+      { number: 1, askedAt: AT, questions: [question(), question({ id: 'Q2' })] },
+    ]
+    let inputs: PlanningInput[] = []
+    const engine: Partial<PlanningLink> = {
+      waves: () => Promise.resolve(waves),
+      planningInputs: () => Promise.resolve(inputs),
+      missionSessions: () => Promise.resolve([session({ state: 'idle' })]),
+      coldReadFreshness: () => Promise.resolve({ readVersion: 4, specVersion: 4, changes: [] }),
+    }
+    const answeredAs = (state: PlanningInput['state']): void => {
+      waves = [
+        { number: 1, askedAt: AT, questions: [answered('Q1', state), question({ id: 'Q2' })] },
+      ]
+      inputs = [input({ state })]
+    }
+    const live = world({
+      ...engine,
+      answer: () => {
+        answeredAs('received')
+        return Promise.resolve()
+      },
+    })
+    live.listeners.spec(spec({ readVersion: 4 }))
+    await flush()
+    await live.following.answer('Q1', { optionId: 'A' })
+    await flush()
+    for (const state of ['delivered', 'integrated'] as const) {
+      answeredAs(state)
+      live.listeners.spec(spec({ readVersion: 4 }))
+      // oxlint-disable-next-line no-await-in-loop -- each step is heard after the one before
+      await flush()
+      const fresh = world(engine)
+      fresh.listeners.spec(spec({ readVersion: 4 }))
+      // oxlint-disable-next-line no-await-in-loop -- the restarted page reads the same step
+      await flush()
+      expect(live.last().data).toEqual(fresh.last().data)
+      expect(planningHeadOf(live.last(), null)).toEqual(planningHeadOf(fresh.last(), null))
+      expect(live.last().data?.waves[0]?.questions[0]?.answers.at(-1)?.inputState).toBe(state)
+    }
   })
 
   test('a refused gesture says why, and the next one clears it', async () => {

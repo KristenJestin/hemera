@@ -13,6 +13,8 @@ export interface FreezeProps {
   offer: FreezeOffer
   /** Why the last Freeze was refused, each reason in words. */
   refused?: readonly string[] | undefined
+  /** Whether the Freeze pressed is on its way. */
+  freezing?: boolean | undefined
   onFreeze: () => void
 }
 
@@ -27,7 +29,12 @@ function noteOf(offer: FreezeOffer, refused: readonly string[] | undefined): str
  * Freeze in the mission's head, from the declaration of the Spec on: disabled while something
  * must end first, enabled once nothing is left; never there and gone without a word.
  */
-export function FreezeButton({ offer, refused, onFreeze }: FreezeProps): ReactNode {
+export function FreezeButton({
+  offer,
+  refused,
+  freezing = false,
+  onFreeze,
+}: FreezeProps): ReactNode {
   if (!offer.shown) return undefined
   const note = noteOf(offer, refused)
   return (
@@ -36,6 +43,7 @@ export function FreezeButton({ offer, refused, onFreeze }: FreezeProps): ReactNo
         variant="primary"
         size="sm"
         disabled={offer.reasons.length > 0}
+        state={freezing ? 'loading' : 'idle'}
         aria-describedby={note === null ? undefined : NOTE}
         onClick={onFreeze}
       >
@@ -46,7 +54,10 @@ export function FreezeButton({ offer, refused, onFreeze }: FreezeProps): ReactNo
 }
 
 /** The line under Freeze: what is left before it, or why it was refused. */
-export function FreezeNote({ offer, refused }: Omit<FreezeProps, 'onFreeze'>): ReactNode {
+export function FreezeNote({
+  offer,
+  refused,
+}: Omit<FreezeProps, 'onFreeze' | 'freezing'>): ReactNode {
   const note = noteOf(offer, refused)
   if (note === null) return undefined
   const refusing = refused !== undefined && refused.length > 0

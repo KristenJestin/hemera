@@ -1,4 +1,4 @@
-import type { Mission } from '@hemera/ipc'
+import type { FreezeReadiness, Mission } from '@hemera/ipc'
 import {
   MissionFrameDifference,
   type MissionStage,
@@ -19,6 +19,13 @@ export interface StageFrame {
   views?: readonly MissionView[] | undefined
   /** The Now line of the head. */
   now?: string | undefined
+  /** Brings the user to what the Now line names. */
+  onNow?: (() => void) | undefined
+  /** What runs, beside the Now line: its chip. */
+  nowChip?: ReactNode
+  /** The stage's action in the head, and the line under it. */
+  action?: ReactNode
+  actionNote?: ReactNode
   /** Why a gesture of the page did not go through, in words. */
   notice?: string | undefined
 }
@@ -32,8 +39,14 @@ export interface StagePageProps {
   open: (view: string) => void
   /** Goes to another mission of the Project, by its key. */
   goMission: (key: string) => void
+  /** What stands between a Planning mission and its Freeze, once the engine said. */
+  readiness: FreezeReadiness | null
   /** Why the last Freeze was refused, each reason in words. */
   refused?: ReadonlyArray<string> | undefined
+  /** Freezes the Spec at the version the engine offered it on. */
+  freeze: () => void
+  /** Whether a Freeze is on its way: Freeze then works and is not sent again. */
+  freezing: boolean
   /** Draws the mission's frame around what the page gives it. */
   frame: (parts: StageFrame) => ReactNode
 }
