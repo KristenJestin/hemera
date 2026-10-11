@@ -39,13 +39,15 @@ const lineOf =
       fields: { event: stringOf(event.payload, 'event') || null },
     })
 
-/** A change as its line says it: "The ticket's description changed (acme/shop#41)". */
+/**
+ * A change as its line says it: "The ticket's description changed (acme/shop#41)". Hemera's words
+ * only: the line reaches agents unquoted (a brief's Journal, `memory_read`), so what people wrote
+ * (a comment's author, a status wording) reaches them only as the event's delivery quotes it.
+ */
 const changeSaid = (payload: EventPayload): string => {
   const kind = TICKET_EVENT_KINDS.find((one) => one === stringOf(payload, 'kind'))
   const said = kind === undefined ? 'The ticket changed' : TICKET_EVENT_SAID[kind]
-  const author = stringOf(payload, 'author')
-  const status = kind === 'status_changed' ? `: ${stringOf(payload, 'difference')}` : ''
-  return `${said}${author === '' ? '' : ` by ${author}`} (${stringOf(payload, 'key')})${status}`
+  return `${said} (${stringOf(payload, 'key')})`
 }
 
 export const TICKET_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
