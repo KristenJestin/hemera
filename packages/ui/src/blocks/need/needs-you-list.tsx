@@ -86,7 +86,13 @@ const ROW = 'flex h-control-md min-w-0 items-center gap-2 px-4 text-sm'
 const KEY = 'w-16 shrink-0 font-mono text-xs text-muted-foreground'
 const TITLE = 'min-w-0 shrink truncate font-medium'
 const DETAIL = 'min-w-0 flex-1 truncate text-muted-foreground'
-const WHEN = 'shrink-0 text-xs text-muted-foreground tabular-nums'
+/** One column on every row: the time ends on the same edge, its figures of one width. */
+const WHEN =
+  'w-need-when shrink-0 text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums'
+/** One column on every row: every button its width, whatever it says. */
+const ACTION = 'flex w-need-action shrink-0'
+/** The time and the action, close together at the end of the row. */
+const END = 'flex shrink-0 items-center gap-1'
 const RULE = 'border-b border-border last:border-b-0'
 /** A row, clipped while it grows in or folds out. */
 const PLACE = cn(RULE, 'overflow-hidden')
@@ -130,12 +136,16 @@ function Row({
           <NeedGlyph kind={kind} />
           <span className={TITLE}>{need.title}</span>
           <span className={DETAIL}>{need.text ?? ''}</span>
-          <span className={WHEN}>{need.when}</span>
           {/* The action keeps its width: the title and what the agent wrote give way first. */}
-          <span className="flex shrink-0">
-            <Button size="sm" aria-expanded={opened} onClick={onToggle}>
-              {ACTIONS[kind]}
-            </Button>
+          <span className={END}>
+            <span className={WHEN} data-need-when="">
+              {need.when}
+            </span>
+            <span className={ACTION}>
+              <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
+                {ACTIONS[kind]}
+              </Button>
+            </span>
           </span>
         </div>
       )}
@@ -206,8 +216,8 @@ function GroupRow({
           {waiting.length} requests from {first.agent?.name ?? 'an agent'}
         </span>
         <span className={DETAIL}>{waiting.map((row) => row.need.title).join(' · ')}</span>
-        <span className={WHEN}>{last.need.when}</span>
-        <span className="flex shrink-0 gap-1">
+        {/* Allow these stands before the time, so the time and the action keep their columns. */}
+        <span className="flex shrink-0">
           <Button
             size="sm"
             variant="secondary"
@@ -217,9 +227,16 @@ function GroupRow({
           >
             Allow these
           </Button>
-          <Button size="sm" aria-expanded={opened} onClick={onToggle}>
-            {ACTIONS.permission}
-          </Button>
+        </span>
+        <span className={END}>
+          <span className={WHEN} data-need-when="">
+            {last.need.when}
+          </span>
+          <span className={ACTION}>
+            <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
+              {ACTIONS.permission}
+            </Button>
+          </span>
         </span>
       </div>
       <AnimatePresence initial={false}>
@@ -302,8 +319,11 @@ function RowSkeleton(): ReactNode {
           <Skeleton>Which table holds the invoices?</Skeleton>
         </span>
         <span className={DETAIL} />
-        <span className={WHEN}>
-          <Skeleton>4 min</Skeleton>
+        <span className={END}>
+          <span className={WHEN}>
+            <Skeleton>4 min</Skeleton>
+          </span>
+          <span className={ACTION} />
         </span>
       </span>
     </li>

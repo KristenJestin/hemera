@@ -366,3 +366,48 @@ export const GroupPartlyAnswered: Story = {
     await expect(canvas.getByText('2 requests from the Probe')).toBeVisible()
   },
 }
+
+/** Every kind of row, every length of time, and an agent's group: one column each for when and what to do. */
+const ALIGNED: readonly NeedRow[] = [
+  ...ROWS.map((row, at) =>
+    Object.assign({}, row, {
+      need: Object.assign({}, row.need, { when: ['2 h', '25 min', '1 min', '3 d', 'now'][at] }),
+    }),
+  ),
+  ...PROBE_ROWS,
+]
+
+/**
+ * The times end on one edge and the buttons share one column, whatever they say: Retry here,
+ * Answer here and Choose here are the same width, an agent's group included.
+ */
+export const Aligned: Story = {
+  args: { rows: ALIGNED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const times = [...canvasElement.querySelectorAll('[data-need-when]')]
+    await expect(times.map((one) => one.textContent)).toEqual(
+      expect.arrayContaining(['2 h', '25 min', '1 min', '3 d']),
+    )
+    const rights = new Set(times.map((one) => Math.round(one.getBoundingClientRect().right)))
+    await expect(rights.size).toBe(1)
+    const edges = () => {
+      const actions = canvas.getAllByRole('button', { name: /here$/ })
+      return {
+        count: actions.length,
+        lefts: new Set(actions.map((one) => Math.round(one.getBoundingClientRect().left))).size,
+        rights: new Set(actions.map((one) => Math.round(one.getBoundingClientRect().right))).size,
+      }
+    }
+    await expect(edges()).toEqual({ count: 7, lefts: 1, rights: 1 })
+    // An agent's group unfolded: its own rows keep the same columns.
+    const group = canvas
+      .getAllByRole('button', { name: 'Answer here' })
+      .find((one) => one.closest('[data-agent]') !== null)
+    if (group === undefined) throw new globalThis.Error('the Probe has a group')
+    await userEvent.click(group)
+    // Under the hand a button grows by a pixel each side: the edges are read once it has left.
+    await userEvent.unhover(group)
+    await waitFor(() => expect(edges()).toEqual({ count: 10, lefts: 1, rights: 1 }))
+  },
+}

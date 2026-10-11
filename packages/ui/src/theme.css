@@ -301,6 +301,12 @@
   /* The least a live chip's name is given, however narrow the line: a few words, never a few
      letters. The chip does not shrink below its name's least and its seconds whole. */
   --spacing-chip-name: 4rem;
+  /* The columns of a Needs you row: when it was raised, as wide as the longest a time is said
+     (`yesterday`), and its action, as wide as the longest label at the small size (`Choose
+     here`, with a little room) and no wider, so a row still fits a third of a 1366 px window: every row's times end
+     and its buttons stand on the same edges, whatever they say. */
+  --spacing-need-when: 3.25rem;
+  --spacing-need-action: 6.5rem;
   /* How wide a live chip's glance is: a long command, an address and three lines of output read
      without wrapping every other word. */
   --spacing-glance: 20rem;
