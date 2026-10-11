@@ -223,7 +223,7 @@ function Toggle({
     <span className={ICON}>
       <Tooltip label={label}>
         <IconButton
-          variant="secondary"
+          variant="ghost"
           size="sm"
           icon={icon}
           aria-label={label}

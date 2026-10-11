@@ -469,6 +469,20 @@ export const Aligned: Story = {
     await expect(controls.map(([, more]) => /^More actions for /.test(more ?? ''))).toEqual(
       Array(7).fill(true),
     )
+    // The action and the menu read as a pair: the same quiet icon button, the same size, no frame.
+    const looks = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
+      [...cell.querySelectorAll('button')].map((one) => {
+        const style = getComputedStyle(one)
+        const box = one.getBoundingClientRect()
+        return [
+          style.backgroundColor,
+          style.borderTopColor,
+          Math.round(box.width),
+          Math.round(box.height),
+        ].join(' ')
+      }),
+    )
+    await expect(new Set(looks.flat()).size).toBe(1)
     await expect(canvas.queryByRole('button', { name: 'Allow these' })).toBeNull()
     const actions = canvas.getAllByRole('button', { name: /here$/ })
     await expect(
