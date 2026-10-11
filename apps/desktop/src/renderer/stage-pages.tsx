@@ -32,6 +32,8 @@ export interface StagePageProps {
   open: (view: string) => void
   /** Goes to another mission of the Project, by its key. */
   goMission: (key: string) => void
+  /** Opens a Chat of the Project, by its id. */
+  openChat: (chatId: string) => void
   /** Why the last Freeze was refused, each reason in words. */
   refused?: ReadonlyArray<string> | undefined
   /** Draws the mission's frame around what the page gives it. */

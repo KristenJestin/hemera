@@ -111,14 +111,15 @@ describe('A Project’s settings page', () => {
   })
 })
 
-describe('The ticket, resource and living spec entries of a Project’s settings', () => {
+describe('The ticket and resource entries of a Project’s settings', () => {
   const ready: SettingsData = { ...LOADING_SETTINGS, project: { kind: 'ready', project: ACME } }
 
-  test('the list gains Tickets and Specs, Exclusive resources and the Living spec entry', () => {
+  test('the list gains Tickets and Specs and Exclusive resources, and no Living spec entry', () => {
     const markup = drawn(ready)
-    for (const entry of ['Tickets and Specs', 'Exclusive resources', 'Living spec']) {
+    for (const entry of ['Tickets and Specs', 'Exclusive resources']) {
       expect(markup).toContain(`>${entry}<`)
     }
+    expect(markup).not.toContain('>Living spec<')
   })
 
   test('a section the route names is the one shown first, drawn by the ticket slot', () => {
@@ -139,10 +140,10 @@ describe('The ticket, resource and living spec entries of a Project’s settings
     expect(drawn(ready, { section: 'nowhere' })).toContain('data-repository="api"')
   })
 
-  test('the Living spec entry opens the page and shows no section; the others show theirs', () => {
-    expect(sectionChosen('livingSpec')).toEqual({ kind: 'livingSpec' })
-    expect(sectionChosen('tickets')).toEqual({ kind: 'section', id: 'tickets' })
-    expect(sectionChosen('repositories')).toEqual({ kind: 'section', id: 'repositories' })
+  test('an entry of the list is a section; a name the page does not have is none', () => {
+    expect(sectionChosen('tickets')).toBe('tickets')
+    expect(sectionChosen('repositories')).toBe('repositories')
+    expect(sectionChosen('livingSpec')).toBeNull()
     expect(sectionChosen('nowhere')).toBeNull()
   })
 

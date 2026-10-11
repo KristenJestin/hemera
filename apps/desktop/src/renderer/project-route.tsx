@@ -134,7 +134,6 @@ export function ProjectRoute({
           projectId={id}
           projectName={name}
           onOpenMission={actions.openMission}
-          onOpenChat={() => startChat(link, id, newChat, actions.openChat, () => undefined)}
         />
       }
       groups={groupsOf(lines, events, now)}

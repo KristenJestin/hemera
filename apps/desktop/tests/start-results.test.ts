@@ -1,18 +1,12 @@
 /**
  * What the start field shows: the stream folded into results (the Project's missions, then the
  * tickets as they come, "Create a mission" last and replaced by a second one), what each choice
- * creates, and the triage answer a created mission carries.
+ * creates, and the mission started from a choice, which opens at once.
  */
 
-import {
-  AgentWorking,
-  CanonicalTicket,
-  WaitingOnYou,
-  parseTicketReference,
-} from '@hemera/core/domain'
+import { CanonicalTicket, parseTicketReference } from '@hemera/core/domain'
 import {
   CreateChoice,
-  MissionChanged,
   MissionFound,
   SearchNotice,
   TicketFound,
@@ -27,9 +21,7 @@ import {
   createOf,
   foldStart,
   searchPending,
-  settleStart,
-  triageOf,
-  triageStep,
+  startAndOpen,
   viewsOf,
 } from '../src/renderer/start-results.ts'
 
@@ -166,49 +158,6 @@ describe('what a choice creates', () => {
   })
 })
 
-const answered = (kind: 'existing_mission' | 'delivered' | 'too_small', more = {}): Mission =>
-  mission({
-    triage: {
-      kind,
-      ref: 'ACME-9',
-      text: 'It is.',
-      state: 'pending',
-      at: '2026-10-05T09:01:00.000Z',
-      basedOnProposed: false,
-      ...more,
-    },
-  })
-
-describe('the triage answer of a created mission', () => {
-  test('is none without an answer, or once the user kept the mission', () => {
-    expect(triageOf(mission())).toBeUndefined()
-    expect(triageOf(answered('too_small', { state: 'kept' }))).toBeUndefined()
-  })
-
-  test('says which mission it belongs to', () => {
-    expect(triageOf(answered('existing_mission'))).toEqual({ kind: 'belongs', key: 'ACME-9' })
-  })
-
-  test('says what delivered it, and whether that still waits on the user', () => {
-    expect(triageOf(answered('delivered', { basedOnProposed: true }))).toEqual({
-      kind: 'delivered',
-      key: 'ACME-9',
-      proposed: true,
-    })
-  })
-
-  test('says it is too small', () => {
-    expect(triageOf(answered('too_small'))).toEqual({ kind: 'small' })
-  })
-
-  test('falls back on the mission itself when the answer points to nothing', () => {
-    expect(triageOf(answered('existing_mission', { ref: null }))).toEqual({
-      kind: 'belongs',
-      key: 'ACME-12',
-    })
-  })
-})
-
 describe('whether the search for the text typed is still going', () => {
   const choice = foldStart(EMPTY_FOLD, CreateChoice.make({ title: 'export', ticket: null }))
   const search = (done: boolean, ended: string | null = null) => ({
@@ -233,76 +182,36 @@ describe('whether the search for the text typed is still going', () => {
   })
 })
 
-describe('what the first change of the created mission settles', () => {
-  test('is the answer when the Planner triaged it', () => {
-    expect(settleStart(MissionChanged.make({ mission: answered('too_small') }), 'm12')).toEqual({
-      kind: 'answer',
-      triage: { kind: 'small' },
-    })
-  })
+describe('a mission started from the field', () => {
+  const made = createOf('acme', 'export invoices', EMPTY_FOLD, 'choice-1')
 
-  test('is nothing for a change that says nothing of the triage', () => {
-    expect(settleStart(MissionChanged.make({ mission: mission() }), 'm12')).toBeNull()
-    expect(
-      settleStart(
-        MissionChanged.make({ mission: mission({ ball: AgentWorking.make({}) }) }),
-        'm12',
-      ),
-    ).toBeNull()
-  })
-
-  test('is that it went on planning when the user kept it, or the mission moved on', () => {
-    const planning = { kind: 'planning', key: 'ACME-12' }
-    expect(
-      settleStart(
-        MissionChanged.make({ mission: answered('too_small', { state: 'kept' }) }),
-        'm12',
-      ),
-    ).toEqual(planning)
-    expect(
-      settleStart(MissionChanged.make({ mission: mission({ stage: 'building' }) }), 'm12'),
-    ).toEqual(planning)
-    expect(settleStart(MissionChanged.make({ mission: mission({ frozen: true }) }), 'm12')).toEqual(
-      planning,
+  test('opens at once, under its key, without waiting for the Planner', async () => {
+    const asked: string[] = []
+    const opened: string[] = []
+    const refused: string[] = []
+    await startAndOpen(
+      {
+        createStart: (request) => {
+          asked.push(request.projectId)
+          return Promise.resolve(mission())
+        },
+      },
+      made,
+      { opened: (key) => opened.push(key), refused: (sentence) => refused.push(sentence) },
     )
-    expect(
-      settleStart(
-        MissionChanged.make({ mission: mission({ ball: WaitingOnYou.make({}) }) }),
-        'm12',
-      ),
-    ).toEqual(planning)
+    expect(asked).toEqual(['acme'])
+    expect(opened).toEqual(['ACME-12'])
+    expect(refused).toEqual([])
   })
 
-  test('is nothing for another mission', () => {
-    expect(settleStart(MissionChanged.make({ mission: mission({ id: 'm9' }) }), 'm12')).toBeNull()
-  })
-})
-
-describe('what an action on the triage answer does', () => {
-  const created = { id: 'm12', key: 'ACME-12' }
-
-  test('Open goes to the mission the answer points to', () => {
-    expect(triageStep('open', { kind: 'belongs', key: 'ACME-4' }, created)).toEqual({
-      kind: 'open',
-      key: 'ACME-4',
+  test('opens nothing and says why when the engine refuses', async () => {
+    const opened: string[] = []
+    const refused: string[] = []
+    await startAndOpen({ createStart: () => Promise.reject(new Error('no room')) }, made, {
+      opened: (key) => opened.push(key),
+      refused: (sentence) => refused.push(sentence),
     })
-  })
-
-  test('Start a mission anyway keeps the created mission planning', () => {
-    expect(triageStep('anyway', { kind: 'small' }, created)).toEqual({
-      kind: 'keep',
-      missionId: 'm12',
-    })
-    expect(
-      triageStep('anyway', { kind: 'delivered', key: 'ACME-4', proposed: false }, created),
-    ).toEqual({ kind: 'keep', missionId: 'm12' })
-  })
-
-  test('the Chat is opened for a small change', () => {
-    expect(triageStep('chat', { kind: 'small' }, created)).toEqual({ kind: 'chat' })
-  })
-
-  test('nothing is done while no mission was created', () => {
-    expect(triageStep('anyway', { kind: 'small' }, null)).toBeNull()
+    expect(opened).toEqual([])
+    expect(refused).toEqual(['The mission could not be started: no room'])
   })
 })

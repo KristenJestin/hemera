@@ -2,7 +2,6 @@ import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type KeyboardEvent, type ReactNode, use, useRef } from 'react'
 
-import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Kbd } from '../../components/kbd/kbd.tsx'
@@ -30,16 +29,6 @@ export type StartResultView =
     }
   | { kind: 'create'; title: string; ticket: string | null }
 
-/** What the Planner answered, once it has read what was typed. */
-export type StartTriage =
-  | { kind: 'reading' }
-  | { kind: 'belongs'; key: string }
-  | { kind: 'delivered'; key: string; proposed: boolean }
-  | { kind: 'small' }
-
-/** What the buttons under the field do: go to the mission, ask in a Chat, or keep going. */
-export type StartTriageAction = 'open' | 'chat' | 'anyway'
-
 export interface StartFieldProps {
   projectName: string
   text: string
@@ -50,10 +39,8 @@ export interface StartFieldProps {
   searching?: boolean | undefined
   /** Something the search said once, in words. */
   notice?: string | undefined
-  triage?: StartTriage | undefined
   onOpen: (key: string) => void
   onCreate: () => void
-  onTriageAction: (action: StartTriageAction) => void
 }
 
 const RESULTS = 'flex flex-col py-1'
@@ -65,68 +52,6 @@ const RESULT_KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 const QUIET = 'shrink-0 text-xs text-muted-foreground'
 
-const TRIAGE = 'flex min-w-0 flex-wrap items-center gap-3 px-1 text-sm'
-
-function Anyway({ onPress }: { onPress: () => void }): ReactNode {
-  return (
-    <Button variant="ghost" size="sm" onClick={onPress}>
-      Start a mission anyway
-    </Button>
-  )
-}
-
-function TriageLine({
-  triage,
-  onAction,
-}: {
-  triage: StartTriage
-  onAction: (action: StartTriageAction) => void
-}): ReactNode {
-  switch (triage.kind) {
-    case 'reading':
-      return (
-        <div className={TRIAGE} role="status">
-          <Loading size="sm" label="Hemera reads it" />
-          <span className="text-muted-foreground">Hemera reads it…</span>
-        </div>
-      )
-    case 'belongs':
-      return (
-        <div className={TRIAGE} role="status">
-          <span>This belongs to {triage.key}</span>
-          <Button variant="secondary" size="sm" onClick={() => onAction('open')}>
-            Add it to {triage.key}
-          </Button>
-          <Anyway onPress={() => onAction('anyway')} />
-        </div>
-      )
-    case 'delivered':
-      return (
-        <div className={TRIAGE} role="status">
-          <span>
-            {triage.proposed
-              ? `Delivered by ${triage.key}, not validated yet`
-              : `Already delivered by ${triage.key}`}
-          </span>
-          <Button variant="secondary" size="sm" onClick={() => onAction('open')}>
-            Open {triage.key}
-          </Button>
-          <Anyway onPress={() => onAction('anyway')} />
-        </div>
-      )
-    case 'small':
-      return (
-        <div className={TRIAGE} role="status">
-          <span>Too small for a mission</span>
-          <Button variant="secondary" size="sm" onClick={() => onAction('chat')}>
-            Ask in a Chat
-          </Button>
-          <Anyway onPress={() => onAction('anyway')} />
-        </div>
-      )
-  }
-}
-
 function buttonsOf(list: HTMLElement | null): HTMLElement[] {
   return list === null ? [] : Array.from(list.querySelectorAll<HTMLElement>('button'))
 }
@@ -135,8 +60,7 @@ function buttonsOf(list: HTMLElement | null): HTMLElement[] {
  * The field that starts a mission: it searches first and creates last. As it is typed, what it
  * finds unfolds under it and pushes the page down: the Project's missions, then tickets, linked or
  * remote, and "Create a mission" always last. Enter opens the result marked open, or creates only
- * when nothing else shows; the arrows move through the results. The Planner's answer stands
- * under the field.
+ * when nothing else shows; the arrows move through the results.
  */
 export function StartField({
   projectName,
@@ -145,10 +69,8 @@ export function StartField({
   results,
   searching = false,
   notice,
-  triage,
   onOpen,
   onCreate,
-  onTriageAction,
 }: StartFieldProps): ReactNode {
   const folding = useTransition(fold)
   const page = use(MissionField)
@@ -276,7 +198,6 @@ export function StartField({
           </motion.div>
         )}
       </AnimatePresence>
-      {triage !== undefined && <TriageLine triage={triage} onAction={onTriageAction} />}
     </div>
   )
 }
