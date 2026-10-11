@@ -4,7 +4,14 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import type { Proposal } from './proposal.tsx'
 import { type CardStatus, SetupCard, type SetupCardProps } from './setup-card.tsx'
-import { LONG_PROPOSALS, NESTED_REPOSITORY, PROPOSALS, REFUSALS } from './setup-fixtures.ts'
+import {
+  LONG_PROPOSALS,
+  MANY_SCRIPTS,
+  NESTED_REPOSITORY,
+  PROPOSALS,
+  REFUSALS,
+  withAdded,
+} from './setup-fixtures.ts'
 
 /**
  * A card of the setup: what the setup agent proposes for one part of a new Project — its
@@ -25,6 +32,7 @@ const meta = {
     onEdit: fn(),
     onDiscuss: fn(),
     onDecline: fn(),
+    onAddOther: fn(),
     onSave: fn(),
     onCancel: fn(),
     onSend: fn(),
@@ -75,6 +83,10 @@ function Held(args: SetupCardProps) {
         args.onDiscuss?.()
         setStatus({ state: 'discussing' })
       }}
+      onAddOther={(id) => {
+        args.onAddOther?.(id)
+        setProposal((before) => (before === null ? before : withAdded(before, id)))
+      }}
       onDecline={() => {
         args.onDecline()
         setStatus({ state: 'declined' })
@@ -110,6 +122,47 @@ export const Commands: Story = {
     for (const answer of ['Accept', 'Edit', 'Discuss', 'Decline']) {
       expect(canvas.getByRole('button', { name: answer })).toBeVisible()
     }
+  },
+}
+
+/**
+ * A repository with many scripts: the everyday commands selected, every other script folded
+ * under "Other scripts", unselected. Opened, each is added by its own click, and stays listed,
+ * marked as added.
+ */
+export const OtherScripts: Story = {
+  args: { proposal: MANY_SCRIPTS },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Proposed commands' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(8)
+    const toggle = canvas.getByRole('button', { name: /Other scripts/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent('11')
+    expect(canvas.queryByRole('list', { name: 'Other scripts' })).toBeNull()
+    await userEvent.click(toggle)
+    const others = await canvas.findByRole('list', { name: 'Other scripts' })
+    expect(within(others).getAllByRole('listitem')).toHaveLength(11)
+    await userEvent.click(within(others).getByRole('button', { name: 'Add release' }))
+    expect(args.onAddOther).toHaveBeenCalledWith('release')
+    await waitFor(() => {
+      expect(within(others).queryByRole('button', { name: 'Add release' })).toBeNull()
+    })
+    expect(within(others).getByRole('img', { name: 'release added' })).toBeVisible()
+    expect(within(others).getByRole('button', { name: 'Add docs' })).toBeVisible()
+  },
+}
+
+/** The commands accepted: the others stay folded and can still be added one by one. */
+export const OtherScriptsAfterAccept: Story = {
+  args: { proposal: MANY_SCRIPTS },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Accept' }))
+    expect(await canvas.findByRole('img', { name: 'Accepted' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: /Other scripts/ }))
+    await userEvent.click(await canvas.findByRole('button', { name: 'Add docs' }))
+    expect(args.onAddOther).toHaveBeenCalledWith('docs')
   },
 }
 
@@ -154,6 +207,27 @@ export const Variables: Story = {
     expect(canvas.getByText('DATABASE_URL')).toBeVisible()
     expect(canvas.queryByText(/postgres:/)).toBeNull()
     expect(canvas.getAllByText('masked')).toHaveLength(3)
+  },
+}
+
+/**
+ * The Spec language, proposed because the Project's own files are written in it: the language by
+ * name, its tag, and the file that says it. Declined, the Project keeps the language it has.
+ */
+export const SpecLanguage: Story = {
+  args: { kind: 'specLanguage', proposal: PROPOSALS.specLanguage },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Proposed spec language' })
+    expect(within(list).getByText('French')).toBeVisible()
+    expect(within(list).getByText('fr')).toBeVisible()
+    expect(within(list).getByText('README.md')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Edit' }))
+    const tag = await canvas.findByRole('textbox', { name: 'Language of fr' })
+    await userEvent.clear(tag)
+    await userEvent.type(tag, 'de')
+    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    expect(await canvas.findByText('German')).toBeVisible()
   },
 }
 

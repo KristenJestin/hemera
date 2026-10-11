@@ -594,6 +594,10 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
                     "minLength": 1,
                     "type": "string",
                   },
+                  "listed": {
+                    "description": "Whether it is one of the other scripts: found in the repository, but none of the Project’s everyday commands. It is listed under "Other scripts", unselected, and Accept all leaves it alone. False without it.",
+                    "type": "boolean",
+                  },
                   "name": {
                     "description": "Its name in the catalogue: a rewrite when the catalogue already holds it.",
                     "minLength": 1,
@@ -709,6 +713,33 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
                   "kind",
                   "name",
                   "value",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "specLanguage",
+                    ],
+                    "type": "string",
+                  },
+                  "language": {
+                    "description": "A BCP 47 language tag: \`fr\`, \`en\`, \`pt-BR\`.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "source": {
+                    "description": "The file of the Project that says it, relative to the Project folder (\`README.md\`, \`api/AGENTS.md\`). Only whole paragraphs written in the language, or a line stating it, count: never one word, a name or a code identifier.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "language",
+                  "source",
                 ],
                 "type": "object",
               },
