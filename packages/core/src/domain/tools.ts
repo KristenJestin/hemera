@@ -35,6 +35,8 @@ import { ModelRecommend, ProofWrite, TasksWrite } from './proofs.ts'
 import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
+import { TaskAmendment } from './build-tasks.ts'
+import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
 import { FINDINGS_PAGE, ReportedFinding } from './tester.ts'
@@ -767,6 +769,80 @@ const DiscussionProposeDecision = Schema.Struct({
     'Propose the decision a discussion leads to. It waits for the user, who accepts it, writes another, or ends the discussion without one; a new proposal replaces the pending one.',
 })
 
+const TaskNamed = Bounded(20, 'The task, by its id (`T4`).')
+
+const BuildRead = Schema.Struct({
+  task: Schema.optionalKey(TaskNamed),
+}).annotate({
+  description:
+    'Read the build: the ready set, every task with its state, runner and attempts, the files the running tasks hold, the needs and the decisions. With `task`: that task in full, with each attempt.',
+})
+
+const TaskStart = Schema.Struct({ task: TaskNamed }).annotate({
+  description:
+    'Start a task of the ready set before writing for it: it moves to in progress, its target files become its claims, and its attempt opens. Refused when its files overlap a running task’s: the answer names that task, and the task is delivered again once its files are free.',
+})
+
+const TaskFinished = Schema.Struct({
+  task: TaskNamed,
+  summary: Bounded(4000, 'What you did and how you verified it, in the language of the user.'),
+}).annotate({
+  description:
+    'Say a task you run is finished, once you verified it yourself. Hemera takes its end state and judges it: never call it to see what the checks say.',
+})
+
+const NeedOption = Bounded(MAX_REQUESTED_OPTION, 'One option, in a few words.')
+
+const NeedOptions = Schema.Array(NeedOption).check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_REQUESTED_OPTIONS),
+)
+
+const TaskBlocked = Schema.Struct({
+  task: TaskNamed,
+  kind: Schema.Literals(['decision', 'impossible']).annotate({
+    description:
+      '`impossible`: the task cannot be built as written; `decision`: the Spec does not settle a choice the user would care about.',
+  }),
+  reason: Bounded(MAX_REQUESTED_TEXT, 'What blocks it, as the user will read it.'),
+  options: NeedOptions.annotate({ description: 'The options the user chooses from.' }),
+  recommended: NeedOption.annotate({ description: 'The option you recommend: one of `options`.' }),
+  recommended_reason: Bounded(MAX_REQUESTED_TEXT, 'Why you recommend it.'),
+  amendment: Schema.optionalKey(TaskAmendment),
+}).annotate({
+  description:
+    'Say a task you run is blocked: Hemera checks the request and asks the user a decision. The task and the tasks that depend on it wait; go on with the others. An amendment of the plan applies only if the user chooses your recommended option.',
+})
+
+const ReportNeed = Schema.Struct({
+  kind: Schema.Literals(['environment', 'decision']).annotate({
+    description:
+      '`environment`: something outside the code fails or is missing (a VPN, a vault, a quota, a step only the user can do); `decision`: a choice that is no one task’s.',
+  }),
+  text: Bounded(MAX_REQUESTED_TEXT, 'What is missing, or the question, as the user will read it.'),
+  action: Schema.optionalKey(
+    Bounded(MAX_REQUESTED_TEXT, 'For `environment`: what the user should do.'),
+  ),
+  options: Schema.optionalKey(
+    NeedOptions.annotate({ description: 'For `decision`: the options the user chooses from.' }),
+  ),
+  recommended: Schema.optionalKey(
+    NeedOption.annotate({ description: 'For `decision`: the option you recommend.' }),
+  ),
+  tasks: Schema.Array(TaskNamed).annotate({
+    description: 'The tasks it holds: they and their dependants wait. Empty when it holds none.',
+  }),
+}).annotate({
+  description:
+    'Ask the user for what is not one task’s: Hemera checks the request and creates the need.',
+})
+
+const BuildSummary = Schema.Struct({
+  text: Bounded(8000, 'What was built, what was not and why, every failure said.'),
+}).annotate({
+  description: 'Write the final summary of the build, once Hemera says every task is done.',
+})
+
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
@@ -966,7 +1042,7 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch'],
+    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch', 'builder'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1285,6 +1361,54 @@ export const TOOLS = {
       doing: 'Reporting what moved since the Freeze',
     },
   }),
+  build_read: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: BuildRead,
+    label: { label: 'Read the build', mark: 'build-read', doing: 'Reading the build' },
+  }),
+  task_start: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: TaskStart,
+    label: { label: 'Start a task', mark: 'task-start', doing: 'Starting a task' },
+  }),
+  task_finished: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: TaskFinished,
+    label: { label: 'Task finished', mark: 'task-finished', doing: 'Finishing a task' },
+  }),
+  task_blocked: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: TaskBlocked,
+    label: { label: 'Task blocked', mark: 'task-blocked', doing: 'Saying a task is blocked' },
+  }),
+  report_need: tool({
+    roles: ['builder'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ReportNeed,
+    label: { label: 'Report a need', mark: 'report-need', doing: 'Asking the user' },
+  }),
+  build_summary: tool({
+    roles: ['builder'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: BuildSummary,
+    label: { label: 'Build summary', mark: 'build-summary', doing: 'Writing the summary' },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1358,6 +1482,12 @@ export const TOOL_NAMES = [
   'answer_propose',
   'ticket_event_report',
   'prelaunch_report',
+  'build_read',
+  'task_start',
+  'task_finished',
+  'task_blocked',
+  'report_need',
+  'build_summary',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
