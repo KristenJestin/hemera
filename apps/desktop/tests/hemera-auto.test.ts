@@ -236,7 +236,8 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     const [need] = answer
     expect(Predicate.isTagged(need?.fields, 'Permission')).toBe(true)
     expect(need?.fields).toMatchObject({
-      hemeraReason: 'no judge could rate it: no judge is set up',
+      hemeraReason:
+        'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
       settingsSection: 'hemera-auto',
     })
   })
@@ -245,7 +246,7 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     const { questions } = await withJev(({ builder }) => write(builder), { consent: false })
     expect(jev.received).toHaveLength(0)
     expect(questions).toEqual([
-      'no judge could rate it: Hemera Auto waits for consent to send calls to Jev',
+      'No rule of this Project allows this write for the Builder, and Hemera Auto waits for consent to send calls to Jev.',
     ])
   })
 
@@ -261,8 +262,8 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     expect(jev.received).toHaveLength(1)
     expect(answer).toMatchObject({ stored: true, held: true, refused: true, consent: true })
     expect(questions).toEqual([
-      'no judge could rate it: Jev refused the saved key',
-      'no judge could rate it: Jev refused the saved key',
+      'No rule of this Project allows this write for the Builder, and Jev refused the saved key.',
+      'No rule of this Project allows this write for the Builder, and Jev refused the saved key.',
     ])
   })
 
@@ -286,7 +287,9 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     if (reply === 'closed') await jev.close()
     else jev.answer = () => reply
     const { questions, lines } = await withJev(({ builder }) => write(builder))
-    expect(questions).toEqual([`no judge could rate it: ${reason}`])
+    expect(questions).toEqual([
+      `No rule of this Project allows this write for the Builder, and ${reason}.`,
+    ])
     const line = lines.find((one) => one.startsWith('permissions:') && one.includes('fs_write'))
     expect(line).toContain(logged)
     expect(line).toContain(': ask by rules')
@@ -300,7 +303,9 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
       }),
     )
     expect(jev.received).toHaveLength(0)
-    expect(questions).toEqual(['no judge could rate it: the call could not be sent to Jev whole'])
+    expect(questions).toEqual([
+      'No rule of this Project allows this write for the Builder, and the call could not be sent to Jev whole.',
+    ])
   })
 })
 
@@ -711,7 +716,7 @@ describe('Hemera Auto’s verdicts are lines of the mission’s Journal', () => 
     )
     const [line] = answer.filter((row) => row.kind === 'permission')
     expect(line?.text).toBe(
-      "Asked the user about fs_write ~/acme/notes.md by Hemera's rules: no judge could rate it: Jev answered HTTP 503",
+      "Asked the user about fs_write ~/acme/notes.md by Hemera's rules: No rule of this Project allows this write for the Builder, and Jev answered HTTP 503.",
     )
     expect(JSON.parse(line?.fields ?? '{}')).toMatchObject({ failure: 'http 503', judge: null })
   })

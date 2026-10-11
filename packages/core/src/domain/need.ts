@@ -45,6 +45,10 @@ export const PermissionFields = Schema.TaggedStruct('Permission', {
   sensitive: Schema.Boolean,
   /** The id of an app setting section (`hemera-auto`) that would settle such calls, if one would. */
   settingsSection: Schema.optionalKey(Schema.String),
+  /** The call in words: "Write tests/cli/install.test.ts in its Probe folder", "Run git status". */
+  asked: Schema.optionalKey(Schema.String),
+  /** The session of the agent that asks, which groups its requests together. */
+  agent: Schema.optionalKey(Schema.String),
 })
 
 export const NeedFields = Schema.Union([

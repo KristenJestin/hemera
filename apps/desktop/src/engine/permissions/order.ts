@@ -12,8 +12,9 @@
  *     for this mission" grant for the same action allows it); then a path outside the role's
  *     place, or words that do not read, ask, and so does a catalogue command marked "ask before
  *     running";
- *  4. the local allows, only for what is fully understood: a read inside, a plain listing, a
- *     catalogue command of the place that does not go through a shell;
+ *  4. the local allows, only for what is fully understood: a read inside, a write inside a
+ *     Probe's own folder, a plain listing, a read-only Git command, a catalogue command of the
+ *     place that does not go through a shell;
  *  5. the judge, which allows or asks;
  *  6. any failure of the judge asks. Never an allow on an error path.
  *
@@ -22,24 +23,27 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   PERMISSION_POLICY,
   PLACE_NAMES,
   type PlaceContext,
   ROLE_NAMES,
+  ROLE_PLACES,
   concernSaid,
   deletesGit,
   effectiveAction,
   chatMustAskThroughScripts,
   missionRefusal,
+  namesGit,
   neverMatch,
   neverSaid,
   placesNamed,
   plainListing,
+  readOnlyGit,
   runsAShell,
   wordsOf,
 } from '@hemera/core/domain'
@@ -107,6 +111,49 @@ export const JUDGE_LIMIT = Duration.seconds(10)
 const READS = new Set(['fs_read', 'fs_list', 'search'])
 /** The local tools without a path: they read Hemera's own state for the session. */
 const SESSION_READS = new Set(['commands_list', 'commands_output'])
+/** What a call is, as the reason of a question names it. */
+const KINDS: Partial<Record<JudgedCall['tool'], string>> = {
+  fs_read: 'read',
+  fs_list: 'read',
+  search: 'read',
+  fs_write: 'write',
+  fs_edit: 'write',
+  commands_run: 'command',
+}
+
+/** The tools that write a file, allowed by the rules only in a place of the session's own. */
+const WRITES = new Set(['fs_write', 'fs_edit'])
+
+/**
+ * Whether a call's path is certainly inside a place that is the session's own (a Probe's
+ * worktree), the role's own and not read-only: never a Workspace nor the main checkout. Never
+ * under a `.git`, as written or as it leads: Git reads its configuration there and runs the
+ * programs it names (`core.fsmonitor` on `git status`), which read-only Git would then run.
+ */
+const ownFolder = (call: JudgedCall): boolean => {
+  const { place, role } = call.session
+  return (
+    place.kind === 'own-worktree' &&
+    ROLE_PLACES[role].kind === 'own-worktree' &&
+    !place.readOnly &&
+    !ROLE_PLACES[role].readOnly &&
+    call.path !== null &&
+    call.path.inside &&
+    call.path.certain &&
+    !namesGit(call.path.named) &&
+    !namesGit(relative(place.root, call.path.resolved)) &&
+    !namesGit(relative(realRoot(place.root), call.path.resolved))
+  )
+}
+
+/** A place's root as the disk has it, links followed; as written when it cannot say. */
+const realRoot = (root: string): string => {
+  try {
+    return realpathSync.native(root)
+  } catch {
+    return root
+  }
+}
 
 export interface OrderSettings {
   readonly log: Log
@@ -306,6 +353,8 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
       /** Step 4: whether the rules allow it, all being understood. */
       const allowedLocally = (call: JudgedCall): boolean => {
         if (READS.has(call.tool) || SESSION_READS.has(call.tool)) return true
+        // A Probe's folder is its own, made for it and thrown away: it writes there freely.
+        if (WRITES.has(call.tool) && ownFolder(call)) return true
         if (call.tool !== 'commands_run') return false
         const line = call.command?.line ?? call.line ?? ''
         const [program = '', ...args] = wordsOf(line)
@@ -315,12 +364,8 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           runsAShell(program) ||
           (invocationOf([program, ...args], platform, lookup)?.verbatim ?? false)
         if (call.command !== null) return !call.command.askBeforeRunning && !shell
-        return plainListing({
-          program,
-          args,
-          shell,
-          resolved: findOnPath(program, lookup, platform),
-        })
+        const resolved = { program, args, shell, resolved: findOnPath(program, lookup, platform) }
+        return plainListing(resolved) || readOnlyGit(resolved)
       }
 
       /** Steps 5 and 6: the judge, whose every failure asks. */
@@ -336,7 +381,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               onSome: (answer): Decision =>
                 answer.verdict === 'unavailable'
                   ? {
-                      ...decided('ask', [`no judge could rate it: ${answer.reason}`]),
+                      ...decided('ask', [
+                        `No rule of this Project allows this ${KINDS[call.tool] ?? 'call'} for ${ROLE_NAMES[call.session.role]}, and ${answer.reason}.`,
+                      ]),
                       failure: answer.failure ?? null,
                       roundTripMs: answer.roundTripMs ?? null,
                       settingsSection: answer.settingsSection ?? null,

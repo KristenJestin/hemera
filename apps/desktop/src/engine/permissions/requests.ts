@@ -27,7 +27,7 @@
 
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
 
 import {
@@ -35,6 +35,7 @@ import {
   type Masked,
   MissionOwner,
   PERMISSION_POLICY,
+  PLACE_NAMES,
   PermissionFields,
   type PlaceContext,
   ProjectOwner,
@@ -147,6 +148,42 @@ const described = (call: JudgedCall, home: string): string => {
       : `${call.line} (in ${call.folder})`
   }
   return call.path === null ? call.tool : `${call.tool} ${shownPath(call.path.resolved, home)}`
+}
+
+/** What each file tool does, as a request says it. */
+const DOING: Partial<Record<JudgedCall['tool'], string>> = {
+  fs_read: 'Read',
+  fs_list: 'List',
+  search: 'Search',
+  fs_write: 'Write',
+  fs_edit: 'Edit',
+  evidence_add: 'Keep as evidence',
+}
+
+/** The place a request names: a Probe's folder is its own; the others, as a refusal says them. */
+const placeSaid = (call: JudgedCall): string =>
+  call.session.place.kind === 'own-worktree'
+    ? 'its Probe folder'
+    : PLACE_NAMES[call.session.place.kind]
+
+/**
+ * The call in words, for a person: what it does, to what, and where: "Write tests/a.test.ts in
+ * its Probe folder", "Write ~/notes.md, outside the Workspace", "Run git status".
+ */
+export const callSaid = (call: JudgedCall, home: string): string => {
+  if (call.command !== null) return `Run ${call.command.name} (${call.command.line})`
+  if (call.line !== null) {
+    return call.folder === null || call.folder === '.'
+      ? `Run ${call.line}`
+      : `Run ${call.line} in ${call.folder}`
+  }
+  const doing = DOING[call.tool] ?? `Use ${call.tool}`
+  if (call.path === null) return doing
+  const { named, inside } = call.path
+  const relativeName = !isAbsolute(named) && !/^~(?:$|[\\/])/.test(named)
+  return inside && relativeName
+    ? `${doing} ${named.replace(/^\.[\\/]/, '')} in ${placeSaid(call)}`
+    : `${doing} ${shownPath(call.path.resolved, home)}, outside ${placeSaid(call)}`
 }
 
 /** The paths a call names, as written and as they lead: its path, or the paths of its line. */
@@ -409,23 +446,27 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
           const { identity, guard } = yield* guardOf(call, frozen, settings)
           const shown = secrets.mask(described(call, settings.home))
           const why = call.why?.trim() ?? ''
-          const agentReason = secrets.mask(why === '' ? 'no reason given' : why)
+          const said = callSaid(call, settings.home)
+          const agentReason = secrets.mask(why === '' ? said : why)
           const hemeraReason = secrets.mask(asked.reason)
           const { sensitive } = asked
+          const fields = {
+            call: shown,
+            agentReason,
+            hemeraReason,
+            sensitive,
+            asked: secrets.mask(said),
+            agent: call.session.sessionId,
+          }
           const writeNeed = yield* createNeedIn(
             PERMISSION_REQUESTS,
             missionId === null
               ? ProjectOwner.make({ projectId })
               : MissionOwner.make({ projectId, missionId, taskId: null }),
             asked.settingsSection === null
-              ? PermissionFields.make({ call: shown, agentReason, hemeraReason, sensitive })
-              : PermissionFields.make({
-                  call: shown,
-                  agentReason,
-                  hemeraReason,
-                  sensitive,
-                  settingsSection: asked.settingsSection,
-                }),
+              ? PermissionFields.make(fields)
+              : PermissionFields.make({ ...fields, settingsSection: asked.settingsSection }),
+            call.session.role,
           )
           const row = yield* mutate('asking the user', (transaction) =>
             Effect.gen(function* () {

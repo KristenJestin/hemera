@@ -30,6 +30,7 @@ import {
   type NeedAnswerAsked,
   type NeedGroup,
 } from '@hemera/ipc'
+import { APP_SECTIONS } from '@hemera/ui'
 import { Predicate } from 'effect'
 import { describe, expect, test, vi } from 'vite-plus/test'
 
@@ -283,6 +284,52 @@ describe('What each card says', () => {
     })
   })
 
+  test('a permission said in words (#170): the call as its title, the agent’s own reason under it, who asks, and the setting that would settle it', () => {
+    const fields = PermissionFields.make({
+      call: 'fs_edit ~/acme/notes.md',
+      agentReason: 'fix the notes',
+      hemeraReason:
+        'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
+      sensitive: false,
+      settingsSection: 'hemera-auto',
+      asked: 'Edit notes.md in the Workspace',
+      agent: 'session-1',
+    })
+    const card = cardOf(
+      need(onMission('m1'), fields, '2026-10-05T10:00:00Z', { requestedBy: 'builder' }),
+      NOW,
+    )
+    expect(card).toMatchObject({
+      title: 'Edit notes.md in the Workspace',
+      role: 'builder',
+      ask: {
+        kind: 'permission',
+        agentReason: 'fix the notes',
+        settings: APP_SECTIONS.get('hemera-auto'),
+      },
+    })
+    const unsaid = { ...fields, agentReason: 'Edit notes.md in the Workspace' }
+    const quiet = cardOf(need(onMission('m1'), unsaid, '2026-10-05T10:00:00Z'), NOW)
+    expect(quiet.title).toBe('Edit notes.md in the Workspace')
+    expect(quiet.ask).not.toHaveProperty('agentReason')
+  })
+
+  test('the requests of one agent carry it, for the list to group them (#170)', () => {
+    const fields = { ...PERMISSION, asked: 'Run git status', agent: 'session-1' }
+    const rows = needRowsOf(
+      ready([
+        need(onMission('m1'), fields, '2026-10-05T10:00:00Z', { requestedBy: 'probe' }),
+        need(onMission('m1'), PERMISSION, '2026-10-05T10:01:00Z'),
+      ]),
+      PROJECTS,
+      NOW,
+    )
+    expect(rows.map((row) => row.agent)).toEqual([
+      { id: 'session-1', name: 'the Probe' },
+      undefined,
+    ])
+  })
+
   test('answered, it says the answer; expired or resolved, the reason', () => {
     const allowed = need(onMission('m1'), PERMISSION, '2026-10-05T10:00:00Z', {
       state: 'answered',
@@ -328,6 +375,17 @@ describe('What a card’s buttons do', () => {
       'Allow for this mission',
       PermissionAnswer.make({ choice: 'allow-for-mission' }),
     )
+  })
+
+  test('a permission’s setting opens its section (#170)', () => {
+    const asked = need(
+      onMission('m1'),
+      { ...PERMISSION, settingsSection: 'hemera-auto' },
+      '2026-10-05T10:00:00Z',
+    )
+    const on = tools()
+    handlersFor(asked, on).onSettings?.()
+    expect(on.openSettings).toHaveBeenCalledWith('hemera-auto')
   })
 
   test('a decision answers with the option chosen, and offers no answer of one’s own', () => {
