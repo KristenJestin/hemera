@@ -336,7 +336,8 @@ export interface QuestionCardProps extends Pick<
  * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
  * Answered, the card folds at once: the question, then its answer and Change; its dot and a word say
  * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
- * is said as a change; a retired question stays, with its reason. Everything but a press on its
+ * is said as a change; a retired question stays, with its reason. Open or folded, the question
+ * has its row to itself: the dot and its word, and the waiting clock, sit under it. Everything but a press on its
  * way and Change is drawn from the question: a card is the same live and after a restart.
  */
 export function QuestionCard({
@@ -450,22 +451,24 @@ export function QuestionCard({
           >
             <div className="flex min-w-0 items-start gap-2">
               <span className={ID}>{question.id}</span>
-              <h3 className="min-w-0 flex-1 text-sm font-medium break-words">{question.text}</h3>
-              {question.state === 'waiting' && (
-                <Legend label="Waiting on someone">
-                  <span aria-hidden="true" className="flex text-muted-foreground">
-                    <IconClockPause size="sm" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <h3 className="text-sm font-medium break-words">{question.text}</h3>
+                <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="flex items-center gap-1.5">
+                    <InputDot state={step === 'sending' ? 'received' : step} />
+                    <span role="status" className={QUIET}>
+                      {STEP_WORDS[step]}
+                    </span>
                   </span>
-                </Legend>
-              )}
-              <span className="flex shrink-0 items-center gap-1 leading-5">
-                <InputDot state={step === 'sending' ? 'received' : step} />
-                {step !== 'unanswered' && (
-                  <span role="status" className="text-xs whitespace-nowrap text-muted-foreground">
-                    {STEP_WORDS[step]}
-                  </span>
-                )}
-              </span>
+                  {question.state === 'waiting' && (
+                    <Legend label="Waiting on someone">
+                      <span aria-hidden="true" className="flex text-muted-foreground">
+                        <IconClockPause size="sm" />
+                      </span>
+                    </Legend>
+                  )}
+                </span>
+              </div>
             </div>
             {question.why !== '' && <p className={cn(QUIET, 'break-words')}>{question.why}</p>}
             <Options

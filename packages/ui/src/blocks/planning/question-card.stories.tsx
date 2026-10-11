@@ -370,6 +370,29 @@ export const MarkingWaiting: Story = {
   },
 }
 
+/**
+ * Open, the question has its row to itself, as on the folded line: the dot with its word and the
+ * waiting clock sit under it, aligned with its text, never beside it.
+ */
+export const QuestionOnItsRow: Story = {
+  args: { question: byId('Q6') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const heading = canvas.getByRole('heading', { name: byId('Q6').text })
+    const below = heading.getBoundingClientRect().bottom
+    const left = heading.getBoundingClientRect().left
+    const glyphs = [
+      canvas.getByRole('img', { name: 'Not answered yet' }),
+      canvas.getByRole('img', { name: 'Waiting on someone' }),
+    ].map((glyph) => glyph.getBoundingClientRect())
+    await expect(glyphs.map((glyph) => glyph.top >= below && glyph.left >= left)).toEqual([
+      true,
+      true,
+    ])
+    await expect(canvas.getByRole('status')).toHaveTextContent('Not answered yet')
+  },
+}
+
 /** Waiting on someone: the glyph, the note, the drafted message with Copy and no Send. */
 export const WaitingOnSomeone: Story = {
   args: { question: byId('Q6') },
