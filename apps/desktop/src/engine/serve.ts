@@ -72,6 +72,7 @@ import {
   setNotificationKind,
   setNotificationSound,
   setSoundStyle,
+  setSoundVolume,
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
@@ -594,6 +595,8 @@ export const engineHandlers = (
       use(setNotificationSound(REGISTRY, sound, on)).pipe(observed('notifications.setSound', log)),
     'notifications.setStyle': ({ style }) =>
       use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
+    'notifications.setVolume': ({ volume }) =>
+      use(setSoundVolume(REGISTRY, volume)).pipe(observed('notifications.setVolume', log)),
     'notifications.feed': () =>
       follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
     // The field searches first and creates only on the user's explicit choice (#84).

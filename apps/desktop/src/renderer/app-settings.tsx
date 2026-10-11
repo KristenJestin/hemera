@@ -258,6 +258,8 @@ function NotificationsPart({ link, engineReady }: Part): ReactNode {
     readNotifications,
   )
   const [previewing, setPreviewing] = useState<string | undefined>(undefined)
+  // The volume while the slider is held: the one kept is written when it is let go.
+  const [held, setHeld] = useState<number | undefined>(undefined)
   const [errors, setErrors] = useRowErrors()
   if (read.kind === 'failed') {
     return <Unread title="Notifications & sounds" sentence={read.sentence} onRetry={reread} />
@@ -265,10 +267,18 @@ function NotificationsPart({ link, engineReady }: Part): ReactNode {
   const settings = valueOf(read)
   if (settings === null) return null
   const shown = notificationsOf(settings)
+  const preview = (sound: Sound, volume: number): void => {
+    setPreviewing(sound)
+    const asked = link.previewSound(settings.style, sound, volume)
+    writing(asked, sound, 'This sound could not be played', setErrors)
+    const done = (): void => setPreviewing(undefined)
+    asked.then(done, done)
+  }
   return (
     <NotificationsSection
       // The section's `style` is the sound style chosen, not a CSS style: given whole.
       {...shown}
+      volume={held ?? shown.volume}
       previewing={previewing}
       errors={errors}
       onEvent={(id, on) => {
@@ -300,13 +310,18 @@ function NotificationsPart({ link, engineReady }: Part): ReactNode {
           setSettings,
         )
       }}
+      onVolume={setHeld}
+      onVolumeCommitted={(volume) => {
+        const kept = link.setSoundVolume(volume)
+        writing(kept, 'volume', 'The volume could not be changed', setErrors, setSettings)
+        kept.then(
+          () => setHeld(undefined),
+          () => setHeld(undefined),
+        )
+        preview('needs-you', volume)
+      }}
       onPreview={(id) => {
-        if (!isSound(id)) return
-        setPreviewing(id)
-        const asked = link.previewSound(settings.style, id)
-        writing(asked, id, 'This sound could not be played', setErrors)
-        const done = (): void => setPreviewing(undefined)
-        asked.then(done, done)
+        if (isSound(id)) preview(id, held ?? settings.volume)
       }}
     />
   )

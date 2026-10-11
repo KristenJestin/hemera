@@ -25,6 +25,7 @@ import {
   type Sound,
   type SoundPreview,
   type SoundStyle,
+  type SoundVolume,
   type StorageFailed,
   type WindowNotice,
 } from '@hemera/ipc'
@@ -52,7 +53,11 @@ export interface Application {
   /** What main tells the window of notifications, from the moment it listens. */
   readonly notices: Stream.Stream<WindowNotice>
   /** Plays one sound of one style once, as a notification would. */
-  readonly preview: (style: SoundStyle, sound: Sound) => Effect.Effect<SoundPreview>
+  readonly preview: (
+    style: SoundStyle,
+    sound: Sound,
+    volume: SoundVolume,
+  ) => Effect.Effect<SoundPreview>
   /** Hemera Auto's key, which main alone seals: where it stands, saved, removed. */
   readonly hemeraAuto: {
     readonly status: Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
@@ -778,8 +783,13 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('notifications.setStyle', log),
       ),
-    'notifications.preview': ({ style, sound }) =>
-      application.preview(style, sound).pipe(observed('notifications.preview', log)),
+    'notifications.setVolume': (request) =>
+      engine['notifications.setVolume'](request).pipe(
+        closedAs(gone),
+        observed('notifications.setVolume', log),
+      ),
+    'notifications.preview': ({ style, sound, volume }) =>
+      application.preview(style, sound, volume).pipe(observed('notifications.preview', log)),
     'notifications.window': () =>
       application.notices.pipe(observedStream('notifications.window', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),

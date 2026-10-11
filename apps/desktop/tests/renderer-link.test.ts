@@ -339,6 +339,7 @@ const noProjects = {
   'notifications.setKind': unused,
   'notifications.setSound': unused,
   'notifications.setStyle': unused,
+  'notifications.setVolume': unused,
 }
 
 /** Notes what the window asked of main: one line per call, the call then its payload as JSON. */
