@@ -21,10 +21,11 @@ import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import { AcpTraces } from '../src/engine/agents/trace.ts'
 import { setProjectLimits } from '../src/engine/budget.ts'
 import { answerNeed, listNeeds, retryNeed } from '../src/engine/needs.ts'
+import { writePreferences } from '../src/engine/preferences.ts'
 import { addRepository, createProject, getProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { sessionsIn } from '../src/engine/sessions/store.ts'
+import { instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard } from '../src/engine/setup/cards.ts'
 import { Setup } from '../src/engine/setup/service.ts'
@@ -35,7 +36,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
 import { listVariables } from '../src/engine/variables.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { held, sessionsEngine, until, within } from './sessions-world.ts'
+import { held, sessionsEngine, text as textOf, until, within } from './sessions-world.ts'
 
 let data: string
 let work: string
@@ -984,5 +985,27 @@ describe('A repository card the user partly did meanwhile', () => {
     )
     expect(seen.after).toMatchObject({ state: 'accepted', refusal: null })
     expect(seen.web).toMatchObject({ remote: 'origin', baseBranch: 'main' })
+  })
+})
+
+describe('The setup agent speaks the user’s language', () => {
+  test('its instructions and its brief both name it, and ask for every message, not the summary alone', async () => {
+    const { world, run } = sessionsEngine(data, () => proposing())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* writePreferences({ userLanguage: 'fr' })
+          const { project } = yield* acme
+          const session = yield* setUp(project.id)
+          return yield* instructionsKept(session.id)
+        }),
+      ),
+    )
+    expect(seen).not.toContain('{user.language}')
+    expect(seen).toContain('in French')
+    expect(seen).toMatch(/Every message you write is in French/)
+    const brief = textOf(world.agents[0]?.answers.prompts[0] ?? [])
+    expect(brief).toContain('Your language with the user: French')
   })
 })

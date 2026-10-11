@@ -7,7 +7,9 @@
 
 import { Effect } from 'effect'
 
+import { readPreferences } from '../preferences.ts'
 import { getProject } from '../projects.ts'
+import { languageName } from '../sessions/instructions.ts'
 import type { RoleEntry, SessionOwner } from '../sessions/roles.ts'
 
 /** The `setup` role's layer of the instructions, as the ticket writes it. */
@@ -40,8 +42,10 @@ The Project's name and folder. Read the current setup with \`setup_read\` first.
 5. A variable's value: propose it only when the repository gives a safe default (an example file
    that is meant to be copied). Never copy a value from a secret file. Its value is hidden from
    the user's view and from every record.
-6. End your turn with a short summary, in {user.language}: what you proposed, and what you could
-   not decide and why.
+6. Every message you write is in {user.language}, whatever language the repository's files are
+   in: the remarks you make while you read as well as the closing summary. Make the summary short,
+   in plain Markdown (a short paragraph, or a few list items): what you proposed, and what you
+   could not decide and why.
 
 ## Never
 - Propose a change you have not read evidence for.
@@ -58,8 +62,13 @@ const setupBrief = (owner: SessionOwner) =>
       Effect.catchTag('UnknownProject', () => Effect.succeed(null)),
     )
     if (project === null) return []
+    const preferences = yield* readPreferences
     return [
       { label: 'The Project', text: `${project.name}, in the folder ${project.mainCheckout}` },
+      {
+        label: 'Languages',
+        text: `Your language with the user: ${languageName(preferences.userLanguage)}`,
+      },
     ]
   })
 
