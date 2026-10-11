@@ -106,10 +106,19 @@ describe('The window’s link to main and the engine', () => {
   })
 
   it('streams agent-like items with an acknowledgement each, and says how fast', async () => {
-    const measure = await browser.electron.execute(async () =>
-      globalThis.hemeraProbe?.load(20_000, 200),
+    // Started without waiting on it: one request held for the whole stream outlasts the driver's
+    // limit on a busy machine. Its measure is read once it has ended.
+    await browser.electron.execute(() => {
+      globalThis.hemeraLoaded = undefined
+      void globalThis.hemeraProbe?.load(20_000, 200).then((measure) => {
+        globalThis.hemeraLoaded = measure
+      })
+    })
+    const measure = await browser.waitUntil(
+      async () => browser.electron.execute(() => globalThis.hemeraLoaded),
+      { timeout: 50_000, interval: 500, timeoutMsg: 'the load never ended' },
     )
-    expect(measure?.items).toBe(20_000)
+    expect(measure.items).toBe(20_000)
     console.log(`load: ${JSON.stringify(measure)}`)
   })
 

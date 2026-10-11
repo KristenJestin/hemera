@@ -15,7 +15,18 @@ import { join } from 'node:path'
 import { SPEC_SECTIONS, toolsOf } from '@hemera/core/domain'
 import { and, asc, eq } from 'drizzle-orm'
 import { MissionTarget } from '@hemera/ipc'
-import { Deferred, Effect, Exit, Fiber, Option, Predicate, type Schema, Stream } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Predicate,
+  type Schema,
+  Stream,
+} from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -39,12 +50,7 @@ import { PlannerWake } from '../src/engine/planning/wake.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import {
-  type RoleSession,
-  getSession,
-  instructionsKept,
-  sessionsIn,
-} from '../src/engine/sessions/store.ts'
+import { type RoleSession, instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
@@ -137,37 +143,14 @@ const plannerStarted = (missionId: string) =>
     return planner
   })
 
-/**
- * Waits until a session has nothing left to do. A session opens with a first message (a Planner's
- * brief, a Builder's), and one whose first turn has not begun yet counts as settled: wait for that
- * message in its thread, unless the session ended before it.
- */
-const settled = (session: RoleSession) =>
-  Effect.gen(function* () {
-    yield* until(
-      Effect.gen(function* () {
-        const lines = yield* threadOf(session.id)
-        if (lines.some((line) => line.kind === 'sent')) return true
-        const now = yield* getSession(session.id)
-        return !LIVE.some((state) => state === now.state)
-      }),
-    )
-    yield* Sessions.use((sessions) => sessions.settled(session.id))
-  })
+/** Waits until a session has nothing left to do, its first message (the brief) included. */
+const settled = (session: RoleSession) => Sessions.use((sessions) => sessions.settled(session.id))
 
-/**
- * A mission of Acme, its Planner started on its own and its first turn over: the session is idle
- * once a turn ended (`settled` alone may answer before the brief's turn is handed over).
- */
+/** A mission of Acme, its Planner started on its own and its first turn over. */
 const missionPlanned = (projectId: string, sentence = 'Export the invoices as CSV') =>
   Effect.gen(function* () {
     const mission = yield* createMission({ projectId, idea: { sentence, ticket: null } })
     const planner = yield* plannerStarted(mission.id)
-    yield* until(
-      Effect.map(plannersOf(mission.id, ['idle']), (rows) =>
-        rows.some((row) => row.id === planner.id),
-      ),
-    )
     yield* settled(planner)
     return { mission, planner }
   })
@@ -1159,12 +1142,47 @@ describe('A cancel racing the Planner’s first start leaves nothing running', (
 })
 
 describe('Nothing wakes the Planner but a delivery', () => {
-  test('no file of Planning holds a timer', () => {
-    const folder = join(import.meta.dirname, '..', 'src', 'engine', 'planning')
-    for (const file of readdirSync(folder)) {
-      const source = readFileSync(join(folder, file), 'utf8')
-      expect(source, file).not.toMatch(/Schedule\.|Effect\.sleep|setTimeout|setInterval/)
-    }
+  test('hours pass with nothing delivered: no Planner is started or woken', async () => {
+    // The engine's own sweeps run at a pace of minutes, so a day passes in a few seconds.
+    const { world, run } = planning(() => QUIET, {
+      testClock: true,
+      timings: { sweepEvery: Duration.minutes(10), notePickup: Duration.minutes(10) },
+    })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // Waited on the real clock: the engine's own waits are on the test clock.
+          const planner = yield* TestClock.withLive(
+            Effect.gen(function* () {
+              const { project } = yield* acme
+              const mission = yield* createMission({
+                projectId: project.id,
+                idea: { sentence: 'Export the invoices as CSV', ticket: null },
+              })
+              const started = yield* plannerStarted(mission.id)
+              yield* until(
+                Effect.map(plannersOf(mission.id, ['idle']), (rows) =>
+                  rows.some((row) => row.id === started.id),
+                ),
+              )
+              return started
+            }),
+          )
+          const before = yield* threadOf(planner.id)
+          for (let hour = 0; hour < 24; hour += 1) {
+            yield* TestClock.adjust(Duration.hours(1))
+            yield* TestClock.withLive(Effect.sleep('5 millis'))
+          }
+          return { before, after: yield* threadOf(planner.id) }
+        }),
+      ),
+    )
+    expect(seen.after.filter((line) => line.kind === 'sent')).toEqual(
+      seen.before.filter((line) => line.kind === 'sent'),
+    )
+    expect(world.agents).toHaveLength(1)
+    expect(world.agents[0]?.answers.prompts).toHaveLength(1)
   })
 
   test('a Planner that ended is not started again, by a restart or a second mission.started', async () => {

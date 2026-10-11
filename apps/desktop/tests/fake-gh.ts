@@ -51,7 +51,7 @@ export const RECORDED_ENV = [
 ] as const
 
 const FAKE = `
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 const args = process.argv.slice(2)
 const rules = JSON.parse(readFileSync(process.env.FAKE_GH_RULES, 'utf8'))
 const env = {}
@@ -67,9 +67,12 @@ process.stdin.on('end', () => {
     (one.times === undefined || (used[at] ?? 0) < one.times) &&
     one.when.every((word) => args.some((arg) => arg.includes(word))))
   const rule = index < 0 ? undefined : rules[index]
-  if (rule !== undefined) {
+  // Only a counted rule writes its count, replaced whole: a call at once never reads it half written.
+  if (rule?.times !== undefined) {
     used[index] = (used[index] ?? 0) + 1
-    writeFileSync(process.env.FAKE_GH_USED, JSON.stringify(used))
+    const next = process.env.FAKE_GH_USED + '.' + process.pid
+    writeFileSync(next, JSON.stringify(used))
+    renameSync(next, process.env.FAKE_GH_USED)
   }
   if (rule === undefined) {
     process.stderr.write('fake gh: no rule for ' + args.join(' ') + '\\n')

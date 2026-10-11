@@ -15,8 +15,10 @@
  *   run whose first session is still being opened reads as running.
  * - **The end.** `living_spec_done` ends the run; once its turn has settled its session ends and
  *   frees its slot. A session that ends its turn without it is reminded once; ending a turn
- *   without it again ends its run, failed, its proposals kept. Removing a Project would stop its
- *   run: Hemera 1.0 has no removal of a Project yet.
+ *   without it again ends its run, failed, its proposals kept.
+ * - **A stop.** `stop` ends a Project's running run as `stopped`, its needs expired and its session
+ *   ended. Removing a Project calls it; Hemera 1.0 has no removal of a Project yet, so nothing
+ *   else does.
  *
  * Hemera does not detect behaviour changed outside Hemera in 1.0.
  */
@@ -54,7 +56,7 @@ import {
   sessionNeeds,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type RunRow, domainsIn, failRun, runOfLineage } from './store.ts'
+import { type RunRow, domainsIn, failRun, runOfLineage, stopRun } from './store.ts'
 
 export class LivingSpec extends Context.Service<
   LivingSpec,
@@ -67,6 +69,11 @@ export class LivingSpec extends Context.Service<
       projectId: string,
       domainId: string | null,
     ) => Effect.Effect<BootstrapRun, LivingSpecRefused | UnknownProject | DatabaseError>
+    /**
+     * Stops the Project's running run, if any, for a reason of the Project's (its removal): false
+     * when nothing ran.
+     */
+    readonly stop: (projectId: string, reason: string) => Effect.Effect<boolean, DatabaseError>
     /** The Project's runs, the newest first, each as it stands now. */
     readonly runs: (
       projectId: string,
@@ -307,6 +314,25 @@ export const livingSpecLayer = (settings: LivingSpecSettings) =>
           }),
         ).pipe(run)
 
+      const stop = (projectId: string, reason: string) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            const database = yield* Database
+            const [open] = yield* database
+              .select()
+              .from(livingRuns)
+              .where(and(eq(livingRuns.projectId, projectId), eq(livingRuns.state, 'running')))
+              .pipe(Effect.mapError(refusedWhile('reading the bootstrap runs')))
+            if (open === undefined) return false
+            if (!(yield* stopRun(open.id, reason))) return false
+            yield* sessions.end(open.lineage, reason)
+            return true
+          }),
+        ).pipe(run)
+
       /**
        * Once a session's turn has settled and nothing of it waits on the user: done, its session
        * ends; not done, it is reminded once, and the next time its run ends failed, its
@@ -449,6 +475,6 @@ export const livingSpecLayer = (settings: LivingSpecSettings) =>
           }),
         ).pipe(Stream.provideContext(context))
 
-      return { bootstrap, runs, changes }
+      return { bootstrap, stop, runs, changes }
     }),
   )

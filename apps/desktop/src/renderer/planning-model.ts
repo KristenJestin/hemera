@@ -328,8 +328,8 @@ export function planningDataOf(read: PlanningRead, now: Date): PlanningData {
 
 /**
  * The Now line of the head in Planning: what the Planner says it does, else the slot it waits for,
- * else a Planner that gave no sign or stopped. Nothing when none of them is known: the head then
- * says whose turn it is.
+ * else a Planner in a turn it has said nothing of (a silent turn), that gave no sign or stopped.
+ * Nothing when none of them is known: the head then says whose turn it is.
  */
 export function nowLineOf(
   now: Now | null,
@@ -339,6 +339,7 @@ export function nowLineOf(
   if (doing !== undefined && doing !== '') return doing
   if (now?.slotWait !== null && now?.slotWait !== undefined) return now.slotWait
   const planner = sessions.filter((session) => session.role === 'planner').at(-1)
+  if (planner?.state === 'working') return 'The Planner is working and has not said on what yet'
   if (planner?.state === 'stuck') return 'The Planner has given no sign for a while'
   if (planner?.state === 'failed') {
     return planner.stateReason === null

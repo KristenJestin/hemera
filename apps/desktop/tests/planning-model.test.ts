@@ -413,8 +413,15 @@ describe('The Now line of the head', () => {
     expect(nowLineOf(now(), [session({ state: 'failed', stateReason: 'Out of credit' })])).toBe(
       'The Planner stopped: Out of credit',
     )
-    expect(nowLineOf(now(), [session()])).toBeUndefined()
+    expect(nowLineOf(now(), [session({ state: 'idle' })])).toBeUndefined()
     expect(nowLineOf(null, [])).toBeUndefined()
+  })
+
+  test('says a silent turn: the Planner works and has not said on what', () => {
+    expect(nowLineOf(now(), [session({ state: 'working' })])).toBe(
+      'The Planner is working and has not said on what yet',
+    )
+    expect(nowLineOf(null, [session({ state: 'starting' })])).toBeUndefined()
   })
 })
 
