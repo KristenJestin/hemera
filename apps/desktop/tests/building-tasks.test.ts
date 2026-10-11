@@ -12,7 +12,7 @@
 import { realpathSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { ChosenAnswer } from '@hemera/core/domain'
+import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -484,6 +484,42 @@ describe('An amendment changes the plan only through the user’s answer (CT-33)
     expect(statesOf(seen.view)['T2']).toBe('in_progress')
     expect(seen.mission.needs).toEqual([])
   })
+
+  test.each([
+    ['another option', ChosenAnswer.make({ option: 'Keep it whole' }), 'Keep it whole'],
+    [
+      'a free answer',
+      WrittenAnswer.make({ text: 'Stream it in one task.' }),
+      'Stream it in one task.',
+    ],
+  ])(
+    '%s keeps the decision and the plan: nothing applied, T2 available again',
+    async (_, answer, said) => {
+      const { run } = builderEngine(data, work)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work)
+            const { grantId } = yield* builderOf(mission.id)
+            yield* call(grantId, 'task_start', { task: 'T2' })
+            yield* call(grantId, 'task_blocked', REPLACE_T2)
+            const [need] = (yield* getMission(mission.id)).needs
+            yield* answerNeed({ id: need?.id ?? '', answer, key: 'answer-1' })
+            yield* taskIn(mission.id, 'T2', 'available')
+            return yield* buildingNow(mission.id)
+          }),
+        ),
+      )
+      expect(seen.tasks.map((task) => task.id)).toEqual(['T1', 'T2', 'T3', 'T4'])
+      const [decision] = seen.decisions
+      expect([decision?.state, decision?.answer, decision?.applied]).toEqual([
+        'answered',
+        said,
+        false,
+      ])
+    },
+  )
 
   test('replacing T2 with T2a and T2b applies on the answer: T2 skipped, T3 waits for both', async () => {
     const { run } = builderEngine(data, work)
