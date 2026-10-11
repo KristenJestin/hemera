@@ -502,9 +502,30 @@ const SUMMARY = `I read both repositories and proposed the setup:
 I could not decide the **dev server**: \`api\` and \`web\` both define \`dev\`.`
 
 /**
- * What the agent said, read: its last message is the summary, written as Markdown and drawn as
+ * What the agent said, folded: the summary takes one line, its first, without Markdown marks, and
+ * the control unfolds it in place. The messages it wrote while it read stay out of sight.
+ */
+export const TaskSummaryFolded: Story = {
+  render: () => (
+    <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+  ),
+  play: async () => {
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    const said = await within(details).findByRole('region', { name: 'What the agent said' })
+    await waitFor(() => expect(said).toBeVisible())
+    const unfold = within(said).getByRole('button', { name: 'Unfold the summary' })
+    expect(unfold).toHaveAttribute('aria-expanded', 'false')
+    expect(within(said).getByText('I read both repositories and proposed the setup:')).toBeVisible()
+    expect(said.textContent).not.toContain('**')
+    expect(within(said).queryByRole('listitem')).toBeNull()
+    expect(within(said).queryByRole('button', { name: /Earlier messages/ })).toBeNull()
+  },
+}
+
+/**
+ * What the agent said, unfolded by its control: the summary is written as Markdown and drawn as
  * such — bold, code and lists — in a quiet block of its own. The messages it wrote while it read
- * are folded under it, "Earlier messages", and read the same way.
+ * are folded inside it, "Earlier messages", and read the same way. The control folds it again.
  */
 export const TaskSummary: Story = {
   render: () => (
@@ -514,14 +535,23 @@ export const TaskSummary: Story = {
     const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
     const said = await within(details).findByRole('region', { name: 'What the agent said' })
     await waitFor(() => expect(said).toBeVisible())
+    await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
+    expect(await within(said).findAllByRole('listitem')).toHaveLength(2)
     expect(said.textContent).not.toContain('**')
     expect(said.textContent).not.toContain('`')
     expect(within(said).getByText('Commands', { selector: 'strong' })).toBeVisible()
-    expect(within(said).getAllByRole('listitem')).toHaveLength(2)
     expect(within(said).getByText('pnpm install', { selector: 'code' })).toBeVisible()
     expect(within(said).queryByText(/Reading/)).toBeNull()
     await userEvent.click(within(said).getByRole('button', { name: /Earlier messages/ }))
     expect(await within(said).findByText('package.json', { selector: 'code' })).toBeVisible()
+    await userEvent.click(within(said).getByRole('button', { name: 'Fold the summary' }))
+    await waitFor(() => expect(within(said).queryAllByRole('listitem')).toHaveLength(0))
+    expect(within(said).getByRole('button', { name: 'Unfold the summary' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
+    expect(await within(said).findByText('Commands', { selector: 'strong' })).toBeVisible()
   },
 }
 
