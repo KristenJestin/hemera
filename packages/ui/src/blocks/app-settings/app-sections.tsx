@@ -25,6 +25,7 @@ import {
   IconPlayerPlay,
   IconShieldLock,
 } from '../../icons.ts'
+import { languagesOffered } from '../project-settings/spec-fields.tsx'
 
 /**
  * The sections of the application's settings: Appearance, Agents, Models by role, Hemera Auto,
@@ -642,14 +643,21 @@ export interface ProfileProps {
   backingUp?: boolean | undefined
   agentLanguage: string
   languages: readonly string[]
+  /** The tag of the Spec language new Projects start in. */
+  specLanguage: string
   /** Opens the data folder; left out, Show is not drawn. */
   onShowFolder?: (() => void) | undefined
   onBackUp: () => void
   onRestore: () => void
   onAgentLanguage: (language: string) => void
-  /** What the engine refused, on the backups' row and on the language's. */
+  onSpecLanguage: (tag: string) => void
+  /** What the engine refused, on the backups' row and on the two languages'. */
   errors?:
-    | { readonly backups?: string | undefined; readonly language?: string | undefined }
+    | {
+        readonly backups?: string | undefined
+        readonly language?: string | undefined
+        readonly specLanguage?: string | undefined
+      }
     | undefined
 }
 
@@ -687,6 +695,14 @@ export function ProfileSection(props: ProfileProps): ReactNode {
           value={props.agentLanguage}
           onValueChange={props.onAgentLanguage}
           items={props.languages.map((language) => ({ value: language, label: language }))}
+        />
+      </Row>
+      <Row name="Default Spec language" error={props.errors?.specLanguage}>
+        <Select<string>
+          label="Default Spec language"
+          value={props.specLanguage}
+          onValueChange={props.onSpecLanguage}
+          items={languagesOffered(props.specLanguage)}
         />
       </Row>
     </Section>

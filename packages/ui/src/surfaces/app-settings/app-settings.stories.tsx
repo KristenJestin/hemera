@@ -358,12 +358,45 @@ export const Profile: Story = {
         backups="12, the last at 08:12"
         agentLanguage="English"
         languages={LANGUAGES}
+        specLanguage="en"
+        onSpecLanguage={fn()}
         onShowFolder={fn()}
         onBackUp={fn()}
         onRestore={fn()}
         onAgentLanguage={fn()}
       />
     ),
+  },
+}
+
+const onSpecLanguage = fn()
+
+/** The language new Projects start in: French chosen, German picked; each Project's own select still overrides it. */
+export const ProfileDefaultSpecLanguage: Story = {
+  args: {
+    current: 'profile',
+    children: (
+      <ProfileSection
+        dataFolder="~/.local/share/hemera"
+        backups="12, the last at 08:12"
+        agentLanguage="English"
+        languages={LANGUAGES}
+        specLanguage="fr"
+        onBackUp={fn()}
+        onRestore={fn()}
+        onAgentLanguage={fn()}
+        onSpecLanguage={onSpecLanguage}
+      />
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const select = canvas.getByRole('combobox', { name: 'Default Spec language' })
+    await expect(select).toHaveTextContent('French')
+    await userEvent.click(select)
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'German' }))
+    await expect(onSpecLanguage).toHaveBeenCalledWith('de')
+    await waitFor(() => expect(within(document.body).queryByRole('listbox')).toBeNull())
   },
 }
 
@@ -434,6 +467,8 @@ export const ProfileAndKeyServedOnly: Story = {
           backups="12, the last at 08:12"
           agentLanguage="English"
           languages={LANGUAGES}
+          specLanguage="en"
+          onSpecLanguage={fn()}
           onBackUp={fn()}
           onRestore={fn()}
           onAgentLanguage={fn()}
@@ -576,9 +611,12 @@ export const ProfileRefused: Story = {
         backups="12, the last at 08:12"
         agentLanguage="English"
         languages={LANGUAGES}
+        specLanguage="en"
+        onSpecLanguage={fn()}
         errors={{
           backups: 'No backup was made: the folder chosen cannot be written to.',
           language: 'The language could not be kept: Hemera could not write to its profile.',
+          specLanguage: 'The default could not be kept: Hemera could not write to its profile.',
         }}
         onBackUp={fn()}
         onRestore={fn()}
@@ -590,6 +628,7 @@ export const ProfileRefused: Story = {
     await expect(alerts(canvasElement)).toEqual([
       'No backup was made: the folder chosen cannot be written to.',
       'The language could not be kept: Hemera could not write to its profile.',
+      'The default could not be kept: Hemera could not write to its profile.',
     ])
   },
 }
