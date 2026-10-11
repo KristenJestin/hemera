@@ -618,16 +618,23 @@ export const declineCard = (id: string) =>
     }),
   )
 
+/** A command the agent listed apart: not selected, so Accept all leaves it for its own click. */
+const isListed = (change: SetupChange): boolean =>
+  change.kind === 'command' && change.listed === true
+
 /**
  * Accepts every pending card of a Project in the order proposed, stopping at the first refusal:
- * what came before is accepted, the refused card and what follows stay pending.
+ * what came before is accepted, the refused card and what follows stay pending. A command listed
+ * apart (`listed`) is not part of it.
  */
 export const acceptAll = (projectId: string) =>
   Effect.gen(function* () {
     const deciding = yield* SetupValues.use((values) => Effect.succeed(values.deciding(projectId)))
     return yield* deciding(
       Effect.gen(function* () {
-        const pending = (yield* cardsOf(projectId)).filter((card) => card.state === 'pending')
+        const pending = (yield* cardsOf(projectId)).filter(
+          (card) => card.state === 'pending' && !isListed(card.change),
+        )
         for (const card of pending) {
           // Listed a moment ago, under the same hold: a card that is not there now is a defect.
           const after = yield* accepted(card).pipe(Effect.catchTag('UnknownSetupCard', Effect.die))

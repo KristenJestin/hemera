@@ -282,6 +282,29 @@ export const LongText: Story = {
   },
 }
 
+/**
+ * A repository with many scripts, Hemera's own: the commands that matter are proposed, the other
+ * scripts folded under them, unselected. Accept all takes the proposal and leaves them; one is
+ * added with its own click, folded or not.
+ */
+export const ManyScripts: Story = {
+  args: { folder: '~/work/hemera', scripts: true },
+  play: async ({ canvasElement }) => {
+    const commands = within(card(canvasElement, 'Commands'))
+    expect(
+      within(commands.getByRole('list', { name: 'Proposed commands' })).getAllByRole('listitem'),
+    ).toHaveLength(8)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Accept all' }))
+    expect(await commands.findByRole('img', { name: 'Accepted' })).toBeVisible()
+    await userEvent.click(commands.getByRole('button', { name: /Other scripts/ }))
+    const others = await commands.findByRole('list', { name: 'Other scripts' })
+    expect(within(others).getAllByRole('button', { name: /^Add / })).toHaveLength(11)
+    await userEvent.click(within(others).getByRole('button', { name: 'Add package' }))
+    expect(await within(others).findByRole('img', { name: 'package added' })).toBeVisible()
+    expect(within(others).getAllByRole('button', { name: /^Add / })).toHaveLength(10)
+  },
+}
+
 /** Hemera itself, set up from its own folder. */
 export const Hemera: Story = {
   args: { folder: '~/work/hemera' },

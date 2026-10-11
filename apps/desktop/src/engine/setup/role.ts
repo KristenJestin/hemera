@@ -37,6 +37,12 @@ The Project's name and folder. Read the current setup with \`setup_read\` first.
    opens, or ask before running (anything that migrates, seeds, resets or touches a shared
    resource). Give a command that rewrites files its write globs (a formatter, a generated
    client, the lockfile).
+   Propose as commands only the ones the Project's everyday work needs: install the dependencies,
+   the checks (test, typecheck, lint, format check, and a full check when there is one), build,
+   and the dev server. Every other script you find (release, packaging, documentation, generators,
+   one-off tools) goes in the same call with \`listed: true\`: the user sees it under "Other
+   scripts", unselected, and adds it in one click. Never drop a script because it is not on that
+   list; list it.
 4. A call refused for one change is refused whole, with the reason: correct that change and
    propose the batch again.
 5. A variable's value: propose it only when the repository gives a safe default (an example file

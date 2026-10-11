@@ -55,6 +55,9 @@ export const CommandProposal = Schema.Struct({
     'Whether nobody runs it without the user’s permission: anything that migrates, seeds, resets or touches a shared resource.',
   ),
   readOnly: Flag('Whether it writes nothing in the repository.'),
+  listed: Flag(
+    'Whether it is one of the other scripts: found in the repository, but none of the Project’s everyday commands. It is listed under "Other scripts", unselected, and Accept all leaves it alone.',
+  ),
   writeGlobs: Schema.optionalKey(
     Schema.Array(Text('A glob of files it may write, relative to its folder.')).annotate({
       description: 'The files it rewrites: a formatter’s, a generated client, the lockfile.',

@@ -594,6 +594,10 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
                     "minLength": 1,
                     "type": "string",
                   },
+                  "listed": {
+                    "description": "Whether it is one of the other scripts: found in the repository, but none of the Project’s everyday commands. It is listed under "Other scripts", unselected, and Accept all leaves it alone. False without it.",
+                    "type": "boolean",
+                  },
                   "name": {
                     "description": "Its name in the catalogue: a rewrite when the catalogue already holds it.",
                     "minLength": 1,

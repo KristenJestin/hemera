@@ -28,6 +28,7 @@ import { Sessions } from '../src/engine/sessions/service.ts'
 import { instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard } from '../src/engine/setup/cards.ts'
+import { SETUP_TEMPLATE } from '../src/engine/setup/role.ts'
 import { Setup } from '../src/engine/setup/service.ts'
 import { TRACES_FOLDER } from '../src/main/diagnostic.ts'
 import { listCommands } from '../src/engine/catalogue.ts'
@@ -1007,5 +1008,68 @@ describe('The setup agent speaks the user’s language', () => {
     expect(seen).toMatch(/Every message you write is in French/)
     const brief = textOf(world.agents[0]?.answers.prompts[0] ?? [])
     expect(brief).toContain('Your language with the user: French')
+  })
+})
+
+describe('The commands that matter, and the other scripts', () => {
+  test('a command listed apart is a card Accept all leaves alone, added by its own click', async () => {
+    const command = (name: string, type: string, line: string, more: Schema.JsonObject = {}) => ({
+      kind: 'command',
+      name,
+      type,
+      line,
+      ...more,
+    })
+    const { run } = sessionsEngine(data, () =>
+      proposing([
+        command('test', 'test', 'pnpm test', { check: true }),
+        command('build', 'build', 'pnpm build'),
+        command('release', 'script', 'pnpm release', { listed: true }),
+        command('docs', 'script', 'pnpm docs', { listed: true }),
+      ]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const proposed = yield* cardsOf(project.id)
+          const all = yield* acceptAll(project.id)
+          const after = (yield* listCommands(project.id)).map((one) => one.name)
+          const release = all.find((card) => card.title === 'Add the command release')
+          if (release === undefined) return yield* Effect.die(new Error('no release card'))
+          const added = yield* acceptCard(release.id)
+          return {
+            proposed,
+            all,
+            after,
+            added,
+            catalogue: (yield* listCommands(project.id)).map((one) => one.name),
+          }
+        }),
+      ),
+    )
+    expect(seen.proposed.map((card) => card.change)).toMatchObject([
+      { name: 'test' },
+      { name: 'build' },
+      { name: 'release', listed: true },
+      { name: 'docs', listed: true },
+    ])
+    // The pending cards come first, then the decided ones.
+    expect(seen.all.map((card) => [card.title, card.state])).toEqual([
+      ['Add the command release', 'pending'],
+      ['Add the command docs', 'pending'],
+      ['Add the command test', 'accepted'],
+      ['Add the command build', 'accepted'],
+    ])
+    expect(seen.after.toSorted()).toEqual(['build', 'test'])
+    expect(seen.added.state).toBe('accepted')
+    expect(seen.catalogue.toSorted()).toEqual(['build', 'release', 'test'])
+  })
+
+  test('the role asks for the commands that matter and lists every other script apart', () => {
+    expect(SETUP_TEMPLATE).toMatch(/install[^.]*(test|check)[^.]*build[^.]*dev server/)
+    expect(SETUP_TEMPLATE).toContain('listed: true')
   })
 })

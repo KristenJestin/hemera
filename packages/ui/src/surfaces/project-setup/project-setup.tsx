@@ -47,6 +47,8 @@ export interface ProjectSetupProps {
   /** Left out where the agent takes no discussion. */
   onDiscuss?: ((kind: SetupKind) => void) | undefined
   onDecline: (kind: SetupKind) => void
+  /** Adds one of the commands' other scripts, by its id; left out where the agent lists none. */
+  onAddOther?: ((id: string) => void) | undefined
   onSave: (kind: SetupKind) => void
   onCancel: (kind: SetupKind) => void
   onSend: (kind: SetupKind, note: string) => void
@@ -116,6 +118,7 @@ export type SetupBodyProps = Pick<
   | 'onDraft'
   | 'onDiscuss'
   | 'onDecline'
+  | 'onAddOther'
   | 'onSave'
   | 'onCancel'
   | 'onSend'
@@ -138,6 +141,7 @@ export function SetupBody({
   onDraft,
   onDiscuss,
   onDecline,
+  onAddOther,
   onSave,
   onCancel,
   onSend,
@@ -173,6 +177,7 @@ export function SetupBody({
             onEdit={onEdit === undefined ? undefined : () => onEdit(card.kind)}
             onDiscuss={onDiscuss === undefined ? undefined : () => onDiscuss(card.kind)}
             onDecline={() => onDecline(card.kind)}
+            onAddOther={onAddOther}
             onSave={() => onSave(card.kind)}
             onCancel={() => onCancel(card.kind)}
             onSend={(note) => onSend(card.kind, note)}

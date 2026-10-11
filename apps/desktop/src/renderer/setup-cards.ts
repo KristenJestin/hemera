@@ -35,19 +35,26 @@ const KINDS: ReadonlyArray<readonly [SetupCard['change']['kind'], SetupKind]> = 
 const kindOf = (card: SetupCard): SetupKind | undefined =>
   KINDS.find(([change]) => change === card.change.kind)?.[1]
 
-/** A kind's changes still waiting for the user, in the order proposed. */
+/** A command listed apart by the agent: one of the card's other scripts, not waited on. */
+const isListed = (card: SetupCard): boolean =>
+  card.change.kind === 'command' && card.change.listed === true
+
+/** A kind's changes still waiting for the user, in the order proposed; the listed scripts apart. */
 export const pendingOf = (cards: ReadonlyArray<SetupCard>, kind: SetupKind): SetupCard[] =>
   cards
-    .filter((card) => kindOf(card) === kind && card.state === 'pending')
+    .filter((card) => kindOf(card) === kind && card.state === 'pending' && !isListed(card))
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
 
 const statusOf = (cards: ReadonlyArray<SetupCard>): CardStatus => {
-  const waiting = cards.filter((card) => card.state === 'pending')
+  // The scripts listed apart are no proposal to answer: only their own click adds one.
+  const chosen = cards.filter((card) => !isListed(card))
+  if (chosen.length === 0) return { state: 'accepted' }
+  const waiting = chosen.filter((card) => card.state === 'pending')
   if (waiting.length > 0) {
     const refused = waiting.findLast((card) => card.refusal !== null)?.refusal ?? undefined
     return { state: 'proposed', refused }
   }
-  return cards.some((card) => card.state === 'accepted')
+  return chosen.some((card) => card.state === 'accepted')
     ? { state: 'accepted' }
     : { state: 'declined' }
 }
@@ -74,7 +81,7 @@ const proposalOf = (kind: SetupKind, cards: ReadonlyArray<SetupCard>): Proposal 
     case 'commands':
       return {
         kind,
-        items: cards.flatMap(({ id, change }) =>
+        items: cards.flatMap(({ id, change, state }) =>
           change.kind === 'command'
             ? [
                 {
@@ -86,6 +93,8 @@ const proposalOf = (kind: SetupKind, cards: ReadonlyArray<SetupCard>): Proposal 
                   service: change.type === 'serve',
                   atOpen: change.atOpen ?? false,
                   ask: change.askBeforeRunning ?? false,
+                  other: change.listed === true,
+                  added: change.listed === true && state === 'accepted',
                 },
               ]
             : [],
@@ -141,7 +150,10 @@ export const sinceLatestSetup = (
 ): ReadonlyArray<SetupCard> => {
   if (latest === null) return cards
   const start = Date.parse(latest.createdAt)
-  return cards.filter((card) => card.state === 'pending' || Date.parse(card.createdAt) >= start)
+  // What waits from before is carried over; the scripts a setup listed apart are its own.
+  return cards.filter(
+    (card) => Date.parse(card.createdAt) >= start || (card.state === 'pending' && !isListed(card)),
+  )
 }
 
 /** One card per kind the agent proposed something for, in the settings' order. */
@@ -222,7 +234,7 @@ const STEPS: Record<SetupAgent, string> = {
  */
 export function setupIsTask(standing: SetupStanding, cards: ReadonlyArray<SetupCard>): boolean {
   if (standing.state === 'waiting' || standing.state === 'working') return true
-  return cards.some((card) => card.state === 'pending')
+  return cards.some((card) => card.state === 'pending' && !isListed(card))
 }
 
 /** What the Tasks row of a Project's page reads of its setup. */
