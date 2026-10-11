@@ -314,8 +314,8 @@ const PROBE_ROWS: readonly NeedRow[] = [
 ]
 
 /**
- * The requests of one agent on one row, with their count and "Allow these"; an agent with one
- * request keeps its own row.
+ * The requests of one agent on one row, with their count and "Allow these" in its menu; an agent
+ * with one request keeps its own row.
  */
 export const GroupedByAgent: StoryObj<typeof NeedsYouList> = {
   args: {
@@ -327,7 +327,13 @@ export const GroupedByAgent: StoryObj<typeof NeedsYouList> = {
     await expect(canvas.getByText('3 requests from the Probe')).toBeVisible()
     await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(3)
     answered.mockClear()
-    await userEvent.click(canvas.getByRole('button', { name: 'Allow these' }))
+    // "Allow these" is not the row's action: it waits in the row's menu.
+    await expect(canvas.queryByRole('button', { name: 'Allow these' })).toBeNull()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'More actions for 3 requests from the Probe' }),
+    )
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Allow these' }))
     await expect(answered).toHaveBeenCalledTimes(3)
     await expect(answered).toHaveBeenCalledWith('probe-1-0', 'allow-once')
     await expect(answered).toHaveBeenCalledWith('probe-1-2', 'allow-once')
@@ -399,6 +405,23 @@ const edgesOf = (root: Element) =>
     }),
   )
 
+/**
+ * Every row but the first has its rule above it: some element's bottom border ends where the
+ * row's line begins (its own, or the one of the row it follows, or of what holds it).
+ */
+const rulesAbove = (root: Element) => {
+  const rules = [...root.querySelectorAll('*')]
+    .filter((one) => Number.parseFloat(getComputedStyle(one).borderBottomWidth) > 0)
+    .map((one) => Math.round(one.getBoundingClientRect().bottom))
+  const lines = [...root.querySelectorAll('[data-need-row]')]
+  return {
+    rows: lines.length,
+    ruled: lines.filter(
+      (line, at) => at === 0 || rules.includes(Math.round(line.getBoundingClientRect().top)),
+    ).length,
+  }
+}
+
 /** Every column on one edge, the times ending on one edge too. */
 const aligned = (cells: number) => {
   const edges: Record<string, ReturnType<typeof expect.objectContaining>> = {}
@@ -407,6 +430,20 @@ const aligned = (cells: number) => {
   }
   edges.when = expect.objectContaining({ cells, lefts: 1, rights: 1 })
   return edges
+}
+
+/** A row's menu holds what the row offers besides its action: the way to its mission. */
+export const RowMenu: Story = {
+  args: { rows: ROWS.slice(1, 3), onOpenMission: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'More actions for Which table holds the invoices?' }),
+    )
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open ACME-14' }))
+    await expect(args.onOpenMission).toHaveBeenCalledWith('table')
+  },
 }
 
 /**
@@ -419,6 +456,20 @@ export const Aligned: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(edgesOf(canvasElement)).toEqual(aligned(7))
+    await expect(rulesAbove(canvasElement)).toEqual({ rows: 7, ruled: 7 })
+    // One action and one menu on every row, the same two controls whatever the row offers.
+    const controls = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
+      [...cell.querySelectorAll('button')].map((one) => one.getAttribute('aria-label') ?? ''),
+    )
+    await expect(controls).toHaveLength(7)
+    await expect(controls.map((names) => names.length)).toEqual(Array(7).fill(2))
+    await expect(controls.map(([action]) => /here$/.test(action ?? ''))).toEqual(
+      Array(7).fill(true),
+    )
+    await expect(controls.map(([, more]) => /^More actions for /.test(more ?? ''))).toEqual(
+      Array(7).fill(true),
+    )
+    await expect(canvas.queryByRole('button', { name: 'Allow these' })).toBeNull()
     const actions = canvas.getAllByRole('button', { name: /here$/ })
     await expect(
       new Set(actions.map((one) => Math.round(one.getBoundingClientRect().right))).size,
@@ -435,5 +486,7 @@ export const Aligned: Story = {
     // Under the hand a button grows by a pixel each side: the edges are read once it has left.
     await userEvent.unhover(group)
     await waitFor(() => expect(edgesOf(canvasElement)).toEqual(aligned(10)))
+    // The group's own line and the rows it unfolds to are each ruled off from the one above.
+    await waitFor(() => expect(rulesAbove(canvasElement)).toEqual({ rows: 10, ruled: 10 }))
   },
 }

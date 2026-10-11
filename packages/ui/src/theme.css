@@ -301,11 +301,9 @@
   /* The least a live chip's name is given, however narrow the line: a few words, never a few
      letters. The chip does not shrink below its name's least and its seconds whole. */
   --spacing-chip-name: 4rem;
-  /* The columns of Needs you: the longest a title is drawn before it ends in an ellipsis, so
-     every row's detail starts on one edge; and the action, as wide as the longest label at the
-     small size (`Choose here`, with a little room), so every button is the same width. */
+  /* The column of Needs you's titles: the longest a title is drawn before it ends in an ellipsis,
+     so every row's detail starts on one edge. */
   --spacing-need-title: 16rem;
-  --spacing-need-action: 6.5rem;
   /* How wide a live chip's glance is: a long command, an address and three lines of output read
      without wrapping every other word. */
   --spacing-glance: 20rem;

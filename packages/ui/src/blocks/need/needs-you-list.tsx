@@ -2,11 +2,18 @@ import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type HTMLAttributes, type ReactNode, type Ref, useState } from 'react'
 
-import { Button } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
+import { Menu, type MenuItem } from '../../components/menu/menu.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconChevronRight } from '../../icons.ts'
+import {
+  IconChevronRight,
+  IconDots,
+  IconListCheck,
+  IconMessages,
+  IconRefresh,
+} from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-card.tsx'
 
@@ -15,16 +22,17 @@ import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-c
  * application's first, then each Project's, the oldest first in each.
  *
  * A row is the Project's mark (Hemera's own for a need of the application), the mission's key, the
- * kind's glyph, the title, what the agent wrote cut to the row, and when. Its button, "<action>
- * here", unfolds the whole need card under the row, pushing the rows below it, with a way to the
- * mission under the card. The rows are the same height loading as loaded.
+ * kind's glyph, the title, what the agent wrote cut to the row, and when. Its one action, an icon
+ * named "<action> here" by its tooltip, unfolds the whole need card under the row, pushing the rows
+ * below it, with a way to the mission under the card. Every other action of the row is in the
+ * "more" menu at its end, which every row has. The rows are the same height loading as loaded.
  *
  * A need that arrives grows into its place and pushes the rows under it; one answered or expired
  * becomes its card's faint line where its row was, and folds out of the list when it leaves.
  *
  * The permissions one agent asked for while several of them still wait share one row, where the
- * first of them stands: how many wait and from whom, what they ask, "Allow these" (Allow once for
- * each), and "Answer here", which unfolds their own rows.
+ * first of them stands: how many wait and from whom, what they ask, and the action, which unfolds
+ * their own rows; "Allow these" (Allow once for each) is in the row's menu.
  */
 export interface NeedRow {
   id: string
@@ -75,12 +83,12 @@ export interface NeedsYouListProps {
   >
 }
 
-/** What the row's button says it does, by kind: the need is answered in place. */
-const ACTIONS: Record<NeedKind, string> = {
-  permission: 'Answer here',
-  decision: 'Answer here',
-  error: 'Choose here',
-  environment: 'Retry here',
+/** What the row's action says it does, by kind, and its icon: the need is answered in place. */
+const ACTIONS: Record<NeedKind, { label: string; icon: ReactNode }> = {
+  permission: { label: 'Answer here', icon: <IconMessages size="sm" /> },
+  decision: { label: 'Answer here', icon: <IconMessages size="sm" /> },
+  error: { label: 'Choose here', icon: <IconListCheck size="sm" /> },
+  environment: { label: 'Retry here', icon: <IconRefresh size="sm" /> },
 }
 
 /**
@@ -107,9 +115,9 @@ const DETAIL = 'flex min-w-0'
 const DETAIL_TEXT = 'min-w-0 truncate text-muted-foreground outline-none focus-ring'
 /** The time ends on one edge, its figures of one width. */
 const WHEN = 'text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums'
-/** The action ends the row; every button the same width, whatever it says. */
+/** The action ends the row: its icon, then the menu, neither of them ever shrinking. */
 const ACTION = 'flex justify-end gap-1'
-const BUTTON = 'flex w-need-action shrink-0'
+const ICON = 'flex shrink-0'
 const RULE = 'border-b border-border last:border-b-0'
 /** A row, clipped while it grows in or folds out. */
 const PLACE = cn(LINE, RULE, 'overflow-hidden')
@@ -151,6 +159,8 @@ function Cells({
   detail,
   when,
   action,
+  more,
+  ruled = false,
 }: {
   project: string
   projects: readonly string[] | undefined
@@ -160,9 +170,13 @@ function Cells({
   detail: string | undefined
   when: string
   action: ReactNode
+  /** What the row offers besides its action, in the menu at its end. */
+  more: readonly MenuItem[]
+  /** Whether a rule closes the line itself: an unfolded group has its own rows under it. */
+  ruled?: boolean
 }): ReactNode {
   return (
-    <div className={ROW}>
+    <div className={cn(ROW, ruled && 'border-b border-border')} data-need-row="">
       <span className={MARK} data-need-cell="project">
         <ProjectMark name={project} others={projects} legend />
       </span>
@@ -181,26 +195,42 @@ function Cells({
       </span>
       <span className={ACTION} data-need-cell="action">
         {action}
+        <span className={ICON}>
+          <Menu
+            label={`More actions for ${title}`}
+            icon={<IconDots size="sm" />}
+            groups={[[...more]]}
+            disabled={more.length === 0}
+          />
+        </span>
       </span>
     </div>
   )
 }
 
-/** The row's own button, of the action column's width. */
+/** The row's own action: an icon, named and told by its tooltip. */
 function Toggle({
-  label,
+  kind,
   opened,
   onToggle,
 }: {
-  label: string
+  kind: NeedKind
   opened: boolean
   onToggle: () => void
 }): ReactNode {
+  const { label, icon } = ACTIONS[kind]
   return (
-    <span className={BUTTON}>
-      <Button size="sm" className="w-full" aria-expanded={opened} onClick={onToggle}>
-        {label}
-      </Button>
+    <span className={ICON}>
+      <Tooltip label={label}>
+        <IconButton
+          variant="secondary"
+          size="sm"
+          icon={icon}
+          aria-label={label}
+          aria-expanded={opened}
+          onClick={onToggle}
+        />
+      </Tooltip>
     </span>
   )
 }
@@ -262,7 +292,12 @@ function Row({
           title={need.title}
           detail={need.text}
           when={need.when}
-          action={<Toggle label={ACTIONS[kind]} opened={opened} onToggle={onToggle} />}
+          action={<Toggle kind={kind} opened={opened} onToggle={onToggle} />}
+          more={
+            need.missionKey !== undefined && onOpenMission !== undefined
+              ? [{ label: `Open ${need.missionKey}`, onSelect: onOpenMission }]
+              : []
+          }
         />
       )}
       <AnimatePresence initial={false}>
@@ -327,21 +362,16 @@ function GroupRow({
         title={`${String(waiting.length)} requests from ${name}`}
         detail={waiting.map((row) => row.need.title).join(' · ')}
         when={last.need.when}
-        action={
-          <>
-            {/* Allow these stands beside the action, in its column: the time keeps its place. */}
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                for (const row of waiting) on(row.id).onPermission?.('allow-once')
-              }}
-            >
-              Allow these
-            </Button>
-            <Toggle label={ACTIONS.permission} opened={opened} onToggle={onToggle} />
-          </>
-        }
+        action={<Toggle kind="permission" opened={opened} onToggle={onToggle} />}
+        more={[
+          {
+            label: 'Allow these',
+            onSelect: () => {
+              for (const row of waiting) on(row.id).onPermission?.('allow-once')
+            },
+          },
+        ]}
+        ruled={opened}
       />
       <AnimatePresence initial={false}>
         {opened && (
