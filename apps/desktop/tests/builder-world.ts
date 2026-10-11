@@ -16,7 +16,7 @@ import { Effect, type Layer } from 'effect'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { checkMission } from '../src/engine/building/check.ts'
 import { launchMission } from '../src/engine/building/launch.ts'
-import type { BuildingEnd, TaskVerdict } from '../src/engine/building/builder.ts'
+import type { BuilderHold, BuildingEnd, TaskVerdict } from '../src/engine/building/builder.ts'
 import { buildingOf } from '../src/engine/building/builder.ts'
 import { freezeMission } from '../src/engine/planning/freeze.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
@@ -44,6 +44,7 @@ export const builderEngine = (
   building: {
     readonly verdict?: Layer.Layer<TaskVerdict>
     readonly end?: Layer.Layer<BuildingEnd>
+    readonly hold?: BuilderHold
   } = {},
 ) =>
   sessionsEngine(data, builderAgents, {

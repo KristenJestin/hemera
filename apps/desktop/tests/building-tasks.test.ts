@@ -13,7 +13,7 @@ import { realpathSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ChosenAnswer } from '@hemera/core/domain'
-import { Effect, Layer, Predicate } from 'effect'
+import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -307,6 +307,47 @@ describe('Only the runner at the current epoch finishes its task', () => {
     const t1 = seen.view.tasks.find((task) => task.id === 'T1')
     expect([t1?.state, t1?.verified]).toEqual(['done', false])
     expect(seen.view.percent).toBe(25)
+  })
+})
+
+describe('A late call of a replaced runner changes nothing', () => {
+  test('task_finished held past its check while the Builder is replaced is refused, and T1 stays its successor’s', async () => {
+    const release = Promise.withResolvers<void>()
+    const reached = Promise.withResolvers<void>()
+    let held = false
+    const hold = (at: string) =>
+      at !== 'finishing' || held
+        ? Effect.void
+        : Effect.promise(() => {
+            held = true
+            reached.resolve()
+            return release.promise
+          })
+    const { run } = builderEngine(data, work, { hold })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { session, grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          const late = yield* Effect.forkChild(
+            call(grantId, 'task_finished', { task: 'T1', summary: 'Late.' }),
+          )
+          yield* Effect.promise(() => reached.promise)
+          const fresh = yield* Sessions.use((sessions) => sessions.replace(session.id, 'a test'))
+          release.resolve()
+          const answer = yield* Fiber.join(late)
+          return { answer, fresh, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.answer).toBe(
+      'refused: T1 is run by another session: only its runner says it is finished.',
+    )
+    const t1 = seen.view.tasks.find((task) => task.id === 'T1')
+    expect(t1?.state).toBe('in_progress')
+    expect(t1?.attempts.map((one) => one.endedAt)).toEqual([null])
   })
 })
 

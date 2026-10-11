@@ -64,7 +64,12 @@ import { Secrets } from '../secrets.ts'
 import { Sessions } from '../sessions/service.ts'
 import { assignWorkIn } from '../sessions/leases.ts'
 import { type RoleSession, getSession, sessionsIn } from '../sessions/store.ts'
-import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import {
   buildingActivity,
   buildingAttempts,
@@ -272,7 +277,13 @@ const answerOf = (need: Need): string | null => {
   return null
 }
 
-export const builderLayer = (log: Log) => {
+/**
+ * Where a suite holds the Builder between a check and the transaction it guards: after a task's
+ * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
+ */
+export type BuilderHold = (at: 'starting' | 'finishing' | 'judging') => Effect.Effect<void>
+
+export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
@@ -524,6 +535,7 @@ export const builderLayer = (log: Log) => {
             }),
           )
           if (judgement === 'pending') return judgement
+          yield* hold('judging')
           const done = yield* mutate('judging a task', (transaction) =>
             Effect.gen(function* () {
               const task = taskIn(yield* tasksIn(transaction, building.id), taskId)
@@ -624,6 +636,7 @@ export const builderLayer = (log: Log) => {
           const starts = yield* Effect.result(snapshotOf(building, attemptId, 'start'))
           if (Result.isFailure(starts))
             return yield* snapshotRefused(building, starts.failure, 'start')
+          yield* hold('starting')
           const outcome = yield* mutate('starting a task', (transaction) =>
             Effect.gen(function* () {
               const current = taskIn(yield* tasksIn(transaction, building.id), task.id)
@@ -699,41 +712,72 @@ export const builderLayer = (log: Log) => {
           return outcome
         })
 
-      /** The task named, in progress and run by the caller now, or the refusal. */
-      const runnerTask = (building: BuildingRow, grant: Grant, id: string, verb: string) =>
+      const notRunnerSaid = (id: string, verb: string) =>
+        refusal(`refused: ${id} is run by another session: only its runner says it ${verb}.`)
+
+      /**
+       * The task named, in progress and run by the caller now, with the lease as it was read, or
+       * the refusal. The transaction that acts reads the lease again: it must not have moved.
+       */
+      const runnerTask = (
+        reader: Database['Service'] | EngineTransaction,
+        building: BuildingRow,
+        grant: Grant,
+        id: string,
+        verb: string,
+      ) =>
         Effect.gen(function* () {
-          const database = yield* Database
-          const task = taskIn(yield* tasksIn(database, building.id), id)
+          const task = taskIn(yield* tasksIn(reader, building.id), id)
           if (task === null) return refusal(`refused: ${id} is not a task of the plan.`)
           if (task.state !== 'in_progress') {
             return refusal(`refused: ${id} is not in progress: only a running task ${verb}.`)
           }
-          const lease = yield* runnerSessionIn(database, building.id, id)
-          if (lease?.sessionId !== grant.sessionId) {
-            return refusal(
-              `refused: ${id} is run by another session: only its runner says it ${verb}.`,
-            )
-          }
-          return task
+          const lease = yield* runnerSessionIn(reader, building.id, id)
+          if (lease === null || lease.sessionId !== grant.sessionId) return notRunnerSaid(id, verb)
+          return { task, lease }
         })
+
+      /** Whether the lease read before is still the task's, at the same epoch. */
+      const stillRunner = (
+        transaction: EngineTransaction,
+        building: BuildingRow,
+        id: string,
+        lease: { readonly sessionId: string; readonly epoch: number },
+      ) =>
+        Effect.map(
+          runnerSessionIn(transaction, building.id, id),
+          (held) =>
+            held !== null && held.sessionId === lease.sessionId && held.epoch === lease.epoch,
+        )
 
       const finished = (grant: Grant, args: ToolArguments<'task_finished'>) =>
         Effect.gen(function* () {
           const caller = yield* callerOf(grant)
           if ('refused' in caller) return caller.refused
           const { building, session } = caller
-          const task = yield* runnerTask(building, grant, args.task, 'is finished')
-          if (!('id' in task)) return task
           const database = yield* Database
+          const ran = yield* runnerTask(database, building, grant, args.task, 'is finished')
+          if (!('task' in ran)) return ran
+          const { task, lease } = ran
           const attempt = yield* openAttemptIn(database, building.id, task.id)
           const attemptId = attempt?.id ?? crypto.randomUUID()
           const ends = yield* Effect.result(snapshotOf(building, attemptId, 'end'))
           if (Result.isFailure(ends)) return yield* snapshotRefused(building, ends.failure, 'end')
           const secrets = yield* Secrets
+          yield* hold('finishing')
           const written = yield* mutate('finishing a task', (transaction) =>
             Effect.gen(function* () {
               const current = taskIn(yield* tasksIn(transaction, building.id), task.id)
-              if (current?.state !== 'in_progress') return { result: false, events: [] }
+              if (current?.state !== 'in_progress') {
+                return {
+                  result: refusal(`refused: ${task.id} is no longer in progress.`),
+                  events: [],
+                }
+              }
+              // A call held past its check while the runner changed writes nothing.
+              if (!(yield* stillRunner(transaction, building, task.id, lease))) {
+                return { result: notRunnerSaid(task.id, 'is finished'), events: [] }
+              }
               yield* transaction
                 .update(buildingAttempts)
                 .set({
@@ -756,7 +800,7 @@ export const builderLayer = (log: Log) => {
               yield* moveIn(transaction, building.id, current, 'checking')
               const settledNow = yield* settleIn(transaction, building)
               return {
-                result: true,
+                result: null,
                 events: [
                   buildingEvent(
                     building.missionId,
@@ -769,7 +813,7 @@ export const builderLayer = (log: Log) => {
               }
             }),
           )
-          if (!written) return refusal(`refused: ${task.id} is no longer in progress.`)
+          if (written !== null) return written
           const judgement = yield* judge(building, task.id, attemptId)
           return answered(
             judgement === 'pending'
@@ -821,11 +865,15 @@ export const builderLayer = (log: Log) => {
           readonly tasks: ReadonlyArray<string>
           readonly fields: typeof DecisionFields.Type | typeof EnvironmentFields.Type
           readonly amendment: Amendment | null
+          /** What the request's own check says again in the transaction: a refusal, or null. */
+          readonly still: (
+            transaction: EngineTransaction,
+          ) => Effect.Effect<ToolAnswer | null, DatabaseError>
         },
       ) =>
         Effect.gen(function* () {
           const mission = yield* missionRowOf(building.missionId)
-          if (mission === null) return null
+          if (mission === null) return NO_BUILDING
           const secrets = yield* Secrets
           const write = yield* createNeedIn(
             BUILDER_NEEDS,
@@ -838,6 +886,8 @@ export const builderLayer = (log: Log) => {
           )
           return yield* mutate('asking the user', (transaction) =>
             Effect.gen(function* () {
+              const moved = yield* asked.still(transaction)
+              if (moved !== null) return { result: moved, events: [] }
               const need = yield* write(transaction)
               const decision = Predicate.isTagged(asked.fields, 'Decision') ? asked.fields : null
               yield* transaction
@@ -874,7 +924,7 @@ export const builderLayer = (log: Log) => {
                 need.id,
               )
               return {
-                result: need.id,
+                result: null,
                 events: [
                   ...need.events,
                   buildingEvent(
@@ -911,8 +961,10 @@ export const builderLayer = (log: Log) => {
           const caller = yield* callerOf(grant)
           if ('refused' in caller) return caller.refused
           const { building, session } = caller
-          const task = yield* runnerTask(building, grant, args.task, 'is blocked')
-          if (!('id' in task)) return task
+          const database = yield* Database
+          const ran = yield* runnerTask(database, building, grant, args.task, 'is blocked')
+          if (!('task' in ran)) return ran
+          const { task, lease } = ran
           if (!args.options.includes(args.recommended)) {
             return refusal('refused: the option you recommend is not one of your options.')
           }
@@ -931,9 +983,13 @@ export const builderLayer = (log: Log) => {
           ]
             .filter((part) => part !== null)
             .join('\n\n')
-          const needId = yield* requested(building, session, {
+          const refused = yield* requested(building, session, {
             kind: args.kind,
             tasks: [task.id],
+            still: (transaction) =>
+              Effect.map(stillRunner(transaction, building, task.id, lease), (runs) =>
+                runs ? null : notRunnerSaid(task.id, 'is blocked'),
+              ),
             fields: DecisionFields.make({
               question,
               options: args.options,
@@ -941,7 +997,7 @@ export const builderLayer = (log: Log) => {
             }),
             amendment,
           })
-          if (needId === null) return NO_BUILDING
+          if (refused !== null) return refused
           return answered(yield* askedSaid(building, [task.id]))
         })
 
@@ -983,13 +1039,14 @@ export const builderLayer = (log: Log) => {
                   : { option: args.recommended, reason: 'Recommended by the Builder.' },
             })
           }
-          const needId = yield* requested(building, session, {
+          const refused = yield* requested(building, session, {
             kind: args.kind,
             tasks: args.tasks,
             fields,
             amendment: null,
+            still: () => Effect.succeed(null),
           })
-          if (needId === null) return NO_BUILDING
+          if (refused !== null) return refused
           return answered(yield* askedSaid(building, args.tasks))
         })
 

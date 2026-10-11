@@ -40,6 +40,7 @@ import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
 import { type BuildingStart, buildingLaunchesLayer, BUILDING_NEEDS } from './building/launch.ts'
 import {
   BUILDER_NEEDS,
+  type BuilderHold,
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
@@ -257,6 +258,8 @@ export interface ProfileParts {
         readonly start?: Layer.Layer<BuildingStart>
         readonly verdict?: Layer.Layer<TaskVerdict>
         readonly end?: Layer.Layer<BuildingEnd>
+        /** Where a suite holds the Builder between a check and its transaction. */
+        readonly hold?: BuilderHold
       }
     | undefined
   /**
@@ -464,7 +467,7 @@ export const startProfile = (
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
-    const builder = builderLayer(log)
+    const builder = builderLayer(log, parts.building?.hold)
     // One store of the snapshots, for the checkpoints and the Builder alike (#140).
     const snapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
     const missionParts: Partial<MissionParts> = {
