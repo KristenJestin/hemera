@@ -38,7 +38,7 @@ import {
   UnknownRemote,
   UnknownSetupCard,
 } from '@hemera/ipc'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm'
 import { Effect, Option, Predicate, Result, Schema, Stream } from 'effect'
 
 import { existsSync } from 'node:fs'
@@ -68,6 +68,8 @@ export interface SetupCard {
   readonly details: ReadonlyArray<SetupDetail>
   readonly state: SetupCardState
   readonly refusal: string | null
+  /** What the user asked to change, while the agent answers it; kept once it revised the card. */
+  readonly discussion: string | null
   readonly createdAt: string
   readonly decidedAt: string | null
 }
@@ -93,6 +95,7 @@ const cardOf = (row: Row): SetupCard | null =>
       details: Option.getOrElse(readDetails(row.details), () => []),
       state: SETUP_CARD_STATES.find((one) => one === row.state) ?? 'pending',
       refusal: row.refusal,
+      discussion: row.discussion,
       createdAt: row.createdAt,
       decidedAt: row.decidedAt,
     }),
@@ -303,15 +306,18 @@ const sameChange = (one: Schema.JsonObject, other: Schema.JsonObject): boolean =
   JSON.stringify(other, Object.keys(other).toSorted())
 
 /**
- * Checks a whole call as the settings would, against the setup as it will stand once the pending
- * cards are accepted, then stores one card per change in one batch, the values of its variables
- * held in memory only. A change a pending card already proposes (a variable: with the same value)
- * is not stored again. Answers the cards, the ones already pending said so.
+ * Checks changes as the settings would, against the setup as it will stand once the pending cards
+ * but `replaced` are accepted, then stores one card per change in one batch, the values of its
+ * variables held in memory only, and puts the `replaced` cards aside as revised in the same
+ * transaction. A change a pending card already proposes (a variable: with the same value) is not
+ * stored again. Answers the cards, the ones already pending said so.
  */
-export const propose = (
+const stored = (
   projectId: string,
   sessionId: string,
   proposals: ReadonlyArray<SetupProposal>,
+  replaced: ReadonlyArray<SetupCard>,
+  eventsOf: (batch: string) => ReadonlyArray<NewEvent>,
 ) =>
   Effect.gen(function* () {
     const project = yield* getProject(projectId)
@@ -319,7 +325,9 @@ export const propose = (
     const variables = (yield* listVariables({ projectId, workspaceId: null })).map((one) => one.key)
     const secrets = yield* Secrets
     const values = yield* SetupValues
-    const pending = (yield* cardsOf(projectId)).filter((card) => card.state === 'pending')
+    const pending = (yield* cardsOf(projectId)).filter(
+      (card) => card.state === 'pending' && !replaced.some((one) => one.id === card.id),
+    )
     let planned: Planned = { project, commands }
     for (const card of pending) planned = plannedWith(planned, card.change)
     let steps =
@@ -349,6 +357,7 @@ export const propose = (
           title: setupChangeTitle(change),
           state: 'pending',
           refusal: null,
+          discussion: null,
           createdAt: at,
           decidedAt: null,
         }
@@ -381,26 +390,161 @@ export const propose = (
         }
       }),
     )
-    if (rows.length > 0) {
+    if (rows.length > 0 || replaced.length > 0) {
       yield* mutate('storing the setup cards', (transaction) =>
-        transaction
-          .insert(setupCards)
-          .values(rows)
-          .pipe(
-            Effect.mapError(refusedWhile('storing the setup cards')),
-            Effect.as({
-              result: undefined,
-              events: [setupEvent('setup.proposed', projectId, { batch })],
-            }),
-          ),
+        Effect.gen(function* () {
+          if (rows.length > 0) yield* transaction.insert(setupCards).values(rows)
+          if (replaced.length > 0) {
+            yield* transaction
+              .update(setupCards)
+              .set({ state: 'revised', decidedAt: at })
+              .where(
+                and(
+                  inArray(
+                    setupCards.id,
+                    replaced.map((one) => one.id),
+                  ),
+                  eq(setupCards.state, 'pending'),
+                ),
+              )
+          }
+          return { result: undefined, events: [...eventsOf(batch)] }
+        }).pipe(Effect.mapError(refusedWhile('storing the setup cards'))),
       )
     }
+    for (const one of replaced) yield* values.forget(one.id)
     return proposed.map(({ card, waits }) =>
       waits === null
         ? { id: card.id, title: card.title, already: false }
         : { id: waits.id, title: waits.title, already: true },
     )
   })
+
+/**
+ * The setup agent's call: checked whole as the settings would, then stored, changing nothing. The
+ * cards a discussion waits on are revised by the changes of their kind the call holds.
+ */
+export const propose = (
+  projectId: string,
+  sessionId: string,
+  proposals: ReadonlyArray<SetupProposal>,
+) =>
+  Effect.gen(function* () {
+    const kinds = new Set(proposals.map((proposal) => proposal.kind))
+    const discussed = (yield* cardsOf(projectId)).filter(
+      (card) => card.state === 'pending' && card.discussion !== null && kinds.has(card.change.kind),
+    )
+    return yield* stored(projectId, sessionId, proposals, discussed, (batch) => [
+      setupEvent('setup.proposed', projectId, { batch }),
+      ...discussed.map((card) => setupEvent('setup.revised', projectId, { card: card.id })),
+    ])
+  })
+
+/** A change the user wrote in the editor of a card: `from` names the card it was, if one. */
+export interface EditedChange {
+  readonly from: string | null
+  readonly proposal: SetupProposal
+}
+
+/** What the editor cannot write: a part of a change its card keeps hidden. */
+export const HIDDEN_PART = 'a hidden part of this change cannot be edited: decline it instead'
+
+/**
+ * Replaces pending cards of a Project by the changes the user wrote in their place, checked as the
+ * agent's are; a refusal changes nothing. A variable written without a value keeps the one its
+ * card held. The cards replaced are revised; the edit's are pending, the next to accept. Answers
+ * the Project's cards.
+ */
+export const editCards = (cardIds: ReadonlyArray<string>, changes: ReadonlyArray<EditedChange>) =>
+  Effect.gen(function* () {
+    const [first] = cardIds
+    if (first === undefined) return []
+    const { projectId, sessionId } = yield* cardNamed(first)
+    const deciding = yield* SetupValues.use((values) => Effect.succeed(values.deciding(projectId)))
+    return yield* deciding(
+      Effect.gen(function* () {
+        const replaced = yield* Effect.forEach(cardIds, cardNamed)
+        const [stale] = replaced.filter(
+          (card) => card.state !== 'pending' || card.projectId !== projectId,
+        )
+        if (stale !== undefined) return yield* new UnknownSetupCard({ id: stale.id })
+        const proposals = yield* Effect.forEach(changes, ({ from, proposal }) =>
+          Effect.gen(function* () {
+            if (JSON.stringify(proposal).includes(MASK)) {
+              return yield* new ProposalRefused({ reason: HIDDEN_PART })
+            }
+            if (proposal.kind !== 'variable' || proposal.value !== '' || from === null) {
+              return proposal
+            }
+            const value = yield* SetupValues.use((values) => values.valueOf(from))
+            if (value === null) return yield* new ProposalRefused({ reason: VALUE_FORGOTTEN })
+            return { ...proposal, value }
+          }),
+        )
+        yield* stored(projectId, sessionId, proposals, replaced, () =>
+          replaced.map((card) => setupEvent('setup.edited', projectId, { card: card.id }, true)),
+        )
+        return yield* cardsOf(projectId)
+      }),
+    )
+  })
+
+/** Opens a discussion on pending cards: the user's words, kept on them until the agent answers. */
+export const discussCards = (cardIds: ReadonlyArray<string>, note: string) =>
+  Effect.gen(function* () {
+    const cards = yield* Effect.forEach(cardIds, cardNamed)
+    const secrets = yield* Secrets
+    const open = cards.filter((card) => card.state === 'pending')
+    const [first] = open
+    if (first === undefined) return []
+    yield* mutate('opening a discussion on setup cards', (transaction) =>
+      transaction
+        .update(setupCards)
+        .set({ discussion: secrets.mask(note) })
+        .where(
+          and(
+            inArray(
+              setupCards.id,
+              open.map((card) => card.id),
+            ),
+            eq(setupCards.state, 'pending'),
+          ),
+        )
+        .pipe(
+          Effect.mapError(refusedWhile('opening a discussion on setup cards')),
+          Effect.as({
+            result: undefined,
+            events: open.map((card) =>
+              setupEvent('setup.discussed', first.projectId, { card: card.id }, true),
+            ),
+          }),
+        ),
+    )
+    return open
+  })
+
+/** Closes a Project's discussions the agent left: their cards wait as they were. */
+export const closeDiscussions = (projectId: string) =>
+  mutate('closing the setup discussions', (transaction) =>
+    transaction
+      .update(setupCards)
+      .set({ discussion: null })
+      .where(
+        and(
+          eq(setupCards.projectId, projectId),
+          eq(setupCards.state, 'pending'),
+          isNotNull(setupCards.discussion),
+        ),
+      )
+      .returning({ id: setupCards.id })
+      .pipe(
+        Effect.mapError(refusedWhile('closing the setup discussions')),
+        Effect.map((rows) => ({
+          result: undefined,
+          events: rows.length === 0 ? [] : [setupEvent('setup.answered', projectId, {})],
+        })),
+      ),
+  )
 
 const setupEvent = (
   type: string,
