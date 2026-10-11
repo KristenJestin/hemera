@@ -3,8 +3,10 @@ import { type ReactNode, use, useEffect } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
+import { durationOf, useNow } from '../../components/live-chip/live-chip.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { IconCheck } from '../../icons.ts'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { IconCheck, IconClockPause } from '../../icons.ts'
 import { MissionField } from '../project/project-page.tsx'
 import {
   AgentMark,
@@ -86,6 +88,33 @@ export interface SetupTaskProps
   onClosed?: (() => void) | undefined
 }
 
+/**
+ * The agent at work, as the chip says it: its step and how long, over the proposals as they come.
+ * Not read out as it ticks: the seconds are for the eye.
+ */
+function AgentAtWork({
+  agent,
+  step,
+  startedAt,
+}: Pick<SetupTaskProps, 'agent' | 'startedAt'> & { step: string | undefined }): ReactNode {
+  const now = useNow(true)
+  return (
+    <div
+      role="group"
+      aria-label="Setup agent at work"
+      className="flex items-center gap-2 text-sm text-muted-foreground"
+    >
+      {agent === 'waiting' ? (
+        <IconClockPause size="sm" aria-hidden="true" />
+      ) : (
+        <StatusMark state="running" size="sm" />
+      )}
+      <span className="min-w-0 flex-1 truncate text-foreground">{step ?? 'Setup agent'}</span>
+      <span className="shrink-0 font-mono tabular-nums">{durationOf(now - startedAt)}</span>
+    </div>
+  )
+}
+
 /** What the setup holds: how many proposals answered, Accept all, the cards, what the agent said. */
 export function SetupProposals(props: SetupTaskProps): ReactNode {
   const { agent, cards, messages = [] } = props
@@ -93,6 +122,9 @@ export function SetupProposals(props: SetupTaskProps): ReactNode {
   const waiting = shown.filter((card) => card.status.state === 'proposed').length
   return (
     <div className="flex flex-col gap-5">
+      {(agent === 'working' || agent === 'waiting') && (
+        <AgentAtWork agent={agent} step={props.glance?.step} startedAt={props.startedAt} />
+      )}
       {shown.length > 0 && (
         <div className="flex items-center justify-between gap-3">
           <Progress cards={shown} />
@@ -105,7 +137,7 @@ export function SetupProposals(props: SetupTaskProps): ReactNode {
         </div>
       )}
       <SetupBody {...props} narrow />
-      {shown.length === 0 && agent !== 'failed' && (
+      {shown.length === 0 && agent === 'done' && (
         <p className="text-sm text-muted-foreground">No proposal yet.</p>
       )}
       {messages.length > 0 && (

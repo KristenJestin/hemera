@@ -45,7 +45,13 @@ export function LivingSpecPage(props: LivingSpecPageProps): ReactNode {
         actions={
           data === null ? undefined : (
             <>
-              <ReadingChip projectName={projectName} data={data} names={names} />
+              <ReadingChip
+                projectName={projectName}
+                data={data}
+                names={names}
+                onReview={props.onOpenDomain}
+                onRetry={props.onRead}
+              />
               {data.domains.length > 0 && (
                 <Menu
                   label="More about the living spec"
