@@ -20,7 +20,8 @@ import {
  *
  * Its band says whose it is: the kind's glyph and "Needs you", then the mission (a link, left out
  * on the mission's own page), when, and the role that raised it. The body is the title and the
- * agent's own words, then what that kind asks: the call and the two reasons of a permission, the
+ * agent's own words, then what that kind asks: the call and the two reasons of a permission (with
+ * how to stop being asked: Allow for this mission, or the setting that would settle it), the
  * options of a decision, the attempts of an error, the action of what is missing. The actions are
  * the band below. What cannot be chosen is not drawn: Allow for this mission is not there on a
  * sensitive place or outside a mission, Discuss only while the mission is in Planning.
@@ -68,6 +69,8 @@ export type NeedAsk =
       hemeraReason: string
       /** The choices offered: Allow for this mission only on an ordinary place of a mission. */
       choices: readonly PermissionChoice[]
+      /** The settings section that would settle such calls, by its name. */
+      settings?: string | undefined
     }
   | { kind: 'decision'; options: readonly DecisionOption[] }
   | {
@@ -128,6 +131,7 @@ const BODY = 'flex flex-col gap-3 px-4 py-3'
 const TITLE = 'text-base font-semibold text-foreground'
 const PROSE = 'max-w-prose text-sm text-foreground whitespace-pre-line'
 const LABEL = 'text-xs font-medium text-muted-foreground'
+const HINT = 'max-w-prose text-sm text-muted-foreground'
 // A command or an output wraps rather than scrolls: a scrolled block is a stop the keyboard must make.
 const CODE =
   'rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre-wrap break-words'
@@ -254,6 +258,12 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
           )}
           <Part label="Why Hemera asks">
             <p className={PROSE}>{ask.hemeraReason}</p>
+            {ask.choices.includes('allow-for-mission') && (
+              <p className={HINT}>
+                Allow for this mission stops these questions for the same action until the mission
+                ends.
+              </p>
+            )}
           </Part>
         </>
       )
@@ -329,6 +339,11 @@ function Actions({
             </Button>
           ))}
           {discuss}
+          {ask.settings !== undefined && (
+            <Button variant="ghost" onClick={on.onSettings}>
+              Open Settings › {ask.settings}
+            </Button>
+          )}
         </>
       )
     case 'decision':

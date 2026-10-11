@@ -41,6 +41,8 @@ export interface StagePageProps {
   goMission: (key: string) => void
   /** What stands between a Planning mission and its Freeze, once the engine said. */
   readiness: FreezeReadiness | null
+  /** Opens a Chat of the Project, by its id. */
+  openChat: (chatId: string) => void
   /** Why the last Freeze was refused, each reason in words. */
   refused?: ReadonlyArray<string> | undefined
   /** Freezes the Spec at the version the engine offered it on. */

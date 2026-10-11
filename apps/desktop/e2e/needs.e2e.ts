@@ -77,7 +77,7 @@ describe('Needs created while Hemera runs', () => {
 
   it('answers it from its card: answered in place, then gone, and no longer counted', async () => {
     const table = needsYou().$('li*=Which table holds the invoices?')
-    await table.$('button=Answer here').click()
+    await table.$('button[aria-label="Answer here"]').click()
     await table.$('button=invoices').click()
     await expect(table).toHaveText(/Applied/)
     await expect(home(1)).toBeDisplayed()
@@ -96,7 +96,7 @@ describe('Needs created while Hemera runs', () => {
         ProjectOwner.make({ projectId: acme }),
         MODELS,
       )) ?? ''
-    await row(id).$('button=Retry here').click()
+    await row(id).$('button[aria-label="Retry here"]').click()
     await row(id).$('button=Open Settings › Models by role').click()
     await expect($('main h1')).toHaveText('Settings')
     await expect($('[data-settings-section="models"]')).toBeExisting()

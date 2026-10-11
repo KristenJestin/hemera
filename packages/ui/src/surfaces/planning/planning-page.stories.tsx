@@ -36,6 +36,7 @@ const meta = {
     onMarkRead: fn(() => Promise.resolve()),
     onKeepPlanning: fn(() => Promise.resolve()),
     onOpenMission: fn(),
+    onAskInChat: fn(),
     onSeenTicketChange: fn(() => Promise.resolve()),
     onSay: fn(() => Promise.resolve()),
     onAccept: fn(() => Promise.resolve()),

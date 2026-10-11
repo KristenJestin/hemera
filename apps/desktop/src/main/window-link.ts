@@ -354,6 +354,10 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['setup.decline'](request).pipe(closedAs(gone), observed('setup.decline', log)),
     'setup.acceptAll': (request) =>
       engine['setup.acceptAll'](request).pipe(closedAs(gone), observed('setup.acceptAll', log)),
+    'setup.edit': (request) =>
+      engine['setup.edit'](request).pipe(closedAs(gone), observed('setup.edit', log)),
+    'setup.discuss': (request) =>
+      engine['setup.discuss'](request).pipe(closedAs(gone), observed('setup.discuss', log)),
     'setup.propose': (request) =>
       engine['setup.propose'](request).pipe(closedAs(gone), observed('setup.propose', log)),
     'setup.standing': (request) =>

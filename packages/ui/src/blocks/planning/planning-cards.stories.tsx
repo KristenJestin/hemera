@@ -4,8 +4,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
-import { DEPENDENCIES, outdated, triaged } from '../../surfaces/planning/planning-fixtures.ts'
-import type { PlanningData } from './planning-types.ts'
+import { DEPENDENCIES, outdated } from '../../surfaces/planning/planning-fixtures.ts'
+import type { PlanningData, Triage } from './planning-types.ts'
 import { DependenciesCard, TicketCard, TriageCard, VisionCard } from './planning-cards.tsx'
 import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
 
@@ -23,6 +23,7 @@ function Cards(props: CardsProps): ReactNode {
           triage={props.triage}
           onKeepPlanning={props.onKeepPlanning}
           onOpenMission={props.onOpenMission}
+          onAskInChat={props.onAskInChat}
         />
       )}
       {props.ticket !== null && (
@@ -53,6 +54,7 @@ interface CardsProps {
   mentionables: readonly Mentionable[]
   onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
+  onAskInChat: () => void
   onSeenTicketChange: (id: string) => Promise<void>
   onDecideDependency: (id: string, accept: boolean) => Promise<void>
   onGiveVision: (text: string) => Promise<void>
@@ -71,6 +73,7 @@ const meta = {
     mentionables: MENTIONABLES,
     onKeepPlanning: fn(() => Promise.resolve()),
     onOpenMission: fn(),
+    onAskInChat: fn(),
     onSeenTicketChange: fn(() => Promise.resolve()),
     onDecideDependency: fn(() => Promise.resolve()),
     onGiveVision: fn(() => Promise.resolve()),
@@ -86,6 +89,72 @@ const meta = {
 
 export default meta
 type Story = StoryObj<typeof meta>
+
+const ANSWER: Triage = {
+  kind: 'existing_mission',
+  ref: 'ACME-20',
+  text: 'ACME-20 already moves the attachments: a Markdown export belongs there, as one more format.',
+  basedOnProposed: false,
+}
+
+/** The request belongs to another mission: Add it to that mission, or Keep planning. */
+export const TriageBelongs: Story = {
+  args: { triage: ANSWER },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('region', { name: 'Belongs elsewhere' })
+    await expect(within(card).queryByRole('button', { name: 'Ask in a Chat' })).toBeNull()
+    await expect(card).toHaveTextContent('ACME-20 already moves the attachments')
+    await userEvent.click(within(card).getByRole('button', { name: 'Add it to ACME-20' }))
+    await expect(args.onOpenMission).toHaveBeenCalledWith('ACME-20')
+    const keep = within(card).getByRole('button', { name: 'Keep planning' })
+    await userEvent.click(keep)
+    await expect(args.onKeepPlanning).toHaveBeenCalled()
+    await settled(keep)
+  },
+}
+
+/** The request is already delivered: Open the mission that did, or Keep planning. */
+export const TriageDelivered: Story = {
+  args: {
+    triage: {
+      ...ANSWER,
+      kind: 'delivered',
+      text: 'ACME-20 already delivers the Markdown export of a note.',
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('region', { name: 'Already delivered' })
+    await expect(within(card).queryByRole('button', { name: 'Ask in a Chat' })).toBeNull()
+    await expect(within(card).queryByRole('button', { name: /^Add it to/ })).toBeNull()
+    await expect(within(card).getByRole('button', { name: 'Keep planning' })).toBeVisible()
+    await userEvent.click(within(card).getByRole('button', { name: 'Open ACME-20' }))
+    await expect(args.onOpenMission).toHaveBeenCalledWith('ACME-20')
+    await expect(args.onKeepPlanning).not.toHaveBeenCalled()
+  },
+}
+
+/** The request is too small for a mission: Ask in a Chat, or Keep planning. */
+export const TriageTooSmall: Story = {
+  args: {
+    triage: {
+      ...ANSWER,
+      kind: 'too_small',
+      ref: null,
+      text: 'Renaming one label is a single edit: a Chat does it without a Spec.',
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('region', { name: 'Small enough without a mission' })
+    await expect(within(card).queryByRole('button', { name: /^Add it to|^Open/ })).toBeNull()
+    await userEvent.click(within(card).getByRole('button', { name: 'Keep planning' }))
+    await expect(args.onKeepPlanning).toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('button', { name: 'Ask in a Chat' }))
+    await expect(args.onAskInChat).toHaveBeenCalledTimes(1)
+  },
+}
 
 /** Nothing but the vision, which is always there while the Spec is written. */
 export const VisionOnly: Story = {
@@ -160,22 +229,6 @@ export const DecidingTwice: Story = {
     await userEvent.click(accept)
     await expect(args.onDecideDependency).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(accept).toHaveAttribute('aria-disabled', 'true'))
-  },
-}
-
-/** The triage answer: where it belongs, Keep planning, or open the other mission. */
-export const Triage: Story = {
-  args: { triage: triaged().data.triage },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    const card = canvas.getByRole('region', { name: 'Belongs elsewhere' })
-    await expect(card).toHaveTextContent('ACME-20 already moves the attachments')
-    await userEvent.click(within(card).getByRole('button', { name: 'Open ACME-20' }))
-    await expect(args.onOpenMission).toHaveBeenCalledWith('ACME-20')
-    const keep = within(card).getByRole('button', { name: 'Keep planning' })
-    await userEvent.click(keep)
-    await expect(args.onKeepPlanning).toHaveBeenCalled()
-    await settled(keep)
   },
 }
 

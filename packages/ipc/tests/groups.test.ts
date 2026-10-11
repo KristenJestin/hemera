@@ -267,6 +267,8 @@ const memoryHandlers = {
   'setup.accept': unused,
   'setup.decline': unused,
   'setup.acceptAll': unused,
+  'setup.edit': unused,
+  'setup.discuss': unused,
   'setup.propose': unused,
   'setup.standing': unused,
   'setup.changes': unused,

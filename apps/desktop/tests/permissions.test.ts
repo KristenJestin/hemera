@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { NeverProgram } from '@hemera/core/domain'
@@ -72,6 +72,7 @@ const withBuilder = <A, E>(
     readonly main: string
     readonly projectId: string
     readonly missionKey: string
+    readonly missionId: string
     readonly started: Started
   }) => Effect.Effect<A, E, EngineServices>,
   parts: NonNullable<Engine> = {},
@@ -93,6 +94,7 @@ const withBuilder = <A, E>(
             main,
             projectId: project.id,
             missionKey: mission.key,
+            missionId: mission.id,
             started,
           })
         }),
@@ -125,7 +127,7 @@ describe('The order of decision: each step, and only steps 1 and 2 refuse', () =
     expect(answer[3].text).toBe('refused: approvals are not available yet')
     expect(questions).toEqual([
       `outside the Workspace: ~/elsewhere.txt`,
-      'no judge could rate it: no judge is set up',
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
     ])
   })
 
@@ -332,6 +334,159 @@ describe("CT-17: the data folder's missions/ exception keeps missions isolated",
   })
 })
 
+/**
+ * A Probe of Acme's mission working in its own folder under the data folder, as the planning
+ * desk makes it (`probes/<mission>/<n>`), a Git repository with one commit.
+ */
+const withProbe = <A, E>(
+  body: (world: {
+    readonly probe: string
+    readonly folder: string
+  }) => Effect.Effect<A, E, EngineServices>,
+) =>
+  withBuilder(({ missionKey, missionId }) =>
+    Effect.gen(function* () {
+      const folder = join(data, 'probes', missionKey, '1')
+      mkdirSync(join(folder, 'tests'), { recursive: true })
+      writeFileSync(join(folder, 'README.md'), 'acme\n')
+      for (const args of [
+        ['init', '-q'],
+        ['add', '.'],
+        ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'one'],
+      ]) {
+        spawnSync('git', args, { cwd: folder })
+      }
+      const probe = yield* sessionOf('probe', folder, { kind: 'mission', id: missionId })
+      return yield* body({ probe: probe.grantId, folder })
+    }),
+  )
+
+describe('A Probe writes in its own folder without asking (#170)', () => {
+  test('a new test file in its folder, and an edit of one, are allowed by the rules', async () => {
+    const { answer, questions } = await withProbe(({ probe }) =>
+      Effect.gen(function* () {
+        const written = yield* callTool(probe, 'fs_write', {
+          path: 'tests/cli/install.test.ts',
+          content: 'fails today\n',
+        })
+        yield* read(probe, 'tests/cli/install.test.ts')
+        const edited = yield* callTool(probe, 'fs_edit', {
+          path: 'tests/cli/install.test.ts',
+          edits: [{ old: 'today', new: 'on main' }],
+        })
+        return [written, edited]
+      }),
+    )
+    expect(questions).toEqual([])
+    expect(answer.map((one) => one.ok)).toEqual([true, true])
+  })
+
+  test('a write one folder up, through a link that leaves it, or into its .env still asks', async () => {
+    const { answer, questions } = await withProbe(({ probe, folder }) =>
+      Effect.gen(function* () {
+        symlinkSync(work, join(folder, 'out'))
+        return yield* Effect.all([
+          callTool(probe, 'fs_write', { path: '../2/notes.md', content: 'x' }),
+          callTool(probe, 'fs_write', { path: 'out/notes.md', content: 'x' }),
+          callTool(probe, 'fs_write', { path: '.env', content: 'TOKEN=x' }),
+        ])
+      }),
+    )
+    expect(answer.map((one) => one.ok)).toEqual([false, false, false])
+    expect(questions).toHaveLength(3)
+    expect(questions[0]).toMatch(/^outside its worktree: /)
+    expect(questions[1]).toMatch(/^outside its worktree: /)
+    expect(questions[2]).toMatch(/^sensitive place: /)
+  })
+
+  test("A Probe's write to .git in its own folder still asks (#170)", async () => {
+    const { answer, questions } = await withProbe(({ probe, folder }) =>
+      Effect.gen(function* () {
+        rmSync(join(folder, '.git'), { recursive: true, force: true })
+        return yield* Effect.all([
+          callTool(probe, 'fs_write', { path: '.git', content: 'gitdir: ./g\n' }),
+          callTool(probe, 'fs_write', { path: '.git/config', content: '[core]\n' }),
+          callTool(probe, 'fs_write', { path: 'sub/.GIT/hooks/x', content: 'x' }),
+          callTool(probe, 'fs_write', { path: 'sub\\.git\\config', content: 'x' }),
+        ])
+      }),
+    )
+    expect(answer.map((one) => one.ok)).toEqual([false, false, false, false])
+    expect(questions).toHaveLength(4)
+  })
+
+  test("a Builder's write in its Workspace still goes to the judge", async () => {
+    const { questions } = await withBuilder(({ builder }) =>
+      callTool(builder, 'fs_write', { path: 'notes.md', content: 'x' }),
+    )
+    expect(questions).toHaveLength(1)
+  })
+})
+
+describe('A read-only Git command does not ask (#170)', () => {
+  test.each([
+    'git rev-parse HEAD',
+    'git status --short',
+    'git log --oneline -n 1',
+    'git diff',
+    'git show HEAD:README.md',
+  ])('%s runs without a question', async (line) => {
+    const { answer, questions } = await withProbe(({ probe }) => run(probe, line))
+    expect(questions).toEqual([])
+    expect(answer.text).not.toContain('approvals')
+  })
+
+  test.each([
+    'git -c core.hooksPath=/tmp/hooks status',
+    'git -C .. status',
+    'git diff --output=notes.txt',
+    'git diff --no-index ../2/README.md README.md',
+    'git rev-parse HEAD | sh',
+    `sh -c 'git rev-parse HEAD'`,
+    'git stash',
+    'git checkout -- README.md',
+  ])('%s still asks', async (line) => {
+    const { questions } = await withProbe(({ probe }) => run(probe, line))
+    expect(questions).toHaveLength(1)
+  })
+
+  test('a Project that never allows git log is still refused', async () => {
+    const { answer } = await withBuilder(({ builder, projectId }) =>
+      Effect.gen(function* () {
+        yield* setNeverList(projectId, [NeverProgram.make({ words: ['git', 'log'] })])
+        return yield* run(builder, 'git log --oneline')
+      }),
+    )
+    expect(answer.text).toBe('refused: the Project never allows git log')
+  })
+})
+
+describe('Without a judge, what only reads is allowed by the rules (#170)', () => {
+  test('reads, listings, searches and read-only Git pass; a write, a command that may write, or a read outside asks', async () => {
+    const { answer, questions } = await withBuilder(({ builder }) =>
+      Effect.all([
+        read(builder, 'README.md'),
+        callTool(builder, 'fs_list', { path: '.' }),
+        callTool(builder, 'search', { pattern: 'acme' }),
+        callTool(builder, 'commands_list', {}),
+        run(builder, 'ls'),
+        run(builder, 'git status'),
+        callTool(builder, 'fs_write', { path: 'notes.md', content: 'x' }),
+        run(builder, 'node --version'),
+        read(builder, '../elsewhere.txt'),
+      ]),
+    )
+    expect(answer.slice(0, 6).map((one) => one.text)).not.toContain(
+      'refused: approvals are not available yet',
+    )
+    expect(questions).toEqual([
+      'No rule of this Project allows this write for the Builder, and no judge is set up to rate it.',
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
+      'outside the Workspace: ~/elsewhere.txt',
+    ])
+  })
+})
+
 describe("The refusals of a mission's agents, on the effective action", () => {
   test.each([
     ['git push', 'no agent of a mission may run git push'],
@@ -351,7 +506,9 @@ describe("The refusals of a mission's agents, on the effective action", () => {
   test('a read of a forge CLI is not refused (it goes on, and asks without a judge)', async () => {
     const { answer, questions } = await withBuilder(({ builder }) => run(builder, 'gh pr view 1'))
     expect(answer.text).toBe('refused: approvals are not available yet')
-    expect(questions).toEqual(['no judge could rate it: no judge is set up'])
+    expect(questions).toEqual([
+      'No rule of this Project allows this command for the Builder, and no judge is set up to rate it.',
+    ])
   })
 
   test("the Chat's commands are not refused by the mission rules: they go through the order", async () => {

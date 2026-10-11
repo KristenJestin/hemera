@@ -18,6 +18,9 @@ import { refusedTag } from './focusable.ts'
  * It is still declared once by the provider the shell puts at its root rather than per tooltip:
  * one answer for the whole window is a decision, and a prop would make it a habit.
  *
+ * It is not hoverable: the pointer leaving the control closes it, even when it moves onto the
+ * name itself. A hoverable name would linger over the next row and cover what it names.
+ *
  * It opens in CSS through Base UI's `data-starting-style` rather than through motion: the
  * element enters and leaves with the popup itself, and a spring driven from React would have
  * to be told when the popup is gone. Opacity and scale only, on the theme's curve.
@@ -89,7 +92,7 @@ export function Tooltip({
     throw new Error(`a tooltip needs a focusable control, and <${refused}> is not one`)
   }
   return (
-    <BaseTooltip.Root disabled={disabled}>
+    <BaseTooltip.Root disabled={disabled} disableHoverablePopup>
       <BaseTooltip.Trigger render={children} {...handed} />
       <BaseTooltip.Portal container={container}>
         <BaseTooltip.Positioner side={side} sideOffset={4}>

@@ -226,8 +226,11 @@ export function setupChangeDetails(change: SetupChange): ReadonlyArray<SetupDeta
   }
 }
 
-/** Where a card stands: waiting for the user, or decided once and for all. */
-export const SETUP_CARD_STATES = ['pending', 'accepted', 'declined'] as const
+/**
+ * Where a card stands: waiting for the user, or decided once and for all; `revised` when another
+ * card took its place before it was decided, the user's edit or the agent's answer to a discussion.
+ */
+export const SETUP_CARD_STATES = ['pending', 'accepted', 'declined', 'revised'] as const
 export const SetupCardState = Schema.Literals(SETUP_CARD_STATES)
 export type SetupCardState = typeof SetupCardState.Type
 

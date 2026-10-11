@@ -8,7 +8,7 @@ import { MissionField } from './project-page.tsx'
 /**
  * The place of the start field in the stories and in the window's fixtures: a field of the
  * design system, named as the real one is, that takes the page's ref so a task leaving the page
- * hands the focus to it. The real field, its results and its triage are drawn by the start slot.
+ * hands the focus to it. The real field, its results are drawn by the start slot.
  */
 export function ProjectStartSlot({ name }: { name: string }): ReactNode {
   const field = use(MissionField)

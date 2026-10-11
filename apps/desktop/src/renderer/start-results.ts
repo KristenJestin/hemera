@@ -1,22 +1,22 @@
 /**
  * What the Project's start field shows, with no React: the stream of `start.search` folded into the
  * results the field draws (the Project's missions, then the remote tickets, "Create a mission"
- * always last), the creation each choice asks of the engine, and the triage answer a created
- * mission carries, turned into the field's words.
+ * always last), the creation each choice asks of the engine, and the opening of the mission it
+ * creates.
  */
 
 import { type ProviderHit, canonicalTicket } from '@hemera/core/domain'
 import type {
   CreateChoice as CreateChoiceSchema,
-  Mission,
   MissionFound as MissionFoundSchema,
-  MissionsChange,
   StartCreate,
   StartResult,
   TicketFound as TicketFoundSchema,
 } from '@hemera/ipc'
-import type { StartResultView, StartTriage, StartTriageAction } from '@hemera/ui'
-import { Match, Predicate } from 'effect'
+import type { StartResultView } from '@hemera/ui'
+import { Match } from 'effect'
+
+import type { Link } from './link.ts'
 
 type MissionFound = typeof MissionFoundSchema.Type
 type TicketFound = typeof TicketFoundSchema.Type
@@ -132,71 +132,17 @@ export function createFromTicket(
   return { projectId, ticket: { reference: hit.reference, title: hit.title }, idempotencyKey }
 }
 
-/** The field's triage answer for a mission, or none when the Planner said nothing or it was kept. */
-export function triageOf(mission: Mission): StartTriage | undefined {
-  const answer = mission.triage
-  if (answer === null || answer.state === 'kept') return undefined
-  const key = answer.ref ?? mission.key
-  switch (answer.kind) {
-    case 'existing_mission':
-      return { kind: 'belongs', key }
-    case 'delivered':
-      return { kind: 'delivered', key, proposed: answer.basedOnProposed }
-    case 'too_small':
-      return { kind: 'small' }
-  }
-}
-
-/** What a change of the created mission settles: the Planner's answer, or that there is none. */
-export type StartSettled =
-  | { kind: 'answer'; triage: StartTriage }
-  | { kind: 'planning'; key: string }
-
 /**
- * The first change of the mission just created: the Planner answered that it is not new work, or
- * it went on planning (see `wentOnPlanning`), and the mission opens. A change of another mission settles nothing.
+ * Starts the mission a choice asks for and opens it at once, under its key: the Planner's triage
+ * answer then stands on the mission's own page, not in the field. A refusal opens nothing.
  */
-export function settleStart(change: MissionsChange, missionId: string): StartSettled | null {
-  if (!Predicate.isTagged(change, 'MissionChanged') || change.mission.id !== missionId) return null
-  const { mission } = change
-  const triage = triageOf(mission)
-  if (triage !== undefined) return { kind: 'answer', triage }
-  return wentOnPlanning(mission) ? { kind: 'planning', key: mission.key } : null
-}
-
-/**
- * Whether the mission shows that triage is behind it: the user kept it after an answer, it left
- * Planning or froze its Spec, or the Planner now waits on the user (its questions). Any other
- * change, a mark or a Journal line say, settles nothing.
- */
-const wentOnPlanning = (mission: Mission): boolean =>
-  mission.triage?.state === 'kept' ||
-  mission.stage !== 'planning' ||
-  mission.frozen ||
-  Predicate.isTagged(mission.ball, 'WaitingOnYou')
-
-/** What an action on the triage answer asks: open a mission, the Chat, or keep the created one. */
-export type TriageStep =
-  | { kind: 'open'; key: string }
-  | { kind: 'chat' }
-  | { kind: 'keep'; missionId: string }
-
-/**
- * What an action on the triage answer does: Open goes to the mission the answer points to, Chat to
- * the Project's Chat, and "Start a mission anyway" keeps the created mission, which goes on
- * planning. Nothing while no mission was created.
- */
-export function triageStep(
-  action: StartTriageAction,
-  triage: StartTriage | undefined,
-  created: { id: string; key: string } | null,
-): TriageStep | null {
-  if (action === 'chat') return { kind: 'chat' }
-  if (action === 'open' && (triage?.kind === 'belongs' || triage?.kind === 'delivered')) {
-    return { kind: 'open', key: triage.key }
-  }
-  if (created === null) return null
-  return action === 'anyway'
-    ? { kind: 'keep', missionId: created.id }
-    : { kind: 'open', key: created.key }
+export function startAndOpen(
+  link: Pick<Link, 'createStart'>,
+  made: StartCreate,
+  then: { opened: (key: string) => void; refused: (sentence: string) => void },
+): Promise<void> {
+  return link.createStart(made).then(
+    (mission) => then.opened(mission.key),
+    (failure: Error) => then.refused(`The mission could not be started: ${failure.message}`),
+  )
 }

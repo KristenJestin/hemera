@@ -45,6 +45,8 @@ export interface MissionRouteProps {
     goProject: () => void
     /** Goes to another mission of the Project, by its key. */
     goMission: (key: string) => void
+    /** Opens a Chat of the Project, by its id. */
+    openChat: (chatId: string) => void
     answer: ShellActions['answer']
     recheck: ShellActions['recheck']
     openSettings: (section: AppSection) => void
@@ -173,6 +175,7 @@ export function MissionPage({
         open: actions.open,
         goMission: actions.goMission,
         readiness,
+        openChat: actions.openChat,
         refused,
         freeze,
         freezing,

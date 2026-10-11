@@ -83,6 +83,7 @@ const pageOf = (more: Partial<MissionPageProps> = {}): MissionPageProps => ({
     close: none,
     goProject: none,
     goMission: none,
+    openChat: none,
     answer: none,
     recheck: none,
     openSettings: none,

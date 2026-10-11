@@ -39,6 +39,7 @@ const missionProps = {
     close: () => undefined,
     goProject: () => undefined,
     goMission: () => undefined,
+    openChat: () => undefined,
     answer: () => undefined,
     recheck: () => undefined,
     openSettings: () => undefined,
@@ -164,6 +165,7 @@ const drawn = ({
         close: nothing,
         goProject: nothing,
         goMission: nothing,
+        openChat: nothing,
         answer: nothing,
         recheck: nothing,
         openSettings: nothing,
@@ -373,7 +375,6 @@ describe('The pages', () => {
         projectId: 'acme',
         projectName: 'Acme',
         onOpenMission: nothing,
-        onOpenChat: nothing,
       }),
     )
     expect(field).toContain('Start a mission in Acme')

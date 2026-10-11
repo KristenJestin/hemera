@@ -103,6 +103,9 @@ const meta = {
   tags: ['autodocs'],
   title: 'Blocks/Needs you/Needs you list',
   component: NeedsYouList,
+  // The list is a grid that sizes itself to the column it is given, as Home's and a mission's
+  // are: the canvas gives it the page's width rather than shrinking around it.
+  parameters: { layout: 'padded' },
   args: {
     rows: ROWS,
     projects: ['Acme', 'Hemera'],
@@ -120,7 +123,7 @@ const meta = {
   },
   decorators: [
     (Story, context) => (
-      <section aria-label="Needs you" className="flex max-w-4xl flex-col gap-3 p-8">
+      <section aria-label="Needs you" className="flex w-full max-w-4xl flex-col gap-3 p-8">
         <SectionHead
           title="Needs you"
           count={context.args.loading === true ? undefined : context.args.rows.length || undefined}
@@ -260,5 +263,269 @@ export const Narrow: Story = {
       .getAllByRole('button', { name: /here$/ })
       .filter((button) => button.scrollWidth > button.clientWidth)
     await expect(cut).toEqual([])
+  },
+}
+
+/** What "Allow these" and the cards of the group answer, by need. */
+const answered = fn()
+
+/** Three Probes asking at once: each one's requests on one row. */
+const PROBE_ROWS: readonly NeedRow[] = [
+  ...['tests/cli/install.test.ts', 'tests/cli/update.test.ts', 'tests/cli/remove.test.ts'].map(
+    (path, at): NeedRow => ({
+      id: `probe-1-${String(at)}`,
+      project: 'Acme',
+      agent: { id: 'probe-1', name: 'the Probe' },
+      need: {
+        title: `Write ${path} in its Probe folder`,
+        missionKey: 'ACME-12',
+        when: `${String(3 - at)} min`,
+        role: 'probe',
+        ask: {
+          kind: 'permission',
+          command: `fs_write ~/.hemera/probes/ACME-12/1/${path}`,
+          hemeraReason:
+            'No rule of this Project allows this write for the Probe, and no judge is set up to rate it.',
+          settings: 'Hemera Auto',
+          choices: ['allow-once', 'allow-for-mission', 'deny'],
+        },
+      },
+    }),
+  ),
+  {
+    id: 'probe-2-0',
+    project: 'Acme',
+    agent: { id: 'probe-2', name: 'the Probe' },
+    need: {
+      title: 'Run git rev-parse HEAD',
+      missionKey: 'ACME-12',
+      when: '1 min',
+      role: 'probe',
+      ask: {
+        kind: 'permission',
+        command: 'git rev-parse HEAD',
+        hemeraReason:
+          'No rule of this Project allows this command for the Probe, and no judge is set up to rate it.',
+        settings: 'Hemera Auto',
+        choices: ['allow-once', 'allow-for-mission', 'deny'],
+      },
+    },
+  },
+]
+
+/**
+ * The requests of one agent on one row, with their count and "Allow these" in its menu; an agent
+ * with one request keeps its own row.
+ */
+export const GroupedByAgent: StoryObj<typeof NeedsYouList> = {
+  args: {
+    rows: [...PROBE_ROWS, ...ROWS.slice(2, 3)],
+    on: (id: string) => ({ onPermission: (choice) => answered(id, choice) }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('3 requests from the Probe')).toBeVisible()
+    await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(3)
+    answered.mockClear()
+    // "Allow these" is not the row's action: it waits in the row's menu.
+    await expect(canvas.queryByRole('button', { name: 'Allow these' })).toBeNull()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'More actions for 3 requests from the Probe' }),
+    )
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Allow these' }))
+    await expect(answered).toHaveBeenCalledTimes(3)
+    await expect(answered).toHaveBeenCalledWith('probe-1-0', 'allow-once')
+    await expect(answered).toHaveBeenCalledWith('probe-1-2', 'allow-once')
+    await expect(answered).not.toHaveBeenCalledWith('probe-2-0', 'allow-once')
+  },
+}
+
+/** The group's own button opens its requests, each answered on its own. */
+export const GroupUnfolded: Story = {
+  args: { rows: [...PROBE_ROWS, ...ROWS.slice(2, 3)] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const [group] = canvas.getAllByRole('button', { name: 'Answer here' })
+    if (group === undefined) throw new globalThis.Error('the group is the first row')
+    await userEvent.click(group)
+    await expect(group).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() =>
+      expect(canvas.getByText('Write tests/cli/update.test.ts in its Probe folder')).toBeVisible(),
+    )
+    await expect(canvas.getAllByRole('button', { name: 'Answer here' })).toHaveLength(6)
+  },
+}
+
+/** Once answered, a group's requests settle in place, and the group says what still waits. */
+export const GroupPartlyAnswered: Story = {
+  args: {
+    rows: PROBE_ROWS.map((row) =>
+      row.id === 'probe-1-0'
+        ? Object.assign({}, row, {
+            need: Object.assign({}, row.need, {
+              status: { state: 'applied', answer: 'Allowed once' },
+            }),
+          })
+        : row,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('2 requests from the Probe')).toBeVisible()
+  },
+}
+
+/**
+ * Every kind of row, every length of time, a row without a key (Hemera's own), one without a
+ * detail, and an agent's group: one grid, every column on one edge.
+ */
+const ALIGNED: readonly NeedRow[] = [
+  ...ROWS.map((row, at) =>
+    Object.assign({}, row, {
+      need: Object.assign({}, row.need, {
+        when: ['2 h', '25 min', '1 min', '3 d', 'now'][at],
+        text: row.id === 'table' ? undefined : row.need.text,
+      }),
+    }),
+  ),
+  ...PROBE_ROWS,
+]
+
+/** The cells of the list, by column: each one's left edge, and the time's right edge. */
+const COLUMNS = ['project', 'key', 'kind', 'title', 'detail', 'when', 'action'] as const
+
+const edgesOf = (root: Element) =>
+  Object.fromEntries(
+    COLUMNS.map((column) => {
+      const cells = [...root.querySelectorAll(`[data-need-cell="${column}"]`)]
+      const lefts = new Set(cells.map((cell) => Math.round(cell.getBoundingClientRect().left)))
+      const rights = new Set(cells.map((cell) => Math.round(cell.getBoundingClientRect().right)))
+      return [column, { cells: cells.length, lefts: lefts.size, rights: rights.size }]
+    }),
+  )
+
+/**
+ * Every row but the first has its rule above it: some element's bottom border ends where the
+ * row's line begins (its own, or the one of the row it follows, or of what holds it).
+ */
+const rulesAbove = (root: Element) => {
+  const rules = [...root.querySelectorAll('*')]
+    .filter((one) => Number.parseFloat(getComputedStyle(one).borderBottomWidth) > 0)
+    .map((one) => Math.round(one.getBoundingClientRect().bottom))
+  const lines = [...root.querySelectorAll('[data-need-row]')]
+  return {
+    rows: lines.length,
+    ruled: lines.filter(
+      (line, at) => at === 0 || rules.includes(Math.round(line.getBoundingClientRect().top)),
+    ).length,
+  }
+}
+
+/** Every column on one edge, the times ending on one edge too. */
+const aligned = (cells: number) => {
+  const edges: Record<string, ReturnType<typeof expect.objectContaining>> = {}
+  for (const column of COLUMNS) {
+    edges[column] = expect.objectContaining({ cells, lefts: 1 })
+  }
+  edges.when = expect.objectContaining({ cells, lefts: 1, rights: 1 })
+  return edges
+}
+
+/** A row's menu holds what the row offers besides its action: the way to its mission. */
+export const RowMenu: Story = {
+  args: { rows: ROWS.slice(1, 3), onOpenMission: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'More actions for Which table holds the invoices?' }),
+    )
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open ACME-14' }))
+    await expect(args.onOpenMission).toHaveBeenCalledWith('table')
+  },
+}
+
+/**
+ * A row with nothing in its menu draws no ⋯ button, and its action keeps the x of the rows that
+ * have one: the menu's place is kept empty.
+ */
+export const RowWithoutMenu: Story = {
+  args: { rows: [ROWS[1], ROWS[0]].filter((row): row is NeedRow => row !== undefined) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.queryByRole('button', { name: 'More actions for Git is not on the PATH' }),
+    ).toBeNull()
+    await expect(
+      canvas.getByRole('button', {
+        name: 'More actions for Read the deploy host from the SSH configuration',
+      }),
+    ).toBeVisible()
+    const answer = canvas.getByRole('button', { name: 'Answer here' })
+    const retry = canvas.getByRole('button', { name: 'Retry here' })
+    await expect(Math.round(retry.getBoundingClientRect().left)).toBe(
+      Math.round(answer.getBoundingClientRect().left),
+    )
+  },
+}
+
+/**
+ * Needs you is a table: the Project, the key, the kind, the title, the detail, when and the
+ * action each start on one edge on every row, a row without a key or a detail keeping its empty
+ * cell; the times end on one edge; an agent's group and its unfolded rows share the columns.
+ */
+export const Aligned: Story = {
+  args: { rows: ALIGNED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(edgesOf(canvasElement)).toEqual(aligned(7))
+    await expect(rulesAbove(canvasElement)).toEqual({ rows: 7, ruled: 7 })
+    // One action on every row; the menu only where the row has something in it (the Hemera need
+    // and the chat's permission have no mission to open, so no menu).
+    const controls = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
+      [...cell.querySelectorAll('button')].map((one) => one.getAttribute('aria-label') ?? ''),
+    )
+    await expect(controls).toHaveLength(7)
+    await expect(controls.map((names) => names.length)).toEqual([1, 2, 2, 2, 1, 2, 2])
+    await expect(controls.map(([action]) => /here$/.test(action ?? ''))).toEqual(
+      Array(7).fill(true),
+    )
+    await expect(
+      controls.map((names) => names.length === 2 && /^More actions for /.test(names[1] ?? '')),
+    ).toEqual([false, true, true, true, false, true, true])
+    // The action and the menu read as a pair: the same quiet icon button, the same size, no frame.
+    const looks = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
+      [...cell.querySelectorAll('button')].map((one) => {
+        const style = getComputedStyle(one)
+        const box = one.getBoundingClientRect()
+        return [
+          style.backgroundColor,
+          style.borderTopColor,
+          Math.round(box.width),
+          Math.round(box.height),
+        ].join(' ')
+      }),
+    )
+    await expect(new Set(looks.flat()).size).toBe(1)
+    await expect(canvas.queryByRole('button', { name: 'Allow these' })).toBeNull()
+    const actions = canvas.getAllByRole('button', { name: /here$/ })
+    await expect(
+      new Set(actions.map((one) => Math.round(one.getBoundingClientRect().right))).size,
+    ).toBe(1)
+    await expect(
+      new Set(actions.map((one) => Math.round(one.getBoundingClientRect().left))).size,
+    ).toBe(1)
+    // An agent's group unfolded: its own rows keep the same columns.
+    const group = canvas
+      .getAllByRole('button', { name: 'Answer here' })
+      .find((one) => one.closest('[data-agent]') !== null)
+    if (group === undefined) throw new globalThis.Error('the Probe has a group')
+    await userEvent.click(group)
+    // Under the hand a button grows by a pixel each side: the edges are read once it has left.
+    await userEvent.unhover(group)
+    await waitFor(() => expect(edgesOf(canvasElement)).toEqual(aligned(10)))
+    // The group's own line and the rows it unfolds to are each ruled off from the one above.
+    await waitFor(() => expect(rulesAbove(canvasElement)).toEqual({ rows: 10, ruled: 10 }))
   },
 }
