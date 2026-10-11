@@ -494,6 +494,51 @@ export const TaskReadingWithProposals: Story = {
   },
 }
 
+const SUMMARY = `I read both repositories and proposed the setup:
+
+- **Commands**: \`pnpm install\`, the checks and the build. The other scripts are listed apart.
+- **Preparation**: one step, \`pnpm install --frozen-lockfile\`.
+
+I could not decide the **dev server**: \`api\` and \`web\` both define \`dev\`.`
+
+/**
+ * What the agent said, read: its last message is the summary, written as Markdown and drawn as
+ * such — bold, code and lists — in a quiet block of its own. The messages it wrote while it read
+ * are folded under it, "Earlier messages", and read the same way.
+ */
+export const TaskSummary: Story = {
+  render: () => (
+    <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+  ),
+  play: async () => {
+    const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+    const said = await within(details).findByRole('region', { name: 'What the agent said' })
+    await waitFor(() => expect(said).toBeVisible())
+    expect(said.textContent).not.toContain('**')
+    expect(said.textContent).not.toContain('`')
+    expect(within(said).getByText('Commands', { selector: 'strong' })).toBeVisible()
+    expect(within(said).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(said).getByText('pnpm install', { selector: 'code' })).toBeVisible()
+    expect(within(said).queryByText(/Reading/)).toBeNull()
+    await userEvent.click(within(said).getByRole('button', { name: /Earlier messages/ }))
+    expect(await within(said).findByText('package.json', { selector: 'code' })).toBeVisible()
+  },
+}
+
+/** In the chip's menu a message is one plain line: its first, without Markdown marks. */
+export const TaskSummaryGlance: Story = {
+  render: () => <Held {...BASE} messages={['Reading **api**', SUMMARY]} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: 'Setup agent, done, waits for you' }),
+    )
+    const menu = await within(document.body).findByRole('dialog', { name: 'Setup agent' })
+    await waitFor(() => expect(within(menu).getByText('Reading api')).toBeVisible())
+    expect(within(menu).getByText('I read both repositories and proposed the setup:')).toBeVisible()
+    expect(menu.textContent).not.toContain('**')
+  },
+}
+
 /** The agent waits for a free slot: the details say that, and nothing is proposed yet. */
 export const TaskWaitingDetails: Story = {
   render: () => (
@@ -535,7 +580,11 @@ export const TaskProposed: Story = {
     await waitFor(() => {
       expect(within(details).getByRole('region', { name: 'Commands' })).toBeVisible()
     })
-    expect(within(details).getByText('Found pnpm workspaces in api and web')).toBeVisible()
+    // The last message is the summary; the earlier ones are folded.
+    expect(
+      within(details).getByText('Proposed the commands, the preparation and the variables'),
+    ).toBeVisible()
+    expect(within(details).queryByText('Found pnpm workspaces in api and web')).toBeNull()
     await userEvent.click(within(details).getByRole('button', { name: 'Accept all' }))
     expect(HANDLERS.onAcceptAll).toHaveBeenCalled()
     // Nothing unfolded on the page itself.

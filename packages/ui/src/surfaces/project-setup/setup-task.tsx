@@ -1,12 +1,15 @@
 import { cn } from 'cn'
-import { type ReactNode, use, useEffect } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { type ReactNode, use, useEffect, useState } from 'react'
 
+import { Prose } from '../../blocks/planning/prose.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
 import { durationOf, useNow } from '../../components/live-chip/live-chip.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
-import { IconCheck, IconClockPause } from '../../icons.ts'
+import { IconCheck, IconChevronDown, IconChevronRight, IconClockPause } from '../../icons.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { MissionField } from '../project/project-page.tsx'
 import {
   AgentMark,
@@ -115,6 +118,70 @@ function AgentAtWork({
   )
 }
 
+/** A message on one plain line, for the chip's menu: its first line, without Markdown marks. */
+const plainLine = (message: string): string =>
+  (message.split('\n').find((line) => line.trim() !== '') ?? '')
+    .replace(/^\s*(#{1,6}|[-*]|\d+[.)])\s+/, '')
+    .replaceAll('**', '')
+    .replaceAll('`', '')
+
+/**
+ * What the agent said: its last message is the summary, read as Markdown in a block of its own;
+ * the messages it wrote while it read are folded under it.
+ */
+function AgentSaid({ messages }: { messages: readonly string[] }): ReactNode {
+  const folding = useTransition(fold)
+  const [open, setOpen] = useState(false)
+  const summary = messages.at(-1)
+  const earlier = messages.slice(0, -1)
+  if (summary === undefined) return null
+  return (
+    <section aria-label="What the agent said" className="flex flex-col gap-3">
+      <SectionHead title="What the agent said" />
+      <div className="rounded-md border border-border bg-card px-4 py-3">
+        <Prose body={summary} />
+      </div>
+      {earlier.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            className="flex w-fit items-center gap-1.5 rounded-sm text-sm text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <span className="flex" aria-hidden="true">
+              {open ? <IconChevronDown size="sm" /> : <IconChevronRight size="sm" />}
+            </span>
+            Earlier messages
+            <span className="tabular-nums">{earlier.length}</span>
+          </button>
+          <AnimatePresence initial={false}>
+            {open && (
+              <motion.ol
+                key="earlier"
+                aria-label="Earlier messages"
+                className="flex flex-col gap-3 overflow-hidden pl-5 text-muted-foreground"
+                initial={collapse}
+                animate={expand}
+                exit={collapse}
+                transition={folding}
+              >
+                {earlier.map((message, at) => (
+                  // Messages repeat; where they stand is what tells them apart.
+                  // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
+                  <li key={at}>
+                    <Prose body={message} />
+                  </li>
+                ))}
+              </motion.ol>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+    </section>
+  )
+}
+
 /** What the setup holds: how many proposals answered, Accept all, the cards, what the agent said. */
 export function SetupProposals(props: SetupTaskProps): ReactNode {
   const { agent, cards, messages = [] } = props
@@ -140,20 +207,7 @@ export function SetupProposals(props: SetupTaskProps): ReactNode {
       {shown.length === 0 && agent === 'done' && (
         <p className="text-sm text-muted-foreground">No proposal yet.</p>
       )}
-      {messages.length > 0 && (
-        <section aria-label="What the agent said" className="flex flex-col gap-2">
-          <SectionHead title="What the agent said" />
-          <ol className="flex flex-col gap-1 text-sm">
-            {messages.map((message, at) => (
-              // Messages repeat; where they stand is what tells them apart.
-              // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
-              <li key={at} className="max-w-measure">
-                {message}
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      {messages.length > 0 && <AgentSaid messages={messages} />}
     </div>
   )
 }
@@ -193,7 +247,7 @@ export function SetupTask(props: SetupTaskProps): ReactNode {
           kind: 'helper',
           type: about ?? glance?.type ?? 'Setup agent',
           step: agent === 'failed' ? (failure ?? 'The setup agent stopped') : glance?.step,
-          output: props.messages?.slice(-3),
+          output: props.messages?.slice(-3).map(plainLine),
           ask:
             agent === 'failed'
               ? { label: 'Try again', onPress: props.onRetry }
