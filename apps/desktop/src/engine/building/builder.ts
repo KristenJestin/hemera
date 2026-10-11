@@ -20,7 +20,7 @@
  *   one the resume block. Cancel ends the Building as cancelled; the work stays.
  */
 
-import { relative, sep } from 'node:path'
+import { realpathSync } from 'node:fs'
 
 import {
   type Amendment,
@@ -214,17 +214,39 @@ const notAvailableSaid = (task: TaskNow): string => {
 const listed = (ids: ReadonlyArray<string>): string =>
   ids.length <= 1 ? (ids[0] ?? '') : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1) ?? ''}`
 
-/** A path of a repository of the Workspace, or null when it is in none. */
-const inRepository = (
-  repositories: ReadonlyArray<BuildingBase>,
+/**
+ * A path of a repository of the Workspace, or null when it is in none. Both sides are real paths;
+ * on Windows the case of their letters does not tell two paths apart.
+ */
+export const inRepository = (
+  repositories: ReadonlyArray<{ readonly repository: string; readonly folder: string }>,
   resolved: string,
+  platform: NodeJS.Platform = process.platform,
 ): { readonly repository: string; readonly path: string } | null => {
+  const separator = platform === 'win32' ? '\\' : '/'
+  const folded = (path: string) => (platform === 'win32' ? path.toLowerCase() : path)
+  const at = folded(resolved)
   const found = repositories
     .toSorted((a, b) => b.folder.length - a.folder.length)
-    .find((one) => resolved.startsWith(`${one.folder}${sep}`))
+    .find((one) => at.startsWith(`${folded(one.folder)}${separator}`))
   return found === undefined
     ? null
-    : { repository: found.repository, path: relative(found.folder, resolved).split(sep).join('/') }
+    : {
+        repository: found.repository,
+        path: resolved
+          .slice(found.folder.length + 1)
+          .split(separator)
+          .join('/'),
+      }
+}
+
+/** A folder as the file tools resolve paths: its real path, or as written when it is gone. */
+const realFolder = (folder: string): string => {
+  try {
+    return realpathSync.native(folder)
+  } catch {
+    return folder
+  }
 }
 
 /** The tasks an amendment brings into the plan. */
@@ -1000,7 +1022,13 @@ export const builderLayer = (log: Log) => {
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null) return null
-          const file = inRepository(basesOf(building), call.path.resolved)
+          const file = inRepository(
+            basesOf(building).map((base) => ({
+              repository: base.repository,
+              folder: realFolder(base.folder),
+            })),
+            call.path.resolved,
+          )
           if (file === null) return null
           const writer = yield* getSession(call.session.sessionId)
           const named = `${file.repository}/${file.path}`
@@ -1039,8 +1067,12 @@ export const builderLayer = (log: Log) => {
           return null
         }).pipe(
           provided,
+          // A claim that cannot be checked refuses the write rather than let it through.
           Effect.catchCause((cause) =>
-            Effect.as(said(`a claim was not checked: ${String(cause)}`), null),
+            Effect.as(
+              said(`a claim was not checked: ${String(cause)}`),
+              'refused: the files held by the running tasks could not be checked: try again.',
+            ),
           ),
         )
 

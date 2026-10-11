@@ -9,7 +9,8 @@
  * Workspace. Every wait is on state.
  */
 
-import { realpathSync } from 'node:fs'
+import { realpathSync, symlinkSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { ChosenAnswer } from '@hemera/core/domain'
 import { Effect, Layer, Predicate } from 'effect'
@@ -20,6 +21,7 @@ import {
   BuildingStart,
   TaskVerdict,
   buildingOf,
+  inRepository,
 } from '../src/engine/building/builder.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
@@ -233,6 +235,45 @@ describe('Claims: a file held by another running task is refused, a file outside
     expect(seen.outside).not.toMatch(/^refused/)
     const t1 = seen.view.tasks.find((task) => task.id === 'T1')
     expect(t1?.attempts[0]?.outside).toEqual(['api/notes.md'])
+  })
+})
+
+describe('Claims hold whatever way the folders are written', () => {
+  test('a data folder reached through a link still refuses the held file', async () => {
+    const links = realpathSync.native(temporaryFolder('building-tasks-links'))
+    const linkedData = join(links, 'data')
+    const linkedWork = join(links, 'work')
+    symlinkSync(data, linkedData, 'junction')
+    symlinkSync(work, linkedWork, 'junction')
+    const { run } = builderEngine(linkedData, linkedWork)
+    const refused = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(linkedWork)
+          const { session, grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          const helper = yield* helperOf(mission.id, session.folder)
+          return yield* call(helper, 'fs_write', {
+            repository: 'api',
+            path: 'invoices.ts',
+            content: 'export const invoices = [1]\n',
+          })
+        }),
+      ),
+    )
+    expect(refused).toBe(
+      'refused: api/invoices.ts is held by T1 (Export as CSV), which runs now: leave it, or wait for T1.',
+    )
+  })
+
+  test('on Windows a path is found in its repository whatever its letters’ case', () => {
+    const repositories = [{ repository: 'api', folder: 'C:\\Data\\ws\\api' }]
+    expect(inRepository(repositories, 'c:\\data\\WS\\api\\src\\a.ts', 'win32')).toEqual({
+      repository: 'api',
+      path: 'src/a.ts',
+    })
+    expect(inRepository(repositories, 'c:\\data\\ws\\api\\a.ts', 'linux')).toBeNull()
   })
 })
 
