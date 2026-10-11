@@ -12,6 +12,7 @@ import type {
   ColdReadPass as EnginePass,
   Discussion as EngineDiscussion,
   DiscussionItem,
+  FreezeReadiness,
   MissionDependencies,
   Now,
   PlanningInput,
@@ -26,7 +27,15 @@ import type {
   TicketEventInfo,
   Wave as EngineWave,
 } from '@hemera/ipc'
-import type { Mentionable, Planning } from '@hemera/ui'
+import {
+  freezeOf,
+  planningNow,
+  type FreezeOffer,
+  type Mentionable,
+  type Planner,
+  type Planning,
+  type PlanningNow,
+} from '@hemera/ui'
 
 import type { Link } from './link.ts'
 import { stageOf } from './missions.ts'
@@ -327,34 +336,73 @@ export function planningDataOf(read: PlanningRead, now: Date): PlanningData {
 }
 
 /**
- * The Now line of the head in Planning: what the Planner says it does, else the slot it waits for,
- * else a Planner in a turn it has said nothing of (a silent turn), that gave no sign or stopped.
- * Nothing when none of them is known: the head then says whose turn it is.
+ * The Planner as the page knows it, from its last session and the mission's Now: at work in a turn
+ * (its own line, else none: a silent turn), starting (the slot it waits for), between its turns,
+ * without a sign for a while, or stopped. Its line is kept by the engine after its turn, so the
+ * page believes it only while the Planner works.
  */
-export function nowLineOf(
-  now: Now | null,
-  sessions: ReadonlyArray<SessionSummary>,
-): string | undefined {
+export function plannerOf(now: Now | null, sessions: ReadonlyArray<SessionSummary>): Planner {
   const doing = now?.doing.find((line) => line.main)?.text
-  if (doing !== undefined && doing !== '') return doing
-  if (now?.slotWait !== null && now?.slotWait !== undefined) return now.slotWait
-  const planner = sessions.filter((session) => session.role === 'planner').at(-1)
-  if (planner?.state === 'working') return 'The Planner is working and has not said on what yet'
-  if (planner?.state === 'stuck') return 'The Planner has given no sign for a while'
-  if (planner?.state === 'failed') {
-    return planner.stateReason === null
-      ? 'The Planner stopped'
-      : `The Planner stopped: ${planner.stateReason}`
+  const next = now?.next?.text ?? null
+  const session = sessions.filter((one) => one.role === 'planner').at(-1)
+  const planner = (state: Planner['state'], said: string | null = null): Planner => ({
+    state,
+    doing: said,
+    next,
+    reason: state === 'failed' ? (session?.stateReason ?? null) : null,
+  })
+  switch (session?.state) {
+    case 'working':
+      return planner('working', doing === undefined || doing === '' ? null : doing)
+    case 'starting':
+      return planner('working', now?.slotWait ?? null)
+    case 'stuck':
+      return planner('stuck')
+    case 'failed':
+      return planner('failed')
+    default:
+      return planner('idle', doing ?? null)
   }
-  return undefined
+}
+
+/** The head of the page: its Now line, and Freeze with what stands before it. */
+export interface PlanningHead {
+  readonly now: PlanningNow | null
+  readonly freeze: FreezeOffer
+}
+
+/** Said under Freeze while the engine has not said yet whether it is ready. */
+const CHECKING = 'Hemera checks what is left before Freeze'
+
+/**
+ * The head, from what the page shows and what the engine says of the Freeze: the page's reasons
+ * first; when they explain nothing, the engine's, which knows more (an open discussion, a Spec
+ * changed since the cold read).
+ */
+export function planningHeadOf(
+  view: PlanningView,
+  readiness: FreezeReadiness | null,
+): PlanningHead {
+  if (view.data === null) return { now: null, freeze: { shown: false } }
+  const facts = { data: view.data, planner: view.planner, declaredComplete: view.declaredComplete }
+  const offer = freezeOf(facts)
+  const freeze: FreezeOffer =
+    !offer.shown || offer.reasons.length > 0
+      ? offer
+      : readiness === null
+        ? { shown: true, reasons: [CHECKING] }
+        : { shown: true, reasons: readiness.ready ? [] : readiness.unsettled }
+  return { now: planningNow(facts), freeze }
 }
 
 /** What the page shows of the follower. */
 export interface PlanningView {
   readonly data: PlanningData | null
   readonly error?: string | undefined
-  /** The Now line of the head. */
-  readonly now?: string | undefined
+  /** The Planner's session, as the page knows it. */
+  readonly planner: Planner
+  /** Whether the Planner declared the Spec complete and Hemera's check passed. */
+  readonly declaredComplete: boolean
   /** Why the last gesture did not go through, in words. */
   readonly refused?: string | undefined
   /** The Project's missions, which a field can mention. */
@@ -363,7 +411,13 @@ export interface PlanningView {
   readonly reports: ReadonlyMap<string, Planning.ProbeDetail | null>
 }
 
-export const LOADING_PLANNING: PlanningView = { data: null, mentionables: [], reports: new Map() }
+export const LOADING_PLANNING: PlanningView = {
+  data: null,
+  planner: plannerOf(null, []),
+  declaredComplete: false,
+  mentionables: [],
+  reports: new Map(),
+}
 
 /**
  * What the page can do. A gesture settles once the engine has taken it; one that sends what the
@@ -499,7 +553,8 @@ export function followPlanning(
               clock(),
             ),
       error,
-      now: nowLineOf(now, around?.sessions ?? []),
+      planner: plannerOf(now, around?.sessions ?? []),
+      declaredComplete: spec !== null && spec.declaredCompleteVersion !== null,
       refused,
       mentionables,
       reports,

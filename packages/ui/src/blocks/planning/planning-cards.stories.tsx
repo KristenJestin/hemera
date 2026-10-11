@@ -181,8 +181,10 @@ export const VisionGiven: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const given = canvas.getByRole('list', { name: 'Your vision so far' })
-    await expect(within(given).getByRole('img', { name: 'Received' })).toBeVisible()
-    await expect(within(given).getByRole('img', { name: 'Integrated in the Spec' })).toBeVisible()
+    await expect(within(given).getByRole('img', { name: /^Sent/ })).toBeVisible()
+    await expect(
+      within(given).getByRole('img', { name: 'Taken into account in the Spec' }),
+    ).toBeVisible()
   },
 }
 
@@ -237,7 +239,7 @@ export const TicketChanged: Story = {
     const canvas = within(canvasElement)
     const card = canvas.getByRole('region', { name: 'acme/shop#41 changed' })
     await expect(card).toHaveTextContent('a whole notebook as one archive')
-    await expect(within(card).getByRole('img', { name: 'Delivered to the Planner' })).toBeVisible()
+    await expect(within(card).getByRole('img', { name: /^With the Planner/ })).toBeVisible()
     const pressed = within(card).getByRole('button', { name: 'Seen' })
     await userEvent.click(pressed)
     await expect(args.onSeenTicketChange).toHaveBeenCalledWith('e1')

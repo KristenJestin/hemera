@@ -4,18 +4,26 @@ import type {
   DiscussionHandlers,
   DiscussionItem,
   PlanningHandlers,
+  Question,
 } from '../../blocks/planning/planning-types.ts'
-import { Button } from '../../components/button/button.tsx'
+import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
+import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import { freezeOf, planningNow } from '../../blocks/planning/planning-progress.ts'
+import { IconEye } from '../../icons.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
 import * as moments from './planning-fixtures.ts'
-import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
+import { PlanningPage, discussionViewId, focusTarget, probeViewId } from './planning-page.tsx'
 import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
 const MOMENTS = {
+  starting: moments.starting,
   writing: moments.writing,
+  waveToAnswer: moments.waveToAnswer,
+  plannerFailed: moments.plannerFailed,
+  plannerSilent: moments.plannerSilent,
   firstWave: moments.firstWave,
   wave: moments.wave,
   discussing: moments.discussing,
@@ -52,6 +60,38 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   onRetry: () => void
 }
 
+/** A moment with the answers the story's engine took, each sent and not yet read by the Planner. */
+function withAnswers(
+  moment: moments.PlanningMoment,
+  taken: ReadonlyMap<string, { optionId: string } | { text: string }>,
+): moments.PlanningMoment {
+  if (taken.size === 0) return moment
+  const waves = moment.data.waves.map((wave) =>
+    Object.assign({}, wave, {
+      questions: wave.questions.map((question): Question => {
+        const given = taken.get(question.id)
+        if (given === undefined) return question
+        return Object.assign({}, question, {
+          state: 'answered' as const,
+          answers: [
+            ...question.answers.map((version) =>
+              Object.assign({}, version, { inputState: 'superseded' as const }),
+            ),
+            {
+              version: question.answers.length + 1,
+              optionId: 'optionId' in given ? given.optionId : null,
+              text: 'text' in given ? given.text : null,
+              at: '11:50',
+              inputState: 'received' as const,
+            },
+          ],
+        })
+      }),
+    }),
+  )
+  return Object.assign({}, moment, { data: Object.assign({}, moment.data, { waves }) })
+}
+
 /**
  * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
  * renderer draws above it, the page as its base, and the views it opens over it — a discussion, a
@@ -68,13 +108,25 @@ export function PlanningScreen({
   onClose,
   ...handlers
 }: PlanningScreenProps): ReactNode {
-  const shown = moment === 'loading' || moment === 'error' ? null : MOMENTS[moment]()
+  // The story's engine: an answer it takes is sent, as the page reads it next.
+  const [taken, setTaken] = useState<ReadonlyMap<string, { optionId: string } | { text: string }>>(
+    new Map(),
+  )
+  const shown =
+    moment === 'loading' || moment === 'error' ? null : withAnswers(MOMENTS[moment](), taken)
+  const answer: PlanningHandlers['onAnswer'] = (questionId, given) =>
+    handlers.onAnswer(questionId, given).then(() => {
+      setTaken((before) => new Map(before).set(questionId, given))
+    })
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
   )
   const [starting, setStarting] = useState<DiscussionItem | null>(null)
   const data = shown?.data ?? null
-  const head = shown?.head ?? { now: null, ready: false, frozen: false }
+  const head = shown?.head ?? { now: null, frozen: false }
+  const line = shown === null ? null : planningNow(shown)
+  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
+  const reading = line?.coldRead ?? null
 
   const discuss = (item: DiscussionItem): void => {
     handlers.onDiscuss(item)
@@ -106,26 +158,46 @@ export function PlanningScreen({
       stage={head.frozen ? 'Ready' : 'Planning'}
       frozen={head.frozen}
       type="feature"
-      ball={head.now !== null ? 'agent' : head.frozen ? 'idle' : 'you'}
-      now={head.now ?? head.silent}
+      ball={line?.ball ?? 'idle'}
+      now={line?.text}
+      onNow={
+        line?.target === null || line?.target === undefined
+          ? undefined
+          : () => {
+              if (line.target !== null) focusTarget(line.target)
+            }
+      }
+      nowChip={
+        reading === null ? undefined : (
+          <LiveChip
+            name={`Cold read ${reading.label}`}
+            icon={<IconEye size="sm" />}
+            state="running"
+            startedAt={reading.startedAt}
+            endedAt={null}
+            onPress={() => focusTarget({ kind: 'coldRead' })}
+          />
+        )
+      }
       marks={head.outdated === true ? [{ kind: 'outdated' }] : []}
       ticket={{ key: 'acme/shop#41' }}
       action={
-        head.ready ? (
-          <Button variant="primary" size="sm" onClick={onFreeze}>
-            Freeze
-          </Button>
+        freeze.shown ? (
+          <FreezeButton offer={freeze} refused={head.refused} onFreeze={onFreeze} />
         ) : undefined
       }
+      actionNote={<FreezeNote offer={freeze} refused={head.refused} />}
       onCancel={head.frozen ? undefined : () => undefined}
       base={
         <PlanningPage
           data={data}
           error={moment === 'error' ? 'The engine did not answer in time.' : failure}
-          refused={head.refused}
+          planner={shown?.planner}
+          declaredComplete={shown?.declaredComplete}
           mentionables={MENTIONABLES}
           onRetry={onRetry}
           {...handlers}
+          onAnswer={answer}
           onDiscuss={discuss}
           onOpenProbe={openProbe}
         />

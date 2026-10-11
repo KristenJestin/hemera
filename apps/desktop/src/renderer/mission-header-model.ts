@@ -1,6 +1,6 @@
 /**
  * What a mission's header and page are made of, apart from drawing them: whether the Spec shows as
- * frozen, whether Freeze and Cancel are offered, the repository names its marks use, what the
+ * frozen, whether Cancel is offered, the repository names its marks use, what the
  * outdated mark says moved, and the rows of the mission's own needs. Plain values and functions,
  * no React: `mission-route.tsx` holds the hooks and draws.
  */
@@ -33,27 +33,17 @@ export function cancelOffered(stage: MissionStage): boolean {
   return stage !== 'Done' && stage !== 'Cancelled'
 }
 
-/** Freeze is offered in Planning, once the engine says everything is settled. */
-export function freezeOffered(stage: MissionStage, readiness: FreezeReadiness | null): boolean {
-  return stage === 'Planning' && readiness !== null && readiness.ready
-}
-
-/** What the header shows beyond the line itself. */
+/**
+ * What the header shows beyond the line itself. Freeze is not here: the Planning page puts it in
+ * the head, from what it shows and what the engine says (`planning-model.ts`).
+ */
 export interface MissionHeaderModel {
   frozen: boolean
-  freeze: boolean
   cancel: boolean
 }
 
-export function headerOf(
-  line: Pick<MissionLine, 'stage' | 'frozen'>,
-  readiness: FreezeReadiness | null,
-): MissionHeaderModel {
-  return {
-    frozen: frozenOf(line),
-    freeze: freezeOffered(line.stage, readiness),
-    cancel: cancelOffered(line.stage),
-  }
+export function headerOf(line: Pick<MissionLine, 'stage' | 'frozen'>): MissionHeaderModel {
+  return { frozen: frozenOf(line), cancel: cancelOffered(line.stage) }
 }
 
 /** The page registered for a stage, if any. */

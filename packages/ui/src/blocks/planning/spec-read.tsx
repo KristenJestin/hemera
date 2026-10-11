@@ -250,6 +250,8 @@ export interface SpecReadProps {
   tasks: readonly Task[]
   /** What changed since the last read: marked where it changed. */
   changes: readonly SpecChange[]
+  /** How many questions may still change each section, by its name: none settles it. */
+  open: ReadonlyMap<string, number>
 }
 
 /**
@@ -263,6 +265,7 @@ export function SpecRead({
   requirements,
   tasks,
   changes,
+  open,
 }: SpecReadProps): ReactNode {
   const changed = changedSet(changes)
   const byName = new Map(sections.map((section) => [section.name, section]))
@@ -275,12 +278,16 @@ export function SpecRead({
           <section
             key={entry.name}
             id={sectionAnchor(entry.name)}
+            tabIndex={-1}
             aria-label={entry.title}
-            className={cn('flex min-w-0 scroll-mt-2 flex-col gap-3', marked && CHANGED)}
+            className={cn(
+              'flex min-w-0 scroll-mt-2 flex-col gap-3 rounded-sm outline-none focus-ring',
+              marked && CHANGED,
+            )}
             data-changed={marked ? '' : undefined}
           >
             <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
-              <SectionMark state={entry.state} />
+              <SectionMark state={entry.state} open={open.get(entry.name)} />
               {entry.title}
               {marked && <ChangedMark />}
             </h2>
@@ -311,13 +318,20 @@ export function SpecRead({
   )
 }
 
-/** The Spec's sections down the left of the page, each with its state, scrolling to it. */
+/**
+ * The Spec's sections down the left of the page, each with its state — settled only once no open
+ * question touches it — scrolling to it.
+ */
 export function SectionsNav({
   sections,
   requirementsState,
   changes,
   tasks,
-}: Pick<SpecReadProps, 'sections' | 'requirementsState' | 'changes' | 'tasks'>): ReactNode {
+  open,
+}: Pick<
+  SpecReadProps,
+  'sections' | 'requirementsState' | 'changes' | 'tasks' | 'open'
+>): ReactNode {
   const changed = changedSet(changes)
   const go = (name: string): void => {
     document.getElementById(sectionAnchor(name))?.scrollIntoView({ block: 'start' })
@@ -332,7 +346,7 @@ export function SectionsNav({
               className="flex h-control-md w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion"
               onClick={() => go(entry.name)}
             >
-              <SectionMark state={entry.state} />
+              <SectionMark state={entry.state} open={open.get(entry.name)} />
               <span className="min-w-0 flex-1 truncate">{entry.title}</span>
               {changed.has(entry.name) && <ChangedMark />}
             </button>

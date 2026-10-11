@@ -136,10 +136,26 @@ describe('The header of a mission', () => {
     expect(drawn()).not.toContain('aria-label="Spec frozen"')
   })
 
-  test('offers Freeze only once the engine says it is ready', () => {
-    expect(drawn({ readiness: ready(true) })).toMatch(/<button[^>]*>Freeze<\/button>/)
-    expect(drawn({ readiness: ready(false) })).not.toContain('Freeze')
-    expect(drawn({ readiness: null })).not.toContain('Freeze')
+  test('Freeze is the Planning page’s: in the head where it puts it, with the line under it', () => {
+    let told: StagePageProps['readiness'] = null
+    const pages = {
+      Planning: ({ frame, readiness }: StagePageProps): ReactNode => {
+        told = readiness
+        return frame({
+          base: null,
+          action: createElement('button', { type: 'button', disabled: true }, 'Freeze'),
+          actionNote: createElement('p', null, 'The cold read is reading the Spec'),
+        })
+      },
+    }
+    const markup = drawn({ pages, readiness: ready(false) })
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>Freeze<\/button>/)
+    expect(markup).toContain('The cold read is reading the Spec')
+    expect(told).toEqual(ready(false))
+  })
+
+  test('the head offers no Freeze of its own, ready or not', () => {
+    expect(drawn({ readiness: ready(true) })).not.toContain('Freeze')
     expect(drawn({ mission: mission({ stage: 'ready' }), readiness: ready(true) })).not.toContain(
       'Freeze',
     )

@@ -4,8 +4,9 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { InputDot } from './planning-marks.tsx'
 
 /**
- * Where an input of the user stands (CT-26): a ring once received, a blue dot once delivered to the
- * Planner, a green dot once integrated in the Spec. The words are in the tooltip, never beside it.
+ * Where an answer of the user stands, from the press to the Spec: a ring in the warning tone while
+ * nothing is answered, a ring once sent, a blue dot once the Planner has it, a green dot once it is
+ * taken into account. The dot follows the answer alone; its tooltip says the step and the next one.
  */
 const meta = {
   tags: ['autodocs'],
@@ -17,35 +18,45 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Received by Hemera: a ring. */
-export const Received: Story = {
+/** Nothing answered yet: a ring in the warning tone, the question waits for the user. */
+export const Unanswered: Story = {
+  args: { state: 'unanswered' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Received' })).toBeVisible()
+    const dot = canvas.getByRole('img', { name: /^Not answered yet/ })
+    await expect(dot.querySelector('[data-input="unanswered"]')).not.toBeNull()
   },
 }
 
-/** Delivered to the Planner: a blue dot; its words come with the tooltip. */
+/** Sent: Hemera has it, the Planner has not read it yet. */
+export const Received: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('img', { name: /^Sent/ })).toBeVisible()
+  },
+}
+
+/** With the Planner: a blue dot; the tooltip says what comes next. */
 export const Delivered: Story = {
   args: { state: 'delivered' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const dot = canvas.getByRole('img', { name: 'Delivered to the Planner' })
+    const dot = canvas.getByRole('img', { name: /^With the Planner/ })
     await userEvent.hover(dot)
     await waitFor(() =>
       expect(within(document.body).getByRole('tooltip')).toHaveTextContent(
-        'Delivered to the Planner',
+        'next, taken into account in the Spec',
       ),
     )
   },
 }
 
-/** Integrated in the Spec by the Planner: a green dot. */
+/** Taken into account in the Spec: a green dot, and only then. */
 export const Integrated: Story = {
   args: { state: 'integrated' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Integrated in the Spec' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Taken into account in the Spec' })).toBeVisible()
   },
 }
 

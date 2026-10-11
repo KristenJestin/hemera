@@ -33,7 +33,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Running: its chip, skeleton rows where the findings will be, no other pass to run. */
+/** Running: its chip, what it does in a sentence, no other pass to run. */
 export const Running: Story = {
   args: {
     passes: [
@@ -49,10 +49,7 @@ export const Running: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: /Cold read C1/ })).toBeVisible()
-    await expect(canvas.getByRole('list', { name: 'Findings' })).toHaveAttribute(
-      'aria-busy',
-      'true',
-    )
+    await expect(canvas.getByText(/A fresh reader goes through the whole Spec/)).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Run another cold read' })).toBeNull()
   },
 }

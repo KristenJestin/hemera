@@ -2,7 +2,8 @@
  * A mission planned in the real application, its Planner the fake agent the suite scripts
  * (`planning-script.ts`): the vision that starts it, the draft it writes, two waves answered one
  * by one, a question put on hold with a note, a discussion closed on the decision it proposed, a
- * Probe's chip, the question on hold answered at last, the cold read's report, and Freeze offered.
+ * Probe's chip, the question on hold answered at last, the cold read's report, and Freeze offered:
+ * each settled wave folded to its line, and the head's Now line leading to Freeze once it is ready.
  * `planning.restarted.e2e.ts` starts Hemera again on the same data folder, finds all of it, and
  * freezes the Spec.
  *
@@ -39,6 +40,10 @@ const rail = () => $('aside[aria-label="What calls for you"]')
 /** A question's card in the rail, by its id. */
 const card = (id: string) => rail().$(`article[aria-label^="${id} ·"]`)
 const option = (id: string, letter: string) => card(id).$(`button[aria-label^="${letter} "]`)
+/** A settled wave's line, which opens its questions. */
+const settledWave = (number: number) => rail().$(`button*=Wave ${String(number)}`)
+/** The head's Now line. */
+const nowLine = () => $('[data-now]')
 /** The view of a discussion over the page. */
 const view = () => $('[data-view^="discussion:"]')
 
@@ -94,11 +99,14 @@ describe('A mission planned with its Planner', () => {
     )
   })
 
-  it('answers the first wave one question at a time, each answer integrated', async () => {
+  it('answers the first wave one question at a time, each answer integrated, then folds it', async () => {
+    await expect(card('Q1').$('[data-input="unanswered"]')).toBeExisting()
     await option('Q1', 'A').click()
     await expect(card('Q1').$('[data-input="integrated"]')).toBeExisting({ wait: 30_000 })
+    await expect(card('Q2').$('[data-input="unanswered"]')).toBeExisting()
     await option('Q2', 'B').click()
-    await expect(card('Q2').$('[data-input="integrated"]')).toBeExisting({ wait: 30_000 })
+    await expect(settledWave(1)).toHaveText(expect.stringContaining('2 settled'), { wait: 30_000 })
+    await expect(rail().$('ul[aria-label="Wave 1"]')).not.toBeExisting()
     await expect(rail().$('ul[aria-label="Wave 2"]')).toBeDisplayed({ wait: 30_000 })
   })
 
@@ -141,17 +149,20 @@ describe('A mission planned with its Planner', () => {
     await expect($('[data-view^="probe:"]')).not.toBeExisting()
   })
 
-  it('answers the question on hold, after which the cold read reports and Freeze appears', async () => {
+  it('answers the question on hold, after which the cold read reports and Freeze is ready', async () => {
     // The Planner's session keeps its script; the cold read's, started after this, takes this one.
     await browser.electron.execute(
       async (_, script) => await globalThis.hemeraProbe?.scriptAgent(script),
       COLD_READER,
     )
     await option('Q3', 'A').click()
-    await expect(card('Q3').$('[data-input="integrated"]')).toBeExisting({ wait: 30_000 })
-    await expect($('button=Freeze')).toBeDisplayed({ wait: 45_000 })
+    await expect(settledWave(2)).toHaveText(expect.stringContaining('settled'), { wait: 30_000 })
+    await expect($('button=Freeze')).toBeEnabled({ wait: 45_000 })
     await expect(rail().$('section[aria-label="Cold read"]')).toHaveText(
       expect.stringContaining('Nothing found.'),
     )
+    await expect(nowLine()).toHaveText('Ready to freeze')
+    await nowLine().click()
+    await expect($('button=Freeze')).toBeFocused()
   })
 })

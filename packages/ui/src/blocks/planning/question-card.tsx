@@ -4,14 +4,14 @@ import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
-import { Loading } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
+import { IconCheck, IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { InputDot } from './planning-marks.tsx'
-import { NotSent, SendButton, useSending } from './sending.tsx'
+import { type AnswerStep, INPUT_SHORT, InputDot, answerStepOf } from './planning-marks.tsx'
+import { targetId } from './planning-progress.ts'
+import { NotSent, SendButton, type Sending, useSending } from './sending.tsx'
 import {
   type AnswerVersion,
   type PlanningHandlers,
@@ -20,16 +20,28 @@ import {
   latest,
 } from './planning-types.ts'
 
+/**
+ * An option: a quiet frame until the user chooses it, then the primary's frame and fill, its check
+ * in the room of its letter, and the others dimmed. Nothing else wears a frame or a fill: the
+ * recommendation is a star and a line.
+ */
 const OPTION =
-  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-muted aria-disabled:opacity-50 aria-busy:opacity-100'
+  'flex w-full min-w-0 items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-pressed:border-primary aria-pressed:bg-primary-muted data-dimmed:text-muted-foreground'
 
-const LETTER = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
+/** The option's letter, and its check once chosen, in a room of one width: the label never shifts. */
+const LETTER =
+  'flex w-icon-sm shrink-0 justify-center font-mono text-xs leading-5 text-muted-foreground'
 
 const QUIET = 'text-xs text-muted-foreground'
 
 const ID = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
 
 const BOX = 'flex flex-col gap-2 rounded-md border border-border px-3 py-2'
+
+/** Where the answer shown stands: on its way, or a step of its input. */
+type StepShown = 'sending' | AnswerStep
+
+const STEP_WORDS: Record<StepShown, string> = { sending: 'Sending', ...INPUT_SHORT }
 
 const RETIRED: ReadonlySet<Question['state']> = new Set(['withdrawn', 'replaced', 'moot'])
 
@@ -71,8 +83,10 @@ function RetiredQuestion({
   const why = RETIRED_WORDS[question.state]?.(question) ?? ''
   return (
     <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
       aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 items-start gap-2 px-3 py-2 text-sm text-muted-foreground"
+      className="flex min-w-0 items-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground outline-none focus-ring"
     >
       <span className={ID}>{question.id}</span>
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -93,57 +107,76 @@ function RetiredQuestion({
   )
 }
 
-/** A question answered before the page opened, as one line: its answer, its dot, and Change. */
+/**
+ * An answered question, folded: the question on its own row, the whole width; under it, the
+ * answer in a quiet panel with where it stands (its dot and a word) beneath it, and Change at the
+ * panel's end, where no step moves it. It folds to it the moment the user answers.
+ */
 function AnsweredLine({
   question,
   answer,
+  step,
   onChange,
 }: {
   question: Question
-  answer: AnswerVersion
+  answer: Pick<AnswerVersion, 'optionId' | 'text'>
+  step: StepShown
   onChange: () => void
 }): ReactNode {
   const option = question.options.find((candidate) => candidate.id === answer.optionId)
   return (
     <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
       aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 items-start gap-2 px-3 py-2.5 text-sm"
+      className="flex min-w-0 items-start gap-2 rounded-md px-3 py-2.5 text-sm outline-none focus-ring"
     >
       <span className={ID}>{question.id}</span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="line-clamp-2 break-words">{question.text}</span>
-        <span className="truncate text-xs text-muted-foreground">
-          {option !== undefined ? `${option.id} · ${option.label}` : `“${answer.text ?? ''}”`}
-        </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <span className="break-words">{question.text}</span>
+        <div className="flex min-w-0 items-center gap-3 rounded-md bg-muted px-3 py-1.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate">
+              {option !== undefined ? `${option.id} · ${option.label}` : `“${answer.text ?? ''}”`}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <InputDot state={step === 'sending' ? 'received' : step} />
+              <span role="status" className={QUIET}>
+                {STEP_WORDS[step]}
+              </span>
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Change the answer to ${question.id}`}
+            onClick={onChange}
+          >
+            Change
+          </Button>
+        </div>
         <ChangedAnswer question={question} />
       </div>
-      <InputDot state={answer.inputState} />
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label={`Change the answer to ${question.id}`}
-        onClick={onChange}
-      >
-        Change
-      </Button>
     </article>
   )
 }
 
 /**
- * The options, the recommended one starred; a press answers at once. While the answer is on its
- * way, the option pressed works and the others wait: a second press sends nothing.
+ * The options, the recommended one starred; a press answers at once, and the option pressed is
+ * filled at once, before the engine has it. While it is on its way a second press sends nothing.
  */
 function Options({
   question,
-  onAnswer,
+  chosen,
+  answering,
+  onPress,
 }: {
   question: Question
-  onAnswer: (optionId: string) => Promise<void>
+  /** The option shown as chosen: the one pressed, else the latest answer's. */
+  chosen: string | null
+  answering: Sending
+  onPress: (optionId: string) => void
 }): ReactNode {
-  const chosen = latest(question)?.optionId ?? null
-  const answering = useSending()
-  const [pressed, setPressed] = useState<string | null>(null)
   return (
     <ul aria-label={`Options of ${question.id}`} className="flex flex-col gap-1.5">
       {question.options.map((option) => (
@@ -152,28 +185,33 @@ function Options({
             type="button"
             className={OPTION}
             aria-pressed={chosen === option.id}
-            aria-busy={answering.busy && pressed === option.id}
+            aria-busy={answering.busy && chosen === option.id}
             aria-disabled={answering.busy}
+            data-dimmed={chosen !== null && chosen !== option.id ? '' : undefined}
             aria-label={`${option.id} ${option.label}${option.id === question.recommended ? ', recommended' : ''}`}
-            onClick={() =>
-              // A press while an answer is on its way sends nothing: `send` keeps to one.
-              answering.send(() => {
-                setPressed(option.id)
-                return onAnswer(option.id)
-              })
-            }
+            onClick={() => onPress(option.id)}
           >
-            <span className={LETTER}>{option.id}</span>
-            <span className="min-w-0 flex-1 font-medium break-words">{option.label}</span>
-            {answering.busy && pressed === option.id && (
-              <span className="flex shrink-0 pt-0.5">
-                <Loading size="sm" label="Sending" />
+            {chosen === option.id ? (
+              <span
+                aria-hidden="true"
+                className="flex w-icon-sm shrink-0 justify-center pt-0.5 text-primary"
+                data-chosen=""
+              >
+                <IconCheck size="sm" />
               </span>
+            ) : (
+              <span className={LETTER}>{option.id}</span>
             )}
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="font-medium break-words">{option.label}</span>
+              {option.detail !== '' && (
+                <span className="text-xs break-words text-muted-foreground">{option.detail}</span>
+              )}
+            </span>
             {option.id === question.recommended && (
               <span
                 aria-hidden="true"
-                className="flex shrink-0 pt-0.5 text-primary"
+                className="flex shrink-0 pt-0.5 text-muted-foreground"
                 data-recommended=""
               >
                 <IconStar size="sm" />
@@ -287,23 +325,24 @@ export interface QuestionCardProps extends Pick<
   question: Question
   /** Whether a discussion on it exists already: Discuss then opens it. */
   discussed: boolean
-  /** An answered question as one line, its answer and its dot, until Change opens it again. */
-  foldAnswered: boolean
   /** What the user's own words can mention. */
   mentionables: readonly Mentionable[]
 }
 
 /**
- * A question of the Planner: its options with the recommended one and why, answered by a press
- * that leaves at once (no Send), or in the user's own words through the mention field; "I'm
- * waiting on someone" with an optional note, and the Planner's drafted message with Copy; an
- * answer proposed from the ticket with Accept, Edit and Dismiss; the answer's state as a dot, a
- * changed answer said as a change. A retired question stays, with its reason.
+ * A question of the Planner: its options with the recommended one starred and why, answered by a
+ * press that leaves at once (no Send) and fills the option at once, or in the user's own words
+ * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
+ * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
+ * Answered, the card folds at once: the question, then its answer and Change; its dot and a word say
+ * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
+ * is said as a change; a retired question stays, with its reason. Open or folded, the question
+ * has its row to itself: the dot and its word, and the waiting clock, sit under it. Everything but a press on its
+ * way and Change is drawn from the question: a card is the same live and after a restart.
  */
 export function QuestionCard({
   question,
   discussed,
-  foldAnswered,
   mentionables,
   onAnswer,
   onWaitOnSomeone,
@@ -317,17 +356,37 @@ export function QuestionCard({
   const [editing, setEditing] = useState<string | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
-  const [changing, setChanging] = useState(false)
+  // Change opens a folded card again until the next answer comes: the count of answers then.
+  const [changingAt, setChangingAt] = useState<number | null>(null)
+  // The option pressed, shown at once, until the answer it sent comes back with the question.
+  const [pressed, setPressed] = useState<{ optionId: string; after: number } | null>(null)
+  const folding = useTransition(fold)
+  const choosing = useSending()
   const answering = useSending()
   const waiting = useSending()
-  // Answered before the page opened: one line. Answered here: the card stays in place, answered.
-  const [answeredBefore] = useState(question.state === 'answered')
   const answer = latest(question)
+  const count = question.answers.length
+  const pressing =
+    pressed !== null && pressed.after === count && choosing.refusal === undefined
+      ? pressed.optionId
+      : null
   if (RETIRED.has(question.state)) {
     return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
   }
-  if (foldAnswered && answeredBefore && answer !== undefined && !changing) {
-    return <AnsweredLine question={question} answer={answer} onChange={() => setChanging(true)} />
+  // Answered, it folds at once to its line — on the press, before the engine has it — and stays
+  // folded while the answer goes on its way. Apart from a press on its way and Change, what it
+  // shows comes from the question alone: the same card live and after a restart.
+  const folded =
+    pressing !== null ||
+    (question.state === 'answered' && answer !== undefined && changingAt !== count)
+  const step: StepShown =
+    pressing === null ? answerStepOf(question) : choosing.busy ? 'sending' : 'received'
+  const press = (optionId: string): void => {
+    // A press while an answer is on its way sends nothing: `send` keeps to one.
+    choosing.send(() => {
+      setPressed({ optionId, after: count })
+      return onAnswer(question.id, { optionId })
+    })
   }
   const proposal = question.proposals[0]
   const submit = (): void => {
@@ -352,115 +411,176 @@ export function QuestionCard({
       },
     )
   }
+  // Answered, the card folds to its line: the card collapses as the line comes, on `fold`.
   return (
-    <article
-      aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 flex-col gap-3 px-3 py-3"
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        <span className={ID}>{question.id}</span>
-        <h3 className="min-w-0 flex-1 text-sm font-medium break-words">{question.text}</h3>
-        {question.state === 'waiting' && (
-          <Legend label="Waiting on someone">
-            <span aria-hidden="true" className="flex text-muted-foreground">
-              <IconClockPause size="sm" />
-            </span>
-          </Legend>
-        )}
-        {answer !== undefined && <InputDot state={answer.inputState} />}
-      </div>
-      <Options question={question} onAnswer={(optionId) => onAnswer(question.id, { optionId })} />
-      <p className={cn(QUIET, 'break-words')}>
-        <span className="font-medium text-foreground">Recommended {question.recommended}</span>
-        {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
-      </p>
-      {answer !== undefined && answer.text !== null && (
-        <blockquote className="border-l-2 border-border pl-3 text-sm break-words">
-          {answer.text}
-        </blockquote>
-      )}
-      <ChangedAnswer question={question} />
-      {question.state === 'waiting' && <WaitingBox question={question} onCopy={onCopyDraft} />}
-      {proposal !== undefined && (
-        <Proposed
-          proposal={proposal}
-          onAccept={() => onAcceptProposed(proposal.id, null)}
-          onEdit={() => {
-            setEditing(proposal.id)
-            setText(proposal.text)
-            setOwnWords(true)
-          }}
-          onDismiss={() => onDismissProposed(proposal.id)}
-        />
-      )}
-      <Unfold open={ownWords}>
-        <div className="flex flex-col gap-1">
-          <MentionField
-            label={`Your answer to ${question.id}`}
-            placeholder="In your own words…"
-            value={text}
-            onValueChange={(value) => setText(value)}
-            mentionables={mentionables}
-            onSubmit={submit}
-            disabled={answering.busy}
+    <AnimatePresence initial={false}>
+      {folded ? (
+        <motion.div
+          key="line"
+          className="overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={folding}
+        >
+          <AnsweredLine
+            question={question}
+            answer={
+              pressing === null && answer !== undefined
+                ? answer
+                : { optionId: pressing, text: null }
+            }
+            step={step}
+            onChange={() => setChangingAt(count)}
           />
-          <NotSent refusal={answering.refusal} />
-        </div>
-      </Unfold>
-      <Unfold open={noting}>
-        <Input
-          label="Who, or what, it waits on"
-          placeholder="Optional"
-          size="sm"
-          value={note}
-          onValueChange={setNote}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') wait()
-          }}
-          action={
-            <Button
-              variant="secondary"
-              size="sm"
-              state={waiting.busy ? 'loading' : 'idle'}
-              onClick={wait}
-            >
-              Wait
-            </Button>
-          }
-        />
-      </Unfold>
-      <div className="flex flex-wrap items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={ownWords}
-          onClick={() => {
-            setEditing(null)
-            setOwnWords(!ownWords)
-          }}
+        </motion.div>
+      ) : (
+        <motion.div
+          key="card"
+          className="overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={folding}
         >
-          In my own words
-        </Button>
-        {question.state === 'open' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-expanded={noting}
-            onClick={() => setNoting(!noting)}
+          <article
+            id={targetId({ kind: 'question', id: question.id })}
+            tabIndex={-1}
+            aria-label={`${question.id} · ${question.text}`}
+            className="flex min-w-0 flex-col gap-3 rounded-md px-3 py-3 outline-none focus-ring"
           >
-            <IconClockPause size="sm" />
-            I’m waiting on someone
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onDiscuss({ kind: 'question', id: question.id })}
-        >
-          <IconMessages size="sm" />
-          {discussed ? 'Open the discussion' : 'Discuss'}
-        </Button>
-      </div>
-    </article>
+            <div className="flex min-w-0 items-start gap-2">
+              <span className={ID}>{question.id}</span>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <h3 className="text-sm font-medium break-words">{question.text}</h3>
+                <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="flex items-center gap-1.5">
+                    <InputDot state={step === 'sending' ? 'received' : step} />
+                    <span role="status" className={QUIET}>
+                      {STEP_WORDS[step]}
+                    </span>
+                  </span>
+                  {question.state === 'waiting' && (
+                    <Legend label="Waiting on someone">
+                      <span aria-hidden="true" className="flex text-muted-foreground">
+                        <IconClockPause size="sm" />
+                      </span>
+                    </Legend>
+                  )}
+                </span>
+              </div>
+            </div>
+            {question.why !== '' && <p className={cn(QUIET, 'break-words')}>{question.why}</p>}
+            <Options
+              question={question}
+              chosen={pressing ?? answer?.optionId ?? null}
+              answering={choosing}
+              onPress={press}
+            />
+            <NotSent refusal={choosing.refusal} />
+            <p className={cn(QUIET, 'flex min-w-0 items-start gap-1.5 break-words')}>
+              <span aria-hidden="true" className="flex shrink-0 pt-0.5">
+                <IconStar size="sm" />
+              </span>
+              <span className="min-w-0">
+                <span className="font-medium text-foreground">
+                  Recommended {question.recommended}
+                </span>
+                {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
+              </span>
+            </p>
+            {answer !== undefined && answer.text !== null && (
+              <blockquote className="border-l-2 border-border pl-3 text-sm break-words">
+                {answer.text}
+              </blockquote>
+            )}
+            <ChangedAnswer question={question} />
+            {question.state === 'waiting' && (
+              <WaitingBox question={question} onCopy={onCopyDraft} />
+            )}
+            {proposal !== undefined && (
+              <Proposed
+                proposal={proposal}
+                onAccept={() => onAcceptProposed(proposal.id, null)}
+                onEdit={() => {
+                  setEditing(proposal.id)
+                  setText(proposal.text)
+                  setOwnWords(true)
+                }}
+                onDismiss={() => onDismissProposed(proposal.id)}
+              />
+            )}
+            <Unfold open={ownWords}>
+              <div className="flex flex-col gap-1">
+                <MentionField
+                  label={`Your answer to ${question.id}`}
+                  placeholder="In your own words…"
+                  value={text}
+                  onValueChange={(value) => setText(value)}
+                  mentionables={mentionables}
+                  onSubmit={submit}
+                  disabled={answering.busy}
+                />
+                <NotSent refusal={answering.refusal} />
+              </div>
+            </Unfold>
+            <Unfold open={noting}>
+              <Input
+                label="Who, or what, it waits on"
+                placeholder="Optional"
+                size="sm"
+                value={note}
+                onValueChange={setNote}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') wait()
+                }}
+                action={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    state={waiting.busy ? 'loading' : 'idle'}
+                    onClick={wait}
+                  >
+                    Wait
+                  </Button>
+                }
+              />
+            </Unfold>
+            <div className="flex flex-wrap items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={ownWords}
+                onClick={() => {
+                  setEditing(null)
+                  setOwnWords(!ownWords)
+                }}
+              >
+                In my own words
+              </Button>
+              {question.state === 'open' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-expanded={noting}
+                  onClick={() => setNoting(!noting)}
+                >
+                  <IconClockPause size="sm" />
+                  I’m waiting on someone
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDiscuss({ kind: 'question', id: question.id })}
+              >
+                <IconMessages size="sm" />
+                {discussed ? 'Open the discussion' : 'Discuss'}
+              </Button>
+            </div>
+          </article>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }

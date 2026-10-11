@@ -10,7 +10,14 @@ import {
   IconPencil,
   IconPlus,
 } from '../../icons.ts'
-import type { Delta, InputState, SectionState, Severity } from './planning-types.ts'
+import {
+  type Delta,
+  type InputState,
+  type Question,
+  type SectionState,
+  type Severity,
+  latest,
+} from './planning-types.ts'
 
 /**
  * The marks of the Planning page: a section's state, where an input stands, how bad a finding
@@ -20,7 +27,7 @@ import type { Delta, InputState, SectionState, Severity } from './planning-types
 
 const SECTION_WORDS: Record<SectionState, string> = {
   empty: 'Not written yet',
-  written: 'Written',
+  written: 'Settled',
   being_written: 'Being written',
 }
 
@@ -30,8 +37,34 @@ const SECTION_POSE: Record<SectionState, MarkState> = {
   being_written: 'running',
 }
 
-/** A section's state as a glyph: a quiet ring, a closed one, the running arc while written. */
-export function SectionMark({ state }: { state: SectionState }): ReactNode {
+const questionsOpen = (open: number): string =>
+  open === 1 ? '1 question open' : `${String(open)} questions open`
+
+/**
+ * A section's state as a glyph: a quiet ring, the running arc while written, the green check once
+ * settled. Written while open questions will still change it, it is in progress: the waiting mark
+ * and their count, never the check.
+ */
+export function SectionMark({
+  state,
+  open = 0,
+}: {
+  state: SectionState
+  /** How many open questions touch it. */
+  open?: number | undefined
+}): ReactNode {
+  if (state === 'written' && open > 0) {
+    return (
+      <span className="flex shrink-0 items-center gap-1">
+        <Legend label={`Written · ${questionsOpen(open)}`}>
+          <StatusMark state="waiting" size="sm" />
+        </Legend>
+        <span aria-hidden="true" className="text-xs text-warning tabular-nums">
+          {open}
+        </span>
+      </span>
+    )
+  }
   return (
     <Legend label={SECTION_WORDS[state]}>
       <StatusMark state={SECTION_POSE[state]} size="sm" />
@@ -39,22 +72,50 @@ export function SectionMark({ state }: { state: SectionState }): ReactNode {
   )
 }
 
-export const INPUT_WORDS: Record<InputState, string> = {
-  received: 'Received',
-  delivered: 'Delivered to the Planner',
-  integrated: 'Integrated in the Spec',
+/** Where an answer stands: nothing answered yet, or the state of the input that carries it. */
+export type AnswerStep = 'unanswered' | InputState
+
+/**
+ * Where a question's answer stands, from the question alone: not answered while it is asked (an
+ * earlier answer of a question asked again does not count), else its latest answer's input; an
+ * answer the engine has not listed an input for yet was just sent.
+ */
+export function answerStepOf(question: Question): AnswerStep {
+  if (question.state !== 'answered') return 'unanswered'
+  return latest(question)?.inputState ?? 'unanswered'
+}
+
+/** Each step in words, with the one that follows it: the dot's legend. */
+export const INPUT_WORDS: Record<AnswerStep, string> = {
+  unanswered: 'Not answered yet',
+  received: 'Sent; next, the Planner reads it',
+  delivered: 'With the Planner; next, taken into account in the Spec',
+  integrated: 'Taken into account in the Spec',
   superseded: 'Replaced by a later answer',
 }
 
-const INPUT_DOT: Record<InputState, string> = {
-  received: 'size-2 shrink-0 rounded-full border border-muted-foreground hover-motion',
+/** Each step in a word or two, under a question once answered. */
+export const INPUT_SHORT: Record<AnswerStep, string> = {
+  unanswered: 'Not answered yet',
+  received: 'Sent',
+  delivered: 'With the Planner',
+  integrated: 'Taken into account',
+  superseded: 'Replaced',
+}
+
+const INPUT_DOT: Record<AnswerStep, string> = {
+  unanswered: 'size-2 shrink-0 rounded-full border border-warning hover-motion',
+  received: 'size-2 shrink-0 rounded-full border border-info hover-motion',
   delivered: 'size-2 shrink-0 rounded-full bg-info hover-motion',
   integrated: 'size-2 shrink-0 rounded-full bg-success hover-motion',
   superseded: 'size-2 shrink-0 rounded-full border border-border hover-motion',
 }
 
-/** Where an input of the user stands: a ring received, a dot delivered, a green dot integrated. */
-export function InputDot({ state }: { state: InputState }): ReactNode {
+/**
+ * Where an answer of the user stands: a warning ring unanswered, a ring sent, a blue dot with the
+ * Planner, a green dot taken into account. It follows the answer alone, never anything else.
+ */
+export function InputDot({ state }: { state: AnswerStep }): ReactNode {
   return (
     <Legend label={INPUT_WORDS[state]}>
       <span aria-hidden="true" className="flex size-icon-sm items-center justify-center">

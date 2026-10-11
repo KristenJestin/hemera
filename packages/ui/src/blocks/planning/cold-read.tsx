@@ -154,7 +154,12 @@ export function ColdReadReport({
   )
   const open = pass.findings.filter((finding) => finding.fate === 'open').length
   return (
-    <section aria-label="Cold read">
+    <section
+      id="planning-coldRead"
+      tabIndex={-1}
+      aria-label="Cold read"
+      className="rounded-xl outline-none focus-ring"
+    >
       <Frame
         header={
           <FrameHeader
@@ -182,13 +187,11 @@ export function ColdReadReport({
             The cold read failed: {pass.failure}
           </p>
         ) : busy ? (
-          <ul aria-label="Findings" aria-busy="true" className="flex flex-col">
-            {[0, 1].map((row) => (
-              <li key={row} className={ROW}>
-                <span className="h-4 w-full rounded-sm bg-skeleton motion-safe:animate-breathe" />
-              </li>
-            ))}
-          </ul>
+          <p aria-busy="true" className="px-4 py-3 text-sm break-words text-muted-foreground">
+            {pass.state === 'waiting_for_slot'
+              ? 'It starts as soon as an agent is free.'
+              : 'A fresh reader goes through the whole Spec, without the conversation that wrote it. What it finds comes here, and Freeze waits for it.'}
+          </p>
         ) : (
           <>
             <FreshnessLine freshness={freshness} />

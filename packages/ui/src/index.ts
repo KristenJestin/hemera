@@ -175,9 +175,22 @@ export * as Planning from './blocks/planning/planning-types.ts'
 export {
   PlanningPage,
   discussionViewId,
+  focusTarget,
   probeViewId,
   type PlanningPageProps,
 } from './surfaces/planning/planning-page.tsx'
+export {
+  freezeOf,
+  planningNow,
+  planningSteps,
+  type FreezeOffer,
+  type Planner,
+  type PlanningFacts,
+  type PlanningNow,
+  type PlanningTarget,
+} from './blocks/planning/planning-progress.ts'
+export { FreezeButton, FreezeNote } from './blocks/planning/freeze.tsx'
+export { answerStepOf, type AnswerStep } from './blocks/planning/planning-marks.tsx'
 export { planningViews, type PlanningViewsOf } from './surfaces/planning/planning-views.tsx'
 export {
   DiscussionThread,

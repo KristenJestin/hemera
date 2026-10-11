@@ -1,8 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { CHANGES, REQUIREMENTS, TASKS, WRITTEN } from '../../surfaces/planning/planning-fixtures.ts'
-import { SpecRead } from './spec-read.tsx'
+import {
+  CHANGES,
+  REQUIREMENTS,
+  TASKS,
+  WAVES,
+  WRITTEN,
+} from '../../surfaces/planning/planning-fixtures.ts'
+import { openBySection } from './planning-types.ts'
+import { SectionsNav, SpecRead } from './spec-read.tsx'
 
 /**
  * The Spec as the Planning page reads it, in the middle at its measure: the seven prose sections
@@ -20,6 +27,7 @@ const meta = {
     requirements: REQUIREMENTS,
     tasks: TASKS,
     changes: [],
+    open: new Map(),
   },
   decorators: [
     (Story) => (
@@ -40,6 +48,55 @@ export const Written: Story = {
     await expect(canvas.getAllByRole('heading', { level: 2 })).toHaveLength(8)
     await expect(canvas.getByRole('region', { name: 'Requirements' })).toBeVisible()
     await expect(canvas.queryByRole('textbox')).toBeNull()
+  },
+}
+
+/**
+ * Every section written and no question open: each wears the green check, which means settled.
+ */
+export const SectionsSettled: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const decisions = canvas.getByRole('region', { name: 'Decisions' })
+    await expect(within(decisions).getByRole('img', { name: 'Settled' })).toBeVisible()
+  },
+}
+
+/**
+ * Decisions and Requirements written while questions are open on them: in progress, with the
+ * count, on the heading and in the list; never the green check until they are answered and taken
+ * into account.
+ */
+export const SectionsWithQuestionsOpen: Story = {
+  args: { open: openBySection(WAVES) },
+  render: (args) => (
+    <div className="flex gap-8">
+      <div className="w-settings-nav shrink-0">
+        <SectionsNav
+          sections={args.sections}
+          requirementsState={args.requirementsState}
+          changes={args.changes}
+          tasks={args.tasks}
+          open={args.open}
+        />
+      </div>
+      <SpecRead {...args} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const decisions = canvas.getByRole('region', { name: 'Decisions' })
+    await expect(
+      within(decisions).getByRole('img', { name: 'Written · 1 question open' }),
+    ).toBeVisible()
+    await expect(within(decisions).queryByRole('img', { name: 'Settled' })).toBeNull()
+    const requirements = canvas.getByRole('region', { name: 'Requirements' })
+    await expect(
+      within(requirements).getByRole('img', { name: 'Written · 2 questions open' }),
+    ).toBeVisible()
+    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
+    await expect(nav.getByRole('img', { name: 'Written · 2 questions open' })).toBeVisible()
+    await expect(nav.getAllByRole('img', { name: 'Settled' })).toHaveLength(6)
   },
 }
 
