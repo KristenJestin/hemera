@@ -25,7 +25,9 @@ import {
   setupShownOf,
   setupTimesOf,
   setupMessagesOf,
+  setupLineageOf,
   sinceLatestSetup,
+  editedChangesOf,
 } from '../src/renderer/setup-cards.ts'
 
 const card = (
@@ -41,6 +43,7 @@ const card = (
   details: [],
   state: 'pending',
   refusal: null,
+  discussion: null,
   createdAt: `2026-10-06T16:00:0${id.length}.000Z`,
   decidedAt: null,
   ...more,
@@ -211,6 +214,165 @@ describe('A setup launched again', () => {
     expect(shown.map((one) => one.id)).toEqual(['c1', 'r2'])
     expect(setupEntriesOf(shown).map((entry) => entry.kind)).toEqual(['repositories', 'commands'])
     expect(sinceLatestSetup(cards, null)).toEqual(cards)
+  })
+
+  test('started again for a discussion, it is still the same setup: its lineage, oldest first (#185)', () => {
+    const resumed = { ...session('s3', 'setup', '2026-10-06T12:00:00.000Z'), lineage: 's2' }
+    expect(setupLineageOf([resumed, first, second])).toEqual([second, resumed])
+    expect(setupLineageOf([])).toEqual([])
+  })
+})
+
+describe('A card the user edited or discussed (#185)', () => {
+  const language = (id: string, tag: string, more: Partial<SetupCard> = {}) =>
+    card(id, { kind: 'specLanguage', language: tag, source: 'README.md' }, more)
+
+  test('a card another took the place of is no longer drawn: its kind shows the one that waits', () => {
+    const [entry] = setupEntriesOf([
+      language('l1', 'fr', { state: 'revised' }),
+      language('l22', 'de'),
+    ])
+    expect(entry).toEqual({
+      kind: 'specLanguage',
+      status: { state: 'proposed', refused: undefined },
+      proposal: { kind: 'specLanguage', items: [{ id: 'l22', tag: 'de', source: 'README.md' }] },
+    })
+  })
+
+  test('while the agent answers a discussion, its kind shows the user’s words', () => {
+    const [entry] = setupEntriesOf([language('l1', 'fr', { discussion: 'It is German.' })])
+    expect(entry?.status).toEqual({ state: 'discussed', note: 'It is German.' })
+  })
+
+  test('an edit becomes the changes that replace the waiting cards, what the editor does not show kept', () => {
+    const cards = [
+      card('r1', { kind: 'repository', path: 'web', remote: 'origin', baseBranch: 'main' }),
+      card('c1', {
+        kind: 'command',
+        name: 'test',
+        type: 'test',
+        line: 'npm test',
+        check: true,
+        replaces: false,
+      }),
+      card('c2', {
+        kind: 'command',
+        name: 'lint',
+        type: 'lint',
+        line: 'npm run lint',
+        replaces: false,
+      }),
+      card('s1', { kind: 'step', step: 'copy', repository: 'web', path: '.env.example' }),
+      card('v1', { kind: 'variable', name: 'ACME_REGION', replaces: false }),
+      language('l1', 'fr'),
+    ]
+    expect(
+      editedChangesOf(cards, {
+        kind: 'repositories',
+        items: [{ id: 'r1', path: 'web', base: 'upstream/release/1.0' }],
+      }),
+    ).toEqual({
+      cardIds: ['r1'],
+      changes: [
+        {
+          from: 'r1',
+          proposal: {
+            kind: 'repository',
+            path: 'web',
+            remote: 'upstream',
+            baseBranch: 'release/1.0',
+          },
+        },
+      ],
+    })
+    expect(
+      editedChangesOf(cards, {
+        kind: 'commands',
+        items: [
+          {
+            id: 'c1',
+            name: 'test',
+            type: 'test',
+            line: 'npm test -- --run',
+            check: true,
+            service: false,
+            atOpen: false,
+            ask: false,
+          },
+          {
+            id: 'added-1',
+            name: 'build',
+            type: 'script',
+            line: 'npm run build',
+            check: false,
+            service: false,
+            atOpen: false,
+            ask: false,
+          },
+        ],
+      }),
+    ).toEqual({
+      cardIds: ['c1', 'c2'],
+      changes: [
+        {
+          from: 'c1',
+          proposal: {
+            kind: 'command',
+            name: 'test',
+            type: 'test',
+            line: 'npm test -- --run',
+            check: true,
+          },
+        },
+        {
+          from: null,
+          proposal: { kind: 'command', name: 'build', type: 'script', line: 'npm run build' },
+        },
+      ],
+    })
+    expect(
+      editedChangesOf(cards, {
+        kind: 'preparation',
+        items: [{ id: 's1', kind: 'copy', place: 'web', what: '.env.sample' }],
+      }),
+    ).toEqual({
+      cardIds: ['s1'],
+      changes: [
+        {
+          from: 's1',
+          proposal: { kind: 'step', step: 'copy', repository: 'web', path: '.env.sample' },
+        },
+      ],
+    })
+    expect(
+      editedChangesOf(cards, {
+        kind: 'variables',
+        items: [{ id: 'v1', key: 'ACME_ZONE', value: '' }],
+      }),
+    ).toEqual({
+      cardIds: ['v1'],
+      changes: [{ from: 'v1', proposal: { kind: 'variable', name: 'ACME_ZONE', value: '' } }],
+    })
+    expect(
+      editedChangesOf(cards, {
+        kind: 'specLanguage',
+        items: [{ id: 'l1', tag: 'de', source: 'README.md' }],
+      }),
+    ).toEqual({
+      cardIds: ['l1'],
+      changes: [
+        { from: 'l1', proposal: { kind: 'specLanguage', language: 'de', source: 'README.md' } },
+      ],
+    })
+  })
+
+  test('a line left without what it needs is said in words, and nothing reaches the engine', () => {
+    expect(
+      editedChangesOf([language('l1', 'fr')], {
+        kind: 'specLanguage',
+        items: [{ id: 'l1', tag: '', source: 'README.md' }],
+      }),
+    ).toEqual({ refused: 'A line is missing what it needs: fill it in or remove it.' })
   })
 })
 

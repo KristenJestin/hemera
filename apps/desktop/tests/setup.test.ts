@@ -27,7 +27,13 @@ import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
-import { acceptAll, acceptCard, cardsOf, declineCard } from '../src/engine/setup/cards.ts'
+import {
+  acceptAll,
+  acceptCard,
+  cardsOf,
+  declineCard,
+  editCards,
+} from '../src/engine/setup/cards.ts'
 import { SETUP_TEMPLATE } from '../src/engine/setup/role.ts'
 import { specLanguageOf } from '../src/engine/planning/store.ts'
 import { Setup } from '../src/engine/setup/service.ts'
@@ -36,7 +42,7 @@ import { listCommands } from '../src/engine/catalogue.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
-import { listVariables } from '../src/engine/variables.ts'
+import { listVariables, revealVariable } from '../src/engine/variables.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { held, sessionsEngine, text as textOf, until, within } from './sessions-world.ts'
 
@@ -1174,5 +1180,339 @@ describe('The Spec language, proposed when the files say it', () => {
   test('the role proposes it only when whole files say it, never from a word', () => {
     expect(SETUP_TEMPLATE).toContain('specLanguage')
     expect(SETUP_TEMPLATE).toMatch(/never from a word/i)
+  })
+})
+
+/** The cards of a Project still waiting, by title. */
+const waitingOf = (projectId: string) =>
+  Effect.map(cardsOf(projectId), (cards) => cards.filter((card) => card.state === 'pending'))
+
+/** The Spec language read from `web/README.md`, as the agent proposes it. */
+const FRENCH = { kind: 'specLanguage', language: 'fr', source: 'web/README.md' } as const
+
+describe('An edited card is accepted with its edited value (#185)', () => {
+  test('the Spec language edited, its card is replaced by the edit, and Accept applies the edited language', async () => {
+    const { run } = sessionsEngine(data, () => proposing([FRENCH]))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* editCards([card.id], [{ from: card.id, proposal: { ...FRENCH, language: 'de' } }])
+          const cards = yield* cardsOf(project.id)
+          const [edited] = yield* waitingOf(project.id)
+          if (edited === undefined) return yield* Effect.die(new Error('no edited card'))
+          const accepted = yield* acceptCard(edited.id)
+          return { card, cards, accepted, language: yield* specLanguageOf(project.id) }
+        }),
+      ),
+    )
+    expect(seen.cards.map((one) => [one.title, one.state])).toEqual([
+      ['Set the Spec language to de', 'pending'],
+      ['Set the Spec language to fr', 'revised'],
+    ])
+    expect(seen.accepted.state).toBe('accepted')
+    expect(seen.language).toBe('de')
+  })
+
+  test('a command edited keeps what the editor does not show, and a line removed is no longer proposed', async () => {
+    const { run } = sessionsEngine(data, () =>
+      proposing([
+        { kind: 'repository', path: 'web' },
+        { kind: 'command', name: 'test', type: 'test', line: 'npm test', check: true },
+        { kind: 'command', name: 'lint', type: 'lint', line: 'npm run lint' },
+      ]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [, checks, lint] = yield* cardsOf(project.id)
+          if (checks === undefined || lint === undefined) {
+            return yield* Effect.die(new Error('three cards'))
+          }
+          yield* editCards(
+            [checks.id, lint.id],
+            [
+              {
+                from: checks.id,
+                proposal: {
+                  kind: 'command',
+                  name: 'test',
+                  type: 'test',
+                  line: 'npm test -- --run',
+                  check: true,
+                },
+              },
+            ],
+          )
+          yield* acceptAll(project.id)
+          return yield* listCommands(project.id)
+        }),
+      ),
+    )
+    expect(seen.map((one) => [one.name, one.line, one.check])).toEqual([
+      ['test', 'npm test -- --run', true],
+    ])
+  })
+
+  test('an edit the settings would refuse is refused with their reason, and the card stays as it was', async () => {
+    const { run } = sessionsEngine(data, () => proposing([FRENCH]))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          const refused = yield* editCards(
+            [card.id],
+            [{ from: card.id, proposal: { ...FRENCH, language: 'not a tag' } }],
+          ).pipe(Effect.flip)
+          return { refused, cards: yield* cardsOf(project.id) }
+        }),
+      ),
+    )
+    expect(seen.refused.message).toMatch(/not a language tag/)
+    expect(seen.cards.map((one) => [one.title, one.state])).toEqual([
+      ['Set the Spec language to fr', 'pending'],
+    ])
+  })
+
+  test('a variable renamed without a new value keeps the value the agent proposed', async () => {
+    const { run } = sessionsEngine(data, () =>
+      proposing([{ kind: 'variable', name: 'ACME_REGION', value: 'eu-west' }]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* editCards(
+            [card.id],
+            [{ from: card.id, proposal: { kind: 'variable', name: 'ACME_ZONE', value: '' } }],
+          )
+          yield* acceptAll(project.id)
+          const variables = yield* listVariables({ projectId: project.id, workspaceId: null })
+          const value = yield* revealVariable({
+            projectId: project.id,
+            workspaceId: null,
+            key: 'ACME_ZONE',
+          })
+          return { keys: variables.map((one) => one.key), value }
+        }),
+      ),
+    )
+    expect(seen).toEqual({ keys: ['ACME_ZONE'], value: 'eu-west' })
+  })
+
+  test('after a restart, the edited card is still the one that waits, and Accept applies the edit', async () => {
+    const first = sessionsEngine(data, () => proposing([FRENCH]))
+    const projectId = await first.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* editCards([card.id], [{ from: card.id, proposal: { ...FRENCH, language: 'es' } }])
+          return project.id
+        }),
+      ),
+    )
+    const seen = await sessionsEngine(data, () => proposing()).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const [card] = yield* waitingOf(projectId)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          const accepted = yield* acceptCard(card.id)
+          return { card, accepted, language: yield* specLanguageOf(projectId) }
+        }),
+      ),
+    )
+    expect(seen.card.title).toBe('Set the Spec language to es')
+    expect(seen.accepted.state).toBe('accepted')
+    expect(seen.language).toBe('es')
+  })
+})
+
+describe('A discussed card is revised by the setup agent (#185)', () => {
+  const NOTE = 'The README is in German: propose de.'
+
+  /** The first session proposes French; the one the discussion starts again proposes German. */
+  const discussing = (index: number): FakeScript =>
+    index === 0
+      ? proposing([FRENCH])
+      : {
+          steps: [
+            uses('toolu_revise', 'setup_propose', { changes: [{ ...FRENCH, language: 'de' }] }),
+            { does: 'says', text: 'I proposed German instead.' },
+          ],
+        }
+
+  test('the user’s words reach the agent, which replaces the card with its revision; Accept applies it', async () => {
+    const { world, run } = sessionsEngine(data, discussing)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* Setup.use((setup) => setup.discuss([card.id], NOTE))
+          const discussed = yield* cardsOf(project.id)
+          yield* until(
+            Effect.map(waitingOf(project.id), (cards) =>
+              cards.some((one) => one.title === 'Set the Spec language to de'),
+            ),
+          )
+          yield* until(
+            Effect.map(
+              Setup.use((setup) => setup.standing(project.id)),
+              (one) => one.state === 'done',
+            ),
+          )
+          const cards = yield* cardsOf(project.id)
+          const [revised] = yield* waitingOf(project.id)
+          if (revised === undefined) return yield* Effect.die(new Error('no revision'))
+          const accepted = yield* acceptCard(revised.id)
+          return { discussed, cards, accepted, language: yield* specLanguageOf(project.id) }
+        }),
+      ),
+    )
+    expect(seen.discussed).toEqual([
+      expect.objectContaining({ state: 'pending', discussion: NOTE }),
+    ])
+    const asked = (world.agents[1]?.answers.prompts ?? []).map(textOf).join('\n')
+    expect(asked).toContain(NOTE)
+    expect(asked).toContain('Set the Spec language to fr')
+    expect(seen.cards.map((one) => [one.title, one.state, one.discussion])).toEqual([
+      ['Set the Spec language to de', 'pending', null],
+      ['Set the Spec language to fr', 'revised', NOTE],
+    ])
+    expect(seen.accepted.state).toBe('accepted')
+    expect(seen.language).toBe('de')
+  })
+
+  test('an agent that keeps its proposal closes the discussion: the card waits as it was', async () => {
+    const { run } = sessionsEngine(data, (index) =>
+      index === 0
+        ? proposing([FRENCH])
+        : { steps: [{ does: 'says', text: 'The README is in French: I keep it.' }] },
+    )
+    const cards = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* Setup.use((setup) => setup.discuss([card.id], NOTE))
+          yield* until(
+            Effect.map(cardsOf(project.id), (all) => all.every((one) => one.discussion === null)),
+          )
+          return yield* cardsOf(project.id)
+        }),
+      ),
+    )
+    expect(cards.map((one) => [one.title, one.state, one.discussion])).toEqual([
+      ['Set the Spec language to fr', 'pending', null],
+    ])
+  })
+
+  test('after a restart, the revised card is still the one that waits, and Accept applies it', async () => {
+    const first = sessionsEngine(data, discussing)
+    const projectId = await first.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* Setup.use((setup) => setup.discuss([card.id], NOTE))
+          yield* until(
+            Effect.map(waitingOf(project.id), (cards) =>
+              cards.some((one) => one.title === 'Set the Spec language to de'),
+            ),
+          )
+          return project.id
+        }),
+      ),
+    )
+    const seen = await sessionsEngine(data, () => proposing()).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const cards = yield* cardsOf(projectId)
+          const [card] = yield* waitingOf(projectId)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          return { cards, accepted: yield* acceptCard(card.id) }
+        }),
+      ),
+    )
+    expect(seen.cards.map((one) => [one.title, one.state])).toEqual([
+      ['Set the Spec language to de', 'pending'],
+      ['Set the Spec language to fr', 'revised'],
+    ])
+    expect(seen.accepted.state).toBe('accepted')
+  })
+
+  test('a restart during the discussion closes it: the card waits as it was', async () => {
+    const hold = held()
+    const first = sessionsEngine(data, (index) =>
+      index === 0
+        ? proposing([FRENCH])
+        : { steps: [{ does: 'says', text: 'Reading.' }], between: () => hold.promise },
+    )
+    const projectId = await first.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          yield* Setup.use((setup) => setup.discuss([card.id], NOTE))
+          yield* until(
+            Effect.map(sessionsIn(['working']), (working) =>
+              working.some((one) => one.role === 'setup'),
+            ),
+          )
+          return project.id
+        }),
+      ),
+    )
+    hold.release()
+    const cards = await sessionsEngine(data, () => proposing()).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(
+            Effect.map(
+              Setup.use((setup) => setup.standing(projectId)),
+              (one) => one.state === 'failed',
+            ),
+          )
+          return yield* cardsOf(projectId)
+        }),
+      ),
+    )
+    expect(cards.map((one) => [one.title, one.state, one.discussion])).toEqual([
+      ['Set the Spec language to fr', 'pending', null],
+    ])
   })
 })

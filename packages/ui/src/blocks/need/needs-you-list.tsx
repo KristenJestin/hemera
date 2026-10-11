@@ -25,7 +25,8 @@ import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-c
  * kind's glyph, the title, what the agent wrote cut to the row, and when. Its one action, an icon
  * named "<action> here" by its tooltip, unfolds the whole need card under the row, pushing the rows
  * below it, with a way to the mission under the card. Every other action of the row is in the
- * "more" menu at its end, which every row has. The rows are the same height loading as loaded.
+ * "more" menu at its end, which a row has when it has something to offer in it. The rows are the
+ * same height loading as loaded.
  *
  * A need that arrives grows into its place and pushes the rows under it; one answered or expired
  * becomes its card's faint line where its row was, and folds out of the list when it leaves.
@@ -118,6 +119,8 @@ const WHEN = 'text-right text-xs whitespace-nowrap text-muted-foreground tabular
 /** The action ends the row: its icon, then the menu, neither of them ever shrinking. */
 const ACTION = 'flex justify-end gap-1'
 const ICON = 'flex shrink-0'
+/** The menu's place in a row that has no menu: the width of its small icon button. */
+const EMPTY_MORE = 'size-control-sm'
 const RULE = 'border-b border-border last:border-b-0'
 /** A row, clipped while it grows in or folds out. */
 const PLACE = cn(LINE, RULE, 'overflow-hidden')
@@ -195,13 +198,14 @@ function Cells({
       </span>
       <span className={ACTION} data-need-cell="action">
         {action}
-        <span className={ICON}>
-          <Menu
-            label={`More actions for ${title}`}
-            icon={<IconDots size="sm" />}
-            groups={[[...more]]}
-            disabled={more.length === 0}
-          />
+        <span className={cn(ICON, more.length === 0 && EMPTY_MORE)}>
+          {more.length > 0 && (
+            <Menu
+              label={`More actions for ${title}`}
+              icon={<IconDots size="sm" />}
+              groups={[[...more]]}
+            />
+          )}
         </span>
       </span>
     </div>
