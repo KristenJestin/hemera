@@ -321,6 +321,7 @@ export interface PlanningHandlers {
   onMarkRead: () => Promise<void>
   onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
+  onAskInChat: () => void
   onSeenTicketChange: (id: string) => Promise<void>
 }
 
