@@ -267,6 +267,12 @@ export const amendmentProblems = (
       target: string,
     ) => problems.push(graphProblemSaid({ kind, task: task.id, target }))
     for (const one of task.depends_on) if (!known.has(one)) said('unknown_task', one)
+    // The task taken out never ends: a new task waiting on it would wait forever.
+    if (out !== null && task.depends_on.includes(out)) {
+      problems.push(
+        `${task.id} depends on ${out}, the task it takes out of the plan: it would wait forever.`,
+      )
+    }
     for (const one of task.requirements) {
       if (!coverable.requirements.has(one)) said('unknown_requirement', one)
     }

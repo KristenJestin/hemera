@@ -255,6 +255,27 @@ describe('An amendment changes the effective plan, never a frozen task (CT-33)',
     ])
   })
 
+  test('a replacement that depends on the task it replaces is refused: it would wait forever', () => {
+    const circular = decode({
+      kind: 'replace',
+      task: 'T21',
+      by: [
+        {
+          id: 'T21a',
+          title: 'Read the export',
+          result: 'The export is read.',
+          requirements: ['R1'],
+          scenarios: ['R1.S21'],
+          targets: [{ repository: 'api', path: 'read.ts', intent: 'create' }],
+          depends_on: ['T21'],
+        },
+      ],
+    })
+    expect(amendmentProblems(plan, circular, COVERABLE)).toEqual([
+      'T21a depends on T21, the task it takes out of the plan: it would wait forever.',
+    ])
+  })
+
   test('the amendment in words, for the need', () => {
     expect(amendmentSaid(replacement)).toBe(
       'T21 is replaced by T21a (Read the export) and T21b (Write the export).',
