@@ -11,6 +11,8 @@
 import {
   ChosenAnswer,
   PermissionAnswer,
+  ROLES,
+  ROLE_NAMES,
   type NeedAnswer,
   type NeedFields,
 } from '@hemera/core/domain'
@@ -105,6 +107,21 @@ const RETRY = 'Retry'
 const sectionOf = (id: string | null): AppSection | undefined =>
   [...APP_SECTIONS.keys()].find((section) => section === id)
 
+/** The name of a settings section, when the window has it. */
+const settingsLabel = (id: string | null): string | undefined => {
+  const section = sectionOf(id)
+  return section === undefined ? undefined : APP_SECTIONS.get(section)
+}
+
+/** The agent that asked for a permission, for the list to keep its requests together. */
+const agentOf = (need: Need): NeedRow['agent'] => {
+  if (!Predicate.isTagged(need.fields, 'Permission') || need.fields.agent === undefined) {
+    return undefined
+  }
+  const role = ROLES.find((one) => one === need.requestedBy)
+  return { id: need.fields.agent, name: role === undefined ? 'an agent' : ROLE_NAMES[role] }
+}
+
 /** The options of a decision, the recommended one first and marked with its reason. */
 function optionsOf(
   fields: Extract<NeedFields, { _tag: 'Decision' }>,
@@ -153,16 +170,22 @@ const wordsOf = (
               : { kind: 'error' as const, attempts: fields.attempts, proposed },
         }
       },
-      // The engine gives a permission no title of its own: the agent's reason says what it wants.
-      Permission: (fields) => ({
-        title: fields.agentReason,
-        ask: {
-          kind: 'permission' as const,
+      // The call in words is the title; an older need without it, the agent's reason. The agent's
+      // own reason is said under it only when it gave one.
+      Permission: (fields) => {
+        const ask: Extract<NeedAsk, { kind: 'permission' }> = {
+          kind: 'permission',
           command: fields.call,
           hemeraReason: fields.hemeraReason,
           choices: need.choices,
-        },
-      }),
+        }
+        if (fields.asked !== undefined && fields.agentReason !== fields.asked) {
+          ask.agentReason = fields.agentReason
+        }
+        const label = settingsLabel(fields.settingsSection ?? null)
+        if (label !== undefined) ask.settings = label
+        return { title: fields.asked ?? fields.agentReason, ask }
+      },
     }),
   )
 
@@ -245,7 +268,11 @@ export function needRowsOf(
   const row = (need: Need, project: string): NeedRow => {
     const mission = missionOf(need)
     const key = mission === null ? undefined : missions.get(mission)?.key
-    return { id: need.id, project, need: cardOf(need, now, key, answers.get(need.id)) }
+    const card = cardOf(need, now, key, answers.get(need.id))
+    const agent = agentOf(need)
+    return agent === undefined
+      ? { id: need.id, project, need: card }
+      : { id: need.id, project, agent, need: card }
   }
   const oldestFirst = (a: Need, b: Need): number => a.createdAt.localeCompare(b.createdAt)
   const activityOf = (mission: string, of: ReadonlyArray<Need>): string =>
@@ -325,10 +352,14 @@ export function handlersFor(need: Need, tools: NeedTools): NeedHandlers {
               : () => tools.answer(need.id, APPLY, ChosenAnswer.make({ option: proposed })),
         }
       },
-      Permission: (): NeedHandlers => ({
-        onPermission: (choice) =>
-          tools.answer(need.id, CHOICE_LABELS[choice], PermissionAnswer.make({ choice })),
-      }),
+      Permission: (fields): NeedHandlers => {
+        const section = sectionOf(fields.settingsSection ?? null)
+        return {
+          onPermission: (choice) =>
+            tools.answer(need.id, CHOICE_LABELS[choice], PermissionAnswer.make({ choice })),
+          onSettings: section === undefined ? undefined : () => tools.openSettings(section),
+        }
+      },
     }),
   )
 }
