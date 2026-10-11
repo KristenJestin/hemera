@@ -31,6 +31,7 @@ import type { CommandDraft, ResourceDraft } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
 import {
   Deferred,
+  Duration,
   Effect,
   Fiber,
   Layer,
@@ -40,6 +41,7 @@ import {
   type Schema,
   Stream,
 } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeAgent, FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -62,7 +64,7 @@ import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
 import { Runs } from '../src/engine/runs.ts'
 import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
-import { RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
+import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
@@ -648,34 +650,39 @@ describe('The Probe’s place (#36)', () => {
   })
 })
 
+/**
+ * A Planner that launches one Probe, and a Probe that reports, then keeps its turn going until
+ * `hold` is released.
+ */
+const workingOn =
+  (hold: { readonly promise: Promise<void> }) =>
+  (index: number): FakeScript => {
+    let steps = 0
+    return index === 0
+      ? {
+          turns: [
+            [
+              uses('toolu_launch', 'probe_launch', {
+                question: 'does the importer keep accents?',
+                brief: 'Look at api/importer.ts.',
+              }),
+            ],
+          ],
+          steps: [says('Noted.')],
+        }
+      : {
+          turns: [[uses('toolu_report', 'probe_report', reported()), says('Done.')]],
+          between: () => {
+            steps += 1
+            return steps === 2 ? hold.promise : Promise.resolve()
+          },
+        }
+  }
+
 describe('probe_report ends the Probe', () => {
   test('its session ends once its last turn is over: the agent hears its report kept, and nothing cancels it', async () => {
     const hold = held()
-    let steps = 0
-    const { world, run } = probing(
-      (index) =>
-        index === 0
-          ? {
-              turns: [
-                [
-                  uses('toolu_launch', 'probe_launch', {
-                    question: 'does the importer keep accents?',
-                    brief: 'Look at api/importer.ts.',
-                  }),
-                ],
-              ],
-              steps: [says('Noted.')],
-            }
-          : {
-              turns: [[uses('toolu_report', 'probe_report', reported()), says('Done.')]],
-              // Its turn goes on after the report: held there until the test lets it end.
-              between: () => {
-                steps += 1
-                return steps === 2 ? hold.promise : Promise.resolve()
-              },
-            },
-      { sessions: { plannerStarts: true } },
-    )
+    const { world, run } = probing(workingOn(hold), { sessions: { plannerStarts: true } })
     const seen = await run(({ profile }) =>
       within(
         profile,
@@ -702,6 +709,80 @@ describe('probe_report ends the Probe', () => {
     expect(answersOf(world.agents[1])[0]).toMatch(/^Kept: Probe #1 ended/)
     expect(world.agents[1]?.answers.cancels).toBe(0)
     expect(seen.row.number).toBe(1)
+  })
+
+  test('a Probe that keeps working after its report: its Planner hears it at once', async () => {
+    const hold = held()
+    const { world, run } = probing(workingOn(hold), { sessions: { plannerStarts: true } })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme()
+          const mission = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'Import names as written', ticket: null },
+          })
+          const row = yield* probeIn(mission.id, 1, ['done'])
+          // The Probe's turn is still held: the Planner's next turn carries the report all the same.
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) >= 2))
+          const live = yield* sessionsOfLineage(row.lineage)
+          hold.release()
+          yield* until(
+            Effect.map(sessionsOfLineage(row.lineage), (rows) =>
+              rows.every((one) => one.state === 'ended'),
+            ),
+          )
+          return { live }
+        }),
+      ),
+    )
+    expect(text(world.agents[0]?.answers.prompts[1] ?? [])).toContain('[hemera:probe]')
+    expect(seen.live.some((one) => one.state !== 'ended')).toBe(true)
+    expect(world.agents[1]?.answers.cancels).toBe(0)
+  })
+
+  test('a Probe whose turn never settles after its report is ended past the bound', async () => {
+    const hold = held()
+    // The engine on a test clock: the bound passes when the test says; its sweeps every minute.
+    const { world, run } = probing(workingOn(hold), {
+      sessions: { plannerStarts: true },
+      testClock: true,
+      timings: { sweepEvery: Duration.minutes(1), notePickup: Duration.minutes(1) },
+    })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { row, live } = yield* TestClock.withLive(
+            Effect.gen(function* () {
+              const { project } = yield* acme()
+              const mission = yield* createMission({
+                projectId: project.id,
+                idea: { sentence: 'Import names as written', ticket: null },
+              })
+              const done = yield* probeIn(mission.id, 1, ['done'])
+              yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) >= 2))
+              return { row: done, live: yield* sessionsOfLineage(done.lineage) }
+            }),
+          )
+          yield* TestClock.adjust(REPORTED_TURN_BOUND)
+          yield* TestClock.withLive(
+            until(
+              Effect.map(sessionsOfLineage(row.lineage), (rows) =>
+                rows.every((one) => one.state === 'ended'),
+              ),
+            ),
+          )
+          hold.release()
+          return { live, ended: yield* sessionsOfLineage(row.lineage) }
+        }),
+      ),
+    )
+    expect(seen.live.some((one) => one.state !== 'ended')).toBe(true)
+    expect(seen.ended.map((one) => one.stateReason)).toContain('it reported')
+    // Ended under its turn: the agent heard the cancel.
+    expect(world.agents[1]?.answers.cancels).toBe(1)
   })
 
   test('reproduced without observed is refused; a valid one is stored, the worktree captured, and delivered to the Planner', async () => {
