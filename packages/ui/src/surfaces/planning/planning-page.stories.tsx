@@ -128,8 +128,9 @@ export const Starting: Story = {
       'Asked once the Planner meets what it cannot decide alone',
     )
     await expect(canvas.queryByRole('button', { name: 'Freeze' })).toBeNull()
-    // The field's editor arrives on its own: until then there is nothing to focus.
-    const vision = await canvas.findByRole('textbox', { name: 'Your vision' }, { timeout: 5000 })
+    // The field's editor arrives on its own, the first time its module is fetched: until then there
+    // is nothing to focus. A cold Windows runner takes seconds for it.
+    const vision = await canvas.findByRole('textbox', { name: 'Your vision' }, { timeout: 20_000 })
     await userEvent.click(within(spec).getByRole('button', { name: 'Give your vision' }))
     await waitFor(() => expect(vision).toHaveFocus())
     await userEvent.click(nowLine(canvasElement, /Reads the living spec and the prototype code/))
