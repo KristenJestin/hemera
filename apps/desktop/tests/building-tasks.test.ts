@@ -412,6 +412,29 @@ describe('A need blocks its task and its dependants, not the build', () => {
     ])
   })
 
+  test('report_need naming a task being checked is refused, and the task stays checking', async () => {
+    const holding = Layer.succeed(TaskVerdict, { judge: () => Effect.succeed('pending' as const) })
+    const { run } = builderEngine(data, work, { verdict: holding })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          const answer = yield* call(grantId, 'report_need', {
+            kind: 'environment',
+            text: 'The VPN is down.',
+            tasks: ['T1'],
+          })
+          return { answer, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.answer).toBe('refused: T1 is being checked: a need holds it no more.')
+    expect(statesOf(seen.view)['T1']).toBe('checking')
+  })
+
   test('report_need of kind error or permission is refused', async () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) =>

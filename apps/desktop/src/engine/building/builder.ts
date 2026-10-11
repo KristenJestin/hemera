@@ -254,6 +254,21 @@ const realFolder = (folder: string): string => {
   }
 }
 
+/**
+ * Why a need cannot hold these tasks: one done or skipped is over, one being checked waits for its
+ * verdict. Null when a need may hold them all.
+ */
+const unholdable = (tasks: ReadonlyArray<TaskNow>, ids: ReadonlyArray<string>) => {
+  const stateOf = (id: string) => tasks.find((task) => task.id === id)?.state
+  const over = ids.filter((id) => stateOf(id) === 'done' || stateOf(id) === 'skipped')
+  if (over.length > 0) return refusal(`refused: ${listed(over)} is over: a need holds it no more.`)
+  const checking = ids.filter((id) => stateOf(id) === 'checking')
+  if (checking.length > 0) {
+    return refusal(`refused: ${listed(checking)} is being checked: a need holds it no more.`)
+  }
+  return null
+}
+
 /** The tasks an amendment brings into the plan. */
 const addedBy = (amendment: Amendment) => {
   switch (amendment.kind) {
@@ -1038,12 +1053,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (unknown.length > 0) {
             return refusal(`refused: ${listed(unknown)} is no task of the plan.`)
           }
-          const over = args.tasks.filter((id) => {
-            const state = taskIn(tasks, id)?.state
-            return state === 'done' || state === 'skipped'
-          })
-          if (over.length > 0)
-            return refusal(`refused: ${listed(over)} is over: a need holds it no more.`)
+          const unheld = unholdable(tasks, args.tasks)
+          if (unheld !== null) return unheld
           let fields: typeof DecisionFields.Type | typeof EnvironmentFields.Type
           if (args.kind === 'environment') {
             fields = EnvironmentFields.make({
@@ -1070,7 +1081,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             tasks: args.tasks,
             fields,
             amendment: null,
-            still: () => Effect.succeed(null),
+            still: (transaction) =>
+              Effect.map(tasksIn(transaction, building.id), (current) =>
+                unholdable(current, args.tasks),
+              ),
           })
           if (refused !== null) return refused
           return answered(yield* askedSaid(building, args.tasks))
