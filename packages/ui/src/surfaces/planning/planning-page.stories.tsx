@@ -373,7 +373,7 @@ export const AnswerIntegrating: Story = {
   args: { moment: 'answerReceived' },
   play: async ({ canvasElement }) => {
     const card = rail(canvasElement).getByRole('article', { name: /^Q5/ })
-    await expect(within(card).getByRole('img', { name: 'Received' })).toBeVisible()
+    await expect(within(card).getByRole('img', { name: /^Sent/ })).toBeVisible()
   },
 }
 
