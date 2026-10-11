@@ -31,16 +31,19 @@ const TRIAGE_TITLE: Record<Triage['kind'], string> = {
 
 /**
  * The Planner's triage answer: the request belongs to another mission, is already delivered, or is
- * too small for one. Keep planning goes on here; the other mission opens from its key.
+ * too small for one. Keep planning goes on here; the other mission opens from its key (the request
+ * is added to it, or it already delivers it), and a request too small goes to a Chat.
  */
 export function TriageCard({
   triage,
   onKeepPlanning,
   onOpenMission,
+  onAskInChat,
 }: {
   triage: Triage
   onKeepPlanning: () => Promise<void>
   onOpenMission: (key: string) => void
+  onAskInChat: () => void
 }): ReactNode {
   const { ref } = triage
   return (
@@ -68,7 +71,12 @@ export function TriageCard({
             </SendButton>
             {ref !== null && (
               <Button variant="ghost" size="sm" onClick={() => onOpenMission(ref)}>
-                Open {ref}
+                {triage.kind === 'existing_mission' ? `Add it to ${ref}` : `Open ${ref}`}
+              </Button>
+            )}
+            {triage.kind === 'too_small' && (
+              <Button variant="ghost" size="sm" onClick={onAskInChat}>
+                Ask in a Chat
               </Button>
             )}
           </div>

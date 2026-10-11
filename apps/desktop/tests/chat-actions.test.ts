@@ -241,3 +241,33 @@ describe('"New Chat" in the sidebar', () => {
     )
   })
 })
+
+describe('"Ask in a Chat" on the Planner’s triage answer', () => {
+  test('creates the Chat in the mission’s Project and opens it, as the start field did', async () => {
+    const asked: string[] = []
+    const opened: string[] = []
+    startChat(
+      {
+        createChat: (projectId) => {
+          asked.push(projectId)
+          return Promise.resolve({
+            id: 'chat-3',
+            projectId,
+            title: 'New Chat',
+            setting: { agent: 'claude', model: null, effort: null },
+            createdAt: '2026-10-07T08:00:00.000Z',
+            lastActivityAt: '2026-10-07T08:00:00.000Z',
+            working: false,
+          })
+        },
+      },
+      'acme',
+      flight(),
+      (id) => opened.push(id),
+      () => undefined,
+    )
+    await settled()
+    expect(asked).toEqual(['acme'])
+    expect(opened).toEqual(['chat-3'])
+  })
+})
