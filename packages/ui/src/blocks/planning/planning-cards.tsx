@@ -4,16 +4,8 @@ import { Button } from '../../components/button/button.tsx'
 import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { MentionField } from '../../components/mention-field/mention-field.tsx'
-import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import {
-  IconAlertTriangle,
-  IconHelpCircle,
-  IconBolt,
-  IconCheck,
-  IconHandStop,
-  IconLink,
-} from '../../icons.ts'
+import { IconAlertTriangle, IconHelpCircle, IconBolt, IconCheck, IconLink } from '../../icons.ts'
 import { STAGE_DOT } from '../mission/vocabulary.ts'
 import { InputDot } from './planning-marks.tsx'
 import { NotSent, SendButton, useSending } from './sending.tsx'
@@ -251,37 +243,6 @@ export function VisionCard({
           />
           <NotSent refusal={giving.refusal} />
         </div>
-      </Frame>
-    </section>
-  )
-}
-
-/** Freeze pressed and refused: every reason in words, each naming what blocks it. */
-export function FreezeRefusal({ reasons }: { reasons: readonly string[] }): ReactNode {
-  return (
-    <section aria-label="Freeze refused">
-      <Frame
-        header={
-          <FrameHeader
-            icon={
-              <span className="flex text-warning">
-                <IconHandStop size="md" />
-              </span>
-            }
-            title="Not frozen"
-          />
-        }
-      >
-        <ul aria-label="Why Freeze was refused" className="flex flex-col">
-          {reasons.map((reason) => (
-            <li key={reason} className={ROW}>
-              <span className="flex pt-0.5">
-                <StatusMark state="waiting" size="sm" />
-              </span>
-              <span className="text-sm break-words">{reason}</span>
-            </li>
-          ))}
-        </ul>
       </Frame>
     </section>
   )

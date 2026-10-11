@@ -10,6 +10,7 @@ import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconCheck, IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type AnswerStep, INPUT_SHORT, InputDot } from './planning-marks.tsx'
+import { targetId } from './planning-progress.ts'
 import { NotSent, SendButton, type Sending, useSending } from './sending.tsx'
 import {
   type AnswerVersion,
@@ -82,8 +83,10 @@ function RetiredQuestion({
   const why = RETIRED_WORDS[question.state]?.(question) ?? ''
   return (
     <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
       aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 items-start gap-2 px-3 py-2 text-sm text-muted-foreground"
+      className="flex min-w-0 items-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground outline-none focus-ring"
     >
       <span className={ID}>{question.id}</span>
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -117,8 +120,10 @@ function AnsweredLine({
   const option = question.options.find((candidate) => candidate.id === answer.optionId)
   return (
     <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
       aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 items-start gap-2 px-3 py-2.5 text-sm"
+      className="flex min-w-0 items-start gap-2 rounded-md px-3 py-2.5 text-sm outline-none focus-ring"
     >
       <span className={ID}>{question.id}</span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -395,8 +400,10 @@ export function QuestionCard({
   }
   return (
     <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
       aria-label={`${question.id} · ${question.text}`}
-      className="flex min-w-0 flex-col gap-3 px-3 py-3"
+      className="flex min-w-0 flex-col gap-3 rounded-md px-3 py-3 outline-none focus-ring"
     >
       <div className="flex min-w-0 items-start gap-2">
         <span className={ID}>{question.id}</span>

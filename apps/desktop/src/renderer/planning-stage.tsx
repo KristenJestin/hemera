@@ -25,7 +25,6 @@ export function PlanningStage({
   mission,
   open,
   goMission,
-  refused,
   frame,
 }: StagePageProps): ReactNode {
   const [view, act] = usePlanning(link, engineReady, mission)
@@ -48,7 +47,6 @@ export function PlanningStage({
         data={data}
         error={view.error}
         onRetry={act.retry}
-        refused={refused}
         mentionables={view.mentionables}
         onAnswer={act.answer}
         onWaitOnSomeone={act.waitOnSomeone}

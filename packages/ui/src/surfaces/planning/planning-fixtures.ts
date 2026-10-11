@@ -11,6 +11,7 @@ import type {
   Task,
   Wave,
 } from '../../blocks/planning/planning-types.ts'
+import type { Planner, PlanningFacts } from '../../blocks/planning/planning-progress.ts'
 
 /**
  * The neutral case the Planning page is drawn on: the Project "Acme" with `api`, `web` and
@@ -628,24 +629,44 @@ export const PROBES: readonly ProbeDetail[] = [SLASH_PROBE, SIZE_PROBE, EMOJI_PR
 export const probeById = (id: string): ProbeDetail | null =>
   PROBES.find((probe) => probe.id === id) ?? null
 
-/** What the mission's head says at a moment of the journey, beside the page. */
+/** What the engine says beside the page at a moment of the journey: the Planner, the head. */
 export interface PlanningHead {
-  /** What the Planner does now, in words; null while nothing runs. */
+  /** What the Planner says it does, while it works; null between its turns. */
   now: string | null
-  /** A turn that ended without a word, said in words. */
-  silent?: string | undefined
-  /** Whether Freeze is offered. */
-  ready: boolean
+  /** The next step it set. */
+  next?: string | undefined
+  /** Its session in trouble, when it is: stopped with its reason, or stuck. */
+  planner?: Planner | undefined
+  /** A turn that ended without a word. */
+  silent?: boolean | undefined
+  /** Whether the Planner declared the Spec complete. */
+  declared?: boolean | undefined
   frozen: boolean
   /** Freeze pressed and refused: every reason, each naming what blocks it. */
   refused?: readonly string[] | undefined
   outdated?: boolean | undefined
 }
 
-/** One moment of the journey: the page, and the head beside it. */
-export interface PlanningMoment {
-  data: PlanningData
+/** One moment of the journey: what the page knows, and the head beside it. */
+export interface PlanningMoment extends PlanningFacts {
   head: PlanningHead
+}
+
+const IDLE: Planner = { state: 'idle', doing: null, next: null, reason: null }
+
+/** The Planner as the head says it: at work while it has a line, else between its turns. */
+function plannerOf(head: PlanningHead): Planner {
+  if (head.planner !== undefined) return head.planner
+  if (head.silent === true) return { ...IDLE, state: 'silent' }
+  if (head.now !== null) {
+    return { state: 'working', doing: head.now, next: head.next ?? null, reason: null }
+  }
+  return { ...IDLE, next: head.next ?? null }
+}
+
+/** A moment, from the page's data and the head beside it. */
+function scene({ data, head }: { data: PlanningData; head: PlanningHead }): PlanningMoment {
+  return { data, head, planner: plannerOf(head), declaredComplete: head.declared === true }
 }
 
 const VISION = {
@@ -676,14 +697,14 @@ function base(): PlanningData {
   }
 }
 
-const YOUR_TURN: PlanningHead = { now: null, ready: false, frozen: false }
+const YOUR_TURN: PlanningHead = { now: null, frozen: false }
 
 /** How far the first draft has gone, section by section. */
 const DRAFT_STATES: readonly SpecSection['state'][] = ['written', 'written', 'being_written']
 
 /** The first draft, being written: two sections done, Impact under way, no question yet. */
 export function writing(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       sections: WRITTEN.map((section, index) =>
@@ -701,30 +722,78 @@ export function writing(): PlanningMoment {
       visions: [],
     },
     head: { ...YOUR_TURN, now: 'Writes Impact, after reading api/src/routes/notes.ts' },
-  }
+  })
+}
+
+/**
+ * The first second of a mission: nothing written yet, the Planner reading what exists before it
+ * writes, and its next step said.
+ */
+export function starting(): PlanningMoment {
+  const draft = writing()
+  return scene({
+    data: {
+      ...draft.data,
+      sections: WRITTEN.map((section, index) =>
+        changing(section, { state: index === 0 ? 'being_written' : 'empty', body: '' }),
+      ),
+    },
+    head: {
+      ...YOUR_TURN,
+      now: 'Reads the living spec and the prototype code',
+      next: 'Write Why and Goals, then ask what it cannot decide alone',
+    },
+  })
+}
+
+/** The Planner stopped in the middle of the first draft: why, in words. */
+export function plannerFailed(): PlanningMoment {
+  const draft = writing()
+  return scene({
+    data: {
+      ...draft.data,
+      sections: draft.data.sections.map((section) =>
+        section.state === 'being_written' ? changing(section, { state: 'empty' }) : section,
+      ),
+    },
+    head: {
+      ...YOUR_TURN,
+      planner: {
+        state: 'failed',
+        doing: null,
+        next: null,
+        reason: 'its provider refused the request (quota reached)',
+      },
+    },
+  })
+}
+
+/** The Planner's last turn ended without a word, questions answered and nothing new. */
+export function plannerSilent(): PlanningMoment {
+  return scene({ data: answerIntegrated().data, head: { ...YOUR_TURN, silent: true } })
 }
 
 /** Two waves: one question open, one waiting on someone with its drafted message, others retired. */
 export function wave(): PlanningMoment {
-  return { data: base(), head: YOUR_TURN }
+  return scene({ data: base(), head: YOUR_TURN })
 }
 
 /** Only the first wave, before the second arrives. */
 export function firstWave(): PlanningMoment {
-  return { data: { ...base(), waves: WAVES.slice(0, 1) }, head: YOUR_TURN }
+  return scene({ data: { ...base(), waves: WAVES.slice(0, 1) }, head: YOUR_TURN })
 }
 
 /** A discussion open on Q5, the agent's decision proposed. */
 export function discussing(): PlanningMoment {
-  return { data: { ...base(), discussions: [DISCUSSION] }, head: YOUR_TURN }
+  return scene({ data: { ...base(), discussions: [DISCUSSION] }, head: YOUR_TURN })
 }
 
 /** A Probe running while the Planner goes on with the user; one reported, one that did not reproduce. */
 export function probing(): PlanningMoment {
-  return {
+  return scene({
     data: { ...base(), probes: [chip(SLASH_PROBE), chip(SIZE_PROBE), chip(EMOJI_PROBE)] },
     head: { ...YOUR_TURN, now: 'Waits for Probe #2 before writing R3' },
-  }
+  })
 }
 
 /** Every wave answered and integrated: what a settled Planning holds. */
@@ -759,7 +828,7 @@ function answered(): Wave[] {
 
 /** The first completeness declaration: Hemera launched the cold read; it runs. */
 export function coldReadRunning(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       waves: answered(),
@@ -774,13 +843,13 @@ export function coldReadRunning(): PlanningMoment {
       ],
       dependencies: [DEPENDENCIES[1]!],
     },
-    head: { ...YOUR_TURN, now: 'Declared the Spec complete' },
-  }
+    head: { ...YOUR_TURN, declared: true },
+  })
 }
 
 /** The cold read reported: a blocker asked as Q8, one fixed on the tasks, a warning and a suggestion. */
 export function findings(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       waves: [...answered(), { number: 3, askedAt: '11:30', questions: [EMPTY_TITLE] }],
@@ -788,14 +857,14 @@ export function findings(): PlanningMoment {
       freshness: { current: false, changes: CHANGES },
       dependencies: [DEPENDENCIES[1]!],
     },
-    head: YOUR_TURN,
-  }
+    head: { ...YOUR_TURN, declared: true },
+  })
 }
 
 /** The cold read failed: said in words, and another pass is the user's to run. */
 export function coldReadFailed(): PlanningMoment {
   const running = coldReadRunning()
-  return {
+  return scene({
     data: {
       ...running.data,
       passes: [
@@ -809,24 +878,24 @@ export function coldReadFailed(): PlanningMoment {
         },
       ],
     },
-    head: { ...YOUR_TURN, silent: 'The cold read stopped without a report' },
-  }
+    head: { ...YOUR_TURN, declared: true },
+  })
 }
 
 /** A dependency on another mission proposed by the Planner, waiting for the user. */
 export function dependencyProposed(): PlanningMoment {
-  return { data: { ...base(), waves: answered() }, head: YOUR_TURN }
+  return scene({ data: { ...base(), waves: answered() }, head: YOUR_TURN })
 }
 
 /** Back after a while: what changed since the last read, marked in the text. */
 export function changed(): PlanningMoment {
   const found = findings()
-  return { data: { ...found.data, changes: CHANGES }, head: YOUR_TURN }
+  return scene({ data: { ...found.data, changes: CHANGES }, head: YOUR_TURN })
 }
 
 /** The vision given twice: the first integrated, the second just received. */
 export function vision(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       visions: [
@@ -840,12 +909,12 @@ export function vision(): PlanningMoment {
       ],
     },
     head: YOUR_TURN,
-  }
+  })
 }
 
 /** Everything settled for the agent: Freeze appears in the head. */
 export function readyToFreeze(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       waves: [
@@ -885,37 +954,34 @@ export function readyToFreeze(): PlanningMoment {
       ],
       dependencies: [{ ...DEPENDENCIES[0]!, state: 'accepted' }, DEPENDENCIES[1]!],
     },
-    head: { ...YOUR_TURN, ready: true },
-  }
+    head: { ...YOUR_TURN, declared: true },
+  })
 }
 
 /** Freeze pressed as the Planner changed the Spec: refused, each reason named. */
 export function freezeRefused(): PlanningMoment {
   const ready = readyToFreeze()
-  return {
+  return scene({
     data: { ...ready.data, changes: CHANGES.slice(0, 2) },
     head: {
-      ...YOUR_TURN,
-      refused: [
-        'The Spec changed after you read it: R2 and Decisions',
-        'Your answer to Q8 is delivered, not integrated yet',
-      ],
+      ...ready.head,
+      refused: ['The Spec changed after you read it: R2 and Decisions'],
     },
-  }
+  })
 }
 
 /** Frozen: the Spec read-only, nothing left to answer. */
 export function frozen(): PlanningMoment {
   const ready = readyToFreeze()
-  return {
+  return scene({
     data: { ...ready.data, frozen: true, probes: [] },
-    head: { now: null, ready: false, frozen: true },
-  }
+    head: { now: null, declared: true, frozen: true },
+  })
 }
 
 /** The ticket changed while the Spec is written: its difference, as the Planner receives it. */
 export function outdated(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       ticket: {
@@ -933,13 +999,13 @@ export function outdated(): PlanningMoment {
       },
     },
     head: { ...YOUR_TURN, now: 'Reads the ticket’s new description', outdated: true },
-  }
+  })
 }
 
 /** The Planner read the request as something else: its triage answer, Keep planning. */
 export function triaged(): PlanningMoment {
   const draft = writing()
-  return {
+  return scene({
     data: {
       ...draft.data,
       sections: WRITTEN.map((section) => changing(section, { state: 'empty', body: '' })),
@@ -951,12 +1017,12 @@ export function triaged(): PlanningMoment {
       },
     },
     head: YOUR_TURN,
-  }
+  })
 }
 
 /** Q6 waits on the support team; a comment on the ticket answers it, and the Planner proposes it. */
 export function proposedAnswer(): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       waves: WAVES.map((one) =>
@@ -980,7 +1046,7 @@ export function proposedAnswer(): PlanningMoment {
       ),
     },
     head: YOUR_TURN,
-  }
+  })
 }
 
 /**
@@ -988,21 +1054,39 @@ export function proposedAnswer(): PlanningMoment {
  * is told what it had not integrated yet.
  */
 export function restarted(): PlanningMoment {
-  return {
+  return scene({
     data: base(),
     head: { ...YOUR_TURN, now: 'Started again: reads what it had not integrated yet' },
-  }
+  })
 }
 
-/** Everything settled but the last answer's integration: Freeze is not there yet. */
+/** Everything settled but the last answer's integration: Freeze waits for it, and says so. */
 export function almostReady(): PlanningMoment {
   const ready = readyToFreeze()
-  return { data: ready.data, head: { ...ready.head, ready: false } }
+  return scene({
+    data: {
+      ...ready.data,
+      waves: ready.data.waves.map((one) =>
+        changing(one, {
+          questions: one.questions.map((question) =>
+            question.id === 'Q8'
+              ? changing(question, {
+                  answers: question.answers.map((answer) =>
+                    changing(answer, { inputState: 'delivered' }),
+                  ),
+                })
+              : question,
+          ),
+        }),
+      ),
+    },
+    head: ready.head,
+  })
 }
 
 /** Q5 answered with B, at a given state of its input. */
 function answeredQ5(inputState: 'received' | 'delivered' | 'integrated'): PlanningMoment {
-  return {
+  return scene({
     data: {
       ...base(),
       waves: WAVES.map((one) =>
@@ -1019,7 +1103,7 @@ function answeredQ5(inputState: 'received' | 'delivered' | 'integrated'): Planni
       ),
     },
     head: YOUR_TURN,
-  }
+  })
 }
 
 /** Q5 just answered: received. */
@@ -1043,7 +1127,7 @@ const LONG =
 /** Long text in every field: a question, its options, an answer, a requirement. */
 export function long(): PlanningMoment {
   const discussed = discussing()
-  return {
+  return scene({
     data: {
       ...discussed.data,
       requirements: REQUIREMENTS.map((requirement) =>
@@ -1076,7 +1160,7 @@ export function long(): PlanningMoment {
       visions: [{ ...VISION, text: `${LONG}one file per note.` }],
     },
     head: { ...YOUR_TURN, now: `Writes R3, ${LONG}` },
-  }
+  })
 }
 
 export { FINDINGS_PASS, WRITTEN }

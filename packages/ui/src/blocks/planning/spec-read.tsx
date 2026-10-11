@@ -278,8 +278,12 @@ export function SpecRead({
           <section
             key={entry.name}
             id={sectionAnchor(entry.name)}
+            tabIndex={-1}
             aria-label={entry.title}
-            className={cn('flex min-w-0 scroll-mt-2 flex-col gap-3', marked && CHANGED)}
+            className={cn(
+              'flex min-w-0 scroll-mt-2 flex-col gap-3 rounded-sm outline-none focus-ring',
+              marked && CHANGED,
+            )}
             data-changed={marked ? '' : undefined}
           >
             <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">

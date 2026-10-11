@@ -1,15 +1,21 @@
 import { AnimatePresence, motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { ColdReadReport } from '../../blocks/planning/cold-read.tsx'
 import {
   DependenciesCard,
-  FreezeRefusal,
   TicketCard,
   TriageCard,
   VisionCard,
 } from '../../blocks/planning/planning-cards.tsx'
 import { ChangedMark } from '../../blocks/planning/planning-marks.tsx'
+import {
+  type Planner,
+  type PlanningTarget,
+  planningSteps,
+  targetId,
+} from '../../blocks/planning/planning-progress.ts'
+import { PlanningSteps } from '../../blocks/planning/planning-steps.tsx'
 import { SendButton } from '../../blocks/planning/sending.tsx'
 import {
   type DiscussionItem,
@@ -17,6 +23,7 @@ import {
   type PlanningHandlers,
   type Wave,
   openBySection,
+  unsettled,
   waiting,
 } from '../../blocks/planning/planning-types.ts'
 import { ProbesCard } from '../../blocks/planning/probes.tsx'
@@ -28,23 +35,27 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
+import { IconChevronRight } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { PageError } from '../page.tsx'
 
 /**
  * The Planning page: the base of a mission's frame while the Planner writes the Spec with the
- * user (#100, proposal A, with the Probes as a card of the rail).
+ * user (#100, reworked by #169 so that the user always knows what happens and what to do).
  *
  * The centre holds what matters to read, the Spec, at its measure, with its eight sections and
- * their state down the left; what changed since the last read is marked where it changed, with
- * one line on top and Mark as read. The right-hand rail holds everything the user may have to act
- * on: the Planner's triage answer, what changed on the ticket, the questions (the newest wave
- * first, answered ones folded to a line with Change), the Probes, the cold read, the dependencies,
- * and the vision, a field always there while the Spec is written. Nothing else in the centre asks
- * for anything. A refused Freeze names what blocks it above both.
+ * their state down the left — the green check only once no open question touches a section; what
+ * changed since the last read is marked where it changed, with one line on top and Mark as read.
+ * The right-hand rail holds, in an order that never changes: where Planning stands (the four steps,
+ * the Planner's next step, the vision to give meanwhile); the Planner's triage answer and what
+ * changed on the ticket, when they wait; the questions, the waves still open newest first and,
+ * under them, each wave whose every question is settled folded to one line; the cold read; the
+ * Probes; the dependencies; and the vision, a field always there while the Spec is written. A
+ * question looks the same however the page was reached: it is drawn from its state alone.
  *
- * Discuss and a Probe's report open as views over the page: their ids are below, and the frame
- * that holds the page holds them.
+ * The head's Now line and the steps lead to what they name: `focusTarget` scrolls to it and gives
+ * it the focus. Discuss and a Probe's report open as views over the page: their ids are below,
+ * and the frame that holds the page holds them.
  */
 
 /** The id of the view of a discussion over the page. */
@@ -53,6 +64,23 @@ export const discussionViewId = (item: DiscussionItem): string =>
 
 /** The id of the view of a Probe's report over the page. */
 export const probeViewId = (id: string): string => `probe:${id}`
+
+/**
+ * Brings the user to what a target names: scrolled into view and focused — a card or a section
+ * itself, or the control inside it for Freeze and the vision.
+ */
+export function focusTarget(target: PlanningTarget): void {
+  const element = document.getElementById(targetId(target))
+  if (element === null) return
+  const inside = element.hasAttribute('data-focus-inside')
+    ? element.querySelector<HTMLElement>('button, [role="textbox"]')
+    : null
+  element.scrollIntoView({ block: 'nearest' })
+  ;(inside ?? element).focus({ preventScroll: inside === null })
+}
+
+/** The Planner when the page is not told: between its turns. */
+const BETWEEN_TURNS: Planner = { state: 'idle', doing: null, next: null, reason: null }
 
 export interface PlanningPageProps extends PlanningHandlers {
   /** The page's data; null while the first read is on its way. */
@@ -63,10 +91,12 @@ export interface PlanningPageProps extends PlanningHandlers {
    */
   error?: string | undefined
   onRetry: () => void
-  /** The reasons of a Freeze just refused, each naming what blocks it. */
-  refused?: readonly string[] | undefined
   /** What the user's own words can mention. */
   mentionables: readonly Mentionable[]
+  /** The Planner's session, for where Planning stands; between its turns when left out. */
+  planner?: Planner | undefined
+  /** Whether the Planner declared the Spec complete. */
+  declaredComplete?: boolean | undefined
 }
 
 const COLUMNS = 'flex min-w-0 items-start gap-8 px-8 pt-2 pb-10'
@@ -125,15 +155,69 @@ function WaveList({
   )
 }
 
+/** A wave whose every question is answered and taken into account, or retired. */
+const settledWave = (wave: Wave): boolean =>
+  wave.questions.every((question) => !unsettled(question))
+
+/** A settled wave as one line that opens its questions, each one line with Change. */
+function SettledWave({
+  wave,
+  data,
+  props,
+}: {
+  wave: Wave
+  data: PlanningData
+  props: PlanningPageProps
+}): ReactNode {
+  const [open, setOpen] = useState(false)
+  const folding = useTransition(fold)
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-fit items-center gap-1.5 rounded-sm text-sm outline-none focus-ring hover-motion hover:text-primary"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="flex chevron-motion" data-open={open ? '' : undefined}>
+          <IconChevronRight size="sm" />
+        </span>
+        <span className="font-semibold">Wave {wave.number}</span>
+        <span className="text-muted-foreground">· {wave.questions.length} settled</span>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="questions"
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <WaveList wave={wave} data={data} props={props} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/**
+ * The questions: the waves still open, newest first, then the settled ones, each folded to a
+ * line. A wave moves down once, as a whole, when its last question is taken into account.
+ */
 function Questions({ data, props }: { data: PlanningData; props: PlanningPageProps }): ReactNode {
   const folding = useTransition(fold)
   if (data.frozen || data.waves.length === 0) return null
   const newestFirst = [...data.waves].reverse()
+  const open = newestFirst.filter((wave) => !settledWave(wave))
+  const settled = newestFirst.filter(settledWave)
   return (
     <section aria-label="Questions" className="flex flex-col gap-3">
       <SectionHead title="Questions" count={waiting(data.waves).length} calls />
       <AnimatePresence initial={false}>
-        {newestFirst.map((wave) => (
+        {open.map((wave) => (
           <motion.div
             key={wave.number}
             className="overflow-hidden"
@@ -143,6 +227,18 @@ function Questions({ data, props }: { data: PlanningData; props: PlanningPagePro
             transition={folding}
           >
             <WaveList wave={wave} data={data} props={props} />
+          </motion.div>
+        ))}
+        {settled.map((wave) => (
+          <motion.div
+            key={`settled-${String(wave.number)}`}
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <SettledWave wave={wave} data={data} props={props} />
           </motion.div>
         ))}
       </AnimatePresence>
@@ -183,7 +279,7 @@ function Skeletons(): ReactNode {
 }
 
 export function PlanningPage(props: PlanningPageProps): ReactNode {
-  const { data, error, refused } = props
+  const { data, error } = props
   if (data === null) {
     if (error !== undefined) {
       return (
@@ -199,6 +295,11 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
     return <Skeletons />
   }
   const open = openBySection(data.waves)
+  const steps = planningSteps({
+    data,
+    planner: props.planner ?? BETWEEN_TURNS,
+    declaredComplete: props.declaredComplete === true,
+  })
   return (
     <div className="flex min-w-0 flex-col">
       {error !== undefined && (
@@ -212,11 +313,6 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
           >
             {`What is shown may be behind: ${error}`}
           </PageError>
-        </div>
-      )}
-      {refused !== undefined && refused.length > 0 && (
-        <div className="px-8 pb-3">
-          <FreezeRefusal reasons={refused} />
         </div>
       )}
       <div className={COLUMNS}>
@@ -253,12 +349,15 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
           />
         </section>
         <aside aria-label="What calls for you" className={RAIL}>
+          <PlanningSteps steps={steps} onGo={focusTarget} />
           {data.triage !== null && (
-            <TriageCard
-              triage={data.triage}
-              onKeepPlanning={props.onKeepPlanning}
-              onOpenMission={props.onOpenMission}
-            />
+            <div id={targetId({ kind: 'triage' })} data-focus-inside="">
+              <TriageCard
+                triage={data.triage}
+                onKeepPlanning={props.onKeepPlanning}
+                onOpenMission={props.onOpenMission}
+              />
+            </div>
           )}
           {data.ticket !== null && (
             <TicketCard ticket={data.ticket} onSeen={props.onSeenTicketChange} />
@@ -277,11 +376,13 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
             onDecide={props.onDecideDependency}
           />
           {!data.frozen && (
-            <VisionCard
-              visions={data.visions}
-              mentionables={props.mentionables}
-              onGive={props.onGiveVision}
-            />
+            <div id={targetId({ kind: 'vision' })} data-focus-inside="">
+              <VisionCard
+                visions={data.visions}
+                mentionables={props.mentionables}
+                onGive={props.onGiveVision}
+              />
+            </div>
           )}
         </aside>
       </div>

@@ -5,17 +5,23 @@ import type {
   DiscussionItem,
   PlanningHandlers,
 } from '../../blocks/planning/planning-types.ts'
-import { Button } from '../../components/button/button.tsx'
+import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
+import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import { freezeOf, planningNow } from '../../blocks/planning/planning-progress.ts'
+import { IconEye } from '../../icons.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
 import * as moments from './planning-fixtures.ts'
-import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
+import { PlanningPage, discussionViewId, focusTarget, probeViewId } from './planning-page.tsx'
 import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
 const MOMENTS = {
+  starting: moments.starting,
   writing: moments.writing,
+  plannerFailed: moments.plannerFailed,
+  plannerSilent: moments.plannerSilent,
   firstWave: moments.firstWave,
   wave: moments.wave,
   discussing: moments.discussing,
@@ -74,7 +80,10 @@ export function PlanningScreen({
   )
   const [starting, setStarting] = useState<DiscussionItem | null>(null)
   const data = shown?.data ?? null
-  const head = shown?.head ?? { now: null, ready: false, frozen: false }
+  const head = shown?.head ?? { now: null, frozen: false }
+  const line = shown === null ? null : planningNow(shown)
+  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
+  const reading = line?.coldRead ?? null
 
   const discuss = (item: DiscussionItem): void => {
     handlers.onDiscuss(item)
@@ -106,23 +115,42 @@ export function PlanningScreen({
       stage={head.frozen ? 'Ready' : 'Planning'}
       frozen={head.frozen}
       type="feature"
-      ball={head.now !== null ? 'agent' : head.frozen ? 'idle' : 'you'}
-      now={head.now ?? head.silent}
+      ball={line?.ball ?? 'idle'}
+      now={line?.text}
+      onNow={
+        line?.target === null || line?.target === undefined
+          ? undefined
+          : () => {
+              if (line.target !== null) focusTarget(line.target)
+            }
+      }
+      nowChip={
+        reading === null ? undefined : (
+          <LiveChip
+            name={`Cold read ${reading.label}`}
+            icon={<IconEye size="sm" />}
+            state="running"
+            startedAt={reading.startedAt}
+            endedAt={null}
+            onPress={() => focusTarget({ kind: 'coldRead' })}
+          />
+        )
+      }
       marks={head.outdated === true ? [{ kind: 'outdated' }] : []}
       ticket={{ key: 'acme/shop#41' }}
       action={
-        head.ready ? (
-          <Button variant="primary" size="sm" onClick={onFreeze}>
-            Freeze
-          </Button>
+        freeze.shown ? (
+          <FreezeButton offer={freeze} refused={head.refused} onFreeze={onFreeze} />
         ) : undefined
       }
+      actionNote={<FreezeNote offer={freeze} refused={head.refused} />}
       onCancel={head.frozen ? undefined : () => undefined}
       base={
         <PlanningPage
           data={data}
           error={moment === 'error' ? 'The engine did not answer in time.' : failure}
-          refused={head.refused}
+          planner={shown?.planner}
+          declaredComplete={shown?.declaredComplete}
           mentionables={MENTIONABLES}
           onRetry={onRetry}
           {...handlers}
