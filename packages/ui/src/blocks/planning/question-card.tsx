@@ -9,7 +9,7 @@ import { MentionField } from '../../components/mention-field/mention-field.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconCheck, IconClockPause, IconCopy, IconMessages, IconStar } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { type AnswerStep, INPUT_SHORT, InputDot } from './planning-marks.tsx'
+import { type AnswerStep, INPUT_SHORT, InputDot, answerStepOf } from './planning-marks.tsx'
 import { targetId } from './planning-progress.ts'
 import { NotSent, SendButton, type Sending, useSending } from './sending.tsx'
 import {
@@ -379,11 +379,7 @@ export function QuestionCard({
     pressing !== null ||
     (question.state === 'answered' && answer !== undefined && changingAt !== count)
   const step: StepShown =
-    pressing === null
-      ? (answer?.inputState ?? 'unanswered')
-      : choosing.busy
-        ? 'sending'
-        : 'received'
+    pressing === null ? answerStepOf(question) : choosing.busy ? 'sending' : 'received'
   const press = (optionId: string): void => {
     // A press while an answer is on its way sends nothing: `send` keeps to one.
     choosing.send(() => {
