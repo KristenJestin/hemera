@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { NeverProgram } from '@hemera/core/domain'
@@ -397,6 +397,22 @@ describe('A Probe writes in its own folder without asking (#170)', () => {
     expect(questions[0]).toMatch(/^outside its worktree: /)
     expect(questions[1]).toMatch(/^outside its worktree: /)
     expect(questions[2]).toMatch(/^sensitive place: /)
+  })
+
+  test("A Probe's write to .git in its own folder still asks (#170)", async () => {
+    const { answer, questions } = await withProbe(({ probe, folder }) =>
+      Effect.gen(function* () {
+        rmSync(join(folder, '.git'), { recursive: true, force: true })
+        return yield* Effect.all([
+          callTool(probe, 'fs_write', { path: '.git', content: 'gitdir: ./g\n' }),
+          callTool(probe, 'fs_write', { path: '.git/config', content: '[core]\n' }),
+          callTool(probe, 'fs_write', { path: 'sub/.GIT/hooks/x', content: 'x' }),
+          callTool(probe, 'fs_write', { path: 'sub\\.git\\config', content: 'x' }),
+        ])
+      }),
+    )
+    expect(answer.map((one) => one.ok)).toEqual([false, false, false, false])
+    expect(questions).toHaveLength(4)
   })
 
   test("a Builder's write in its Workspace still goes to the judge", async () => {

@@ -208,7 +208,7 @@ const DELETERS = new Set([
 ])
 
 /** Whether a word names `.git` or anything under it, however it is spelled. */
-function namesGit(word: string): boolean {
+export function namesGit(word: string): boolean {
   return word.replaceAll('\\', '/').toLowerCase().split('/').includes('.git')
 }
 

@@ -23,9 +23,9 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   PERMISSION_POLICY,
@@ -38,6 +38,7 @@ import {
   effectiveAction,
   chatMustAskThroughScripts,
   missionRefusal,
+  namesGit,
   neverMatch,
   neverSaid,
   placesNamed,
@@ -125,7 +126,9 @@ const WRITES = new Set(['fs_write', 'fs_edit'])
 
 /**
  * Whether a call's path is certainly inside a place that is the session's own (a Probe's
- * worktree), the role's own and not read-only: never a Workspace nor the main checkout.
+ * worktree), the role's own and not read-only: never a Workspace nor the main checkout. Never
+ * under a `.git`, as written or as it leads: Git reads its configuration there and runs the
+ * programs it names (`core.fsmonitor` on `git status`), which read-only Git would then run.
  */
 const ownFolder = (call: JudgedCall): boolean => {
   const { place, role } = call.session
@@ -136,8 +139,20 @@ const ownFolder = (call: JudgedCall): boolean => {
     !ROLE_PLACES[role].readOnly &&
     call.path !== null &&
     call.path.inside &&
-    call.path.certain
+    call.path.certain &&
+    !namesGit(call.path.named) &&
+    !namesGit(relative(place.root, call.path.resolved)) &&
+    !namesGit(relative(realRoot(place.root), call.path.resolved))
   )
+}
+
+/** A place's root as the disk has it, links followed; as written when it cannot say. */
+const realRoot = (root: string): string => {
+  try {
+    return realpathSync.native(root)
+  } catch {
+    return root
+  }
 }
 
 export interface OrderSettings {
