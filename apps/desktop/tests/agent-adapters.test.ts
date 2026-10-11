@@ -21,6 +21,7 @@ import { codex } from '../src/engine/agents/adapters/codex.ts'
 import { NOT_RUN_ON_LINUX, opencode } from '../src/engine/agents/adapters/opencode.ts'
 import {
   type BareInput,
+  type JudgeInput,
   E2E_QUALIFIED,
   agentDirectoryOf,
   hemeraServer,
@@ -92,6 +93,22 @@ const OpenCodeConfig = Schema.fromJsonString(
     default_agent: Schema.String,
     agent: Schema.Struct({
       hemera: Schema.Struct({
+        mode: Schema.String,
+        permission: Schema.Record(Schema.String, Schema.String),
+      }),
+      build: Schema.Struct({ disable: Schema.Boolean }),
+      plan: Schema.Struct({ disable: Schema.Boolean }),
+    }),
+  }),
+)
+
+const JudgeConfig = Schema.fromJsonString(
+  Schema.Struct({
+    model: Schema.optionalKey(Schema.String),
+    small_model: Schema.optionalKey(Schema.String),
+    default_agent: Schema.String,
+    agent: Schema.Struct({
+      judge: Schema.Struct({
         mode: Schema.String,
         permission: Schema.Record(Schema.String, Schema.String),
       }),
@@ -275,6 +292,77 @@ describe("Each agent's bare options contain no built-in tool and only the hemera
 
   test('the agent folders are <data>/agents/<provider>', () => {
     expect(agentDirectoryOf('/data', 'opencode')).toBe(join('/data', 'agents', 'opencode'))
+  })
+})
+
+describe("Each agent's judge session has no MCP server, no tool and the judge's instructions", () => {
+  const JUDGE_INSTRUCTIONS = 'Rate the action; answer the three scores only.'
+  const judging: JudgeInput = {
+    agentDirectory: '/data/agents/x',
+    instructions: JUDGE_INSTRUCTIONS,
+    own: { model: 'anthropic/sonnet', small_model: 'anthropic/haiku' },
+  }
+
+  test('no MCP server for any agent, and nothing of Hemera’s tools in its options', () => {
+    for (const adapter of ADAPTERS) {
+      const options = adapter.judgeOptions(judging)
+      expect(options.mcpServers).toEqual([])
+      expect(JSON.stringify(options)).not.toContain('hemera_*')
+      expect(JSON.stringify(options)).not.toContain('mcp__hemera__')
+    }
+  })
+
+  test('Claude Code: no tool, no settings source, strict MCP, the judge’s instructions as its prompt', () => {
+    const options = claude.judgeOptions(judging)
+    const meta = Schema.decodeUnknownSync(ClaudeMeta)(options.meta).claudeCode.options
+    expect(meta.tools).toEqual([])
+    expect(meta.allowedTools).toEqual([])
+    expect(meta.settingSources).toEqual([])
+    expect(meta.strictMcpConfig).toBe(true)
+    expect(meta.systemPrompt.prompt).toBe(JUDGE_INSTRUCTIONS)
+    expect(meta.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1')
+    expect(options.systemPromptAs).toBe('session-meta')
+  })
+
+  test('Codex: the patch’s judge session (no tool server), every optional feature off', () => {
+    const options = codex.judgeOptions(judging)
+    expect(options.meta).toEqual({ hemera: { bare: true, toolServer: null } })
+    const config = Schema.decodeUnknownSync(CodexConfig)(options.env.CODEX_CONFIG)
+    expect(config.features.shell_tool).toBe(false)
+    expect(config.web_search).toBe('disabled')
+    expect(options.systemPromptAs).toBe('embedded-resource')
+  })
+
+  test('OpenCode: a judge agent that denies everything, build and plan off, the user’s models kept', () => {
+    const options = opencode.judgeOptions(judging)
+    expect(options.env.XDG_CONFIG_HOME).toBe('/data/agents/x')
+    expect(options.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1')
+    const config = Schema.decodeUnknownSync(JudgeConfig)(options.env.OPENCODE_CONFIG_CONTENT)
+    expect(config).toEqual({
+      model: 'anthropic/sonnet',
+      small_model: 'anthropic/haiku',
+      default_agent: 'judge',
+      agent: {
+        judge: { mode: 'primary', permission: { '*': 'deny' } },
+        build: { disable: true },
+        plan: { disable: true },
+      },
+    })
+    expect(options.systemPromptAs).toBe('embedded-resource')
+  })
+
+  test('each prefers its smallest model among those offered, and none when it offers none', () => {
+    expect(claude.judgeModel(['default', 'sonnet', 'haiku', 'opus'], {})).toBe('haiku')
+    expect(claude.judgeModel(['default', 'opus'], {})).toBeNull()
+    expect(codex.judgeModel(['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex'], {})).toBe('gpt-5.4-mini')
+    expect(codex.judgeModel(['gpt-5.5'], {})).toBeNull()
+    expect(
+      opencode.judgeModel(['anthropic/sonnet', 'anthropic/haiku', 'openai/gpt-5-mini'], {
+        small_model: 'openai/gpt-5-mini',
+      }),
+    ).toBe('openai/gpt-5-mini')
+    expect(opencode.judgeModel(['anthropic/sonnet', 'anthropic/haiku'], {})).toBe('anthropic/haiku')
+    expect(opencode.judgeModel(['anthropic/sonnet'], {})).toBeNull()
   })
 })
 
