@@ -8,6 +8,7 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
+import { Slider } from '../../components/slider/slider.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
 import {
   type ModelChoice,
@@ -561,14 +562,20 @@ export interface NotificationsProps {
   /** The sound style chosen, among `styles`. */
   style: string
   styles: readonly SoundStyleChoice[]
+  /** How loud the sounds are, from 0 to 100. */
+  volume: number
   /** The sound being previewed, while it plays. */
   previewing?: string | undefined
   onEvent: (id: string, on: boolean) => void
   onSound: (id: string, on: boolean) => void
   onStyle: (id: string) => void
+  /** The slider moves: the value to show. */
+  onVolume: (volume: number) => void
+  /** The slider is let go: the value to keep, and to hear once. */
+  onVolumeCommitted: (volume: number) => void
   /** Plays a sound once, in the style chosen. */
   onPreview: (id: string) => void
-  /** What the engine refused, by the id of the event or of the sound, or `style`. */
+  /** What the engine refused, by the id of the event or of the sound, or `style` or `volume`. */
   errors?: RowErrors | undefined
 }
 
@@ -577,10 +584,13 @@ export function NotificationsSection({
   sounds,
   style,
   styles,
+  volume,
   previewing,
   onEvent,
   onSound,
   onStyle,
+  onVolume,
+  onVolumeCommitted,
   onPreview,
   errors = {},
 }: NotificationsProps): ReactNode {
@@ -606,6 +616,16 @@ export function NotificationsSection({
             onValueChange={onStyle}
             items={styles.map((one) => ({ value: one.id, label: one.label }))}
           />
+        </Row>
+        <Row name="Volume" error={errors['volume']}>
+          <Slider
+            label="Volume"
+            value={volume}
+            onValueChange={onVolume}
+            onValueCommitted={onVolumeCommitted}
+            className="w-picker-list"
+          />
+          <span className="w-10 text-right text-muted-foreground tabular-nums">{volume} %</span>
         </Row>
         {sounds.map((sound) => (
           <div key={sound.id} className={ROW}>

@@ -45,6 +45,13 @@ export type SoundStyle = typeof SoundStyle.Type
 /** The style played when none was chosen, and the one a missing file falls back to. */
 export const DEFAULT_SOUND_STYLE = SOUND_STYLES[0]
 
+/** How loud the sounds are, in percent of the file: a whole number from 0 to 100. */
+export const SoundVolume = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }))
+export type SoundVolume = typeof SoundVolume.Type
+
+/** The volume kept when none was chosen: half, the files as shipped being loud. */
+export const DEFAULT_SOUND_VOLUME: SoundVolume = 50
+
 /** The mark a notice is drawn with in the window: what waits, what finished, what failed. */
 export const NoticeTone = Schema.Literals(['you', 'done', 'failed', 'outside'])
 export type NoticeTone = typeof NoticeTone.Type
@@ -132,12 +139,14 @@ export type SoundStyleOption = typeof SoundStyleOption.Type
 
 /**
  * The settings of Notifications & sounds: one switch per registered kind, one per sound, and the
- * sound style chosen among those listed.
+ * sound style chosen among those listed, and the volume of the sounds.
  */
 export const NotificationSettings = Schema.Struct({
   kinds: Schema.Array(KindSetting),
   sounds: Schema.Array(SoundSetting),
   style: SoundStyle,
+  /** How loud the sounds are, applied to every sound Hemera plays. */
+  volume: SoundVolume,
   styles: Schema.Array(SoundStyleOption),
 })
 export type NotificationSettings = typeof NotificationSettings.Type
@@ -172,6 +181,11 @@ export const NotificationSettingsRpcs = RpcGroup.make(
     success: NotificationSettings,
     error: failing,
   }),
+  Rpc.make('notifications.setVolume', {
+    payload: { volume: SoundVolume },
+    success: NotificationSettings,
+    error: failing,
+  }),
 )
 
 /**
@@ -181,10 +195,10 @@ export const NotificationSettingsRpcs = RpcGroup.make(
 export const SoundPreview = Schema.Literals(['played', 'do-not-disturb', 'no-player'])
 export type SoundPreview = typeof SoundPreview.Type
 
-/** Main's own: one sound of one style, played once by the player notifications use. */
+/** Main's own: one sound of one style at a volume, played once by the player notifications use. */
 export const SoundPreviewRpcs = RpcGroup.make(
   Rpc.make('notifications.preview', {
-    payload: { style: SoundStyle, sound: Sound },
+    payload: { style: SoundStyle, sound: Sound, volume: SoundVolume },
     success: SoundPreview,
   }),
 )

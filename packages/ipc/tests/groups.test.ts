@@ -229,6 +229,7 @@ const missionHandlers = {
   'notifications.setKind': unused,
   'notifications.setSound': unused,
   'notifications.setStyle': unused,
+  'notifications.setVolume': unused,
 }
 
 /** The Memory of an engine that keeps one piece of evidence, a png, and nothing else. */
