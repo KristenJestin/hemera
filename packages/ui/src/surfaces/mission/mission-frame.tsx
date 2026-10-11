@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Menu } from '../../components/menu/menu.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { type SheetView, type SheetWidth, SheetStack } from '../../components/sheet/sheet.tsx'
-import { IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
+import { IconChevronRight, IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
 import { type Ball, BALL_LEGENDS, BallMark } from '../../blocks/ball/ball-mark.tsx'
 import { TicketLink } from '../../blocks/mission/mission-marks.tsx'
@@ -18,7 +18,9 @@ import { CancelMission, HeaderMarks, StageTrack } from './mission-header.tsx'
  *
  * The header is three lines. The first: the key in the mono face, the title, and at its end the
  * stage's action, the `…` with the rest when there is one, and Cancel, visible at every stage
- * before Done. The second: the stage as a track of the stages of a mission's life, the current
+ * before Done; under the action, when the stage gives one, a line saying why it cannot be done
+ * yet. The third line's Now line is a button when the stage gives it a place to lead to, with the
+ * chip of what runs beside it. The second: the stage as a track of the stages of a mission's life, the current
  * one lit and the lock of the frozen Spec on Planning. The third, quiet: who has the ball (with the
  * Now line of its agent when the stage gives one), the marks with the causes of those that have
  * one written out, the type, the ticket it comes from, the branch when it is known, and the Spec, which opens from here on every stage because it is
@@ -77,6 +79,10 @@ export interface MissionFrameProps {
    * word said in words; the ball's legend when left out.
    */
   now?: string | undefined
+  /** Brings the user to what the Now line names: the line is then a button. */
+  onNow?: (() => void) | undefined
+  /** What runs, beside the Now line: its chip. */
+  nowChip?: ReactNode
   /** The marks of the mission after its ball: a glyph each, the causes written out. */
   marks?: readonly MissionMarkView[] | undefined
   /** Opens what moved, from the outdated mark. */
@@ -91,6 +97,8 @@ export interface MissionFrameProps {
   onOpenSpec?: (() => void) | undefined
   /** The stage's action: Freeze, Launch, Ship. */
   action?: ReactNode
+  /** A line under the action: why it cannot be done yet, or why it was refused. */
+  actionNote?: ReactNode
   /** The rest of what can be done, in the `…`: open the Memory, the diff. */
   more?: readonly MissionMore[] | undefined
   /** Cancel is there only when this is: not at Done, not at Cancelled. */
@@ -114,7 +122,12 @@ export interface MissionFrameProps {
 
 const FRAME = 'flex min-h-0 flex-1 flex-col'
 
-const HEADER = 'flex shrink-0 flex-col gap-2 px-8 pt-5 pb-3'
+const HEADER = 'flex shrink-0 items-start gap-6 px-8 pt-5 pb-3'
+
+const LINES = 'flex min-w-0 flex-1 flex-col gap-2'
+
+/** The actions at the end of the first line, and the note under them, down the right. */
+const ACTIONS = 'flex max-w-view-narrow shrink-0 flex-col items-end gap-1'
 
 const LINE = 'flex min-h-control-md min-w-0 items-center gap-3'
 
@@ -122,7 +135,7 @@ const KEY = 'shrink-0 font-mono text-sm text-muted-foreground'
 
 const TITLE = 'min-w-0 truncate text-xl font-semibold tracking-tight'
 
-const END = 'ml-auto flex shrink-0 items-center gap-2'
+const END = 'flex min-h-control-md shrink-0 items-center gap-2'
 
 const META = 'flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground'
 
@@ -130,6 +143,9 @@ const META_ITEM = 'flex min-w-0 items-center gap-1'
 
 const META_LINK =
   'flex min-w-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-ring'
+
+const NOW_LINE =
+  'flex min-w-0 items-center gap-1 rounded-sm text-foreground outline-none hover:text-primary focus-ring hover-motion'
 
 /** Clipped: a sheet past the right edge, on its way in or out, is not a reason for the page to scroll. */
 const BODY = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
@@ -145,6 +161,8 @@ export function MissionFrame({
   type,
   ball,
   now,
+  onNow,
+  nowChip,
   marks = [],
   onOpenOutdated,
   ticket,
@@ -152,6 +170,7 @@ export function MissionFrame({
   spec,
   onOpenSpec,
   action,
+  actionNote,
   more = [],
   onCancel,
   notice,
@@ -166,9 +185,52 @@ export function MissionFrame({
   return (
     <div className={FRAME}>
       <div className={HEADER}>
-        <div className={LINE}>
-          <span className={KEY}>{missionKey}</span>
-          <h1 className={TITLE}>{title}</h1>
+        <div className={LINES}>
+          <div className={LINE}>
+            <span className={KEY}>{missionKey}</span>
+            <h1 className={TITLE}>{title}</h1>
+          </div>
+          <StageTrack stage={stage} round={round} frozen={frozen} />
+          <div className={META}>
+            <span className={META_ITEM}>
+              <BallMark ball={ball} legend face />
+              {now !== undefined && onNow !== undefined ? (
+                <button type="button" className={NOW_LINE} data-now="" onClick={onNow}>
+                  <span className="truncate">{now}</span>
+                  <IconChevronRight size="sm" />
+                </button>
+              ) : (
+                <span className="truncate" data-now={now === undefined ? undefined : ''}>
+                  {now ?? BALL_LEGENDS[ball]}
+                </span>
+              )}
+              {nowChip}
+            </span>
+            <HeaderMarks marks={marks} onOpenOutdated={onOpenOutdated} />
+            <span className="capitalize">{type}</span>
+            {ticket !== null && ticket !== undefined && (
+              <TicketLink ticket={ticket.key} onOpen={ticket.onOpen} />
+            )}
+            {branch !== undefined && (
+              <span className={META_ITEM}>
+                <IconGitBranch size="sm" />
+                <span className="truncate font-mono">{branch}</span>
+              </span>
+            )}
+            {onOpenSpec !== undefined && (
+              <button type="button" className={META_LINK} onClick={onOpenSpec}>
+                <IconFileText size="sm" />
+                <span className="truncate">Spec{spec === undefined ? '' : ` · ${spec}`}</span>
+              </button>
+            )}
+          </div>
+          {notice !== undefined && (
+            <p role="alert" className="text-sm text-destructive">
+              {notice}
+            </p>
+          )}
+        </div>
+        <div className={ACTIONS}>
           <div className={END}>
             <StageAction action={action} />
             {onCancel !== undefined && (
@@ -188,38 +250,8 @@ export function MissionFrame({
               />
             )}
           </div>
+          {actionNote}
         </div>
-        <StageTrack stage={stage} round={round} frozen={frozen} />
-        <div className={META}>
-          <span className={META_ITEM}>
-            <BallMark ball={ball} legend face />
-            <span className="truncate" data-now={now === undefined ? undefined : ''}>
-              {now ?? BALL_LEGENDS[ball]}
-            </span>
-          </span>
-          <HeaderMarks marks={marks} onOpenOutdated={onOpenOutdated} />
-          <span className="capitalize">{type}</span>
-          {ticket !== null && ticket !== undefined && (
-            <TicketLink ticket={ticket.key} onOpen={ticket.onOpen} />
-          )}
-          {branch !== undefined && (
-            <span className={META_ITEM}>
-              <IconGitBranch size="sm" />
-              <span className="truncate font-mono">{branch}</span>
-            </span>
-          )}
-          {onOpenSpec !== undefined && (
-            <button type="button" className={META_LINK} onClick={onOpenSpec}>
-              <IconFileText size="sm" />
-              <span className="truncate">Spec{spec === undefined ? '' : ` · ${spec}`}</span>
-            </button>
-          )}
-        </div>
-        {notice !== undefined && (
-          <p role="alert" className="text-sm text-destructive">
-            {notice}
-          </p>
-        )}
       </div>
       {needs}
 
