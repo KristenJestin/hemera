@@ -277,6 +277,7 @@ export function ProjectSetupTask({
         onDecline={(kind) =>
           answer(Promise.all(ofKind(kind).map((card) => link.declineSetupCard(card.id))))
         }
+        onAddOther={(id) => answer(link.acceptSetupCard(id))}
         onDraft={nothing}
         onSave={nothing}
         onCancel={nothing}

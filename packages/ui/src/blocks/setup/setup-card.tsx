@@ -69,6 +69,8 @@ export interface SetupCardProps {
   /** Left out where the agent takes no discussion: no Discuss then. */
   onDiscuss?: (() => void) | undefined
   onDecline: () => void
+  /** Adds one of the other scripts of the commands; left out where the agent lists none. */
+  onAddOther?: ((id: string) => void) | undefined
   onSave: () => void
   onCancel: () => void
   /** Sends what should change to the agent. */
@@ -274,6 +276,7 @@ export function SetupCard({
   draft,
   onDraft,
   onSend,
+  onAddOther,
   ...on
 }: SetupCardProps): ReactNode {
   const title = SETUP_TITLES[kind]
@@ -283,7 +286,7 @@ export function SetupCard({
     if (status.state === 'editing' && draft !== undefined && onDraft !== undefined) {
       return <ProposalEditor draft={draft} onChange={onDraft} />
     }
-    const summary = <ProposalSummary proposal={proposal} />
+    const summary = <ProposalSummary proposal={proposal} onAddOther={onAddOther} />
     if (quiet) return <div className={QUIET}>{summary}</div>
     return (
       <>

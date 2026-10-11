@@ -3,10 +3,10 @@
  *
  * An agent reads the setup freely and changes nothing of it: every change it wants is a proposal
  * the user accepts, one card per change, applied through the very use cases the Project settings
- * call. The changes of one call are one batch. In 1.0 a change is one of four kinds (open
+ * call. The changes of one call are one batch. In 1.0 a change is one of five kinds (open
  * question 71): declare a repository (with its remote and base branch when the agent read them),
  * add or rewrite a catalogue command (with its roles and write globs), add a step at the end of
- * the preparation recipe, set a Project variable.
+ * the preparation recipe, set a Project variable, set the Project's Spec language.
  *
  * A change is said the same way on its card, in the Journal and in the answer the agent reads: a
  * title, and the details under it. A variable's value is never part of either.
@@ -18,7 +18,13 @@ import { COMMAND_TYPES } from './commands.ts'
 import { RECIPE_KINDS } from './workspace.ts'
 
 /** The kinds of change a setup proposal carries. */
-export const SETUP_CHANGE_KINDS = ['repository', 'command', 'step', 'variable'] as const
+export const SETUP_CHANGE_KINDS = [
+  'repository',
+  'command',
+  'step',
+  'variable',
+  'specLanguage',
+] as const
 export type SetupChangeKind = (typeof SETUP_CHANGE_KINDS)[number]
 
 const Text = (description: string) =>
@@ -55,6 +61,9 @@ export const CommandProposal = Schema.Struct({
     'Whether nobody runs it without the user’s permission: anything that migrates, seeds, resets or touches a shared resource.',
   ),
   readOnly: Flag('Whether it writes nothing in the repository.'),
+  listed: Flag(
+    'Whether it is one of the other scripts: found in the repository, but none of the Project’s everyday commands. It is listed under "Other scripts", unselected, and Accept all leaves it alone.',
+  ),
   writeGlobs: Schema.optionalKey(
     Schema.Array(Text('A glob of files it may write, relative to its folder.')).annotate({
       description: 'The files it rewrites: a formatter’s, a generated client, the lockfile.',
@@ -84,12 +93,22 @@ export const VariableProposal = Schema.Struct({
   }),
 })
 
+/** The language the Project's Specs are written in, when its own files say it. */
+export const SpecLanguageProposal = Schema.Struct({
+  kind: Schema.Literal('specLanguage'),
+  language: Text('A BCP 47 language tag: `fr`, `en`, `pt-BR`.'),
+  source: Text(
+    'The file of the Project that says it, relative to the Project folder (`README.md`, `api/AGENTS.md`). Only whole paragraphs written in the language, or a line stating it, count: never one word, a name or a code identifier.',
+  ),
+})
+
 /** One change as the agent proposes it. */
 export const SetupProposal = Schema.Union([
   RepositoryProposal,
   CommandProposal,
   StepProposal,
   VariableProposal,
+  SpecLanguageProposal,
 ])
 export type SetupProposal = typeof SetupProposal.Type
 
@@ -112,6 +131,7 @@ export const SetupChange = Schema.Union([
   CommandChange,
   StepProposal,
   VariableChange,
+  SpecLanguageProposal,
 ])
 export type SetupChange = typeof SetupChange.Type
 
@@ -145,6 +165,8 @@ export function setupChangeTitle(change: SetupChange): string {
       return `Add a preparation step that ${change.step === 'copy' ? 'copies' : 'links'} ${change.path ?? ''}`
     case 'variable':
       return `Set the variable ${change.name}`
+    case 'specLanguage':
+      return `Set the Spec language to ${change.language}`
   }
 }
 
@@ -191,6 +213,11 @@ export function setupChangeDetails(change: SetupChange): ReadonlyArray<SetupDeta
             { label: 'Runs in', value: placeOf(change.repository, change.path) },
           ]
         : [{ label: 'Command', value: change.command }]
+    case 'specLanguage':
+      return [
+        { label: 'Language', value: change.language },
+        { label: 'Said in', value: change.source },
+      ]
     case 'variable':
       return [
         { label: 'Scope', value: 'the Project' },

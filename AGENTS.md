@@ -271,8 +271,10 @@ BREAKING CHANGE: <description — only if a schema or an internal API changes>
 
 ## Working on a machine
 
-- Worktrees, logs, screenshots, drafts and every other scratch file live outside the clone, in a
-  sibling work folder; never inside the repository.
+- Worktrees live outside the clone, in a sibling work folder, never inside the repository: they
+  are second checkouts with their own dependencies.
+- Small scratch files (briefs, state, reports, drafts, logs, screenshots) go in `.agent-relay/` at
+  the root of the repository. That folder is never committed.
 - Heavy commands (builds, full test runs, the end-to-end suite) run at low priority
   (`nice -n 19` on Linux), one at a time.
 - The end-to-end suite takes a lock folder kept outside the repository before it starts and

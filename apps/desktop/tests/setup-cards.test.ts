@@ -538,3 +538,108 @@ describe('A launch of a Project’s setup', () => {
     expect(asked).toEqual(['acme', 'web'])
   })
 })
+
+describe('The scripts the agent lists apart', () => {
+  const script = (id: string, name: string, more: Partial<SetupCard> = {}) =>
+    card(
+      id,
+      {
+        kind: 'command',
+        name,
+        type: 'script',
+        line: `pnpm ${name}`,
+        listed: true,
+        replaces: false,
+      },
+      more,
+    )
+  const chosen = card('c1', {
+    kind: 'command',
+    name: 'test',
+    type: 'test',
+    line: 'pnpm test',
+    check: true,
+    replaces: false,
+  })
+
+  test('are the commands card’s other scripts: apart from the chosen, and added once accepted', () => {
+    const [commands] = setupEntriesOf([
+      chosen,
+      script('c2', 'release'),
+      script('c3', 'docs', { state: 'accepted' }),
+    ])
+    expect(commands?.proposal).toMatchObject({
+      kind: 'commands',
+      items: [
+        { id: 'c1', name: 'test' },
+        { id: 'c2', name: 'release', other: true, added: false },
+        { id: 'c3', name: 'docs', other: true, added: true },
+      ],
+    })
+  })
+
+  test('are not waited on: the kind’s Accept and Decline leave them, and they do not keep the card proposed', () => {
+    const cards = [chosen, script('c2', 'release')]
+    expect(pendingOf(cards, 'commands').map((one) => one.id)).toEqual(['c1'])
+    expect(setupEntriesOf(cards)[0]?.status).toEqual({ state: 'proposed', refused: undefined })
+    const answered = [{ ...chosen, state: 'accepted' as const }, script('c2', 'release')]
+    expect(setupEntriesOf(answered)[0]?.status).toEqual({ state: 'accepted' })
+  })
+
+  test('are no task of the Project: only a chosen proposal waiting keeps the setup on the page', () => {
+    const done: SetupStanding = { state: 'done', sentence: null }
+    expect(setupIsTask(done, [script('c2', 'release')])).toBe(false)
+    expect(setupIsTask(done, [chosen, script('c2', 'release')])).toBe(true)
+  })
+
+  test('are not carried over to a setup launched again', () => {
+    const session: SessionSummary = {
+      id: 's2',
+      provider: 'claude',
+      role: 'setup',
+      lineage: 's2',
+      parent: null,
+      depth: 0,
+      epoch: 0,
+      state: 'ended',
+      stateReason: null,
+      createdAt: '2026-10-06T11:00:00.000Z',
+      endedAt: null,
+    }
+    const before = { createdAt: '2026-10-06T10:00:00.000Z' }
+    const after = { createdAt: '2026-10-06T11:01:00.000Z' }
+    const cards = [
+      { ...chosen, ...before },
+      script('c2', 'release', before),
+      script('c3', 'docs', after),
+    ]
+    expect(sinceLatestSetup(cards, session).map((one) => one.id)).toEqual(['c1', 'c3'])
+  })
+})
+
+describe('The Spec language the agent proposes', () => {
+  const proposed = card('l1', { kind: 'specLanguage', language: 'fr', source: 'README.md' })
+
+  test('is a card of its own, after the variables, naming the language tag and its file', () => {
+    const entries = setupEntriesOf([proposed, ...CARDS])
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'repositories',
+      'commands',
+      'preparation',
+      'variables',
+      'specLanguage',
+    ])
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'specLanguage',
+      status: { state: 'proposed' },
+      proposal: {
+        kind: 'specLanguage',
+        items: [{ id: 'l1', tag: 'fr', source: 'README.md' }],
+      },
+    })
+  })
+
+  test('answers like the others: its Accept goes to the card waiting', () => {
+    expect(pendingOf([proposed], 'specLanguage').map((one) => one.id)).toEqual(['l1'])
+  })
+})

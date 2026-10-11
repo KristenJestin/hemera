@@ -1,4 +1,4 @@
-import type { Proposal, SetupKind } from './proposal.tsx'
+import type { Proposal, ProposedCommand, SetupKind } from './proposal.tsx'
 
 /**
  * What the setup agent proposes for Acme, read from `~/work/acme`: its three repositories, its
@@ -77,6 +77,10 @@ export const PROPOSALS: Record<SetupKind, Proposal> = {
       { id: 'v3', key: 'SMTP_URL', value: 'smtp://localhost:1025' },
     ],
   },
+  specLanguage: {
+    kind: 'specLanguage',
+    items: [{ id: 'l1', tag: 'fr', source: 'README.md' }],
+  },
   never: {
     kind: 'never',
     items: [
@@ -86,6 +90,68 @@ export const PROPOSALS: Record<SetupKind, Proposal> = {
     ],
   },
 }
+
+const chosen = (
+  id: string,
+  type: ProposedCommand['type'],
+  line: string,
+  more: Partial<ProposedCommand> = {},
+): ProposedCommand => ({
+  id,
+  name: id,
+  type,
+  line,
+  check: false,
+  service: false,
+  atOpen: false,
+  ask: false,
+  ...more,
+})
+
+/** What a script found and not selected looks like: listed apart, until the user adds it. */
+const other = (id: string, line: string): ProposedCommand => ({
+  ...chosen(id, 'script', line),
+  other: true,
+  added: false,
+})
+
+/**
+ * A repository with many scripts, as the agent proposes it: the everyday commands selected (the
+ * install, the checks, the build, the dev server), every other script listed apart.
+ */
+export const MANY_SCRIPTS: Proposal = {
+  kind: 'commands',
+  items: [
+    chosen('install', 'configure', 'pnpm install --frozen-lockfile'),
+    chosen('test', 'test', 'pnpm test', { check: true }),
+    chosen('typecheck', 'typecheck', 'pnpm typecheck', { check: true }),
+    chosen('lint', 'lint', 'pnpm lint', { check: true }),
+    chosen('fmt:check', 'lint', 'pnpm fmt:check', { check: true }),
+    chosen('check', 'test', 'pnpm check', { check: true }),
+    chosen('build', 'build', 'pnpm build'),
+    chosen('dev', 'serve', 'pnpm dev', { service: true }),
+    other('doctor', 'pnpm run doctor'),
+    other('package', 'pnpm package'),
+    other('storybook', 'pnpm storybook'),
+    other('e2e:headless', 'pnpm --filter @acme/web e2e:headless'),
+    other('fmt', 'pnpm fmt'),
+    other('release', 'pnpm release'),
+    other('docs', 'pnpm docs'),
+    other('db:reset', 'pnpm db:reset'),
+    other('db:seed', 'pnpm db:seed'),
+    other('clean', 'pnpm clean'),
+    other('generate', 'pnpm generate'),
+  ],
+}
+
+/** Marks one of a proposal's other scripts as added. */
+export const withAdded = (proposal: Proposal, id: string): Proposal =>
+  proposal.kind === 'commands'
+    ? {
+        kind: 'commands',
+        items: proposal.items.map((one) => (one.id === id ? { ...one, added: true } : one)),
+      }
+    : proposal
 
 /**
  * The folder is not a repository and Hemera found none in it when it was chosen; the agent looked

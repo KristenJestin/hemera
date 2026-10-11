@@ -13,8 +13,9 @@
  * - a command cut at its limit, or abandoned, is killed and waited for until it has exited: on
  *   Windows a folder a live process stands in cannot be removed (EPERM);
  * - what it prints is read up to 32 MB;
- * - nothing waits on a prompt: `GIT_TERMINAL_PROMPT=0`, so a fetch that would ask for credentials
- *   fails at once;
+ * - nothing waits on a prompt: `GIT_TERMINAL_PROMPT=0`, and `GCM_INTERACTIVE=never` for Git
+ *   Credential Manager (the helper Git for Windows ships), so a fetch that would ask for
+ *   credentials fails at once; stored credentials still answer;
  * - never inside a database transaction.
  */
 
@@ -110,7 +111,12 @@ export const spawnGitBytes =
   (folder, args, kind, options = {}) => {
     const run = Effect.callback<Buffer, GitRefusal>((resume) => {
       const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
-        env: { ...process.env, ...options.env, GIT_TERMINAL_PROMPT: '0' },
+        env: {
+          ...process.env,
+          ...options.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GCM_INTERACTIVE: 'never',
+        },
         stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
         detached: process.platform !== 'win32',

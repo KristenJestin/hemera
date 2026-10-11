@@ -9,9 +9,10 @@
  *   `probes/<mission key>/<number>/` of the data folder and prepared with the Project's recipe
  *   (#6), then its session opens: a child of the Planner, role `probe`, its folder its place.
  * - **End.** `probe_report` is checked, what the worktree holds against its commit is captured,
- *   the report stored, the session stopped with its runs, its reservations released (#88), and
- *   `[hemera:probe]` delivered to the Planner (CT-28). An agent that ends a turn without it is told
- *   once; a second silent end fails the Probe. A failure is delivered the same way.
+ *   the report stored and `[hemera:probe]` delivered to the Planner at once (CT-28); then the
+ *   session stopped with its runs once its turn is over (two minutes at most), and its
+ *   reservations released (#88). An agent that ends a turn without it is told once; a second
+ *   silent end fails the Probe. A failure is delivered the same way.
  * - **Health.** #40's rules hold: a session silent in a turn is stuck (its chip says so until its
  *   lineage speaks again, its parent is told), a dead one is replaced in the same folder.
  * - **Wipe.** In this order: the whole process tree, the Cleanup hook (S6, never the Closing),
@@ -59,6 +60,7 @@ import { DetachedAt } from '@hemera/ipc'
 import { and, eq, inArray, isNotNull, max } from 'drizzle-orm'
 import {
   Cause,
+  Duration,
   Effect,
   Fiber,
   Layer,
@@ -228,6 +230,13 @@ export const interruptLeftProbes = Effect.gen(function* () {
   }
   return interrupted
 })
+
+/**
+ * How long the end of a Probe that reported waits for its session's turn to be over before ending
+ * it anyway. The engine has no bound for this kind of wait: two minutes, enough for a last message
+ * and a few calls the report did not need.
+ */
+export const REPORTED_TURN_BOUND = Duration.minutes(2)
 
 const failedStep = (failed: { readonly message: string }) =>
   new ReconciliationFailed({ reason: failed.message })
@@ -553,6 +562,26 @@ export const probesLayer = (settings: ProbesSettings) =>
           yield* stopProcesses(row, reason)
           yield* releaseReservations(row)
           yield* tellPlanner(row, body)
+        }).pipe(
+          Effect.catchCause((cause) =>
+            log(`the end of Probe ${row.id} was not finished: ${String(cause)}`),
+          ),
+        )
+
+      /**
+       * After a Probe's own report was kept: its Planner told at once, the report being final; then
+       * its session's turn left to end, so the agent hears its report kept, for at most
+       * `REPORTED_TURN_BOUND`; then its processes stopped and its reservations released, a turn
+       * still going ended with them.
+       */
+      const afterReport = (row: ProbeRow, body: string, reporter: string) =>
+        Effect.gen(function* () {
+          yield* tellPlanner(row, body)
+          yield* sessions
+            .settled(reporter)
+            .pipe(Effect.timeoutOption(REPORTED_TURN_BOUND), Effect.ignore)
+          yield* stopProcesses(row, 'it reported')
+          yield* releaseReservations(row)
         }).pipe(
           Effect.catchCause((cause) =>
             log(`the end of Probe ${row.id} was not finished: ${String(cause)}`),
@@ -1069,14 +1098,14 @@ export const probesLayer = (settings: ProbesSettings) =>
         }).pipe(
           Effect.tap((outcome) =>
             'ended' in outcome && outcome.ended !== undefined
-              ? afterEnd(
+              ? afterReport(
                   outcome.ended,
-                  'it reported',
                   probeReportText(
                     outcome.ended.number,
                     outcome.ended.question,
                     reportOf(outcome.ended) ?? args,
                   ),
+                  grant.sessionId,
                 ).pipe(Effect.forkIn(scope))
               : Effect.void,
           ),

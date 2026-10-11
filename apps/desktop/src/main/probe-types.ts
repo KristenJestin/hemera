@@ -80,4 +80,7 @@ export interface PendingNeed {
 declare global {
   // oxlint-disable-next-line no-var -- a global is declared with `var`
   var hemeraProbe: HemeraProbe | undefined
+  /** What a load the suite started measured, once it has ended. */
+  // oxlint-disable-next-line no-var -- a global is declared with `var`
+  var hemeraLoaded: LoadMeasure | undefined
 }

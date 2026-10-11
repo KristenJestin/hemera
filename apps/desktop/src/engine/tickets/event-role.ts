@@ -102,10 +102,15 @@ const ticketEventBriefOf = (owner: SessionOwner, session: BriefedSession) =>
           DATA_LABEL,
           ...events.map((event) =>
             [
-              `- ${event.id} (${event.key}): ${kindSaid(event.kind)}${
-                event.commentId === null ? '' : `, comment ${event.commentId}`
-              }`,
-              ...event.difference.split('\n').map((line) => `  > ${line}`),
+              `- ${event.id} (${event.key}): ${kindSaid(event.kind)}`,
+              // The comment's id is the forge's: quoted with the difference.
+              ...[
+                ...(event.commentId === null ? [] : [`Comment ${event.commentId}:`]),
+                event.difference,
+              ]
+                .join('\n')
+                .split('\n')
+                .map((line) => `  > ${line}`),
             ].join('\n'),
           ),
         ].join('\n'),

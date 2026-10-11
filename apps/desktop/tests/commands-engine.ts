@@ -15,6 +15,7 @@ import { join } from 'node:path'
 
 import { Effect } from 'effect'
 import type { Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 
 import { type ProfileParts, type StartedProfile, startProfile } from '../src/engine/profile.ts'
 import { SHIPPED, temporaryFolder } from './storage.ts'
@@ -59,6 +60,8 @@ export function commandsEngine(
     | 'building'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
+  /** The engine's fibers on a test clock the program moves (`TestClock.adjust`). */
+  testClock = false,
 ) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {
     const lines: string[] = []
@@ -77,7 +80,7 @@ export function commandsEngine(
             (line) => lines.push(line),
           )
           return yield* program({ profile, lines })
-        }),
+        }).pipe(testClock ? Effect.provide(TestClock.layer()) : (effect) => effect),
       ),
     )
   }

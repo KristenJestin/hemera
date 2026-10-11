@@ -5,10 +5,12 @@ import type { CardStatus } from '../../blocks/setup/setup-card.tsx'
 import {
   ACME_FOLDER,
   LONG_PROPOSALS,
+  MANY_SCRIPTS,
   NESTED_REPOSITORY,
   PROPOSALS,
   REFUSALS,
   REVISED_VARIABLES,
+  withAdded,
 } from '../../blocks/setup/setup-fixtures.ts'
 import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
@@ -31,6 +33,8 @@ export interface SetupFixtureProps {
   nested?: boolean | undefined
   /** A long path, a long line and a long name in every field that holds one. */
   long?: boolean | undefined
+  /** A repository with many scripts: the others listed apart under the commands. */
+  scripts?: boolean | undefined
   failure?: string | undefined
   /** The folder chosen. */
   folder?: string | undefined
@@ -53,12 +57,17 @@ export function SetupFixture({
   arriving = [],
   nested = false,
   long = false,
+  scripts = false,
   failure,
   folder = ACME_FOLDER,
 }: SetupFixtureProps): ReactNode {
   const proposals = long ? LONG_PROPOSALS : PROPOSALS
   const proposalOf = (kind: SetupKind): Proposal =>
-    kind === 'repositories' && nested ? NESTED_REPOSITORY : proposals[kind]
+    kind === 'repositories' && nested
+      ? NESTED_REPOSITORY
+      : kind === 'commands' && scripts
+        ? MANY_SCRIPTS
+        : proposals[kind]
   const [startedAt] = useState(() => Date.now() - 42_000)
   const [agent, setAgent] = useState<SetupAgent>(firstAgent)
   const [open, setOpen] = useState(false)
@@ -139,6 +148,12 @@ export function SetupFixture({
       const card = cards.find((one) => one.kind === kind)
       set(kind, { status: { state: 'editing' }, draft: card?.proposal ?? undefined })
     },
+    onAddOther: (id) =>
+      setCards((before) =>
+        before.map((card) =>
+          card.proposal === null ? card : { ...card, proposal: withAdded(card.proposal, id) },
+        ),
+      ),
     onDraft: (kind, draft) => set(kind, { draft }),
     onDiscuss: (kind) => set(kind, { status: { state: 'discussing' } }),
     onDecline: (kind) => set(kind, { status: { state: 'declined' } }),
