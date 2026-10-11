@@ -447,6 +447,30 @@ export const RowMenu: Story = {
 }
 
 /**
+ * A row with nothing in its menu draws no ⋯ button, and its action keeps the x of the rows that
+ * have one: the menu's place is kept empty.
+ */
+export const RowWithoutMenu: Story = {
+  args: { rows: [ROWS[1], ROWS[0]].filter((row): row is NeedRow => row !== undefined) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.queryByRole('button', { name: 'More actions for Git is not on the PATH' }),
+    ).toBeNull()
+    await expect(
+      canvas.getByRole('button', {
+        name: 'More actions for Read the deploy host from the SSH configuration',
+      }),
+    ).toBeVisible()
+    const answer = canvas.getByRole('button', { name: 'Answer here' })
+    const retry = canvas.getByRole('button', { name: 'Retry here' })
+    await expect(Math.round(retry.getBoundingClientRect().left)).toBe(
+      Math.round(answer.getBoundingClientRect().left),
+    )
+  },
+}
+
+/**
  * Needs you is a table: the Project, the key, the kind, the title, the detail, when and the
  * action each start on one edge on every row, a row without a key or a detail keeping its empty
  * cell; the times end on one edge; an agent's group and its unfolded rows share the columns.
@@ -457,18 +481,19 @@ export const Aligned: Story = {
     const canvas = within(canvasElement)
     await expect(edgesOf(canvasElement)).toEqual(aligned(7))
     await expect(rulesAbove(canvasElement)).toEqual({ rows: 7, ruled: 7 })
-    // One action and one menu on every row, the same two controls whatever the row offers.
+    // One action on every row; the menu only where the row has something in it (the Hemera need
+    // and the chat's permission have no mission to open, so no menu).
     const controls = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
       [...cell.querySelectorAll('button')].map((one) => one.getAttribute('aria-label') ?? ''),
     )
     await expect(controls).toHaveLength(7)
-    await expect(controls.map((names) => names.length)).toEqual(Array(7).fill(2))
+    await expect(controls.map((names) => names.length)).toEqual([1, 2, 2, 2, 1, 2, 2])
     await expect(controls.map(([action]) => /here$/.test(action ?? ''))).toEqual(
       Array(7).fill(true),
     )
-    await expect(controls.map(([, more]) => /^More actions for /.test(more ?? ''))).toEqual(
-      Array(7).fill(true),
-    )
+    await expect(
+      controls.map((names) => names.length === 2 && /^More actions for /.test(names[1] ?? '')),
+    ).toEqual([false, true, true, true, false, true, true])
     // The action and the menu read as a pair: the same quiet icon button, the same size, no frame.
     const looks = [...canvasElement.querySelectorAll('[data-need-cell="action"]')].map((cell) =>
       [...cell.querySelectorAll('button')].map((one) => {
