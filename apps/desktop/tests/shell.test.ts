@@ -373,7 +373,6 @@ describe('The pages', () => {
         projectId: 'acme',
         projectName: 'Acme',
         onOpenMission: nothing,
-        onOpenChat: nothing,
       }),
     )
     expect(field).toContain('Start a mission in Acme')

@@ -6,13 +6,12 @@ import {
   StartField,
   type StartFieldProps,
   type StartResultView,
-  type StartTriage,
 } from './start-field.tsx'
 
 /**
  * The field that starts a mission: it searches first and creates last. What it finds unfolds
  * under it, the Project's missions, then tickets, and "Create a mission" is always the last
- * choice and never what Enter does while something else shows. The Planner's answer stands under it.
+ * choice and never what Enter does while something else shows.
  */
 const meta = {
   tags: ['autodocs'],
@@ -25,7 +24,6 @@ const meta = {
     results: [],
     onOpen: fn(),
     onCreate: fn(),
-    onTriageAction: fn(),
   },
   decorators: [
     (Story) => (
@@ -254,64 +252,5 @@ export const Focused: Story = {
     expect(choices[0]).toHaveFocus()
     await userEvent.keyboard('{ArrowUp}')
     await waitFor(() => expect(field).toHaveFocus())
-  },
-}
-
-const answered = (triage: StartTriage, text: string): NonNullable<Story['args']> => ({
-  text,
-  results: [],
-  triage,
-})
-
-/** The Planner reads what was typed: its loading face under the field. */
-export const TriageReading: Story = {
-  args: answered({ kind: 'reading' }, 'Export the audit log'),
-  render: typing,
-  play: ({ canvasElement }) => {
-    expect(within(canvasElement).getByRole('status', { name: 'Hemera reads it' })).toBeVisible()
-  },
-}
-
-/** The answer: this belongs to an existing mission. */
-export const TriageBelongs: Story = {
-  args: answered({ kind: 'belongs', key: 'ACME-12' }, 'Keep the date range in the file name'),
-  render: typing,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    expect(canvas.getByText('This belongs to ACME-12')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Add it to ACME-12' }))
-    expect(args.onTriageAction).toHaveBeenCalledWith('open')
-    await userEvent.click(canvas.getByRole('button', { name: 'Start a mission anyway' }))
-    expect(args.onTriageAction).toHaveBeenCalledWith('anyway')
-  },
-}
-
-/** The answer: it was delivered already, by a mission or a requirement not validated yet. */
-export const TriageDelivered: Story = {
-  args: answered({ kind: 'delivered', key: 'ACME-9', proposed: false }, 'Export the movements'),
-  render: typing,
-  play: ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    expect(canvas.getByText('Already delivered by ACME-9')).toBeVisible()
-    expect(canvas.getByRole('button', { name: 'Open ACME-9' })).toBeVisible()
-  },
-}
-
-/** Delivered by a requirement the user has not validated yet. */
-export const TriageDeliveredProposed: Story = {
-  args: answered({ kind: 'delivered', key: 'ACME-9', proposed: true }, 'Export the movements'),
-  render: typing,
-  play: ({ canvasElement }) => {
-    expect(within(canvasElement).getByText('Delivered by ACME-9, not validated yet')).toBeVisible()
-  },
-}
-
-/** The answer: too small for a mission, the Chat is the place. */
-export const TriageSmall: Story = {
-  args: answered({ kind: 'small' }, 'Fix the typo in the footer'),
-  render: typing,
-  play: async ({ canvasElement, args }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Ask in a Chat' }))
-    expect(args.onTriageAction).toHaveBeenCalledWith('chat')
   },
 }
