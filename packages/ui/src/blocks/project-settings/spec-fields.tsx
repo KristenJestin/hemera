@@ -130,13 +130,6 @@ export function SpecFields({
               </p>
             )}
           </div>
-          <Select
-            label="Spec language"
-            items={languagesOffered(language)}
-            value={language}
-            disabled={language === null}
-            onValueChange={onLanguage}
-          />
           {(mode === 'linked' || mode === 'remote') && sync !== undefined && (
             <div className="flex flex-col gap-1.5">
               <Select
@@ -150,6 +143,13 @@ export function SpecFields({
               </p>
             </div>
           )}
+          <Select
+            label="Spec language"
+            items={languagesOffered(language)}
+            value={language}
+            disabled={language === null}
+            onValueChange={onLanguage}
+          />
           <Input
             label="Key prefix"
             value={prefix ?? ''}

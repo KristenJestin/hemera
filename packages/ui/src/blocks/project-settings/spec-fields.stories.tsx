@@ -6,7 +6,7 @@ import { SPEC_MODE_WORDS, SpecFields } from './spec-fields.tsx'
 
 /**
  * The frame under the ticket providers: where Specs live (Local or Linked, with what the mode does
- * written under it), the language Specs are written in, how often a watched ticket is read, and the
+ * written under it), how often a watched ticket is read, the language Specs are written in, and the
  * key prefix the next missions take.
  */
 const meta = {
@@ -48,6 +48,20 @@ export const Linked: Story = {
     await expect(canvas.getByText('Last checked at 09:41')).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Key prefix' })).toHaveValue('ACME')
     await expect(canvas.getByText(/the next ones use ACME\./)).toBeVisible()
+  },
+}
+
+/** The check interval sits right under the mode, before the language: choosing Linked adds no row below it. */
+export const IntervalUnderTheMode: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const follows = (first: HTMLElement, second: HTMLElement) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const mode = canvas.getByRole('combobox', { name: 'Where Specs live' })
+    const interval = canvas.getByRole('combobox', { name: 'Check linked tickets' })
+    const language = canvas.getByRole('combobox', { name: 'Spec language' })
+    await expect(follows(mode, interval)).toBe(true)
+    await expect(follows(interval, language)).toBe(true)
   },
 }
 
