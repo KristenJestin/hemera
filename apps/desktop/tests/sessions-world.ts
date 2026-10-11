@@ -129,6 +129,8 @@ export const sessionsEngine = (
     readonly reconciliationSteps?: ProfileParts['reconciliationSteps']
     /** Where a launched mission's Building starts, when a suite counts it (#139). */
     readonly building?: ProfileParts['building']
+    /** The engine on a test clock the suite moves (#85). */
+    readonly testClock?: boolean
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -182,6 +184,7 @@ export const sessionsEngine = (
     options.reconciliationSteps === undefined
       ? withSnapshots
       : { ...withSnapshots, reconciliationSteps: options.reconciliationSteps },
+    options.testClock,
   )
   return { world, run }
 }

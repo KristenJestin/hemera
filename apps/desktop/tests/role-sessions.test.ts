@@ -471,6 +471,60 @@ describe('A redirect cancels the turn, then sends (channel 3)', () => {
       '[hemera:cancel]\nThe user cancelled the export: stop.',
     )
   })
+  test('a redirect right after a delivery cancels the turn it started, before the agent knows of it', async () => {
+    const hold = held()
+    const { world, run } = engine((index) =>
+      index === 0
+        ? {
+            turns: [[{ does: 'says', text: 'ready' }]],
+            steps: [
+              { does: 'says', text: 'a' },
+              { does: 'says', text: 'b' },
+            ],
+            // Every turn after the brief's is held at its first step.
+            between: () =>
+              (world.agents[0]?.answers.prompts.length ?? 0) > 1 ? hold.promise : Promise.resolve(),
+          }
+        : {},
+    )
+    await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
+          // The first starts a turn; the redirect lands before its prompt reaches the runtime.
+          yield* Sessions.use((sessions) =>
+            Effect.andThen(
+              sessions.deliver({
+                owner,
+                target: { lineage: session.lineage },
+                kind: 'answers',
+                body: 'Export them as CSV.',
+              }),
+              sessions.deliver({
+                owner,
+                target: { lineage: session.lineage },
+                kind: 'cancel',
+                body: 'The user cancelled the export: stop.',
+                urgency: 'redirect',
+              }),
+            ),
+          )
+          yield* until(Effect.sync(() => world.agents[0]?.answers.cancels === 1))
+          hold.release()
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 3))
+        }),
+      ),
+    )
+    expect(world.agents[0]?.answers.cancels).toBe(1)
+    expect(text(world.agents[0]?.answers.prompts[2] ?? [])).toBe(
+      '[hemera:cancel]\nThe user cancelled the export: stop.',
+    )
+  })
 })
 
 describe('Silence, waiting and stuck (CT-12)', () => {

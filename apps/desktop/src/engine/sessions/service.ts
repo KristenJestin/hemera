@@ -161,6 +161,11 @@ export class Sessions extends Context.Service<
       asked: OpenAsked,
       reason: string,
     ) => Effect.Effect<RoleSession, SessionRefused | DatabaseError>
+    /**
+     * Starts a lineage stopped as failed or ended again, when it has no live successor and its
+     * owner is active: the successor takes its leases and the resume block. Null otherwise.
+     */
+    readonly resume: (sessionId: string) => Effect.Effect<RoleSession | null, DatabaseError>
     /** Stores a delivery, then hands it over on its channel when its session lives. */
     readonly deliver: (
       asked: DeliveryAsked,
@@ -462,7 +467,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             driver.lastSign = yield* Clock.currentTimeMillis
             driver.took = false
             driver.waiting = false
-            driver.turn = yield* runTurn(driver, text, sent).pipe(Effect.forkIn(scope))
+            // Started at once, so the runtime knows of the turn before anything can cancel it.
+            driver.turn = yield* runTurn(driver, text, sent).pipe(
+              Effect.forkIn(scope, { startImmediately: true }),
+            )
           }),
         ).pipe(run)
 
@@ -1391,6 +1399,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               return yield* openAt(asked, { lineage, epoch })
             }),
           ).pipe(run),
+        resume,
         replace,
         stopTree,
         rebuild,

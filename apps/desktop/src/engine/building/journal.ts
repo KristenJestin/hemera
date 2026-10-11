@@ -1,6 +1,7 @@
 /**
- * The pre-launch check's and the launch's lines in a mission's Journal (#139): each the projection
- * of the domain event written in the same transaction as what it records.
+ * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
+ * (#141): each the projection of the domain event written in the same transaction as what it
+ * records.
  */
 
 import { AgentAuthor, HemeraAuthor, type MemoryAuthor, UserAuthor } from '@hemera/ipc'
@@ -120,4 +121,65 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
         `Launched: Building on ${stringsOf(payload, 'branches').join(', ')}, the validation settings copied (version ${String(numberOf(payload, 'validation'))}).`,
     ),
   ],
+  [
+    'building.started',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'label')} started with ${String(numberOf(payload, 'tasks'))} task(s).`,
+    ),
+  ],
+  [
+    'building.task_available',
+    lineOf(byHemera, (payload) => `Available: ${stringsOf(payload, 'tasks').join(', ')}.`),
+  ],
+  [
+    'building.task_started',
+    lineOf(
+      agentOrHemera,
+      (payload) => `${stringOf(payload, 'task')} started: ${stringOf(payload, 'title')}.`,
+    ),
+  ],
+  [
+    'building.task_finished',
+    lineOf(
+      agentOrHemera,
+      (payload) => `${stringOf(payload, 'task')} finished: ${stringOf(payload, 'summary')}`,
+    ),
+  ],
+  [
+    'building.task_done',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'task')} is done, ${payload['verified'] === true ? 'verified' : 'not verified'}.`,
+    ),
+  ],
+  [
+    'building.task_blocked',
+    lineOf(byHemera, (payload) => `${stringOf(payload, 'task')} is blocked: a need waits.`),
+  ],
+  [
+    'building.task_skipped',
+    lineOf(
+      byHemera,
+      (payload) => `${stringOf(payload, 'task')} is skipped: ${stringOf(payload, 'reason')}.`,
+    ),
+  ],
+  [
+    'building.need_requested',
+    lineOf(agentOrHemera, (payload) => {
+      const tasks = stringsOf(payload, 'tasks')
+      return `The Builder asked the user (${stringOf(payload, 'kind')})${tasks.length === 0 ? '' : `, holding ${tasks.join(', ')}`}.`
+    }),
+  ],
+  [
+    'building.decision',
+    lineOf(byUser, (payload) => {
+      const amendment = stringOf(payload, 'amendment')
+      return `Decided: ${stringOf(payload, 'answer')}.${amendment === '' ? '' : ` The plan changed: ${amendment}`}`
+    }),
+  ],
+  ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],
+  ['building.tasks_done', lineOf(byHemera, () => 'Every task of the plan is done or skipped.')],
 ])

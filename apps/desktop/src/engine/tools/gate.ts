@@ -95,6 +95,7 @@ import type { MissionActivity } from '../missions.ts'
 import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
+import { BuildDesk } from '../building/desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -206,6 +207,7 @@ export type GateServices =
   | Git
   | ProfileHome
   | ProbeDesk
+  | BuildDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -385,6 +387,18 @@ const decodeCall = (
       return decoder(tool, TOOLS.ticket_event_report.input)(raw)
     case 'prelaunch_report':
       return decoder(tool, TOOLS.prelaunch_report.input)(raw)
+    case 'build_read':
+      return decoder(tool, TOOLS.build_read.input)(raw)
+    case 'task_start':
+      return decoder(tool, TOOLS.task_start.input)(raw)
+    case 'task_finished':
+      return decoder(tool, TOOLS.task_finished.input)(raw)
+    case 'task_blocked':
+      return decoder(tool, TOOLS.task_blocked.input)(raw)
+    case 'report_need':
+      return decoder(tool, TOOLS.report_need.input)(raw)
+    case 'build_summary':
+      return decoder(tool, TOOLS.build_summary.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -802,6 +816,18 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* ticketEventReportTool(grant, call.args)
             case 'prelaunch_report':
               return yield* prelaunchReportTool(grant, call.args)
+            case 'build_read':
+              return yield* BuildDesk.use((desk) => desk.read(grant, call.args))
+            case 'task_start':
+              return yield* BuildDesk.use((desk) => desk.start(grant, call.args))
+            case 'task_finished':
+              return yield* BuildDesk.use((desk) => desk.finished(grant, call.args))
+            case 'task_blocked':
+              return yield* BuildDesk.use((desk) => desk.blocked(grant, call.args))
+            case 'report_need':
+              return yield* BuildDesk.use((desk) => desk.need(grant, call.args))
+            case 'build_summary':
+              return yield* BuildDesk.use((desk) => desk.summary(grant, call.args))
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

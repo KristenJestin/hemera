@@ -39,18 +39,22 @@ const commentsText = (version: TicketVersion, since: string | null): string => {
   if (kept.length === 0) return since === null ? 'No comment.' : `No comment since ${since}.`
   return [
     'Comments:',
+    // A comment's author was written by people too: quoted with its body.
     ...kept.map(
       (comment) =>
-        `- ${comment.author ?? 'a deleted account'} on ${comment.createdAt}${
-          comment.editedAt === null ? '' : ` (edited ${comment.editedAt})`
-        }:\n${quoted(comment.body, '  ')}`,
+        `- Comment:\n${quoted(
+          `${comment.author ?? 'a deleted account'} on ${comment.createdAt}${
+            comment.editedAt === null ? '' : ` (edited ${comment.editedAt})`
+          }:`,
+          '  ',
+        )}\n${quoted(comment.body, '  ')}`,
     ),
   ].join('\n')
 }
 
 /**
- * The ticket: its key, link and read date, its title and status, its sections and the rest, quoted,
- * then its comments when asked, and the end line.
+ * The ticket: its key, link and read date, then its title and status, its sections and the rest,
+ * quoted, then its comments when asked, and the end line.
  */
 export const ticketText = (
   version: TicketVersion,
@@ -59,8 +63,8 @@ export const ticketText = (
   [
     `Ticket: ${version.key} ${version.url}, read on ${version.readAt}`,
     DATA_LABEL,
-    `Title: ${version.title}`,
-    `Status: ${version.status.wording}`,
+    quoted(`Title: ${version.title}`),
+    quoted(`Status: ${version.status.wording}`),
     ...version.sections.map(
       (part) =>
         `## ${sectionTitle(part.section)} (written “${part.heading}”)\n${quoted(part.text)}`,

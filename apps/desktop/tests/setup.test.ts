@@ -21,12 +21,15 @@ import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import { AcpTraces } from '../src/engine/agents/trace.ts'
 import { setProjectLimits } from '../src/engine/budget.ts'
 import { answerNeed, listNeeds, retryNeed } from '../src/engine/needs.ts'
+import { writePreferences } from '../src/engine/preferences.ts'
 import { addRepository, createProject, getProject } from '../src/engine/projects.ts'
 import { setRoleSetting } from '../src/engine/sessions/cascade.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { sessionsIn } from '../src/engine/sessions/store.ts'
+import { instructionsKept, sessionsIn } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { acceptAll, acceptCard, cardsOf, declineCard } from '../src/engine/setup/cards.ts'
+import { SETUP_TEMPLATE } from '../src/engine/setup/role.ts'
+import { specLanguageOf } from '../src/engine/planning/store.ts'
 import { Setup } from '../src/engine/setup/service.ts'
 import { TRACES_FOLDER } from '../src/main/diagnostic.ts'
 import { listCommands } from '../src/engine/catalogue.ts'
@@ -35,7 +38,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
 import { listVariables } from '../src/engine/variables.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { held, sessionsEngine, until, within } from './sessions-world.ts'
+import { held, sessionsEngine, text as textOf, until, within } from './sessions-world.ts'
 
 let data: string
 let work: string
@@ -984,5 +987,192 @@ describe('A repository card the user partly did meanwhile', () => {
     )
     expect(seen.after).toMatchObject({ state: 'accepted', refusal: null })
     expect(seen.web).toMatchObject({ remote: 'origin', baseBranch: 'main' })
+  })
+})
+
+describe('The setup agent speaks the user’s language', () => {
+  test('its instructions and its brief both name it, and ask for every message, not the summary alone', async () => {
+    const { world, run } = sessionsEngine(data, () => proposing())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* writePreferences({ userLanguage: 'fr' })
+          const { project } = yield* acme
+          const session = yield* setUp(project.id)
+          return yield* instructionsKept(session.id)
+        }),
+      ),
+    )
+    expect(seen).not.toContain('{user.language}')
+    expect(seen).toContain('in French')
+    expect(seen).toMatch(/Every message you write is in French/)
+    const brief = textOf(world.agents[0]?.answers.prompts[0] ?? [])
+    expect(brief).toContain('Your language with the user: French')
+  })
+})
+
+describe('The commands that matter, and the other scripts', () => {
+  test('a command listed apart is a card Accept all leaves alone, added by its own click', async () => {
+    const command = (name: string, type: string, line: string, more: Schema.JsonObject = {}) => ({
+      kind: 'command',
+      name,
+      type,
+      line,
+      ...more,
+    })
+    const { run } = sessionsEngine(data, () =>
+      proposing([
+        command('test', 'test', 'pnpm test', { check: true }),
+        command('build', 'build', 'pnpm build'),
+        command('release', 'script', 'pnpm release', { listed: true }),
+        command('docs', 'script', 'pnpm docs', { listed: true }),
+      ]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme
+          yield* setUp(project.id)
+          const proposed = yield* cardsOf(project.id)
+          const all = yield* acceptAll(project.id)
+          const after = (yield* listCommands(project.id)).map((one) => one.name)
+          const release = all.find((card) => card.title === 'Add the command release')
+          if (release === undefined) return yield* Effect.die(new Error('no release card'))
+          const added = yield* acceptCard(release.id)
+          return {
+            proposed,
+            all,
+            after,
+            added,
+            catalogue: (yield* listCommands(project.id)).map((one) => one.name),
+          }
+        }),
+      ),
+    )
+    expect(seen.proposed.map((card) => card.change)).toMatchObject([
+      { name: 'test' },
+      { name: 'build' },
+      { name: 'release', listed: true },
+      { name: 'docs', listed: true },
+    ])
+    // The pending cards come first, then the decided ones.
+    expect(seen.all.map((card) => [card.title, card.state])).toEqual([
+      ['Add the command release', 'pending'],
+      ['Add the command docs', 'pending'],
+      ['Add the command test', 'accepted'],
+      ['Add the command build', 'accepted'],
+    ])
+    expect(seen.after.toSorted()).toEqual(['build', 'test'])
+    expect(seen.added.state).toBe('accepted')
+    expect(seen.catalogue.toSorted()).toEqual(['build', 'release', 'test'])
+  })
+
+  test('the role asks for the commands that matter and lists every other script apart', () => {
+    expect(SETUP_TEMPLATE).toMatch(/install[^.]*(test|check)[^.]*build[^.]*dev server/)
+    expect(SETUP_TEMPLATE).toContain('listed: true')
+  })
+})
+
+describe('The Spec language, proposed when the files say it', () => {
+  /** A Spec language the Project does not have yet, and a README the files say it in. */
+  const otherThan = (current: string) => (current === 'fr' ? 'de' : 'fr')
+
+  /** What the agent is told when its proposal of this change is refused; no card is made. */
+  const refused = async (change: Schema.JsonObject) => {
+    const { world, run } = sessionsEngine(data, () => proposing([change]))
+    const cards = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          writeFileSync(join(main, 'README.md'), '# Acme\n')
+          yield* setUp(project.id)
+          return yield* cardsOf(project.id)
+        }),
+      ),
+    )
+    expect(cards).toEqual([])
+    return world.agents[0]?.answers.toolAnswers[1]?.text ?? ''
+  }
+
+  test('a card names the language and the file that says it; accepting sets the Project’s Spec language', async () => {
+    let tag = 'fr'
+    const { world, run } = sessionsEngine(data, () =>
+      proposing([{ kind: 'specLanguage', language: tag, source: 'README.md' }]),
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          writeFileSync(join(main, 'README.md'), '# Acme\n')
+          tag = otherThan(yield* specLanguageOf(project.id))
+          yield* setUp(project.id)
+          const [card] = yield* cardsOf(project.id)
+          if (card === undefined) return yield* Effect.die(new Error('no card'))
+          const before = yield* specLanguageOf(project.id)
+          const accepted = yield* acceptCard(card.id)
+          return { tag, card, before, accepted, after: yield* specLanguageOf(project.id) }
+        }),
+      ),
+    )
+    expect(seen.card).toMatchObject({
+      title: `Set the Spec language to ${seen.tag}`,
+      state: 'pending',
+      change: { kind: 'specLanguage', language: seen.tag, source: 'README.md' },
+    })
+    expect(seen.card.details).toContainEqual({ label: 'Said in', value: 'README.md' })
+    expect(seen.before).not.toBe(seen.tag)
+    expect(seen.accepted.state).toBe('accepted')
+    expect(seen.after).toBe(seen.tag)
+    expect(world.agents[0]?.answers.toolAnswers[0]?.text).toMatch(/Spec language: .* \(\w+/)
+  })
+
+  test('a call is refused whole when no file says it', async () => {
+    expect(await refused({ kind: 'specLanguage', language: 'fr', source: 'GUIDE.md' })).toMatch(
+      /^refused: the whole call, for Set the Spec language to fr: GUIDE\.md does not exist/,
+    )
+  })
+
+  test('a call is refused whole when its language is no language tag', async () => {
+    expect(
+      await refused({ kind: 'specLanguage', language: 'not a tag', source: 'README.md' }),
+    ).toMatch(/not a language tag/)
+  })
+
+  test('a call is refused whole when its file leaves the Project folder', async () => {
+    expect(await refused({ kind: 'specLanguage', language: 'fr', source: '../README.md' })).toMatch(
+      /leaves the main checkout/,
+    )
+  })
+
+  test('a language the Project already has is refused whole', async () => {
+    let tag = 'en'
+    const { world, run } = sessionsEngine(data, () =>
+      proposing([{ kind: 'specLanguage', language: tag, source: 'README.md' }]),
+    )
+    const cards = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme
+          writeFileSync(join(main, 'README.md'), '# Acme\n')
+          tag = yield* specLanguageOf(project.id)
+          yield* setUp(project.id)
+          return yield* cardsOf(project.id)
+        }),
+      ),
+    )
+    expect(cards).toEqual([])
+    expect(world.agents[0]?.answers.toolAnswers[1]?.text).toMatch(
+      /is already the Spec language of this Project/,
+    )
+  })
+
+  test('the role proposes it only when whole files say it, never from a word', () => {
+    expect(SETUP_TEMPLATE).toContain('specLanguage')
+    expect(SETUP_TEMPLATE).toMatch(/never from a word/i)
   })
 })

@@ -21,7 +21,12 @@ describe('The Journal, found again after the engine was killed', () => {
       async () => {
         const state = await browser.electron.execute(() => globalThis.hemeraProbe?.memory())
         const [mission] = state?.files ?? []
-        return state !== undefined && mission?.names.includes('journal.md') === true
+        // A line written after the catch-up (the replaced session's) reaches the file a moment later.
+        return (
+          state !== undefined &&
+          mission?.names.includes('journal.md') === true &&
+          mission.journalFileLines === state.journalLines
+        )
       },
       { timeout: 30_000, timeoutMsg: 'the Memory never wrote its files again' },
     )

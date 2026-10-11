@@ -7,7 +7,9 @@
 
 import { Effect } from 'effect'
 
+import { readPreferences } from '../preferences.ts'
 import { getProject } from '../projects.ts'
+import { languageName } from '../sessions/instructions.ts'
 import type { RoleEntry, SessionOwner } from '../sessions/roles.ts'
 
 /** The `setup` role's layer of the instructions, as the ticket writes it. */
@@ -35,13 +37,26 @@ The Project's name and folder. Read the current setup with \`setup_read\` first.
    opens, or ask before running (anything that migrates, seeds, resets or touches a shared
    resource). Give a command that rewrites files its write globs (a formatter, a generated
    client, the lockfile).
-4. A call refused for one change is refused whole, with the reason: correct that change and
+   Propose as commands only the ones the Project's everyday work needs: install the dependencies,
+   the checks (test, typecheck, lint, format check, and a full check when there is one), build,
+   and the dev server. Every other script you find (release, packaging, documentation, generators,
+   one-off tools) goes in the same call with \`listed: true\`: the user sees it under "Other
+   scripts", unselected, and adds it in one click. Never drop a script because it is not on that
+   list; list it.
+4. The Spec language: propose it (\`specLanguage\`, with the file that says it) only when the
+   README or an instruction file (\`AGENTS.md\`, \`CLAUDE.md\`) is written in one language through
+   whole paragraphs, or states it, and that language differs from the Spec language \`setup_read\`
+   gives. Never from a word, a name, a code identifier or a comment; if the files disagree or say
+   nothing, propose nothing.
+5. A call refused for one change is refused whole, with the reason: correct that change and
    propose the batch again.
-5. A variable's value: propose it only when the repository gives a safe default (an example file
+6. A variable's value: propose it only when the repository gives a safe default (an example file
    that is meant to be copied). Never copy a value from a secret file. Its value is hidden from
    the user's view and from every record.
-6. End your turn with a short summary, in {user.language}: what you proposed, and what you could
-   not decide and why.
+7. Every message you write is in {user.language}, whatever language the repository's files are
+   in: the remarks you make while you read as well as the closing summary. Make the summary short,
+   in plain Markdown (a short paragraph, or a few list items): what you proposed, and what you
+   could not decide and why.
 
 ## Never
 - Propose a change you have not read evidence for.
@@ -58,8 +73,13 @@ const setupBrief = (owner: SessionOwner) =>
       Effect.catchTag('UnknownProject', () => Effect.succeed(null)),
     )
     if (project === null) return []
+    const preferences = yield* readPreferences
     return [
       { label: 'The Project', text: `${project.name}, in the folder ${project.mainCheckout}` },
+      {
+        label: 'Languages',
+        text: `Your language with the user: ${languageName(preferences.userLanguage)}`,
+      },
     ]
   })
 
