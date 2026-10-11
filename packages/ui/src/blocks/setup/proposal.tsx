@@ -8,6 +8,7 @@ import { Legend } from '../../components/tooltip/legend.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconBan,
+  IconBook2,
   IconBolt,
   IconCheck,
   IconChecklist,
@@ -41,13 +42,20 @@ import { MASK } from '../project-settings/variables.tsx'
  * the mono face, a value always masked, a role as its glyph. A repository the agent found deeper
  * in the folder than Hemera looked carries the search glyph, with its legend.
  */
-export type SetupKind = 'repositories' | 'commands' | 'preparation' | 'variables' | 'never'
+export type SetupKind =
+  | 'repositories'
+  | 'commands'
+  | 'preparation'
+  | 'variables'
+  | 'specLanguage'
+  | 'never'
 
 export const SETUP_KINDS: readonly SetupKind[] = [
   'repositories',
   'commands',
   'preparation',
   'variables',
+  'specLanguage',
   'never',
 ]
 
@@ -56,6 +64,7 @@ export const SETUP_TITLES: Record<SetupKind, string> = {
   commands: 'Commands',
   preparation: 'Preparation',
   variables: 'Variables',
+  specLanguage: 'Spec language',
   never: 'Never run',
 }
 
@@ -69,6 +78,8 @@ export function setupIcon(kind: SetupKind): ReactNode {
       return <IconListNumbers size="sm" />
     case 'variables':
       return <IconVariable size="sm" />
+    case 'specLanguage':
+      return <IconBook2 size="sm" />
     case 'never':
       return <IconBan size="sm" />
   }
@@ -115,6 +126,14 @@ export interface ProposedVariable {
   value: string
 }
 
+export interface ProposedSpecLanguage {
+  id: string
+  /** The language as a BCP 47 tag: `fr`, `pt-BR`. */
+  tag: string
+  /** The file of the Project that says it: `README.md`. */
+  source: string
+}
+
 export interface ProposedNever {
   id: string
   line: string
@@ -125,6 +144,7 @@ export type Proposal =
   | { readonly kind: 'commands'; readonly items: readonly ProposedCommand[] }
   | { readonly kind: 'preparation'; readonly items: readonly ProposedStep[] }
   | { readonly kind: 'variables'; readonly items: readonly ProposedVariable[] }
+  | { readonly kind: 'specLanguage'; readonly items: readonly ProposedSpecLanguage[] }
   | { readonly kind: 'never'; readonly items: readonly ProposedNever[] }
 
 const LIST = 'flex flex-col'
@@ -267,6 +287,15 @@ function OtherScripts({
   )
 }
 
+/** A language tag as its English name: `fr` is French; a tag it cannot name stays as it is. */
+function languageName(tag: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag) ?? tag
+  } catch {
+    return tag
+  }
+}
+
 /** The proposal in short: one line per thing. */
 export function ProposalSummary({
   proposal,
@@ -355,6 +384,26 @@ export function ProposalSummary({
           ))}
         </ul>
       )
+    case 'specLanguage':
+      return (
+        <ul aria-label={`Proposed ${label.toLowerCase()}`} className={LIST}>
+          {proposal.items.map((one) => (
+            <li key={one.id} className={RULE} data-proposed={one.tag}>
+              <span className={ROW}>
+                <span className={GLYPH} aria-hidden="true">
+                  <IconBook2 size="sm" />
+                </span>
+                <span className="font-medium">{languageName(one.tag)}</span>
+                <span className={cn(MONO, 'text-muted-foreground')}>{one.tag}</span>
+                <span className={QUIET_MONO}>
+                  <span className="sr-only">said in </span>
+                  {one.source}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )
     case 'never':
       return (
         <ul aria-label={`Proposed ${label.toLowerCase()}`} className={LIST}>
@@ -379,6 +428,7 @@ const LIKELY: Record<SetupKind, string> = {
   commands: 'pnpm --filter api test',
   preparation: 'pnpm install --frozen-lockfile',
   variables: 'DATABASE_URL',
+  specLanguage: 'Spanish',
   never: 'git push --force',
 }
 
@@ -648,6 +698,37 @@ export function ProposalEditor({ draft, onChange }: ProposalEditorProps): ReactN
           }
           onRemove={(line) => set(items.filter((_, at) => at !== line))}
           onAdd={() => set([...items, { id: freshId(), key: '', value: '' }])}
+        />
+      )
+    }
+    case 'specLanguage': {
+      const items = draft.items
+      const set = (next: readonly ProposedSpecLanguage[]): void =>
+        onChange({ kind: draft.kind, items: next })
+      return (
+        <EditLines
+          add="Add a language"
+          lines={items.map((one) => ({
+            id: one.id,
+            name: one.tag,
+            fields: [
+              { label: 'Language', value: one.tag, mono: true, placeholder: 'fr' },
+              { label: 'Said in', value: one.source, mono: true, placeholder: 'README.md' },
+            ],
+          }))}
+          onField={(line, field, value) =>
+            set(
+              items.map((one, at) =>
+                at !== line
+                  ? one
+                  : field === 0
+                    ? { ...one, tag: value }
+                    : { ...one, source: value },
+              ),
+            )
+          }
+          onRemove={(line) => set(items.filter((_, at) => at !== line))}
+          onAdd={() => set([...items, { id: freshId(), tag: '', source: '' }])}
         />
       )
     }

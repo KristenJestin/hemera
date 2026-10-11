@@ -210,6 +210,27 @@ export const Variables: Story = {
   },
 }
 
+/**
+ * The Spec language, proposed because the Project's own files are written in it: the language by
+ * name, its tag, and the file that says it. Declined, the Project keeps the language it has.
+ */
+export const SpecLanguage: Story = {
+  args: { kind: 'specLanguage', proposal: PROPOSALS.specLanguage },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Proposed spec language' })
+    expect(within(list).getByText('French')).toBeVisible()
+    expect(within(list).getByText('fr')).toBeVisible()
+    expect(within(list).getByText('README.md')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Edit' }))
+    const tag = await canvas.findByRole('textbox', { name: 'Language of fr' })
+    await userEvent.clear(tag)
+    await userEvent.type(tag, 'de')
+    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    expect(await canvas.findByText('German')).toBeVisible()
+  },
+}
+
 /** The commands it would never run in this Project. */
 export const NeverRun: Story = {
   args: { kind: 'never', proposal: PROPOSALS.never },

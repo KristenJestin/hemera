@@ -32,7 +32,14 @@ export const Proposed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('region', { name: 'Tasks' })).toBeVisible()
-    for (const name of ['Repositories', 'Commands', 'Preparation', 'Variables', 'Never run']) {
+    for (const name of [
+      'Repositories',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Spec language',
+      'Never run',
+    ]) {
       expect(card(canvasElement, name)).toBeVisible()
     }
     expect(
@@ -65,13 +72,21 @@ export const Waiting: Story = {
       commands: { state: 'reading' },
       preparation: { state: 'reading' },
       variables: { state: 'reading' },
+      specLanguage: { state: 'reading' },
       never: { state: 'reading' },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('img', { name: 'Setup agent, waiting for a free slot' })).toBeVisible()
-    for (const name of ['Repositories', 'Commands', 'Preparation', 'Variables', 'Never run']) {
+    for (const name of [
+      'Repositories',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Spec language',
+      'Never run',
+    ]) {
       expect(card(canvasElement, name)).toHaveAttribute('aria-busy', 'true')
     }
     // Nothing to review while every card is still read.
@@ -193,14 +208,15 @@ export const AllAccepted: Story = {
       commands: { state: 'accepted' },
       preparation: { state: 'accepted' },
       variables: { state: 'accepted' },
+      specLanguage: { state: 'accepted' },
       never: { state: 'declined' },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getAllByRole('img', { name: 'Accepted' })).toHaveLength(4)
+    expect(canvas.getAllByRole('img', { name: 'Accepted' })).toHaveLength(5)
     expect(canvas.queryByRole('button', { name: 'Accept all' })).toBeNull()
-    expect(canvas.getByRole('img', { name: '5 of 5 proposals answered' })).toBeVisible()
+    expect(canvas.getByRole('img', { name: '6 of 6 proposals answered' })).toBeVisible()
   },
 }
 

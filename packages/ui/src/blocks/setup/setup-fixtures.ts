@@ -77,6 +77,10 @@ export const PROPOSALS: Record<SetupKind, Proposal> = {
       { id: 'v3', key: 'SMTP_URL', value: 'smtp://localhost:1025' },
     ],
   },
+  specLanguage: {
+    kind: 'specLanguage',
+    items: [{ id: 'l1', tag: 'fr', source: 'README.md' }],
+  },
   never: {
     kind: 'never',
     items: [

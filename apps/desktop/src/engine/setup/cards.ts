@@ -23,6 +23,7 @@ import {
   SETUP_CARD_STATES,
   SetupChange as SetupChangeSchema,
   VALUE_FORGOTTEN,
+  canonicalLanguage,
   checkedTemplate,
   maskedJson,
   setupChangeDetails,
@@ -40,12 +41,14 @@ import {
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect, Option, Predicate, Result, Schema, Stream } from 'effect'
 
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { checkedCommand, listCommands, saveCommand } from '../catalogue.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
+import { specLanguageOf, setSpecLanguage } from '../planning/store.ts'
 import { addRepository, checkedPath, getProject, setBaseBranch, setRemote } from '../projects.ts'
 import { checkedStep, getRecipe, saveRecipe } from '../recipe.ts'
 import { Secrets } from '../secrets.ts'
@@ -246,6 +249,18 @@ const refusalOf = (project: Project, planned: Planned, change: SetupProposal, po
         )
         return Result.isFailure(checked) ? said(checked.failure) : null
       }
+      case 'specLanguage': {
+        const language = canonicalLanguage(change.language)
+        if (language === null) return `${change.language} is not a language tag`
+        const source = yield* checkedPath(project.mainCheckout, change.source).pipe(Effect.result)
+        if (Result.isFailure(source)) return said(source.failure)
+        if (!existsSync(join(project.mainCheckout, source.success))) {
+          return `${change.source} does not exist in the Project folder`
+        }
+        return language === (yield* specLanguageOf(project.id))
+          ? `${language} is already the Spec language of this Project`
+          : null
+      }
       case 'variable': {
         const key = variableKey(change.name)
         if (Result.isFailure(key)) return key.failure.message
@@ -266,6 +281,8 @@ const changeOf = (
       return { kind: 'variable', name: proposal.name, replaces: variables.includes(proposal.name) }
     case 'command':
       return { ...proposal, replaces: commands.some((one) => one.name === proposal.name) }
+    case 'specLanguage':
+      return { ...proposal, language: canonicalLanguage(proposal.language) ?? proposal.language }
     default:
       return proposal
   }
@@ -514,6 +531,9 @@ const apply = (card: SetupCard) =>
         })
         return
       }
+      case 'specLanguage':
+        yield* setSpecLanguage(project.id, change.language)
+        return
       case 'variable': {
         const value = yield* SetupValues.use((values) => values.valueOf(card.id))
         if (value === null) return yield* new ProposalRefused({ reason: VALUE_FORGOTTEN })

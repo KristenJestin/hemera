@@ -716,6 +716,33 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
                 ],
                 "type": "object",
               },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "specLanguage",
+                    ],
+                    "type": "string",
+                  },
+                  "language": {
+                    "description": "A BCP 47 language tag: \`fr\`, \`en\`, \`pt-BR\`.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "source": {
+                    "description": "The file of the Project that says it, relative to the Project folder (\`README.md\`, \`api/AGENTS.md\`). Only whole paragraphs written in the language, or a line stating it, count: never one word, a name or a code identifier.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "language",
+                  "source",
+                ],
+                "type": "object",
+              },
             ],
           },
           "maxItems": 50,

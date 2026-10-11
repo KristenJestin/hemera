@@ -13,6 +13,7 @@ import type { Command, Project, RecipeStep } from '@hemera/ipc'
 import { Effect, Layer, Predicate } from 'effect'
 
 import { listCommands } from '../catalogue.ts'
+import { specLanguageOf } from '../planning/store.ts'
 import { getProject } from '../projects.ts'
 import { getRecipe } from '../recipe.ts'
 import { type ProjectServices, repositoryStatus } from '../repositories.ts'
@@ -20,6 +21,7 @@ import type { Secrets } from '../secrets.ts'
 import type { Grant } from '../tools/access.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
 import { SetupDesk } from '../tools/ports.ts'
+import { languageName } from '../sessions/instructions.ts'
 import { listVariables } from '../variables.ts'
 import type { Preparations } from '../workspaces.ts'
 import { propose } from './cards.ts'
@@ -82,6 +84,7 @@ const read = (grant: Grant) =>
     const commands = yield* listCommands(project.id)
     const steps = yield* getRecipe(project.id)
     const variables = yield* listVariables({ projectId: project.id, workspaceId: null })
+    const specLanguage = yield* specLanguageOf(project.id)
     const lines = [
       `The Project ${project.name}, in ${project.mainCheckout}.`,
       `The Project folder is a Git repository: ${yesNo(folderIsRepository)}.`,
@@ -100,6 +103,8 @@ const read = (grant: Grant) =>
       '',
       'The variables, by name only:',
       variables.length === 0 ? '(none)' : variables.map((one) => one.key).join(', '),
+      '',
+      `Spec language: ${languageName(specLanguage)} (${specLanguage})`,
     ]
     return answered(lines.join('\n'))
   })

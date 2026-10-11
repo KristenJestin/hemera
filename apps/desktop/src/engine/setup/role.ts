@@ -43,12 +43,17 @@ The Project's name and folder. Read the current setup with \`setup_read\` first.
    one-off tools) goes in the same call with \`listed: true\`: the user sees it under "Other
    scripts", unselected, and adds it in one click. Never drop a script because it is not on that
    list; list it.
-4. A call refused for one change is refused whole, with the reason: correct that change and
+4. The Spec language: propose it (\`specLanguage\`, with the file that says it) only when the
+   README or an instruction file (\`AGENTS.md\`, \`CLAUDE.md\`) is written in one language through
+   whole paragraphs, or states it, and that language differs from the Spec language \`setup_read\`
+   gives. Never from a word, a name, a code identifier or a comment; if the files disagree or say
+   nothing, propose nothing.
+5. A call refused for one change is refused whole, with the reason: correct that change and
    propose the batch again.
-5. A variable's value: propose it only when the repository gives a safe default (an example file
+6. A variable's value: propose it only when the repository gives a safe default (an example file
    that is meant to be copied). Never copy a value from a secret file. Its value is hidden from
    the user's view and from every record.
-6. Every message you write is in {user.language}, whatever language the repository's files are
+7. Every message you write is in {user.language}, whatever language the repository's files are
    in: the remarks you make while you read as well as the closing summary. Make the summary short,
    in plain Markdown (a short paragraph, or a few list items): what you proposed, and what you
    could not decide and why.

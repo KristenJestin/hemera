@@ -616,3 +616,30 @@ describe('The scripts the agent lists apart', () => {
     expect(sinceLatestSetup(cards, session).map((one) => one.id)).toEqual(['c1', 'c3'])
   })
 })
+
+describe('The Spec language the agent proposes', () => {
+  const proposed = card('l1', { kind: 'specLanguage', language: 'fr', source: 'README.md' })
+
+  test('is a card of its own, after the variables, naming the language tag and its file', () => {
+    const entries = setupEntriesOf([proposed, ...CARDS])
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'repositories',
+      'commands',
+      'preparation',
+      'variables',
+      'specLanguage',
+    ])
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'specLanguage',
+      status: { state: 'proposed' },
+      proposal: {
+        kind: 'specLanguage',
+        items: [{ id: 'l1', tag: 'fr', source: 'README.md' }],
+      },
+    })
+  })
+
+  test('answers like the others: its Accept goes to the card waiting', () => {
+    expect(pendingOf([proposed], 'specLanguage').map((one) => one.id)).toEqual(['l1'])
+  })
+})

@@ -30,6 +30,7 @@ const KINDS: ReadonlyArray<readonly [SetupCard['change']['kind'], SetupKind]> = 
   ['command', 'commands'],
   ['step', 'preparation'],
   ['variable', 'variables'],
+  ['specLanguage', 'specLanguage'],
 ]
 
 const kindOf = (card: SetupCard): SetupKind | undefined =>
@@ -122,6 +123,15 @@ const proposalOf = (kind: SetupKind, cards: ReadonlyArray<SetupCard>): Proposal 
         kind,
         items: cards.flatMap(({ id, change }) =>
           change.kind === 'variable' ? [{ id, key: change.name, value: '' }] : [],
+        ),
+      }
+    case 'specLanguage':
+      return {
+        kind,
+        items: cards.flatMap(({ id, change }) =>
+          change.kind === 'specLanguage'
+            ? [{ id, tag: change.language, source: change.source }]
+            : [],
         ),
       }
     case 'never':
