@@ -649,6 +649,61 @@ describe('The Probe’s place (#36)', () => {
 })
 
 describe('probe_report ends the Probe', () => {
+  test('its session ends once its last turn is over: the agent hears its report kept, and nothing cancels it', async () => {
+    const hold = held()
+    let steps = 0
+    const { world, run } = probing(
+      (index) =>
+        index === 0
+          ? {
+              turns: [
+                [
+                  uses('toolu_launch', 'probe_launch', {
+                    question: 'does the importer keep accents?',
+                    brief: 'Look at api/importer.ts.',
+                  }),
+                ],
+              ],
+              steps: [says('Noted.')],
+            }
+          : {
+              turns: [[uses('toolu_report', 'probe_report', reported()), says('Done.')]],
+              // Its turn goes on after the report: held there until the test lets it end.
+              between: () => {
+                steps += 1
+                return steps === 2 ? hold.promise : Promise.resolve()
+              },
+            },
+      { sessions: { plannerStarts: true } },
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project } = yield* acme()
+          const mission = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'Import names as written', ticket: null },
+          })
+          const row = yield* probeIn(mission.id, 1, ['done'])
+          // Whatever follows the report has had its moment; the turn is still the agent's.
+          yield* until(Effect.sync(() => answersOf(world.agents[1]).length === 1))
+          hold.release()
+          yield* until(
+            Effect.map(sessionsOfLineage(row.lineage), (rows) =>
+              rows.every((one) => one.state === 'ended'),
+            ),
+          )
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) >= 2))
+          return { row }
+        }),
+      ),
+    )
+    expect(answersOf(world.agents[1])[0]).toMatch(/^Kept: Probe #1 ended/)
+    expect(world.agents[1]?.answers.cancels).toBe(0)
+    expect(seen.row.number).toBe(1)
+  })
+
   test('reproduced without observed is refused; a valid one is stored, the worktree captured, and delivered to the Planner', async () => {
     const { world, run } = probing(
       (index) =>

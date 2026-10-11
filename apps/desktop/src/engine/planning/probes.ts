@@ -9,9 +9,10 @@
  *   `probes/<mission key>/<number>/` of the data folder and prepared with the Project's recipe
  *   (#6), then its session opens: a child of the Planner, role `probe`, its folder its place.
  * - **End.** `probe_report` is checked, what the worktree holds against its commit is captured,
- *   the report stored, the session stopped with its runs, its reservations released (#88), and
- *   `[hemera:probe]` delivered to the Planner (CT-28). An agent that ends a turn without it is told
- *   once; a second silent end fails the Probe. A failure is delivered the same way.
+ *   the report stored, the session stopped with its runs once its turn is over, its reservations
+ *   released (#88), and `[hemera:probe]` delivered to the Planner (CT-28). An agent that ends a
+ *   turn without it is told once; a second silent end fails the Probe. A failure is delivered the
+ *   same way.
  * - **Health.** #40's rules hold: a session silent in a turn is stuck (its chip says so until its
  *   lineage speaks again, its parent is told), a dead one is replaced in the same folder.
  * - **Wipe.** In this order: the whole process tree, the Cleanup hook (S6, never the Closing),
@@ -547,9 +548,14 @@ export const probesLayer = (settings: ProbesSettings) =>
           .deliver(row.missionId, 'probe', body)
           .pipe(Effect.catchCause((cause) => log(`Probe ${row.id} was not told: ${String(cause)}`)))
 
-      /** After a Probe ended: its processes stopped, its reservations released, its Planner told. */
-      const afterEnd = (row: ProbeRow, reason: string, body: string) =>
+      /**
+       * After a Probe ended: its processes stopped, its reservations released, its Planner told.
+       * Ended by its own report, its session's turn is over first: the agent hears its report kept,
+       * and its session is not ended under it.
+       */
+      const afterEnd = (row: ProbeRow, reason: string, body: string, reporter?: string) =>
         Effect.gen(function* () {
+          if (reporter !== undefined) yield* sessions.settled(reporter)
           yield* stopProcesses(row, reason)
           yield* releaseReservations(row)
           yield* tellPlanner(row, body)
@@ -1077,6 +1083,7 @@ export const probesLayer = (settings: ProbesSettings) =>
                     outcome.ended.question,
                     reportOf(outcome.ended) ?? args,
                   ),
+                  grant.sessionId,
                 ).pipe(Effect.forkIn(scope))
               : Effect.void,
           ),
