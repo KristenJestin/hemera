@@ -8,7 +8,7 @@
  */
 
 import type { SetupState } from '@hemera/core/domain'
-import type { UnknownProject } from '@hemera/ipc'
+import type { UnknownProject, UnknownSetupCard } from '@hemera/ipc'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Context, Effect, Layer, Schema, Stream } from 'effect'
 
@@ -17,12 +17,15 @@ import { expireNeedIn } from '../needs.ts'
 import { expireSessionRequestsIn } from '../permissions/requests.ts'
 import { getProject } from '../projects.ts'
 import { Cap } from '../sessions/cap.ts'
+import type { DeliveryKindRefused } from '../sessions/deliveries.ts'
 import { type SessionRefused, Sessions } from '../sessions/service.ts'
 import { type RoleSession, endSession, getSession, sessionsIn } from '../sessions/store.ts'
 import type { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import { permissionRequests, sessionNeeds } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { closeDiscussions, discussCards } from './cards.ts'
+import { SETUP_DISCUSSION, discussionText } from './role.ts'
 
 /** A setup proposal asked for while one is being made. */
 export class SetupBusy extends Schema.TaggedError<SetupBusy>()('SetupBusy', {}) {
@@ -44,6 +47,23 @@ export class Setup extends Context.Service<
     readonly start: (
       projectId: string,
     ) => Effect.Effect<RoleSession, SetupBusy | SessionRefused | DatabaseError | UnknownProject>
+    /**
+     * Opens a discussion on pending cards of one Project: the user's words reach its setup agent,
+     * whose session is started again when none lives, and the agent answers by revising them or
+     * not. The discussion closes once its session has ended.
+     */
+    readonly discuss: (
+      cardIds: ReadonlyArray<string>,
+      note: string,
+    ) => Effect.Effect<
+      void,
+      | UnknownSetupCard
+      | SetupBusy
+      | SessionRefused
+      | DeliveryKindRefused
+      | DatabaseError
+      | UnknownProject
+    >
     /** Where the Project's setup session stands, for the new-Project screen. */
     readonly standing: (projectId: string) => Effect.Effect<SetupStanding, DatabaseError>
     /**
@@ -137,8 +157,14 @@ export const setupLayer = Layer.effect(
         }
       })
 
+    // What it was asked to discuss is answered once it has ended, revised or not.
     const watch = (session: RoleSession) =>
       proposalMade(session).pipe(
+        Effect.ensuring(
+          session.owner.kind === 'project'
+            ? closeDiscussions(session.owner.projectId).pipe(Effect.ignore)
+            : Effect.void,
+        ),
         Effect.provide(context),
         Effect.catchCause(() => Effect.void),
         Effect.forkIn(scope),
@@ -160,21 +186,41 @@ export const setupLayer = Layer.effect(
       Effect.forkIn(scope),
     )
 
+    const start = (projectId: string) =>
+      Effect.gen(function* () {
+        const project = yield* getProject(projectId)
+        const running = (yield* setupSessionsOf(projectId)).some((one) =>
+          LIVE.some((state) => state === one.state),
+        )
+        if (running) return yield* new SetupBusy()
+        const session = yield* sessions.open({
+          owner: { kind: 'project', projectId },
+          role: 'setup',
+          folder: project.mainCheckout,
+        })
+        yield* watch(session)
+        return session
+      }).pipe(Effect.provide(context))
+
     return {
-      start: (projectId) =>
+      start,
+      discuss: (cardIds, note) =>
         Effect.gen(function* () {
-          const project = yield* getProject(projectId)
-          const running = (yield* setupSessionsOf(projectId)).some((one) =>
-            LIVE.some((state) => state === one.state),
-          )
-          if (running) return yield* new SetupBusy()
-          const session = yield* sessions.open({
-            owner: { kind: 'project', projectId },
-            role: 'setup',
-            folder: project.mainCheckout,
+          const cards = yield* discussCards(cardIds, note)
+          const [first] = cards
+          if (first === undefined) return
+          const owner = { kind: 'project', projectId: first.projectId } as const
+          yield* sessions.deliver({
+            owner,
+            target: { role: 'setup' },
+            kind: SETUP_DISCUSSION,
+            body: discussionText(cards, note),
           })
-          yield* watch(session)
-          return session
+          // A setup at work takes it between two turns; one that ended is started again with it.
+          const [last] = yield* setupSessionsOf(first.projectId)
+          if (last !== undefined && LIVE.some((state) => state === last.state)) return
+          const resumed = last === undefined ? null : yield* sessions.resume(last.id)
+          if (resumed === null) yield* start(first.projectId)
         }).pipe(Effect.provide(context)),
       standing: (projectId) =>
         Effect.gen(function* () {
@@ -222,6 +268,7 @@ export const setupLayer = Layer.effect(
               return { result: undefined, events: [ended, ...requests, ...needs.flat()] }
             }),
           )
+          if (one.owner.kind === 'project') yield* closeDiscussions(one.owner.projectId)
         }
       }).pipe(Effect.provide(context)),
     }

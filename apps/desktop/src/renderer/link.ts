@@ -100,6 +100,7 @@ import {
   type ThreadLine,
   type RunOutput,
   type RunStart,
+  type EditedChange,
   type SetupCard,
   type SetupStanding,
   type Sound,
@@ -491,6 +492,16 @@ export interface Link {
   readonly declineSetupCard: (cardId: string) => Promise<SetupCard>
   /** Accepts the pending cards in their order, stopping at the first refusal. */
   readonly acceptAllSetupCards: (projectId: string) => Promise<ReadonlyArray<SetupCard>>
+  /**
+   * Replaces pending cards by what the user wrote in their place; rejects with the settings'
+   * reason (`SetupEditRefused`), nothing changed.
+   */
+  readonly editSetupCards: (
+    cardIds: ReadonlyArray<string>,
+    changes: ReadonlyArray<EditedChange>,
+  ) => Promise<ReadonlyArray<SetupCard>>
+  /** Sends the user's words on pending cards to the setup agent. */
+  readonly discussSetupCards: (cardIds: ReadonlyArray<string>, note: string) => Promise<void>
   /** Starts a setup proposal; rejects with `SetupRefused` while one is being made. */
   readonly proposeSetup: (projectId: string) => Promise<void>
   /** A Project's sessions, every state, parents before their children. */
@@ -851,6 +862,10 @@ export function linkOver(port: Port): Link {
     acceptSetupCard: (cardId) => call((ready) => ready['setup.accept']({ cardId })),
     declineSetupCard: (cardId) => call((ready) => ready['setup.decline']({ cardId })),
     acceptAllSetupCards: (projectId) => call((ready) => ready['setup.acceptAll']({ projectId })),
+    editSetupCards: (cardIds, changes) =>
+      call((ready) => ready['setup.edit']({ cardIds, changes })),
+    discussSetupCards: (cardIds, note) =>
+      call((ready) => ready['setup.discuss']({ cardIds, note })),
     proposeSetup: (projectId) => call((ready) => ready['setup.propose']({ projectId })),
     projectSessions: (projectId) =>
       call((ready) => ready['sessions.list']({ ownerKind: 'project', ownerId: projectId })),

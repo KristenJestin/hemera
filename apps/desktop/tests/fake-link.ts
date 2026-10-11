@@ -97,6 +97,8 @@ export const SILENT_LINK: Link = {
   acceptSetupCard: never,
   declineSetupCard: never,
   acceptAllSetupCards: never,
+  editSetupCards: never,
+  discussSetupCards: never,
   proposeSetup: never,
   projectSessions: never,
   sessionThread: never,

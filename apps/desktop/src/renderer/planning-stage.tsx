@@ -7,6 +7,7 @@ import {
 } from '@hemera/ui'
 import { useState, type ReactNode } from 'react'
 
+import { flight, startChat } from './chat-actions.ts'
 import type { StagePageProps } from './stage-pages.tsx'
 import { usePlanning } from './use-planning.ts'
 
@@ -25,10 +26,13 @@ export function PlanningStage({
   mission,
   open,
   goMission,
+  openChat,
   refused,
   frame,
 }: StagePageProps): ReactNode {
   const [view, act] = usePlanning(link, engineReady, mission)
+  const [creating] = useState(() => flight())
+  const [chatRefused, setChatRefused] = useState<string | null>(null)
   // A discussion opens with its first message: until then its view holds only the field.
   const [starting, setStarting] = useState<readonly Planning.DiscussionItem[]>([])
   const data = view.data
@@ -66,6 +70,7 @@ export function PlanningStage({
         onMarkRead={act.markRead}
         onKeepPlanning={act.keepPlanning}
         onOpenMission={goMission}
+        onAskInChat={() => startChat(link, mission.projectId, creating, openChat, setChatRefused)}
         onSeenTicketChange={act.seenTicketChange}
       />
     ),
@@ -80,6 +85,6 @@ export function PlanningStage({
       onClose: act.close,
     }),
     now: view.now,
-    notice: view.refused,
+    notice: chatRefused ?? view.refused,
   })
 }

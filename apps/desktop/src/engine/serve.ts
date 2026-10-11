@@ -11,6 +11,7 @@ import {
   EngineMainRpcs,
   type EngineStart,
   type EngineStatus,
+  SetupEditRefused,
   SetupRefused,
   TesterFolderUnreadable,
 } from '@hemera/ipc'
@@ -76,7 +77,14 @@ import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
 import { Chats, chatsChanges } from './chat/service.ts'
 import { type Chat, chatsOf, renameChat, transcriptOf } from './chat/store.ts'
-import { acceptAll, acceptCard, cardsOf, declineCard, setupChanges } from './setup/cards.ts'
+import {
+  acceptAll,
+  acceptCard,
+  cardsOf,
+  declineCard,
+  editCards,
+  setupChanges,
+} from './setup/cards.ts'
 import { Setup } from './setup/service.ts'
 import { LivingSpec } from './living-spec/service.ts'
 import {
@@ -403,6 +411,28 @@ export const engineHandlers = (
       use(Effect.andThen(getProject(projectId), acceptAll(projectId))).pipe(
         observed('setup.acceptAll', log),
       ),
+    'setup.edit': ({ cardIds, changes }) =>
+      use(
+        editCards(cardIds, changes).pipe(
+          Effect.catchTags({
+            ProposalRefused: (refused) =>
+              Effect.fail(new SetupEditRefused({ reason: refused.reason })),
+            UnknownProject: (unknown) => Effect.die(unknown),
+            UnknownWorkspace: (unknown) => Effect.die(unknown),
+          }),
+        ),
+      ).pipe(observed('setup.edit', log)),
+    'setup.discuss': ({ cardIds, note }) =>
+      use(
+        Setup.use((setup) => setup.discuss(cardIds, note)).pipe(
+          Effect.catchTags({
+            SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
+            SessionRefused: (refused) => Effect.fail(new SetupRefused({ reason: refused.reason })),
+            DeliveryKindRefused: (refused) => Effect.die(refused),
+            UnknownProject: (unknown) => Effect.die(unknown),
+          }),
+        ),
+      ).pipe(observed('setup.discuss', log)),
     'setup.propose': ({ projectId }) =>
       use(
         Setup.use((setup) => setup.start(projectId)).pipe(

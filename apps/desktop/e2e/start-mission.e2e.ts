@@ -1,5 +1,5 @@
 /**
- * A mission started from the Project's field: from a sentence (the field searches, "Create a
+ * A mission started from the Project's field, which opens at once: from a sentence (the field searches, "Create a
  * mission" is the last choice and Enter does not take it while something else shows) and from a
  * ticket reference, with a fake `gh` that signs in and reads one issue. Nothing here reaches GitHub.
  *
@@ -100,7 +100,9 @@ describe('A mission started from the Project’s field', () => {
 
   it('creates a mission from a sentence with the last choice', async () => {
     await found().$('button*=Create a mission').click()
-    // Once the Planner goes on with it, the mission opens: the sidebar counts it on any page.
+    // The mission opens at once: its page, not the Project's home, whatever the Planner answers.
+    await expect($('main h1')).toHaveText('Export', { containing: true })
+    await expect($('nav[aria-label="Where you are"]')).toHaveText('Acme', { containing: true })
     await places().$('button[aria-label="Open the missions of Acme"]').click()
     await expect(planningInSidebar().$$('button')).toBeElementsArrayOfSize({ eq: 2 })
   })
@@ -123,6 +125,7 @@ describe('A mission started from the Project’s field', () => {
       expect.stringContaining('Create a mission'),
     )
     await found().$('button*=acme/api#41').click()
+    await expect($('main h1')).toHaveText('Export invoices as CSV', { containing: true })
     await expect(planningInSidebar().$('button*=Export invoices as CSV')).toBeDisplayed()
   })
 })

@@ -1062,6 +1062,11 @@ export const setupCards = sqliteTable(
     state: text('state').notNull(),
     /** Why the last click was refused, by the use case, masked; null otherwise. */
     refusal: text('refusal').$type<Masked<string>>(),
+    /**
+     * What the user asked to change, masked, while the setup agent answers it; kept on a card its
+     * answer revised, null otherwise.
+     */
+    discussion: text('discussion').$type<Masked<string>>(),
     createdAt: text('created_at').notNull(),
     decidedAt: text('decided_at'),
   },

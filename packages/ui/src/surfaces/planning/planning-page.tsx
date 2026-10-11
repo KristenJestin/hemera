@@ -255,6 +255,7 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
               triage={data.triage}
               onKeepPlanning={props.onKeepPlanning}
               onOpenMission={props.onOpenMission}
+              onAskInChat={props.onAskInChat}
             />
           )}
           {data.ticket !== null && (
