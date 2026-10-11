@@ -73,6 +73,7 @@ export type SnapshotOwner =
       readonly side: 'start' | 'end'
     }
   | { readonly kind: 'checkpoint'; readonly missionId: string; readonly checkpointId: string }
+  | { readonly kind: 'building'; readonly missionId: string; readonly buildingId: string }
   | {
       readonly kind: 'run'
       readonly missionId: string
@@ -252,6 +253,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/${owner.attemptId}/${owner.side}/${leaf}`
     case 'checkpoint':
       return `${mission}/checkpoints/${owner.checkpointId}/${leaf}`
+    case 'building':
+      return `${mission}/buildings/${owner.buildingId}/base/${leaf}`
     case 'run':
       return `${mission}/runs/${owner.runId}/${owner.side}/${leaf}`
   }
@@ -264,6 +267,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `attempt ${owner.attemptId} ${owner.side}`
     case 'checkpoint':
       return `checkpoint ${owner.checkpointId}`
+    case 'building':
+      return `the base of Building ${owner.buildingId}`
     case 'run':
       return `run ${owner.runId} ${owner.side}`
   }

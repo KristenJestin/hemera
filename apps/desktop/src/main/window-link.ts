@@ -689,6 +689,15 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('building.chooseModel', log),
       ),
+    'building.read': (request) =>
+      engine['building.read'](request).pipe(closedAs(gone), observed('building.read', log)),
+    'building.task': (request) =>
+      engine['building.task'](request).pipe(closedAs(gone), observed('building.task', log)),
+    'building.tasksChanged': (request) =>
+      engine['building.tasksChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('building.tasksChanged', log),
+      ),
     'building.changed': (request) =>
       engine['building.changed'](request).pipe(
         streamClosedAs(gone),

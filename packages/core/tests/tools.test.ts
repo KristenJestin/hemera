@@ -140,6 +140,8 @@ describe('Each role has exactly its tools', () => {
     [
       'builder',
       [
+        'build_read',
+        'build_summary',
         'commands_list',
         'commands_output',
         'commands_run',
@@ -154,12 +156,18 @@ describe('Each role has exactly its tools', () => {
         'note_add',
         'notes_condense',
         'now_set',
+        'report_need',
         'search',
+        'spec_read',
+        'task_blocked',
+        'task_finished',
+        'task_start',
       ],
     ],
     [
       'helper',
       [
+        'build_read',
         'commands_list',
         'commands_output',
         'commands_run',
@@ -171,6 +179,9 @@ describe('Each role has exactly its tools', () => {
         'note_add',
         'now_set',
         'search',
+        'task_blocked',
+        'task_finished',
+        'task_start',
       ],
     ],
     ['documenter', ['fs_edit', 'fs_list', 'fs_read', 'fs_write', 'now_set', 'search']],
@@ -254,6 +265,7 @@ describe('The table says what each tool does to the world', () => {
 
   test('read-only tools carry readOnlyHint true, the others false', () => {
     expect(TOOL_NAMES.filter((name) => readOnlyHint(name)).sort()).toEqual([
+      'build_read',
       'commands_list',
       'commands_output',
       'fs_list',
