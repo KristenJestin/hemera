@@ -727,6 +727,8 @@ describe('The end and Cancel', () => {
           const { grantId } = yield* builderOf(mission.id)
           for (const id of ['T1', 'T2', 'T4', 'T3']) yield* builds(grantId, id)
           yield* until(Effect.sync(() => ended.length > 0))
+          // A second call would come from the follower or a judgement still on its way.
+          yield* Effect.sleep('500 millis')
           const summary = yield* call(grantId, 'build_summary', { text: 'Built the exports.' })
           return { mission, summary, view: yield* buildingNow(mission.id) }
         }),
@@ -846,6 +848,21 @@ describe('The end and Cancel', () => {
     )
     expect(seen.answer).toBe('refused: the mission has no Building under way')
     expect(statesOf(seen.view)['T1']).toBe('available')
+  })
+
+  test('the Builder’s git push is refused by the decision on its commands', async () => {
+    const { run } = builderEngine(data, work)
+    const answer = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          return yield* call(grantId, 'commands_run', { line: 'git push', repository: 'api' })
+        }),
+      ),
+    )
+    expect(answer).toBe('refused: no agent of a mission may run git push')
   })
 
   test('BuildingStart called again for a mission already started begins nothing', async () => {

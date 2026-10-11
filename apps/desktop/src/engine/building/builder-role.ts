@@ -77,8 +77,8 @@ The build is done when Hemera says so, not when you think so.
 - Edit the Spec, its tasks or a decision; set a task state; mark a task finished that you did not
   verify.
 - Write outside the Workspace, or write a file another running task holds.
-- Commit, push, merge, rebase, tag or switch branches; Hemera refuses it unless the brief says the
-  Project lets you commit.
+- Commit, push, merge, rebase, tag or switch branches: the decision on every command you run
+  refuses them for an agent of a mission, a commit unless the brief says the Project lets you.
 - Hide a failure in your summary.`
 
 /** A task of the ready set, as the brief and a ready-set delivery list it. */
@@ -117,7 +117,7 @@ const taskLine = (
 
 /** The rule about commits as this version holds it: Hemera commits, never an agent. */
 export const COMMITS_SAID =
-  'You do not commit, push, merge, rebase, tag or switch branches: Hemera refuses it.'
+  'You do not commit, push, merge, rebase, tag or switch branches: the decision on every command you run refuses them for an agent of a mission.'
 
 const builderBriefOf = (owner: SessionOwner) =>
   Effect.gen(function* () {
