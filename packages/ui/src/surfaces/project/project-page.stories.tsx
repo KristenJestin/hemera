@@ -204,13 +204,17 @@ export const DoneKeyboard: Story = {
   },
 }
 
-/** The living spec card: its domains, the one that waits marked, and the way into the page. */
+/** The living spec card: its domains, the one that waits marked, and the way into the page. Its description stands in the footer. */
 export const LivingSpecCard: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const rail = canvas.getByRole('complementary', { name: 'About Acme' })
-    expect(within(rail).getByText('3 domains · updated yesterday')).toBeVisible()
-    const domains = within(within(rail).getByRole('list', { name: 'Domains' }))
+    const about = within(rail).getByText('3 domains · updated yesterday')
+    expect(about).toBeVisible()
+    const list = within(rail).getByRole('list', { name: 'Domains' })
+    // The list sits right under the title; the description closes the card.
+    expect(list.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const domains = within(list)
     expect(domains.getAllByRole('listitem')).toHaveLength(3)
     expect(domains.getByText('Waits for you')).toBeInTheDocument()
     await userEvent.click(within(rail).getByRole('button', { name: 'Open' }))

@@ -15,7 +15,7 @@ import {
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { ErrorState } from '../../components/error-state/error-state.tsx'
-import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
+import { Frame, FrameFooter, FrameHeader } from '../../components/frame/frame.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { type Identity, ProjectMark } from '../../components/project-mark/project-mark.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
@@ -206,13 +206,19 @@ function LivingSpecCard({
         <FrameHeader
           icon={<IconBook2 size="md" />}
           title="Living spec"
-          description={livingSpec?.about}
           action={
             <Button variant="link" size="sm" onClick={onOpen}>
               Open
             </Button>
           }
         />
+      }
+      footer={
+        livingSpec === null ? undefined : (
+          <FrameFooter>
+            <p className="text-xs text-muted-foreground">{livingSpec.about}</p>
+          </FrameFooter>
+        )
       }
     >
       {livingSpec === null ? (
