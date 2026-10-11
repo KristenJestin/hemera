@@ -126,58 +126,86 @@ const plainLine = (message: string): string =>
     .replaceAll('`', '')
 
 /**
- * What the agent said: its last message is the summary, read as Markdown in a block of its own;
- * the messages it wrote while it read are folded under it.
+ * What the agent said: its last message is the summary, folded to its first line; the control
+ * unfolds it in place, read as Markdown, with the messages it wrote while it read folded inside.
  */
 function AgentSaid({ messages }: { messages: readonly string[] }): ReactNode {
   const folding = useTransition(fold)
   const [open, setOpen] = useState(false)
+  const [earlierOpen, setEarlierOpen] = useState(false)
   const summary = messages.at(-1)
   const earlier = messages.slice(0, -1)
   if (summary === undefined) return null
   return (
     <section aria-label="What the agent said" className="flex flex-col gap-3">
       <SectionHead title="What the agent said" />
-      <div className="rounded-md border border-border bg-card px-4 py-3">
-        <Prose body={summary} />
+      <div className="flex flex-col gap-3 rounded-md border border-border bg-card px-4 py-3">
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-1.5 rounded-sm text-left text-sm outline-none focus-ring hover-motion"
+          aria-label={open ? 'Fold the summary' : 'Unfold the summary'}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <span className="flex shrink-0 text-muted-foreground" aria-hidden="true">
+            {open ? <IconChevronDown size="sm" /> : <IconChevronRight size="sm" />}
+          </span>
+          <span className="min-w-0 flex-1 truncate" aria-hidden={open || undefined}>
+            {plainLine(summary)}
+          </span>
+        </button>
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="summary"
+              className="flex flex-col gap-3 overflow-hidden"
+              initial={collapse}
+              animate={expand}
+              exit={collapse}
+              transition={folding}
+            >
+              <Prose body={summary} />
+              {earlier.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    className="flex w-fit items-center gap-1.5 rounded-sm text-sm text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion"
+                    aria-expanded={earlierOpen}
+                    onClick={() => setEarlierOpen(!earlierOpen)}
+                  >
+                    <span className="flex" aria-hidden="true">
+                      {earlierOpen ? <IconChevronDown size="sm" /> : <IconChevronRight size="sm" />}
+                    </span>
+                    Earlier messages
+                    <span className="tabular-nums">{earlier.length}</span>
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {earlierOpen && (
+                      <motion.ol
+                        key="earlier"
+                        aria-label="Earlier messages"
+                        className="flex flex-col gap-3 overflow-hidden pl-5 text-muted-foreground"
+                        initial={collapse}
+                        animate={expand}
+                        exit={collapse}
+                        transition={folding}
+                      >
+                        {earlier.map((message, at) => (
+                          // Messages repeat; where they stand is what tells them apart.
+                          // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
+                          <li key={at}>
+                            <Prose body={message} />
+                          </li>
+                        ))}
+                      </motion.ol>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      {earlier.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            className="flex w-fit items-center gap-1.5 rounded-sm text-sm text-muted-foreground outline-none hover:text-foreground focus-ring hover-motion"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            <span className="flex" aria-hidden="true">
-              {open ? <IconChevronDown size="sm" /> : <IconChevronRight size="sm" />}
-            </span>
-            Earlier messages
-            <span className="tabular-nums">{earlier.length}</span>
-          </button>
-          <AnimatePresence initial={false}>
-            {open && (
-              <motion.ol
-                key="earlier"
-                aria-label="Earlier messages"
-                className="flex flex-col gap-3 overflow-hidden pl-5 text-muted-foreground"
-                initial={collapse}
-                animate={expand}
-                exit={collapse}
-                transition={folding}
-              >
-                {earlier.map((message, at) => (
-                  // Messages repeat; where they stand is what tells them apart.
-                  // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
-                  <li key={at}>
-                    <Prose body={message} />
-                  </li>
-                ))}
-              </motion.ol>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
     </section>
   )
 }
