@@ -5,12 +5,14 @@
  * of the instructions is the ticket's.
  */
 
+import { setupChangeDetails } from '@hemera/core/domain'
 import { Effect } from 'effect'
 
 import { readPreferences } from '../preferences.ts'
 import { getProject } from '../projects.ts'
 import { languageName } from '../sessions/instructions.ts'
 import type { RoleEntry, SessionOwner } from '../sessions/roles.ts'
+import type { SetupCard } from './cards.ts'
 
 /** The `setup` role's layer of the instructions, as the ticket writes it. */
 export const SETUP_TEMPLATE = `# Role: Setup
@@ -58,12 +60,38 @@ The Project's name and folder. Read the current setup with \`setup_read\` first.
    in plain Markdown (a short paragraph, or a few list items): what you proposed, and what you
    could not decide and why.
 
+## When the user discusses a proposal
+A \`[hemera:discussion]\` block holds the user's words about some of your cards, and those cards.
+It is all you answer, whatever the blocks before it say: read what you need, then propose with
+\`setup_propose\` the changes of that part as they should be (they replace the cards discussed),
+or nothing when your proposal stands. Then say in a short message, in {user.language}, what you
+changed or why you kept it. Do not propose the rest of the setup again.
+
 ## Never
 - Propose a change you have not read evidence for.
 - Read secret files (\`.env\`, keys, credentials) or anything outside the Project folder.
 - Propose a command line with shell syntax (\`|\`, \`>\`, \`&&\`, \`;\`, \`$(…)\`, unquoted globs): it is
   refused. Split it, or point to a script the repository already has.
 - Propose the same change again after the user declined it.`
+
+/** The delivery that carries a discussion to the setup agent. */
+export const SETUP_DISCUSSION = 'discussion'
+
+/** A discussion as the setup agent reads it: the cards discussed, then the user's words. */
+export const discussionText = (
+  cards: ReadonlyArray<Pick<SetupCard, 'title' | 'change'>>,
+  note: string,
+): string =>
+  [
+    'The user discusses these cards of your proposal:',
+    ...cards.flatMap((card) => [
+      `- ${card.title}`,
+      ...setupChangeDetails(card.change).map((detail) => `  ${detail.label}: ${detail.value}`),
+    ]),
+    '',
+    'Their words:',
+    note,
+  ].join('\n')
 
 /** The Project's name and folder, as the setup agent's brief gives them. */
 const setupBrief = (owner: SessionOwner) =>

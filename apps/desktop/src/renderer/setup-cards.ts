@@ -5,14 +5,17 @@
  * kind's Accept and Decline go to its changes still waiting, in the order proposed.
  */
 
+import { SetupProposal } from '@hemera/core/domain'
 import type {
   AgentState,
+  EditedChange,
   RoleModels,
   SessionSummary,
   SetupCard,
   SetupStanding,
   ThreadLine,
 } from '@hemera/ipc'
+import { Option, Predicate, Schema } from 'effect'
 import type {
   CardStatus,
   LiveGlance,
@@ -51,6 +54,9 @@ const statusOf = (cards: ReadonlyArray<SetupCard>): CardStatus => {
   const chosen = cards.filter((card) => !isListed(card))
   if (chosen.length === 0) return { state: 'accepted' }
   const waiting = chosen.filter((card) => card.state === 'pending')
+  // The user's words stand on the card while the agent answers them.
+  const note = waiting.find((card) => card.discussion !== null)?.discussion
+  if (note !== undefined && note !== null) return { state: 'discussed', note }
   if (waiting.length > 0) {
     const refused = waiting.findLast((card) => card.refusal !== null)?.refusal ?? undefined
     return { state: 'proposed', refused }
@@ -166,11 +172,26 @@ export const sinceLatestSetup = (
   )
 }
 
-/** One card per kind the agent proposed something for, in the settings' order. */
+/**
+ * The setup sessions of the latest setup's lineage, oldest first: a setup started again for a
+ * discussion is still the same setup.
+ */
+export const setupLineageOf = (sessions: ReadonlyArray<SessionSummary>): SessionSummary[] => {
+  const latest = latestSetupOf(sessions)
+  if (latest === null) return []
+  return sessions
+    .filter((one) => one.role === SETUP_ROLE && one.lineage === latest.lineage)
+    .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+}
+
+/**
+ * One card per kind the agent proposed something for, in the settings' order. A card another took
+ * the place of (the user's edit, the agent's revision) is not drawn.
+ */
 export function setupEntriesOf(cards: ReadonlyArray<SetupCard>): SetupCardEntry[] {
   return KINDS.flatMap(([, kind]) => {
     const ofKind = cards
-      .filter((card) => kindOf(card) === kind)
+      .filter((card) => kindOf(card) === kind && card.state !== 'revised')
       .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
     return ofKind.length === 0
       ? []
@@ -372,3 +393,114 @@ export function setupAboutOf(
 /** What the setup agent said, oldest first, from its session's thread. */
 export const setupMessagesOf = (thread: ReadonlyArray<ThreadLine>): string[] =>
   thread.filter((line) => line.kind === 'said').map((line) => line.text)
+
+/** What an edit sends: the waiting cards it replaces, and the changes written in their place. */
+export type EditedCards =
+  | { readonly cardIds: ReadonlyArray<string>; readonly changes: ReadonlyArray<EditedChange> }
+  | { readonly refused: string }
+
+/** Said of a line the editor left without what it needs. */
+export const LINE_MISSING = 'A line is missing what it needs: fill it in or remove it.'
+
+/** A change as the editor wrote it, the fields it left empty not written. */
+const written = (fields: Record<string, string | boolean | ReadonlyArray<string> | undefined>) =>
+  Object.fromEntries(
+    Object.entries(fields).flatMap(([key, value]) =>
+      value === undefined || (Predicate.isString(value) && value.trim() === '')
+        ? []
+        : [[key, Predicate.isString(value) ? value.trim() : value]],
+    ),
+  )
+
+/** A repository's base as the editor writes it, `origin/main`, back into its remote and branch. */
+/** Where a repository's work starts from, as its change says it. */
+interface RepositoryBase {
+  readonly remote?: string | undefined
+  readonly baseBranch?: string | undefined
+}
+
+const baseOf = (base: string, remote: string | undefined): RepositoryBase => {
+  const said = base.trim()
+  if (remote !== undefined && said === remote) return { remote }
+  if (remote !== undefined && said.startsWith(`${remote}/`)) {
+    return { remote, baseBranch: said.slice(remote.length + 1) }
+  }
+  const slash = said.indexOf('/')
+  return slash === -1
+    ? { baseBranch: said }
+    : { remote: said.slice(0, slash), baseBranch: said.slice(slash + 1) }
+}
+
+/** A line of the editor as the change it proposes, what the editor does not show kept from `was`. */
+const proposalOfLine = (
+  draft: Proposal,
+  at: number,
+  was: SetupCard['change'] | undefined,
+): Schema.Json | null => {
+  switch (draft.kind) {
+    case 'repositories': {
+      const item = draft.items[at]
+      if (item === undefined) return null
+      const remote = was?.kind === 'repository' ? was.remote : undefined
+      return written({ kind: 'repository', path: item.path, ...baseOf(item.base, remote) })
+    }
+    case 'commands': {
+      const item = draft.items[at]
+      if (item === undefined) return null
+      if (was?.kind === 'command') {
+        const { replaces: _replaces, ...kept } = was
+        return written({ ...kept, name: item.name, line: item.line })
+      }
+      return written({ kind: 'command', name: item.name, type: item.type, line: item.line })
+    }
+    case 'preparation': {
+      const item = draft.items[at]
+      if (item === undefined) return null
+      if (was?.kind === 'step') {
+        const field = was.path !== undefined ? 'path' : was.line !== undefined ? 'line' : 'command'
+        return written({ ...was, [field]: item.what })
+      }
+      return written({
+        kind: 'step',
+        step: item.kind,
+        repository: item.place === '.' ? undefined : item.place,
+        [item.kind === 'run' ? 'line' : 'path']: item.what,
+      })
+    }
+    case 'variables': {
+      const item = draft.items[at]
+      // A value left empty keeps the one the card holds: the engine knows it, the page does not.
+      return item === undefined
+        ? null
+        : { kind: 'variable', name: item.key.trim(), value: item.value }
+    }
+    case 'specLanguage': {
+      const item = draft.items[at]
+      if (item === undefined) return null
+      return written({ kind: 'specLanguage', language: item.tag, source: item.source })
+    }
+    case 'never':
+      return null
+  }
+}
+
+const readProposal = Schema.decodeUnknownOption(SetupProposal)
+
+/**
+ * A kind's edit as the engine takes it: its waiting cards, replaced by the editor's lines. A line
+ * that was a decided card is left alone; one the editor left without what it needs is said.
+ */
+export function editedChangesOf(cards: ReadonlyArray<SetupCard>, draft: Proposal): EditedCards {
+  const waiting = pendingOf(cards, draft.kind)
+  const changes: EditedChange[] = []
+  for (const [at, item] of draft.items.entries()) {
+    // The scripts listed apart are not edited: they stay as they are.
+    if ('other' in item && item.other === true) continue
+    const card = cards.find((one) => one.id === item.id)
+    if (card !== undefined && card.state !== 'pending') continue
+    const proposal = readProposal(proposalOfLine(draft, at, card?.change))
+    if (Option.isNone(proposal)) return { refused: LINE_MISSING }
+    changes.push({ from: card?.id ?? null, proposal: proposal.value })
+  }
+  return { cardIds: waiting.map((card) => card.id), changes }
+}

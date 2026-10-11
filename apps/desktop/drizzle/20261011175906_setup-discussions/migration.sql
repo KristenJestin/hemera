@@ -1,0 +1,1 @@
+ALTER TABLE `setup_cards` ADD `discussion` text;
