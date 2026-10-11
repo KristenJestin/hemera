@@ -336,6 +336,7 @@ function ProfilePart({ link, engineReady, dataFolder, tools }: Part): ReactNode 
   }
   const backups = valueOf(backupsRead)
   const language = valueOf(preferencesRead)?.userLanguage ?? 'en'
+  const specLanguage = valueOf(preferencesRead)?.defaultSpecLanguage ?? 'en'
   /** A folder chosen, then what is done with it; a folder that could not be chosen is said. */
   const inFolder = (then: (folder: string) => void): void => {
     tools.chooseFolder().then(
@@ -356,7 +357,12 @@ function ProfilePart({ link, engineReady, dataFolder, tools }: Part): ReactNode 
       backingUp={backingUp}
       agentLanguage={language}
       languages={[...new Set([language, 'en', 'fr', 'de', 'es'])]}
-      errors={{ backups: errors['backups'], language: errors['language'] }}
+      specLanguage={specLanguage}
+      errors={{
+        backups: errors['backups'],
+        language: errors['language'],
+        specLanguage: errors['specLanguage'],
+      }}
       onBackUp={() =>
         inFolder((folder) => {
           setBackingUp(true)
@@ -388,6 +394,15 @@ function ProfilePart({ link, engineReady, dataFolder, tools }: Part): ReactNode 
           link.writePreferences({ userLanguage: chosen }),
           'language',
           'The language could not be kept',
+          setErrors,
+          rereadPreferences,
+        )
+      }}
+      onSpecLanguage={(chosen) => {
+        writing(
+          link.writePreferences({ defaultSpecLanguage: chosen }),
+          'specLanguage',
+          'The default could not be kept',
           setErrors,
           rereadPreferences,
         )

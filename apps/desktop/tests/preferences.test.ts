@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { openProfile } from '../src/engine/migrate.ts'
 import {
+  DEFAULT_SPEC_LANGUAGE_KEY,
   THEME_KEY,
   USER_LANGUAGE_KEY,
   systemLanguage,
@@ -40,11 +41,31 @@ describe('The tester mode is a preference, off by default (#45)', () => {
   })
 })
 
+describe('The default Spec language is a preference, English until chosen (#183)', () => {
+  test('French written is read back as French, at the next start too', async () => {
+    expect((await on(data, readPreferences)).defaultSpecLanguage).toBe('en')
+    await on(data, writePreferences({ defaultSpecLanguage: 'fr' }))
+    expect((await on(data, readPreferences)).defaultSpecLanguage).toBe('fr')
+  })
+
+  test('a row this build cannot read answers English', async () => {
+    await on(
+      data,
+      Effect.gen(function* () {
+        const client = yield* SqliteClient
+        yield* client`INSERT INTO app_preferences (key, value) VALUES (${DEFAULT_SPEC_LANGUAGE_KEY}, '"not a tag"')`
+      }),
+    )
+    expect((await on(data, readPreferences)).defaultSpecLanguage).toBe('en')
+  })
+})
+
 describe('The theme is kept in the Profile', () => {
   test('a Profile where nothing was chosen answers the defaults', async () => {
     expect(await on(data, readPreferences)).toEqual({
       theme: DEFAULT_PREFERENCES.theme,
       userLanguage: systemLanguage(),
+      defaultSpecLanguage: 'en',
       testerMode: false,
     })
     expect(DEFAULT_PREFERENCES.theme).toBe('system')
