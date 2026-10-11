@@ -28,12 +28,19 @@ const storedLanguage = Schema.fromJsonString(
 )
 const readLanguage = Schema.decodeUnknownOption(storedLanguage)
 const writeLanguage = Schema.encodeSync(storedLanguage)
+const storedSpecLanguage = Schema.fromJsonString(
+  Schema.toCodecJson(PreferencesSchema.fields.defaultSpecLanguage),
+)
+const readSpecLanguage = Schema.decodeUnknownOption(storedSpecLanguage)
+const writeSpecLanguage = Schema.encodeSync(storedSpecLanguage)
 const storedTester = Schema.fromJsonString(Schema.Boolean)
 const readTester = Schema.decodeUnknownOption(storedTester)
 const writeTester = Schema.encodeSync(storedTester)
 
 export const THEME_KEY = 'theme'
 export const USER_LANGUAGE_KEY = 'user.language'
+/** Read by `createProject` in the statement that adds a Project, as its Spec language. */
+export const DEFAULT_SPEC_LANGUAGE_KEY = 'projects.defaultSpecLanguage'
 export const TESTER_MODE_KEY = 'developer.testerMode'
 
 /** The system's language, the default of the agents' one: its tag, English when it has none. */
@@ -56,6 +63,10 @@ export const readPreferences: Effect.Effect<PreferencesValue, DatabaseError, Dat
     return {
       theme: Option.getOrElse(readTheme(kept.get(THEME_KEY)), () => DEFAULT_PREFERENCES.theme),
       userLanguage: Option.getOrElse(readLanguage(kept.get(USER_LANGUAGE_KEY)), systemLanguage),
+      defaultSpecLanguage: Option.getOrElse(
+        readSpecLanguage(kept.get(DEFAULT_SPEC_LANGUAGE_KEY)),
+        () => DEFAULT_PREFERENCES.defaultSpecLanguage,
+      ),
       testerMode: Option.getOrElse(
         readTester(kept.get(TESTER_MODE_KEY)),
         () => DEFAULT_PREFERENCES.testerMode,
@@ -74,6 +85,11 @@ export const writePreferences = (
       written.push({ key: THEME_KEY, value: writeTheme(change.theme) })
     if (change.userLanguage !== undefined)
       written.push({ key: USER_LANGUAGE_KEY, value: writeLanguage(change.userLanguage) })
+    if (change.defaultSpecLanguage !== undefined)
+      written.push({
+        key: DEFAULT_SPEC_LANGUAGE_KEY,
+        value: writeSpecLanguage(change.defaultSpecLanguage),
+      })
     if (change.testerMode !== undefined)
       written.push({ key: TESTER_MODE_KEY, value: writeTester(change.testerMode) })
     if (written.length === 0) return

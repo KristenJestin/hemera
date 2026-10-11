@@ -23,6 +23,8 @@ export const UserLanguage = Schema.String.check(
 export const Preferences = Schema.Struct({
   theme: ThemePreference,
   userLanguage: UserLanguage,
+  /** The Spec language a Project added from now on starts in (#183); the Project's own overrides it. */
+  defaultSpecLanguage: UserLanguage,
   /**
    * Whether every role's agent also tests Hemera and reports what it finds there (#45), a
    * development tool off by default; it applies to the sessions that start afterwards.
@@ -35,6 +37,7 @@ export type Preferences = typeof Preferences.Type
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
   userLanguage: 'en',
+  defaultSpecLanguage: 'en',
   testerMode: false,
 }
 
@@ -42,6 +45,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 export const PreferencesChange = Schema.Struct({
   theme: Schema.optionalKey(ThemePreference),
   userLanguage: Schema.optionalKey(UserLanguage),
+  defaultSpecLanguage: Schema.optionalKey(UserLanguage),
   testerMode: Schema.optionalKey(Schema.Boolean),
 })
 export type PreferencesChange = typeof PreferencesChange.Type

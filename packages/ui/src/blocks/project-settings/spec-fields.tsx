@@ -83,7 +83,7 @@ function intervalsOffered(minutes: number, minimum: number): { value: string; la
 }
 
 /** The language items: the short list, with the current tag kept when it is not in it. */
-function languagesOffered(current: string | null): { value: string; label: string }[] {
+export function languagesOffered(current: string | null): { value: string; label: string }[] {
   const items = SPEC_LANGUAGES.map((one) => ({ value: one.value, label: one.label }))
   if (current === null || items.some((one) => one.value === current)) return items
   return [{ value: current, label: current }, ...items]

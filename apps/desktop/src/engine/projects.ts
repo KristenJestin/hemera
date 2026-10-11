@@ -45,7 +45,7 @@ import {
   UnknownRepository,
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { Effect, Option, Result, Stream } from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
@@ -57,7 +57,8 @@ import {
   type EngineTransaction,
   refusedWhile,
 } from './storage/database.ts'
-import { missions, projectRepositories, projects } from './storage/schema.ts'
+import { DEFAULT_SPEC_LANGUAGE_KEY } from './preferences.ts'
+import { appPreferences, missions, projectRepositories, projects } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 
 /** The date every row and event of one change shares. */
@@ -411,6 +412,7 @@ export const createProject = (asked: NewProject) =>
             name,
             mainCheckout,
             keyPrefix: prefix,
+            specLanguage: sql<string>`coalesce((select json_extract(${appPreferences.value}, '$') from ${appPreferences} where ${appPreferences.key} = ${DEFAULT_SPEC_LANGUAGE_KEY}), 'en')`,
             createdAt: at,
             updatedAt: at,
             version: 1,

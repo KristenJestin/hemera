@@ -33,6 +33,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { type GitProgram, type GitSpawn, gitLayer, spawnGit } from '../src/engine/git.ts'
 import { readEvents } from '../src/engine/journal.ts'
 import { openProfile } from '../src/engine/migrate.ts'
+import { specLanguageOf } from '../src/engine/planning/store.ts'
+import { writePreferences } from '../src/engine/preferences.ts'
 import {
   addRepository,
   createProject,
@@ -553,5 +555,24 @@ describe('Every change of a Project is told to whoever follows them', () => {
       ['Atlas II', 0],
       ['Atlas II', 1],
     ])
+  })
+})
+
+describe('A new Project starts in the default Spec language (#183)', () => {
+  test('a Project added after the default became French has French; the one added before keeps English', async () => {
+    const before = await run(
+      createProject({ name: 'Before', mainCheckout: checkout(), repositories: [] }),
+    )
+    await on(data, writePreferences({ defaultSpecLanguage: 'fr' }))
+    const after = await run(
+      createProject({ name: 'After', mainCheckout: checkout(), repositories: [] }),
+    )
+    expect(await on(data, specLanguageOf(after.id))).toBe('fr')
+    expect(await on(data, specLanguageOf(before.id))).toBe('en')
+  })
+
+  test('a Profile where no default was chosen starts a Project in English', async () => {
+    const project = await run(atlas(checkout()))
+    expect(await on(data, specLanguageOf(project.id))).toBe('en')
   })
 })

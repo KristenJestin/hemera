@@ -608,25 +608,40 @@ describe('The preferences', () => {
   test('the theme is the system’s, light or dark, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(Preferences)
     for (const theme of ['system', 'light', 'dark']) {
-      expect(decode({ theme, userLanguage: 'en', testerMode: false })).toEqual({
+      expect(
+        decode({ theme, userLanguage: 'en', defaultSpecLanguage: 'en', testerMode: false }),
+      ).toEqual({
         theme,
         userLanguage: 'en',
+        defaultSpecLanguage: 'en',
         testerMode: false,
       })
     }
-    expect(() => decode({ theme: 'sepia', userLanguage: 'en', testerMode: false })).toThrow()
+    expect(() =>
+      decode({ theme: 'sepia', userLanguage: 'en', defaultSpecLanguage: 'en', testerMode: false }),
+    ).toThrow()
   })
 
   test('the agents’ language is a language tag, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(Preferences)
     for (const userLanguage of ['en', 'fr', 'pt-BR', 'zh-Hant-TW']) {
-      expect(decode({ theme: 'system', userLanguage, testerMode: false }).userLanguage).toBe(
-        userLanguage,
-      )
+      expect(
+        decode({ theme: 'system', userLanguage, defaultSpecLanguage: 'en', testerMode: false })
+          .userLanguage,
+      ).toBe(userLanguage)
     }
     for (const userLanguage of ['', 'French', 'en_US', '../etc']) {
-      expect(() => decode({ theme: 'system', userLanguage, testerMode: false })).toThrow()
+      expect(() =>
+        decode({ theme: 'system', userLanguage, defaultSpecLanguage: 'en', testerMode: false }),
+      ).toThrow()
     }
+  })
+
+  test('the default Spec language is a language tag too', () => {
+    const decode = Schema.decodeUnknownSync(Preferences)
+    const kept = { theme: 'system', userLanguage: 'en', testerMode: false }
+    expect(decode({ ...kept, defaultSpecLanguage: 'fr' }).defaultSpecLanguage).toBe('fr')
+    expect(() => decode({ ...kept, defaultSpecLanguage: 'French' })).toThrow()
   })
 
   test('a refused restore reaches the caller as itself', () =>
