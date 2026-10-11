@@ -2,11 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import {
-  StartField,
-  type StartFieldProps,
-  type StartResultView,
-} from './start-field.tsx'
+import { StartField, type StartFieldProps, type StartResultView } from './start-field.tsx'
 
 /**
  * The field that starts a mission: it searches first and creates last. What it finds unfolds
