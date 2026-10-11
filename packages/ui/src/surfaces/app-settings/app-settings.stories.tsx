@@ -723,14 +723,14 @@ export const HemeraAutoJudgedByJev: Story = {
   },
 }
 
-/** No key: Hemera asks you. */
-export const HemeraAutoAsks: Story = {
+/** No key: each agent judges its own calls with its own model. */
+export const HemeraAutoAgentJudges: Story = {
   args: {
     current: 'hemera-auto',
-    children: auto({ jevKey: 'missing', consent: undefined, judge: 'Hemera asks' }),
+    children: auto({ jevKey: 'missing', consent: undefined, judge: 'Each agent (its own model)' }),
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Hemera asks')).toBeVisible()
+    await expect(within(canvasElement).getByText('Each agent (its own model)')).toBeVisible()
   },
 }
 

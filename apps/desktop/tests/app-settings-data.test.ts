@@ -265,7 +265,7 @@ describe('The Jev key in Hemera Auto', () => {
 
   test('who judges now, in the settings’ words', () => {
     expect(judgeSaid('Jev')).toBe('Hemera Auto (Jev)')
-    expect(judgeSaid('Hemera asks')).toBe('Hemera asks')
+    expect(judgeSaid('Each agent (its own model)')).toBe('Each agent (its own model)')
   })
 
   test('a key saved: the status the engine answered', async () => {
@@ -279,7 +279,7 @@ describe('The Jev key in Hemera Auto', () => {
     const unprotected: HemeraAutoStatus = {
       ...STATUS,
       key: 'storage-unavailable',
-      judge: 'Hemera asks',
+      judge: 'Each agent (its own model)',
       missing: 'No Secret Service is running.',
     }
     expect(await keyWritten(Promise.resolve(unprotected), 'saved')).toEqual({
@@ -290,7 +290,11 @@ describe('The Jev key in Hemera Auto', () => {
   })
 
   test('a key removed: the status the engine answered', async () => {
-    const removed: HemeraAutoStatus = { ...STATUS, key: 'missing', judge: 'Hemera asks' }
+    const removed: HemeraAutoStatus = {
+      ...STATUS,
+      key: 'missing',
+      judge: 'Each agent (its own model)',
+    }
     expect(await keyWritten(Promise.resolve(removed), 'missing')).toEqual({
       kind: 'done',
       status: removed,

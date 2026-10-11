@@ -428,7 +428,7 @@ export interface HemeraAutoProps {
   errors?: { readonly key?: string | undefined; readonly consent?: string | undefined } | undefined
   /** Whether the key's state is still being read: the rows' shape, never a state not yet known. */
   loading?: boolean | undefined
-  /** Who judges now, as the engine says it: `Hemera Auto (Jev)`, `Hemera asks`. */
+  /** Who judges now, as the engine says it: `Hemera Auto (Jev)`, `Each agent (its own model)`. */
   judge?: string | undefined
 }
 

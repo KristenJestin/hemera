@@ -159,7 +159,7 @@ export function writing<A>(
 
 /** Who judges now, as Hemera Auto's section says it. */
 export const judgeSaid = (judge: HemeraAutoStatus['judge']): string =>
-  judge === 'Jev' ? 'Hemera Auto (Jev)' : 'Hemera asks'
+  judge === 'Jev' ? 'Hemera Auto (Jev)' : judge
 
 /** What became of a key saved or removed: the status the engine answered, or why not in words. */
 export type KeyWritten =
