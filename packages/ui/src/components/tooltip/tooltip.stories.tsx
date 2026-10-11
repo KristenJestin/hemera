@@ -48,6 +48,23 @@ export const Open: Story = {
   },
 }
 
+/**
+ * Not hoverable: the name lets the pointer through to what lies beneath it, so the pointer never
+ * holds it open, and it closes as soon as the pointer leaves the control.
+ */
+export const NotHoverable: Story = {
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('button', { name: 'Settings' })
+    await userEvent.hover(trigger)
+    const tip = await waitFor(() => within(document.body).getByRole('tooltip'))
+    expect(getComputedStyle(tip).pointerEvents).toBe('none')
+    await userEvent.unhover(trigger)
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('tooltip')).toBeNull()
+    })
+  },
+}
+
 /** With the keystroke that does the same thing, drawn as keys beside the name. */
 export const WithKeys: Story = {
   args: {
