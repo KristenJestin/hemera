@@ -267,6 +267,38 @@ export const SameAfterARestart: Story = {
   },
 }
 
+/**
+ * The folded line, step after step: the question keeps the whole width, nothing beside it; the
+ * answer and its state sit under it, and Change stays where it was from Sent to Taken into account.
+ */
+export const ChangeStaysPut: Story = {
+  render: (args) => <LiveAndRestarted {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const live = within(canvas.getByRole('region', { name: 'Live' }))
+    const next = canvas.getByRole('button', { name: 'Next step' })
+    await userEvent.click(next)
+    const steps = ['Sent', 'With the Planner', 'Taken into account']
+    const places = await steps.reduce<Promise<string[]>>(
+      (before, step, index) =>
+        before.then(async (seen) => {
+          if (index > 0) await userEvent.click(next)
+          await waitFor(() => expect(live.getByRole('status')).toHaveTextContent(step))
+          const question = live.getByText(OPEN.text).getBoundingClientRect()
+          const status = live.getByRole('status').getBoundingClientRect()
+          const change = live
+            .getByRole('button', { name: 'Change the answer to Q5' })
+            .getBoundingClientRect()
+          await expect(status.top).toBeGreaterThanOrEqual(question.bottom)
+          await expect(change.top).toBeGreaterThanOrEqual(question.bottom)
+          return [...seen, `${change.left},${change.top},${change.width}`]
+        }),
+      Promise.resolve([]),
+    )
+    await expect(new Set(places).size).toBe(1)
+  },
+}
+
 /** An option pressed twice before the engine has it: sent once, the card folded at the first. */
 export const AnsweringTwice: Story = {
   args: { onAnswer: fn(() => new Promise<void>(() => undefined)) },

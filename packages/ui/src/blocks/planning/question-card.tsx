@@ -108,8 +108,9 @@ function RetiredQuestion({
 }
 
 /**
- * An answered question, as one line: its answer, where it stands (its dot and a word), and
- * Change. It folds to it the moment the user answers.
+ * An answered question, folded: the question on its own row, the whole width; under it, the
+ * answer in a quiet panel with where it stands (its dot and a word) beneath it, and Change at the
+ * panel's end, where no step moves it. It folds to it the moment the user answers.
  */
 function AnsweredLine({
   question,
@@ -131,27 +132,31 @@ function AnsweredLine({
       className="flex min-w-0 items-start gap-2 rounded-md px-3 py-2.5 text-sm outline-none focus-ring"
     >
       <span className={ID}>{question.id}</span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="line-clamp-2 break-words">{question.text}</span>
-        <span className="truncate text-xs text-muted-foreground">
-          {option !== undefined ? `${option.id} · ${option.label}` : `“${answer.text ?? ''}”`}
-        </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <span className="break-words">{question.text}</span>
+        <div className="flex min-w-0 items-center gap-3 rounded-md bg-muted px-3 py-1.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate">
+              {option !== undefined ? `${option.id} · ${option.label}` : `“${answer.text ?? ''}”`}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <InputDot state={step === 'sending' ? 'received' : step} />
+              <span role="status" className={QUIET}>
+                {STEP_WORDS[step]}
+              </span>
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Change the answer to ${question.id}`}
+            onClick={onChange}
+          >
+            Change
+          </Button>
+        </div>
         <ChangedAnswer question={question} />
       </div>
-      <span className="flex shrink-0 items-center gap-1 leading-5">
-        <InputDot state={step === 'sending' ? 'received' : step} />
-        <span role="status" className="text-xs whitespace-nowrap text-muted-foreground">
-          {STEP_WORDS[step]}
-        </span>
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label={`Change the answer to ${question.id}`}
-        onClick={onChange}
-      >
-        Change
-      </Button>
     </article>
   )
 }
@@ -329,7 +334,7 @@ export interface QuestionCardProps extends Pick<
  * press that leaves at once (no Send) and fills the option at once, or in the user's own words
  * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
  * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
- * Answered, the card folds at once to one line with its answer and Change; its dot and a word say
+ * Answered, the card folds at once: the question, then its answer and Change; its dot and a word say
  * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
  * is said as a change; a retired question stays, with its reason. Everything but a press on its
  * way and Change is drawn from the question: a card is the same live and after a restart.
