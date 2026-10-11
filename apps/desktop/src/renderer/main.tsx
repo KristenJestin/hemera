@@ -320,7 +320,6 @@ function Application() {
             problems={
               ticketProblem === undefined ? undefined : new Map([['tickets', ticketProblem]])
             }
-            onOpenLivingSpec={() => goTo({ kind: 'livingSpec', projectId: settingsOf })}
             ticketSection={(section, showForm) => (
               <TicketSection
                 section={section}
