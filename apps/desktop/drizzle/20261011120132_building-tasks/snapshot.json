@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "aee538f8-02d8-49f5-9a34-28165388bbf7",
+  "id": "cc84d3c4-c527-464c-8aaf-864870d1b63b",
   "prevIds": ["dc526278-3dc9-4e69-a477-15507095c6da"],
   "ddl": [
     {
@@ -1545,6 +1545,16 @@
       "default": null,
       "generated": null,
       "name": "tasks_done_at",
+      "entityType": "columns",
+      "table": "buildings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "end_called_at",
       "entityType": "columns",
       "table": "buildings"
     },

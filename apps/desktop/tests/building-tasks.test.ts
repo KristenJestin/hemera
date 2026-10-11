@@ -626,6 +626,39 @@ describe('The end and Cancel', () => {
     expect(seen.view.summary).toBe('Built the exports.')
   })
 
+  test('an engine stopped before BuildingEnd ran calls it at its next start, once', async () => {
+    const stopped = Layer.succeed(BuildingEnd, {
+      end: () => Effect.die(new Error('the engine stopped before the end ran')),
+    })
+    const before = builderEngine(data, work, { end: stopped })
+    const left = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          for (const id of ['T1', 'T2', 'T4', 'T3']) yield* builds(grantId, id)
+          return mission
+        }),
+      ),
+    )
+    const ended: string[] = []
+    const end = Layer.succeed(BuildingEnd, {
+      end: (missionId: string) => Effect.sync(() => ended.push(missionId)).pipe(Effect.asVoid),
+    })
+    const after = builderEngine(data, work, { end })
+    await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(Effect.sync(() => ended.length > 0))
+          yield* Effect.sleep('300 millis')
+        }),
+      ),
+    )
+    expect(ended).toEqual([left.id])
+  })
+
   test('Cancel stops the Builder and ends the Building as cancelled; the work stays', async () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) =>

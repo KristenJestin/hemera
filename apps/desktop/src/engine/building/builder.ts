@@ -419,6 +419,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 startedAt: now(),
                 endedAt: null,
                 tasksDoneAt: null,
+                endCalledAt: null,
                 summary: null,
               }
               yield* transaction
@@ -512,10 +513,23 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
-      /** Says a Building's tasks are done to its port, once, and to its Builder. */
+      /**
+       * Says a Building's tasks are done to its port, then marks it called: an engine stopped in
+       * between calls it again at its next start, so the port is called at least once.
+       */
       const ended = (building: BuildingRow) =>
         Effect.gen(function* () {
           yield* BuildingEnd.use((port) => port.end(building.missionId))
+          yield* mutate('keeping that the end was called', (transaction) =>
+            transaction
+              .update(buildings)
+              .set({ endCalledAt: now() })
+              .where(eq(buildings.id, building.id))
+              .pipe(
+                Effect.mapError(refusedWhile('keeping that the end was called')),
+                Effect.as({ result: undefined, events: [] }),
+              ),
+          )
           yield* deliver(
             building,
             'done',
@@ -1403,6 +1417,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             const last = attempts.findLast((one) => one.taskId === taskId)
             yield* judge(building, taskId, last?.id ?? '')
           }
+          if (building.tasksDoneAt !== null && building.endCalledAt === null) yield* ended(building)
           yield* ensureBuilder(building)
         }
       })

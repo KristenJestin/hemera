@@ -89,6 +89,7 @@ CREATE TABLE `buildings` (
 	`started_at` text NOT NULL,
 	`ended_at` text,
 	`tasks_done_at` text,
+	`end_called_at` text,
 	`summary` text,
 	CONSTRAINT `fk_buildings_mission_id_missions_id_fk` FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `fk_buildings_workspace_id_workspaces_id_fk` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON DELETE SET NULL

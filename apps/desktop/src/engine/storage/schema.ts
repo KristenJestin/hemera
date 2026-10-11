@@ -2358,8 +2358,10 @@ export const buildings = sqliteTable(
     state: text('state').notNull(),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
-    /** When every task was done or skipped and `BuildingEnd` was called, once. */
+    /** When every task was done or skipped. */
     tasksDoneAt: text('tasks_done_at'),
+    /** When `BuildingEnd` returned: a start finds a Building whose tasks are done without it. */
+    endCalledAt: text('end_called_at'),
     summary: text('summary').$type<Masked<string>>(),
   },
   (table) => [
