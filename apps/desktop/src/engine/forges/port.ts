@@ -787,6 +787,8 @@ export const forgePort = () => {
       /**
        * Waits until anything changes for the repository: its state is no longer the one waited on
        * (ready, forced elsewhere), or an event names it (removed, forced). The loop then looks again.
+       * Only the state, the CLI, the host and the forge count: a detail that differs at each check
+       * (an unreachable forge's message) would have waiters wake each other forever.
        */
       const changed = (
         repositoryId: string,
@@ -795,9 +797,16 @@ export const forgePort = () => {
       ) =>
         Effect.raceFirst(
           SubscriptionRef.changes(memory).pipe(
-            Stream.filter(
-              (known) => JSON.stringify(known.get(repositoryId)?.status) !== JSON.stringify(seen),
-            ),
+            Stream.filter((known) => {
+              const now = known.get(repositoryId)?.status
+              return (
+                now === undefined ||
+                now.state !== seen.state ||
+                now.cli !== seen.cli ||
+                now.host !== seen.host ||
+                now.forge !== seen.forge
+              )
+            }),
             Stream.take(1),
             Stream.runDrain,
           ),
