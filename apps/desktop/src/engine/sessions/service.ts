@@ -138,6 +138,11 @@ export interface OpenAsked {
   readonly folder: string
   /** The session that starts it, for a child: a helper, a Probe. */
   readonly parent?: RoleSession | undefined
+  /**
+   * Its id, which is its lineage's, when its opener writes what describes it before it starts (a
+   * helper, #145); a new one otherwise.
+   */
+  readonly id?: string | undefined
   readonly chosen?: RoleSession['chosen']
   /**
    * Who asks for it: an agent's call, which the Project's cap refuses above it and which spends
@@ -684,9 +689,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           yield* post.turning(driver.session.id, null, false)
         })
 
-      /** Tells a session's parent, between its turns, what happened to its child. */
+      /**
+       * Tells a session's parent, between its turns, what happened to its child; a role whose owner
+       * tells the parent itself is left to it.
+       */
       const tellParent = (session: RoleSession, text: string) =>
-        session.parent === null
+        session.parent === null || roleNamed(registry, session.role)?.toldToParentByOwner === true
           ? Effect.void
           : storeDelivery({
               owner: session.owner,
@@ -1187,7 +1195,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               reason: `${entry.displayName} belongs to a ${entry.ownerKind}`,
             })
           }
-          const id = crypto.randomUUID()
+          const id = at === null ? (asked.id ?? crypto.randomUUID()) : crypto.randomUUID()
           // Until its session is written, whatever stops an agent's launch gives back its slot.
           const session = yield* Effect.gen(function* () {
             if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)

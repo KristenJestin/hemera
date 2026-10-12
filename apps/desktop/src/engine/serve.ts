@@ -115,6 +115,7 @@ import {
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
+import { helperChanges, listHelpers, readHelper } from './building/helper-store.ts'
 import { taskGraphOf } from './planning/plan.ts'
 import { discussionsOf, readDiscussion } from './planning/discussion-store.ts'
 import {
@@ -704,6 +705,13 @@ export const engineHandlers = (
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
+    // The helpers of a Building (#145), as their chips show them; no stop, no write.
+    'helpers.list': ({ missionId }) =>
+      use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
+    'helpers.read': ({ helperId, thread }) =>
+      use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
+    'helpers.changed': ({ missionId }) =>
+      follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
     // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
     'discussions.list': ({ missionId }) =>
       use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),

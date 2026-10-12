@@ -446,7 +446,14 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
           const { identity, guard } = yield* guardOf(call, frozen, settings)
           const shown = secrets.mask(described(call, settings.home))
           const why = call.why?.trim() ?? ''
-          const said = callSaid(call, settings.home)
+          // A helper's call asks through its parent's mission, naming the helper and its task (#145).
+          const helper = call.session.helper
+          const by =
+            helper === undefined
+              ? ''
+              : `${helper.label}${helper.taskId === null ? '' : ` (${helper.taskId})`} asks: `
+          const said = `${by}${callSaid(call, settings.home)}`
+          const taskId = helper?.taskId ?? null
           const agentReason = secrets.mask(why === '' ? said : why)
           const hemeraReason = secrets.mask(asked.reason)
           const { sensitive } = asked
@@ -462,7 +469,7 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
             PERMISSION_REQUESTS,
             missionId === null
               ? ProjectOwner.make({ projectId })
-              : MissionOwner.make({ projectId, missionId, taskId: null }),
+              : MissionOwner.make({ projectId, missionId, taskId }),
             asked.settingsSection === null
               ? PermissionFields.make(fields)
               : PermissionFields.make({ ...fields, settingsSection: asked.settingsSection }),
@@ -496,7 +503,7 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
                   ownerId: owner.id,
                   projectId,
                   missionId,
-                  taskId: null,
+                  taskId,
                   number: (last?.number ?? 0) + 1,
                   callKey: asked.key,
                   sessionId: call.session.sessionId,

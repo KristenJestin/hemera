@@ -48,6 +48,9 @@ import {
   tasksDoneEnd,
 } from './building/builder.ts'
 import { buildDeskLayer, claimGuards } from './building/desk.ts'
+import { helperDeskLayer } from './building/helper-desk.ts'
+import { HELPER_MAPPERS } from './building/helper-store.ts'
+import { helpersLayer } from './building/helpers.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -427,6 +430,8 @@ export const startProfile = (
     const offersContext = yield* Layer.build(agentOffersLayer)
     // Where the gate reaches the Builder's tools and the claims, served by the Builder (#141).
     const buildContext = yield* Layer.build(buildDeskLayer)
+    // Where the gate reaches the helpers' tools, served by the helpers' service (#145).
+    const helperContext = yield* Layer.build(helperDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -439,6 +444,7 @@ export const startProfile = (
       Layer.succeedContext(deskContext),
       Layer.succeedContext(offersContext),
       Layer.succeedContext(buildContext),
+      Layer.succeedContext(helperContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -534,6 +540,7 @@ export const startProfile = (
         ...FREEZE_MAPPERS,
         ...TICKET_MAPPERS,
         ...BUILDING_MAPPERS,
+        ...HELPER_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -563,6 +570,7 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
+        helpersLayer({ log }),
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??

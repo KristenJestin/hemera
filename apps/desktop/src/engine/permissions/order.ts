@@ -59,7 +59,7 @@ import { Secrets } from '../secrets.ts'
 import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
-import { resolvePath, shownPath } from '../tools/paths.ts'
+import { containedIn, resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
 import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
@@ -302,7 +302,14 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             Effect.gen(function* () {
               const found = yield* sensitiveOf(call, written, resolved.path, writes)
               if (found !== null) sensitive.push(found)
-              if (!resolved.inside || !resolved.certain) {
+              // The Workspace a place reads beside its own folder is inside for a read (#145).
+              const readable = call.session.place.readable
+              const read =
+                !writes &&
+                resolved.certain &&
+                readable !== undefined &&
+                [readable, realRoot(readable)].some((one) => containedIn(one, resolved.path))
+              if ((!resolved.inside || !resolved.certain) && !read) {
                 concerns.push({ kind: 'outside', place: shownPath(resolved.path, home) })
               }
             })

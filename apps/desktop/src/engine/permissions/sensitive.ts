@@ -59,6 +59,13 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
             const reading = !asked.writes
             const root = spellings(asked.session.place.root).find((one) => containedIn(one, path))
             if (root !== undefined) return below(root, path, reading)
+            // The Workspace a place reads beside its own folder, for a read only (#145).
+            const readable = asked.session.place.readable
+            const read =
+              reading && readable !== undefined
+                ? spellings(readable).find((one) => containedIn(one, path))
+                : undefined
+            if (read !== undefined) return below(read, path, reading)
             const data = dataFolders.find((one) => containedIn(one, path))
             if (data === undefined) {
               const found = sensitivePlace(path, context, { reading })

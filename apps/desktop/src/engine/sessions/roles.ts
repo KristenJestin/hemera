@@ -21,6 +21,7 @@ import { SETUP_ROLE } from '../setup/role.ts'
 import { TICKET_EVENT_ROLE } from '../tickets/event-role.ts'
 import { PRELAUNCH_ROLE } from '../building/prelaunch-role.ts'
 import { BUILDER_ROLE } from '../building/builder-role.ts'
+import { HELPER_ROLE, PROTOTYPER_ROLE } from '../building/helper-role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -69,6 +70,11 @@ export interface RoleEntry {
    * no marker, and a restart does not start them again.
    */
   readonly ledByUser: boolean
+  /**
+   * Whether what becomes of its sessions (stuck, replaced, failed) is told to their parent by the
+   * service that owns them, in its own words, rather than by the sessions' (a helper, #145).
+   */
+  readonly toldToParentByOwner?: boolean | undefined
 }
 
 export class RoleRegistry extends Context.Service<RoleRegistry, ReadonlyArray<RoleEntry>>()(
@@ -93,6 +99,8 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   TICKET_EVENT_ROLE,
   PRELAUNCH_ROLE,
   BUILDER_ROLE,
+  HELPER_ROLE,
+  PROTOTYPER_ROLE,
 ]
 
 /**
