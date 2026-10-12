@@ -340,40 +340,36 @@ export function ForYou({
   const toVerify = moment.proofs.filter((one) => one.state === 'toVerify')
   const team = moment.team.filter((one) => one.state === 'new')
   const names = moment.team.map((one) => one.author)
-  const nothing = grilling === undefined && toVerify.length === 0 && team.length === 0
+  if (grilling === undefined && toVerify.length === 0 && team.length === 0) return null
   return (
     <section aria-label="For you" className="flex flex-col gap-2">
       <h2 className="px-4 text-xs font-medium text-muted-foreground">For you</h2>
       <Frame>
-        {nothing ? (
-          <p className="px-4 py-2 text-sm text-muted-foreground">Nothing waits for you here.</p>
-        ) : (
-          <div className="flex flex-col py-1">
-            {grilling !== undefined && (
-              <RoundQuestions round={grilling} handlers={handlers.question} />
-            )}
-            {toVerify.length > 0 && (
-              <ul aria-label="To verify by hand" className="flex flex-col">
-                {toVerify.map((proof) => (
-                  <ProofToVerify key={proof.id} proof={proof} onVerify={handlers.onVerify} />
-                ))}
-              </ul>
-            )}
-            {team.length > 0 && (
-              <ul aria-label="The team’s comments" className="flex flex-col">
-                {team.map((comment) => (
-                  <TeamLine
-                    key={comment.id}
-                    comment={comment}
-                    forge={moment.forge ?? 'the forge'}
-                    names={names}
-                    handlers={handlers}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        <div className="flex flex-col py-1">
+          {grilling !== undefined && (
+            <RoundQuestions round={grilling} handlers={handlers.question} />
+          )}
+          {toVerify.length > 0 && (
+            <ul aria-label="To verify by hand" className="flex flex-col">
+              {toVerify.map((proof) => (
+                <ProofToVerify key={proof.id} proof={proof} onVerify={handlers.onVerify} />
+              ))}
+            </ul>
+          )}
+          {team.length > 0 && (
+            <ul aria-label="The team’s comments" className="flex flex-col">
+              {team.map((comment) => (
+                <TeamLine
+                  key={comment.id}
+                  comment={comment}
+                  forge={moment.forge ?? 'the forge'}
+                  names={names}
+                  handlers={handlers}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
       </Frame>
     </section>
   )

@@ -14,6 +14,12 @@ import { collapse, expand, fold, useTransition } from '../../motion.ts'
 export const LINE =
   'flex min-h-control-md w-full min-w-0 items-center gap-2 px-4 py-1.5 text-left text-sm outline-none hover:tinted focus-ring hover-motion'
 
+/**
+ * A line whose mark stands before its button, so the mark's legend is not inside a control: the
+ * whole line takes the tint under the hand, the button inside it adds none.
+ */
+export const MARKED = 'flex min-w-0 items-center pl-4 hover:tinted hover-motion'
+
 /** A line that says one thing and leads nowhere. */
 export const ROW = 'flex min-h-control-md min-w-0 items-center gap-2 px-4 py-1.5 text-sm'
 

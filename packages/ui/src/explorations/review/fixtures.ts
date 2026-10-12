@@ -214,6 +214,9 @@ export const ROUND_ONE_CLOSED: Round = {
   backAt: 'yesterday 18:05',
 }
 
+/** Round 1 as it came back: its remarks addressed, waiting for the user. */
+const ROUND_ONE_BACK: Round = { ...ROUND_ONE_CLOSED, state: 'back' }
+
 const NOW_MS = Date.now()
 
 const question = (
@@ -336,7 +339,7 @@ const ROUND_TWO_POINTS: readonly RoundPoint[] = [
     id: 'P7',
     title: 'Export the credit notes too',
     kind: 'behaviour',
-    sources: ['T2'],
+    sources: ['C2'],
     state: 'todo',
     detail: 'The team asks for credit notes in the same file. The Spec never mentions them.',
     newMission: 'Export credit notes with the invoices',
@@ -377,7 +380,7 @@ export const ROUND_TWO_BUILDING: Round = {
 
 export const TEAM: readonly TeamComment[] = [
   {
-    id: 'T1',
+    id: 'C1',
     author: 'ana.lopez',
     anchor: 'api/src/billing/export.controller.ts:88',
     text: 'This endpoint is not rate-limited. An export of everything, pressed in a loop, would hold a connection each.',
@@ -390,7 +393,7 @@ export const TEAM: readonly TeamComment[] = [
     at: '08:58',
   },
   {
-    id: 'T2',
+    id: 'C2',
     author: 'bram.de-vries',
     anchor: 'api #412',
     text: 'Could the same export include the credit notes? Finance asks every month.',
@@ -401,7 +404,7 @@ export const TEAM: readonly TeamComment[] = [
     at: '09:03',
   },
   {
-    id: 'T3',
+    id: 'C3',
     author: 'chen.wei',
     anchor: 'web/src/billing/export-button.tsx:12',
     text: 'Nit: the icon should come from ui-kit.',
@@ -696,7 +699,7 @@ function feedback(): ReviewMoment {
     progress: { step: 'Review · round 1', detail: '4 remarks wait to be sent' },
     round: 1,
     remarks: [...ROUND_ONE, ...WAITING],
-    rounds: [ROUND_ONE_CLOSED],
+    rounds: [ROUND_ONE_BACK],
     proofs: verified(PROOFS),
     pulls: PULLS_OPEN,
     refusals: ['4 remarks are not sent', '3 addressed remarks wait for you'],
@@ -717,7 +720,7 @@ function grilling(): ReviewMoment {
       (one) => one.state === 'waiting',
       () => ({ state: 'inRound', round: 2 }),
     ),
-    rounds: [ROUND_TWO_GRILLING, ROUND_ONE_CLOSED],
+    rounds: [ROUND_TWO_GRILLING, ROUND_ONE_BACK],
     refusals: ['round 2 is open', 'Q2 and Q3 wait for your answer'],
   }
 }
@@ -832,8 +835,8 @@ export const MOMENTS = {
       now: 'Builder reads the filters from the URL at each export (P4).',
       progress: { step: 'Round 2', detail: '1 of 4 points done' },
       ball: { ball: 'agent' },
-      rounds: [ROUND_TWO_BUILDING, ROUND_ONE_CLOSED],
-      refusals: ['round 2 is building'],
+      rounds: [ROUND_TWO_BUILDING, ROUND_ONE_BACK],
+      refusals: [],
     }
   },
   back,

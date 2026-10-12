@@ -362,18 +362,18 @@ export const TeamComments: Story = {
     await waitFor(() => {
       expect(forYou.getByText(/Asks for a limit on concurrent exports/)).toBeVisible()
     })
-    await userEvent.click(forYou.getByRole('button', { name: 'Copy the reply to T1' }))
+    await userEvent.click(forYou.getByRole('button', { name: 'Copy the reply to C1' }))
     await expect(args.onCopy).toHaveBeenCalledWith(expect.stringMatching(/^Good catch/))
-    await userEvent.click(forYou.getByRole('button', { name: 'Open T1 on GitHub' }))
+    await userEvent.click(forYou.getByRole('button', { name: 'Open C1 on GitHub' }))
     await expect(args.onOpenLink).toHaveBeenCalledWith(
       'https://github.com/acme/shop/pull/412#discussion_r1',
     )
-    await userEvent.type(forYou.getByRole('textbox', { name: 'My take on T1' }), 'One per user.')
-    await userEvent.click(forYou.getByRole('button', { name: 'Add T1 to the round' }))
-    await expect(args.onTeam).toHaveBeenCalledWith('T1', 'round', 'One per user.')
+    await userEvent.type(forYou.getByRole('textbox', { name: 'My take on C1' }), 'One per user.')
+    await userEvent.click(forYou.getByRole('button', { name: 'Add C1 to the round' }))
+    await expect(args.onTeam).toHaveBeenCalledWith('C1', 'round', 'One per user.')
     await userEvent.click(forYou.getByRole('button', { name: /bram\.de-vries/ }))
-    await userEvent.click(await waitFor(() => forYou.getByRole('button', { name: 'Dismiss T2' })))
-    await expect(args.onTeam).toHaveBeenCalledWith('T2', 'dismiss', '')
+    await userEvent.click(await waitFor(() => forYou.getByRole('button', { name: 'Dismiss C2' })))
+    await expect(args.onTeam).toHaveBeenCalledWith('C2', 'dismiss', '')
     const resolved = canvas.getByRole('button', { name: /^Team comments/ })
     await expect(resolved).toHaveTextContent('1 resolved on GitHub')
   },
@@ -543,13 +543,15 @@ export const LongText: Story = {
     const long = next.getByRole('button', { name: /F10/ })
     await userEvent.click(long)
     await waitFor(() => {
-      expect(next.getByText(/Again, the first point matters most/, { selector: 'p' })).toBeVisible()
+      expect(
+        next.getByText(/Again, the first point matters most/, { selector: 'span' }),
+      ).toBeVisible()
     })
     await expect(
       next.getAllByText(
         'web/src/features/billing/invoices/export/components/export-button/export-progress-indicator.tsx:142',
       ).length,
-    ).toBe(2)
+    ).toBe(1)
     const rows = within(await unfold(canvasElement, 'Pull requests'))
     await expect(rows.getByText(/lea\.dubois/)).toBeVisible()
   },

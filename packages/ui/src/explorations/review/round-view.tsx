@@ -7,7 +7,7 @@ import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconCheck, IconChevronRight, IconListNumbers, IconPlus } from '../../icons.ts'
-import { Chevron, Fold, ID, LINE, PROSE, QUIET, Unfolding } from './parts.tsx'
+import { Chevron, Fold, ID, LINE, MARKED, PROSE, QUIET, Unfolding } from './parts.tsx'
 import type { RailHandlers } from './rail.tsx'
 import type { Round, RoundPoint } from './types.ts'
 
@@ -100,12 +100,12 @@ function PointLine({
   const [open, setOpen] = useState(false)
   return (
     <li className="flex flex-col border-b border-border last:border-b-0">
-      <div className="flex min-w-0 items-center pl-4">
+      <div className={MARKED}>
         <StatusMark state={point.state} size="sm" legend />
         <button
           type="button"
           aria-expanded={open}
-          className={cn(LINE, 'pl-2')}
+          className={cn(LINE, 'pl-2 hover:shadow-none')}
           onClick={() => setOpen(!open)}
         >
           <span className={ID}>{point.id}</span>

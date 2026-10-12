@@ -16,7 +16,7 @@ import {
   IconPhoto,
   IconX,
 } from '../../icons.ts'
-import { Chevron, ID, LINE, MONO, PROSE, QUIET, Unfolding, plural } from './parts.tsx'
+import { Chevron, ID, LINE, MARKED, MONO, PROSE, QUIET, Unfolding, plural } from './parts.tsx'
 import type { Remark, RemarkImage, RemarkState, Round } from './types.ts'
 
 /**
@@ -220,22 +220,6 @@ export function Composer({
         take(filesOf(event.dataTransfer.files))
       }}
     >
-      {follows === undefined && (
-        <div role="group" aria-label="Kind" className="flex gap-1">
-          {(['remark', 'question'] as const).map((one) => (
-            <Button
-              key={one}
-              variant="ghost"
-              size="sm"
-              aria-pressed={kind === one}
-              aria-current={kind === one ? 'true' : undefined}
-              onClick={() => setKind(one)}
-            >
-              {one === 'remark' ? 'Remark' : 'Question'}
-            </Button>
-          ))}
-        </div>
-      )}
       <Textarea
         label={label}
         rows={2}
@@ -251,7 +235,22 @@ export function Composer({
         images={images}
         onRemove={(name) => setImages((before) => before.filter((one) => one.name !== name))}
       />
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {follows === undefined && (
+          <div role="group" aria-label="Kind" className="flex gap-0.5">
+            {(['remark', 'question'] as const).map((one) => (
+              <Button
+                key={one}
+                variant={kind === one ? 'secondary' : 'ghost'}
+                size="sm"
+                aria-pressed={kind === one}
+                onClick={() => setKind(one)}
+              >
+                {one === 'remark' ? 'Remark' : 'Question'}
+              </Button>
+            ))}
+          </div>
+        )}
         <label
           htmlFor={`${id}-files`}
           className="flex h-control-sm cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground outline-none hover:tinted focus-within:focus-ring hover-motion"
@@ -313,14 +312,14 @@ export function RemarkLine({
   const kept = (remark.images ?? []).length
   return (
     <li className="flex flex-col border-b border-border last:border-b-0">
-      <div className="flex min-w-0 items-center pl-4">
+      <div className={MARKED}>
         <Legend label={remarkLegend(remark)}>
           <StatusMark state={MARK[remark.state]} size="sm" />
         </Legend>
         <button
           type="button"
           aria-expanded={open}
-          className={cn(LINE, 'pl-2')}
+          className={cn(LINE, 'pl-2 hover:shadow-none')}
           onClick={() => setOpen(!open)}
         >
           <span className={ID}>{remark.id}</span>
@@ -335,16 +334,19 @@ export function RemarkLine({
               {remark.follows}
             </span>
           )}
-          <span
-            className={cn(
-              'min-w-0 flex-1 truncate',
-              quiet && 'text-muted-foreground',
-              remark.state === 'withdrawn' && 'line-through',
-            )}
-          >
-            {remark.text}
+          <span className="flex min-w-0 flex-1">
+            <span
+              className={cn(
+                'min-w-0',
+                open ? 'max-w-measure break-words whitespace-pre-line' : 'truncate',
+                quiet && 'text-muted-foreground',
+                remark.state === 'withdrawn' && 'line-through',
+              )}
+            >
+              {remark.text}
+            </span>
           </span>
-          {remark.anchor !== undefined && (
+          {remark.anchor !== undefined && !open && (
             <span className={cn(MONO, 'shrink')}>{remark.anchor}</span>
           )}
           {kept > 0 && (
@@ -359,9 +361,7 @@ export function RemarkLine({
       </div>
       <Unfolding open={open}>
         <div className="flex flex-col gap-3 pr-4 pb-3 pl-12">
-          {editing === null ? (
-            <p className={PROSE}>{remark.text}</p>
-          ) : (
+          {editing !== null && (
             <div className="flex max-w-measure flex-col gap-2">
               <Textarea label={remark.id} rows={3} value={editing} onValueChange={setEditing} />
               <div className="flex gap-2">
@@ -672,10 +672,9 @@ function OneList({
           {FILTERS.map((one) => (
             <Button
               key={one.id}
-              variant="ghost"
+              variant={filter === one.id ? 'secondary' : 'ghost'}
               size="sm"
               aria-pressed={filter === one.id}
-              aria-current={filter === one.id ? 'true' : undefined}
               onClick={() => setFilter(one.id)}
             >
               {`${one.label} · ${String(remarks.filter(one.keeps).length)}`}

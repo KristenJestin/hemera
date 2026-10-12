@@ -235,7 +235,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
     </Button>
   ) : undefined
   const note =
-    !loading && moment.refusals.length > 0 ? (
+    !loading && stage === 'Review' && moment.refusals.length > 0 ? (
       <p className="max-w-view-narrow text-right text-xs break-words text-muted-foreground">
         {`${local ? 'Delivery' : 'Ship'} waits: ${moment.refusals.join(' · ')}`}
       </p>
