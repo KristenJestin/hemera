@@ -1,0 +1,203 @@
+/**
+ * What the Checks and Documentation sections of a Project's settings show of the engine's records
+ * (#152), what their dialogs write back, where a refusal is said, and the one move a reorder is.
+ */
+
+import {
+  CheckRefused,
+  DocRecipeRefused,
+  StorageFailed,
+  type Command,
+  type DocRecipe,
+  type ProjectCheck,
+} from '@hemera/ipc'
+import { describe, expect, test } from 'vite-plus/test'
+
+import {
+  checkChoicesOf,
+  checkDraftOf,
+  checkFormOf,
+  checkRefusalsOf,
+  docRecipeDraftOf,
+  docRecipeFormOf,
+  docRecipeRefusalsOf,
+  moveOf,
+  proposedChecksOf,
+  proposedDocRecipesOf,
+  settingsCheckOf,
+  settingsDocRecipeOf,
+} from '../src/renderer/checks-model.ts'
+
+const command = (over: Partial<Command>): Command => ({
+  id: 'c-lint',
+  projectId: 'acme',
+  name: 'lint',
+  type: 'lint',
+  line: 'pnpm lint',
+  lineWindows: null,
+  lineLinux: null,
+  repositoryId: null,
+  folder: null,
+  scope: 'workspace',
+  portless: false,
+  portlessName: null,
+  check: true,
+  atOpen: false,
+  askBeforeRunning: false,
+  readOnly: false,
+  writeGlobs: [],
+  ...over,
+})
+
+const CATALOGUE: ReadonlyArray<Command> = [
+  command({}),
+  command({ id: 'c-e2e', name: 'e2e', type: 'e2e', line: 'pnpm e2e', askBeforeRunning: true }),
+  command({ id: 'c-web', name: 'web', type: 'serve', line: 'pnpm dev', check: false }),
+  command({ id: 'c-seed', name: 'seed', type: 'script', line: 'node seed.mjs', check: false }),
+]
+
+const coverage: ProjectCheck = {
+  id: 'k1',
+  projectId: 'acme',
+  rank: 0,
+  name: 'coverage',
+  commandId: null,
+  line: 'pnpm --filter api test --coverage',
+  where: 'repository',
+  repository: 'api',
+  when: 'requirement',
+  expect: { pattern: 'All files\\s*\\|\\s*([0-9.]+)', minimum: 70 },
+  files: null,
+}
+
+describe('A check, as its line shows it', () => {
+  test('a free line keeps its line, where it runs, and the number it expects as written', () => {
+    expect(settingsCheckOf(coverage, CATALOGUE)).toEqual({
+      id: 'k1',
+      name: 'coverage',
+      command: null,
+      line: 'pnpm --filter api test --coverage',
+      where: 'repository',
+      repository: 'api',
+      when: 'requirement',
+      expect: { pattern: 'All files\\s*\\|\\s*([0-9.]+)', minimum: '70' },
+      files: null,
+    })
+  })
+
+  test('a catalogue command shows its line and its "ask before running" mark', () => {
+    const e2e = { ...coverage, commandId: 'c-e2e', line: null, expect: null }
+    expect(settingsCheckOf(e2e, CATALOGUE).command).toEqual({
+      id: 'c-e2e',
+      name: 'e2e',
+      type: 'e2e',
+      line: 'pnpm e2e',
+      askBeforeRunning: true,
+    })
+  })
+
+  test('the commands offered are those the catalogue marks as checks, never a service', () => {
+    expect(checkChoicesOf(CATALOGUE).map((one) => one.name)).toEqual(['lint', 'e2e'])
+  })
+
+  test('the proposals are lines of their own, each with an id the list can move', () => {
+    const proposed = proposedChecksOf(
+      [{ ...coverage, name: 'lint', commandId: 'c-lint', line: null, expect: null }],
+      CATALOGUE,
+    )
+    expect(proposed.map((one) => [one.id, one.name, one.command?.line])).toEqual([
+      ['proposed-0', 'lint', 'pnpm lint'],
+    ])
+  })
+})
+
+describe('A check, as its dialog writes it', () => {
+  test('a check read into the dialog is written back as it was', () => {
+    const form = checkFormOf(settingsCheckOf(coverage, CATALOGUE))
+    const { id: _id, projectId: _project, rank: _rank, ...draft } = coverage
+    expect(checkDraftOf(form)).toEqual(draft)
+  })
+
+  test('a catalogue command chosen sends no line', () => {
+    const form = { ...checkFormOf(settingsCheckOf(coverage, CATALOGUE)), command: 'c-lint' }
+    expect(checkDraftOf(form)).toMatchObject({ commandId: 'c-lint', line: null })
+  })
+
+  test('a minimum left empty or not a number is sent as no number, for the engine to refuse', () => {
+    const form = checkFormOf(settingsCheckOf(coverage, CATALOGUE))
+    for (const minimum of ['', 'seventy']) {
+      expect(checkDraftOf({ ...form, expect: { pattern: 'x', minimum } }).expect?.minimum).toBe(
+        Number.NaN,
+      )
+    }
+  })
+})
+
+describe('A refusal is said at the field it concerns', () => {
+  test('a check refused at a field is said under it, the others at the foot', () => {
+    expect(
+      checkRefusalsOf(new CheckRefused({ reason: '“|” is shell syntax.', field: 'line' })),
+    ).toEqual({ fields: { line: '“|” is shell syntax.' }, foot: undefined })
+    expect(
+      checkRefusalsOf(new CheckRefused({ reason: 'Choose the repository.', field: null })),
+    ).toEqual({ fields: {}, foot: 'Choose the repository.' })
+    expect(checkRefusalsOf(new StorageFailed({ sentence: 'disk full' })).foot).toContain(
+      'disk full',
+    )
+  })
+
+  test('a doc recipe refused at its path is said under it', () => {
+    expect(
+      docRecipeRefusalsOf(new DocRecipeRefused({ reason: '../x leaves api.', field: 'path' })),
+    ).toEqual({ fields: { path: '../x leaves api.' }, foot: undefined })
+  })
+})
+
+const readme: DocRecipe = {
+  id: 'd1',
+  projectId: 'acme',
+  rank: 0,
+  repository: 'api',
+  path: 'openapi.yaml',
+  purpose: 'The HTTP API contract.',
+  applies: 'when_impact_names',
+  words: ['API', 'contract'],
+}
+
+describe('A doc recipe, as its line shows it and its dialog writes it', () => {
+  test('a recipe that applies when named shows its words, and is written back as it was', () => {
+    const shown = settingsDocRecipeOf(readme)
+    expect(shown).toEqual({
+      id: 'd1',
+      place: 'api',
+      path: 'openapi.yaml',
+      purpose: 'The HTTP API contract.',
+      words: ['API', 'contract'],
+    })
+    const { id: _id, projectId: _project, rank: _rank, ...draft } = readme
+    expect(docRecipeDraftOf(docRecipeFormOf(shown))).toEqual(draft)
+  })
+
+  test('a recipe that always applies names no words, and blank words are dropped', () => {
+    const always = docRecipeDraftOf({ place: '.', path: 'README.md', purpose: 'p', words: null })
+    expect(always).toMatchObject({ repository: '.', applies: 'always', words: [] })
+    const named = docRecipeDraftOf({ place: '.', path: 'a', purpose: 'p', words: ['API', ' '] })
+    expect(named).toMatchObject({ applies: 'when_impact_names', words: ['API'] })
+  })
+
+  test('the proposals get ids of their own', () => {
+    const { id: _id, projectId: _project, rank: _rank, ...draft } = readme
+    expect(proposedDocRecipesOf([draft, draft]).map((one) => one.id)).toEqual([
+      'proposed-0',
+      'proposed-1',
+    ])
+  })
+})
+
+describe('A reorder is one move', () => {
+  test('a line moved down or up is found with the place it goes to', () => {
+    expect(moveOf(['a', 'b', 'c', 'd'], ['b', 'c', 'a', 'd'])).toEqual({ id: 'a', rank: 2 })
+    expect(moveOf(['a', 'b', 'c', 'd'], ['a', 'd', 'b', 'c'])).toEqual({ id: 'd', rank: 1 })
+    expect(moveOf(['a', 'b'], ['a', 'b'])).toBeNull()
+  })
+})
