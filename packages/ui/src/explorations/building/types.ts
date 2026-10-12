@@ -83,10 +83,16 @@ export interface Service {
   line: string
 }
 
+/** A service the mission can run but does not run now: declared by the Project, or offered by its catalogue. */
+export interface IdleService {
+  name: string
+  line: string
+}
+
 /** What works beside the Builder: a chip each, never stopped by hand. */
 export interface Helper {
   name: string
-  kind: 'helper' | 'prototyper' | 'documenter' | 'reviewer'
+  kind: 'helper' | 'documenter' | 'reviewer'
   state: LiveState
   step: string
   startedAt: number
@@ -159,7 +165,12 @@ export interface BuildingMoment {
   phases: readonly Phase[]
   checks: readonly Check[]
   changes: readonly Change[]
+  /** The services that run. */
   services: readonly Service[]
+  /** The services the Project declares that do not run: each shows Start. */
+  idle: readonly IdleService[]
+  /** What the Project's catalogue offers that this mission does not declare. */
+  catalogue: readonly IdleService[]
   helpers: readonly Helper[]
   journal: readonly JournalEvent[]
   needs: readonly NeedRow[]

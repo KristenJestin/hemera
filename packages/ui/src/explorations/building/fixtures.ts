@@ -226,14 +226,16 @@ const SERVICES: readonly Service[] = [
     url: 'http://localhost:4212',
     line: 'pnpm --filter web dev',
   },
-  {
-    name: 'storybook',
-    state: 'stopped',
-    startedAt: since(90),
-    endedAt: since(60),
-    url: 'http://localhost:6006',
-    line: 'pnpm --filter web storybook',
-  },
+]
+
+const IDLE = [
+  { name: 'storybook', line: 'pnpm --filter web storybook' },
+  { name: 'worker', line: 'pnpm --filter api worker' },
+]
+
+const CATALOGUE = [
+  { name: 'mailpit', line: 'docker compose up mailpit' },
+  { name: 'docs', line: 'pnpm --filter docs dev' },
 ]
 
 const HELPERS: readonly Helper[] = [
@@ -243,14 +245,6 @@ const HELPERS: readonly Helper[] = [
     state: 'running',
     step: 'Writes the labels of the export menu (T19)',
     startedAt: since(6),
-    endedAt: null,
-  },
-  {
-    name: 'Prototyper',
-    kind: 'prototyper',
-    state: 'running',
-    step: 'Draws the progress on the export button',
-    startedAt: since(3),
     endedAt: null,
   },
 ]
@@ -493,6 +487,8 @@ const WORKING: BuildingMoment = {
     { repository: 'shared', files: 3, added: 64, deleted: 4 },
   ],
   services: SERVICES,
+  idle: IDLE,
+  catalogue: CATALOGUE,
   helpers: HELPERS,
   journal: JOURNAL,
   needs: [],
@@ -551,7 +547,6 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     ...WORKING,
     helpers: [
       { ...HELPERS[0]!, state: 'stuck', startedAt: since(19) },
-      HELPERS[1]!,
       {
         name: 'Documenter',
         kind: 'documenter',

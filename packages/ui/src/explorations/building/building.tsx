@@ -18,6 +18,8 @@ import {
   IconGitCompare,
   IconHammer,
   IconHistory,
+  IconPlayerPlay,
+  IconPlus,
   IconRefresh,
   IconTerminal,
   IconX,
@@ -60,7 +62,7 @@ import type {
 export interface BuildingHandlers {
   onOpenTask: (id: string) => void
   onOpenDiff: (repository: string) => void
-  onService: (name: string, action: 'stop' | 'restart' | 'copy' | 'open') => void
+  onService: (name: string, action: 'start' | 'stop' | 'restart' | 'copy' | 'open') => void
   onRevoke: (id: string) => void
 }
 
@@ -70,8 +72,6 @@ export interface BuildingPageProps extends BuildingHandlers {
   chosenTask?: string | undefined
   /** Whether the page waits for its first read: its rows are skeletons. */
   loading?: boolean | undefined
-  /** Whether the mission's own things end the rail; left out, they do (the recommendation). */
-  thingsInRail?: boolean | undefined
 }
 
 const COLUMNS = 'flex min-w-0 flex-col gap-8 px-8 pt-2 pb-10 lg:flex-row-reverse lg:items-start'
@@ -133,7 +133,6 @@ export function measuresOf(moment: BuildingMoment): Measures {
 
 const HELPER_TYPE: Record<BuildingMoment['helpers'][number]['kind'], string> = {
   helper: 'Helper',
-  prototyper: 'Prototyper',
   documenter: 'Documenter',
   reviewer: 'Reviewer',
 }
@@ -249,19 +248,28 @@ export function BuildingCard({
   )
 }
 
-/** The services of the mission: a chip each, their address, Stop and Restart in the glance. */
+/**
+ * The services of the mission. What runs is its chip, with its address, Stop and Restart in the
+ * glance. What the Project declares and does not run is a Start each, beside the chips. What the
+ * catalogue offers beyond them is one folded line; unfolded, each with its command and Start, which
+ * runs it for this mission only.
+ */
 function Services({
   services,
+  idle,
+  catalogue,
   onService,
 }: {
   services: BuildingMoment['services']
+  idle: BuildingMoment['idle']
+  catalogue: BuildingMoment['catalogue']
   onService: BuildingHandlers['onService']
 }): ReactNode {
-  if (services.length === 0) return null
+  if (services.length === 0 && idle.length === 0 && catalogue.length === 0) return null
   return (
     <section aria-label="Services" className="flex flex-col gap-2">
       <h2 className="px-4 text-xs font-medium text-muted-foreground">Services</h2>
-      <ul aria-label="Services" className="flex flex-wrap gap-1.5 px-4">
+      <ul aria-label="Services" className="flex flex-wrap items-center gap-1.5 px-4">
         {services.map((service) => (
           <li key={service.name} className="flex">
             <LiveChip
@@ -282,7 +290,46 @@ function Services({
             />
           </li>
         ))}
+        {idle.map((service) => (
+          <li key={service.name} className="flex">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Start ${service.name}`}
+              onClick={() => onService(service.name, 'start')}
+            >
+              <IconPlayerPlay size="sm" />
+              {service.name}
+            </Button>
+          </li>
+        ))}
       </ul>
+      {catalogue.length > 0 && (
+        <Fold
+          glyph={<IconPlus size="sm" />}
+          title="From the catalogue"
+          detail={`${plural(catalogue.length, 'service', 'services')} this mission does not declare`}
+        >
+          <ul aria-label="From the catalogue" className="flex flex-col pb-1 pl-6">
+            {catalogue.map((service) => (
+              <li key={service.name} className={ROW}>
+                <span className="shrink-0 font-medium">{service.name}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                  {service.line}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={`Start ${service.name} for this mission`}
+                  onClick={() => onService(service.name, 'start')}
+                >
+                  Start
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Fold>
+      )}
     </section>
   )
 }
@@ -751,7 +798,6 @@ export function BuildingPage({
   moment,
   chosenTask,
   loading = false,
-  thingsInRail = true,
   onOpenTask,
   onOpenDiff,
   onService,
@@ -761,7 +807,12 @@ export function BuildingPage({
     <div className={COLUMNS} data-stage="building">
       <aside aria-label="What happens" className={RAIL}>
         <BuildingCard moment={moment} loading={loading} />
-        <Services services={moment.services} onService={onService} />
+        <Services
+          services={moment.services}
+          idle={moment.idle}
+          catalogue={moment.catalogue}
+          onService={onService}
+        />
         {!loading && (
           <div className="flex flex-col">
             <Checks checks={moment.checks} />
@@ -769,7 +820,7 @@ export function BuildingPage({
             <Journal journal={moment.journal} />
           </div>
         )}
-        {thingsInRail && <MissionFolds mission={moment.mission} onRevoke={onRevoke} />}
+        <MissionFolds mission={moment.mission} onRevoke={onRevoke} />
       </aside>
       <div className={MAIN}>
         <Spine moment={moment} chosenTask={chosenTask} onOpenTask={onOpenTask} loading={loading} />

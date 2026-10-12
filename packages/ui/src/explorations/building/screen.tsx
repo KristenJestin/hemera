@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react'
 import type { MissionMarkView } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
 import type { ModelChoice } from '../../components/model-picker/model-picker.tsx'
-import { IconFileText, IconGitCompare, IconInfoCircle, IconListCheck } from '../../icons.ts'
+import { IconFileText, IconGitCompare, IconListCheck } from '../../icons.ts'
 import { ContentHeader, type Crumb } from '../../shell/content-header.tsx'
 import {
   MissionFrame,
@@ -30,10 +30,9 @@ import {
   TASK_DETAILS,
   TITLE,
 } from './fixtures.ts'
-import { MissionFolds } from './parts.tsx'
 import { ReadyPage, blockerOf, launchable } from './ready.tsx'
 import { TaskView } from './task-view.tsx'
-import type { BuildingMoment, MissionThings, Task, TaskDetail } from './types.ts'
+import type { BuildingMoment, Task, TaskDetail } from './types.ts'
 
 /**
  * The Ready and Building pages of ACME-12 in their mission frame, under the window's header that
@@ -46,9 +45,6 @@ import type { BuildingMoment, MissionThings, Task, TaskDetail } from './types.ts
 function Elsewhere({ words }: { words: string }): ReactNode {
   return <p className="max-w-measure px-6 py-5 text-sm text-muted-foreground">{words}</p>
 }
-
-/** Where the mission's own things live: folded in the rail, or in a view of their own. */
-export type ThingsPlace = 'rail' | 'view'
 
 function useViews(initial: MissionFrameState) {
   const [state, setState] = useState(initial)
@@ -95,7 +91,7 @@ function taskViews(moment: BuildingMoment, onOpenDiff: (what: string) => void): 
   )
 }
 
-function commonViews(things: MissionThings, onRevoke: (id: string) => void): MissionView[] {
+function commonViews(): MissionView[] {
   return [
     {
       id: 'spec',
@@ -110,17 +106,6 @@ function commonViews(things: MissionThings, onRevoke: (id: string) => void): Mis
       icon: <IconGitCompare size="sm" />,
       width: 'wide',
       body: <Elsewhere words="The diff, as the diff view draws it." />,
-    },
-    {
-      id: 'about',
-      title: `About ${KEY}`,
-      icon: <IconInfoCircle size="sm" />,
-      width: 'narrow',
-      body: (
-        <div className="py-3">
-          <MissionFolds mission={things} onRevoke={onRevoke} />
-        </div>
-      ),
     },
   ]
 }
@@ -144,8 +129,6 @@ const crumbsOf = (
 
 export interface BuildingScreenProps extends BuildingHandlers {
   moment: MomentName
-  /** Where the mission's dependencies, grants and budget live: the recommendation is the rail. */
-  things?: ThingsPlace | undefined
   loading?: boolean | undefined
   title?: string | undefined
   /** The views open as the story starts. */
@@ -155,7 +138,6 @@ export interface BuildingScreenProps extends BuildingHandlers {
 /** The Building page of ACME-12 in its frame, the needs above it, its views over it. */
 export function BuildingScreen({
   moment: name,
-  things = 'rail',
   loading = false,
   title = TITLE,
   initial = AT_BASE,
@@ -168,19 +150,12 @@ export function BuildingScreen({
     handlers.onOpenDiff(what)
     views.open('diff')
   }
-  const all = [...taskViews(moment, onOpenDiff), ...commonViews(moment.mission, handlers.onRevoke)]
+  const all = [...taskViews(moment, onOpenDiff), ...commonViews()]
   const stage = stageWords('Building', moment.round)
   const marks: MissionMarkView[] = []
   if (moment.needs.length > 0) marks.push({ kind: 'needsYou' })
   if (moment.outside !== undefined) marks.push({ kind: 'outside', repository: moment.outside })
   const more: MissionMore[] = []
-  if (things === 'view') {
-    more.push({
-      label: `About ${KEY}`,
-      icon: <IconInfoCircle size="sm" />,
-      onSelect: () => views.open('about'),
-    })
-  }
   more.push({
     label: 'Diff',
     icon: <IconGitCompare size="sm" />,
@@ -225,7 +200,6 @@ export function BuildingScreen({
         base={
           <BuildingPage
             moment={moment}
-            thingsInRail={things === 'rail'}
             chosenTask={chosen}
             loading={loading}
             onOpenTask={(id) => {
@@ -268,7 +242,7 @@ export function ReadyScreen({
   const [shown, setShown] = useState<ReadyName>(name)
   const moment = READY_MOMENTS[shown]()
   const views = useViews(AT_BASE)
-  const all = commonViews(moment.mission, handlers.onRevoke)
+  const all = commonViews()
   const blocker = blockerOf(moment)
   const check = (): void => setShown('checking')
   const marks: MissionMarkView[] = []

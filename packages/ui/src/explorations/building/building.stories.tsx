@@ -96,7 +96,10 @@ export const JustLaunched: Story = {
     const card = within(cardOf(canvasElement))
     await expect(card.getByRole('status')).toHaveTextContent(/records each scenario’s red/)
     await expect(card.getByRole('img', { name: /^0%/ })).toBeVisible()
-    await expect(within(canvasElement).queryByRole('list', { name: 'Services' })).toBeNull()
+    // Nothing runs yet: the declared services are a Start each.
+    await expect(
+      within(canvasElement).getByRole('button', { name: 'Start storybook' }),
+    ).toBeVisible()
   },
 }
 
@@ -152,6 +155,27 @@ export const BudgetSpent: Story = {
   },
 }
 
+/**
+ * Starting a service: each one the Project declares and that does not run is a Start beside the
+ * chips; what the catalogue offers beyond them is one folded line, each with its command and Start.
+ */
+export const ServicesToStart: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Start storybook' }))
+    await expect(args.onService).toHaveBeenCalledWith('storybook', 'start')
+    const catalogue = canvas.getByRole('button', { name: /^From the catalogue/ })
+    await expect(catalogue).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(catalogue)
+    const offered = await waitFor(() => canvas.getByRole('list', { name: 'From the catalogue' }))
+    await expect(within(offered).getByText('docker compose up mailpit')).toBeVisible()
+    await userEvent.click(
+      within(offered).getByRole('button', { name: 'Start mailpit for this mission' }),
+    )
+    await expect(args.onService).toHaveBeenCalledWith('mailpit', 'start')
+  },
+}
+
 /** An intermediate check failed: the checks' line calls and opens, the failure's output under it. */
 export const CheckFailed: Story = {
   args: { moment: 'checkFailed' },
@@ -188,7 +212,7 @@ export const HelperStuck: Story = {
   args: { moment: 'stuck' },
   play: async ({ canvasElement }) => {
     const chips = within(canvasElement).getByRole('list', { name: 'Working beside the Builder' })
-    await expect(within(chips).getAllByRole('listitem')).toHaveLength(3)
+    await expect(within(chips).getAllByRole('listitem')).toHaveLength(2)
     await expect(within(chips).queryByRole('button', { name: /Stop|×/ })).toBeNull()
   },
 }
