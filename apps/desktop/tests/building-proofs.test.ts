@@ -321,7 +321,8 @@ describe('The proofs written into the Workspace (CT-37)', () => {
         }),
       ),
     )
-    expect(seen.merged).toBe(WITH_ADDITION)
+    // A Windows checkout keeps its CRLF lines through the merge (git.test.ts covers it).
+    expect(seen.merged.replaceAll('\r\n', '\n')).toBe(WITH_ADDITION)
   })
 
   test('an addition against a file changed since the Freeze conflicts, writes nothing, and gives the Builder an attempt with the three versions', async () => {
