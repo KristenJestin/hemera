@@ -730,14 +730,55 @@ export const buildingEndLayer = (log: Log) => {
           )
         })
 
+      /** Whether an automated proof is not proven, or a final check is red or stale. */
+      const unsettled = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const unproven = (yield* scenarioProofsIn(database, building.id)).some(
+            (row) => modeOf(row) === 'automated' && !PROVEN.some((state) => state === stateOf(row)),
+          )
+          if (unproven) return true
+          return (yield* finalChecksIn(database, building.missionId, building.id)).some(
+            (one) => one.verdict === 'red' || !one.upToDate,
+          )
+        })
+
       /**
-       * The exit: what changed after the review checkpoint kept with who wrote it, the Builder's
-       * session ended, then the mission moved to Review and the Building ended, in one transaction.
+       * The exit. The Builder's sessions end first, so no write of theirs lands after the Workspace
+       * is looked at; then a snapshot of each repository, which makes stale whatever a late write
+       * touched. Anything stale or red sends the end back to the Builder, resumed, with the stale
+       * proofs and checks run again. Otherwise what changed after the review checkpoint is kept
+       * with who wrote it, and the mission moves to Review and the Building ends, in one
+       * transaction. A failure in between leaves the end at `refresh`, which runs the exit again.
        */
       const exit = (building: BuildingRow) =>
         Effect.gen(function* () {
           const database = yield* Database
           const missionId = building.missionId
+          const owner = { kind: 'mission', missionId } as const
+          for (const session of yield* sessionsIn(
+            ['starting', 'working', 'idle', 'stuck'],
+            owner,
+          )) {
+            if (session.role !== 'builder') continue
+            yield* Sessions.use((sessions) => sessions.end(session.lineage, 'the Building ended'))
+          }
+          const snapshots = yield* Snapshots
+          const ends: Array<{ readonly base: BuildingBase; readonly tree: string }> = []
+          for (const base of basesOf(building)) {
+            const tree = yield* snapshots.take(placeOf(base), {
+              kind: 'review_exit',
+              missionId,
+              buildingId: building.id,
+            })
+            ends.push({ base, tree })
+          }
+          if (yield* unsettled(building)) {
+            yield* said('a write landed after the last checks: they run again before Review')
+            yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
+            yield* BuildDesk.use((desk) => desk.refreshProofs(missionId))
+            return
+          }
           const changed: Array<typeof reviewChangedAfter.$inferInsert> = []
           if (building.reviewCheckpointId !== null) {
             const [taken] = yield* database
@@ -767,14 +808,8 @@ export const buildingEndLayer = (log: Log) => {
               )
               .orderBy(attemptWrites.at)
               .pipe(Effect.mapError(refusedWhile('reading the writes')))
-            for (const base of basesOf(building)) {
+            for (const { base, tree: end } of ends) {
               const tree = trees.find((one) => one.repository === base.repository)?.tree ?? null
-              const snapshots = yield* Snapshots
-              const end = yield* snapshots.take(placeOf(base), {
-                kind: 'review_exit',
-                missionId,
-                buildingId: building.id,
-              })
               for (const file of yield* snapshots.changed(missionId, placeOf(base), tree, end)) {
                 const last = writes.findLast(
                   (one) =>
@@ -795,15 +830,6 @@ export const buildingEndLayer = (log: Log) => {
                 })
               }
             }
-          }
-          // The Builder's work is over: its session ends before the mission leaves Building.
-          const owner = { kind: 'mission', missionId } as const
-          for (const session of yield* sessionsIn(
-            ['starting', 'working', 'idle', 'stuck'],
-            owner,
-          )) {
-            if (session.role !== 'builder') continue
-            yield* Sessions.use((sessions) => sessions.end(session.lineage, 'the Building ended'))
           }
           const moved = yield* mutate('ending the Building', (transaction) =>
             Effect.gen(function* () {

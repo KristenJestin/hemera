@@ -964,6 +964,34 @@ describe('The documenter’s delta', () => {
   )
 })
 
+/** R1.S2's proof: a test that holds once `export.ts` exists in `api`. */
+const exported = [
+  "import { test } from 'node:test'",
+  "import assert from 'node:assert/strict'",
+  "import { existsSync } from 'node:fs'",
+  '',
+  "test('the scenario holds', () => {",
+  "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
+  '})',
+  '',
+].join('\n')
+const exportProof = () => ({
+  'R1.S2': {
+    mode: 'automated',
+    actions: ['Run the test'],
+    starting_data: 'None.',
+    expected: 'The assertion of the test holds.',
+    test: {
+      repository: 'api',
+      path: 'tests/export.test.mjs',
+      code: exported,
+      insertion: 'new_file',
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+    },
+    seen_today: false,
+  },
+})
+
 describe('What the review saw, and what changed after it', () => {
   test('review_changed_after lists src/x.ts, attributed to RV1', SLOW, async () => {
     const { world, run } = ending()
@@ -979,32 +1007,6 @@ describe('What the review saw, and what changed after it', () => {
   })
 
   test('a proof made stale by RV1 is re-run before Review', SLOW, async () => {
-    const exported = [
-      "import { test } from 'node:test'",
-      "import assert from 'node:assert/strict'",
-      "import { existsSync } from 'node:fs'",
-      '',
-      "test('the scenario holds', () => {",
-      "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
-      '})',
-      '',
-    ].join('\n')
-    const proofs = () => ({
-      'R1.S2': {
-        mode: 'automated',
-        actions: ['Run the test'],
-        starting_data: 'None.',
-        expected: 'The assertion of the test holds.',
-        test: {
-          repository: 'api',
-          path: 'tests/export.test.mjs',
-          code: exported,
-          insertion: 'new_file',
-          command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
-        },
-        seen_today: false,
-      },
-    })
     const { world, run } = ending()
     const seen = await run(({ profile }) =>
       within(
@@ -1017,7 +1019,7 @@ describe('What the review saw, and what changed after it', () => {
             PLAN,
             undefined,
             undefined,
-            proofs,
+            exportProof,
           )
           const builder = yield* builderOf(mission.id)
           yield* proofState(mission.id, 'R1.S2', 'red_recorded')
@@ -1060,6 +1062,73 @@ describe('What the review saw, and what changed after it', () => {
       .find((one) => one.scenario === 'R1.S2')
     expect(proof).toMatchObject({ state: 'green', upToDate: true })
   })
+})
+
+describe('The exit', () => {
+  test(
+    'a write that lands after the last checks, as the end exits, is checked before Review',
+    SLOW,
+    async () => {
+      let late: (() => void) | null = null
+      const { world, run } = ending({
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            // The write lands as the exit looks at the Workspace, after every check of the end.
+            if (owner.kind === 'review_exit' && late !== null) {
+              late()
+              late = null
+            }
+            return real.take(place, owner)
+          },
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            late = () => writtenInWorkspace(api, 'src/late.ts', 'export const late = true\n')
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            const database = yield* Database
+            return {
+              late,
+              runs: yield* database
+                .select()
+                .from(proofRuns)
+                .where(and(eq(proofRuns.missionId, mission.id), eq(proofRuns.scenario, 'R1.S2')))
+                .orderBy(asc(proofRuns.at)),
+              view: yield* buildingNow(mission.id),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.late).toBeNull()
+      // The proof the late write made stale ran again on its tree before the move to Review.
+      expect(seen.runs.map((one) => one.phase)).toContain('rerun')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+      expect(seen.review?.changedAfter.map((one) => one.path)).toContain('src/late.ts')
+    },
+  )
 })
 
 describe('The reviewers count in the cap', () => {
