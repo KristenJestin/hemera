@@ -1,19 +1,21 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { PlanningScreen } from './planning-screen-fixture.tsx'
+import { Button } from '../../components/button/button.tsx'
 import { settled } from '../../blocks/planning/planning-play.ts'
+import { type MomentName, PlanningScreen } from './planning-screen-fixture.tsx'
 
 /**
  * The Planning page of a mission, the base of its frame while the Spec is written with the user,
- * from the mission's first second to Freeze. The user always knows what happens and what to do:
- * the head's Now line says it, and a press on it brings them to the card it names; the top of the
- * rail says where Planning stands, step by step, with what the Planner does next. The Spec leads,
- * in the middle at its measure, its sections down the left — the green check only once settled.
- * The rail, in an order that never changes: where Planning stands, the triage and the ticket when
- * they wait, the questions (a wave whose every question is settled folds to one line, below the
- * waves still open), the cold read, the Probes, the dependencies and the vision. Freeze stands in
- * the head from the declaration on, disabled with what is left until nothing is.
+ * from the mission's first second to Freeze. It tells at a glance what waits for the user, what
+ * happens, and where the Spec stands. The Spec keeps the middle, its sections the left; the head
+ * draws the ball without the face and no Now line. The rail reads top to bottom: the stage card
+ * (Hemera's face in the expression of what happens, one line, where Planning stands, the chips of
+ * what runs), For you (what waits — the mission's needs, the questions, the findings to settle —
+ * one line per kind, the questions one list that grows, one open at a time), and the rest folded
+ * one quiet line each. Freeze stands in the head from the declaration on, disabled with what is
+ * left until nothing is.
  */
 const meta = {
   tags: ['autodocs'],
@@ -21,7 +23,7 @@ const meta = {
   component: PlanningScreen,
   parameters: { layout: 'fullscreen' },
   args: {
-    moment: 'wave',
+    moment: 'questionsWaiting',
     onAnswer: fn(() => Promise.resolve()),
     onWaitOnSomeone: fn(() => Promise.resolve()),
     onCopyDraft: fn(),
@@ -38,6 +40,7 @@ const meta = {
     onOpenMission: fn(),
     onAskInChat: fn(),
     onSeenTicketChange: fn(() => Promise.resolve()),
+    onPermission: fn(),
     onSay: fn(() => Promise.resolve()),
     onAccept: fn(() => Promise.resolve()),
     onClose: fn(() => Promise.resolve()),
@@ -57,13 +60,15 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 const page = (canvasElement: HTMLElement) => within(canvasElement)
-const rail = (canvasElement: HTMLElement) =>
-  within(within(canvasElement).getByRole('complementary', { name: 'What calls for you' }))
-const steps = (canvasElement: HTMLElement) =>
-  within(within(canvasElement).getByRole('region', { name: 'Where Planning stands' }))
-/** The head's Now line, a button that brings the user to what it names. */
-const nowLine = (canvasElement: HTMLElement, name: string | RegExp) =>
-  within(canvasElement).getByRole('button', { name })
+const card = (canvasElement: HTMLElement) =>
+  within(within(canvasElement).getByRole('region', { name: 'Planning' }))
+const forYou = (canvasElement: HTMLElement) =>
+  within(within(canvasElement).getByRole('region', { name: 'For you' }))
+const rest = (canvasElement: HTMLElement) =>
+  within(within(canvasElement).getByRole('region', { name: 'Everything else' }))
+/** The ids of the questions a list holds, in its order: its own items, not their options'. */
+const questionIds = (list: HTMLElement): string[] =>
+  [...list.querySelectorAll(':scope > li')].map((item) => item.textContent?.slice(0, 2) ?? '')
 /** Whether an element shows in the window, at least its top. */
 const inView = (element: Element): boolean => {
   const box = element.getBoundingClientRect()
@@ -74,8 +79,10 @@ const inView = (element: Element): boolean => {
 export const Loading: Story = {
   args: { moment: 'loading' },
   play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Spec' })).toHaveAttribute('aria-busy', 'true')
+    await expect(page(canvasElement).getByRole('region', { name: 'Spec' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    )
   },
 }
 
@@ -95,7 +102,7 @@ export const Error: Story = {
  * above the columns, with the cause and Try again, and keeps what it had read.
  */
 export const StoppedFollowing: Story = {
-  args: { moment: 'wave', failure: 'The engine did not answer in time.' },
+  args: { moment: 'asked', failure: 'The engine did not answer in time.' },
   play: async ({ canvasElement, args }) => {
     const canvas = page(canvasElement)
     const alert = canvas.getByRole('alert')
@@ -108,166 +115,186 @@ export const StoppedFollowing: Story = {
 }
 
 /**
- * The first second of a mission: the Planner reads what exists before it writes. The head says
- * so, the top of the rail says where Planning stands — the Spec under way, then the questions,
- * the cold read and Freeze — with what the Planner does next, and the vision is there to give
- * meanwhile. A press on the Now line brings the user to the section the Planner writes.
+ * The first minutes: the Planner reads before it writes. The face reads, the card's line is the
+ * Planner's own and says no section is written yet; nothing waits for the user, and nothing in
+ * the card or the head looks like it leads anywhere.
  */
-export const Starting: Story = {
-  args: { moment: 'starting' },
+export const ReadingAtTheStart: Story = {
+  args: { moment: 'reading' },
   play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    const where = steps(canvasElement)
-    await expect(where.getAllByRole('listitem')).toHaveLength(4)
-    const spec = where.getByRole('listitem', { name: /The Spec/ })
-    await expect(within(spec).getByRole('img', { name: 'Running' })).toBeVisible()
-    await expect(spec).toHaveTextContent('0 of 8 sections written')
-    await expect(spec).toHaveTextContent(
-      'Next: write Why and Goals, then ask what it cannot decide alone',
-    )
-    await expect(where.getByRole('listitem', { name: /Your answers/ })).toHaveTextContent(
-      'Asked once the Planner meets what it cannot decide alone',
-    )
-    await expect(canvas.queryByRole('button', { name: 'Freeze' })).toBeNull()
-    // The field's editor arrives on its own, the first time its module is fetched: until then there
-    // is nothing to focus. A cold Windows runner takes seconds for it.
-    const vision = await canvas.findByRole('textbox', { name: 'Your vision' }, { timeout: 20_000 })
-    await userEvent.click(within(spec).getByRole('button', { name: 'Give your vision' }))
-    await waitFor(() => expect(vision).toHaveFocus())
-    await userEvent.click(nowLine(canvasElement, /Reads the living spec and the prototype code/))
-    await waitFor(() => expect(canvas.getByRole('region', { name: 'Why' })).toHaveFocus())
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Reading' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent(/^Reads the living spec/)
+    await expect(planning.getByText('0 of 8 sections written')).toBeVisible()
+    await expect(forYou(canvasElement).getByText('Nothing waits for you')).toBeVisible()
+    await expect(
+      page(canvasElement).queryByRole('button', { name: /Reads the living spec/ }),
+    ).toBeNull()
   },
 }
 
-/** The Planner writes the first draft: its Now line, a section being written, nothing asked yet. */
+/** The Planner writes the first draft: its line, the face writing, a section being written. */
 export const PlannerWriting: Story = {
   args: { moment: 'writing' },
   play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    await expect(canvas.getByText(/Writes Impact/)).toBeVisible()
-    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Writing' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent(/^Writes Impact/)
+    const nav = within(page(canvasElement).getByRole('navigation', { name: 'Spec sections' }))
     await expect(nav.getByRole('img', { name: 'Being written' })).toBeVisible()
-    await expect(canvas.queryByRole('region', { name: 'Questions' })).toBeNull()
-    await expect(canvas.queryByRole('button', { name: 'Freeze' })).toBeNull()
-  },
-}
-
-/** Two waves: one open, one waiting on someone, a changed answer, retired ones kept readable. */
-export const WaveWaiting: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    const questions = canvas.getByRole('region', { name: 'Questions' })
-    const waves = within(questions).getAllByRole('list', { name: /^Wave/ })
-    await expect(waves[0]).toHaveAccessibleName('Wave 2')
-    await expect(canvas.getByRole('img', { name: 'Waiting on someone' })).toBeVisible()
-    await expect(canvas.getByText('Now B, before A')).toBeVisible()
-    await expect(canvas.getByText('Replaced by Q6')).toBeVisible()
-    await expect(page(canvasElement).queryByRole('list', { name: 'Needs you' })).toBeNull()
+    await expect(page(canvasElement).queryByRole('button', { name: 'Freeze' })).toBeNull()
   },
 }
 
 /**
- * A wave waits: the Now line names the question and a press brings the user to it; the step of
- * the answers says how many wait, and the sections they will change are not settled.
+ * Eight questions asked, one list: two answered, one waiting on someone, five to answer. The
+ * card says so and where the Spec stands; the first to answer stands whole, the others one line
+ * each; the answered ones are one line under the rest.
  */
-export const WaveWaitsForYou: Story = {
+export const QuestionsWaiting: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    await expect(
-      steps(canvasElement).getByRole('listitem', { name: /Your answers/ }),
-    ).toHaveTextContent('1 to answer · 1 waits on someone · 1 being taken into account')
-    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
-    await expect(nav.getByRole('img', { name: 'Written · 2 questions open' })).toBeVisible()
-    await userEvent.click(nowLine(canvasElement, /Q5 waits for your answer/))
-    await waitFor(() =>
-      expect(rail(canvasElement).getByRole('article', { name: /^Q5/ })).toHaveFocus(),
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Waiting for your answer' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent('5 questions wait for your answer')
+    await expect(planning.getByText('The Spec')).toBeVisible()
+    await expect(planning.getByText('4 of 8 sections written')).toBeVisible()
+    const waiting = forYou(canvasElement)
+    await expect(waiting.getByRole('button', { name: /Questions/ })).toHaveTextContent(
+      '5 to answer · 1 waits on someone',
+    )
+    await expect(waiting.getByRole('article', { name: /^Q3/ })).toBeVisible()
+    for (const id of ['Q4', 'Q5', 'Q7', 'Q8']) {
+      // oxlint-disable-next-line no-await-in-loop -- one line after the other, in the list's order
+      await expect(waiting.getByRole('button', { name: new RegExp(`^${id}`) })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      )
+    }
+    await expect(waiting.getByRole('button', { name: /^Q6.*Waits on someone/ })).toBeVisible()
+    await expect(rest(canvasElement).getByRole('button', { name: /Answered/ })).toHaveTextContent(
+      '2',
     )
   },
 }
 
 /**
- * A wave of three questions: the header says how many are left. Answering Q5 folds it at once to
- * its line and brings Q6 into view with the focus; answering the last says, in place, that every
- * question is answered and the Planner takes them into account.
+ * Choosing an answer keeps the view where the user is: Q3 folds to its line in place, Q4 opens
+ * right under it with the focus, and nothing above moves.
  */
-export const AnsweringBringsTheNext: Story = {
-  args: { moment: 'waveToAnswer' },
-  play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    const questions = within(canvas.getByRole('region', { name: 'Questions' }))
-    await expect(questions.getByText('3 to answer')).toBeVisible()
-    await expect(
-      steps(canvasElement).getByRole('listitem', { name: /Your answers/ }),
-    ).toHaveTextContent('3 to answer')
-    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
-    const q6 = canvas.getByRole('article', { name: /^Q6/ })
-    await waitFor(() => expect(q6).toHaveFocus())
-    await expect(inView(q6)).toBe(true)
-    await waitFor(() => expect(questions.getByText('2 to answer')).toBeVisible())
-    const q5 = within(canvas.getByRole('article', { name: /^Q5/ }))
-    await expect(q5.getByText('B · Only its owner')).toBeVisible()
-    await expect(q5.getByRole('status')).toHaveTextContent('Sent')
-    await userEvent.click(within(q6).getByRole('button', { name: /5 000 notes/ }))
-    const q9 = canvas.getByRole('article', { name: /^Q9/ })
-    await waitFor(() => expect(q9).toHaveFocus())
-    await userEvent.click(within(q9).getByRole('button', { name: /Yes, as a list/ }))
-    const done = await questions.findByText(
-      'All questions answered — the Planner takes them into account',
-    )
-    await waitFor(() => expect(done).toHaveFocus())
-    await expect(questions.queryByText(/to answer$/)).toBeNull()
-  },
-}
-
-/** Q5 answered and sent: folded at once to its line, "Sent" beside its dot. */
-export const AnswerSent: Story = {
-  args: { moment: 'answerReceived' },
-  play: async ({ canvasElement }) => {
-    const card = within(rail(canvasElement).getByRole('article', { name: /^Q5/ }))
-    await expect(card.getByText('B · Only its owner')).toBeVisible()
-    await expect(card.getByRole('status')).toHaveTextContent('Sent')
-  },
-}
-
-/** With the Planner: the line's dot turns blue; the step says it is being taken into account. */
-export const AnswerWithThePlanner: Story = {
-  args: { moment: 'answerDelivered' },
-  play: async ({ canvasElement }) => {
-    const card = within(rail(canvasElement).getByRole('article', { name: /^Q5/ }))
-    await expect(card.getByRole('status')).toHaveTextContent('With the Planner')
-    await expect(
-      steps(canvasElement).getByRole('listitem', { name: /Your answers/ }),
-    ).toHaveTextContent('2 being taken into account')
-  },
-}
-
-/** Taken into account: the same line, its dot green and its word, Change. */
-export const AnswerTakenIntoAccount: Story = {
-  args: { moment: 'answerIntegrated' },
-  play: async ({ canvasElement }) => {
-    const card = within(rail(canvasElement).getByRole('article', { name: /^Q5/ }))
-    await expect(card.getByText('B · Only its owner')).toBeVisible()
-    await expect(card.getByRole('status')).toHaveTextContent('Taken into account')
-    await expect(card.getByRole('button', { name: 'Change the answer to Q5' })).toBeVisible()
-  },
-}
-
-/** Answering by a press: the answer leaves at once, no Send. */
-export const Answering: Story = {
+export const AnsweringKeepsTheView: Story = {
   play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Only its owner/ }))
-    await expect(args.onAnswer).toHaveBeenCalledWith('Q5', { optionId: 'B' })
-    const card = within(canvas.getByRole('article', { name: /^Q5/ }))
-    await expect(card.queryByRole('button', { name: 'Send' })).toBeNull()
+    const waiting = forYou(canvasElement)
+    const q3 = waiting.getByRole('article', { name: /^Q3/ })
+    const top = q3.getBoundingClientRect().top
+    await userEvent.click(within(q3).getByRole('button', { name: /Every field/ }))
+    await expect(args.onAnswer).toHaveBeenCalledWith('Q3', { optionId: 'A' })
+    await waitFor(() => expect(waiting.getByRole('article', { name: /^Q4/ })).toHaveFocus())
+    const q4 = waiting.getByRole('article', { name: /^Q4/ })
+    await expect(inView(q4)).toBe(true)
+    await expect(
+      Math.abs(waiting.getByRole('article', { name: /^Q3/ }).getBoundingClientRect().top - top),
+    ).toBeLessThan(2)
+    await userEvent.click(within(q4).getByRole('button', { name: /Anyone who can read it/ }))
+    await waitFor(() => expect(waiting.getByRole('article', { name: /^Q5/ })).toHaveFocus())
+  },
+}
+
+/** A question line opens it, in place of the one that stood open. */
+export const OpeningAnotherQuestion: Story = {
+  play: async ({ canvasElement }) => {
+    const waiting = forYou(canvasElement)
+    await userEvent.click(waiting.getByRole('button', { name: /^Q7/ }))
+    await waitFor(() => expect(waiting.getByRole('article', { name: /^Q7/ })).toBeVisible())
+    await expect(waiting.getByRole('button', { name: /^Q3/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+  },
+}
+
+/**
+ * Eight questions asked at two moments are one list, in the order they were asked: no wave label,
+ * grouping or count by wave anywhere on the page.
+ */
+export const NoWaveAnywhere: Story = {
+  play: async ({ canvasElement }) => {
+    const list = forYou(canvasElement).getByRole('list', { name: 'Questions to answer' })
+    await expect(questionIds(list)).toEqual(['Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8'])
+    await expect(canvasElement.textContent).not.toMatch(/wave/i)
+  },
+}
+
+/** The questions the Planner asks while the page is open join the list, at its end. */
+export const QuestionsArriving: Story = {
+  args: { moment: 'asked' },
+  render: function Arriving(args) {
+    const [moment, setMoment] = useState<MomentName>(args.moment)
+    return (
+      <>
+        <div className="flex px-8 py-2">
+          <Button variant="secondary" size="sm" onClick={() => setMoment('threeToAnswer')}>
+            Ask Q9
+          </Button>
+        </div>
+        <PlanningScreen {...args} moment={moment} />
+      </>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const waiting = forYou(canvasElement)
+    await expect(waiting.getByRole('article', { name: /^Q5/ })).toBeVisible()
+    await expect(waiting.queryByRole('button', { name: /^Q9/ })).toBeNull()
+    await userEvent.click(page(canvasElement).getByRole('button', { name: 'Ask Q9' }))
+    const list = waiting.getByRole('list', { name: 'Questions to answer' })
+    await waitFor(() => expect(questionIds(list)).toEqual(['Q5', 'Q6', 'Q9']))
+    await expect(waiting.getByRole('article', { name: /^Q5/ })).toBeVisible()
+  },
+}
+
+/**
+ * A question put on hold, waiting on someone, stays open where it stands: the Planner drafts its
+ * message there.
+ */
+export const PuttingOnHold: Story = {
+  args: { moment: 'asked' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    const q5 = within(waiting.getByRole('article', { name: /^Q5/ }))
+    await userEvent.click(q5.getByRole('button', { name: /waiting on someone/ }))
+    await userEvent.type(q5.getByRole('textbox', { name: 'Who, or what, it waits on' }), 'Sam')
+    await userEvent.click(q5.getByRole('button', { name: 'Wait' }))
+    await expect(args.onWaitOnSomeone).toHaveBeenCalledWith('Q5', 'Sam')
+    await waitFor(() =>
+      expect(waiting.getByRole('button', { name: /Questions/ })).toHaveTextContent(
+        '2 wait on someone',
+      ),
+    )
+    await expect(waiting.getByRole('article', { name: /^Q5/ })).toBeVisible()
+  },
+}
+
+/**
+ * Every question answered; the Planner takes them in. The face thinks, the card says what the
+ * Planner does, nothing waits for the user, and the answers are one line under the rest.
+ */
+export const AnswersTakenIntoAccount: Story = {
+  args: { moment: 'takingAnswers' },
+  play: async ({ canvasElement }) => {
+    await expect(card(canvasElement).getByRole('img', { name: 'Thinking' })).toBeVisible()
+    await expect(card(canvasElement).getByRole('status')).toHaveTextContent(/^Takes your answers/)
+    await expect(forYou(canvasElement).getByText('Nothing waits for you')).toBeVisible()
+    await expect(rest(canvasElement).getByRole('button', { name: /Answered/ })).toHaveTextContent(
+      '8 · 5 being taken into account',
+    )
   },
 }
 
 /** Answering from the keyboard: Tab to an option, Enter, its ring visible. */
 export const AnsweringByKeyboard: Story = {
+  args: { moment: 'asked' },
   play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    const option = canvas.getByRole('button', { name: /Anyone who can read it/ })
+    const q5 = forYou(canvasElement).getByRole('article', { name: /^Q5/ })
+    const option = within(q5).getByRole('button', { name: /Anyone who can read it/ })
     option.focus()
     await expect(option.matches(':focus-visible')).toBe(true)
     await userEvent.keyboard('{Enter}')
@@ -275,25 +302,14 @@ export const AnsweringByKeyboard: Story = {
   },
 }
 
-/** A discussion on Q5, open over the page, the agent's decision proposed. */
-export const DiscussionOpen: Story = {
-  args: { moment: 'discussing', opened: 'discussion:question:Q5' },
-  play: async ({ canvasElement }) => {
-    const body = within(document.body)
-    await waitFor(() =>
-      expect(body.getByRole('group', { name: 'Proposed decision' })).toBeVisible(),
-    )
-    await expect(canvasElement.querySelector('[data-base]')).toHaveAttribute('inert')
-  },
-}
-
 /** Discuss pressed: the view opens, Escape closes it and the focus returns to Discuss. */
 export const Discussing: Story = {
+  args: { moment: 'asked' },
   play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    const discuss = within(canvas.getByRole('article', { name: /^Q5/ })).getByRole('button', {
-      name: 'Discuss',
-    })
+    const discuss = within(forYou(canvasElement).getByRole('article', { name: /^Q5/ })).getByRole(
+      'button',
+      { name: 'Discuss' },
+    )
     await userEvent.click(discuss)
     await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q5' })
     const body = within(document.body)
@@ -309,14 +325,162 @@ export const Discussing: Story = {
   },
 }
 
-/** A Probe running beside two that ended, in the Probes card of the rail. */
+/** A discussion on Q5, open over the page, the agent's decision proposed. */
+export const DiscussionOpen: Story = {
+  args: { moment: 'discussing', opened: 'discussion:question:Q5' },
+  play: async ({ canvasElement }) => {
+    const body = within(document.body)
+    await waitFor(() =>
+      expect(body.getByRole('group', { name: 'Proposed decision' })).toBeVisible(),
+    )
+    await expect(canvasElement.querySelector('[data-base]')).toHaveAttribute('inert')
+  },
+}
+
+/** The ticket answered a question that waits on someone: opened, the Planner proposes it. */
+export const ProposedAnswer: Story = {
+  args: { moment: 'proposedAnswer' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    await userEvent.click(waiting.getByRole('button', { name: /^Q6/ }))
+    const proposal = await waiting.findByRole('group', { name: 'Proposed from the ticket' })
+    const pressed = within(proposal).getByRole('button', { name: 'Accept' })
+    await userEvent.click(pressed)
+    await expect(args.onAcceptProposed).toHaveBeenCalledWith('pa1', null)
+    await settled(pressed)
+  },
+}
+
+/**
+ * The cold read reported seven findings, a paragraph each: five to settle are one line in For
+ * you, the two settled one line under the rest. Freeze stands disabled with what is left.
+ */
+export const ColdReadWithManyFindings: Story = {
+  args: { moment: 'coldReadFindings' },
+  play: async ({ canvasElement }) => {
+    const line = forYou(canvasElement).getByRole('button', { name: /Cold read C1/ })
+    await expect(line).toHaveTextContent('5 findings to settle')
+    await expect(line).toHaveAttribute('aria-expanded', 'false')
+    await expect(
+      forYou(canvasElement).queryByRole('list', { name: 'Findings to settle' }),
+    ).toBeNull()
+    await expect(
+      page(canvasElement).getByRole('button', { name: 'Freeze' }),
+    ).toHaveAccessibleDescription('5 findings to settle')
+    await expect(
+      card(canvasElement).getByRole('img', { name: 'Waiting for your answer' }),
+    ).toBeVisible()
+    await expect(
+      rest(canvasElement).getByRole('button', { name: /Cold read C1/ }),
+    ).toHaveTextContent('2 settled')
+  },
+}
+
+/**
+ * The findings unfolded: each one line — its severity, its first line, where it is. One unfolded
+ * reads whole, with Dismiss; dismissed, it leaves the count.
+ */
+export const FindingsUnfolded: Story = {
+  args: { moment: 'coldReadFindings' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    await userEvent.click(waiting.getByRole('button', { name: /Cold read C1/ }))
+    const list = await waiting.findByRole('list', { name: 'Findings to settle' })
+    await expect(within(list).getAllByRole('button', { expanded: false })).toHaveLength(5)
+    await userEvent.click(within(list).getByRole('button', { name: /^C1\.F4/ }))
+    const dismiss = await within(list).findByRole('button', { name: 'Dismiss C1.F4' })
+    await userEvent.click(dismiss)
+    await expect(args.onDismissFinding).toHaveBeenCalledWith('C1.F4')
+    await waitFor(() =>
+      expect(waiting.getByRole('button', { name: /Cold read C1/ })).toHaveTextContent(
+        '4 findings to settle',
+      ),
+    )
+  },
+}
+
+/**
+ * Declared complete: the cold read reads, its chip in the card; Freeze stands disabled, the
+ * reason under it.
+ */
+export const ColdReadRunning: Story = {
+  args: { moment: 'coldReadRunning' },
+  play: async ({ canvasElement }) => {
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('status')).toHaveTextContent(
+      'The cold read is reading the Spec',
+    )
+    await expect(planning.getByRole('button', { name: /Cold read C1/ })).toBeVisible()
+    const freeze = page(canvasElement).getByRole('button', { name: 'Freeze' })
+    await expect(freeze).toBeDisabled()
+    await expect(freeze).toHaveAccessibleDescription('The cold read is reading the Spec')
+  },
+}
+
+/** The cold read failed: the face says so; its line under the rest says why, and runs another. */
+export const ColdReadFailed: Story = {
+  args: { moment: 'coldReadFailed' },
+  play: async ({ canvasElement, args }) => {
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Error' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent(
+      'The cold read stopped before its report',
+    )
+    const others = rest(canvasElement)
+    await userEvent.click(others.getByRole('button', { name: /Cold read C1/ }))
+    await expect(await others.findByText(/The cold read failed/)).toBeVisible()
+    const again = others.getByRole('button', { name: 'Run another cold read' })
+    await userEvent.click(again)
+    await expect(args.onRunColdRead).toHaveBeenCalled()
+    await settled(again)
+  },
+}
+
+/**
+ * Two Probes run and wait on five permissions. Their chips are in the stage card, the face
+ * waits for a permission, and the five are one line in For you; the mission's needs are not
+ * drawn above the Spec.
+ */
+export const ProbesWithPermissions: Story = {
+  args: { moment: 'probesWithPermissions' },
+  play: async ({ canvasElement }) => {
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Waiting for your permission' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent(
+      'Probe #1 and Probe #2 wait for your permission',
+    )
+    await expect(planning.getAllByRole('button', { name: /^Probe #/ })).toHaveLength(2)
+    const line = forYou(canvasElement).getByRole('button', { name: /Permissions/ })
+    await expect(line).toHaveTextContent('5 · Probe #1, Probe #2')
+    await expect(line).toHaveAttribute('aria-expanded', 'false')
+    await expect(page(canvasElement).queryByRole('list', { name: 'Needs you' })).toBeNull()
+  },
+}
+
+/** The permissions unfolded: one line each; one opened is its card, answered there, and leaves. */
+export const PermissionAnswered: Story = {
+  args: { moment: 'probesWithPermissions' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    await userEvent.click(waiting.getByRole('button', { name: /Permissions/ }))
+    const list = await waiting.findByRole('list', { name: 'Permissions' })
+    await expect(within(list).getAllByRole('listitem')).toHaveLength(5)
+    await userEvent.click(within(list).getByRole('button', { name: /drop schema/ }))
+    const allow = await within(list).findByRole('button', { name: 'Allow once' })
+    await userEvent.click(allow)
+    await expect(args.onPermission).toHaveBeenCalledWith('pr5', 'allow-once')
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(4))
+  },
+}
+
+/** A Probe running beside two that ended: its chip in the card, the ended ones under the rest. */
 export const ProbeRunning: Story = {
   args: { moment: 'probing' },
   play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    const probes = canvas.getByRole('region', { name: 'Probes' })
-    await expect(within(probes).getAllByRole('button')).toHaveLength(3)
-    await expect(nowLine(canvasElement, /Waits for Probe #2/)).toBeVisible()
+    await expect(card(canvasElement).getAllByRole('button', { name: /^Probe #/ })).toHaveLength(1)
+    await expect(rest(canvasElement).getByRole('button', { name: /Probes/ })).toHaveTextContent(
+      '2 ended',
+    )
   },
 }
 
@@ -330,86 +494,15 @@ export const ProbeNotReproduced: Story = {
   },
 }
 
-/**
- * Declared complete, many questions answered: the Now line says the cold read reads the Spec,
- * with its chip, and leads to it; Freeze stands in the head, disabled, the reason under it; the
- * waves whose questions are all settled are one line each, and the cold read is in view.
- */
-export const ColdReadRunning: Story = {
-  args: { moment: 'coldReadRunning' },
-  play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    await expect(nowLine(canvasElement, /The cold read is reading the Spec/)).toBeVisible()
-    await expect(canvas.getAllByRole('button', { name: /Cold read C1/ })).toHaveLength(2)
-    const freeze = canvas.getByRole('button', { name: 'Freeze' })
-    await expect(freeze).toBeDisabled()
-    await expect(freeze).toHaveAccessibleDescription('The cold read is reading the Spec')
-    const waves = rail(canvasElement)
-    await expect(waves.getByRole('button', { name: /Wave 2 · 3 settled/ })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
-    await expect(waves.getByRole('button', { name: /Wave 1 · 4 settled/ })).toBeVisible()
-    const coldRead = waves.getByRole('region', { name: 'Cold read' })
-    await expect(inView(coldRead)).toBe(true)
-    await userEvent.click(nowLine(canvasElement, /The cold read is reading the Spec/))
-    await waitFor(() => expect(coldRead).toHaveFocus())
-  },
-}
-
-/** A settled wave opens again on a press: its questions, each one line with Change. */
-export const SettledWaveOpened: Story = {
-  args: { moment: 'coldReadRunning' },
-  play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    const wave = canvas.getByRole('button', { name: /Wave 1 · 4 settled/ })
-    await userEvent.click(wave)
-    await expect(wave).toHaveAttribute('aria-expanded', 'true')
-    await waitFor(() =>
-      expect(canvas.getByRole('button', { name: 'Change the answer to Q1' })).toBeVisible(),
-    )
-  },
-}
-
-/**
- * The cold read reported on an earlier text, with findings to settle and Q8 asked from one:
- * Freeze names what is left, the Now line leads to Q8.
- */
-export const ColdReadFindings: Story = {
-  args: { moment: 'findings' },
-  play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    await expect(
-      canvas.getByRole('button', { name: /The cold read read an earlier text/ }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('list', { name: 'Wave 3' })).toBeVisible()
-    await expect(
-      page(canvasElement).getByRole('button', { name: 'Freeze' }),
-    ).toHaveAccessibleDescription('1 question to answer · 2 findings to settle')
-    await expect(nowLine(canvasElement, /Q8 waits for your answer/)).toBeVisible()
-  },
-}
-
-/** The cold read failed: why, and another pass to run; the head and the steps say it stopped. */
-export const ColdReadFailed: Story = {
-  args: { moment: 'coldReadFailed' },
-  play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    await expect(canvas.getByText(/The cold read failed/)).toBeVisible()
-    await expect(nowLine(canvasElement, /The cold read stopped before its report/)).toBeVisible()
-    const again = canvas.getByRole('button', { name: 'Run another cold read' })
-    await userEvent.click(again)
-    await expect(args.onRunColdRead).toHaveBeenCalled()
-    await settled(again)
-  },
-}
-
-/** A dependency on ACME-20 proposed by the Planner: Accept or Reject, in the rail. */
+/** A dependency on ACME-20 proposed by the Planner: its line under the rest, Accept in it. */
 export const DependencyProposed: Story = {
   args: { moment: 'dependencyProposed' },
   play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    const accept = canvas.getByRole('button', { name: 'Accept the dependency on ACME-20' })
+    const others = rest(canvasElement)
+    const line = others.getByRole('button', { name: /Dependencies/ })
+    await expect(line).toHaveTextContent('2 · 1 proposed')
+    await userEvent.click(line)
+    const accept = await others.findByRole('button', { name: 'Accept the dependency on ACME-20' })
     await userEvent.click(accept)
     await expect(args.onDecideDependency).toHaveBeenCalledWith('dep1', true)
     await settled(accept)
@@ -434,31 +527,42 @@ export const ChangedSinceLastRead: Story = {
   },
 }
 
-/** The vision, given twice: always a field in the rail. */
-export const Vision: Story = {
-  args: { moment: 'vision' },
+/** The rest, folded: a press opens the vision, which the user may give at any time. */
+export const VisionFolded: Story = {
+  args: { moment: 'reading' },
   play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    await expect(canvas.getByRole('list', { name: 'Your vision so far' })).toBeVisible()
-    await waitFor(() => expect(canvas.getByRole('textbox', { name: 'Your vision' })).toBeVisible())
+    const line = rest(canvasElement).getByRole('button', { name: /Your vision/ })
+    await userEvent.click(line)
+    await expect(line).toHaveAttribute('aria-expanded', 'true')
+    // The field's editor arrives on its own, the first time its module is fetched: until then there
+    // is nothing to show. A cold Windows runner takes seconds for it.
+    await waitFor(
+      () => expect(rest(canvasElement).getByRole('textbox', { name: 'Your vision' })).toBeVisible(),
+      { timeout: 20_000 },
+    )
   },
 }
 
-/**
- * Nothing left: Freeze is enabled, the Now line says so and leads to it, the last step waits for
- * the user.
- */
+/** The vision given twice: its line counts them, and unfolds to what was given and the field. */
+export const Vision: Story = {
+  args: { moment: 'vision' },
+  play: async ({ canvasElement }) => {
+    const others = rest(canvasElement)
+    const line = others.getByRole('button', { name: /Your vision/ })
+    await expect(line).toHaveTextContent('2 given')
+    await userEvent.click(line)
+    await expect(await others.findByRole('list', { name: 'Your vision so far' })).toBeVisible()
+  },
+}
+
+/** Nothing left: the face is done, Freeze is enabled, For you says only Freeze is left. */
 export const ReadyToFreeze: Story = {
   args: { moment: 'readyToFreeze' },
   play: async ({ canvasElement, args }) => {
-    const canvas = page(canvasElement)
-    const freeze = canvas.getByRole('button', { name: 'Freeze' })
+    await expect(card(canvasElement).getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(forYou(canvasElement).getByText('Only Freeze is left')).toBeVisible()
+    const freeze = page(canvasElement).getByRole('button', { name: 'Freeze' })
     await expect(freeze).toBeEnabled()
-    await expect(steps(canvasElement).getByRole('listitem', { name: /Freeze/ })).toHaveTextContent(
-      'Ready: yours to press',
-    )
-    await userEvent.click(nowLine(canvasElement, /Ready to freeze/))
-    await waitFor(() => expect(freeze).toHaveFocus())
     await userEvent.click(freeze)
     await expect(args.onFreeze).toHaveBeenCalled()
   },
@@ -468,41 +572,36 @@ export const ReadyToFreeze: Story = {
 export const FreezeRefused: Story = {
   args: { moment: 'freezeRefused' },
   play: async ({ canvasElement }) => {
-    const canvas = page(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'Freeze' })).toHaveAccessibleDescription(
+    await expect(
+      page(canvasElement).getByRole('button', { name: 'Freeze' }),
+    ).toHaveAccessibleDescription(
       'Not frozen: The Spec changed after you read it: R2 and Decisions',
     )
   },
 }
 
-/** Frozen: the lock is in the track; the Spec read-only; nothing to answer, no vision. */
+/** Frozen: the lock is in the track, the card says so; nothing waits, no vision to give. */
 export const Frozen: Story = {
   args: { moment: 'frozen' },
   play: async ({ canvasElement }) => {
     const canvas = page(canvasElement)
-    await expect(canvas.queryByRole('region', { name: 'Questions' })).toBeNull()
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('status')).toHaveTextContent('The Spec is frozen')
+    await expect(planning.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(canvas.queryByRole('region', { name: 'For you' })).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Your vision' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Freeze' })).toBeNull()
-    await expect(
-      steps(canvasElement)
-        .getAllByRole('img')
-        .map((mark) => mark.getAttribute('aria-label')),
-    ).toEqual(['Done', 'Done', 'Done', 'Done'])
   },
 }
 
-/** The Planner stopped: the head says why, the step of the Spec failed, the Now line leads there. */
+/** The Planner stopped: the face and the card say why. */
 export const PlannerStopped: Story = {
   args: { moment: 'plannerFailed' },
   play: async ({ canvasElement }) => {
-    const line = nowLine(canvasElement, /The Planner stopped: its provider refused the request/)
-    const spec = steps(canvasElement).getByRole('listitem', { name: /The Spec/ })
-    await expect(within(spec).getByRole('img', { name: 'Failed' })).toBeVisible()
-    await userEvent.click(line)
-    await waitFor(() =>
-      expect(
-        page(canvasElement).getByRole('region', { name: 'Where Planning stands' }),
-      ).toHaveFocus(),
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Error' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent(
+      'The Planner stopped: its provider refused the request',
     )
   },
 }
@@ -511,52 +610,42 @@ export const PlannerStopped: Story = {
 export const PlannerSilent: Story = {
   args: { moment: 'plannerSilent' },
   play: async ({ canvasElement }) => {
+    await expect(card(canvasElement).getByRole('status')).toHaveTextContent(
+      'The Planner’s last turn ended without a word',
+    )
+  },
+}
+
+/** Hemera started again in the middle: the Planner says it, every answer where it was. */
+export const Restarted: Story = {
+  args: { moment: 'restarted' },
+  play: async ({ canvasElement }) => {
+    await expect(card(canvasElement).getByRole('status')).toHaveTextContent(/^Started again/)
+    await expect(forYou(canvasElement).getByRole('article', { name: /^Q5/ })).toBeVisible()
+  },
+}
+
+/** The ticket changed while the Spec is written: its difference waits for the user. */
+export const Outdated: Story = {
+  args: { moment: 'outdated' },
+  play: async ({ canvasElement }) => {
     await expect(
-      nowLine(canvasElement, /The Planner’s last turn ended without a word/),
+      forYou(canvasElement).getByRole('region', { name: 'acme/shop#41 changed' }),
     ).toBeVisible()
   },
 }
 
-/** The ticket changed while the Spec is written: its difference and its state, in the rail. */
-export const Outdated: Story = {
-  args: { moment: 'outdated' },
-  play: async ({ canvasElement }) => {
-    const canvas = rail(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'acme/shop#41 changed' })).toBeVisible()
-  },
-}
-
-/** The Planner read the request as belonging elsewhere: its answer, Keep planning. */
+/** The Planner read the request as belonging elsewhere: its answer waits for the user. */
 export const Triage: Story = {
   args: { moment: 'triaged' },
   play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    const keep = canvas.getByRole('button', { name: 'Keep planning' })
+    await expect(card(canvasElement).getByRole('status')).toHaveTextContent(
+      'The Planner asks whether this is new work',
+    )
+    const keep = forYou(canvasElement).getByRole('button', { name: 'Keep planning' })
     await userEvent.click(keep)
     await expect(args.onKeepPlanning).toHaveBeenCalled()
     await settled(keep)
-  },
-}
-
-/** The ticket answered a question that waits: the Planner proposes it; Accept, Edit, Dismiss. */
-export const ProposedAnswer: Story = {
-  args: { moment: 'proposedAnswer' },
-  play: async ({ canvasElement, args }) => {
-    const canvas = rail(canvasElement)
-    const proposal = canvas.getByRole('group', { name: 'Proposed from the ticket' })
-    const pressed = within(proposal).getByRole('button', { name: 'Accept' })
-    await userEvent.click(pressed)
-    await expect(args.onAcceptProposed).toHaveBeenCalledWith('pa1', null)
-    await settled(pressed)
-  },
-}
-
-/** Hemera started again in the middle: every answer and its state are where they were. */
-export const Restarted: Story = {
-  args: { moment: 'restarted' },
-  play: async ({ canvasElement }) => {
-    await expect(nowLine(canvasElement, /Started again/)).toBeVisible()
-    await expect(rail(canvasElement).getByText('Now B, before A')).toBeVisible()
   },
 }
 
@@ -569,26 +658,9 @@ export const LongText: Story = {
   },
 }
 
-/** A new wave arrives: `--set moment=wave` plays it for the image sequence. */
-export const WaveArriving: Story = {
-  args: { moment: 'firstWave' },
-  play: async ({ canvasElement }) => {
-    await expect(rail(canvasElement).getAllByRole('list', { name: /^Wave/ })).toHaveLength(1)
-  },
-}
-
-/** An answer's dot moves on: `--set moment=answerIntegrated` plays it for the image sequence. */
-export const AnswerIntegrating: Story = {
-  args: { moment: 'answerReceived' },
-  play: async ({ canvasElement }) => {
-    const card = rail(canvasElement).getByRole('article', { name: /^Q5/ })
-    await expect(within(card).getByRole('img', { name: /^Sent/ })).toBeVisible()
-  },
-}
-
 /**
  * The last answer is being taken into account: Freeze stands disabled, saying so; `--set
- * moment=readyToFreeze` plays it turning enabled, for the image sequence.
+ * moment=settled` plays it turning enabled, for the image sequence.
  */
 export const FreezeAppearing: Story = {
   args: { moment: 'almostReady' },

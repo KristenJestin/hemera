@@ -86,7 +86,7 @@ function FindingRow({
 }
 
 /** "The cold read read an earlier text", and what changed since, folded. */
-function FreshnessLine({ freshness }: { freshness: Freshness }): ReactNode {
+export function FreshnessLine({ freshness }: { freshness: Freshness }): ReactNode {
   const folding = useTransition(fold)
   const [open, setOpen] = useState(false)
   if (freshness.current) return null

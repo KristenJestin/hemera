@@ -5,7 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { Button } from '../../components/button/button.tsx'
 
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
-import { WAVES } from '../../surfaces/planning/planning-fixtures.ts'
+import { QUESTIONS } from '../../surfaces/planning/planning-fixtures.ts'
 import type { Question } from './planning-types.ts'
 import { QuestionCard } from './question-card.tsx'
 import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
@@ -21,7 +21,7 @@ import { EDITOR_LOADED, settled, writeAndSend } from './planning-play.ts'
  */
 
 const byId = (id: string): Question => {
-  const found = WAVES.flatMap((wave) => wave.questions).find((question) => question.id === id)
+  const found = QUESTIONS.find((question) => question.id === id)
   if (found === undefined) throw new Error(`No question ${id} in the fixtures`)
   return found
 }

@@ -3,13 +3,13 @@ import type {
   Dependency,
   Discussion,
   PlanningData,
+  PlanningNeed,
   ProbeDetail,
   Question,
   Requirement,
   SpecChange,
   SpecSection,
   Task,
-  Wave,
 } from '../../blocks/planning/planning-types.ts'
 import type { Planner, PlanningFacts } from '../../blocks/planning/planning-progress.ts'
 
@@ -208,7 +208,6 @@ export const TASKS: readonly Task[] = [
 
 const ATTACHMENTS: Question = {
   id: 'Q1',
-  wave: 1,
   text: 'Should a note’s attachments leave with it?',
   why: 'Notes hold images and files, kept in object storage by api; the export must say what becomes of them.',
   options: [
@@ -246,7 +245,6 @@ const ATTACHMENTS: Question = {
 
 const FLAVOUR: Question = {
   id: 'Q2',
-  wave: 1,
   text: 'Which Markdown?',
   why: 'The editors people open the file in read CommonMark; the notes’ tables do not exist in it.',
   options: [
@@ -274,7 +272,6 @@ const FLAVOUR: Question = {
 
 const COMMENTS: Question = {
   id: 'Q3',
-  wave: 1,
   text: 'Do the comments of a note leave with it?',
   why: 'Notes have comments in web.',
   options: [
@@ -307,7 +304,6 @@ const SIZE_OLD: Question = {
 
 const WHO: Question = {
   id: 'Q5',
-  wave: 2,
   text: 'Who may export a shared note?',
   why: 'A shared note can be read by people outside its workspace; an export is a copy that leaves Acme.',
   options: [
@@ -337,7 +333,6 @@ const WHO: Question = {
 
 const SIZE: Question = {
   id: 'Q6',
-  wave: 2,
   text: 'From how many notes does an export run in the background?',
   why: 'Below it, the file comes in the same request; above it, a job writes an archive and says when it is ready.',
   options: [
@@ -375,7 +370,6 @@ const SIZE: Question = {
 
 const DATES: Question = {
   id: 'Q7',
-  wave: 2,
   text: 'Should the file keep the note’s creation date?',
   why: '',
   options: [
@@ -399,7 +393,6 @@ const DATES: Question = {
 
 const EMPTY_TITLE: Question = {
   id: 'Q8',
-  wave: 3,
   text: 'What is the file called when the note has no title?',
   why: 'From the cold read: R1 names the file after the title and says nothing of an empty one.',
   options: [
@@ -425,9 +418,15 @@ const EMPTY_TITLE: Question = {
   proposals: [],
 }
 
-export const WAVES: readonly Wave[] = [
-  { number: 1, askedAt: '09:12', questions: [ATTACHMENTS, FLAVOUR, COMMENTS, SIZE_OLD] },
-  { number: 2, askedAt: '10:40', questions: [WHO, SIZE, DATES] },
+/** The questions asked, one list in the order they were asked: four at first, three later. */
+export const QUESTIONS: readonly Question[] = [
+  ATTACHMENTS,
+  FLAVOUR,
+  COMMENTS,
+  SIZE_OLD,
+  WHO,
+  SIZE,
+  DATES,
 ]
 
 export const DISCUSSION: Discussion = {
@@ -647,9 +646,10 @@ export interface PlanningHead {
   outdated?: boolean | undefined
 }
 
-/** One moment of the journey: what the page knows, and the head beside it. */
+/** One moment of the journey: what the page knows, the needs that wait, the head beside it. */
 export interface PlanningMoment extends PlanningFacts {
   head: PlanningHead
+  needs: readonly PlanningNeed[]
 }
 
 const IDLE: Planner = { state: 'idle', doing: null, next: null, reason: null }
@@ -666,7 +666,13 @@ function plannerOf(head: PlanningHead): Planner {
 
 /** A moment, from the page's data and the head beside it. */
 function scene({ data, head }: { data: PlanningData; head: PlanningHead }): PlanningMoment {
-  return { data, head, planner: plannerOf(head), declaredComplete: head.declared === true }
+  return {
+    data,
+    head,
+    planner: plannerOf(head),
+    declaredComplete: head.declared === true,
+    needs: [],
+  }
 }
 
 const VISION = {
@@ -676,7 +682,7 @@ const VISION = {
   inputState: 'integrated' as const,
 }
 
-/** The Planning page with everything written and two waves asked: the base of every moment. */
+/** The Planning page with everything written and seven questions asked: the base of every moment. */
 function base(): PlanningData {
   return {
     frozen: false,
@@ -684,7 +690,7 @@ function base(): PlanningData {
     requirementsState: 'written',
     requirements: REQUIREMENTS,
     tasks: TASKS,
-    waves: WAVES,
+    questions: QUESTIONS,
     discussions: [],
     probes: [chip(SLASH_PROBE)],
     passes: [],
@@ -716,7 +722,7 @@ export function writing(): PlanningMoment {
       requirementsState: 'empty',
       requirements: [],
       tasks: [],
-      waves: [],
+      questions: [],
       probes: [],
       dependencies: [],
       visions: [],
@@ -773,8 +779,8 @@ export function plannerSilent(): PlanningMoment {
   return scene({ data: answerIntegrated().data, head: { ...YOUR_TURN, silent: true } })
 }
 
-/** Two waves: one question open, one waiting on someone with its drafted message, others retired. */
-export function wave(): PlanningMoment {
+/** One question open, one waiting on someone with its drafted message, others retired. */
+export function asked(): PlanningMoment {
   return scene({ data: base(), head: YOUR_TURN })
 }
 
@@ -795,29 +801,27 @@ const TAGS: Question = {
 }
 
 /**
- * A wave of three questions to answer, the first wave settled: answering one folds it and brings
+ * Three questions to answer, the first four settled: answering one folds it and brings
  * the next; the story's engine takes each answer as it comes.
  */
-export function waveToAnswer(): PlanningMoment {
-  const [first, second] = WAVES
+export function threeToAnswer(): PlanningMoment {
   return scene({
     data: {
       ...base(),
-      waves: [
-        first!,
-        {
-          ...second!,
-          questions: [WHO, changing(SIZE, { state: 'open', waitingNote: null, drafts: [] }), TAGS],
-        },
+      questions: [
+        ...QUESTIONS.slice(0, 4),
+        WHO,
+        changing(SIZE, { state: 'open', waitingNote: null, drafts: [] }),
+        TAGS,
       ],
     },
     head: YOUR_TURN,
   })
 }
 
-/** Only the first wave, before the second arrives. */
-export function firstWave(): PlanningMoment {
-  return scene({ data: { ...base(), waves: WAVES.slice(0, 1) }, head: YOUR_TURN })
+/** Only the first four questions, before the next three are asked. */
+export function firstQuestions(): PlanningMoment {
+  return scene({ data: { ...base(), questions: QUESTIONS.slice(0, 4) }, head: YOUR_TURN })
 }
 
 /** A discussion open on Q5, the agent's decision proposed. */
@@ -833,34 +837,30 @@ export function probing(): PlanningMoment {
   })
 }
 
-/** Every wave answered and integrated: what a settled Planning holds. */
-function answered(): Wave[] {
-  return WAVES.map((one) =>
-    changing(one, {
-      questions: one.questions.map((question): Question => {
-        if (question.state !== 'open' && question.state !== 'waiting' && question.id !== 'Q2') {
-          return question
-        }
-        const versions =
-          question.id === 'Q2'
-            ? question.answers.map((answer) =>
-                changing(answer, {
-                  inputState: answer.version === 2 ? 'integrated' : answer.inputState,
-                }),
-              )
-            : [
-                {
-                  version: 1,
-                  optionId: question.recommended,
-                  text: null,
-                  at: '11:08',
-                  inputState: 'integrated' as const,
-                },
-              ]
-        return changing(question, { state: 'answered', waitingNote: null, answers: versions })
-      }),
-    }),
-  )
+/** Every question answered and integrated: what a settled Planning holds. */
+function answered(): Question[] {
+  return QUESTIONS.map((question): Question => {
+    if (question.state !== 'open' && question.state !== 'waiting' && question.id !== 'Q2') {
+      return question
+    }
+    const versions =
+      question.id === 'Q2'
+        ? question.answers.map((answer) =>
+            changing(answer, {
+              inputState: answer.version === 2 ? 'integrated' : answer.inputState,
+            }),
+          )
+        : [
+            {
+              version: 1,
+              optionId: question.recommended,
+              text: null,
+              at: '11:08',
+              inputState: 'integrated' as const,
+            },
+          ]
+    return changing(question, { state: 'answered', waitingNote: null, answers: versions })
+  })
 }
 
 /** The first completeness declaration: Hemera launched the cold read; it runs. */
@@ -868,7 +868,7 @@ export function coldReadRunning(): PlanningMoment {
   return scene({
     data: {
       ...base(),
-      waves: answered(),
+      questions: answered(),
       passes: [
         {
           ...FINDINGS_PASS,
@@ -889,7 +889,7 @@ export function findings(): PlanningMoment {
   return scene({
     data: {
       ...base(),
-      waves: [...answered(), { number: 3, askedAt: '11:30', questions: [EMPTY_TITLE] }],
+      questions: [...answered(), EMPTY_TITLE],
       passes: [FINDINGS_PASS],
       freshness: { current: false, changes: CHANGES },
       dependencies: [DEPENDENCIES[1]!],
@@ -921,7 +921,7 @@ export function coldReadFailed(): PlanningMoment {
 
 /** A dependency on another mission proposed by the Planner, waiting for the user. */
 export function dependencyProposed(): PlanningMoment {
-  return scene({ data: { ...base(), waves: answered() }, head: YOUR_TURN })
+  return scene({ data: { ...base(), questions: answered() }, head: YOUR_TURN })
 }
 
 /** Back after a while: what changed since the last read, marked in the text. */
@@ -954,19 +954,13 @@ export function readyToFreeze(): PlanningMoment {
   return scene({
     data: {
       ...base(),
-      waves: [
+      questions: [
         ...answered(),
         {
-          number: 3,
-          askedAt: '11:30',
-          questions: [
-            {
-              ...EMPTY_TITLE,
-              state: 'answered',
-              answers: [
-                { version: 1, optionId: 'A', text: null, at: '11:34', inputState: 'integrated' },
-              ],
-            },
+          ...EMPTY_TITLE,
+          state: 'answered',
+          answers: [
+            { version: 1, optionId: 'A', text: null, at: '11:34', inputState: 'integrated' },
           ],
         },
       ],
@@ -1062,24 +1056,20 @@ export function proposedAnswer(): PlanningMoment {
   return scene({
     data: {
       ...base(),
-      waves: WAVES.map((one) =>
-        changing(one, {
-          questions: one.questions.map((question) =>
-            question.id === 'Q6'
-              ? changing(question, {
-                  proposals: [
-                    {
-                      id: 'pa1',
-                      author: 'support-team',
-                      comment:
-                        'The largest workspace holds 41 000 notes; the ten largest hold about 9 000 each.',
-                      text: 'B, 5 000 notes: the largest workspaces are well above it, most never reach it.',
-                    },
-                  ],
-                })
-              : question,
-          ),
-        }),
+      questions: QUESTIONS.map((question) =>
+        question.id === 'Q6'
+          ? changing(question, {
+              proposals: [
+                {
+                  id: 'pa1',
+                  author: 'support-team',
+                  comment:
+                    'The largest workspace holds 41 000 notes; the ten largest hold about 9 000 each.',
+                  text: 'B, 5 000 notes: the largest workspaces are well above it, most never reach it.',
+                },
+              ],
+            })
+          : question,
       ),
     },
     head: YOUR_TURN,
@@ -1087,7 +1077,7 @@ export function proposedAnswer(): PlanningMoment {
 }
 
 /**
- * Hemera started again in the middle of the waves: every answer is where it was, and the Planner
+ * Hemera started again in the middle of the questions: every answer is where it was, and the Planner
  * is told what it had not integrated yet.
  */
 export function restarted(): PlanningMoment {
@@ -1103,18 +1093,14 @@ export function almostReady(): PlanningMoment {
   return scene({
     data: {
       ...ready.data,
-      waves: ready.data.waves.map((one) =>
-        changing(one, {
-          questions: one.questions.map((question) =>
-            question.id === 'Q8'
-              ? changing(question, {
-                  answers: question.answers.map((answer) =>
-                    changing(answer, { inputState: 'delivered' }),
-                  ),
-                })
-              : question,
-          ),
-        }),
+      questions: ready.data.questions.map((question) =>
+        question.id === 'Q8'
+          ? changing(question, {
+              answers: question.answers.map((answer) =>
+                changing(answer, { inputState: 'delivered' }),
+              ),
+            })
+          : question,
       ),
     },
     head: ready.head,
@@ -1126,17 +1112,13 @@ function answeredQ5(inputState: 'received' | 'delivered' | 'integrated'): Planni
   return scene({
     data: {
       ...base(),
-      waves: WAVES.map((one) =>
-        changing(one, {
-          questions: one.questions.map((question) =>
-            question.id === 'Q5'
-              ? changing(question, {
-                  state: 'answered',
-                  answers: [{ version: 1, optionId: 'B', text: null, at: '11:02', inputState }],
-                })
-              : question,
-          ),
-        }),
+      questions: QUESTIONS.map((question) =>
+        question.id === 'Q5'
+          ? changing(question, {
+              state: 'answered',
+              answers: [{ version: 1, optionId: 'B', text: null, at: '11:02', inputState }],
+            })
+          : question,
       ),
     },
     head: YOUR_TURN,
@@ -1170,28 +1152,24 @@ export function long(): PlanningMoment {
       requirements: REQUIREMENTS.map((requirement) =>
         changing(requirement, { text: `${LONG}${requirement.text}` }),
       ),
-      waves: discussed.data.waves.map((one) =>
-        changing(one, {
-          questions: one.questions.map((question) =>
-            changing(question, {
-              text: `${LONG}${question.text}`,
-              options: question.options.map((option) =>
-                changing(option, { label: `${option.label}, ${LONG}` }),
-              ),
-              answers:
-                question.id === 'Q1'
-                  ? [
-                      {
-                        version: 1,
-                        optionId: null,
-                        text: `${LONG}links, please.`,
-                        at: '09:20',
-                        inputState: 'integrated' as const,
-                      },
-                    ]
-                  : question.answers,
-            }),
+      questions: discussed.data.questions.map((question) =>
+        changing(question, {
+          text: `${LONG}${question.text}`,
+          options: question.options.map((option) =>
+            changing(option, { label: `${option.label}, ${LONG}` }),
           ),
+          answers:
+            question.id === 'Q1'
+              ? [
+                  {
+                    version: 1,
+                    optionId: null,
+                    text: `${LONG}links, please.`,
+                    at: '09:20',
+                    inputState: 'integrated' as const,
+                  },
+                ]
+              : question.answers,
         }),
       ),
       visions: [{ ...VISION, text: `${LONG}one file per note.` }],

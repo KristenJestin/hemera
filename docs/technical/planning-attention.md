@@ -1,7 +1,8 @@
 # The Planning page: what waits, what happens, where the Spec stands
 
-Design of #193, drawn in Storybook under `Explorations/Planning`. The ticket that builds it follows
-this note; the exploration is deleted once it is built.
+Design of #193, built by #231: the page is `Surfaces/Planning` in Storybook, its rail's pieces in
+`packages/ui/src/blocks/planning/` (`attention.ts`, `planning-stage-card.tsx`, `for-you.tsx`,
+`everything-else.tsx`).
 
 ## The problem
 
@@ -18,7 +19,7 @@ questions and the vision field all asked for attention at once.
 
 Everything else is history: one click away, folded.
 
-## The recommendation: "For you" (`Explorations/Planning/For you`)
+## The recommendation: "For you"
 
 The Spec keeps the middle, its sections the left. The rail reads top to bottom as the three
 questions above, in an order that never changes:
@@ -50,8 +51,9 @@ drawn once on the page (`MissionFrame`'s `ballFace`).
 
 ### The Needs you rows
 
-On Planning, the mission's needs are not drawn above the Spec: they are For you's permissions
-line. The other stages keep them where they are.
+On Planning, the mission's needs are not drawn above the Spec: they are For you's first line,
+"Permissions" (or "Needs" when one of them is not a permission), each unfolding to its need card.
+The other stages keep them where they are.
 
 ### The face
 
@@ -92,14 +94,20 @@ user could not see what waits behind the first thing nor choose the order. The m
 
 - The four steps give way to the progress line: For you, right under the card, holds what they
   led to.
-- Dependencies, the triage answer and a ticket's change follow the same rule (a proposed
-  dependency or the triage is one For you line, a change of the ticket too); they are not drawn in
-  the exploration, whose mission has none waiting.
+- The triage answer and a change of the ticket, rare and urgent, stand whole at the top of For
+  you; the dependencies are one line of the rest, which counts the proposed ones.
+- The cold read's last pass, once it reported or stopped, is one line of the rest: what it
+  settled, the text it read when it read an earlier one, why it stopped, and Run another cold
+  read.
+- The questions withdrawn, replaced or made moot are under the rest's Answered line, counted as
+  set aside.
+- The view no longer carries waves: the page reads one list of questions, which the renderer
+  flattens from the engine's waves (the engine keeps them).
 - A finding's line truncates its first sentence to one line; unfolded, the line wraps whole.
 
 ## Not settled here
 
-- Where For you takes the permissions of a mission from: the build ticket wires the mission's
-  needs into the page.
+- Who asks a permission is named by the role that asked ("Probe"); two Probes are not told apart
+  by their number yet.
 - The face's state is read from the facts the page has; the Planner's tool calls (reading or
   writing) would say "reading" more precisely than "at work, nothing being written".

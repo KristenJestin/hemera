@@ -3,9 +3,9 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import {
   CHANGES,
+  QUESTIONS,
   REQUIREMENTS,
   TASKS,
-  WAVES,
   WRITTEN,
 } from '../../surfaces/planning/planning-fixtures.ts'
 import { openBySection } from './planning-types.ts'
@@ -68,7 +68,7 @@ export const SectionsSettled: Story = {
  * into account.
  */
 export const SectionsWithQuestionsOpen: Story = {
-  args: { open: openBySection(WAVES) },
+  args: { open: openBySection(QUESTIONS) },
   render: (args) => (
     <div className="flex gap-8">
       <div className="w-settings-nav shrink-0">
