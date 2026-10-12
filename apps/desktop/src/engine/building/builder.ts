@@ -262,7 +262,8 @@ export type BuilderHold = (
     | 'committing'
     | 'cutting'
     | 'writing'
-    | 'requirements',
+    | 'requirements'
+    | 'resuming',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -1652,14 +1653,16 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }),
           )
+          // Requirement checks a stop cut or never let start, before a task judged now starts
+          // others: a scope judged here is never one this start just opened.
+          yield* cutScopes(building)
+          yield* requirementChecks(building, null)
           for (const taskId of checking) {
             const attempts = yield* attemptsIn(yield* Database, building.id)
             const last = attempts.findLast((one) => one.taskId === taskId)
             yield* judge(building, taskId, last?.id ?? '')
           }
-          // Requirement checks a stop cut or never let start, before the end can be called.
-          yield* cutScopes(building)
-          yield* requirementChecks(building, null)
+          yield* hold('resuming')
           if (building.tasksDoneAt !== null && building.endCalledAt === null) yield* ended(building)
           // A stop between a task's done and its commit: the commit is made now.
           yield* commitsLeft(building)

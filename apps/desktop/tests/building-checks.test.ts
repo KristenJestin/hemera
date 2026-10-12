@@ -37,7 +37,7 @@ import {
   memoryJournal,
 } from '../src/engine/storage/schema.ts'
 import { call, eventsOf, grantOf, plannedIn } from './building-world.ts'
-import { builderAgents, builderOf, buildingNow, launched } from './builder-world.ts'
+import { PLAN, builderAgents, builderOf, buildingNow, launched } from './builder-world.ts'
 import { nodeLine } from './commands-engine.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { ALLOW, verdictsSaying } from './tools-world.ts'
@@ -565,6 +565,133 @@ describe('A requirement’s checks', () => {
       { name: 'unit', place: '', verdict: 'green', detail: '' },
     ])
     expect(ranIn('unit.log')).toHaveLength(1)
+  })
+})
+
+describe('A restart while the task that completes a requirement is checking', () => {
+  test('an engine stopped while the task that completes a requirement is checking: at the next start the requirement’s checks run once', async () => {
+    const release = join(scripts, 'release-requirement')
+    // T4 covers no requirement: T3 completes R1 and is not the last task.
+    const plan = PLAN.map((task) =>
+      task.title === 'Name the invoices' ? { ...task, requirements: [] } : task,
+    )
+    // T4 and T3 stay checking: the engine stops between their verdict and their done.
+    let held = 0
+    const both = Promise.withResolvers<void>()
+    let armed = false
+    const hold: BuilderHold = (at) =>
+      at === 'judging' && armed
+        ? Effect.andThen(
+            Effect.sync(() => {
+              held += 1
+              if (held === 2) both.resolve()
+            }),
+            Effect.never,
+          )
+        : Effect.void
+    const first = await checksEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* saveCheck(
+                  projectId,
+                  null,
+                  check('unit', checkLine('unit.log', 0, '-', { release }), {
+                    when: 'requirement',
+                  }),
+                )
+                const declared = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: command('db-check', checkLine('db.log', 0, '-', { release })),
+                })
+                yield* saveCheck(
+                  projectId,
+                  null,
+                  check('db', '', { commandId: declared.id, line: null, when: 'requirement' }),
+                )
+                const reset = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: command('db-reset', checkLine('reset.log', 0), { readOnly: false }),
+                })
+                yield* saveResources(projectId, [
+                  {
+                    name: 'Shared database',
+                    description: 'The team database.',
+                    uses: [declared.id],
+                    changes: [reset.id],
+                    resetCommandId: reset.id,
+                  },
+                ])
+              }),
+            'The impact.',
+            plan,
+          )
+          const { grantId } = yield* builderOf(mission.id)
+          for (const task of ['T1', 'T2', 'T4', 'T3']) {
+            yield* call(grantId, 'task_start', { task })
+            armed = task === 'T4' || task === 'T3'
+            const finished = call(grantId, 'task_finished', { task, summary: 'Done.' })
+            if (armed) yield* Effect.forkChild(finished)
+            else yield* finished
+          }
+          yield* Effect.promise(() => both.promise)
+          return { mission }
+        }),
+      ),
+    )
+    // The start goes on once the requirement's checks run: what a slower start meets.
+    const running = Promise.withResolvers<void>()
+    const resuming: BuilderHold = (at) =>
+      at === 'resuming' ? Effect.promise(() => running.promise) : Effect.void
+    const view = await checksEngine(data, resuming).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const database = yield* Database
+          yield* Effect.forkChild(
+            Effect.andThen(
+              until(
+                Effect.map(database.select().from(buildingCheckRuns), (rows) =>
+                  rows.some((row) => row.runId !== null),
+                ),
+              ),
+              Effect.sync(() => running.resolve()),
+            ),
+          )
+          // The checks stay running a while: long enough for the start to see them.
+          yield* Effect.forkChild(
+            Effect.andThen(
+              Effect.sleep('1 second'),
+              Effect.sync(() => writeFileSync(release, '')),
+            ),
+          )
+          yield* until(
+            Effect.map(buildingNow(first.mission.id), (now) =>
+              now.scopes.some((one) => one.verdict !== null),
+            ),
+            15_000,
+          )
+          // Long enough for a second run of either check to be seen.
+          yield* Effect.sleep('1 second')
+          return yield* buildingNow(first.mission.id)
+        }),
+      ),
+    )
+    expect(view.scopes.map((one) => [one.scope, one.subject, one.verdict])).toEqual([
+      ['requirement', 'R1', 'green'],
+    ])
+    expect(checksOf(view.scopes[0])).toEqual([
+      { name: 'unit', place: '', verdict: 'green', detail: '' },
+      { name: 'db', place: '', verdict: 'green', detail: '' },
+    ])
+    expect(ranIn('unit.log')).toHaveLength(1)
+    expect(ranIn('db.log')).toHaveLength(1)
   })
 })
 
