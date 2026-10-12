@@ -95,7 +95,7 @@ import {
   runsLayer,
   runsRecipeRunnerLayer,
 } from './runs.ts'
-import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import { type Database, DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
 import { supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 import {
@@ -276,7 +276,8 @@ export interface ProfileParts {
         readonly verdict?: Layer.Layer<TaskVerdict>
         /** The checks a finished attempt is judged on (#142's port): the Project's (#143). */
         readonly checks?: Layer.Layer<TaskChecks>
-        readonly end?: Layer.Layer<BuildingEnd>
+        /** The end of the tasks (#147's sequence otherwise), on the profile's own services. */
+        readonly end?: Layer.Layer<BuildingEnd, never, Database | DomainEvents | Secrets>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
