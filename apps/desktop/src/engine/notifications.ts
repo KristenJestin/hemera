@@ -320,9 +320,13 @@ const triaged = (event: DomainEvent) =>
     })
   })
 
-/** A mission that moved into Review (#147): the end of its Building, or of a round's. */
+/**
+ * A mission Hemera moved into Review (#147): the end of its Building, or of a round's. A move the
+ * user made is not told back to them.
+ */
 const movedToReview = (event: DomainEvent) =>
-  Option.getOrNull(readText(event.payload['to'])) === 'review'
+  Option.getOrNull(readText(event.payload['to'])) === 'review' &&
+  Option.getOrNull(readText(event.payload['actor'])) === 'hemera'
     ? triaged(event)
     : Effect.succeed(Option.none<TriageFacts>())
 
