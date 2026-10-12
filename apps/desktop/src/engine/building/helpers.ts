@@ -1,9 +1,12 @@
 /**
- * The helpers of a Building (#145): child sessions the Builder, or a helper at depth 1, launches
- * to hand them one piece of work; a free one on its parent's brief, or the Prototyper (CT-43).
+ * The helpers (#145): child sessions launched to hand them one piece of work. In Building, the
+ * Builder or a helper at depth 1 launches a free one on its parent's brief; in Planning, the
+ * Planner launches the Prototyper (#222), which the Building side is refused.
  *
  * - **Launch.** `helper_launch` is refused at depth 2, above the Project's cap or the mission's
- *   launch budget (#41, never queued), or with a task neither available nor run by the caller.
+ *   launch budget (#41, never queued), or with a task neither available nor run by the caller. The
+ *   Planner's is refused outside Planning and for anything but the Prototyper; the Builder's and
+ *   its helpers' for the Prototyper, which belongs to Planning.
  *   Otherwise the helper is recorded, its session opens through #40 (its id its lineage, so its
  *   brief and its tools read the row), and the caller is answered at once with its id. A helper
  *   tied to a task its parent runs becomes its runner at a new epoch, its claims with it; one tied
@@ -30,6 +33,9 @@ import {
   FreeHelperResult,
   HELPER_DEPTH,
   type HelperDefinition,
+  PLANNER_LAUNCHES_ONLY_PROTOTYPER,
+  PROTOTYPER,
+  PROTOTYPER_BELONGS_TO_PLANNING,
   type PrototyperResult,
   STUCK_AFTER_MINUTES,
   definedHelperNamed,
@@ -62,6 +68,7 @@ import type { NewEvent } from '../journal.ts'
 import { putEvidence } from '../memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../memory/files.ts'
 import { Memory } from '../memory/index.ts'
+import { ProbeSteps, type SteppedProbe } from '../planning/probe-steps.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
 import { storeDeliveryIn } from '../sessions/deliveries.ts'
@@ -76,6 +83,7 @@ import {
   buildingClaims,
   buildingTasks,
   helpers,
+  missions,
   queuedResults,
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
@@ -98,6 +106,11 @@ import { activeBuildingIn, tasksIn, workItemOf } from './tasks.ts'
 
 export interface HelpersSettings {
   readonly log: Log
+  /**
+   * Runs at a point a suite needs to reach: `checked`, once the Planner's launch found its mission
+   * in Planning and before it records the Prototyper, where a Freeze may fall.
+   */
+  readonly hold?: ((at: 'checked') => Effect.Effect<void>) | undefined
 }
 
 /** The roles a helper's session holds. */
@@ -115,8 +128,22 @@ const NO_RESULT = 'it ended its turns without helper_result'
 
 const NO_MISSION = refusal('refused: this session works for no mission')
 const NO_BUILDING = refusal('refused: the mission has no Building under way')
+const NO_PLANNING = refusal(
+  'refused: the Prototyper runs in Planning, and the mission is not in it',
+)
 
 const readString = Schema.decodeUnknownOption(Schema.String)
+
+/** Whether a mission is in Planning, read with the reader given. */
+const inPlanning = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
+  reader
+    .select({ stage: missions.stage })
+    .from(missions)
+    .where(eq(missions.id, missionId))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the mission')),
+      Effect.map(([mission]) => mission?.stage === 'planning'),
+    )
 
 /** What a refusal or a failure says, in words. */
 const said = (cause: unknown): string =>
@@ -133,6 +160,7 @@ type Needs =
   | AutomationGate
   | Memory
   | HelperDesk
+  | ProbeSteps
 
 export const helpersLayer = (settings: HelpersSettings) =>
   Layer.effectDiscard(
@@ -340,9 +368,20 @@ export const helpersLayer = (settings: HelpersSettings) =>
           const missionId = grant.missionId
           if (missionId === null) return NO_MISSION
           const database = yield* Database
-          const building = yield* activeBuildingIn(database, missionId)
-          if (building === null) return NO_BUILDING
           const caller = yield* getSession(grant.sessionId)
+          // The Planner launches the Prototyper, in Planning only; the Building side never does.
+          const planning = caller.role === 'planner'
+          if (planning) {
+            if (!(yield* inPlanning(database, missionId))) return NO_PLANNING
+            if (args.helper !== PROTOTYPER.id) {
+              return yield* refused(missionId, PLANNER_LAUNCHES_ONLY_PROTOTYPER)
+            }
+            if (settings.hold !== undefined) yield* settings.hold('checked')
+          } else if (args.helper === PROTOTYPER.id) {
+            return yield* refused(missionId, PROTOTYPER_BELONGS_TO_PLANNING)
+          }
+          const building = planning ? null : yield* activeBuildingIn(database, missionId)
+          if (!planning && building === null) return NO_BUILDING
           const callerHelper = yield* helperOfLineage(caller.lineage)
           const depth = callerHelper === null ? 1 : callerHelper.depth + 1
           if (depth > HELPER_DEPTH) {
@@ -373,7 +412,10 @@ export const helpersLayer = (settings: HelpersSettings) =>
             if (definition !== null && !definition.inputs.includes('task')) {
               return yield* refused(missionId, `${definition.name} is tied to no task`)
             }
-            const task = (yield* tasksIn(database, building.id)).find((one) => one.id === args.task)
+            const task =
+              building === null
+                ? undefined
+                : (yield* tasksIn(database, building.id)).find((one) => one.id === args.task)
             if (task === undefined) {
               return yield* refused(missionId, `${args.task} is not a task of the plan`)
             }
@@ -423,17 +465,29 @@ export const helpersLayer = (settings: HelpersSettings) =>
                 failure: null,
                 startedAt: new Date().toISOString(),
                 endedAt: null,
+                verdict: null,
+                verdictNote: null,
+                judgedAt: null,
               }
-              // Written before its session opens: its brief and its tools are read from it.
-              yield* mutate('recording a helper', (transaction) =>
-                transaction
-                  .insert(helpers)
-                  .values(row)
-                  .pipe(
-                    Effect.mapError(refusedWhile('recording a helper')),
-                    Effect.as({ result: undefined, events: [] }),
-                  ),
+              // Written before its session opens: its brief and its tools are read from it. The
+              // Planner's is written only while its mission is still in Planning: a Freeze between
+              // the check and here refuses it, and a Freeze after it waits for it to end.
+              const recorded = yield* mutate('recording a helper', (transaction) =>
+                Effect.gen(function* () {
+                  if (planning && !(yield* inPlanning(transaction, missionId))) {
+                    return { result: false, events: [] }
+                  }
+                  yield* transaction
+                    .insert(helpers)
+                    .values(row)
+                    .pipe(Effect.mapError(refusedWhile('recording a helper')))
+                  return { result: true, events: [] }
+                }),
               )
+              if (!recorded) {
+                if (prototype) rmSync(folder, { recursive: true, force: true })
+                return { kind: 'left' } as const
+              }
               const opened = yield* sessions
                 .open({
                   id: row.lineage,
@@ -464,12 +518,14 @@ export const helpersLayer = (settings: HelpersSettings) =>
               yield* mutate('saying a helper was launched', (transaction) =>
                 Effect.gen(function* () {
                   const task =
-                    tied === null
+                    tied === null || building === null
                       ? undefined
                       : (yield* tasksIn(transaction, building.id)).find((one) => one.id === tied)
                   // Tied to a task its parent runs: the helper becomes its runner, at a new epoch.
                   const moved =
-                    task?.state === 'in_progress' && task.runner === caller.lineage
+                    building !== null &&
+                    task?.state === 'in_progress' &&
+                    task.runner === caller.lineage
                       ? yield* runnerTo(transaction, building.id, task.id, session)
                       : []
                   return {
@@ -489,6 +545,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
               return { kind: 'launched', row } as const
             }),
           )
+          if (launched.kind === 'left') return NO_PLANNING
           if (launched.kind === 'refused') return yield* refused(missionId, launched.why)
           const label = helperLabel(launched.row.number)
           return answered(
@@ -788,6 +845,8 @@ export const helpersLayer = (settings: HelpersSettings) =>
       const isHelperEvent = (payload: NewEvent['payload']) =>
         payload !== undefined && HELPER_ROLES.includes(String(payload['role']))
 
+      // Which helper a session runs, or none, read once per session and forgotten when it stops.
+      const helperOfSession = new Map<string, SteppedProbe | null>()
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       yield* events.pipe(
         Stream.runForEach((event) =>
@@ -795,6 +854,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
             const payload = event.payload ?? {}
             const lineage = Option.getOrNull(readString(payload['lineage']))
             if (event.type === 'mission.cancelled') return yield* locked(cancelled(event.entityId))
+            if (event.type === 'session.stopped') helperOfSession.delete(event.entityId)
             if (lineage === null || !isHelperEvent(payload)) return
             if (event.type === 'session.stuck') yield* stuckSession(lineage)
             if (event.type === 'session.replaced') {
@@ -831,11 +891,32 @@ export const helpersLayer = (settings: HelpersSettings) =>
         ),
         Effect.forkScoped,
       )
+      // What a running helper is doing (#206, #222): the title of its session's latest tool call,
+      // masked, kept beside the Probes' steps.
+      const steps = yield* ProbeSteps
+      const stepped = (sessionId: string, title: string) =>
+        Effect.gen(function* () {
+          let helper = helperOfSession.get(sessionId)
+          if (helper === undefined) {
+            const session = yield* getSession(sessionId)
+            const row = HELPER_ROLES.includes(session.role)
+              ? yield* helperOfLineage(session.lineage)
+              : null
+            helper = row === null ? null : { probeId: row.id, missionId: row.missionId }
+            helperOfSession.set(sessionId, helper)
+          }
+          if (helper !== null) yield* steps.set(helper, (yield* Secrets).mask(title))
+        })
       const runtime = yield* AgentRuntime
       yield* runtime.activity.pipe(
         Stream.filter(({ event }) => !event.replay),
-        Stream.runForEach(({ sessionId }) =>
-          spoke(sessionId).pipe(
+        Stream.runForEach(({ sessionId, event }) =>
+          Effect.gen(function* () {
+            yield* spoke(sessionId)
+            if (Predicate.isTagged(event, 'ToolCall') && event.call.title !== null) {
+              yield* stepped(sessionId, event.call.title)
+            }
+          }).pipe(
             run,
             Effect.catchCause((cause) => log(`a sign of life was not read: ${String(cause)}`)),
           ),

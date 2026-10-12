@@ -445,6 +445,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           closedAs(gone),
           observed('planning.keepAfterTriage', log),
         ),
+      'planning.askPrototype': (request) =>
+        engine['planning.askPrototype'](request).pipe(
+          closedAs(gone),
+          observed('planning.askPrototype', log),
+        ),
       'planning.changed': (request) =>
         engine['planning.changed'](request).pipe(
           streamClosedAs(gone),
@@ -581,6 +586,13 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['helpers.changed'](request).pipe(
           streamClosedAs(gone),
           observedStream('helpers.changed', log),
+        ),
+      'helpers.judge': (request) =>
+        engine['helpers.judge'](request).pipe(closedAs(gone), observed('helpers.judge', log)),
+      'helpers.prototypesChanged': (request) =>
+        engine['helpers.prototypesChanged'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('helpers.prototypesChanged', log),
         ),
       'discussions.list': (request) =>
         engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),

@@ -21,6 +21,7 @@ import {
   helperBriefFields,
   helperLabel,
   helperNumberOf,
+  prototypeUnsettled,
   helperToolsOf,
   toolsOf,
 } from '../src/domain/index.ts'
@@ -202,8 +203,8 @@ describe('The tools of a helper’s session', () => {
 describe('No stop: there is no helper_stop', () => {
   test('the role table has no tool that stops a helper', () => {
     expect(TOOL_NAMES.filter((name) => /stop/.test(name) && name !== 'commands_stop')).toEqual([])
-    expect(TOOLS.helper_launch.roles).toEqual(['builder', 'helper'])
-    expect(TOOLS.helper_read.roles).toEqual(['builder', 'helper'])
+    expect(TOOLS.helper_launch.roles).toEqual(['planner', 'builder', 'helper'])
+    expect(TOOLS.helper_read.roles).toEqual(['planner', 'builder', 'helper'])
     expect(TOOLS.helper_result.roles).toEqual(['helper', 'prototyper'])
   })
 })
@@ -224,6 +225,7 @@ describe('The brief and the names', () => {
         scenarios: ['R1.S1'],
       },
       spec: true,
+      frozen: true,
       writes: true,
       place: 'the Workspace',
     })
@@ -246,5 +248,35 @@ describe('The brief and the names', () => {
     expect(helperNumberOf('H2')).toBe(2)
     expect(helperNumberOf('#2')).toBeNull()
     expect(avatarToneOf('Helper')).toBe(avatarToneOf('Helper'))
+  })
+})
+
+describe('The Prototyper in Planning holds the Freeze only while it runs', () => {
+  test('running, it is named; done, judged or not, or failed, it holds nothing', () => {
+    const asked = { label: 'H1', question: 'Two columns?' }
+    expect(prototypeUnsettled({ ...asked, state: 'running' })).toBe(
+      'Prototyper H1 runs: Two columns?',
+    )
+    expect(prototypeUnsettled({ ...asked, state: 'done' })).toBeNull()
+    expect(prototypeUnsettled({ ...asked, state: 'failed' })).toBeNull()
+  })
+
+  test('its brief reads the Spec as being planned', () => {
+    const fields = helperBriefFields({
+      label: 'H1',
+      parentRole: 'the Planner',
+      missionKey: 'ACME-1',
+      depth: 1,
+      brief: 'Two columns?',
+      task: null,
+      spec: true,
+      frozen: false,
+      writes: true,
+      place: 'its folder',
+    })
+    expect(fields[2]).toEqual({
+      label: 'Spec',
+      text: 'spec_read (being planned: it may still change)',
+    })
   })
 })

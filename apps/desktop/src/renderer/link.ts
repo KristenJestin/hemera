@@ -47,6 +47,8 @@ import {
   type OpenQuestion,
   type PlanningInput,
   type PlanningVision,
+  type HelperChip,
+  type HelperDetail,
   type ProbeChip,
   type ProbeDetail,
   type ResourceDraft,
@@ -121,6 +123,7 @@ import type {
   ModelSettingValue,
   NeverEntry,
   ProviderStatus,
+  PrototypeVerdict,
   SpecMode,
 } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
@@ -246,6 +249,8 @@ export interface Link {
   readonly createStart: (create: StartCreate) => Promise<Mission>
   /** The user keeps the mission the Planner triaged as not new work: it goes on planning. */
   readonly keepAfterTriage: (missionId: string) => Promise<void>
+  /** The user asks for a prototype: the Planner is handed it and launches the Prototyper (#222). */
+  readonly askPrototype: (missionId: string, question: string) => Promise<void>
   /** Stops everything the mission runs; rejects with `MoveRefused` when its stage does not allow it. */
   readonly cancelMission: (id: string) => Promise<Mission>
   /** What stands between a mission in Planning and its Freeze. */
@@ -314,6 +319,19 @@ export interface Link {
     onEnd: (error: Error) => void,
   ) => () => void
   readonly probe: (probeId: string) => Promise<ProbeDetail>
+  /** The mission's Prototypers now, then again at each change of one of them (#222). */
+  readonly onPrototypes: (
+    missionId: string,
+    listener: (helpers: ReadonlyArray<HelperChip>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly helper: (helperId: string) => Promise<HelperDetail>
+  /** The user's verdict on a Prototyper's result, before the Freeze (#222). */
+  readonly judgePrototype: (
+    helperId: string,
+    verdict: PrototypeVerdict,
+    note: string | null,
+  ) => Promise<void>
   /** The mission's cold read passes now, then again at each change. */
   readonly onColdReads: (
     missionId: string,
@@ -696,6 +714,8 @@ export function linkOver(port: Port): Link {
     createStart: (create) => call((ready) => ready['start.create'](create)),
     keepAfterTriage: (missionId) =>
       call((ready) => ready['planning.keepAfterTriage']({ missionId })),
+    askPrototype: (missionId, question) =>
+      call((ready) => ready['planning.askPrototype']({ missionId, question })),
     cancelMission: (id) => call((ready) => ready['missions.cancel']({ id })),
     freezeReadiness: (id) => call((ready) => ready['missions.freezeReadiness']({ id })),
     onFreezeReadiness: (id, listener, onEnd) =>
@@ -743,6 +763,16 @@ export function linkOver(port: Port): Link {
     onProbes: (missionId, listener, onEnd) =>
       follow((ready) => ready['probes.changed']({ missionId }), listener, anError, onEnd),
     probe: (probeId) => call((ready) => ready['probes.read']({ probeId })),
+    onPrototypes: (missionId, listener, onEnd) =>
+      follow(
+        (ready) => ready['helpers.prototypesChanged']({ missionId }),
+        listener,
+        anError,
+        onEnd,
+      ),
+    helper: (helperId) => call((ready) => ready['helpers.read']({ helperId, thread: false })),
+    judgePrototype: (helperId, verdict, note) =>
+      call((ready) => ready['helpers.judge']({ helperId, verdict, note })),
     onColdReads: (missionId, listener, onEnd) =>
       follow((ready) => ready['coldRead.changed']({ missionId }), listener, anError, onEnd),
     coldReadAgain: (missionId) => call((ready) => ready['coldRead.again']({ missionId })),

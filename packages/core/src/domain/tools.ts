@@ -1448,7 +1448,7 @@ export const TOOLS = {
     label: { label: 'Build summary', mark: 'build-summary', doing: 'Writing the summary' },
   }),
   helper_launch: tool({
-    roles: ['builder', 'helper'],
+    roles: ['planner', 'builder', 'helper'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1456,7 +1456,7 @@ export const TOOLS = {
     label: { label: 'Launch a helper', mark: 'helper-launch', doing: 'Launching a helper' },
   }),
   helper_read: tool({
-    roles: ['builder', 'helper'],
+    roles: ['planner', 'builder', 'helper'],
     gate: 'workflow',
     effect: 'reads',
     path: null,

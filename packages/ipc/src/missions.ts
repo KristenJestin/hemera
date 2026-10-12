@@ -21,6 +21,7 @@ import {
   NeedOwner,
   NeedState,
   PermissionChoice,
+  PrototypeVerdict,
   Stage,
   TriageKind,
 } from '@hemera/core/domain'
@@ -118,12 +119,31 @@ export const FrozenFile = Schema.Struct({
 })
 export type FrozenFile = typeof FrozenFile.Type
 
-/** The last Freeze of a mission (#92): the Spec version frozen, the bases and the dirty files. */
+/** A Prototyper's result at the Freeze, kept with it and with the user's verdict, if any (#222). */
+export const FrozenPrototype = Schema.Struct({
+  /** `H1`. */
+  helper: Schema.String,
+  /** What the Planner asked it, its brief. */
+  question: Schema.String,
+  /** The user's verdict, or null when they did not judge it. */
+  verdict: Schema.NullOr(PrototypeVerdict),
+  /** What the user said with their verdict, or null. */
+  note: Schema.NullOr(Schema.String),
+  /** Its result as the Planner read it: what it tried, what works, what does not, its files. */
+  result: Schema.String,
+})
+export type FrozenPrototype = typeof FrozenPrototype.Type
+
+/**
+ * The last Freeze of a mission (#92): the Spec version frozen, the bases, the dirty files, and the
+ * Prototypers' results (#222).
+ */
 export const MissionFreeze = Schema.Struct({
   version: Schema.Number,
   frozenAt: Schema.String,
   bases: Schema.Array(FrozenBase),
   dirtyFiles: Schema.Array(FrozenFile),
+  prototypes: Schema.Array(FrozenPrototype),
 })
 export type MissionFreeze = typeof MissionFreeze.Type
 

@@ -357,6 +357,15 @@ export const PlanningRpcs = RpcGroup.make(
     error: failing(...always, UnknownMission),
   }),
   /** The user keeps planning a mission the Planner triaged. */
+  /**
+   * The user asks for a prototype (#222): the Planner is handed the ask as `[hemera:prototype]` and
+   * launches the Prototyper. Refused outside Planning.
+   */
+  Rpc.make('planning.askPrototype', {
+    payload: { ...ofMission, question: Schema.String },
+    success: Schema.Void,
+    error: failing(...always, UnknownMission, PlanningRefused),
+  }),
   Rpc.make('planning.keepAfterTriage', {
     payload: ofMission,
     success: Schema.Void,
