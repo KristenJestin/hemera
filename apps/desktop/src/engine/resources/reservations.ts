@@ -1110,9 +1110,9 @@ export const indeterminateRun = (action: EffectfulAction) =>
   })
 
 /**
- * The rules of the actions with an effect outside the database: this version's, and a run cut
+ * The rules of the actions with an effect outside the database: this version's, a run cut
  * short handed first to `first` (a building mission's, #142), then on a shared resource to
- * `indeterminateRun`.
+ * `indeterminateRun`, and a task's commit cut short handed to `first` alone.
  */
 export const resourceActionRules = (
   log: Log,
@@ -1123,6 +1123,17 @@ export const resourceActionRules = (
     Effect.map(Effect.context<Database | DomainEvents | Secrets>(), (context) => ({
       postConditions: new Map([['file.write', fileWritten]]),
       handlers: new Map([
+        [
+          'git.commit',
+          (action: EffectfulAction) =>
+            Effect.asVoid(first(action)).pipe(
+              Effect.catchCause((cause) =>
+                Effect.sync(() =>
+                  log(`building: a commit cut short was not said: ${String(cause)}`),
+                ),
+              ),
+            ),
+        ],
         [
           'command.run',
           (action: EffectfulAction) =>
