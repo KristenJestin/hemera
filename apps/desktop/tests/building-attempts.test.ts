@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Option, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { BuilderHold } from '../src/engine/building/builder.ts'
@@ -32,6 +32,7 @@ import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
+import { SessionPost } from '../src/engine/sessions/post.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
@@ -223,12 +224,32 @@ const green: CheckResult = {
   runId: null,
 }
 
-/** Polls a fiber briefly: whether it ended by then. */
-const endedSoon = <A, E>(fiber: Fiber.Fiber<A, E>) =>
+/**
+ * Whether a fiber ends within a deadline made for a slow runner: it is not asked to be quick, the
+ * deadline only says it never ended.
+ */
+const endsWithin = <A, E>(fiber: Fiber.Fiber<A, E>, deadline = '15 seconds' as const) =>
+  Effect.map(Effect.timeoutOption(Fiber.await(fiber), deadline), Option.isSome)
+
+/**
+ * Waits until a session is held back by another task's write lock, from the engine's own count of
+ * its waits, then answers whether the fiber is still waiting. The assertions on what it was told
+ * of its wait say it really waited.
+ */
+const stillBlocked = <A, E>(fiber: Fiber.Fiber<A, E>, sessionId: string) =>
   Effect.gen(function* () {
-    yield* Effect.sleep('400 millis')
-    return fiber.pollUnsafe() !== undefined
+    yield* until(
+      SessionPost.use((post) => post.lockWaiting(sessionId)),
+      15_000,
+    )
+    return fiber.pollUnsafe() === undefined
   })
+
+/** The environment need a command waiting for its exclusive reservation asks the user. */
+const environmentNeedOf = (missionId: string) =>
+  Effect.map(getMission(missionId), (one) =>
+    one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+  )
 
 describe('Attribution: a change belongs to the task that wrote it (CT-02)', () => {
   test('two tasks in parallel: each attempt’s diff holds only its own files, never the other’s', async () => {
@@ -324,7 +345,7 @@ describe('The write lock of a command', () => {
           const generating = yield* Effect.forkChild(
             call(helper.grantId, 'commands_run', { command: generate.id, timeout: 60 }),
           )
-          const writeEndedSoon = yield* endedSoon(writing)
+          const writeBlocked = yield* stillBlocked(writing, helper.id)
           const generateStarted = yield* runningOf(generate.id)
           // Its own command does not hold back the task that runs it.
           const own = yield* call(grantId, 'fs_write', {
@@ -336,11 +357,11 @@ describe('The write lock of a command', () => {
           const formatted = yield* Fiber.join(formatting)
           const written = yield* Fiber.join(writing)
           const generated = yield* Fiber.join(generating)
-          return { writeEndedSoon, generateStarted, own, formatted, written, generated }
+          return { writeBlocked, generateStarted, own, formatted, written, generated }
         }),
       ),
     )
-    expect(seen.writeEndedSoon).toBe(false)
+    expect(seen.writeBlocked).toBe(true)
     expect(seen.generateStarted).toBe(false)
     expect(seen.own).not.toMatch(/^refused|waiting/)
     expect(seen.formatted).toMatch(/exit code 0/)
@@ -379,12 +400,12 @@ describe('The write lock of a command', () => {
               content: 'export const markdown = true\n',
             }),
           )
-          const writeEndedSoon = yield* endedSoon(writing)
-          return { writeEndedSoon }
+          const writeEnded = yield* endsWithin(writing)
+          return { writeEnded }
         }),
       ),
     )
-    expect(seen.writeEndedSoon).toBe(true)
+    expect(seen.writeEnded).toBe(true)
   })
 
   test('a writing command that outlives its call’s wait keeps the lock until it ends: another task’s write waits, and what it wrote after the call stopped waiting is its own task’s', async () => {
@@ -410,17 +431,17 @@ describe('The write lock of a command', () => {
               content: 'export const markdown = true\n',
             }),
           )
-          const writeEndedSoon = yield* endedSoon(writing)
+          const writeBlocked = yield* stillBlocked(writing, helper.id)
           writeFileSync(release, '')
           const written = yield* Fiber.join(writing)
           yield* until(Effect.map(runningOf(format.id), (going) => !going))
           yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
-          return { ran, writeEndedSoon, written, view: yield* buildingNow(mission.id) }
+          return { ran, writeBlocked, written, view: yield* buildingNow(mission.id) }
         }),
       ),
     )
     expect(seen.ran).not.toMatch(/exit code/)
-    expect(seen.writeEndedSoon).toBe(false)
+    expect(seen.writeBlocked).toBe(true)
     expect(seen.written).toContain('waiting for `format` (T4), which writes in api')
     expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual(['api/invoices.ts'])
     expect(attemptsOf(seen.view, 'T2')[0]?.conflicts ?? []).toEqual([])
@@ -500,7 +521,8 @@ describe('The write lock of a command', () => {
           const migrating = yield* Effect.forkChild(
             call(grantId, 'commands_run', { command: migrate.id, timeout: 60 }),
           )
-          yield* Effect.sleep('300 millis')
+          // Its need asked, the command waits for the reservation.
+          yield* until(Effect.map(environmentNeedOf(mission.id), (need) => need !== undefined))
           const writing = yield* Effect.forkChild(
             call(helper.grantId, 'fs_write', {
               repository: 'api',
@@ -508,14 +530,14 @@ describe('The write lock of a command', () => {
               content: 'export const markdown = true\n',
             }),
           )
-          const writeEndedSoon = yield* endedSoon(writing)
-          const written = writeEndedSoon ? yield* Fiber.join(writing) : ''
+          const writeEnded = yield* endsWithin(writing)
+          const written = writeEnded ? yield* Fiber.join(writing) : ''
           yield* Fiber.interrupt(migrating)
-          return { writeEndedSoon, written }
+          return { writeEnded, written }
         }),
       ),
     )
-    expect(seen.writeEndedSoon).toBe(true)
+    expect(seen.writeEnded).toBe(true)
     expect(seen.written).not.toContain('waiting')
   })
 
@@ -559,16 +581,16 @@ describe('The write lock of a command', () => {
           )
           yield* until(runningOf(format.id))
           yield* Deferred.succeed(approve, undefined)
-          const writeEndedSoon = yield* endedSoon(writing)
+          const writeBlocked = yield* stillBlocked(writing, helper.id)
           writeFileSync(release, '')
           yield* Fiber.join(formatting)
           yield* Fiber.join(writing)
           yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
-          return { writeEndedSoon, view: yield* buildingNow(mission.id) }
+          return { writeBlocked, view: yield* buildingNow(mission.id) }
         }),
       ),
     )
-    expect(seen.writeEndedSoon).toBe(false)
+    expect(seen.writeBlocked).toBe(true)
     expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual(['api/invoices.ts'])
     const t2 = attemptsOf(seen.view, 'T2')[0]
     expect(t2?.conflicts ?? []).toEqual([])
@@ -611,7 +633,7 @@ describe('The write lock of a command', () => {
               content: 'export {}\n',
             }),
           )
-          const heldEndedSoon = yield* endedSoon(held)
+          const heldBlocked = yield* stillBlocked(held, helper.id)
           writeFileSync(release, '')
           yield* Fiber.join(generating)
           const afterwards = yield* Fiber.join(held)
@@ -629,7 +651,7 @@ describe('The write lock of a command', () => {
           yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
           return {
             free,
-            heldEndedSoon,
+            heldBlocked,
             afterwards,
             duringLint,
             view: yield* buildingNow(mission.id),
@@ -639,7 +661,7 @@ describe('The write lock of a command', () => {
     )
     expect(seen.free).toMatch(/^wrote export\.ts/)
     expect(seen.free).not.toContain('waiting')
-    expect(seen.heldEndedSoon).toBe(false)
+    expect(seen.heldBlocked).toBe(true)
     expect(seen.afterwards).toContain('waiting for `codegen` (T4), which writes in api')
     expect(seen.duringLint).not.toContain('waiting')
     // The read-only command took no snapshot pair: T4 holds only what codegen wrote.
