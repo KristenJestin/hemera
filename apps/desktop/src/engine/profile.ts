@@ -162,6 +162,7 @@ import {
   noProbeCleanup,
   probeDeskLayer,
 } from './planning/probe-desk.ts'
+import { type ProbeSteps, probeStepsLayer } from './planning/probe-steps.ts'
 import { PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
@@ -344,6 +345,7 @@ export type EngineServices =
   | LivingSpec
   | BuildDesk
   | ProbeDesk
+  | ProbeSteps
   | FileSnapshots
   | Snapshots
   | BuildingStart
@@ -430,6 +432,8 @@ export const startProfile = (
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
     const desk = Context.get(deskContext, ProbeDesk)
+    // What each running Probe is doing (#206), written by the Probes and read by their chips.
+    const stepsContext = yield* Layer.build(probeStepsLayer)
     // Where the gate reads what an agent offers, served by the agents' runtime above it (#90).
     const offersContext = yield* Layer.build(agentOffersLayer)
     // Where the gate reaches the Builder's tools and the claims, served by the Builder (#141).
@@ -446,6 +450,7 @@ export const startProfile = (
       parts.liveMissions ?? noLiveMissions,
       parts.probes?.cleanup ?? noProbeCleanup,
       Layer.succeedContext(deskContext),
+      Layer.succeedContext(stepsContext),
       Layer.succeedContext(offersContext),
       Layer.succeedContext(buildContext),
       Layer.succeedContext(helperContext),
