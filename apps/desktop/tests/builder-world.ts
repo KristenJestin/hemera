@@ -105,10 +105,17 @@ export const PLAN = [
   },
 ]
 
-/** A mission of Acme planned with the four tasks, frozen, checked and launched: Building. */
-export const launched = (work: string) =>
+/**
+ * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
+ * runs on the Project before the launch, for what the launch must already see.
+ */
+export const launched = <E, R>(
+  work: string,
+  before: (projectId: string) => Effect.Effect<void, E, R> = () => Effect.void,
+) =>
   Effect.gen(function* () {
     const { project, main } = yield* acmeAt(work)
+    yield* before(project.id)
     const { mission, grantId } = yield* plannedIn(project.id, main)
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {

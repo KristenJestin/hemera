@@ -833,7 +833,11 @@ export const startProfile = (
     yield* gate.pass.pipe(
       Effect.andThen(step('stopping what cancelled missions left', runStops(null))),
       Effect.andThen(step('handing over the answers left', deliverAnswers)),
+      // What a stop cut: its writes attributed, then its actions handed over, and only then do
+      // the Buildings resume (#142).
+      Effect.andThen(step('attributing the writes a stop left', builder.restarted)),
       Effect.andThen(step('handing the indeterminate actions over', handleIndeterminate)),
+      Effect.andThen(builder.handed),
       // What #71 queued before the sessions existed becomes their deliveries; then the sessions a
       // stopped engine left are rebuilt, by this supervisor alone (CT-11).
       Effect.andThen(step('handing the queued results to the sessions', drainQueuedResults)),

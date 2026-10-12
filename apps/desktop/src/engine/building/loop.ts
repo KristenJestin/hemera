@@ -210,6 +210,11 @@ const ActionDetails = Schema.Struct({
   command: Schema.optionalKey(Schema.NullOr(Schema.String)),
   line: Schema.optionalKey(Schema.String),
   claim: Schema.optionalKey(Schema.String),
+  // A command's snapshots before it, kept for a restart (#142); `before` is a file write's.
+  trees: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ repository: Schema.String, tree: Schema.String })),
+  ),
+  globs: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
 })
 const readDetails = Schema.decodeUnknownOption(Schema.fromJsonString(ActionDetails))
 const readParsed = Schema.decodeUnknownOption(ActionDetails)
@@ -464,7 +469,7 @@ export const buildingLoop = (parts: LoopParts) => {
           before === null
             ? {}
             : {
-                before: before.map((one) => ({ repository: one.base.repository, tree: one.tree })),
+                trees: before.map((one) => ({ repository: one.base.repository, tree: one.tree })),
                 globs: globs === null ? null : [...globs],
               },
         finish,
@@ -1336,13 +1341,72 @@ export const buildingLoop = (parts: LoopParts) => {
       const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
       const details = Option.getOrNull(readParsed(action.details))
       if (building === null || details === null || details.claim !== undefined) return false
-      yield* indeterminate(building, action.owner.taskId, details)
+      yield* indeterminate(building, action.id, action.owner.taskId, details)
       return true
+    })
+
+  /**
+   * What a command cut by a stop changed before it, from the snapshots its intent kept to a
+   * snapshot taken now: its task's, in its last attempt.
+   */
+  const cutChanges = (
+    building: BuildingRow,
+    actionId: string,
+    taskId: string,
+    sessionId: string,
+    before: ReadonlyArray<{ readonly repository: string; readonly tree: string }>,
+    globs: ReadonlyArray<string> | null,
+  ) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const snapshots = yield* Snapshots
+      const attempt = (yield* attemptsIn(database, building.id)).findLast(
+        (one) => one.taskId === taskId,
+      )
+      if (attempt === undefined) return
+      const changes: Array<{ readonly repository: string; readonly path: string }> = []
+      for (const { repository, tree } of before) {
+        const base = basesOf(building).find((one) => one.repository === repository)
+        if (base === undefined) continue
+        const place = placeOfBase(base)
+        const after = yield* snapshots.take(place, {
+          kind: 'run',
+          missionId: building.missionId,
+          runId: actionId,
+          side: 'after',
+        })
+        const changed = (yield* snapshots.changed(building.missionId, place, tree, after)).filter(
+          (file) => globs === null || globs.some((glob) => posix.matchesGlob(file.path, glob)),
+        )
+        if (changed.length > 0)
+          yield* snapshots.capture(building.missionId, place, tree, after, changed)
+        changes.push(...changed.map((file) => ({ repository, path: file.path })))
+      }
+      yield* mutate('attributing what a cut command changed', (transaction) =>
+        Effect.gen(function* () {
+          for (const change of changes) {
+            yield* recordWriteIn(transaction, {
+              buildingId: building.id,
+              attemptId: attempt.id,
+              taskId,
+              sessionId,
+              repository: change.repository,
+              path: change.path,
+              kind: 'command',
+              runId: null,
+              actionId,
+              fingerprint: null,
+            })
+          }
+          return { result: undefined, events: [] }
+        }),
+      )
     })
 
   /** A command an engine stop cut in the middle: never run again; its runner or the user told. */
   const indeterminate = (
     building: BuildingRow,
+    actionId: string,
     taskId: string | null,
     details: typeof ActionDetails.Type,
   ) =>
@@ -1355,6 +1419,21 @@ export const buildingLoop = (parts: LoopParts) => {
       const task =
         tasks.find((one) => one.id === taskId) ??
         (lineage === null ? undefined : runningOf(tasks, lineage)[0])
+      if (task !== undefined && details.trees !== undefined) {
+        const by = Predicate.isString(details.sessionId) ? details.sessionId : ''
+        yield* cutChanges(
+          building,
+          actionId,
+          task.id,
+          by,
+          details.trees,
+          details.globs ?? null,
+        ).pipe(
+          Effect.catchCause((cause) =>
+            said(`what a cut command changed was not attributed: ${String(cause)}`),
+          ),
+        )
+      }
       const { projectId, owner } = yield* ownerOf(building, task?.id ?? null)
       const cutCommand =
         details.command == null

@@ -15,7 +15,7 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -23,16 +23,18 @@ import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { buildingAttemptOf } from '../src/engine/building/tasks.ts'
+import { Snapshots } from '../src/engine/building/snapshots.ts'
 import { ONE_COMMIT_PER_TASK } from '../src/engine/building/validation.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
 import { getMission } from '../src/engine/missions.ts'
-import { answerNeed, getNeed } from '../src/engine/needs.ts'
+import { answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   commandRuns,
+  domainEvents,
   missionValidationSettings,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
@@ -844,7 +846,7 @@ describe('Three reds become an error need', () => {
 })
 
 describe('An action cut by a restart (CT-09)', () => {
-  test('an fs_write intent without outcome after a simulated crash is resolved from the file’s fingerprint; a command intent becomes indeterminate in the resume brief and is not run again', async () => {
+  test('an fs_write intent without outcome after a simulated crash is resolved from the file’s fingerprint; a command intent becomes indeterminate in the resume brief, is not run again, and what it changed before the stop is its task’s', async () => {
     const before = builderEngine(data, work)
     const first = await before.run(({ profile }) =>
       within(
@@ -871,11 +873,21 @@ describe('An action cut by a restart (CT-09)', () => {
             after: fingerprintOf(Buffer.from('never\n', 'utf8')),
             sessionId: session.id,
           })
+          // The build was cut after its snapshot before and after it wrote a file.
+          const tree = yield* Snapshots.use((snapshots) =>
+            snapshots.take(
+              { name: 'api', folder: join(session.folder, 'api') },
+              { kind: 'run', missionId: mission.id, runId: 'cut-build', side: 'before' },
+            ),
+          )
+          writeFileSync(join(session.folder, 'api', 'built.js'), 'built\n')
           yield* beginAction('command.run', owner, {
             command: build.id,
             line: 'pnpm build',
             folder: null,
             sessionId: session.id,
+            trees: [{ repository: 'api', tree }],
+            globs: null,
           })
           return { mission, builder: session, build }
         }),
@@ -912,7 +924,10 @@ describe('An action cut by a restart (CT-09)', () => {
     ])
     expect(seen.runs).toEqual([])
     expect(seen.journal).toHaveLength(1)
-    expect(pathsOf(attemptsOf(seen.view, 'T1')[0])).toEqual(['api/invoices.ts'])
+    expect(pathsOf(attemptsOf(seen.view, 'T1')[0]).toSorted()).toEqual([
+      'api/built.js',
+      'api/invoices.ts',
+    ])
   })
 
   test('on a command declared on an exclusive resource, a decision need is created and the task waits for it', async () => {
@@ -921,23 +936,38 @@ describe('An action cut by a restart (CT-09)', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { project, mission } = yield* launched(work)
-          const migrate = yield* apiCommand(project.id, 'db:migrate', [])
+          let migrateId = ''
+          // Declared before the launch: the Building's start reserves it, which asks the user once.
+          const { mission } = yield* launched(work, (projectId) =>
+            Effect.gen(function* () {
+              const migrate = yield* apiCommand(projectId, 'db:migrate', [])
+              migrateId = migrate.id
+              yield* saveResources(projectId, [
+                {
+                  name: 'Shared database',
+                  description: 'The team database.',
+                  uses: [],
+                  changes: [migrate.id],
+                  resetCommandId: null,
+                },
+              ])
+            }),
+          )
+          yield* until(
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.some((need) => Predicate.isTagged(need.fields, 'Environment')),
+            ),
+          )
+          const reserved = (yield* getMission(mission.id)).needs.find((need) =>
+            Predicate.isTagged(need.fields, 'Environment'),
+          )
+          yield* retryNeed(reserved?.id ?? '')
           const { session, grantId } = yield* builderOf(mission.id)
           yield* call(grantId, 'task_start', { task: 'T1' })
-          yield* saveResources(project.id, [
-            {
-              name: 'Shared database',
-              description: 'The team database.',
-              uses: [],
-              changes: [migrate.id],
-              resetCommandId: null,
-            },
-          ])
           yield* beginAction(
             'command.run',
             { kind: 'mission', missionId: mission.id, taskId: 'T1' },
-            { command: migrate.id, line: 'pnpm db:migrate', folder: null, sessionId: session.id },
+            { command: migrateId, line: 'pnpm db:migrate', folder: null, sessionId: session.id },
           )
           return { mission }
         }),
@@ -958,7 +988,22 @@ describe('An action cut by a restart (CT-09)', () => {
             answer: ChosenAnswer.make({ option: 'it ran' }),
             key: 'answer-1',
           })
-          return { need, blocked }
+          // The stop's cut command is handed over before the Building resumes and its Builder acts.
+          yield* until(
+            Effect.map(eventsOf(first.mission.id, 'building.resumed'), (rows) => rows.length > 0),
+          )
+          const database = yield* Database
+          const order = yield* database
+            .select({ type: domainEvents.type })
+            .from(domainEvents)
+            .where(
+              and(
+                eq(domainEvents.entityId, first.mission.id),
+                inArray(domainEvents.type, ['building.indeterminate', 'building.resumed']),
+              ),
+            )
+            .orderBy(asc(domainEvents.sequence))
+          return { need, blocked, order: order.map((one) => one.type) }
         }),
       ),
     )
@@ -968,6 +1013,7 @@ describe('An action cut by a restart (CT-09)', () => {
     expect(fields.question).toBe('`db:migrate` was cut by a restart. Did it run?')
     expect(fields.options).toEqual(['it ran', 'it did not run'])
     expect(seen.blocked.tasks.find((task) => task.id === 'T1')?.state).toBe('blocked')
+    expect(seen.order).toEqual(['building.indeterminate', 'building.resumed'])
   })
 })
 

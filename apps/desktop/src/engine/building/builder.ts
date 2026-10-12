@@ -35,6 +35,7 @@ import { and, eq } from 'drizzle-orm'
 import {
   Cause,
   Context,
+  Deferred,
   Effect,
   Layer,
   Option,
@@ -262,6 +263,15 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
     recheck: (_need, retried) => Effect.succeed(!retried),
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
+  let takeRestart: Effect.Effect<void> | null = null
+  const handedOver = Deferred.makeUnsafe<void>()
+  /**
+   * At an engine's start, before the cut actions are handed over: each write a stop left found
+   * done is attributed to its task (#142).
+   */
+  const restarted = Effect.suspend(() => takeRestart ?? Effect.void)
+  /** Once the cut actions are handed over: only then do the Buildings resume and act (#142). */
+  const handed = Deferred.succeed(handedOver, undefined)
   /** A command a stop cut in the middle, taken by the Building when its mission builds (#142). */
   const cut = (action: EffectfulAction) =>
     takeCut === null ? Effect.succeed(false) : takeCut(action)
@@ -1573,5 +1583,5 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       }
     }),
   )
-  return { layer, handler, cut }
+  return { layer, handler, cut, restarted, handed }
 }
