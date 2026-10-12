@@ -1059,6 +1059,46 @@ describe('A gh write names its repository with its host', () => {
   })
 })
 
+describe('A repository whose remote names no repository on its forge', () => {
+  const forcedGitHub = <A, E>(
+    fake: ReturnType<typeof fakeForge>,
+    then: (repositoryId: string) => Effect.Effect<A, E, EngineServices>,
+  ) =>
+    withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(projectId, repository('shop'), 'github', null)
+          return yield* then(repository('shop'))
+        }),
+      { shop: join(work, 'elsewhere') },
+    )
+
+  test('its account is still read: gh api --hostname github.com user', async () => {
+    const fake = fakeForge(ghReady())
+    const login = await forcedGitHub(fake, (repositoryId) =>
+      Effect.flatMap(forge, (port) => port.currentUser(repositoryId)),
+    )
+    expect(login).toBe('octo')
+  })
+
+  test('a write on it is refused before spawning: it cannot name the repository', async () => {
+    const fake = fakeForge(ghReady())
+    const refused = await forcedGitHub(fake, (repositoryId) =>
+      Effect.flip(
+        Effect.flatMap(forge, (port) =>
+          port.operate(repositoryId, (target, run) =>
+            run(['pr', 'merge', '7', ...target.place, '--squash']),
+          ),
+        ),
+      ),
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+})
+
 describe('Waiters wake on a change of state, not of its detail', () => {
   test('two waiters on an unreachable forge whose message changes each check: a bounded number of checks', async () => {
     const fake = fakeForge([

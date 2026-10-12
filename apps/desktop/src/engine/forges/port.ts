@@ -75,7 +75,7 @@ import {
   identify,
 } from './identity.ts'
 import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
-import { SAFE_WORD } from './shapes.ts'
+import { SAFE_WORD, shapeOf } from './shapes.ts'
 
 /** The service the forge's needs belong to. */
 export const FORGE_NEEDS = needService('forge')
@@ -113,6 +113,8 @@ export interface ForgeTarget {
    * The flags that name the repository on its forge, which every write carries: for gh
    * `--repo host/owner/repo`; for bkt the context of the repository's host (bkt would send the
    * command to its active context otherwise), the workspace or project, and the repository.
+   * Empty when the remote names no repository on the forge: a write is then refused (`ForgeRefused`),
+   * a read still runs.
    */
   readonly place: ReadonlyArray<string>
 }
@@ -159,7 +161,7 @@ export class ForgePort extends Context.Service<
         run: (
           args: ReadonlyArray<string>,
           input?: string,
-        ) => Effect.Effect<ForgeAnswer, ForgeFailure>,
+        ) => Effect.Effect<ForgeAnswer, ForgeFailure | ForgeRefused>,
       ) => Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | ForgeOperationFailure>
     /** The window regained the focus: every CLI not ready is checked again. */
@@ -843,7 +845,7 @@ export const forgePort = () => {
           run: (
             args: ReadonlyArray<string>,
             input?: string,
-          ) => Effect.Effect<ForgeAnswer, ForgeFailure>,
+          ) => Effect.Effect<ForgeAnswer, ForgeFailure | ForgeRefused>,
         ) => Effect.Effect<A, E>,
       ): Effect.Effect<A, E | ForgeOperationFailure> =>
         provided(
@@ -879,23 +881,23 @@ export const forgePort = () => {
               const { cli, host, forge } = now
               const identity = yield* identityOf(project, (yield* located(repositoryId)).repository)
               const { owner, slug } = identity
-              if (owner === null || slug === null || (cli === 'bkt' && bktContext === null)) {
-                return yield* new ForgeRefused({
-                  reason: 'The remote of this repository names no repository on its forge.',
-                })
-              }
+              // A repository its remote does not name has no place: its reads run, its writes not.
               const place =
-                cli === 'gh'
-                  ? ['--repo', `${host}/${owner}/${slug}`]
-                  : [
-                      '--context',
-                      bktContext ?? '',
-                      ...(forge === 'bitbucket-cloud'
-                        ? ['--workspace', owner]
-                        : ['--project', projectKey(owner)]),
-                      '--repo',
-                      slug,
-                    ]
+                owner === null || slug === null
+                  ? []
+                  : cli === 'gh'
+                    ? ['--repo', `${host}/${owner}/${slug}`]
+                    : bktContext === null
+                      ? []
+                      : [
+                          '--context',
+                          bktContext,
+                          ...(forge === 'bitbucket-cloud'
+                            ? ['--workspace', owner]
+                            : ['--project', projectKey(owner)]),
+                          '--repo',
+                          slug,
+                        ]
               const target: ForgeTarget = {
                 projectId: project.id,
                 identity: { ...identity, host },
@@ -904,6 +906,14 @@ export const forgePort = () => {
                 place,
               }
               const run = (args: ReadonlyArray<string>, input?: string) => {
+                // Without its place, a write matches no shape: anything but a read is refused.
+                if (place.length === 0 && shapeOf(cli, args)?.class !== 'read') {
+                  return Effect.fail(
+                    new ForgeRefused({
+                      reason: 'The remote of this repository names no repository on its forge.',
+                    }),
+                  )
+                }
                 const plain: ForgeCall = { cli, forge, host, projectId: project.id, args }
                 const call: ForgeCall = input === undefined ? plain : { ...plain, input }
                 return runner.run(call).pipe(
