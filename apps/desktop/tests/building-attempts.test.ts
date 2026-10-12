@@ -20,6 +20,8 @@ import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { BuilderHold } from '../src/engine/building/builder.ts'
+import { BUILDER_TEMPLATE } from '../src/engine/building/builder-role.ts'
+import { HELPER_TEMPLATE } from '../src/engine/building/helper-role.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { buildingAttemptOf } from '../src/engine/building/tasks.ts'
@@ -1334,5 +1336,15 @@ describe('Commits per task', () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) => within(profile, builtWith(false)))
     expect(seen.log).toBe('')
+  })
+})
+
+describe('What the roles are told of reds', () => {
+  test('the Builder and the helper both read how a red comes back and what to do with it', () => {
+    const said = (text: string) => text.replaceAll(/\s+/g, ' ')
+    const sentence =
+      'Hemera runs the checks after task_finished. A red comes back to you as a delivery: the check, the place it ran in and the end of its output. Fix it in the same task, then task_finished again.'
+    expect(said(BUILDER_TEMPLATE)).toContain(sentence)
+    expect(said(HELPER_TEMPLATE)).toContain(sentence)
   })
 })
