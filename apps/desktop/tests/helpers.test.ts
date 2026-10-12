@@ -1,7 +1,7 @@
 /**
  * The helpers of a Building (#145): a free helper launched on a task becomes its runner and hands
- * its result to its parent; the Prototyper writes only in its own folder and keeps its files as
- * evidence; the definitions, the depth, the cap and the budget refuse what they must; a helper's
+ * its result to its parent; the Builder and its helpers no longer launch the Prototyper, which
+ * belongs to Planning (#222, its tests in `planning-prototyper.test.ts`); the definitions, the depth, the cap and the budget refuse what they must; a helper's
  * call that asks becomes its mission's need; a stuck helper is flagged, told and replaced; a
  * restart rebuilds the tree and delivers what was queued, once; nothing stops a helper.
  *
@@ -11,11 +11,16 @@
  * them ends on its own.
  */
 
-import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { PermissionAnswer, TOOL_NAMES, capRefusal, toolsOf } from '@hemera/core/domain'
+import {
+  PROTOTYPER_BELONGS_TO_PLANNING,
+  PermissionAnswer,
+  TOOL_NAMES,
+  capRefusal,
+  toolsOf,
+} from '@hemera/core/domain'
 import { HelpersRpcs } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
@@ -24,8 +29,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { helperRowsOf, listHelpers } from '../src/engine/building/helper-store.ts'
 import { setProjectLimits, projectLimits, spendBudget } from '../src/engine/budget.ts'
-import { listEvidence } from '../src/engine/memory/evidence.ts'
-import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, getNeed } from '../src/engine/needs.ts'
 import { sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Secrets } from '../src/engine/secrets.ts'
@@ -273,9 +276,43 @@ describe('A free helper launched on a task runs it and hands its result to its p
   })
 })
 
-describe('The Prototyper tries an approach in its own folder', () => {
-  test('it writes only in missions/<key>/prototypes/1/, its files land in evidence, and the Workspace is unchanged', async () => {
-    const { world, run } = helping()
+describe('The Builder no longer launches the Prototyper', () => {
+  test('the Builder’s helper_launch of the Prototyper is refused with the sentence, and so is its helper’s', async () => {
+    const { run } = helping()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const builder = yield* builderOf(mission.id)
+          const fromBuilder = yield* call(builder.grantId, 'helper_launch', {
+            helper: 'prototyper',
+            brief: 'Does a streaming CSV writer keep the accents?',
+          })
+          yield* call(builder.grantId, 'helper_launch', { brief: 'Read the history.' })
+          const helper = yield* helperNumbered(mission.id, 1)
+          const fromHelper = yield* call(helper.grantId, 'helper_launch', {
+            helper: 'prototyper',
+            brief: 'Does a streaming CSV writer keep the accents?',
+          })
+          return {
+            fromBuilder,
+            fromHelper,
+            rows: yield* helperRowsOf(mission.id),
+            refused: yield* eventsOf(mission.id, 'helper.refused'),
+          }
+        }),
+      ),
+    )
+    const sentence = `refused: ${PROTOTYPER_BELONGS_TO_PLANNING}`
+    expect(seen.fromBuilder).toBe(sentence)
+    expect(seen.fromHelper).toBe(sentence)
+    expect(seen.rows.map((row) => row.definition)).toEqual([null])
+    expect(seen.refused).toHaveLength(2)
+  })
+
+  test('a free helper still launches from the Builder', async () => {
+    const { run } = helping()
     const seen = await run(({ profile }) =>
       within(
         profile,
@@ -283,148 +320,20 @@ describe('The Prototyper tries an approach in its own folder', () => {
           const { mission } = yield* launched(work)
           const builder = yield* builderOf(mission.id)
           const answer = yield* call(builder.grantId, 'helper_launch', {
-            helper: 'prototyper',
-            brief: 'Does a streaming CSV writer keep the accents?',
+            brief: 'Read the history of invoices.ts.',
           })
           const helper = yield* helperNumbered(mission.id, 1)
-          const own = yield* callTool(helper.grantId, 'fs_write', {
-            path: 'try.ts',
-            content: 'export const tried = true\n',
-          })
-          const workspace = yield* callTool(helper.grantId, 'fs_write', {
-            repository: 'api',
-            path: 'invoices.ts',
-            content: 'overwritten\n',
-          })
-          const read = yield* callTool(helper.grantId, 'fs_read', {
-            repository: 'api',
-            path: 'README.md',
-          })
-          const result = yield* callTool(helper.grantId, 'helper_result', {
-            tried: 'A streaming CSV writer.',
-            works: ['The accents are kept.'],
-            does_not_work: ['Quotes inside a name.'],
-            files: ['try.ts'],
-          })
-          yield* until(
-            Effect.sync(() =>
-              promptsOf(world.agents[1]).some((one) => one.includes('[hemera:result]')),
-            ),
-          )
-          const database = yield* Database
-          return {
-            key: (yield* getMission(mission.id)).key,
-            builder,
-            answer,
-            helper,
-            own,
-            workspace,
-            read,
-            result,
-            evidence: yield* listEvidence(mission.id, null),
-            requests: yield* database.select().from(permissionRequests),
-            prototyped: yield* eventsOf(mission.id, 'prototype.result'),
-          }
+          return { answer, helper }
         }),
       ),
     )
-    const folder = join(data, 'missions', seen.key, 'prototypes', '1')
-    expect(seen.answer).toMatch(/^H1 launched:/)
-    expect(seen.helper.session).toMatchObject({ role: 'prototyper', folder })
-    expect(seen.own.ok).toBe(true)
-    expect(readFileSync(join(folder, 'try.ts'), 'utf8')).toBe('export const tried = true\n')
-    expect(seen.workspace.text).toBe(
-      `refused: the Prototyper writes only in its own folder, ${folder}: the Workspace is read-only to it`,
-    )
-    expect(seen.read.ok).toBe(true)
-    expect(seen.read.text).not.toMatch(/^refused|Waiting/)
-    expect(seen.requests).toEqual([])
-    expect(seen.result.ok).toBe(true)
-    expect(seen.evidence.map((one) => one.name)).toEqual(['H1/try.ts'])
-    const repository = join(seen.builder.session.folder, 'api')
-    const status = spawnSync('git', ['status', '--porcelain'], {
-      cwd: repository,
-      encoding: 'utf8',
-    })
-    expect(status.stdout).toBe('')
-    expect(seen.prototyped).toHaveLength(1)
-    const delivered =
-      promptsOf(world.agents[1]).find((one) => one.includes('[hemera:result]')) ?? ''
-    expect(delivered).toContain('H1 (Prototyper) handed back its result')
-    expect(delivered).toContain('The accents are kept.')
-    expect(existsSync(folder)).toBe(true)
-  })
-})
-
-describe('The Prototyper keeps only the files of its own folder', () => {
-  test('a symlink in its folder to a file outside is refused, naming it, and nothing is copied', async () => {
-    const { run } = helping()
-    const seen = await run(({ profile }) =>
-      within(
-        profile,
-        Effect.gen(function* () {
-          const { mission } = yield* launched(work)
-          const builder = yield* builderOf(mission.id)
-          yield* call(builder.grantId, 'helper_launch', {
-            helper: 'prototyper',
-            brief: 'Try a CSV writer.',
-          })
-          const helper = yield* helperNumbered(mission.id, 1)
-          // What a command run in its folder could make: a link to a key outside it.
-          const outside = join(work, 'key.pem')
-          writeFileSync(outside, 'not-a-real-key')
-          symlinkSync(outside, join(helper.row.folder, 'link.txt'))
-          const answer = yield* call(helper.grantId, 'helper_result', {
-            tried: 'A CSV writer.',
-            works: [],
-            does_not_work: [],
-            files: ['link.txt'],
-          })
-          return {
-            answer,
-            evidence: yield* listEvidence(mission.id, null),
-            rows: yield* helperRowsOf(mission.id),
-          }
-        }),
-      ),
-    )
-    expect(seen.answer).toBe('refused: link.txt is not a file of your folder')
-    expect(seen.evidence).toEqual([])
-    expect(seen.rows.map((row) => row.state)).toEqual(['running'])
-  })
-
-  test('an absolute path outside its folder is refused, and nothing is copied', async () => {
-    const { run } = helping()
-    const seen = await run(({ profile }) =>
-      within(
-        profile,
-        Effect.gen(function* () {
-          const { mission } = yield* launched(work)
-          const builder = yield* builderOf(mission.id)
-          yield* call(builder.grantId, 'helper_launch', {
-            helper: 'prototyper',
-            brief: 'Try a CSV writer.',
-          })
-          const helper = yield* helperNumbered(mission.id, 1)
-          const outside = join(work, 'notes.txt')
-          writeFileSync(outside, 'outside')
-          const answer = yield* call(helper.grantId, 'helper_result', {
-            tried: 'A CSV writer.',
-            works: [],
-            does_not_work: [],
-            files: [outside],
-          })
-          return { answer, outside, evidence: yield* listEvidence(mission.id, null) }
-        }),
-      ),
-    )
-    expect(seen.answer).toBe(`refused: ${seen.outside} is not a file of your folder`)
-    expect(seen.evidence).toEqual([])
+    expect(seen.answer).toMatch(/^H1 launched: it works in the background/)
+    expect(seen.helper.session).toMatchObject({ role: 'helper' })
   })
 })
 
 describe('The definitions refuse what they do not know', () => {
-  test('an unknown defined helper is refused naming the one that exists; a result missing a field is refused naming it', async () => {
+  test('an unknown defined helper is refused naming the one that exists', async () => {
     const { run } = helping()
     const seen = await run(({ profile }) =>
       within(
@@ -436,26 +345,14 @@ describe('The definitions refuse what they do not know', () => {
             helper: 'sketcher',
             brief: 'Draw the export.',
           })
-          yield* call(builder.grantId, 'helper_launch', {
-            helper: 'prototyper',
-            brief: 'Try a CSV writer.',
-          })
-          const helper = yield* helperNumbered(mission.id, 1)
-          const missing = yield* call(helper.grantId, 'helper_result', {
-            tried: 'A CSV writer.',
-            works: [],
-            files: [],
-          })
-          return { unknown, missing, rows: yield* helperRowsOf(mission.id) }
+          return { unknown, rows: yield* helperRowsOf(mission.id) }
         }),
       ),
     )
     expect(seen.unknown).toBe(
       'refused: there is no defined helper sketcher: the one that exists is prototyper',
     )
-    expect(seen.missing).toMatch(/^refused: the result does not read: /)
-    expect(seen.missing).toContain('does_not_work')
-    expect(seen.rows.map((row) => row.state)).toEqual(['running'])
+    expect(seen.rows).toEqual([])
   })
 })
 
@@ -806,9 +703,12 @@ describe('Nothing stops a helper', () => {
       'helper_launch',
       'helper_read',
     ])
+    // The one write is the user's verdict on a Prototyper's result (#222), never a stop.
     expect([...HelpersRpcs.requests.keys()].toSorted()).toEqual([
       'helpers.changed',
+      'helpers.judge',
       'helpers.list',
+      'helpers.prototypesChanged',
       'helpers.read',
     ])
   })

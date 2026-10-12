@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ComponentProps } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import {
@@ -97,6 +98,69 @@ export const SectionsWithQuestionsOpen: Story = {
     const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
     await expect(nav.getByRole('img', { name: 'Written · 2 questions open' })).toBeVisible()
     await expect(nav.getAllByRole('img', { name: 'Settled' })).toHaveLength(6)
+  },
+}
+
+/** The Spec in its own scroll, its sections down the left: what a click on the list scrolls. */
+const scrolled = (args: ComponentProps<typeof SpecRead>) => (
+  <div className="flex gap-8">
+    <div className="w-settings-nav shrink-0">
+      <SectionsNav
+        sections={args.sections}
+        requirementsState={args.requirementsState}
+        changes={args.changes}
+        tasks={args.tasks}
+        open={args.open}
+      />
+    </div>
+    <div data-scroller="" className="h-notice min-w-0 flex-1 overflow-auto">
+      <SpecRead {...args} />
+    </div>
+  </div>
+)
+
+/** Whether an element's top shows inside the box that scrolls it. */
+const shownIn = (element: Element, scroller: Element): boolean => {
+  const box = element.getBoundingClientRect()
+  const room = scroller.getBoundingClientRect()
+  return box.top >= room.top && box.top < room.bottom
+}
+
+/**
+ * A click on a section of the list brings the Spec to it and gives its heading the focus. Under
+ * reduced motion — what the stories play — the jump is instant: the section is there when the
+ * click has returned, and the Spec's reading position moved with it.
+ */
+export const ListScrollsToTheSectionClicked: Story = {
+  render: scrolled,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scroller = canvasElement.querySelector<HTMLElement>('[data-scroller]')!
+    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
+    const risks = canvas.getByRole('region', { name: 'Risks & trade-offs' })
+    await expect(shownIn(risks, scroller)).toBe(false)
+    await userEvent.click(nav.getByRole('button', { name: /Risks & trade-offs/ }))
+    await expect(shownIn(risks, scroller)).toBe(true)
+    await expect(scroller.scrollTop).toBeGreaterThan(0)
+    await expect(within(risks).getByRole('heading', { name: /Risks & trade-offs/ })).toHaveFocus()
+    await userEvent.click(nav.getByRole('button', { name: /Why/ }))
+    await expect(scroller.scrollTop).toBe(0)
+    await expect(canvas.getByRole('heading', { name: /Why/ })).toHaveFocus()
+  },
+}
+
+/** The Tasks entry of the list brings the user to the fold's button, which takes the focus. */
+export const ListScrollsToTheTasks: Story = {
+  render: scrolled,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scroller = canvasElement.querySelector<HTMLElement>('[data-scroller]')!
+    const toggle = canvas.getByRole('button', { name: /Tasks/, expanded: false })
+    await expect(shownIn(toggle, scroller)).toBe(false)
+    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
+    await userEvent.click(nav.getByRole('button', { name: /Tasks/ }))
+    await expect(shownIn(toggle, scroller)).toBe(true)
+    await expect(toggle).toHaveFocus()
   },
 }
 

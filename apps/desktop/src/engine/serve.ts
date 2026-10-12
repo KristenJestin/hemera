@@ -147,7 +147,13 @@ import {
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
-import { helperChanges, listHelpers, readHelper } from './building/helper-store.ts'
+import {
+  helperChanges,
+  listHelpers,
+  prototypeChanges,
+  readHelper,
+} from './building/helper-store.ts'
+import { askPrototype, judgePrototype } from './planning/prototypes.ts'
 import { taskGraphOf } from './planning/plan.ts'
 import { discussionsOf, readDiscussion } from './planning/discussion-store.ts'
 import {
@@ -658,6 +664,8 @@ export const engineHandlers = (
       use(giveVision(missionId, text)).pipe(observed('planning.addVision', log)),
     'planning.keepAfterTriage': ({ missionId }) =>
       use(keepPlanning(missionId)).pipe(observed('planning.keepAfterTriage', log)),
+    'planning.askPrototype': ({ missionId, question }) =>
+      use(askPrototype(missionId, question)).pipe(observed('planning.askPrototype', log)),
     'planning.changed': ({ missionId }) =>
       follow(specChanges(missionId)).pipe(observedStream('planning.changed', log)),
     'planning.specLanguage': ({ projectId }) =>
@@ -737,13 +745,18 @@ export const engineHandlers = (
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
-    // The helpers of a Building (#145), as their chips show them; no stop, no write.
+    // The helpers (#145), as their chips show them; no stop. The one write is the user's verdict
+    // on a Prototyper's result, in Planning (#222).
     'helpers.list': ({ missionId }) =>
       use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
     'helpers.read': ({ helperId, thread }) =>
       use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
+    'helpers.judge': ({ helperId, verdict, note }) =>
+      use(judgePrototype(helperId, verdict, note)).pipe(observed('helpers.judge', log)),
     'helpers.changed': ({ missionId }) =>
       follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
+    'helpers.prototypesChanged': ({ missionId }) =>
+      follow(prototypeChanges(missionId)).pipe(observedStream('helpers.prototypesChanged', log)),
     // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
     'discussions.list': ({ missionId }) =>
       use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),

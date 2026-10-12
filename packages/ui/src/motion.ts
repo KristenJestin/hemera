@@ -1,5 +1,10 @@
-import { MotionConfigContext, useReducedMotion } from 'motion/react'
-import type { Easing, TargetAndTransition, Transition } from 'motion/react'
+import { MotionConfigContext, animate, useReducedMotion } from 'motion/react'
+import type {
+  AnimationPlaybackControls,
+  Easing,
+  TargetAndTransition,
+  Transition,
+} from 'motion/react'
 import { type RefObject, useContext, useEffect, useRef, useState } from 'react'
 
 /**
@@ -105,6 +110,47 @@ export function useTransition(kind: Transition = arrival): Transition {
   const system = useReducedMotion()
   if (reducedMotion === 'always') return instant
   return system === true ? instant : kind
+}
+
+/** The nearest ancestor that scrolls the element, or the page when none does. */
+function scrollerOf(element: HTMLElement): HTMLElement {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    const { overflowY } = getComputedStyle(parent)
+    const scrolls = overflowY === 'auto' || overflowY === 'scroll'
+    if (scrolls && parent.scrollHeight > parent.clientHeight) return parent
+  }
+  return document.documentElement
+}
+
+/**
+ * Brings an element to the top of what scrolls it, the way a panel puts itself in place: on the
+ * `arrival` kind, which `useTransition` turns into an instant jump for a reader asking for less
+ * movement. The element's own `scroll-margin-top` is kept, as the browser's scrolling keeps it,
+ * and a new call takes over from the one still on its way.
+ */
+export function useScrollTo(): (element: HTMLElement) => void {
+  const transition = useTransition(arrival)
+  const playing = useRef<AnimationPlaybackControls | null>(null)
+  return (element) => {
+    playing.current?.stop()
+    const scroller = scrollerOf(element)
+    const page = scroller === document.documentElement
+    const margin = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0
+    const from = scroller.scrollTop
+    const top =
+      element.getBoundingClientRect().top - (page ? 0 : scroller.getBoundingClientRect().top)
+    const to = from + top - margin
+    if (transition === instant) {
+      scroller.scrollTop = to
+      return
+    }
+    playing.current = animate(from, to, {
+      ...transition,
+      onUpdate: (value) => {
+        scroller.scrollTop = value
+      },
+    })
+  }
 }
 
 /** The hand of a control: what carries it, and what it is drawn at under the pointer and the press. */

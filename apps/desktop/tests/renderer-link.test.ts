@@ -249,6 +249,7 @@ const noProjects = {
   'planning.addVision': unused,
   'planning.visions': unused,
   'planning.keepAfterTriage': unused,
+  'planning.askPrototype': unused,
   'planning.changed': unused,
   'planning.specLanguage': unused,
   'planning.setSpecLanguage': unused,
@@ -331,7 +332,10 @@ const noProjects = {
   'building.tasksChanged': () => Stream.die('the window’s link is not asked for the Building here'),
   'helpers.list': unused,
   'helpers.read': unused,
+  'helpers.judge': unused,
   'helpers.changed': () => Stream.die('the window’s link is not asked for the helpers here'),
+  'helpers.prototypesChanged': () =>
+    Stream.die('the window’s link is not asked for the Prototypers here'),
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,

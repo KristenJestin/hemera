@@ -52,7 +52,7 @@ import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from 
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
@@ -257,6 +257,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
+  /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
+  readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
@@ -614,7 +616,7 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
-        helpersLayer({ log }),
+        helpersLayer({ log, hold: parts.helpers?.hold }),
         documenterLayer({ log }).pipe(Layer.provide(snapshots)),
         launches.layer.pipe(
           Layer.provideMerge(

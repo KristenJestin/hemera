@@ -1,8 +1,9 @@
 /**
- * The `helper` and `prototyper` roles (#145): child sessions of a Building, launched by the Builder
- * or by a helper at depth 1. Their instructions are the ticket's (the Prototyper's are its
- * definition's role text), their brief the helper as it is kept: who launched it, its parent's
- * brief, the task it is tied to, the frozen Spec, whether it writes and where. Both count in the
+ * The `helper` and `prototyper` roles (#145): a helper is a child session of a Building, launched
+ * by the Builder or by a helper at depth 1; the Prototyper, of a Planning, launched by the Planner
+ * (#222). Their instructions are the ticket's (the Prototyper's are its definition's role text),
+ * their brief the helper as it is kept: who launched it, its parent's brief, the task it is tied
+ * to, the Spec (frozen, or still being planned), whether it writes and where. Both count in the
  * Project's cap of sub-agents; what becomes of their sessions is told to their parent by the
  * helpers' service, in their own words.
  *
@@ -21,6 +22,7 @@ import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import type { BriefField, BriefedSession, RoleEntry, SessionOwner } from '../sessions/roles.ts'
+import { sessionsOfLineage } from '../sessions/store.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
 import { helperOfLineage } from './helper-store.ts'
@@ -76,9 +78,17 @@ const helperBriefOf = (owner: SessionOwner, session: BriefedSession) =>
       .where(eq(missions.id, owner.missionId))
       .pipe(Effect.mapError(refusedWhile('reading the mission')))
     if (row === null || mission === undefined) return []
-    // Its parent is the Builder, or a helper at depth 1, named by its id.
+    // Its parent is the Planner or the Builder, or a helper at depth 1, named by its id.
     const parent = yield* helperOfLineage(row.parentLineage)
-    const parentRole = parent === null ? ROLE_NAMES.builder : helperLabel(parent.number)
+    const planned = (yield* sessionsOfLineage(row.parentLineage)).some(
+      (one) => one.role === 'planner',
+    )
+    const parentRole =
+      parent !== null
+        ? helperLabel(parent.number)
+        : planned
+          ? ROLE_NAMES.planner
+          : ROLE_NAMES.builder
     const building = yield* latestBuildingIn(database, owner.missionId)
     const task =
       row.taskId === null || building === null
@@ -102,10 +112,11 @@ const helperBriefOf = (owner: SessionOwner, session: BriefedSession) =>
               scenarios: task.scenarios,
             },
       spec: definition === null || definition.inputs.includes('spec'),
+      frozen: !planned,
       writes: row.writes,
       place:
         row.place === 'prototype'
-          ? `your own folder, ${row.folder}; the Workspace is read-only to you (name a repository to read it)`
+          ? `your own folder, ${row.folder}; ${planned ? 'the main checkout' : 'the Workspace'} is read-only to you (name a repository to read it)`
           : `the Workspace, ${row.folder}`,
     })
     return fields

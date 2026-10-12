@@ -1938,6 +1938,8 @@ export const coldReadFindings = sqliteTable(
  * The Freezes of a mission (#92): one per Planning cycle that ended in a Freeze, with the Spec
  * version frozen and when. `bases` is the JSON of the base commit recorded for each repository of
  * the Project (CT-24): its ref and its freshness, "not fetched since" when the fetch failed.
+ * `prototypes` is the JSON of the Prototypers' results by then, each with the user's verdict or
+ * none (#222).
  */
 export const freezes = sqliteTable(
   'freezes',
@@ -1949,6 +1951,7 @@ export const freezes = sqliteTable(
     cycle: integer('cycle').notNull(),
     specVersion: integer('spec_version').notNull(),
     bases: text('bases').notNull(),
+    prototypes: text('prototypes').notNull().default('[]'),
     frozenAt: text('frozen_at').notNull(),
   },
   (table) => [uniqueIndex('freeze_once_per_cycle').on(table.missionId, table.cycle)],
@@ -2719,13 +2722,15 @@ export const buildingDecisions = sqliteTable(
 )
 
 /**
- * The helpers of a Building (#145): child sessions the Builder, or a helper at depth 1, launched.
+ * The helpers (#145): child sessions the Builder, or a helper at depth 1, launched in Building, and
+ * the Prototypers the Planner launched in Planning (#222).
  * `number` makes its id (`H2`) within the mission; `parentLineage` is the session that launched it;
  * `definition` the defined helper it runs, or null for a free one; `taskId` the task it is tied to,
  * or null. `place` is `workspace` or `prototype`, `folder` where it works. `tools` (JSON) are the
  * tools its parent chose for a free one, or null for its role's. `state` runs `running` → `done`
  * or `failed`; `stuck` is set while its session is silent in a turn; `result` is its validated
- * result (JSON).
+ * result (JSON). A Prototyper's `verdict` is the user's on its result (`validated`, `set-aside`),
+ * with their `verdictNote` and when (`judgedAt`); null until they judge it.
  */
 export const helpers = sqliteTable(
   'helpers',
@@ -2751,6 +2756,9 @@ export const helpers = sqliteTable(
     failure: text('failure').$type<Masked<string>>(),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
+    verdict: text('verdict'),
+    verdictNote: text('verdict_note').$type<Masked<string>>(),
+    judgedAt: text('judged_at'),
   },
   (table) => [
     unique('helper_number_in_mission').on(table.missionId, table.number),

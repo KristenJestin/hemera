@@ -8,7 +8,7 @@
  * not there.
  */
 
-import { renderSpecMarkdown } from '@hemera/core/domain'
+import { PLANNER_PROTOTYPE_RULE, renderSpecMarkdown } from '@hemera/core/domain'
 import type { LivingDomain } from '@hemera/ipc'
 import { Effect } from 'effect'
 
@@ -105,6 +105,14 @@ answer with \`triage_answer\` (\`delivered\`) and name the requirement; say whet
   leave them out).
 - A scenario that describes a wrong behaviour seen today needs a Probe that reproduced it. If it
   cannot be reproduced, ask. Never guess.
+
+## The Prototyper
+- ${PLANNER_PROTOTYPE_RULE.split('\n').join('\n  ')}
+- It works in its own throwaway folder, never in the main checkout. Keep working while it runs;
+  \`helper_read\` says where it stands.
+- \`[hemera:result]\` brings what it tried, what works, what does not, and its files kept as
+  evidence. The user judges it on the Planning page before the Freeze; write what they validate
+  into the Spec (Decisions, or the requirement it shapes), as you would an answer.
 
 ## Proofs and tasks
 - Every scenario has a Proof: the exact actions, the starting data, the command or the test (its
