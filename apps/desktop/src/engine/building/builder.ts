@@ -102,6 +102,7 @@ import { PROOF_KINDS, type ProofNeeds, buildingProofs } from './proofs.ts'
 import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
 import { OutsideChanges } from './outside.ts'
+import { prototypeWriteRefusal } from './prototype-files.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
 import {
   attemptFiles,
@@ -1342,6 +1343,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         Effect.gen(function* () {
           const missionId = call.session.missionId
           if (missionId === null || call.path === null) return null
+          // A frozen prototype is read, never written: by the Builder or by a helper (#235).
+          if (call.session.role === 'builder' || call.session.role === 'helper') {
+            const kept = yield* prototypeWriteRefusal(missionId, call.path.resolved)
+            if (kept !== null) return kept
+          }
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null) return null

@@ -21,11 +21,12 @@ import {
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
-import type { BriefField, BriefedSession, RoleEntry, SessionOwner } from '../sessions/roles.ts'
+import type { BriefedSession, RoleEntry, SessionOwner } from '../sessions/roles.ts'
 import { sessionsOfLineage } from '../sessions/store.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions } from '../storage/schema.ts'
 import { helperOfLineage } from './helper-store.ts'
+import { frozenPrototypesOf, prototypesSaid } from './prototype-files.ts'
 import { latestBuildingIn, tasksIn } from './tasks.ts'
 
 /** The free helper's layer of the instructions, as the ticket writes it. */
@@ -37,10 +38,10 @@ an agent, not the user: nobody else reads your answer.
 
 ## Inputs
 Your parent's brief, the task it is tied to if any (its scenarios and target files), the frozen
-Spec, the Notes, whether you may write, your depth (1 or 2).
+Spec, the prototypes frozen with it, the Notes, whether you may write, your depth (1 or 2).
 
 ## Tools
-A subset of your parent's: fs_read, fs_list, search; fs_write, fs_edit if you may write (a file
+A subset of your parent's: fs_read, fs_list, search, prototype_read; fs_write, fs_edit if you may write (a file
 another running task holds is refused); commands_run, commands_output, commands_stop; task_start,
 task_finished, task_blocked for your task only; need_propose when Hemera asks you; proof_run for
 a scenario your task covers; note_add;
@@ -53,6 +54,9 @@ helper_launch and helper_read at depth 1 only; helper_result.
   of its output. Fix it in the same task, then task_finished again. After the third red, Hemera
   asks the user; answer what you propose with need_propose when asked.
 - A write refused because another task holds the file: leave the file, say so in your result.
+- Prototypes frozen with the Spec, if your brief lists them: follow a validated one for the
+  interface, do not do what a set-aside one showed, and read their files with prototype_read; you
+  never write them.
 - The user may change files in the Workspace themselves. Hemera tells you which ones.
 - A launch refused by the cap or the budget is an answer: do the work yourself.
 - A call held for approval has not happened: go on with what does not depend on it.
@@ -96,7 +100,12 @@ const helperBriefOf = (owner: SessionOwner, session: BriefedSession) =>
         ? undefined
         : (yield* tasksIn(database, building.id)).find((one) => one.id === row.taskId)
     const definition = row.definition === null ? null : PROTOTYPER
-    const fields: ReadonlyArray<BriefField> = helperBriefFields({
+    // The prototypes frozen with the Spec are a Building helper's to know; a Prototyper's are its own.
+    const prototypes =
+      planned || row.place === 'prototype'
+        ? null
+        : prototypesSaid(yield* frozenPrototypesOf(owner.missionId))
+    const fields = helperBriefFields({
       label: helperLabel(row.number),
       parentRole,
       missionKey: missionKey(mission.prefix, mission.number),
@@ -120,7 +129,7 @@ const helperBriefOf = (owner: SessionOwner, session: BriefedSession) =>
           ? `your own folder, ${row.folder}; ${planned ? 'the main checkout' : 'the Workspace'} is read-only to you (name a repository to read it)`
           : `the Workspace, ${row.folder}`,
     })
-    return fields
+    return [...fields, { label: 'Prototypes', text: prototypes }]
   })
 
 export const HELPER_ROLE: RoleEntry = {

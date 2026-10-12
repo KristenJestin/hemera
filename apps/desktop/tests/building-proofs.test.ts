@@ -66,7 +66,7 @@ const proofsEngine = (dataFolder: string, hold: BuilderHold = () => Effect.void)
 const launchedWith = (
   proofs: (api: string) => Readonly<Record<string, Schema.JsonObject>>,
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
-) => launched(work, undefined, undefined, plan, undefined, proofs)
+) => launched(work, undefined, undefined, plan, undefined, undefined, proofs)
 
 /** What runs a test file of `api`, its report in TAP whatever the terminal. */
 const testLine = (path: string) => `"${process.execPath}" --test --test-reporter=tap ${path}`
@@ -689,6 +689,7 @@ describe('The green runs', () => {
             undefined,
             undefined,
             undefined,
+            undefined,
             exportProof,
           )
           yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
@@ -1164,6 +1165,7 @@ describe('The proofs’ reach', () => {
             'The exports change api, web and nothing else',
             undefined,
             undefined,
+            undefined,
             () => ({
               'R1.S2': automated(
                 path,
@@ -1413,6 +1415,7 @@ describe('What the user answers on a red', () => {
                   files: null,
                 }),
               ),
+            undefined,
             undefined,
             undefined,
             undefined,

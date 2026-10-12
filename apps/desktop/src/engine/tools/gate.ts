@@ -130,6 +130,7 @@ import { dependencyProposeTool, reliesOnWriteTool } from '../planning/dependenci
 import { answerProposeTool } from '../planning/proposals-store.ts'
 import { ticketEventReportTool } from '../tickets/event-report.ts'
 import { prelaunchReportTool } from '../building/report.ts'
+import { prototypeReadTool } from '../building/prototype-files.ts'
 import type { TesterFindings } from '../tester/findings.ts'
 import { hemeraReport, hemeraReports } from '../tester/tools.ts'
 import type { GhCli } from '../tickets/gh.ts'
@@ -416,6 +417,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.helper_launch.input)(raw)
     case 'helper_read':
       return decoder(tool, TOOLS.helper_read.input)(raw)
+    case 'prototype_read':
+      return decoder(tool, TOOLS.prototype_read.input)(raw)
     case 'helper_result':
       return decoder(tool, TOOLS.helper_result.input)(raw)
     case 'hemera_report':
@@ -905,6 +908,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* HelperDesk.use((desk) => desk.launch(grant, call.args))
             case 'helper_read':
               return yield* HelperDesk.use((desk) => desk.read(grant, call.args))
+            case 'prototype_read':
+              return yield* prototypeReadTool(grant, call.args, home)
             case 'helper_result':
               return yield* HelperDesk.use((desk) => desk.result(grant, call.args))
             case 'docs_report':
