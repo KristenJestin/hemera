@@ -15,6 +15,9 @@
  * - `write` (#98): the issue read again, then its description replaced (`PUT …/issue/{key}`, the
  *   `description` field only: ADF on Cloud, wiki markup on Data Center), then read back. A 400 on
  *   the write is the description refused: too long when Jira says so, a refusal in its words else.
+ * - `edits` (#207): the issue's changelog, its `description` items: on Cloud `…/changelog`, paged
+ *   from the oldest; on Data Center the issue read with `expand=changelog`. Each with its date, its
+ *   author, and its `toString`, the description it left, read as wiki markup.
  * - Descriptions and comments become Markdown (ADF or wiki markup) and go through `readSections`;
  *   the fingerprint is taken on Jira's own text.
  * - Jira's messages come as they are, masked.
@@ -56,6 +59,7 @@ import { Database, refusedWhile } from '../storage/database.ts'
 import { jiraTokens } from '../storage/schema.ts'
 import { type JiraAnswer, JiraLink, jiraLabel } from './jira-link.ts'
 import {
+  type DescriptionEdit,
   MissingTicket,
   MovedTicket,
   type TicketChange,
@@ -69,6 +73,8 @@ import {
 const SEARCH_LIMIT = 20
 /** How many keys one grouped `changedSince` request asks about. */
 export const CHANGED_BATCH = 50
+/** How many changes one page of a changelog asks for. */
+const CHANGELOG_PAGE = 100
 /** How many comments one page asks for. */
 const COMMENT_PAGE = 100
 /** A rate limit whose reset Jira did not say is waited out this long. */
@@ -170,11 +176,35 @@ const SearchAnswer = Schema.Struct({
   ),
 })
 
+const History = Schema.Struct({
+  author: Schema.optionalKey(Named),
+  created: Schema.String,
+  items: Schema.Array(
+    Schema.Struct({
+      field: Schema.String,
+      toString: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    }),
+  ),
+})
+
+/** A page of a Cloud issue's changelog, from the oldest. */
+const ChangelogPage = Schema.Struct({
+  isLast: Schema.optionalKey(Schema.Boolean),
+  values: Schema.Array(History),
+})
+
+/** A Data Center issue read with its changelog. */
+const ChangelogIssue = Schema.Struct({
+  changelog: Schema.Struct({ histories: Schema.Array(History) }),
+})
+
 const Myself = Schema.Struct({ displayName: Schema.optionalKey(Schema.String) })
 
 const readIssue = Schema.decodeUnknownOption(Schema.fromJsonString(IssueAnswer))
 const readComments = Schema.decodeUnknownOption(Schema.fromJsonString(CommentsAnswer))
 const readSearch = Schema.decodeUnknownOption(Schema.fromJsonString(SearchAnswer))
+const readChangelogPage = Schema.decodeUnknownOption(Schema.fromJsonString(ChangelogPage))
+const readChangelogIssue = Schema.decodeUnknownOption(Schema.fromJsonString(ChangelogIssue))
 const readMyself = Schema.decodeUnknownOption(Schema.fromJsonString(Myself))
 const readDocument = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
@@ -699,6 +729,61 @@ export const jiraProvider = (info: TicketProviderInfo, jira: JiraProviderConfig)
         }),
       )
 
+    /** The description edits of a changelog's histories. */
+    const descriptionEdits = (
+      histories: ReadonlyArray<typeof History.Type>,
+    ): ReadonlyArray<DescriptionEdit> =>
+      histories.flatMap((history) =>
+        history.items
+          .filter((item) => item.field === 'description')
+          .map((item) => ({
+            at: jiraInstant(history.created),
+            author: history.author?.displayName ?? null,
+            description: wikiToMarkdown(item.toString ?? ''),
+          })),
+      )
+
+    const unreadableHistory = (key: string) =>
+      new TicketUnreadable({
+        key,
+        detail: `${key}'s history could not be read: Jira's answer was not the one asked for.`,
+      })
+
+    const edits = (reference: TicketReference) =>
+      inContext(
+        Effect.gen(function* () {
+          if (!Predicate.isTagged(reference, 'JiraKey')) {
+            return yield* new TicketUnreadable({
+              key: label,
+              detail: 'This reference is not a Jira key.',
+            })
+          }
+          const key = reference.key
+          const session = yield* opened
+          if (jira.deployment === 'datacenter') {
+            const answer = yield* session.get(
+              `/issue/${encodeURIComponent(key)}?fields=updated&expand=changelog`,
+            )
+            if (answer.status !== 200) return yield* failureOf(label, key, answer, mask)
+            const decoded = readChangelogIssue(answer.body)
+            if (Option.isNone(decoded)) return yield* unreadableHistory(key)
+            return descriptionEdits(decoded.value.changelog.histories)
+          }
+          const histories: Array<typeof History.Type> = []
+          for (;;) {
+            const page = yield* session.get(
+              `/issue/${encodeURIComponent(key)}/changelog?startAt=${String(histories.length)}&maxResults=${String(CHANGELOG_PAGE)}`,
+            )
+            if (page.status !== 200) return yield* failureOf(label, key, page, mask)
+            const decoded = readChangelogPage(page.body)
+            if (Option.isNone(decoded)) return yield* unreadableHistory(key)
+            histories.push(...decoded.value.values)
+            if (decoded.value.values.length === 0 || decoded.value.isLast !== false) break
+          }
+          return descriptionEdits(histories)
+        }),
+      )
+
     return {
       kind: 'jira',
       label,
@@ -708,5 +793,6 @@ export const jiraProvider = (info: TicketProviderInfo, jira: JiraProviderConfig)
       search,
       changedSince,
       write,
+      edits,
     } satisfies TicketProvider
   })

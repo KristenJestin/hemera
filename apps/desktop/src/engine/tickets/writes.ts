@@ -17,6 +17,17 @@
  * - **A stop between the intent and the outcome** leaves the write `indeterminate`; the next start
  *   settles it from what the ticket holds: the Spec, `done`; what Hemera knew before, `failed` and
  *   queued once again; anything else, a conflict.
+ * - **The window** (#207): neither tracker takes a precondition on its write, so an edit landing
+ *   between the read again and the write is overwritten. Once the ticket holds the Spec, its edit
+ *   history is read: an edit made inside the window, by the tracker's own dates, is kept as a
+ *   version (the write's `conflict_version_id`) and a decision is asked with both versions: their
+ *   edit taken into the Spec (the mission outdated with it) or the Spec kept as written.
+ * - **The effectful action** (#33, CT-09): each sending of a write is an action of kind
+ *   `ticket.write` whose id is made from the write's own record, its id and the `started_at` its
+ *   intent wrote (`writeActionId`), committed in the same transaction. The write settles it from
+ *   its own outcome: `done` when the ticket holds the Spec, `failed` when it did not land,
+ *   `indeterminate` while nobody can say. It has no post-condition of its own, so the start's
+ *   reconciliation never replays it, nor counts it done.
  * - **A failed write blocks nothing**: it is said once (`tickets.write_failed`, a notification),
  *   and the user's Retry queues it again. A write a return to Planning, a later Freeze, an ended
  *   mission or a Project no longer in remote mode made stale is dropped, never sent.
@@ -35,16 +46,26 @@ import {
   type TicketWriteState,
   TICKET_WRITE_STATES,
   TicketTooLong,
+  KEEP_SPEC_WRITTEN,
+  type Masked,
+  TAKE_OVERWRITTEN_EDIT,
   WRITE_SPEC_OVER,
   lineDifference,
   maskText,
+  maskedJson,
   normalisedText,
   parseTicketReference,
   remoteSpecReadBack,
   remoteSpecTooLong,
   renderRemoteSpec,
+  type TicketReference,
 } from '@hemera/core/domain'
-import { type TicketWriteInfo, TicketWriteRefused, UnknownTicketWrite } from '@hemera/ipc'
+import {
+  type Need,
+  type TicketWriteInfo,
+  TicketWriteRefused,
+  UnknownTicketWrite,
+} from '@hemera/ipc'
 import { and, asc, desc, eq, inArray, max, sql } from 'drizzle-orm'
 import {
   Cause,
@@ -92,12 +113,20 @@ import {
   seenOverWriteIn,
   writtenByHemeraIn,
 } from './events.ts'
+import { beginActionIn, settleActionIn } from '../tools/actions.ts'
 import { observed } from './link.ts'
-import { descriptionFingerprint, isOutage, specFingerprint } from './provider.ts'
+import {
+  type DescriptionEdit,
+  descriptionFingerprint,
+  isOutage,
+  overwrittenEdit,
+  specFingerprint,
+  ticketFingerprint,
+} from './provider.ts'
 import { type LiveProvider, TicketProviders } from './search.ts'
 import { getProvider } from './store.ts'
 import { ticketEnd } from './text.ts'
-import { maskedVersion, versionOf } from './versions.ts'
+import { insertVersion, maskedVersion, versionOf } from './versions.ts'
 
 /** The engine service the decisions of a conflict belong to. */
 export const TICKET_WRITES = needService('ticket-writes')
@@ -390,19 +419,63 @@ const moveWrite = (
 ) =>
   mutate(`moving a write of the Spec to ${to.state}`, (transaction) =>
     Effect.gen(function* () {
-      const moved = yield* transaction
+      const [current] = yield* transaction
+        .select({ state: ticketWrites.state, startedAt: ticketWrites.startedAt })
+        .from(ticketWrites)
+        .where(and(eq(ticketWrites.id, row.id), inArray(ticketWrites.state, [...from])))
+        .pipe(Effect.mapError(refusedWhile('reading a write of the Spec')))
+      if (current === undefined) return { result: false, events: [] }
+      yield* transaction
         .update(ticketWrites)
         .set({ ...to, updatedAt: now() })
-        .where(and(eq(ticketWrites.id, row.id), inArray(ticketWrites.state, [...from])))
-        .returning({ id: ticketWrites.id })
+        .where(eq(ticketWrites.id, row.id))
         .pipe(Effect.mapError(refusedWhile('moving a write of the Spec')))
-      if (moved.length === 0) return { result: false, events: [] }
+      const settled = yield* settleWriteActionIn(transaction, row, current, to.state, to.error)
       const projectId = yield* projectIdOf(transaction, row.missionId)
-      return { result: true, events: [writeEvent(type, row, projectId, payload)] }
+      return { result: true, events: [writeEvent(type, row, projectId, payload), ...settled] }
     }),
   )
 
 const ANY_TAKEN: ReadonlyArray<TicketWriteState> = [...PENDING_STATES, 'started']
+
+/** The effectful action of one sending of a write: made from the write's id and its intent's date. */
+export const writeActionId = (writeId: string, startedAt: string): string =>
+  `ticket-write:${writeId}:${startedAt}`
+
+/**
+ * In the transaction that moves a write: the action of its sending, when it was sent and not yet
+ * settled (`started` or `indeterminate`), settled from where the write goes: `done` when the ticket
+ * holds the Spec, `indeterminate` while nobody can say, `failed` for anything else (it did not
+ * land). Answers its events.
+ */
+const settleWriteActionIn = (
+  transaction: EngineTransaction,
+  row: Pick<WriteRow, 'id' | 'key'>,
+  current: { readonly state: string; readonly startedAt: string | null },
+  to: TicketWriteState,
+  error: Masked<string> | null | undefined,
+): Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError> => {
+  if (
+    current.startedAt === null ||
+    (current.state !== 'started' && current.state !== 'indeterminate') ||
+    to === current.state
+  ) {
+    return Effect.succeed([])
+  }
+  const id = writeActionId(row.id, current.startedAt)
+  if (to === 'done') {
+    return settleActionIn(transaction, id, 'done', maskText(`The Spec reached ${row.key}.`, []))
+  }
+  if (to === 'indeterminate') {
+    return settleActionIn(transaction, id, 'indeterminate', null)
+  }
+  return settleActionIn(
+    transaction,
+    id,
+    'failed',
+    error ?? maskText(`The Spec did not reach ${row.key}.`, []),
+  )
+}
 
 /** The write failed, in a sentence: said once, blocking nothing. */
 const failWrite = (row: WriteRow, sentence: string) =>
@@ -490,13 +563,14 @@ const conflictWrite = (row: WriteRow, before: string | null, read: TicketVersion
     yield* mutate('recording a conflict of the Spec’s write', (transaction) =>
       Effect.gen(function* () {
         const [current] = yield* transaction
-          .select({ state: ticketWrites.state })
+          .select({ state: ticketWrites.state, startedAt: ticketWrites.startedAt })
           .from(ticketWrites)
           .where(eq(ticketWrites.id, row.id))
           .pipe(Effect.mapError(refusedWhile('reading a write of the Spec')))
         if (current === undefined || !ANY_TAKEN.includes(stateOf(current.state))) {
           return { result: undefined, events: [] }
         }
+        const settled = yield* settleWriteActionIn(transaction, row, current, 'conflict', null)
         const [link] = yield* transaction
           .select({ last: missionTickets.lastVersionId })
           .from(missionTickets)
@@ -535,10 +609,130 @@ const conflictWrite = (row: WriteRow, before: string | null, read: TicketVersion
             }),
             ...asked.events,
             ...marked,
+            ...settled,
           ],
         }
       }),
     )
+  })
+
+/**
+ * The decision an edit overwritten inside a write's window asks (#207), with both versions: their
+ * edit, quoted as data, and the Spec the ticket holds now.
+ */
+const overwroteQuestion = (key: string, lost: DescriptionEdit, spec: string): string =>
+  [
+    `${key} was edited${lost.author === null ? '' : ` by ${lost.author}`} at ${lost.at}, after Hemera read it and before the Spec reached it: the Spec was written over that edit, which the ticket no longer holds.`,
+    [
+      TICKET_DATA_LABEL,
+      quoted(lost.description === '' ? '(an empty description)' : lost.description),
+      ticketEnd(key),
+    ].join('\n'),
+    [`The Spec now in ${key}:`, quoted(spec)].join('\n'),
+    `“${TAKE_OVERWRITTEN_EDIT}” marks the mission outdated with their edit, for the Spec to take it in. “${KEEP_SPEC_WRITTEN}” leaves the Spec as written.`,
+  ].join('\n\n')
+
+/**
+ * An edit the write overwrote (#207): the write stays done, the edit is kept as a version (the
+ * write's `conflict_version_id`), and a decision is asked. `back` is the ticket holding the Spec.
+ */
+const overwroteWrite = (row: WriteRow, back: TicketVersion, lost: DescriptionEdit) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets
+    const database = yield* Database
+    const [mission] = yield* database
+      .select({ projectId: missions.projectId })
+      .from(missions)
+      .where(eq(missions.id, row.missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission')))
+    if (mission === undefined) return
+    const shown: DescriptionEdit = {
+      at: lost.at,
+      author: lost.author === null ? null : secrets.mask(lost.author),
+      description: secrets.mask(lost.description),
+    }
+    const need = yield* createNeedIn(
+      TICKET_WRITES,
+      MissionOwner.make({ projectId: mission.projectId, missionId: row.missionId, taskId: null }),
+      DecisionFields.make({
+        question: overwroteQuestion(row.key, shown, maskedVersion(back, secrets.mask).description),
+        options: [TAKE_OVERWRITTEN_EDIT, KEEP_SPEC_WRITTEN],
+        recommended: null,
+      }),
+    )
+    yield* mutate('recording an edit the Spec’s write overwrote', (transaction) =>
+      Effect.gen(function* () {
+        const [current] = yield* transaction
+          .select({ state: ticketWrites.state, needId: ticketWrites.needId })
+          .from(ticketWrites)
+          .where(eq(ticketWrites.id, row.id))
+          .pipe(Effect.mapError(refusedWhile('reading a write of the Spec')))
+        if (current?.state !== 'done' || current.needId !== null) {
+          return { result: undefined, events: [] }
+        }
+        // A mission that ended meanwhile is asked nothing.
+        const refused: AskedNeed = { id: null, events: [] }
+        const asked = yield* need(transaction).pipe(
+          Effect.catchTag('NeedRefused', () => Effect.succeed(refused)),
+        )
+        if (asked.id === null) return { result: undefined, events: [] }
+        const versionId = yield* insertVersion(
+          transaction,
+          row.missionId,
+          row.providerId,
+          {
+            ...back,
+            description: lost.description,
+            updatedAt: lost.at,
+            readAt: now(),
+            fingerprint: ticketFingerprint(back.title, lost.description),
+          },
+          secrets.mask,
+        )
+        yield* transaction
+          .update(ticketWrites)
+          .set({ needId: asked.id, conflictVersionId: versionId, updatedAt: now() })
+          .where(eq(ticketWrites.id, row.id))
+          .pipe(Effect.mapError(refusedWhile('recording an edit the Spec’s write overwrote')))
+        return {
+          result: undefined,
+          events: [
+            writeEvent('tickets.write_overwrote', row, mission.projectId, {
+              at: shown.at,
+              author: shown.author ?? '',
+            }),
+            ...asked.events,
+          ],
+        }
+      }),
+    )
+  })
+
+/**
+ * Once the ticket holds the Spec (#207): its edit history read, and an edit landing inside the
+ * window, between `before` (the ticket as read before the write, masked) and the write, is never
+ * kept silent. A history out of reach leaves the write done, unchecked.
+ */
+const checkWindow = (
+  row: WriteRow,
+  live: LiveProvider,
+  reference: TicketReference,
+  before: TicketVersion | null,
+  back: TicketVersion,
+) =>
+  Effect.gen(function* () {
+    if (before === null) return
+    const read = yield* Effect.result(observed(live, live.provider.edits(reference)))
+    if (Result.isFailure(read)) {
+      if (read.failure instanceof DatabaseError) return yield* Effect.fail(read.failure)
+      return
+    }
+    const lost = overwrittenEdit(read.success, before.updatedAt, back.updatedAt)
+    if (lost === null) return
+    // Edited and edited back before the write: nothing was lost.
+    const secrets = yield* Secrets
+    if (sameText(secrets.mask(lost.description), before.description)) return
+    yield* overwroteWrite(row, back, lost)
   })
 
 /** The decision a conflict asked, or none when its mission ended meanwhile. */
@@ -603,12 +797,13 @@ const takeWrite = (row: WriteRow, lastKnown: string | null) =>
               : [writeEvent('tickets.write_dropped', row, projectId, { error: stale })],
         }
       }
+      const startedAt = now()
       const taken = yield* transaction
         .update(ticketWrites)
         .set({
           state: 'started',
           expectedVersionId: lastKnown,
-          startedAt: now(),
+          startedAt,
           endedAt: null,
           error: null,
           updatedAt: now(),
@@ -616,9 +811,24 @@ const takeWrite = (row: WriteRow, lastKnown: string | null) =>
         .where(waiting)
         .returning({ id: ticketWrites.id })
         .pipe(Effect.mapError(refusedWhile('taking up a write of the Spec')))
+      if (taken.length === 0) return { result: false, events: [] }
+      // The intent of the action (#33), committed with the write's: its id is made from them both.
+      const intent = yield* beginActionIn(
+        transaction,
+        writeActionId(row.id, startedAt),
+        'ticket.write',
+        { kind: 'mission', missionId: row.missionId, taskId: null },
+        maskedJson(
+          (yield* Secrets).maskRecord({
+            write: row.id,
+            key: row.key,
+            specVersion: row.specVersion,
+          }),
+        ),
+      )
       return {
-        result: taken.length > 0,
-        events: taken.length === 0 ? [] : [writeEvent('tickets.write_started', row, projectId)],
+        result: true,
+        events: [writeEvent('tickets.write_started', row, projectId), ...intent],
       }
     }),
   )
@@ -692,6 +902,7 @@ const step = (writeId: string) =>
       // The post-condition (CT-09): the Spec, done; what Hemera knew, not written; else a conflict.
       if (holds(row, read.description)) {
         yield* doneWrite(row, info.id, read)
+        yield* checkWindow(row, live, reference, yield* keptVersion(row.expectedVersionId), read)
         return false
       }
       // Not written, and no longer to be: dropped, whatever the ticket holds (its change is kept).
@@ -751,6 +962,7 @@ const step = (writeId: string) =>
     if (Result.isSuccess(sent)) {
       if (holds(row, sent.success.description)) {
         yield* doneWrite(row, info.id, sent.success)
+        yield* checkWindow(row, live, reference, maskedVersion(read, secrets.mask), sent.success)
       } else {
         // The tracker took the write: what it holds now is what Hemera sent, as it stored it, and
         // never a change of the ticket's.
@@ -803,6 +1015,66 @@ export const runWrite = (writeId: string) =>
 
 // --- The decision, Retry and the start --------------------------------------------------------------
 
+/** A version kept, by its id, in the transaction given; null for none. */
+const keptVersionIn = (transaction: EngineTransaction, id: string | null) =>
+  Effect.gen(function* () {
+    if (id === null) return null
+    const [row] = yield* transaction
+      .select()
+      .from(ticketVersions)
+      .where(eq(ticketVersions.id, id))
+      .pipe(Effect.mapError(refusedWhile('reading a ticket version')))
+    return row === undefined ? null : versionOf(row)
+  })
+
+/**
+ * The answer to an edit a write overwrote (#207), in the transaction that marks it delivered:
+ * "Take their edit into the Spec" marks the mission outdated with what the edit changed in the
+ * ticket Hemera read; any other answer leaves the Spec as written. Nothing is ever written again.
+ */
+const overwroteAnswerIn = (transaction: EngineTransaction, row: WriteRow, need: Need) =>
+  Effect.gen(function* () {
+    const take =
+      need.answer !== null &&
+      Predicate.isTagged(need.answer, 'Chosen') &&
+      need.answer.option === TAKE_OVERWRITTEN_EDIT
+    const projectId = yield* projectIdOf(transaction, row.missionId)
+    const marked: NewEvent[] = []
+    if (take) {
+      const before = yield* keptVersionIn(transaction, row.expectedVersionId)
+      const lost = yield* keptVersionIn(transaction, row.conflictVersionId)
+      // Both kept masked already.
+      marked.push(
+        ...(yield* markOutdatedIn(
+          transaction,
+          row.missionId,
+          {
+            reason: 'ticket-changed',
+            reference: row.key,
+            difference: lineDifference(before?.description ?? '', lost?.description ?? ''),
+            expiring: [],
+          },
+          (text) => text,
+        ).pipe(
+          // A mission that ended, or is gone, is marked nothing.
+          Effect.catchTags({
+            MarkRefused: () => Effect.succeed([]),
+            UnknownMission: () => Effect.succeed([]),
+          }),
+        )),
+      )
+    }
+    yield* transaction
+      .update(ticketWrites)
+      .set({ resolution: take ? 'kept' : 'written_over', updatedAt: now() })
+      .where(eq(ticketWrites.id, row.id))
+      .pipe(Effect.mapError(refusedWhile('answering an edit the Spec’s write overwrote')))
+    return [
+      writeEvent(take ? 'tickets.overwritten_taken' : 'tickets.overwritten_left', row, projectId),
+      ...marked,
+    ]
+  })
+
 /** The sentence a write ends with once the user kept the ticket's change. */
 const KEPT_SAID = 'Not written: you kept the ticket’s change.'
 
@@ -821,7 +1093,9 @@ export const ticketWritesNeeds: NeedHandler = {
         .from(ticketWrites)
         .where(eq(ticketWrites.needId, need.id))
         .pipe(Effect.mapError(refusedWhile('reading a write of the Spec')))
-      if (row === undefined || row.state !== 'conflict' || row.resolution !== null) return []
+      if (row === undefined || row.resolution !== null) return []
+      if (row.state === 'done') return yield* overwroteAnswerIn(transaction, row, need)
+      if (row.state !== 'conflict') return []
       const projectId = yield* projectIdOf(transaction, row.missionId)
       const over =
         need.answer !== null &&
@@ -929,6 +1203,13 @@ const settleLeft = mutate('marking the writes a stop left', (transaction) =>
           row,
           yield* projectIdOf(transaction, row.missionId),
         ),
+        ...(yield* settleWriteActionIn(
+          transaction,
+          row,
+          { state: 'started', startedAt: row.startedAt },
+          'indeterminate',
+          null,
+        )),
       )
     }
     return { result: undefined, events }
