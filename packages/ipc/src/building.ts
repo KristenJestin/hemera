@@ -229,6 +229,21 @@ export const AttemptCheckView = Schema.Struct({
   outputTail: Schema.String,
   /** The run that holds its full output, or null. */
   runId: Schema.NullOr(Schema.String),
+  /** The line as it ran, `{files}` filled (#143); null when the check did not say. */
+  line: Schema.NullOr(Schema.String),
+  exitCode: Schema.NullOr(Schema.Number),
+  /** The number its expected result read. */
+  value: Schema.NullOr(Schema.Number),
+  /** The trees it ran on (#140): its repository's, or each one's at the Workspace root. */
+  trees: Schema.Array(BuildingTree),
+  /** The whole output, kept as the mission's evidence, for a final check. */
+  evidenceId: Schema.NullOr(Schema.String),
+  /**
+   * How the Building page shows it: an intermediate check stays `quiet` unless it is red, then it
+   * `stands-out`; a final check is shown in full, as evidence.
+   */
+  shown: Schema.Literals(['quiet', 'stands-out', 'final']),
+  at: Schema.String,
 })
 export type AttemptCheckView = typeof AttemptCheckView.Type
 

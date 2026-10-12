@@ -92,6 +92,9 @@ export const OUTPUT_KEPT = 64 * 1024
  */
 const OUTPUT_MARGIN = 16 * 1024
 
+/** What a run the user did not allow says: its end, and a check's red (#143). */
+export const NOT_ALLOWED = 'The user did not allow it to run.'
+
 /** How often, and for how long, a service's address is asked whether it answers. */
 export const READINESS_EVERY_MS = 500
 export const READINESS_FOR_MS = 60_000
@@ -547,6 +550,13 @@ export interface RunAsked {
    * reservation or its permission. When it fails, the run is not started.
    */
   readonly beforeLaunch?: Effect.Effect<void, LaunchWithdrawn>
+  /**
+   * A check's run (#143): the line it runs (the mission's copy of its command's, `{files}` filled)
+   * and its folder under the place, in place of the catalogue's. A command no longer in the
+   * catalogue still runs from it, as a line: only its marks (ask before running, its resources)
+   * are read live, and a command gone has none.
+   */
+  readonly copied?: { readonly line: string; readonly folder: string | null }
 }
 
 /** A line checked for a run: no shell syntax, only template names Hemera fills. */
@@ -590,9 +600,20 @@ export const startRun = (asked: RunAsked) =>
   Effect.gen(function* () {
     const runs = yield* Runs
     let place = yield* placeOf(asked.projectId, asked.workspaceId)
+    const copied = asked.copied
     const command =
-      asked.commandId === null ? null : yield* getCommand(asked.projectId, asked.commandId)
-    if (command === null && (asked.line === null || asked.line.trim() === '')) {
+      asked.commandId === null
+        ? null
+        : copied === undefined
+          ? yield* getCommand(asked.projectId, asked.commandId)
+          : yield* getCommand(asked.projectId, asked.commandId).pipe(
+              Effect.catchTag('UnknownCommand', () => Effect.succeed(null)),
+            )
+    if (
+      copied === undefined &&
+      command === null &&
+      (asked.line === null || asked.line.trim() === '')
+    ) {
       return yield* new InvalidCommand({
         reason: 'name a command of the catalogue or write a line',
       })
@@ -607,7 +628,12 @@ export const startRun = (asked: RunAsked) =>
       if (joined !== null) return joined.run
     }
 
-    const line = command === null ? (asked.line ?? '').trim() : lineFor(command, runs.platform)
+    const line =
+      copied !== undefined
+        ? copied.line.trim()
+        : command === null
+          ? (asked.line ?? '').trim()
+          : lineFor(command, runs.platform)
     yield* runnable(line)
     const values = templateValuesOf(place)
     const relativeFolder =
@@ -615,14 +641,16 @@ export const startRun = (asked: RunAsked) =>
         ? yield* Effect.fromResult(repositoryPath(asked.folder))
         : null
     const folder =
-      command === null
-        ? join(
-            place.folder,
-            relativeFolder === null || relativeFolder === ROOT_REPOSITORY
-              ? ''
-              : fillTemplate(relativeFolder, values),
-          )
-        : commandFolder(place, command)
+      copied !== undefined
+        ? join(place.folder, fillTemplate(copied.folder ?? '', values))
+        : command === null
+          ? join(
+              place.folder,
+              relativeFolder === null || relativeFolder === ROOT_REPOSITORY
+                ? ''
+                : fillTemplate(relativeFolder, values),
+            )
+          : commandFolder(place, command)
     const words = wordsOf(line).map((word) => fillTemplate(word, values))
     if (words.length === 0) return yield* new InvalidCommand({ reason: 'its line is empty' })
     const portless =
@@ -786,7 +814,7 @@ export const startRun = (asked: RunAsked) =>
           Effect.gen(function* () {
             if (answer === 'denied') {
               live.waiting = null
-              return yield* endRun(live, 'failed', null, 'The user did not allow it to run.')
+              return yield* endRun(live, 'failed', null, NOT_ALLOWED)
             }
             live.run = { ...live.run, state: 'starting' }
             yield* proceed

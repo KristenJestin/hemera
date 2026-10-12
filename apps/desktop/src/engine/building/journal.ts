@@ -1,6 +1,6 @@
 /**
  * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
- * (#141) with its attempts and their verdicts (#142): each the projection of the domain event written in the same transaction as what it
+ * (#141) with its attempts and their verdicts (#142) and its checks (#143): each the projection of the domain event written in the same transaction as what it
  * records.
  */
 
@@ -245,6 +245,32 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       (payload) =>
         `${stringOf(payload, 'task')} committed in ${stringOf(payload, 'repository')}: ${stringOf(payload, 'commit').slice(0, 12)}.`,
     ),
+  ],
+  [
+    'building.checks_ran',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Checks ${stringOf(payload, 'when')}: ${stringOf(payload, 'verdict').replace('_', ' ')}.`,
+    ),
+  ],
+  [
+    'building.check_red',
+    lineOf(byHemera, (payload) => {
+      const place = stringOf(payload, 'place')
+      return `${stringOf(payload, 'check')} is red in ${place === '' ? 'the Workspace root' : place}.`
+    }),
+  ],
+  [
+    'building.check_waiting',
+    lineOf(byHemera, (payload) => {
+      const waiting = stringOf(payload, 'waiting')
+      return `${stringOf(payload, 'check')} waits for ${waiting === 'permission' ? 'your permission' : waiting}.`
+    }),
+  ],
+  [
+    'building.final_checks',
+    lineOf(byHemera, (payload) => `Final checks: ${stringsOf(payload, 'checks').join(', ')}.`),
   ],
   [
     'mission.changed_outside',

@@ -31,8 +31,65 @@ export function temporaryFolder(name: string): string {
   made.push(folder)
   return folder
 }
+
+/** What removes a folder and its content, throwing what the system answers. */
+export type Remover = (folder: string) => void
+
+export const removeTree: Remover = (folder) => rmSync(folder, { recursive: true, force: true })
+
+/** Windows answers these while a file is held for a moment (a child just ended, a scan). */
+const TRANSIENT = ['EPERM', 'EBUSY', 'ENOTEMPTY']
+const ATTEMPTS = 10
+const RETRY_MILLIS = 100
+
+const sleep = (millis: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, millis)
+}
+
+/**
+ * Removes a folder, trying again while the system holds it for a moment, each wait longer than
+ * the last. Held for good, the last answer is thrown with the folder's path.
+ */
+export function removeWithRetries(
+  folder: string,
+  remove: Remover = removeTree,
+  wait: (millis: number) => void = sleep,
+): void {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      remove(folder)
+      return
+    } catch (failure) {
+      const transient =
+        failure instanceof Error &&
+        TRANSIENT.some((code) => 'code' in failure && failure.code === code)
+      if (!transient || attempt === ATTEMPTS) {
+        const said = failure instanceof Error ? failure.message : 'it failed'
+        throw new Error(`could not remove ${folder} (${String(attempt)} attempts): ${said}`, {
+          cause: failure,
+        })
+      }
+      wait(RETRY_MILLIS * attempt)
+    }
+  }
+}
+
+/** Removes every folder made, the ones that can be even when one cannot; then throws for those. */
+export function removeFoldersWith(remove: Remover, wait: (millis: number) => void): void {
+  const failures: Error[] = []
+  for (const folder of made.splice(0)) {
+    try {
+      removeWithRetries(folder, remove, wait)
+    } catch (failure) {
+      if (failure instanceof Error) failures.push(failure)
+    }
+  }
+  const [first] = failures
+  if (first !== undefined) throw first
+}
+
 export function removeFolders(): void {
-  for (const folder of made.splice(0)) rmSync(folder, { recursive: true, force: true })
+  removeFoldersWith(removeTree, sleep)
 }
 
 /**
