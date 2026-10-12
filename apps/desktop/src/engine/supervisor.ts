@@ -77,8 +77,11 @@ export interface Supervised {
   readonly kill: Effect.Effect<void>
   /** Each line it writes on its standard output, as it arrives. */
   readonly onStdout: (read: (line: string) => void, done?: () => void) => void
-  /** Each line it writes on its standard error, as it arrives (the diagnostic has them too). */
-  readonly onStderr: (read: (line: string) => void) => void
+  /**
+   * Each line it writes on its standard error, as it arrives (the diagnostic has them too); `done`
+   * once that output is closed, after the last line.
+   */
+  readonly onStderr: (read: (line: string) => void, done?: () => void) => void
 }
 
 /** What a process can be told. */
@@ -109,7 +112,7 @@ export interface HostProcess {
   readonly onFailure: (failed: (reason: string) => void) => void
   /** Each line of its standard output; `done` once the output is closed, after the last line. */
   readonly onStdout: (read: (line: string) => void, done?: () => void) => void
-  readonly onStderr: (read: (line: string) => void) => void
+  readonly onStderr: (read: (line: string) => void, done?: () => void) => void
 }
 
 /** The machine: starting a child, ending a tree, and asking about a pid. */
@@ -257,8 +260,8 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
       onStdout: (read, done) => {
         if (child.stdout !== null) linesOf(child.stdout, read, done)
       },
-      onStderr: (read) => {
-        if (child.stderr !== null) linesOf(child.stderr, read)
+      onStderr: (read, done) => {
+        if (child.stderr !== null) linesOf(child.stderr, read, done)
       },
     }
   },
@@ -605,7 +608,7 @@ export const processSupervisorLayer = Layer.effect(
           stop: stopOf(child),
           kill: killOf(child),
           onStdout: (read, done) => started.onStdout(read, done),
-          onStderr: (read) => started.onStderr(read),
+          onStderr: (read, done) => started.onStderr(read, done),
         })),
       )
 
