@@ -142,6 +142,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'exclusive_resource_commands',
       'exclusive_resources',
       'file_contents',
+      'forge_needs',
       'freeze_files',
       'freeze_once_per_cycle',
       'freezes',

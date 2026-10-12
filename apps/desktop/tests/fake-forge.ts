@@ -168,26 +168,34 @@ export const ghSignedOut = (host = 'github.com'): ReadonlyArray<FakeRule> => [
   { cli: 'gh', when: [host], stderr: 'not logged in\n', code: 1 },
 ]
 
-/** `bkt` signed in on these hosts (its configured hosts), at a version. */
+/** Bitbucket Cloud as bkt stores it: under the API's host, whatever URL the login was given. */
+export const BKT_CLOUD = { base: 'https://api.bitbucket.org/2.0', kind: 'cloud' } as const
+
+/**
+ * `bkt` signed in on these hosts, at a version, as `bkt auth status --json` prints them: each host
+ * keyed by the host of its base URL, port included (`HostKeyFromURL`), indented.
+ */
 export const bktReady = (
-  hosts: ReadonlyArray<{ readonly key: string; readonly kind: 'cloud' | 'dc' }> = [
-    { key: 'bitbucket.org', kind: 'cloud' },
-  ],
+  hosts: ReadonlyArray<{ readonly base: string; readonly kind: 'cloud' | 'dc' }> = [BKT_CLOUD],
 ): ReadonlyArray<FakeRule> => [
   { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\r\n' },
   {
     cli: 'bkt',
     when: ['auth', 'status'],
-    stdout: `${JSON.stringify({
-      hosts: hosts.map((host) => ({
-        key: host.key,
-        kind: host.kind,
-        base_url: `https://${host.key}`,
-        username: 'octo',
-        auth_method: 'basic',
-        token_source: 'keyring',
-      })),
-      contexts: [],
-    })}\r\n`,
+    stdout: `${JSON.stringify(
+      {
+        hosts: hosts.map((host) => ({
+          key: new URL(host.base).host,
+          kind: host.kind,
+          base_url: host.base,
+          username: 'octo',
+          auth_method: host.kind === 'cloud' ? 'basic' : 'bearer',
+          token_source: 'keyring',
+        })),
+        contexts: [],
+      },
+      null,
+      2,
+    ).replaceAll('\n', '\r\n')}\r\n`,
   },
 ]

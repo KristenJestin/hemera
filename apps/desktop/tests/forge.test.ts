@@ -13,23 +13,30 @@ import { mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ProjectOwner } from '@hemera/core/domain'
-import { ForgeError, ForgeRefused, type ForgeRepositoryStatus, ForgeTimeout } from '@hemera/ipc'
+import {
+  ForgeError,
+  ForgeRefused,
+  type ForgeRepositoryStatus,
+  ForgeTimeout,
+  UnknownRepository,
+} from '@hemera/ipc'
 import { Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { listNeeds, retryNeed } from '../src/engine/needs.ts'
-import { ForgePort } from '../src/engine/forges/port.ts'
+import { ForgePort, forgeError } from '../src/engine/forges/port.ts'
 import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
-import { createProject } from '../src/engine/projects.ts'
+import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
 import { listActions } from '../src/engine/tools/actions.ts'
 import { commandsEngine } from './commands-engine.ts'
 import {
   type FakeForge,
   type FakeRule,
   WATCHED_ENV,
+  BKT_CLOUD,
   bktReady,
   fakeForge,
   ghReady,
@@ -187,7 +194,7 @@ describe('Ready, missing, signed-out and unreachable come from the fake CLI, eac
   })
 
   test('Bitbucket Data Center signed out gives the login with its host', async () => {
-    const fake = fakeForge(bktReady([{ key: 'bitbucket.org', kind: 'cloud' }]))
+    const fake = fakeForge(bktReady([BKT_CLOUD]))
     const statuses = await withForge(
       fake,
       ({ projectId, repository }) =>
@@ -203,6 +210,37 @@ describe('Ready, missing, signed-out and unreachable come from the fake CLI, eac
       state: 'signed-out',
       fix: 'bkt auth login https://git.acme.test',
     })
+  })
+
+  test.each([
+    [
+      'a host and its HTTP port, the remote on the SSH port',
+      'https://git.acme.test:7990',
+      'git.acme.test',
+    ],
+    ['a context path', 'https://git.acme.test/bitbucket', 'git.acme.test'],
+    ['the host forced with its port', 'https://git.acme.test:7990', 'git.acme.test:7990'],
+  ])('Bitbucket Data Center under %s is ready', async (_case, base, forced) => {
+    const fake = fakeForge(bktReady([BKT_CLOUD, { base, kind: 'dc' }]))
+    const statuses = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flatMap(forge, (port) =>
+          port.setForced(projectId, repository('dc'), 'bitbucket-datacenter', forced),
+        ),
+      { dc: 'ssh://git@git.acme.test:7999/proj/dc.git' },
+    )
+    expect(byPath(statuses)['dc']).toMatchObject({ state: 'ready', fix: null })
+  })
+
+  test('Bitbucket Cloud is not ready on a Data Center login, nor the reverse', async () => {
+    const fake = fakeForge(bktReady([{ base: 'https://git.acme.test:7990', kind: 'dc' }]))
+    const statuses = await withForge(
+      fake,
+      ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      { api: REMOTES.api },
+    )
+    expect(byPath(statuses)['api']?.state).toBe('signed-out')
   })
 
   test('a check that cannot reach the forge is unreachable, with what the CLI said', async () => {
@@ -330,6 +368,97 @@ describe('An operation with the CLI signed out waits behind one Project need', (
       { shop: REMOTES.shop },
     )
     expect(login).toBe('octo')
+  })
+})
+
+/** The pending needs of the Profile. */
+const pendingNeeds = listNeeds.pipe(Effect.map((groups) => groups.flatMap((group) => group.needs)))
+
+/** Waits until a need is pending, and answers the pending ones. */
+const someNeed = pendingNeeds.pipe(
+  Effect.repeat({ schedule: Schedule.spaced('50 millis'), until: (needs) => needs.length > 0 }),
+)
+
+describe('A waiting operation survives a restart and wakes on any change', () => {
+  test('after a restart, a new operation finds the need left and makes no second; Check again withdraws it', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const main = checkout({ shop: REMOTES.shop })
+    const engine = commandsEngine(data, {
+      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+    })
+    const { projectId, repositoryId } = await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const only = project.repositories[0]?.id ?? ''
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(only))
+          yield* someNeed
+          return { projectId: project.id, repositoryId: only }
+        }),
+      ),
+    )
+    const { login, during, after } = await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repositoryId))
+          yield* Effect.sleep('500 millis')
+          const pendingDuring = yield* pendingNeeds
+          fake.answer(ghReady())
+          yield* port.checkAgain(projectId, null)
+          return {
+            login: yield* Fiber.join(waiting),
+            during: pendingDuring,
+            after: yield* pendingNeeds,
+          }
+        }),
+      ),
+    )
+    expect(during).toHaveLength(1)
+    expect(login).toBe('octo')
+    expect(after).toEqual([])
+  })
+
+  test('the forge forced to none: the waiting operation is refused and its need withdrawn', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { failure, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          return { failure: yield* Fiber.join(waiting), after: yield* pendingNeeds }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(failure).toBeInstanceOf(ForgeRefused)
+    expect(after).toEqual([])
+  })
+
+  test('the repository removed: the waiting operation ends and its need is withdrawn', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { failure, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          const project = yield* getProject(projectId)
+          yield* removeRepository({ id: repository('shop'), version: project.version })
+          return { failure: yield* Fiber.join(waiting), after: yield* pendingNeeds }
+        }),
+      { shop: REMOTES.shop, api: REMOTES.api },
+    )
+    expect(failure).toBeInstanceOf(UnknownRepository)
+    expect(after).toEqual([])
   })
 })
 
@@ -467,6 +596,115 @@ describe('A failure shows stderr verbatim with a ghp_ value masked', () => {
   })
 })
 
+describe('What a CLI prints and the command it ran are masked', () => {
+  test('a credential in a command is masked in its ForgeError', async () => {
+    const fake = fakeForge([
+      ...ghReady(),
+      { cli: 'gh', when: ['pr', 'create'], stderr: 'pull request create failed\n', code: 1 },
+    ])
+    const failure = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(
+          Effect.flatMap(forge, (port) =>
+            port.operate(repository('shop'), (target, run) =>
+              run(
+                [
+                  'pr',
+                  'create',
+                  '--repo',
+                  'acme/shop',
+                  '--base',
+                  'main',
+                  '--head',
+                  'feat/export',
+                  '--title',
+                  'from https://someone:hunter22secret@git.acme.test/acme/shop.git',
+                  '--body-file',
+                  '-',
+                ],
+                'Why',
+              ).pipe(Effect.flatMap((answer) => Effect.fail(forgeError(target, answer)))),
+            ),
+          ),
+        ),
+      { shop: REMOTES.shop },
+    )
+    expect(failure).toBeInstanceOf(ForgeError)
+    expect(failure).toMatchObject({ exitCode: 1, message: 'pull request create failed' })
+    expect(JSON.stringify(failure)).not.toContain('hunter22secret')
+  })
+
+  test('what a CLI prints on its output is masked before it leaves the runner', async () => {
+    const token = `ghp_${'Z9y8X7w6V5'.repeat(4)}`
+    const fake = fakeForge([
+      ...ghReady().filter((rule) => !rule.when.includes('user')),
+      { cli: 'gh', when: ['api', 'user'], stdout: `octo ${token}\n` },
+    ])
+    const login = await withForge(
+      fake,
+      ({ repository }) => Effect.flatMap(forge, (port) => port.currentUser(repository('shop'))),
+      { shop: REMOTES.shop },
+    )
+    expect(login).toBe('octo •••')
+  })
+
+  test('a JSON answer is masked value by value and still read', async () => {
+    const token = `BBDC-${'MDEyMzQ1Njc4OTAx'.repeat(2)}`
+    const fake = fakeForge([
+      { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\n' },
+      {
+        cli: 'bkt',
+        when: ['auth', 'status'],
+        stdout: JSON.stringify({
+          hosts: [
+            {
+              key: 'git.acme.test:7990',
+              kind: 'dc',
+              base_url: 'https://git.acme.test:7990',
+              username: `octo ${token}`,
+              auth_method: 'bearer',
+              token_source: 'keyring',
+            },
+          ],
+        }),
+      },
+    ])
+    const login = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(
+            projectId,
+            repository('dc'),
+            'bitbucket-datacenter',
+            'git.acme.test',
+          )
+          return yield* port.currentUser(repository('dc'))
+        }),
+      { dc: 'ssh://git@git.acme.test:7999/proj/dc.git' },
+    )
+    expect(login).toBe('octo •••')
+  })
+
+  test('the last lines of a long standard error are kept', async () => {
+    const lines = Array.from({ length: 3000 }, (_, at) => `line ${String(at)}`)
+    const fake = fakeForge([
+      ...ghReady().filter((rule) => !rule.when.includes('user')),
+      { cli: 'gh', when: ['api', 'user'], stderr: `${lines.join('\n')}\nthe last line\n`, code: 1 },
+    ])
+    const failure = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(Effect.flatMap(forge, (port) => port.currentUser(repository('shop')))),
+      { shop: REMOTES.shop },
+    )
+    expect(failure).toBeInstanceOf(ForgeError)
+    expect(failure.message.endsWith('line 2999\nthe last line')).toBe(true)
+  })
+})
+
 describe('A timeout gives ForgeTimeout, not a success', () => {
   test('a read cut at its limit', async () => {
     const fake = fakeForge([
@@ -535,7 +773,7 @@ describe('Capabilities follow the forge, its host and the CLI version', () => {
   })
 
   test('Bitbucket Data Center reads build statuses only', async () => {
-    const fake = fakeForge(bktReady([{ key: 'git.acme.test', kind: 'dc' }]))
+    const fake = fakeForge(bktReady([{ base: 'https://git.acme.test:7990', kind: 'dc' }]))
     const capabilities = await withForge(
       fake,
       ({ projectId, repository }) =>
@@ -564,7 +802,7 @@ describe('Capabilities follow the forge, its host and the CLI version', () => {
 
 describe('Forcing a forge is stored and told', () => {
   test('forge.forced and forge.cli_state_changed are written, and the forcing survives a restart', async () => {
-    const fake = fakeForge(bktReady([{ key: 'git.acme.test', kind: 'dc' }]))
+    const fake = fakeForge(bktReady([{ base: 'https://git.acme.test:7990', kind: 'dc' }]))
     const main = checkout({ dc: 'ssh://git@git.acme.test:7999/proj/dc.git' })
     const engine = commandsEngine(data, { forge: { env: fake.env } })
     const { projectId, repositoryId, types } = await engine(({ profile }) =>

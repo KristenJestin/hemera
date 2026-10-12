@@ -30,6 +30,10 @@ import { type CommandShape, shapeOf } from './shapes.ts'
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
 
+const readJsonObject = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
+)
+
 /** How much of what a CLI prints is read before the call is cut. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
@@ -51,8 +55,14 @@ export interface ForgeCall {
   readonly input?: string
 }
 
-/** What a call answered: its exit code, its output, and its standard error masked. */
+/**
+ * What a call answered: the command it ran, its exit code, what it printed and its standard error,
+ * all three masked. An output that is a JSON object is read first and masked value by value
+ * (`maskRecord`: every string, and a credential field whole), then written back, so its structure
+ * stays readable; any other output is masked as text.
+ */
 export interface ForgeAnswer {
+  readonly command: string
   readonly code: number
   readonly stdout: string
   readonly stderr: string
@@ -118,6 +128,13 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         return { ...given, ...QUIET[cli] }
       }
 
+      /** What a CLI printed, masked: a JSON object value by value, any other text as text. */
+      const maskOutput = (printed: string): string =>
+        Option.match(readJsonObject(printed), {
+          onNone: () => secrets.mask(printed),
+          onSome: (object) => JSON.stringify(secrets.maskRecord(object)),
+        })
+
       const find = (cli: ForgeCli) =>
         Effect.sync(() =>
           Option.fromNullishOr(findOnPath(cli, hostLookup(process.cwd(), env), process.platform)),
@@ -159,6 +176,7 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
             const err: string[] = []
             let printed = 0
             const outputEnded = yield* Deferred.make<void>()
+            const errorsEnded = yield* Deferred.make<void>()
             const tooLong = yield* Deferred.make<void>()
             // A CLI on Windows ends its lines with CRLF: the carriage return is not part of a line.
             const line = (text: string) => text.replace(/\r$/, '')
@@ -172,8 +190,22 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
                 Deferred.doneUnsafe(outputEnded, Effect.void)
               },
             )
-            child.onStderr((text) => err.push(line(text)))
-            const ended = Effect.all([child.exited, Deferred.await(outputEnded)])
+            child.onStderr(
+              (text) => {
+                printed += text.length + 1
+                if (printed > OUTPUT_LIMIT) Deferred.doneUnsafe(tooLong, Effect.void)
+                else err.push(line(text))
+              },
+              () => {
+                Deferred.doneUnsafe(errorsEnded, Effect.void)
+              },
+            )
+            // Answered once it exited and both its outputs were read to their end.
+            const ended = Effect.all([
+              child.exited,
+              Deferred.await(outputEnded),
+              Deferred.await(errorsEnded),
+            ])
             const finished = yield* Effect.raceFirst(
               Effect.map(ended, ([exit]) => Option.some(exit)),
               Effect.as(Deferred.await(tooLong), Option.none()),
@@ -199,8 +231,9 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
               })
             }
             return {
+              command,
               code: exit.code,
-              stdout: out.join('\n'),
+              stdout: maskOutput(out.join('\n')),
               stderr: secrets.mask(err.join('\n').trim()),
             } satisfies ForgeAnswer
           }),

@@ -6,7 +6,9 @@
  * - The forge is detected from the remote of the repository's delivery remote, or forced per
  *   repository (stored in `repository_forges`); a forced value wins.
  * - The state of a CLI is what its own status says (`gh auth status --hostname <host>`,
- *   `bkt auth status --json`), with the command that fixes it. Hemera never reads a token nor a
+ *   `bkt auth status --json`), with the command that fixes it. `bkt auth status` reads only bkt's
+ *   own configuration, never the network: for bkt, `ready` means a host is configured, not that its
+ *   token still works, and `unreachable` is rare (bkt itself failing). Hemera never reads a token nor a
  *   CLI's configuration. It is checked again at once on "Check again", when the window regains
  *   the focus, and before each forge operation.
  * - An operation that finds its CLI not ready does not fail: it waits, behind one Project-level
@@ -33,7 +35,7 @@ import {
   type UnknownProject,
   UnknownRepository,
 } from '@hemera/ipc'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { join } from 'node:path'
 import {
   Context,
@@ -50,19 +52,28 @@ import {
 } from 'effect'
 
 import { findOnPath, hostLookup } from '../command-line.ts'
+import { DomainEvents } from '../domain-events.ts'
 import { Git } from '../git.ts'
+import type { DomainEvent } from '../journal.ts'
 import {
   type NeedHandler,
   type NeedServices,
-  createNeed,
+  createNeedIn,
   needService,
   withdrawNeed,
 } from '../needs.ts'
 import { getProject, getRepository } from '../projects.ts'
 import { type DatabaseError, Database, refusedWhile } from '../storage/database.ts'
-import { repositoryForges } from '../storage/schema.ts'
+import { forgeNeeds, needs, repositoryForges } from '../storage/schema.ts'
+import { Secrets } from '../secrets.ts'
 import { mutate } from '../transaction.ts'
-import { type ForcedSetting, type ForgeIdentity, GITHUB_HOST, identify } from './identity.ts'
+import {
+  BITBUCKET_CLOUD_HOST,
+  type ForcedSetting,
+  type ForgeIdentity,
+  GITHUB_HOST,
+  identify,
+} from './identity.ts'
 import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
 
 /** The service the forge's needs belong to. */
@@ -158,12 +169,45 @@ const BktStatus = Schema.fromJsonString(
   Schema.Struct({
     hosts: Schema.NullOr(
       Schema.Array(
-        Schema.Struct({ key: Schema.String, username: Schema.optionalKey(Schema.String) }),
+        Schema.Struct({
+          key: Schema.String,
+          base_url: Schema.optionalKey(Schema.String),
+          username: Schema.optionalKey(Schema.String),
+        }),
       ),
     ),
   }),
 )
 const readBktStatus = Schema.decodeUnknownOption(BktStatus)
+
+/** A host without its port, lower case. */
+const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, '')
+
+/** The host of a base URL without its port, or null. */
+const baseHost = (url: string): string | null => {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a host bkt is configured for is the repository's. bkt keys a host by its base URL's host:
+ * a Bitbucket Cloud login is stored under `api.bitbucket.org` (its API), and a Data Center one
+ * keeps its HTTP port, which the SSH port of a remote never matches, so the host is compared
+ * without its port.
+ */
+const bktServes = (
+  configured: { readonly key: string; readonly base_url?: string },
+  forge: ForgeName,
+  host: string,
+): boolean => {
+  const name = baseHost(configured.base_url ?? '') ?? hostName(configured.key)
+  if (forge === 'bitbucket-cloud')
+    return name === 'api.bitbucket.org' || name === BITBUCKET_CLOUD_HOST
+  return name === hostName(host)
+}
 
 /** The CLI a forge is reached through, or none. */
 const cliOf = (forge: ForgeName): ForgeCli | null =>
@@ -215,11 +259,18 @@ const forcedHost = (given: string): string | null => {
   return /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?$/.test(trimmed) ? trimmed : null
 }
 
-const failed = (call: ForgeCall, answer: ForgeAnswer): ForgeError =>
+/**
+ * The failure of a call that answered: the forge's message verbatim and the command, both masked
+ * by the runner already. What an operation built on `operate` turns a failed answer into.
+ */
+export const forgeError = (
+  target: Pick<ForgeTarget, 'forge'> & { readonly identity: { readonly host: string } },
+  answer: ForgeAnswer,
+): ForgeError =>
   new ForgeError({
-    forge: call.forge,
-    host: call.host,
-    command: [call.cli, ...call.args].join(' '),
+    forge: target.forge,
+    host: target.identity.host,
+    command: answer.command,
     exitCode: answer.code,
     message: answer.stderr,
   })
@@ -255,8 +306,7 @@ export const forgePort = () => {
       const provided = <A, E>(effect: Effect.Effect<A, E, ForgePortServices>) =>
         Effect.provide(effect, context)
       const memory = yield* SubscriptionRef.make<ReadonlyMap<string, Known>>(new Map())
-      /** The pending need of each Project, CLI and host, by `projectId|cli|host`. */
-      const needs = new Map<string, string>()
+      const secrets = yield* Secrets
       const needing = Semaphore.makeUnsafe(1)
 
       const lookup = (program: string) =>
@@ -355,7 +405,7 @@ export const forgePort = () => {
                   : auth.success.stderr,
             } satisfies CliCheck
           }
-          const signedIn = (read.value.hosts ?? []).some((one) => one.key.toLowerCase() === host)
+          const signedIn = (read.value.hosts ?? []).some((one) => bktServes(one, forge, host))
           return signedIn
             ? ({ version, state: 'ready', fix: null, detail: null } satisfies CliCheck)
             : ({
@@ -385,20 +435,48 @@ export const forgePort = () => {
         detail: check?.detail ?? null,
       })
 
-      const needKey = (projectId: string, status: ForgeRepositoryStatus) =>
-        `${projectId}|${status.cli ?? ''}|${status.host ?? ''}`
-
-      /** The Project's needs on this CLI and host withdrawn: the check passed. */
-      const resolved = (projectId: string, status: ForgeRepositoryStatus) =>
+      /** The Project's forge needs pending now, with the CLI and host each waits for. */
+      const pendingNeeds = (projectId: string) =>
         Effect.gen(function* () {
-          const key = needKey(projectId, status)
-          const id = needs.get(key)
-          if (id === undefined) return
-          needs.delete(key)
-          yield* withdrawNeed(
-            id,
-            `${status.cli ?? 'the CLI'} is ready for ${status.host ?? ''} now`,
+          const database = yield* Database
+          return yield* database
+            .select({ id: forgeNeeds.needId, cli: forgeNeeds.cli, host: forgeNeeds.host })
+            .from(forgeNeeds)
+            .innerJoin(needs, eq(needs.id, forgeNeeds.needId))
+            .where(and(eq(forgeNeeds.projectId, projectId), eq(needs.state, 'pending')))
+            .pipe(Effect.mapError(refusedWhile('reading the forge needs')))
+        })
+
+      /** Whether a repository of the Project still waits on this CLI and host, as last checked. */
+      const stillWaits = (
+        project: Project,
+        known: ReadonlyMap<string, Known>,
+        cli: string,
+        host: string,
+      ): boolean =>
+        project.repositories.some((repository) => {
+          const now = known.get(repository.id)?.status
+          return (
+            now !== undefined &&
+            now.cli === cli &&
+            now.host === host &&
+            now.state !== 'ready' &&
+            now.state !== 'not-needed'
           )
+        })
+
+      /**
+       * The Project's needs nothing waits on any more withdrawn: their CLI is ready for their host,
+       * or no repository of the Project reaches that host through it now (forced elsewhere, gone).
+       */
+      const settleNeeds = (projectId: string) =>
+        Effect.gen(function* () {
+          const project = yield* getProject(projectId)
+          const known = yield* SubscriptionRef.get(memory)
+          for (const need of yield* pendingNeeds(projectId)) {
+            if (stillWaits(project, known, need.cli, need.host)) continue
+            yield* withdrawNeed(need.id, `nothing waits on ${need.cli} for ${need.host} any more`)
+          }
         }).pipe(Effect.catch(() => Effect.void))
 
       /** Remembers a repository's state; a change is written to the journal and told. */
@@ -439,7 +517,6 @@ export const forgePort = () => {
           yield* SubscriptionRef.update(memory, (known) =>
             new Map(known).set(status.repositoryId, { projectId, status }),
           )
-          if (status.state === 'ready') yield* resolved(projectId, status)
           return status
         })
 
@@ -459,6 +536,7 @@ export const forgePort = () => {
             }
             yield* remember(project.id, statusOf(repository, identity, found))
           }
+          yield* settleNeeds(project.id)
         })
 
       const statesOf = (project: Project) =>
@@ -568,10 +646,10 @@ export const forgePort = () => {
           1,
         )(
           Effect.gen(function* () {
-            const key = needKey(projectId, waiting)
-            if (needs.has(key)) return
             const cli = waiting.cli ?? 'the forge CLI'
             const host = waiting.host ?? ''
+            const pending = yield* pendingNeeds(projectId)
+            if (pending.some((one) => one.cli === cli && one.host === host)) return
             const fix = waiting.fix ?? ''
             const fields = Match.value(waiting.state).pipe(
               Match.when('missing', () =>
@@ -596,10 +674,21 @@ export const forgePort = () => {
                 }),
               ),
             )
-            const need = yield* createNeed(
+            const written = yield* createNeedIn(
               FORGE_NEEDS,
               ProjectOwner.make({ projectId }),
               fields,
+            )
+            // The need and what it waits for, in one transaction: a restart finds both or neither.
+            yield* mutate('waiting on a forge CLI', (transaction) =>
+              Effect.gen(function* () {
+                const { id, events } = yield* written(transaction)
+                yield* transaction
+                  .insert(forgeNeeds)
+                  .values({ needId: id, projectId, cli, host })
+                  .pipe(Effect.mapError(refusedWhile('writing the forge need')))
+                return { result: undefined, events }
+              }),
             ).pipe(
               // A Project's need has no mission to refuse it.
               Effect.catchTags({
@@ -607,16 +696,31 @@ export const forgePort = () => {
                 UnknownMission: (unknown) => Effect.die(unknown),
               }),
             )
-            needs.set(key, need.id)
           }),
         )
 
-      /** Waits until the repository's CLI is said ready. */
-      const readyAgain = (repositoryId: string) =>
-        SubscriptionRef.changes(memory).pipe(
-          Stream.filter((known) => known.get(repositoryId)?.status.state === 'ready'),
-          Stream.take(1),
-          Stream.runDrain,
+      /**
+       * Waits until anything changes for the repository: its state is no longer the one waited on
+       * (ready, forced elsewhere), or an event names it (removed, forced). The loop then looks again.
+       */
+      const changed = (
+        repositoryId: string,
+        seen: ForgeRepositoryStatus,
+        events: Stream.Stream<DomainEvent>,
+      ) =>
+        Effect.raceFirst(
+          SubscriptionRef.changes(memory).pipe(
+            Stream.filter(
+              (known) => JSON.stringify(known.get(repositoryId)?.status) !== JSON.stringify(seen),
+            ),
+            Stream.take(1),
+            Stream.runDrain,
+          ),
+          events.pipe(
+            Stream.filter((event) => event.entityId === repositoryId),
+            Stream.take(1),
+            Stream.runDrain,
+          ),
         )
 
       const operate = <A, E>(
@@ -631,17 +735,33 @@ export const forgePort = () => {
       ): Effect.Effect<A, E | ForgeOperationFailure> =>
         provided(
           Effect.gen(function* () {
+            let waitedIn: string | null = null
             for (;;) {
-              const { project, status: now } = yield* checkedNow(repositoryId)
+              const looked = yield* Effect.scoped(
+                Effect.gen(function* () {
+                  // Followed before the check, so that no change between the two is missed.
+                  const events = yield* DomainEvents.use((domain) => domain.subscribe)
+                  const checked = yield* checkedNow(repositoryId)
+                  const now = checked.status
+                  if (now.state === 'ready' || now.state === 'not-needed')
+                    return Option.some(checked)
+                  waitedIn = checked.project.id
+                  yield* needFor(checked.project.id, now)
+                  yield* changed(repositoryId, now, events)
+                  return Option.none()
+                }),
+              ).pipe(
+                // The repository went while the operation waited: its need goes too.
+                Effect.tapErrorTag('UnknownRepository', () =>
+                  waitedIn === null ? Effect.void : settleNeeds(waitedIn),
+                ),
+              )
+              if (Option.isNone(looked)) continue
+              const { project, status: now } = looked.value
               if (now.cli === null || now.host === null || now.state === 'not-needed') {
                 return yield* new ForgeRefused({
                   reason: 'This repository has no forge Hemera can reach.',
                 })
-              }
-              if (now.state !== 'ready') {
-                yield* needFor(project.id, now)
-                yield* readyAgain(repositoryId)
-                continue
               }
               const { cli, host, forge } = now
               const identity = yield* identityOf(project, (yield* located(repositoryId)).repository)
@@ -662,7 +782,7 @@ export const forgePort = () => {
                         new ForgeError({
                           forge,
                           host,
-                          command: [cli, ...args].join(' '),
+                          command: secrets.mask([cli, ...args].join(' ')),
                           exitCode: 127,
                           message: missing.message,
                         }),
@@ -683,22 +803,15 @@ export const forgePort = () => {
               target.cli === 'gh'
                 ? ['api', '--hostname', host, 'user', '--jq', '.login']
                 : ['auth', 'status', '--json']
-            const call: ForgeCall = {
-              cli: target.cli,
-              forge: target.forge,
-              host,
-              projectId: target.projectId,
-              args,
-            }
             const answer = yield* run(args)
-            if (answer.code !== 0) return yield* failed(call, answer)
+            if (answer.code !== 0) return yield* forgeError(target, answer)
             if (target.cli === 'gh') return answer.stdout.trim()
             const read = readBktStatus(answer.stdout)
             const user = Option.isNone(read)
               ? undefined
-              : (read.value.hosts ?? []).find((one) => one.key.toLowerCase() === host)?.username
+              : (read.value.hosts ?? []).find((one) => bktServes(one, target.forge, host))?.username
             if (user === undefined || user === '') {
-              return yield* failed(call, {
+              return yield* forgeError(target, {
                 ...answer,
                 stderr: `bkt names no account for ${host}`,
               })
@@ -762,19 +875,22 @@ export const forgePort = () => {
           Stream.changesWith((one, other) => JSON.stringify(one) === JSON.stringify(other)),
         )
 
+      // Retry, and the periodic recheck: the need holds while its own CLI and host are not ready.
       recheck = (need) =>
-        Effect.gen(function* () {
-          if (!Predicate.isTagged(need.owner, 'Project')) return true
-          const projectId = need.owner.projectId
-          const key = [...needs.entries()].find(([, id]) => id === need.id)?.[0]
-          const states = yield* checkAgain(projectId, null)
-          return states.some(
-            (one) =>
-              (key === undefined || needKey(projectId, one) === key) &&
-              one.state !== 'ready' &&
-              one.state !== 'not-needed',
-          )
-        }).pipe(Effect.catch(() => Effect.succeed(true)))
+        provided(
+          Effect.gen(function* () {
+            const database = yield* Database
+            const [waits] = yield* database
+              .select()
+              .from(forgeNeeds)
+              .where(eq(forgeNeeds.needId, need.id))
+              .pipe(Effect.mapError(refusedWhile('reading the forge need')))
+            if (waits === undefined) return false
+            yield* checkAgain(waits.projectId, null)
+            const project = yield* getProject(waits.projectId)
+            return stillWaits(project, yield* SubscriptionRef.get(memory), waits.cli, waits.host)
+          }),
+        ).pipe(Effect.catch(() => Effect.succeed(true)))
 
       return {
         status,

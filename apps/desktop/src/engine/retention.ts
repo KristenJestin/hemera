@@ -46,6 +46,7 @@ export const TABLE_CLASSES = {
   projects: 'state',
   project_repositories: 'state',
   repository_forges: 'state',
+  forge_needs: 'state',
   workspaces: 'state',
   workspace_repositories: 'state',
   project_preparation_steps: 'state',
