@@ -1,9 +1,9 @@
 import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
-import { stageWords } from '../../blocks/mission/vocabulary.ts'
+import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
 import { Button } from '../../components/button/button.tsx'
-import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
+import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
@@ -14,9 +14,7 @@ import {
   IconAlertTriangle,
   IconChecklist,
   IconChevronRight,
-  IconFolder,
   IconGitCompare,
-  IconHammer,
   IconHistory,
   IconPlayerPlay,
   IconPlus,
@@ -24,18 +22,7 @@ import {
   IconTerminal,
   IconX,
 } from '../../icons.ts'
-import {
-  CHEVRON,
-  CODE,
-  Fold,
-  ID,
-  LINE,
-  Measure,
-  MissionFolds,
-  QUIET,
-  ROW,
-  Unfolding,
-} from './parts.tsx'
+import { CHEVRON, CODE, Fold, ID, LINE, MissionFolds, QUIET, ROW, Unfolding } from './parts.tsx'
 import type {
   BuildingMoment,
   Check,
@@ -137,173 +124,148 @@ const HELPER_TYPE: Record<BuildingMoment['helpers'][number]['kind'], string> = {
   reviewer: 'Reviewer',
 }
 
+/** The progress line: the phase under way, and how far it is. */
+export function progressOf(moment: BuildingMoment): StageCardProps['progress'] {
+  const measures = measuresOf(moment)
+  if (moment.points !== undefined && moment.points.length > 0) {
+    const done = moment.points.filter((point) =>
+      point.tasks.every((one) => one.state === 'verified'),
+    ).length
+    return {
+      step: `Round ${String(moment.round)}`,
+      detail: `${String(done)} of ${plural(moment.points.length, 'point', 'points')} done`,
+    }
+  }
+  const phase = moment.phases.find((one) => one.state === 'running' && one.id !== 'tasks')
+  if (phase !== undefined) {
+    return { step: phase.title, detail: phase.detail ?? 'under way' }
+  }
+  const scenarios = moment.requirements.flatMap((requirement) => requirement.scenarios)
+  if (measures.done === 0 && scenarios.some((scenario) => scenario.proof === 'none')) {
+    const recorded = scenarios.filter((scenario) => scenario.proof !== 'none').length
+    return {
+      step: 'Proofs',
+      detail: `${String(recorded)} of ${String(scenarios.length)} reds recorded`,
+    }
+  }
+  return {
+    step: 'Building',
+    detail: `${String(measures.verified)} of ${String(measures.tasks)} tasks done · ${String(measures.proven)} of ${String(measures.requirements)} requirements proven`,
+  }
+}
+
 /**
- * What happens, at the top of the rail: the stage and its percentage, the line that says what
- * happens and what comes next, the chips of who works beside the Builder, the two measures with
- * the time, the phases one line each, and the Workspace.
+ * What happens, at the top of the rail: the common stage card — the face, the line of what
+ * happens or what waits, the progress line — with the chips of what runs: the services, who works
+ * beside the Builder, the checks under way.
  */
 export function BuildingCard({
   moment,
   loading = false,
+  onService,
 }: {
   moment: BuildingMoment
   loading?: boolean | undefined
+  onService: BuildingHandlers['onService']
 }): ReactNode {
-  const measures = measuresOf(moment)
   const names = moment.helpers.map((helper) => helper.name)
+  const checks = moment.checks.filter((check) => check.state === 'running')
+  const running = moment.services.length + moment.helpers.length + checks.length > 0
   return (
-    <section aria-label={stageWords('Building', moment.round)}>
-      <Frame
-        header={
-          <FrameHeader
-            icon={<IconHammer size="md" />}
-            title={stageWords('Building', moment.round)}
-            action={
-              loading ? undefined : (
-                <Legend label={`${String(measures.percent)}% of the tasks done and verified`}>
-                  <span className="text-base font-semibold tabular-nums">{`${String(measures.percent)}%`}</span>
-                </Legend>
-              )
-            }
-          />
-        }
-      >
-        <div className="flex min-w-0 flex-col gap-1.5 px-4 py-3">
-          {loading ? (
-            <p className="text-sm">
-              <Skeleton>Builder writes the progress on the export button (T8).</Skeleton>
-            </p>
-          ) : (
-            <>
-              <p role="status" className="text-sm font-medium break-words">
-                {moment.now}
-              </p>
-              {moment.next !== undefined && (
-                <p className="text-xs break-words text-muted-foreground">{moment.next}</p>
-              )}
-            </>
-          )}
-          {moment.helpers.length > 0 && (
-            <ul aria-label="Working beside the Builder" className="flex flex-wrap gap-1.5 pt-1">
-              {moment.helpers.map((helper) => (
-                <li key={helper.name} className="flex">
-                  <LiveChip
-                    name={helper.name}
-                    icon={<LetterAvatar name={helper.name} others={names} />}
-                    state={helper.state}
-                    startedAt={helper.startedAt}
-                    endedAt={helper.endedAt}
-                    glance={{ kind: 'helper', type: HELPER_TYPE[helper.kind], step: helper.step }}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="grid grid-cols-3 gap-3 border-t border-border px-4 py-2.5">
-          <Measure
-            figure={`${String(measures.verified)} of ${String(measures.tasks)}`}
-            label="tasks done"
-          />
-          <Measure
-            figure={`${String(measures.proven)} of ${String(measures.requirements)}`}
-            label="requirements proven"
-          />
-          <Measure figure={moment.elapsed} label="since the launch" />
-        </div>
-        <ol
-          aria-label="Where Building stands"
-          className="flex flex-col border-t border-border py-1"
-        >
-          {moment.phases.map((phase) => (
-            <li
-              key={phase.id}
-              aria-label={phase.title}
-              className="flex min-h-control-sm min-w-0 items-center gap-2.5 px-4"
-            >
-              <StatusMark state={phase.state} size="sm" legend />
-              <span
-                className={cn(
-                  'shrink-0 text-sm',
-                  phase.state === 'todo' ? 'text-muted-foreground' : 'font-medium',
-                )}
-              >
-                {phase.title}
-              </span>
-              {phase.detail !== undefined && (
-                <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
-                  {phase.detail}
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-        <p className="flex min-w-0 items-center gap-1.5 border-t border-border px-4 py-2 text-xs text-muted-foreground">
-          <IconFolder size="sm" />
-          <span className="shrink-0">Workspace</span>
-          <span className="min-w-0 truncate font-mono">{moment.workspace}</span>
-        </p>
-      </Frame>
-    </section>
+    <StageCard
+      stage="Building"
+      face={loading ? 'loading' : (moment.face ?? 'writing')}
+      line={loading ? 'Reading where Building stands' : moment.now}
+      progress={loading ? { step: 'Building', detail: 'counting the tasks' } : progressOf(moment)}
+      running={
+        running ? (
+          <>
+            {moment.services.map((service) => (
+              <LiveChip
+                key={service.name}
+                name={service.name}
+                icon={<IconTerminal size="sm" />}
+                state={service.state}
+                startedAt={service.startedAt}
+                endedAt={service.endedAt}
+                glance={{
+                  kind: 'service',
+                  type: `Service · ${service.line}`,
+                  url: service.url,
+                  onRestart: () => onService(service.name, 'restart'),
+                  onStop: () => onService(service.name, 'stop'),
+                  onCopyUrl: () => onService(service.name, 'copy'),
+                  onOpenUrl: () => onService(service.name, 'open'),
+                }}
+              />
+            ))}
+            {moment.helpers.map((helper) => (
+              <LiveChip
+                key={helper.name}
+                name={helper.name}
+                icon={<LetterAvatar name={helper.name} others={names} />}
+                state={helper.state}
+                startedAt={helper.startedAt}
+                endedAt={helper.endedAt}
+                glance={{ kind: 'helper', type: HELPER_TYPE[helper.kind], step: helper.step }}
+              />
+            ))}
+            {checks.map((check) => (
+              <LiveChip
+                key={`${check.repository}-${check.name}`}
+                name={`${check.repository} · ${check.name}`}
+                icon={<IconChecklist size="sm" />}
+                state="running"
+                startedAt={CHECK_STARTED}
+                endedAt={null}
+                glance={{ kind: 'run', type: `Check · ${check.after}` }}
+              />
+            ))}
+          </>
+        ) : undefined
+      }
+    />
   )
 }
 
+/** When a running check started, for its chip's seconds: fixed once per load. */
+const CHECK_STARTED = Date.now() - 52_000
+
 /**
- * The services of the mission. What runs is its chip, with its address, Stop and Restart in the
- * glance. What the Project declares and does not run is a Start each, beside the chips. What the
- * catalogue offers beyond them is one folded line; unfolded, each with its command and Start, which
- * runs it for this mission only.
+ * The services that do not run. What runs is a chip on the stage card. What the Project declares
+ * and does not run is a Start each; what the catalogue offers beyond them is one folded line,
+ * unfolded to each with its command and Start, which runs it for this mission only.
  */
 function Services({
-  services,
   idle,
   catalogue,
   onService,
 }: {
-  services: BuildingMoment['services']
   idle: BuildingMoment['idle']
   catalogue: BuildingMoment['catalogue']
   onService: BuildingHandlers['onService']
 }): ReactNode {
-  if (services.length === 0 && idle.length === 0 && catalogue.length === 0) return null
+  if (idle.length === 0 && catalogue.length === 0) return null
   return (
-    <section aria-label="Services" className="flex flex-col gap-2">
-      <h2 className="px-4 text-xs font-medium text-muted-foreground">Services</h2>
-      <ul aria-label="Services" className="flex flex-wrap items-center gap-1.5 px-4">
-        {services.map((service) => (
-          <li key={service.name} className="flex">
-            <LiveChip
-              name={service.name}
-              icon={<IconTerminal size="sm" />}
-              state={service.state}
-              startedAt={service.startedAt}
-              endedAt={service.endedAt}
-              glance={{
-                kind: 'service',
-                type: `Service · ${service.line}`,
-                url: service.url,
-                onRestart: () => onService(service.name, 'restart'),
-                onStop: () => onService(service.name, 'stop'),
-                onCopyUrl: () => onService(service.name, 'copy'),
-                onOpenUrl: () => onService(service.name, 'open'),
-              }}
-            />
-          </li>
-        ))}
-        {idle.map((service) => (
-          <li key={service.name} className="flex">
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Start ${service.name}`}
-              onClick={() => onService(service.name, 'start')}
-            >
-              <IconPlayerPlay size="sm" />
-              {service.name}
-            </Button>
-          </li>
-        ))}
-      </ul>
+    <section aria-label="Services" className="flex flex-col gap-1">
+      <h2 className="px-4 text-xs font-medium text-muted-foreground">Services not running</h2>
+      {idle.length > 0 && (
+        <ul aria-label="Services to start" className="flex flex-wrap items-center gap-1.5 px-2">
+          {idle.map((service) => (
+            <li key={service.name} className="flex">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Start ${service.name}`}
+                onClick={() => onService(service.name, 'start')}
+              >
+                <IconPlayerPlay size="sm" />
+                {service.name}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
       {catalogue.length > 0 && (
         <Fold
           glyph={<IconPlus size="sm" />}
@@ -806,13 +768,8 @@ export function BuildingPage({
   return (
     <div className={COLUMNS} data-stage="building">
       <aside aria-label="What happens" className={RAIL}>
-        <BuildingCard moment={moment} loading={loading} />
-        <Services
-          services={moment.services}
-          idle={moment.idle}
-          catalogue={moment.catalogue}
-          onService={onService}
-        />
+        <BuildingCard moment={moment} loading={loading} onService={onService} />
+        <Services idle={moment.idle} catalogue={moment.catalogue} onService={onService} />
         {!loading && (
           <div className="flex flex-col">
             <Checks checks={moment.checks} />
@@ -820,7 +777,7 @@ export function BuildingPage({
             <Journal journal={moment.journal} />
           </div>
         )}
-        <MissionFolds mission={moment.mission} onRevoke={onRevoke} />
+        <MissionFolds mission={moment.mission} workspace={moment.workspace} onRevoke={onRevoke} />
       </aside>
       <div className={MAIN}>
         <Spine moment={moment} chosenTask={chosenTask} onOpenTask={onOpenTask} loading={loading} />

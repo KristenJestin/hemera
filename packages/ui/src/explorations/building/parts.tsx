@@ -4,7 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { STAGE_DOT } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconChevronRight, IconLink, IconGauge, IconShieldCheck } from '../../icons.ts'
+import { IconChevronRight, IconFolder, IconLink, IconGauge, IconShieldCheck } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import type { Budget, Dependency, Grant, MissionThings } from './types.ts'
 
@@ -159,6 +159,8 @@ function BudgetBody({ budget }: { budget: Budget }): ReactNode {
 
 export interface MissionFoldsProps {
   mission: MissionThings
+  /** The mission's Workspace, once it is prepared: a quiet line before the folds. */
+  workspace?: string | undefined
   onRevoke: (id: string) => void
 }
 
@@ -166,12 +168,23 @@ export interface MissionFoldsProps {
  * The mission's own things at the end of a rail, one quiet line each and folded: its dependencies,
  * what was allowed for it, its budget. A dependency not Done and a budget nearly spent call.
  */
-export function MissionFolds({ mission, onRevoke }: MissionFoldsProps): ReactNode {
+export function MissionFolds({ mission, workspace, onRevoke }: MissionFoldsProps): ReactNode {
   const { dependencies, grants, budget } = mission
   const waiting = dependencies.filter((dependency) => dependency.stage !== 'Done')
   return (
     <section aria-label="This mission" className="flex flex-col">
       <h2 className="px-4 pb-1 text-xs font-medium text-muted-foreground">This mission</h2>
+      {workspace !== undefined && (
+        <p className={ROW}>
+          <span className="flex shrink-0 pl-6 text-muted-foreground">
+            <IconFolder size="sm" />
+          </span>
+          <span className="shrink-0 font-medium">Workspace</span>
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+            {workspace}
+          </span>
+        </p>
+      )}
       <Fold
         glyph={<IconLink size="sm" />}
         title="Dependencies"
@@ -216,15 +229,5 @@ export function MissionFolds({ mission, onRevoke }: MissionFoldsProps): ReactNod
         <BudgetBody budget={budget} />
       </Fold>
     </section>
-  )
-}
-
-/** A measure on the stage card: a figure, and what it counts under it. */
-export function Measure({ figure, label }: { figure: string; label: string }): ReactNode {
-  return (
-    <div className="flex min-w-0 flex-col">
-      <span className="text-base font-semibold tabular-nums">{figure}</span>
-      <span className="text-xs break-words text-muted-foreground">{label}</span>
-    </div>
   )
 }

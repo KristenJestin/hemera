@@ -6,12 +6,12 @@ import { tabTo } from './play.ts'
 import { ReadyScreen } from './screen.tsx'
 
 /**
- * The Ready page of #149, recommended: the frozen Spec in summary in the middle, and the Ready
- * card at the top of the rail, which is the whole launch — where it stands in one line, the model
- * the Planner recommends with its reason, the three steps, and what the pre-launch check found,
- * one line per thing moved, unfolded on demand to the agent's verdict. Launch sits in the header
- * while it can be pressed; when the check needs the user, its choices are in the card and
- * nowhere else. The mission's dependencies, grants and budget end the rail, folded.
+ * The Ready page of #149, recommended: the frozen Spec in summary in the middle, and at the top of
+ * the rail the stage card common to every stage — the face, the line of where the launch stands,
+ * the progress line, the step that runs as a chip — with right under it what the pre-launch check
+ * found (one line per thing moved, unfolded on demand to the agent's verdict) and its choices, the
+ * model the Planner recommends with its reason, and the preparation's steps. Launch sits in the
+ * header while it can be pressed. The mission's dependencies, grants and budget end the rail.
  */
 const meta = {
   title: 'Explorations/Building/Ready',
@@ -42,11 +42,14 @@ const statusOf = (canvasElement: HTMLElement): HTMLElement =>
 export const Frozen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(statusOf(canvasElement)).toHaveTextContent('Frozen yesterday at 17:02')
+    await expect(statusOf(canvasElement)).toHaveTextContent(
+      'Ready to launch · frozen yesterday at 17:02',
+    )
     await expect(canvas.getByRole('button', { name: 'Launch' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: /^Model of the Builder/ })).toBeVisible()
-    const steps = canvas.getByRole('list', { name: 'Where the launch stands' })
-    await expect(within(steps).getAllByRole('listitem')).toHaveLength(3)
+    const card = within(canvas.getByRole('region', { name: 'Ready' }))
+    await expect(card.getByText('Launch')).toBeVisible()
+    await expect(card.getByText('not checked yet')).toBeVisible()
     await expect(canvas.getByRole('list', { name: 'Requirements' }).children).toHaveLength(9)
   },
 }

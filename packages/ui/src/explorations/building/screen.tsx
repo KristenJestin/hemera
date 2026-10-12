@@ -169,6 +169,7 @@ export function BuildingScreen({
         crumbs={crumbsOf(all, views.state, stage, views.show)}
       />
       <MissionFrame
+        ballFace={false}
         missionKey={KEY}
         title={title}
         stage="Building"
@@ -256,6 +257,7 @@ export function ReadyScreen({
         crumbs={crumbsOf(all, views.state, 'Ready', views.show)}
       />
       <MissionFrame
+        ballFace={false}
         missionKey={KEY}
         title={title}
         stage="Ready"

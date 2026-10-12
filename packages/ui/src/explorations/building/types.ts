@@ -1,3 +1,4 @@
+import type { FaceState } from '../../components/face/states.ts'
 import type { MissionStage } from '../../blocks/mission/vocabulary.ts'
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import type { LiveState } from '../../components/live-chip/live-chip.tsx'
@@ -148,7 +149,9 @@ export interface MissionThings {
 }
 
 export interface BuildingMoment {
-  /** What happens now, in plain words. */
+  /** Hemera's face for what happens; the Builder writing when left out. */
+  face?: FaceState | undefined
+  /** What happens now, or what waits for the user, in plain words. */
   now: string
   /** What comes next, while it works. */
   next?: string | undefined

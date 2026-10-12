@@ -3,18 +3,14 @@ import type { ReactNode } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
-import { Loading } from '../../components/loading/loading.tsx'
+import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
+import type { FaceState } from '../../components/face/states.ts'
+import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import { type ModelChoice, ModelPicker } from '../../components/model-picker/model-picker.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconFileText,
-  IconGitCompare,
-  IconRocket,
-} from '../../icons.ts'
+import { IconAlertTriangle, IconFileText, IconGitCompare, IconTerminal } from '../../icons.ts'
 import { Fold, ID, MissionFolds, QUIET, ROW } from './parts.tsx'
 import type { Dependency, LaunchCheck, Moved, ReadyMoment } from './types.ts'
 
@@ -159,8 +155,7 @@ function standing(check: LaunchCheck, blocker: Dependency | undefined, frozenAt:
   switch (check.state) {
     case 'idle':
       return {
-        line: `Frozen ${frozenAt}`,
-        under: 'Launch checks what moved since, then prepares the Workspace.',
+        line: `Ready to launch · frozen ${frozenAt}`,
         tone: 'quiet',
       }
     case 'checking':
@@ -207,42 +202,50 @@ function standing(check: LaunchCheck, blocker: Dependency | undefined, frozenAt:
   }
 }
 
-const STEP = 'flex min-h-control-sm min-w-0 items-center gap-2.5 px-4'
-
-/** The three steps of a launch, as marks: the check, the preparation, the build. */
-function launchSteps(moment: ReadyMoment): { title: string; state: MarkState; detail?: string }[] {
+/** Hemera's face for where the launch stands. */
+function faceOf(moment: ReadyMoment, blocker: Dependency | undefined): FaceState {
   const { check, preparation } = moment
-  const checkState: MarkState =
-    check.state === 'idle'
-      ? 'todo'
-      : check.state === 'checking'
-        ? 'running'
-        : check.state === 'clear' || check.state === 'moved'
-          ? 'done'
-          : check.state === 'dependency'
-            ? 'blocked'
-            : 'waiting'
-  const failed = preparation?.find((step) => step.state === 'failed')
-  const prepared = preparation?.filter((step) => step.state === 'done').length ?? 0
-  const preparationState: MarkState =
-    preparation === null
-      ? 'todo'
-      : failed !== undefined
-        ? 'waiting'
-        : prepared === preparation.length
-          ? 'done'
-          : 'running'
-  return [
-    { title: 'Check', state: checkState },
-    preparation === null
-      ? { title: 'Preparation', state: preparationState }
-      : {
-          title: 'Preparation',
-          state: preparationState,
-          detail: `${String(prepared)} of ${String(preparation.length)}`,
-        },
-    { title: 'Build', state: 'todo' },
-  ]
+  if (preparation?.some((step) => step.state === 'failed') === true) return 'error'
+  if (preparation !== null) return 'running'
+  if (blocker !== undefined && check.state === 'idle') return 'blocked'
+  switch (check.state) {
+    case 'idle':
+      return 'asleep'
+    case 'checking':
+      return 'checking'
+    case 'clear':
+    case 'moved':
+      return 'running'
+    case 'dependency':
+      return 'blocked'
+    default:
+      return 'question'
+  }
+}
+
+/** The progress line: the launch's step under way, and how far it is. */
+function progressOf(moment: ReadyMoment): StageCardProps['progress'] {
+  const { check, preparation } = moment
+  if (preparation !== null) {
+    const done = preparation.filter((step) => step.state === 'done').length
+    return {
+      step: 'Preparation',
+      detail: `${String(done)} of ${String(preparation.length)} steps`,
+    }
+  }
+  if (check.state === 'idle') return { step: 'Launch', detail: 'not checked yet' }
+  if (check.state === 'checking') return { step: 'Check', detail: check.step }
+  if ('moved' in check) {
+    const breaking = check.moved.filter((one) => one.verdict?.holds === false).length
+    return {
+      step: 'Check',
+      detail:
+        breaking > 0
+          ? `${String(check.moved.length)} moved · ${String(breaking)} breaks the Spec`
+          : `${String(check.moved.length)} moved`,
+    }
+  }
+  return { step: 'Check', detail: check.state === 'clear' ? 'nothing moved' : 'to run again' }
 }
 
 /** What the user decides when the check needs them: in the card, and nowhere else. */
@@ -282,15 +285,10 @@ function Choices({ check, handlers }: { check: LaunchCheck; handlers: ReadyHandl
   }
 }
 
-const TONE = {
-  quiet: 'text-sm font-medium break-words',
-  calls: 'text-sm font-medium break-words text-warning-muted-foreground',
-  good: 'text-sm font-medium break-words',
-} as const
-
 /**
- * Where the launch stands and what happens, at the top of the rail: the line that says it, the
- * model, the three steps, and what the check found.
+ * Where the launch stands and what the user decides, at the top of the rail: the common stage
+ * card (the face, the line, the progress, the step that runs), then right under it what the check
+ * found with its choices, the model, and the preparation's steps.
  */
 export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
   const blocker = blockerOf(moment)
@@ -298,111 +296,103 @@ export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
   const said = standing(check, blocker, moment.frozenAt)
   const moved = 'moved' in check ? check.moved : []
   const choices = <Choices check={check} handlers={handlers} />
+  const runningStep = preparation?.find((step) => step.state === 'running')
   return (
-    <section aria-label="Ready">
-      <Frame header={<FrameHeader icon={<IconRocket size="md" />} title="Ready" />}>
-        <div className="flex min-w-0 items-start gap-3 px-4 py-3">
-          <span className="flex pt-0.5">
-            {check.state === 'checking' ? (
-              <Loading size="sm" label="Checking" />
-            ) : said.tone === 'good' ? (
-              <span className="flex text-success">
-                <IconCheck size="sm" />
-              </span>
-            ) : said.tone === 'calls' ? (
-              <StatusMark
-                state={
-                  blocker !== undefined || check.state === 'dependency' ? 'blocked' : 'waiting'
-                }
-                size="sm"
-              />
-            ) : (
-              <StatusMark state="todo" size="sm" />
-            )}
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <p role="status" className={TONE[said.tone]}>
-              {said.line}
-            </p>
-            {said.under !== undefined && (
-              <p className="text-xs break-words text-muted-foreground">{said.under}</p>
-            )}
-            {choices !== null && <div className="flex flex-wrap gap-2 pt-1.5">{choices}</div>}
-          </div>
-        </div>
-        {moved.length > 0 && <MovedList moved={moved} onOpenDiff={handlers.onOpenDiff} />}
-        <div className="flex flex-col gap-1.5 border-t border-border px-4 py-3">
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <span className="text-xs font-medium text-muted-foreground">
-              {moment.overridden ? 'Your choice for Building' : 'Recommended for Building'}
-            </span>
-            <ModelPicker
-              label="Model of the Builder"
-              agents={AGENTS}
-              value={moment.overridden ? moment.model : null}
-              fallback={
-                moment.overridden
-                  ? { agent: 'claude', model: 'opus', effort: 'high' }
-                  : moment.model
-              }
-              onChange={handlers.onModel}
-              onFavourite={() => undefined}
-              onHide={() => undefined}
+    <>
+      <StageCard
+        stage="Ready"
+        face={faceOf(moment, blocker)}
+        line={said.line}
+        progress={progressOf(moment)}
+        running={
+          runningStep === undefined ? undefined : (
+            <LiveChip
+              name={runningStep.name}
+              icon={<IconTerminal size="sm" />}
+              state="running"
+              startedAt={STARTED}
+              endedAt={null}
+              glance={{ kind: 'run', type: `Preparation · ${runningStep.detail ?? ''}` }}
             />
-          </div>
-          <p className="text-xs break-words text-muted-foreground">
-            {moment.overridden ? `The Planner recommended Opus · High: ${moment.why}` : moment.why}
-          </p>
-        </div>
-        <ol
-          aria-label="Where the launch stands"
-          className="flex flex-col border-t border-border py-1"
-        >
-          {launchSteps(moment).map((step) => (
-            <li key={step.title} aria-label={step.title} className={STEP}>
-              <StatusMark state={step.state} size="sm" legend />
-              <span
-                className={cn(
-                  'shrink-0 text-sm',
-                  step.state === 'todo' ? 'text-muted-foreground' : 'font-medium',
-                )}
-              >
-                {step.title}
+          )
+        }
+      />
+      {(said.under !== undefined || moved.length > 0) && (
+        <section aria-label="What the check found">
+          <Frame>
+            {said.under !== undefined && (
+              <div className="flex flex-col gap-2 px-4 py-3">
+                <p className="text-sm break-words text-muted-foreground">{said.under}</p>
+                {choices !== null && <div className="flex flex-wrap gap-2">{choices}</div>}
+              </div>
+            )}
+            {moved.length > 0 && <MovedList moved={moved} onOpenDiff={handlers.onOpenDiff} />}
+          </Frame>
+        </section>
+      )}
+      <section aria-label="Model">
+        <Frame>
+          <div className="flex flex-col gap-1.5 px-4 py-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                {moment.overridden ? 'Your choice for Building' : 'Recommended for Building'}
               </span>
-              {step.detail !== undefined && (
-                <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
-                  {step.detail}
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-        {preparation !== null && (
-          <ul aria-label="Preparation" className="flex flex-col border-t border-border py-1">
-            {preparation.map((step) => (
-              <li key={step.name} className={cn(ROW, 'min-h-control-sm py-0.5')}>
-                <StatusMark state={step.state} size="sm" legend />
-                <span className={cn('shrink-0', step.state === 'todo' && 'text-muted-foreground')}>
-                  {step.name}
-                </span>
-                {step.detail !== undefined && (
+              <ModelPicker
+                label="Model of the Builder"
+                agents={AGENTS}
+                value={moment.overridden ? moment.model : null}
+                fallback={
+                  moment.overridden
+                    ? { agent: 'claude', model: 'opus', effort: 'high' }
+                    : moment.model
+                }
+                onChange={handlers.onModel}
+                onFavourite={() => undefined}
+                onHide={() => undefined}
+              />
+            </div>
+            <p className="text-xs break-words text-muted-foreground">
+              {moment.overridden
+                ? `The Planner recommended Opus · High: ${moment.why}`
+                : moment.why}
+            </p>
+          </div>
+        </Frame>
+      </section>
+      {preparation !== null && (
+        <section aria-label="Preparation steps">
+          <Frame>
+            <ul aria-label="Preparation" className="flex flex-col py-1">
+              {preparation.map((step) => (
+                <li key={step.name} className={cn(ROW, 'min-h-control-sm py-0.5')}>
+                  <StatusMark state={step.state} size="sm" legend />
                   <span
-                    className={cn(
-                      'ml-auto min-w-0 truncate text-xs',
-                      step.state === 'failed' ? 'text-destructive' : 'text-muted-foreground',
-                    )}
+                    className={cn('shrink-0', step.state === 'todo' && 'text-muted-foreground')}
                   >
-                    {step.detail}
+                    {step.name}
                   </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Frame>
-    </section>
+                  {step.detail !== undefined && (
+                    <span
+                      className={cn(
+                        'ml-auto min-w-0 truncate text-xs',
+                        step.state === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+                      )}
+                    >
+                      {step.detail}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Frame>
+        </section>
+      )}
+    </>
   )
 }
+
+/** When the step that runs started, for its chip's seconds: fixed once per load. */
+const STARTED = Date.now() - 38_000
 
 /** The frozen Spec in summary: its goal at a reading measure, its requirements one line each. */
 export function SpecSummary({

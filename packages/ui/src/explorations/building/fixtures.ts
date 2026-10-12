@@ -519,9 +519,15 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     helpers: [],
     journal: JOURNAL.slice(-2),
   }),
-  needs: () => ({ ...WORKING, needs: NEEDS }),
+  needs: () => ({
+    ...WORKING,
+    face: 'permission',
+    now: '6 things wait for you; the Builder goes on with T8 meanwhile.',
+    needs: NEEDS,
+  }),
   refused: () => ({
     ...WORKING,
+    face: 'blocked',
     now: 'Building is paused: the mission’s budget is spent.',
     next: undefined,
     needs: REFUSALS,
@@ -533,6 +539,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
   }),
   checkFailed: () => ({
     ...WORKING,
+    face: 'reading',
     now: 'Builder reads why web’s tests failed after R4.',
     checks: CHECK_FAILED,
   }),
@@ -559,6 +566,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
   }),
   endPhases: () => ({
     ...WORKING,
+    face: 'checking',
     now: 'The final checks run in web: lint, then the end-to-end tests.',
     next: 'Then the automatic review.',
     elapsed: '4 h 12 min',

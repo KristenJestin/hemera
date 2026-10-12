@@ -7,11 +7,11 @@ import { BuildingScreen } from './screen.tsx'
 
 /**
  * The Building page of #149, recommended: the spine of requirements in the middle, each with its
- * tasks and its proofs, and a rail that says top to bottom what happens (the Building card: the
- * percentage, the line of what happens now and next, who works beside the Builder, the two
- * measures and the time, the phases), the services, then one quiet line each for what no one
- * needs to watch — the checks, the changes, the journal — and the mission's own things. The needs
- * stand above the page, one row each, unfolded on demand. Nothing is open that does not call.
+ * tasks and its proofs, and a rail that says top to bottom what happens — the stage card common to
+ * every stage (the face, the line of what happens or waits, the progress line, the chips of what
+ * runs: services, helpers, checks under way) — the services that do not run with their Start,
+ * then one quiet line each for what no one needs to watch — the checks, the changes, the journal —
+ * and the mission's own things. The needs stand above the page, one row each, unfolded on demand.
  */
 const meta = {
   title: 'Explorations/Building/Building',
@@ -43,11 +43,10 @@ export const Working: Story = {
     const canvas = within(canvasElement)
     const card = within(cardOf(canvasElement))
     await expect(card.getByRole('status')).toHaveTextContent(/T8/)
-    await expect(
-      card.getByRole('img', { name: /^28% of the tasks done and verified/ }),
-    ).toBeVisible()
-    await expect(card.getByText('6 of 21')).toBeVisible()
-    await expect(card.getByText('2 of 9')).toBeVisible()
+    await expect(card.getByText('6 of 21 tasks done · 2 of 9 requirements proven')).toBeVisible()
+    // What runs is its chips on the card: the services, the helper.
+    await expect(card.getByText('api')).toBeVisible()
+    await expect(card.getByText('Helper')).toBeVisible()
     await expect(canvas.getByRole('button', { name: /R4 / })).toHaveAttribute(
       'aria-expanded',
       'true',
@@ -60,7 +59,7 @@ export const Working: Story = {
       'aria-expanded',
       'false',
     )
-    await expect(canvas.getByRole('list', { name: 'Services' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Start storybook' })).toBeVisible()
   },
 }
 
@@ -95,7 +94,7 @@ export const JustLaunched: Story = {
   play: async ({ canvasElement }) => {
     const card = within(cardOf(canvasElement))
     await expect(card.getByRole('status')).toHaveTextContent(/records each scenario’s red/)
-    await expect(card.getByRole('img', { name: /^0%/ })).toBeVisible()
+    await expect(card.getByText('3 of 14 reds recorded')).toBeVisible()
     // Nothing runs yet: the declared services are a Start each.
     await expect(
       within(canvasElement).getByRole('button', { name: 'Start storybook' }),
@@ -211,9 +210,10 @@ export const ChangedOutsideHemera: Story = {
 export const HelperStuck: Story = {
   args: { moment: 'stuck' },
   play: async ({ canvasElement }) => {
-    const chips = within(canvasElement).getByRole('list', { name: 'Working beside the Builder' })
-    await expect(within(chips).getAllByRole('listitem')).toHaveLength(2)
-    await expect(within(chips).queryByRole('button', { name: /Stop|×/ })).toBeNull()
+    const card = within(cardOf(canvasElement))
+    await expect(card.getByText('Helper')).toBeVisible()
+    await expect(card.getByText('Documenter')).toBeVisible()
+    await expect(card.queryByRole('button', { name: /Stop|×/ })).toBeNull()
   },
 }
 
@@ -231,8 +231,10 @@ export const EndPhases: Story = {
       'true',
     )
     const card = within(cardOf(canvasElement))
-    await expect(card.getByRole('img', { name: /^100%/ })).toBeVisible()
-    await expect(card.getByRole('listitem', { name: 'Final checks' })).toHaveTextContent('5 of 7')
+    await expect(card.getByText('Final checks')).toBeVisible()
+    await expect(card.getByText('5 of 7')).toBeVisible()
+    // The check under way is a chip on the card.
+    await expect(card.getByText('web · lint')).toBeVisible()
   },
 }
 
@@ -241,7 +243,9 @@ export const RoundTwo: Story = {
   args: { moment: 'round' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(cardOf(canvasElement)).toHaveAccessibleName('Building · round 2')
+    const card = within(cardOf(canvasElement))
+    await expect(card.getByText('Round 2')).toBeVisible()
+    await expect(card.getByText('1 of 4 points done')).toBeVisible()
     await expect(canvas.getByRole('region', { name: 'Round 2' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: /^Requirements/ })).toHaveAttribute(
       'aria-expanded',
@@ -298,7 +302,9 @@ export const Loading: Story = {
       'aria-busy',
       'true',
     )
-    await expect(within(cardOf(canvasElement)).queryByRole('img', { name: /%/ })).toBeNull()
+    await expect(within(cardOf(canvasElement)).getByRole('status')).toHaveTextContent(
+      'Reading where Building stands',
+    )
   },
 }
 
