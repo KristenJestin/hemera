@@ -203,7 +203,12 @@ describe('An "at open" command marked "ask before running"', () => {
           }),
         )
         yield* until(Effect.sync(pidsWritten), (written) => written.length === 1)
-        return { project, need, before, after: yield* profile.use(mainRuns(project)) }
+        // Its pid written is not the run running: that is the run's own state, waited on.
+        launched.release()
+        const after = yield* profile.use(
+          until(mainRuns(project), (seen) => seen[0]?.state === 'running'),
+        )
+        return { project, need, before, after }
       }).pipe(Effect.ensuring(Effect.sync(launched.release))),
     )
     expect(outcome.need.owner).toEqual(ProjectOwner.make({ projectId: outcome.project.id }))
