@@ -349,13 +349,23 @@ describe('The end sequence', () => {
             yield* builtAll(builder.grantId)
             yield* documented(world, mission.id)
             yield* reviewed(world, mission.id, 'spec-reviewer')
+            const now = Memory.use((memory) => memory.now(mission.id))
+            yield* until(
+              Effect.map(now, (state) => state.end.length > 0),
+              LONG,
+            )
+            const reviewingNow = yield* now
             yield* reviewed(world, mission.id, 'code-reviewer', [
               warning('README.md', 'Say how to export the invoices as Markdown.'),
             ])
             yield* specialAvailable(mission.id, 'RV1')
+            const specialNow = yield* now
             yield* specialDone(builder.grantId, 'RV1', 'README.md', 'Acme api, as Markdown\n')
             yield* inReview(mission.id)
             return {
+              reviewingNow,
+              specialNow,
+              endedNow: yield* now,
               types: yield* typesOf(mission.id),
               view: yield* buildingNow(mission.id),
               builder: yield* sessionsIn(SESSION_STATES, {
@@ -397,6 +407,10 @@ describe('The end sequence', () => {
       expect(seen.types.lastIndexOf('mission.moved')).toBeGreaterThan(
         seen.types.indexOf('building.proofs_refreshed'),
       )
+      // Now says where the end stands: the reviewers done, then the special tasks.
+      expect(seen.reviewingNow.end).toEqual(['Automatic review: 1 of 2 reviewers done'])
+      expect(seen.specialNow.end).toEqual(['Special tasks: RV1'])
+      expect(seen.endedNow.end).toEqual([])
       expect(seen.view).toMatchObject({ state: 'ended', phase: 'ended' })
       expect(seen.view.endedAt).not.toBeNull()
       // The Builder's session is stopped at the exit.
