@@ -21,7 +21,12 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import type { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
-import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import { effectfulActions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { fingerprintFile } from './read.ts'
@@ -114,6 +119,37 @@ const actionEvent = (
 })
 
 /**
+ * The intent of an action, in a transaction of the caller's: committed with what the caller writes
+ * of the effect it is about to make. `details` is masked already. Answers its event.
+ */
+export const beginActionIn = (
+  transaction: EngineTransaction,
+  id: string,
+  kind: string,
+  owner: ActionOwner,
+  details: Masked<string>,
+) =>
+  transaction
+    .insert(effectfulActions)
+    .values({
+      id,
+      kind,
+      ownerKind: owner.kind,
+      ownerId: owner.kind === 'mission' ? owner.missionId : owner.projectId,
+      taskId: owner.kind === 'mission' ? owner.taskId : null,
+      details,
+      state: 'started',
+      outcome: null,
+      startedAt: now(),
+      endedAt: null,
+      handledAt: null,
+    })
+    .pipe(
+      Effect.mapError(refusedWhile('recording the intent of an action')),
+      Effect.as([actionEvent('action.started', id, kind)]),
+    )
+
+/**
  * Writes the intent of an action, committed before its effect starts; answers its id, the one
  * given when the caller had to name the action before its intent could be written.
  */
@@ -126,28 +162,40 @@ export const beginAction = (
   Effect.gen(function* () {
     const secrets = yield* Secrets
     yield* mutate('recording the intent of an action', (transaction) =>
-      transaction
-        .insert(effectfulActions)
-        .values({
-          id,
-          kind,
-          ownerKind: owner.kind,
-          ownerId: owner.kind === 'mission' ? owner.missionId : owner.projectId,
-          taskId: owner.kind === 'mission' ? owner.taskId : null,
-          details: maskedJson(secrets.maskRecord(details)),
-          state: 'started',
-          outcome: null,
-          startedAt: now(),
-          endedAt: null,
-          handledAt: null,
-        })
-        .pipe(
-          Effect.mapError(refusedWhile('recording the intent of an action')),
-          Effect.as({ result: undefined, events: [actionEvent('action.started', id, kind)] }),
-        ),
+      Effect.map(
+        beginActionIn(transaction, id, kind, owner, maskedJson(secrets.maskRecord(details))),
+        (events) => ({ result: undefined, events }),
+      ),
     )
     return id
   })
+
+/**
+ * In a transaction of the caller's: what became of an action whose kind settles it itself, from
+ * its own record rather than a post-condition (a remote Spec's write, #207). A `started` or
+ * `indeterminate` action is moved to `state`; any other is left as it is. Answers its event.
+ */
+export const settleActionIn = (
+  transaction: EngineTransaction,
+  id: string,
+  state: 'done' | 'failed' | 'indeterminate',
+  outcome: Masked<string> | null,
+) =>
+  transaction
+    .update(effectfulActions)
+    .set(state === 'indeterminate' ? { state } : { state, outcome, endedAt: now() })
+    .where(
+      and(
+        eq(effectfulActions.id, id),
+        inArray(effectfulActions.state, ['started', 'indeterminate']),
+        state === 'indeterminate' ? eq(effectfulActions.state, 'started') : undefined,
+      ),
+    )
+    .returning({ kind: effectfulActions.kind })
+    .pipe(
+      Effect.mapError(refusedWhile('recording the outcome of an action')),
+      Effect.map((rows) => rows.map((row) => actionEvent(`action.${state}`, id, row.kind))),
+    )
 
 /** Writes the outcome of an action whose intent is `started`. */
 const settle = (id: string, state: 'done' | 'failed', outcome: string) =>
