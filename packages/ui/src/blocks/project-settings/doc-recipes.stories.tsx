@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist, IconFileText } from '../../icons.ts'
 import {
   ProjectSettings,
@@ -242,7 +243,7 @@ export const NoRecipe: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { name: 'No recipe yet' })).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Add a recipe' }))
-    expect(await body().findByRole('dialog', { name: 'Add a recipe' })).toBeVisible()
+    expect(await findOpen(body(), 'dialog', { name: 'Add a recipe' })).toBeVisible()
   },
 }
 
