@@ -168,7 +168,7 @@ describe('The ticket sections, composed', () => {
   })
 
   test('Tickets and Specs holds the providers, then the Spec settings; resources hold theirs', () => {
-    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources'])
+    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources', 'checks', 'documentation'])
     expect(isTicketSection('tickets')).toBe(true)
     expect(isTicketSection('resources')).toBe(true)
     expect(isTicketSection('models')).toBe(false)
@@ -179,5 +179,16 @@ describe('The ticket sections, composed', () => {
     expect(resources).toContain('<section aria-label="Exclusive resources"')
     expect(resources).toContain('<ul aria-label="Exclusive resources" aria-busy="true"')
     expect(resources).not.toContain('aria-label="Ticket providers"')
+  })
+
+  test('Checks and Documentation show skeleton rows while their lists are on their way', () => {
+    expect(isTicketSection('checks')).toBe(true)
+    expect(isTicketSection('documentation')).toBe(true)
+    const checks = renderToStaticMarkup(createElement(TicketSection, props('checks')))
+    expect(checks).toContain('<section aria-label="Checks"')
+    expect(checks).toContain('<ul aria-label="Checks" aria-busy="true"')
+    const documentation = renderToStaticMarkup(createElement(TicketSection, props('documentation')))
+    expect(documentation).toContain('<section aria-label="Documentation"')
+    expect(documentation).toContain('aria-busy="true"')
   })
 })

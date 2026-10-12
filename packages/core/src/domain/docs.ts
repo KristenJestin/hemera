@@ -69,25 +69,49 @@ function insidePath(path: string): string | null {
   return parts.join('/')
 }
 
-/** Why a recipe cannot be saved, as the sentence the settings show, or null when it can be. */
-export function docRecipeProblem(draft: DocRecipeDraft): string | null {
+/** The field of the settings a recipe's refusal is said under. */
+export const DOC_RECIPE_FIELDS = ['path', 'purpose', 'words'] as const
+export const DocRecipeField = Schema.Literals(DOC_RECIPE_FIELDS)
+export type DocRecipeField = typeof DocRecipeField.Type
+
+/** Why a recipe cannot be saved: the sentence the settings show, and the field it is said under. */
+export interface DocRecipeRefusal {
+  readonly field: DocRecipeField
+  readonly sentence: string
+}
+
+/** Why a recipe cannot be saved, and where the settings say it, or null when it can be. */
+export function docRecipeRefusal(draft: DocRecipeDraft): DocRecipeRefusal | null {
   const path = draft.path.trim()
   if (path === '') {
-    return 'Write the file or the pattern the recipe names, as in README.md or docs/**/*.md.'
+    return {
+      field: 'path',
+      sentence: 'Write the file or the pattern the recipe names, as in README.md or docs/**/*.md.',
+    }
   }
   if (insidePath(path) === null) {
     const where = draft.repository === ROOT_REPOSITORY ? 'the Workspace root' : 'its repository'
-    return `${path} leaves ${where}: name a file inside it.`
+    return { field: 'path', sentence: `${path} leaves ${where}: name a file inside it.` }
   }
-  if (draft.purpose.trim() === '') return 'Say in one sentence what the files are for.'
+  if (draft.purpose.trim() === '') {
+    return { field: 'purpose', sentence: 'Say in one sentence what the files are for.' }
+  }
   const words = draft.words.filter((word) => word.trim() !== '')
   if (draft.applies === 'when_impact_names' && words.length === 0) {
-    return 'Give the words the Spec’s Impact must name for this recipe to apply.'
+    return {
+      field: 'words',
+      sentence: 'Give the words the Spec’s Impact must name for this recipe to apply.',
+    }
   }
   if (draft.applies === 'always' && words.length > 0) {
-    return 'A recipe that always applies names no words.'
+    return { field: 'words', sentence: 'A recipe that always applies names no words.' }
   }
   return null
+}
+
+/** Why a recipe cannot be saved, as the sentence the settings show, or null when it can be. */
+export function docRecipeProblem(draft: DocRecipeDraft): string | null {
+  return docRecipeRefusal(draft)?.sentence ?? null
 }
 
 const escaped = (word: string): string => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

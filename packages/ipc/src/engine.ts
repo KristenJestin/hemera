@@ -185,12 +185,17 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
   JiraTokenEngineRpcs,
 )
 
-export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs)
+/**
+ * The Project's checks (#143) and doc recipes (#146), which the window asks through main. One more
+ * group in one set of handlers is more than TypeScript instantiates (TS2589): the engine and main
+ * answer each of them as a layer of its own.
+ */
+export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
+
+export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs, EngineSettingsRpcs)
 
 /**
- * Everything the engine serves: what main asks, and the Project's checks (#143), doc recipes (#146)
- * and proofs (#144), served apart until their screens (#150, #152, R10) forward them. One more
- * group in one set of handlers is more than TypeScript instantiates (TS2589): their handlers are
- * layers of their own.
+ * Everything the engine serves: what main asks, and the proofs (#144), served apart until their
+ * screen (R10) forwards them; their handlers are a layer of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ChecksRpcs, DocRecipesRpcs, ProofsRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs)
