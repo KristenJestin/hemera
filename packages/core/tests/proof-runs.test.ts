@@ -732,6 +732,253 @@ describe('A red read from the words of each runner', () => {
   })
 })
 
+/** pytest 9.1, its own words: three cases of the parametrised test fail, ids with spaces, brackets and unicode among them; one passes, one is skipped. */
+const PYTEST_PARAMETRISED_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+configfile: pyproject.toml
+collected 6 items
+
+tests/test_export.py ..FFFs                                              [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_exports[md] _______________________________
+
+kind = 'md'
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "csv",
+            "md",
+            pytest.param("md", id="with header [md]"),
+            pytest.param("résumé", id="résumé"),
+            pytest.param("txt", marks=pytest.mark.skip(reason="not yet")),
+        ],
+    )
+    def test_exports(kind):
+>       assert export(kind) == "total"
+E       AssertionError: assert '' == 'total'
+E         
+E         - total
+
+tests/test_export.py:21: AssertionError
+________________________ test_exports[with header [md]] ________________________
+
+kind = 'md'
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "csv",
+            "md",
+            pytest.param("md", id="with header [md]"),
+            pytest.param("résumé", id="résumé"),
+            pytest.param("txt", marks=pytest.mark.skip(reason="not yet")),
+        ],
+    )
+    def test_exports(kind):
+>       assert export(kind) == "total"
+E       AssertionError: assert '' == 'total'
+E         
+E         - total
+
+tests/test_export.py:21: AssertionError
+__________________________ test_exports[r\\xe9sum\\xe9] __________________________
+
+kind = 'résumé'
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "csv",
+            "md",
+            pytest.param("md", id="with header [md]"),
+            pytest.param("résumé", id="résumé"),
+            pytest.param("txt", marks=pytest.mark.skip(reason="not yet")),
+        ],
+    )
+    def test_exports(kind):
+>       assert export(kind) == "total"
+E       AssertionError: assert '' == 'total'
+E         
+E         - total
+
+tests/test_export.py:21: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_exports[md] - AssertionError: assert '' == ...
+FAILED tests/test_export.py::test_exports[with header [md]] - AssertionError:...
+FAILED tests/test_export.py::test_exports[r\\xe9sum\\xe9] - AssertionError: ass...
+==================== 3 failed, 2 passed, 1 skipped in 0.01s ====================
+`
+
+/** pytest 9.1 with `-v -rA`: an older test fails; the parametrised test's cases pass or are skipped. */
+const PYTEST_PARAMETRISED_OTHER_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0 -- /work/acme/api/.venv/bin/python3
+rootdir: /work/acme/api
+configfile: pyproject.toml
+collecting ... collected 4 items
+
+tests/test_export.py::test_one_is_one FAILED                             [ 25%]
+tests/test_export.py::test_exports[csv] PASSED                           [ 50%]
+tests/test_export.py::test_exports[with header [txt]] PASSED             [ 75%]
+tests/test_export.py::test_exports[md] SKIPPED (not yet)                 [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:7: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_export.py::test_exports[csv]
+PASSED tests/test_export.py::test_exports[with header [txt]]
+SKIPPED [1] tests/test_export.py:10: not yet
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+==================== 1 failed, 2 passed, 1 skipped in 0.01s ====================
+`
+
+/** go test -v, Go 1.27: a subtest nested two deep fails, its parents with it; one passes, one is skipped. */
+const GO_SUBTEST_FAILS = `=== RUN   TestExport
+=== RUN   TestExport/csv
+=== RUN   TestExport/as_markdown
+=== RUN   TestExport/as_markdown/with_header
+    export_test.go:14: got "", want "| total |"
+=== RUN   TestExport/as_markdown/empty
+=== RUN   TestExport/txt
+    export_test.go:24: not yet
+--- FAIL: TestExport (0.00s)
+    --- PASS: TestExport/csv (0.00s)
+    --- FAIL: TestExport/as_markdown (0.00s)
+        --- FAIL: TestExport/as_markdown/with_header (0.00s)
+        --- PASS: TestExport/as_markdown/empty (0.00s)
+    --- SKIP: TestExport/txt (0.00s)
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+/** go test -v, Go 1.27: an older subtest fails; the others pass or are skipped. */
+const GO_OTHER_SUBTEST_FAILS = `=== RUN   TestExport
+=== RUN   TestExport/csv
+    export_test.go:8: got "total", want "rows"
+=== RUN   TestExport/as_markdown
+=== RUN   TestExport/txt
+    export_test.go:17: not yet
+--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/csv (0.00s)
+    --- PASS: TestExport/as_markdown (0.00s)
+    --- SKIP: TestExport/txt (0.00s)
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+/** A parametrised pytest test, as a patch adds it under an older test. */
+const PYTEST_PARAMETRISED_PATCH = [
+  '@@ -7,0 +8,14 @@',
+  '+',
+  '+',
+  '+@pytest.mark.parametrize(',
+  '+    "kind",',
+  '+    [',
+  '+        "csv",',
+  '+        "md",',
+  '+        pytest.param("md", id="with header [md]"),',
+  '+    ],',
+  '+)',
+  '+def test_exports(kind):',
+  '+    assert export(kind) == "total"',
+].join('\n')
+
+/** Go subtests, as a patch adds them into an older TestExport. */
+const GO_SUBTESTS_PATCH = [
+  '@@ -10,0 +11,8 @@',
+  '+\tt.Run("as markdown", func(t *testing.T) {',
+  '+\t\tif got := Export("md", false); got != "" {',
+  '+\t\t\tt.Errorf("got %q, want %q", got, "")',
+  '+\t\t}',
+  '+\t})',
+  '+\tt.Run("txt", func(t *testing.T) {',
+  '+\t\tt.Skip("not yet")',
+  '+\t})',
+].join('\n')
+
+describe('A red read from pytest parametrised tests and Go subtests', () => {
+  test('a pytest parametrised test failing on some of its cases is a red, by its declared name', () => {
+    const path = 'tests/test_export.py'
+    const names = addedTestNames({
+      insertion: 'addition',
+      code: '',
+      patch: PYTEST_PARAMETRISED_PATCH,
+    })
+    expect(names).toEqual(['test_exports'])
+    expect(validRed(run(PYTEST_PARAMETRISED_FAILS, 1, path), path, names)).toBe(true)
+    expect(validRed(run(PYTEST_PARAMETRISED_FAILS, 1, path), path, ['test_one_is_one'])).toBe(false)
+  })
+
+  test('a pytest case id with spaces, brackets or unicode is read as its declared test', () => {
+    const path = 'tests/test_export.py'
+    const lines = run(PYTEST_PARAMETRISED_FAILS, 1, path).failingLines
+    expect(lines).toHaveLength(3)
+    for (const line of lines) {
+      expect(validRed(run(line, 1, path), path, ['test_exports'])).toBe(true)
+      expect(validRed(run(line, 1, path), path, ['test_export'])).toBe(false)
+    }
+  })
+
+  test('a pytest parametrised test whose cases pass or are skipped, beside an older failing test, is not a red', () => {
+    const path = 'tests/test_export.py'
+    const names = addedTestNames({
+      insertion: 'addition',
+      code: '',
+      patch: PYTEST_PARAMETRISED_PATCH,
+    })
+    expect(validRed(run(PYTEST_PARAMETRISED_OTHER_FAILS, 1, path), path, names)).toBe(false)
+    expect(validRed(run(PYTEST_PARAMETRISED_OTHER_FAILS, 1, path), path, ['test_one_is_one'])).toBe(
+      true,
+    )
+  })
+
+  test('a Go test whose nested subtest fails is a red, by its top function', () => {
+    const path = 'export_test.go'
+    const code = [
+      'func TestExport(t *testing.T) {',
+      '\tt.Run("csv", func(t *testing.T) {})',
+      '\tt.Run("as markdown", func(t *testing.T) {',
+      '\t\tt.Run(`with header`, func(t *testing.T) {})',
+      '\t})',
+      '\tfor _, tc := range cases {',
+      '\t\tt.Run(tc.name, func(t *testing.T) {})',
+      '\t}',
+      '}',
+    ].join('\n')
+    const names = addedTestNames({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual(['TestExport', 'csv', 'as markdown', 'with header'])
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestExport'])).toBe(true)
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestImport'])).toBe(false)
+  })
+
+  test('a Go subtest the proof adds is read under the name Go prints, at any depth', () => {
+    const path = 'export_test.go'
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['with header'])).toBe(true)
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['as markdown'])).toBe(true)
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['empty'])).toBe(false)
+    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['txt'])).toBe(false)
+  })
+
+  test('Go subtests the proof adds, passing or skipped under a parent failing on an older one, are not a red', () => {
+    const path = 'export_test.go'
+    const names = addedTestNames({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH })
+    expect(names).toEqual(['as markdown', 'txt'])
+    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, names)).toBe(false)
+    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, ['csv'])).toBe(true)
+  })
+})
+
 describe('The key line observed in Planning', () => {
   test('colours, paths, durations, addresses and numbers are masked', () => {
     expect(

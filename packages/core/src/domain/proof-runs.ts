@@ -268,18 +268,23 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
  * A test's declared name as a pattern matched whole: from the start of a line or after a
- * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
- * name (a duration, `(`, `[`, ` - `, ` ...`). What `%s`, `$name` or `${…}` stand for (`each`, a
- * template literal) matches words within a name; a name made of placeholders alone is none.
+ * separator (`>`, `›`, `::`, a space, Go's `/` before a subtest), up to the end of the line or what
+ * a runner prints after a name (a duration, `(`, `[` as pytest's case id, ` - `, ` ...`). A space
+ * in a name also matches the `_` Go prints for it. What `%s`, `$name` or `${…}` stand for (`each`,
+ * a template literal) matches words within a name; a name made of placeholders alone is none.
  */
 const namePattern = (name: string): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
   if (parts.every((part, at) => at % 2 === 1 || part.trim() === '')) return null
   const body = parts
-    .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .map((part, at) =>
+      at % 2 === 1
+        ? '[^\\n>›]+?'
+        : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s/g, '[\\s_]'),
+    )
     .join('')
   return new RegExp(
-    `(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `(?:^|[\\s>›/]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s*\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
@@ -324,8 +329,9 @@ export const validRed = (
 }
 
 /**
- * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`,
- * a Go `func TestX(t *testing.T)`, a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
+ * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`
+ * (its pytest cases, `test_…[id]`, are its own), a Go `func TestX(t *testing.T)` and the literal
+ * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
  */
 const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
 /** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
@@ -334,6 +340,7 @@ const EACH_NAME =
 
 const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
 const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
+const GO_SUBTEST_NAME = /\b\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/g
 const RUST_NAME =
   /#\[(?:\w+::)*test\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 
@@ -354,7 +361,7 @@ export const addedTestNames = (test: {
           .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
           .map((line) => line.slice(1))
           .join('\n')
-  return [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME]
+  return [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, GO_SUBTEST_NAME, RUST_NAME]
     .flatMap((pattern) => Array.from(added.matchAll(pattern)))
     .toSorted((a, b) => a.index - b.index)
     .map((found) => found.groups?.['name'] ?? '')
