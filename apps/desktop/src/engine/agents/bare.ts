@@ -39,6 +39,28 @@ export interface BareInput {
   readonly own?: Readonly<Partial<Record<string, string>>>
 }
 
+/** What building an agent's judge session takes (#197). */
+export interface JudgeInput {
+  /** Hemera's own folder for this agent, `<data>/agents/<provider>`. */
+  readonly agentDirectory: string
+  /** The judge's fixed instructions. */
+  readonly instructions: string
+  /** What of the user's own settings the agent keeps (its adapter's `ownSettings`). */
+  readonly own?: Readonly<Partial<Record<string, string>>>
+}
+
+/** The first id offered that matches one of `patterns`, tried in their order; null for none. */
+export function firstOffered(
+  offered: ReadonlyArray<string>,
+  patterns: ReadonlyArray<RegExp>,
+): string | null {
+  for (const pattern of patterns) {
+    const found = offered.find((id) => pattern.test(id))
+    if (found !== undefined) return found
+  }
+  return null
+}
+
 /** The options Claude Code reads from `session/new` `_meta`. */
 export interface ClaudeCodeMeta {
   readonly claudeCode: {
@@ -57,9 +79,12 @@ export interface ClaudeCodeMeta {
   }
 }
 
-/** What Hemera's patch of Codex's adapter reads from `session/new` `_meta`. */
+/**
+ * What Hemera's patch of Codex's adapter reads from `session/new` `_meta`: a tool server of null
+ * is a judge session, with no tool at all.
+ */
 export interface CodexMeta {
-  readonly hemera: { readonly bare: true; readonly toolServer: string }
+  readonly hemera: { readonly bare: true; readonly toolServer: string | null }
 }
 
 /** What an agent is handed to run bare. */

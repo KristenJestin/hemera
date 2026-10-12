@@ -76,7 +76,7 @@ export const PermissionDecision = Schema.Struct({
 })
 export type PermissionDecision = typeof PermissionDecision.Type
 
-/** Who judges what the local rules leave open: "Jev", or "Hemera asks". */
+/** Who judges what the local rules leave open: "Jev", or an agent with its own model. */
 export const WhoJudges = Schema.Literals(JUDGES)
 
 /**

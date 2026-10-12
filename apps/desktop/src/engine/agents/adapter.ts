@@ -4,7 +4,7 @@
  * A declaration says which command the user installs and signs in with, where that agent keeps
  * its login (honouring the agent's own environment overrides), what speaks ACP for it, how its
  * `initialize` answer says it is signed in, whether it has been qualified to run bare on an OS,
- * and the options that make it run bare. It starts nothing and resolves no path: discovery asks
+ * the options that make it run bare, and those of its judge session. It starts nothing and resolves no path: discovery asks
  * the machine, the runtime starts what discovery resolved.
  *
  * The agent itself is never shipped: it is the command on the user's `PATH`. The ACP adapter of
@@ -15,7 +15,7 @@
 import type { AgentProvider } from '@hemera/core/domain'
 import type { Qualification } from '@hemera/ipc'
 
-import type { BareInput, BareOptions } from './bare.ts'
+import type { BareInput, BareOptions, JudgeInput } from './bare.ts'
 
 /** The environment an agent's own paths take their overrides from. */
 export type Environment = Readonly<Record<string, string | undefined>>
@@ -63,6 +63,19 @@ export interface AgentAdapter {
   readonly qualification: (platform: NodeJS.Platform) => Qualification
   /** What the agent is handed so that Hemera's tools are its only tools. */
   readonly bareOptions: (input: BareInput) => BareOptions
+  /**
+   * What the agent is handed to open a judge session: no MCP server, no tool, the judge's
+   * instructions (#197).
+   */
+  readonly judgeOptions: (input: JudgeInput) => BareOptions
+  /**
+   * The model a judge session is put on, among the ids the agent offers: its smallest, or null
+   * when it offers none it knows (the session's model is then taken).
+   */
+  readonly judgeModel: (
+    offered: ReadonlyArray<string>,
+    own: Readonly<Partial<Record<string, string>>>,
+  ) => string | null
   /** For an agent whose bare options move its configuration away: what of the user's it keeps. */
   readonly ownSettings?: OwnSettings
   /** The instruction file of a repository this agent reads when it reads one itself. */
