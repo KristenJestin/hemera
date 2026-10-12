@@ -1312,6 +1312,76 @@ describe('A step that cannot go on', () => {
       }
     },
   )
+
+  test(
+    'a documenter’s delta refused before its pass runs holds the end on an error need, once',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, 'src/x.ts', 'export const x = 1\n')
+            yield* builtAll(builder.grantId)
+            const first = yield* documented(world, mission.id)
+            // A second pass already spent: the delta the special task asks for is refused.
+            const database = yield* Database
+            const view = yield* buildingNow(mission.id)
+            yield* until(
+              Effect.map(
+                database.select().from(documenterPasses),
+                (rows) => rows[0]?.endedAt !== null && rows.length === 1,
+              ),
+              LONG,
+            )
+            yield* database.insert(documenterPasses).values({
+              id: crypto.randomUUID(),
+              buildingId: view.buildingId,
+              missionId: mission.id,
+              number: 2,
+              mode: 'full',
+              files: '[]',
+              state: 'reported',
+              lineage: crypto.randomUUID(),
+              attemptId: crypto.randomUUID(),
+              noChangeReason: null,
+              startedAt: new Date().toISOString(),
+              endedAt: new Date().toISOString(),
+            })
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('src/x.ts', 'Fix src/x.ts.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            yield* specialDone(builder.grantId, 'RV1', 'src/x.ts', 'export const x = 2\n')
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            // Long enough for a loop to write its events again.
+            yield* Effect.sleep('1 second')
+            return {
+              first,
+              mission: yield* getMission(mission.id),
+              view: yield* buildingNow(mission.id),
+              deltas: yield* eventsOf(mission.id, 'building.documenter_delta'),
+            }
+          }),
+        ),
+      )
+      expect(seen.view.phase).toBe('documenter_delta')
+      expect(seen.deltas).toHaveLength(1)
+      const [need] = seen.mission.needs
+      expect(Predicate.isTagged(need?.fields, 'Error')).toBe(true)
+      if (Predicate.isTagged(need?.fields, 'Error')) {
+        expect(need.fields.failed).toContain('the documenter already ran twice')
+      }
+    },
+  )
 })
 
 describe('A restart in the middle of the end', () => {

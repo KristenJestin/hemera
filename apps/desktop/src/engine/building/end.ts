@@ -383,8 +383,9 @@ export const buildingEndLayer = (log: Log) => {
         Effect.gen(function* () {
           documenting.add(building.id)
           yield* Documenter.use((documenter) => documenter.run(building.id, mode)).pipe(
+            // Refused before a pass is recorded: the user is asked, never a loop of refusals.
             Effect.catchTag('DocumenterRefused', (refused) =>
-              said(`the documenter's pass did not run: ${refused.reason}`),
+              raise(building, `The documenter's pass did not run: ${refused.reason}.`),
             ),
             Effect.ensuring(Effect.sync(() => documenting.delete(building.id))),
             Effect.andThen(drive(building.id)),
