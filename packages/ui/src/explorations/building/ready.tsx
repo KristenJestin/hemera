@@ -5,12 +5,11 @@ import { Button } from '../../components/button/button.tsx'
 import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
 import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
 import type { FaceState } from '../../components/face/states.ts'
-import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import { type ModelChoice, ModelPicker } from '../../components/model-picker/model-picker.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconAlertTriangle, IconFileText, IconGitCompare, IconTerminal } from '../../icons.ts'
+import { IconAlertTriangle, IconFileText, IconGitCompare } from '../../icons.ts'
 import { Fold, ID, MissionFolds, QUIET, ROW } from './parts.tsx'
 import type { Dependency, LaunchCheck, Moved, ReadyMoment } from './types.ts'
 
@@ -287,8 +286,9 @@ function Choices({ check, handlers }: { check: LaunchCheck; handlers: ReadyHandl
 
 /**
  * Where the launch stands and what the user decides, at the top of the rail: the common stage
- * card (the face, the line, the progress, the step that runs), then right under it what the check
- * found with its choices, the model, and the preparation's steps.
+ * card (the face, the line, the progress; no chip, since no agent works beside it here), then
+ * right under it what the check found with its choices, the model, and the preparation's steps,
+ * the one under way marked in its list.
  */
 export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
   const blocker = blockerOf(moment)
@@ -296,7 +296,6 @@ export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
   const said = standing(check, blocker, moment.frozenAt)
   const moved = 'moved' in check ? check.moved : []
   const choices = <Choices check={check} handlers={handlers} />
-  const runningStep = preparation?.find((step) => step.state === 'running')
   return (
     <>
       <StageCard
@@ -304,18 +303,6 @@ export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
         face={faceOf(moment, blocker)}
         line={said.line}
         progress={progressOf(moment)}
-        running={
-          runningStep === undefined ? undefined : (
-            <LiveChip
-              name={runningStep.name}
-              icon={<IconTerminal size="sm" />}
-              state="running"
-              startedAt={STARTED}
-              endedAt={null}
-              glance={{ kind: 'run', type: `Preparation · ${runningStep.detail ?? ''}` }}
-            />
-          )
-        }
       />
       {(said.under !== undefined || moved.length > 0) && (
         <section aria-label="What the check found">
@@ -390,9 +377,6 @@ export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
     </>
   )
 }
-
-/** When the step that runs started, for its chip's seconds: fixed once per load. */
-const STARTED = Date.now() - 38_000
 
 /** The frozen Spec in summary: its goal at a reading measure, its requirements one line each. */
 export function SpecSummary({

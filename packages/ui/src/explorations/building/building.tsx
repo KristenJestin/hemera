@@ -1,16 +1,16 @@
 import { cn } from 'cn'
-import { type ReactNode, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
 import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
+import { Popover } from '../../components/popover/popover.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconAlertTriangle,
   IconChecklist,
@@ -21,6 +21,7 @@ import {
   IconPlayerStop,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconTerminal,
   IconX,
 } from '../../icons.ts'
@@ -61,8 +62,6 @@ export interface BuildingPageProps extends BuildingHandlers {
   chosenTask?: string | undefined
   /** Whether the page waits for its first read: its rows are skeletons. */
   loading?: boolean | undefined
-  /** Where the services stand on the rail; the fold until the maintainer chooses. */
-  services?: ServicesLayout | undefined
 }
 
 const COLUMNS = 'flex min-w-0 flex-col gap-8 px-8 pt-2 pb-10 lg:flex-row-reverse lg:items-start'
@@ -160,25 +159,17 @@ export function progressOf(moment: BuildingMoment): StageCardProps['progress'] {
 
 /**
  * What happens, at the top of the rail: the common stage card — the face, the line of what
- * happens or what waits, the progress line — with the chips of what runs: the services, who works
- * beside the Builder, the checks under way.
+ * happens or what waits, the progress line — with a chip for each agent at work beside the
+ * Builder. A service or a check is not an agent: they are in their folds.
  */
 export function BuildingCard({
   moment,
   loading = false,
-  toStart = false,
-  onService,
 }: {
   moment: BuildingMoment
   loading?: boolean | undefined
-  /** Whether the stopped services follow the running chips, dashed, each started by a click. */
-  toStart?: boolean | undefined
-  onService: BuildingHandlers['onService']
 }): ReactNode {
   const names = moment.helpers.map((helper) => helper.name)
-  const checks = moment.checks.filter((check) => check.state === 'running')
-  const idle = toStart ? moment.idle : []
-  const running = moment.services.length + moment.helpers.length + checks.length + idle.length > 0
   return (
     <StageCard
       stage="Building"
@@ -186,27 +177,8 @@ export function BuildingCard({
       line={loading ? 'Reading where Building stands' : moment.now}
       progress={loading ? { step: 'Building', detail: 'counting the tasks' } : progressOf(moment)}
       running={
-        running ? (
+        moment.helpers.length > 0 ? (
           <>
-            {moment.services.map((service) => (
-              <LiveChip
-                key={service.name}
-                name={service.name}
-                icon={<IconTerminal size="sm" />}
-                state={service.state}
-                startedAt={service.startedAt}
-                endedAt={service.endedAt}
-                glance={{
-                  kind: 'service',
-                  type: `Service · ${service.line}`,
-                  url: service.url,
-                  onRestart: () => onService(service.name, 'restart'),
-                  onStop: () => onService(service.name, 'stop'),
-                  onCopyUrl: () => onService(service.name, 'copy'),
-                  onOpenUrl: () => onService(service.name, 'open'),
-                }}
-              />
-            ))}
             {moment.helpers.map((helper) => (
               <LiveChip
                 key={helper.name}
@@ -218,18 +190,6 @@ export function BuildingCard({
                 glance={{ kind: 'helper', type: HELPER_TYPE[helper.kind], step: helper.step }}
               />
             ))}
-            {checks.map((check) => (
-              <LiveChip
-                key={`${check.repository}-${check.name}`}
-                name={`${check.repository} · ${check.name}`}
-                icon={<IconChecklist size="sm" />}
-                state="running"
-                startedAt={CHECK_STARTED}
-                endedAt={null}
-                glance={{ kind: 'run', type: `Check · ${check.after}` }}
-              />
-            ))}
-            <ChipsToStart idle={idle} onService={onService} />
           </>
         ) : undefined
       }
@@ -237,133 +197,120 @@ export function BuildingCard({
   )
 }
 
-/** When a running check started, for its chip's seconds: fixed once per load. */
-const CHECK_STARTED = Date.now() - 52_000
-
 /**
- * Where the services stand on the rail, in the three ways #149 puts to the maintainer: one folded
- * line among the rail's folds (`fold`, recommended), the stopped ones as quiet chips on the stage
- * card (`card`), or a block of its own listing them all (`list`). Two go once one is chosen.
+ * What the catalogue offers beyond the mission's services, behind one quiet action: a picker the
+ * search narrows, each service with its command. Choosing one starts it for this mission only.
  */
-export type ServicesLayout = 'fold' | 'card' | 'list'
-
-/** A stopped service the user can start: quiet and dashed, after the card's running chips. */
-const TO_START =
-  'inline-flex h-control-sm shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border px-2 text-xs font-medium text-muted-foreground outline-none hover:tinted hover:text-foreground focus-ring hover-motion'
-
-/** The stopped services the Project declares, as dashed chips for the stage card: a click starts one. */
-function ChipsToStart({
-  idle,
-  onService,
-}: {
-  idle: BuildingMoment['idle']
-  onService: BuildingHandlers['onService']
-}): ReactNode {
-  return idle.map((service) => (
-    <Tooltip key={service.name} label={`Start ${service.name} · ${service.line}`}>
-      <button
-        type="button"
-        aria-label={`Start ${service.name}`}
-        className={TO_START}
-        onClick={() => onService(service.name, 'start')}
-      >
-        <IconPlayerPlay size="sm" />
-        {service.name}
-      </button>
-    </Tooltip>
-  ))
-}
-
-/** What the catalogue offers beyond the mission's services: one folded line, each with Start. */
-function Catalogue({
+function CataloguePicker({
   catalogue,
   onService,
 }: {
   catalogue: BuildingMoment['catalogue']
   onService: BuildingHandlers['onService']
 }): ReactNode {
+  const id = useId()
+  const search = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
   if (catalogue.length === 0) return null
-  return (
-    <Fold
-      glyph={<IconPlus size="sm" />}
-      title="From the catalogue"
-      detail={`${plural(catalogue.length, 'service', 'services')} this mission does not declare`}
-    >
-      <ul aria-label="From the catalogue" className="flex flex-col pb-1 pl-6">
-        {catalogue.map((service) => (
-          <li key={service.name} className={ROW}>
-            <span className="shrink-0 font-medium">{service.name}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-              {service.line}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              aria-label={`Start ${service.name} for this mission`}
-              onClick={() => onService(service.name, 'start')}
-            >
-              Start
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </Fold>
+  const wanted = query.trim().toLowerCase()
+  const found = catalogue.filter(
+    (service) =>
+      service.name.toLowerCase().includes(wanted) || service.line.toLowerCase().includes(wanted),
   )
-}
-
-/**
- * Every service of the mission, one row each: its mark, its name, its address while it runs or
- * its command while it does not, and Stop or Start. The catalogue's last, folded.
- */
-function ServiceRows({
-  moment,
-  onService,
-}: {
-  moment: BuildingMoment
-  onService: BuildingHandlers['onService']
-}): ReactNode {
+  const current = Math.min(active, Math.max(0, found.length - 1))
+  const start = (service: BuildingMoment['catalogue'][number] | undefined): void => {
+    if (service === undefined) return
+    onService(service.name, 'start')
+    setOpen(false)
+  }
+  const walk = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      setActive(Math.min(Math.max(current + delta, 0), Math.max(0, found.length - 1)))
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      start(found[current])
+    }
+  }
   return (
-    <>
-      <ul aria-label="Services" className="flex flex-col">
-        {moment.services.map((service) => (
-          <li key={service.name} className={ROW}>
-            <StatusMark state="running" size="sm" legend />
-            <span className="shrink-0 font-medium">{service.name}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-              {service.url ?? service.line}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Stop ${service.name}`}
-              onClick={() => onService(service.name, 'stop')}
-            >
-              <IconPlayerStop size="sm" />
-              Stop
-            </Button>
-          </li>
-        ))}
-        {moment.idle.map((service) => (
-          <li key={service.name} className={ROW}>
-            <StatusMark state="idle" size="sm" legend />
-            <span className="shrink-0 font-medium">{service.name}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-              {service.line}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              aria-label={`Start ${service.name}`}
-              onClick={() => onService(service.name, 'start')}
-            >
-              <IconPlayerPlay size="sm" />
-              Start
-            </Button>
-          </li>
-        ))}
-      </ul>
-      <Catalogue catalogue={moment.catalogue} onService={onService} />
-    </>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        setQuery('')
+        setActive(0)
+      }}
+      align="start"
+      label="Start a service from the catalogue"
+      initialFocus={search}
+      trigger={
+        <Button variant="ghost" size="sm">
+          <IconPlus size="sm" />
+          Start a service from the catalogue…
+        </Button>
+      }
+    >
+      <div className="flex w-picker flex-col gap-2">
+        <label className="flex h-control-md min-w-0 items-center gap-2 rounded-md border border-input bg-input-fill px-2.5 focus-ring">
+          <IconSearch size="sm" aria-hidden="true" className="text-muted-foreground" />
+          <input
+            ref={search}
+            role="combobox"
+            aria-label="Search the catalogue"
+            aria-expanded="true"
+            aria-controls={`${id}-list`}
+            aria-activedescendant={
+              found[current] === undefined ? undefined : `${id}-${found[current].name}`
+            }
+            aria-autocomplete="list"
+            placeholder="Search the catalogue"
+            className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setActive(0)
+            }}
+            onKeyDown={walk}
+          />
+        </label>
+        {found.length === 0 ? (
+          <p id={`${id}-list`} className="h-picker-list px-2 py-3 text-sm text-muted-foreground">
+            {`No service matches “${query.trim()}”`}
+          </p>
+        ) : (
+          <div
+            id={`${id}-list`}
+            role="listbox"
+            aria-label="The catalogue"
+            className="flex h-picker-list flex-col gap-0.5 overflow-y-auto scrollbar-stable rounded-md outline-none"
+          >
+            {found.map((service, index) => (
+              <div
+                key={service.name}
+                id={`${id}-${service.name}`}
+                role="option"
+                aria-selected={index === current}
+                data-active={index === current}
+                className="flex min-w-0 shrink-0 flex-col rounded-md px-2 py-1.5 select-none hover-motion hover:tinted data-[active=true]:tinted"
+                onPointerMove={() => setActive(index)}
+                onClick={() => start(service)}
+              >
+                <span className="truncate text-sm font-medium">{service.name}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {service.line}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="px-2 text-xs text-muted-foreground">
+          Started for this mission only: the Project keeps its own list.
+        </p>
+      </div>
+    </Popover>
   )
 }
 
@@ -377,8 +324,12 @@ function servicesWords(moment: BuildingMoment): string {
   return parts.length > 0 ? parts.join(' · ') : 'None'
 }
 
-/** Proposal 1: the services as one folded line among the rail's folds. */
-function ServicesFold({
+/**
+ * The services, one folded line among the rail's folds: "api running · 2 to start". Unfolded,
+ * every service the mission declares, one row each — its mark, its address while it runs or its
+ * command while it does not, Stop or Start — then the catalogue's picker, quiet, last.
+ */
+function Services({
   moment,
   onService,
 }: {
@@ -388,27 +339,49 @@ function ServicesFold({
   return (
     <Fold glyph={<IconTerminal size="sm" />} title="Services" detail={servicesWords(moment)}>
       <div className="flex flex-col pb-1 pl-6">
-        <ServiceRows moment={moment} onService={onService} />
+        <ul aria-label="Services" className="flex flex-col">
+          {moment.services.map((service) => (
+            <li key={service.name} className={ROW}>
+              <StatusMark state="running" size="sm" legend />
+              <span className="shrink-0 font-medium">{service.name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {service.url ?? service.line}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Stop ${service.name}`}
+                onClick={() => onService(service.name, 'stop')}
+              >
+                <IconPlayerStop size="sm" />
+                Stop
+              </Button>
+            </li>
+          ))}
+          {moment.idle.map((service) => (
+            <li key={service.name} className={ROW}>
+              <StatusMark state="idle" size="sm" legend />
+              <span className="shrink-0 font-medium">{service.name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {service.line}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label={`Start ${service.name}`}
+                onClick={() => onService(service.name, 'start')}
+              >
+                <IconPlayerPlay size="sm" />
+                Start
+              </Button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex px-2 pt-1">
+          <CataloguePicker catalogue={moment.catalogue} onService={onService} />
+        </div>
       </div>
     </Fold>
-  )
-}
-
-/** Proposal 3: a block of its own under the stage card, every service listed with its state. */
-function ServicesList({
-  moment,
-  onService,
-}: {
-  moment: BuildingMoment
-  onService: BuildingHandlers['onService']
-}): ReactNode {
-  return (
-    <section aria-labelledby="building-services" className="flex flex-col gap-1">
-      <h2 id="building-services" className="px-4 text-xs font-medium text-muted-foreground">
-        Services
-      </h2>
-      <ServiceRows moment={moment} onService={onService} />
-    </section>
   )
 }
 
@@ -437,20 +410,27 @@ function CheckLine({ check }: { check: Check }): ReactNode {
   )
 }
 
-/** The checks, folded: quiet while they pass, open on a failure, in full once the final ones run. */
+/**
+ * The checks, folded: quiet while they pass, open on a failure, in full once the final ones run.
+ * A check under way is said on the line and marked in the list: it is not an agent, so it has no
+ * chip on the card.
+ */
 function Checks({ checks }: { checks: readonly Check[] }): ReactNode {
   if (checks.length === 0) return null
   const failed = checks.filter((check) => check.state === 'failed')
   const final = checks.some((check) => check.final)
   const done = checks.filter((check) => check.state === 'done').length
+  const running = checks
+    .filter((check) => check.state === 'running')
+    .map((check) => `${check.repository} · ${check.name} running`)
   const detail =
     failed.length > 0
       ? failed
           .map((check) => `${check.repository} · ${check.name} failed ${check.after}`)
           .join(', ')
       : final
-        ? `final · ${String(done)} of ${String(checks.length)}`
-        : `quiet · ${checks[0]?.after ?? ''}`
+        ? [`final · ${String(done)} of ${String(checks.length)}`, ...running].join(' · ')
+        : [...running, `quiet · ${checks[0]?.after ?? ''}`].join(' · ')
   return (
     <Fold
       glyph={<IconChecklist size="sm" />}
@@ -876,7 +856,6 @@ export function BuildingPage({
   moment,
   chosenTask,
   loading = false,
-  services = 'fold',
   onOpenTask,
   onOpenDiff,
   onService,
@@ -885,19 +864,10 @@ export function BuildingPage({
   return (
     <div className={COLUMNS} data-stage="building">
       <aside aria-label="What happens" className={RAIL}>
-        <BuildingCard
-          moment={moment}
-          loading={loading}
-          toStart={services === 'card'}
-          onService={onService}
-        />
-        {services === 'list' && !loading && <ServicesList moment={moment} onService={onService} />}
+        <BuildingCard moment={moment} loading={loading} />
         {!loading && (
           <div className="flex flex-col">
-            {services === 'fold' && <ServicesFold moment={moment} onService={onService} />}
-            {services === 'card' && (
-              <Catalogue catalogue={moment.catalogue} onService={onService} />
-            )}
+            <Services moment={moment} onService={onService} />
             <Checks checks={moment.checks} />
             <Changes changes={moment.changes} onOpenDiff={onOpenDiff} />
             <Journal journal={moment.journal} />

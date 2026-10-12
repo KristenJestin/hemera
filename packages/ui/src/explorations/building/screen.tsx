@@ -19,7 +19,7 @@ import {
   showView,
 } from '../../surfaces/mission/navigation.ts'
 import { stageWords } from '../../blocks/mission/vocabulary.ts'
-import { BuildingPage, type BuildingHandlers, type ServicesLayout } from './building.tsx'
+import { BuildingPage, type BuildingHandlers } from './building.tsx'
 import {
   BRANCH,
   KEY,
@@ -133,8 +133,6 @@ export interface BuildingScreenProps extends BuildingHandlers {
   title?: string | undefined
   /** The views open as the story starts. */
   initial?: MissionFrameState | undefined
-  /** Where the services stand on the rail: one of the three proposals. */
-  services?: ServicesLayout | undefined
 }
 
 /** The Building page of ACME-12 in its frame, the needs above it, its views over it. */
@@ -143,7 +141,6 @@ export function BuildingScreen({
   loading = false,
   title = TITLE,
   initial = AT_BASE,
-  services,
   ...handlers
 }: BuildingScreenProps): ReactNode {
   const moment = MOMENTS[name]()
@@ -206,7 +203,6 @@ export function BuildingScreen({
             moment={moment}
             chosenTask={chosen}
             loading={loading}
-            services={services}
             onOpenTask={(id) => {
               setChosen(id)
               handlers.onOpenTask(id)

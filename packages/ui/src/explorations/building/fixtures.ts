@@ -233,9 +233,28 @@ const IDLE = [
   { name: 'worker', line: 'pnpm --filter api worker' },
 ]
 
+/** The Project's catalogue: twenty services, none declared for this mission. */
 const CATALOGUE = [
   { name: 'mailpit', line: 'docker compose up mailpit' },
   { name: 'docs', line: 'pnpm --filter docs dev' },
+  { name: 'postgres', line: 'docker compose up postgres' },
+  { name: 'redis', line: 'docker compose up redis' },
+  { name: 'minio', line: 'docker compose up minio' },
+  { name: 'rabbitmq', line: 'docker compose up rabbitmq' },
+  { name: 'grafana', line: 'docker compose up grafana' },
+  { name: 'prometheus', line: 'docker compose up prometheus' },
+  { name: 'jaeger', line: 'docker compose up jaeger' },
+  { name: 'keycloak', line: 'docker compose up keycloak' },
+  { name: 'opensearch', line: 'docker compose up opensearch' },
+  { name: 'localstack', line: 'docker compose up localstack' },
+  { name: 'adminer', line: 'docker compose up adminer' },
+  { name: 'nginx', line: 'docker compose up nginx' },
+  { name: 'mongo', line: 'docker compose up mongo' },
+  { name: 'clickhouse', line: 'docker compose up clickhouse' },
+  { name: 'temporal', line: 'docker compose up temporal' },
+  { name: 'meilisearch', line: 'docker compose up meilisearch' },
+  { name: 'wiremock', line: 'docker compose up wiremock' },
+  { name: 'emails', line: 'pnpm --filter emails preview' },
 ]
 
 const HELPERS: readonly Helper[] = [
@@ -498,12 +517,8 @@ const WORKING: BuildingMoment = {
 
 export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
   working: () => WORKING,
-  // One service running with its address, two declared and stopped, one more in the catalogue.
-  services: () => ({
-    ...WORKING,
-    services: SERVICES.slice(0, 1),
-    catalogue: CATALOGUE.slice(0, 1),
-  }),
+  // One service running with its address, two declared and stopped, twenty in the catalogue.
+  services: () => ({ ...WORKING, services: SERVICES.slice(0, 1) }),
   starting: () => ({
     ...WORKING,
     now: 'Builder records each scenario’s red before writing its code: 6 of 14.',

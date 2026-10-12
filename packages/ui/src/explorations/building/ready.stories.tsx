@@ -187,6 +187,9 @@ export const Preparing: Story = {
   play: async ({ canvasElement }) => {
     const preparation = within(canvasElement).getByRole('list', { name: 'Preparation' })
     await expect(within(preparation).getByRole('img', { name: 'Running' })).toBeInTheDocument()
+    // The step under way is marked in its list; the card's chips are for agents only.
+    const card = within(canvasElement).getByRole('region', { name: /^Ready/ })
+    await expect(card.querySelector('[data-live-chip]')).toBeNull()
   },
 }
 
