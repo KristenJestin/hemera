@@ -23,11 +23,12 @@ import {
 
 type Reader = EngineTransaction | Database['Service']
 
-/** A write of a running task: a file tool's, or a command's with its run. */
+/** A write of a running task (or of the documenter): a file tool's, or a command's with its run. */
 export interface AttributedWrite {
   readonly buildingId: string
   readonly attemptId: string
-  readonly taskId: string
+  /** Null for a write of no task: the documenter's (#146). */
+  readonly taskId: string | null
   readonly sessionId: string
   readonly repository: string
   readonly path: string

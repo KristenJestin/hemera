@@ -47,6 +47,13 @@ const lineOf =
 const byHemera = (): MemoryAuthor => HEMERA
 const byUser = (): MemoryAuthor => USER
 
+/** What the documenter changed, each file with why. */
+const documentedSaid = (payload: EventPayload): string => {
+  const whys = stringsOf(payload, 'whys')
+  const files = stringsOf(payload, 'files').map((file, at) => `${file} (${whys[at] ?? ''})`)
+  return `The documenter updated ${files.join(', ')}.`
+}
+
 /** What an attempt is on: a task, or a requirement's or the end's checks. */
 const subjectOf = (payload: EventPayload): string => {
   const task = stringOf(payload, 'task')
@@ -316,4 +323,36 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
   ],
   ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],
   ['building.tasks_done', lineOf(byHemera, () => 'Every task of the plan is done or skipped.')],
+  [
+    'building.documenter_waiting',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Documentation, pass ${String(numberOf(payload, 'pass'))}, waits for a free agent slot.`,
+    ),
+  ],
+  [
+    'building.documenter_started',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The documenter started its ${stringOf(payload, 'mode')} pass ${String(numberOf(payload, 'pass'))}.`,
+    ),
+  ],
+  ['building.documented', lineOf(agentOrHemera, documentedSaid)],
+  [
+    'building.no_doc_change',
+    lineOf(
+      agentOrHemera,
+      (payload) => `The documentation needs no change: ${stringOf(payload, 'reason')}`,
+    ),
+  ],
+  [
+    'building.documenter_failed',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Documentation, pass ${String(numberOf(payload, 'pass'))}, failed: ${stringOf(payload, 'why')}.`,
+    ),
+  ],
 ])

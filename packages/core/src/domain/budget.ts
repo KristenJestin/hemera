@@ -72,9 +72,11 @@ export type BudgetLimits = typeof BudgetLimits.Type
 export const capRefusal = (running: number, cap: number): string =>
   `${String(running)} sub-agents already run in this Project (the cap is ${String(cap)}); do the work yourself or wait`
 
-/** What Now says of a Hemera phase waiting for a slot. */
-export const slotWaitSentence = (inUse: number, cap: number): string =>
-  `waiting for a free slot (${String(inUse)} of ${String(cap)} in use)`
+/** What Now says of a Hemera phase waiting for a slot, named when it says its name. */
+export const slotWaitSentence = (inUse: number, cap: number, phase?: string): string =>
+  phase === undefined
+    ? `waiting for a free slot (${String(inUse)} of ${String(cap)} in use)`
+    : `${phase} waits for a free agent slot (${String(inUse)} of ${String(cap)} in use)`
 
 /** What an agent reads when a counter of its mission is spent. */
 export const budgetSpentSentence = (counter: BudgetCounter, spent: number, limit: number): string =>

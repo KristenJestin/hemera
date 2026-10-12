@@ -12,6 +12,7 @@ import type { LaunchWithdrawn } from '../runs.ts'
 import type { Grant } from '../tools/access.ts'
 import type { ToolAnswer } from '../tools/files.ts'
 import { GateGuards, type Guard, type GuardedCall, WriteAttribution } from '../tools/ports.ts'
+import { DocsDesk } from './docs-desk.ts'
 
 export interface BuildWork {
   readonly read: (grant: Grant, args: ToolArguments<'build_read'>) => Effect.Effect<ToolAnswer>
@@ -109,10 +110,14 @@ export const buildDeskLayer = Layer.effect(
   }),
 )
 
-/** The gate's guards: the claims of a Building. */
-export const claimGuards = Layer.effect(
+/** The gate's guards: the documenter's writes (#146), then the claims of a Building. */
+export const buildingGuards = Layer.effect(
   GateGuards,
-  Effect.map(BuildDesk, (desk) => [desk.claim]),
+  Effect.gen(function* () {
+    const docs = yield* DocsDesk
+    const desk = yield* BuildDesk
+    return [docs.guard, desk.claim]
+  }),
 )
 
 /** Where the gate's file tools and commands attribute their writes: the Builder's (#142). */
