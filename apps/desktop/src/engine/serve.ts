@@ -9,7 +9,8 @@
 import {
   ChatRefused,
   ChecksRpcs,
-  EngineMainRpcs,
+  EngineApartRpcs,
+  EngineMainCoreRpcs,
   type EngineStart,
   type EngineStatus,
   SetupEditRefused,
@@ -28,6 +29,14 @@ import {
   chooseBuilderModel,
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
+import { OutsideChanges } from './building/outside.ts'
+import {
+  dismissService,
+  missionServices,
+  restartService,
+  startService,
+  stopService,
+} from './building/services.ts'
 import {
   buildingAttemptOf,
   buildingOf,
@@ -216,598 +225,612 @@ export const engineHandlers = (
     database,
   })
   const { calls, use, follow } = profile
-  return Layer.merge(
-    checksHandlers(profile, log),
-    EngineMainRpcs.toLayer({
-      'engine.status': () =>
-        SubscriptionRef.get(profile.database).pipe(
-          Effect.map(statusOf),
-          observed('engine.status', log),
+  const core = EngineMainCoreRpcs.toLayer({
+    'engine.status': () =>
+      SubscriptionRef.get(profile.database).pipe(
+        Effect.map(statusOf),
+        observed('engine.status', log),
+      ),
+    'engine.statusChanges': () =>
+      SubscriptionRef.changes(profile.database).pipe(
+        Stream.map(statusOf),
+        observedStream('engine.statusChanges', log),
+      ),
+    'preferences.read': () => calls.readPreferences.pipe(observed('preferences.read', log)),
+    'preferences.write': (change) =>
+      calls.writePreferences(change).pipe(observed('preferences.write', log)),
+    'profile.backups': () => calls.backups.pipe(observed('profile.backups', log)),
+    'diagnostics.retention': () =>
+      Effect.succeed({
+        folder: dataFolder,
+        maxAgeDays: MAX_AGE_DAYS,
+        maxTotalMegabytes: MAX_TOTAL_MEGABYTES,
+      }).pipe(observed('diagnostics.retention', log)),
+    'profile.backup': ({ folder }) => calls.backup(folder).pipe(observed('profile.backup', log)),
+    'profile.restore': ({ folder }) => calls.restore(folder).pipe(observed('profile.restore', log)),
+    'projects.list': () => use(listProjects).pipe(observed('projects.list', log)),
+    'projects.get': ({ id }) => use(getProject(id)).pipe(observed('projects.get', log)),
+    'projects.create': (asked) => use(createProject(asked)).pipe(observed('projects.create', log)),
+    'projects.update': (edit) => use(updateProject(edit)).pipe(observed('projects.update', log)),
+    'projects.detectRepositories': ({ folder }) =>
+      use(detectRepositories(folder)).pipe(observed('projects.detectRepositories', log)),
+    'projects.setWorkspacesRoot': (edit) =>
+      use(setWorkspacesRoot(edit)).pipe(observed('projects.setWorkspacesRoot', log)),
+    'projects.setBranchPrefix': (edit) =>
+      use(setBranchPrefix(edit)).pipe(observed('projects.setBranchPrefix', log)),
+    'projects.setKeyPrefix': (edit) =>
+      use(setKeyPrefix(edit)).pipe(observed('projects.setKeyPrefix', log)),
+    'projects.changes': () => follow(projectChanges).pipe(observedStream('projects.changes', log)),
+    'repositories.add': (asked) =>
+      use(addRepository(asked)).pipe(observed('repositories.add', log)),
+    'repositories.remove': (edit) =>
+      use(removeRepository(edit)).pipe(observed('repositories.remove', log)),
+    'repositories.update': (edit) =>
+      use(updateRepository(edit)).pipe(observed('repositories.update', log)),
+    'repositories.status': ({ id }) =>
+      use(repositoryStatus(id)).pipe(observed('repositories.status', log)),
+    'repositories.remotes': ({ id }) =>
+      use(repositoryRemotes(id)).pipe(observed('repositories.remotes', log)),
+    'repositories.setRemote': (edit) =>
+      use(setRemote(edit)).pipe(observed('repositories.setRemote', log)),
+    'repositories.setBaseBranch': (edit) =>
+      use(setBaseBranch(edit)).pipe(observed('repositories.setBaseBranch', log)),
+    'repositories.upToDateBase': ({ id }) =>
+      use(upToDateBase(id)).pipe(observed('repositories.upToDateBase', log)),
+    'repositories.changes': () =>
+      follow(repositoryChanges).pipe(observedStream('repositories.changes', log)),
+    'workspaces.create': (asked) =>
+      use(createWorkspace(asked)).pipe(observed('workspaces.create', log)),
+    'workspaces.get': ({ id }) => use(getWorkspace(id)).pipe(observed('workspaces.get', log)),
+    'workspaces.list': ({ projectId }) =>
+      use(listWorkspaces(projectId)).pipe(observed('workspaces.list', log)),
+    'workspaces.status': ({ projectId, workspaceId }) =>
+      use(workspaceStatus(projectId, workspaceId)).pipe(observed('workspaces.status', log)),
+    'workspaces.prepare': ({ id }) =>
+      use(beginPreparation(id, false)).pipe(observed('workspaces.prepare', log)),
+    'workspaces.resume': ({ id }) =>
+      use(beginPreparation(id, true)).pipe(observed('workspaces.resume', log)),
+    'workspaces.remove': ({ id }) =>
+      use(removeWorkspace(id)).pipe(observed('workspaces.remove', log)),
+    'workspaces.changes': () =>
+      follow(workspaceChanges).pipe(observedStream('workspaces.changes', log)),
+    'recipe.get': ({ projectId }) => use(getRecipe(projectId)).pipe(observed('recipe.get', log)),
+    'recipe.save': (edit) => use(saveRecipe(edit)).pipe(observed('recipe.save', log)),
+    'recipe.check': ({ projectId, steps }) =>
+      use(checkRecipe(projectId, steps)).pipe(observed('recipe.check', log)),
+    'variables.list': (scope) => use(listVariables(scope)).pipe(observed('variables.list', log)),
+    'variables.set': (edit) => use(setVariable(edit)).pipe(observed('variables.set', log)),
+    'variables.remove': (asked) =>
+      use(removeVariable(asked)).pipe(observed('variables.remove', log)),
+    'variables.reveal': (asked) =>
+      use(revealVariable(asked)).pipe(observed('variables.reveal', log)),
+    'catalogue.list': ({ projectId }) =>
+      use(listCommands(projectId)).pipe(observed('catalogue.list', log)),
+    'catalogue.save': (save) => use(saveCommand(save)).pipe(observed('catalogue.save', log)),
+    'catalogue.remove': ({ projectId, id }) =>
+      use(removeCommand(projectId, id)).pipe(observed('catalogue.remove', log)),
+    'catalogue.checkLine': ({ line }) => checkLine(line).pipe(observed('catalogue.checkLine', log)),
+    'runs.list': ({ projectId, workspaceId }) =>
+      use(listRuns(projectId, workspaceId)).pipe(observed('runs.list', log)),
+    // Started from the window: the user starts it.
+    'runs.start': (asked) =>
+      use(startRun({ ...asked, startedBy: 'user', sessionId: null })).pipe(
+        observed('runs.start', log),
+      ),
+    'runs.stop': ({ id }) => use(stopRun(id)).pipe(observed('runs.stop', log)),
+    'runs.restart': ({ id }) => use(restartRun(id)).pipe(observed('runs.restart', log)),
+    'runs.output': ({ id }) => use(runOutput(id)).pipe(observed('runs.output', log)),
+    'runs.changes': () => follow(runChanges).pipe(observedStream('runs.changes', log)),
+    'missions.list': ({ projectId }) =>
+      use(listMissions(projectId)).pipe(observed('missions.list', log)),
+    'missions.get': ({ id }) => use(getMission(id)).pipe(observed('missions.get', log)),
+    'missions.create': (asked) => use(createMission(asked)).pipe(observed('missions.create', log)),
+    // The moves the window asks for are the user's: an agent never reaches them.
+    'missions.launch': ({ id }) =>
+      use(moveMission(id, 'launch', 'user')).pipe(observed('missions.launch', log)),
+    'missions.fix': ({ id }) =>
+      use(moveMission(id, 'fix', 'user')).pipe(observed('missions.fix', log)),
+    'missions.ship': ({ id }) =>
+      use(moveMission(id, 'ship', 'user')).pipe(observed('missions.ship', log)),
+    'missions.cancel': ({ id }) =>
+      use(moveMission(id, 'cancel', 'user')).pipe(observed('missions.cancel', log)),
+    'missions.changes': () => follow(missionChanges).pipe(observedStream('missions.changes', log)),
+    'needs.list': () => use(listNeeds).pipe(observed('needs.list', log)),
+    'needs.get': ({ id }) => use(getNeed(id)).pipe(observed('needs.get', log)),
+    'needs.answer': (asked) => use(answerNeed(asked)).pipe(observed('needs.answer', log)),
+    'needs.retry': ({ id }) => use(retryNeed(id)).pipe(observed('needs.retry', log)),
+    'permissions.neverList': ({ projectId }) =>
+      use(neverList(projectId)).pipe(observed('permissions.neverList', log)),
+    'permissions.setNeverList': ({ projectId, entries }) =>
+      use(setNeverList(projectId, entries)).pipe(observed('permissions.setNeverList', log)),
+    'permissions.grants': ({ missionId }) =>
+      use(listGrants(missionId)).pipe(observed('permissions.grants', log)),
+    'permissions.revoke': ({ grantId }) =>
+      use(revokeGrant(grantId)).pipe(observed('permissions.revoke', log)),
+    'permissions.decisions': () =>
+      follow(decisionChanges).pipe(observedStream('permissions.decisions', log)),
+    'hemeraAuto.setConsent': ({ consent }) =>
+      use(HemeraAuto.use((auto) => auto.setConsent(consent))).pipe(
+        observed('hemeraAuto.setConsent', log),
+      ),
+    'hemeraAuto.whoJudges': ({ agent, mode }) =>
+      use(whoJudgesFor(agent, mode)).pipe(observed('hemeraAuto.whoJudges', log)),
+    // The key itself is main's alone: what main sealed is stored, what main decrypted is held.
+    'jevKey.state': () =>
+      use(HemeraAuto.use((auto) => auto.state)).pipe(observed('jevKey.state', log)),
+    'jevKey.ciphertext': () =>
+      use(HemeraAuto.use((auto) => auto.ciphertext)).pipe(observed('jevKey.ciphertext', log)),
+    'jevKey.store': ({ ciphertext }) =>
+      use(HemeraAuto.use((auto) => auto.storeKey(ciphertext))).pipe(observed('jevKey.store', log)),
+    'jevKey.restore': ({ key }) =>
+      use(HemeraAuto.use((auto) => auto.restoreKey(key))).pipe(observed('jevKey.restore', log)),
+    'jevKey.remove': () =>
+      use(HemeraAuto.use((auto) => auto.removeKey)).pipe(observed('jevKey.remove', log)),
+    // The sessions are read for diagnosis only: nothing here writes to one.
+    'sessions.list': ({ ownerKind, ownerId }) =>
+      use(
+        Effect.map(sessionsIn(SESSION_STATES, ownerOf(ownerKind, ownerId)), (sessions) =>
+          sessions.map((session) => ({
+            id: session.id,
+            provider: session.provider,
+            role: session.role,
+            lineage: session.lineage,
+            parent: session.parent,
+            depth: session.depth,
+            epoch: session.epoch,
+            state: session.state,
+            stateReason: session.stateReason,
+            createdAt: session.createdAt,
+            endedAt: session.endedAt,
+          })),
         ),
-      'engine.statusChanges': () =>
-        SubscriptionRef.changes(profile.database).pipe(
-          Stream.map(statusOf),
-          observedStream('engine.statusChanges', log),
+      ).pipe(observed('sessions.list', log)),
+    'sessions.thread': ({ id }) => use(threadOf(id)).pipe(observed('sessions.thread', log)),
+    'sessions.instructionFiles': ({ projectId }) =>
+      use(instructionFilesOf(projectId, process.platform)).pipe(
+        observed('sessions.instructionFiles', log),
+      ),
+    'chats.list': ({ projectId }) =>
+      use(
+        Effect.gen(function* () {
+          yield* getProject(projectId)
+          const chats = yield* Chats
+          return yield* Effect.forEach(yield* chatsOf(projectId), (chat) =>
+            Effect.map(chats.working(chat), (working) => chatSummary(chat, working)),
+          )
+        }),
+      ).pipe(observed('chats.list', log)),
+    'chats.create': ({ projectId }) =>
+      use(Chats.use((chats) => chats.create(projectId))).pipe(
+        Effect.map((chat) => chatSummary(chat, false)),
+        observed('chats.create', log),
+      ),
+    'chats.rename': ({ chatId, title }) =>
+      use(renameChat(chatId, title)).pipe(observed('chats.rename', log)),
+    'chats.send': ({ chatId, text, mentions }) =>
+      use(
+        Chats.use((chats) => chats.send(chatId, text, mentions)).pipe(
+          Effect.catchTags({
+            SessionRefused: (refused) => Effect.fail(new ChatRefused({ reason: refused.reason })),
+            DeliveryKindRefused: (refused) =>
+              Effect.fail(new ChatRefused({ reason: refused.reason })),
+          }),
         ),
-      'preferences.read': () => calls.readPreferences.pipe(observed('preferences.read', log)),
-      'preferences.write': (change) =>
-        calls.writePreferences(change).pipe(observed('preferences.write', log)),
-      'profile.backups': () => calls.backups.pipe(observed('profile.backups', log)),
-      'diagnostics.retention': () =>
-        Effect.succeed({
-          folder: dataFolder,
-          maxAgeDays: MAX_AGE_DAYS,
-          maxTotalMegabytes: MAX_TOTAL_MEGABYTES,
-        }).pipe(observed('diagnostics.retention', log)),
-      'profile.backup': ({ folder }) => calls.backup(folder).pipe(observed('profile.backup', log)),
-      'profile.restore': ({ folder }) =>
-        calls.restore(folder).pipe(observed('profile.restore', log)),
-      'projects.list': () => use(listProjects).pipe(observed('projects.list', log)),
-      'projects.get': ({ id }) => use(getProject(id)).pipe(observed('projects.get', log)),
-      'projects.create': (asked) =>
-        use(createProject(asked)).pipe(observed('projects.create', log)),
-      'projects.update': (edit) => use(updateProject(edit)).pipe(observed('projects.update', log)),
-      'projects.detectRepositories': ({ folder }) =>
-        use(detectRepositories(folder)).pipe(observed('projects.detectRepositories', log)),
-      'projects.setWorkspacesRoot': (edit) =>
-        use(setWorkspacesRoot(edit)).pipe(observed('projects.setWorkspacesRoot', log)),
-      'projects.setBranchPrefix': (edit) =>
-        use(setBranchPrefix(edit)).pipe(observed('projects.setBranchPrefix', log)),
-      'projects.setKeyPrefix': (edit) =>
-        use(setKeyPrefix(edit)).pipe(observed('projects.setKeyPrefix', log)),
-      'projects.changes': () =>
-        follow(projectChanges).pipe(observedStream('projects.changes', log)),
-      'repositories.add': (asked) =>
-        use(addRepository(asked)).pipe(observed('repositories.add', log)),
-      'repositories.remove': (edit) =>
-        use(removeRepository(edit)).pipe(observed('repositories.remove', log)),
-      'repositories.update': (edit) =>
-        use(updateRepository(edit)).pipe(observed('repositories.update', log)),
-      'repositories.status': ({ id }) =>
-        use(repositoryStatus(id)).pipe(observed('repositories.status', log)),
-      'repositories.remotes': ({ id }) =>
-        use(repositoryRemotes(id)).pipe(observed('repositories.remotes', log)),
-      'repositories.setRemote': (edit) =>
-        use(setRemote(edit)).pipe(observed('repositories.setRemote', log)),
-      'repositories.setBaseBranch': (edit) =>
-        use(setBaseBranch(edit)).pipe(observed('repositories.setBaseBranch', log)),
-      'repositories.upToDateBase': ({ id }) =>
-        use(upToDateBase(id)).pipe(observed('repositories.upToDateBase', log)),
-      'repositories.changes': () =>
-        follow(repositoryChanges).pipe(observedStream('repositories.changes', log)),
-      'workspaces.create': (asked) =>
-        use(createWorkspace(asked)).pipe(observed('workspaces.create', log)),
-      'workspaces.get': ({ id }) => use(getWorkspace(id)).pipe(observed('workspaces.get', log)),
-      'workspaces.list': ({ projectId }) =>
-        use(listWorkspaces(projectId)).pipe(observed('workspaces.list', log)),
-      'workspaces.status': ({ projectId, workspaceId }) =>
-        use(workspaceStatus(projectId, workspaceId)).pipe(observed('workspaces.status', log)),
-      'workspaces.prepare': ({ id }) =>
-        use(beginPreparation(id, false)).pipe(observed('workspaces.prepare', log)),
-      'workspaces.resume': ({ id }) =>
-        use(beginPreparation(id, true)).pipe(observed('workspaces.resume', log)),
-      'workspaces.remove': ({ id }) =>
-        use(removeWorkspace(id)).pipe(observed('workspaces.remove', log)),
-      'workspaces.changes': () =>
-        follow(workspaceChanges).pipe(observedStream('workspaces.changes', log)),
-      'recipe.get': ({ projectId }) => use(getRecipe(projectId)).pipe(observed('recipe.get', log)),
-      'recipe.save': (edit) => use(saveRecipe(edit)).pipe(observed('recipe.save', log)),
-      'recipe.check': ({ projectId, steps }) =>
-        use(checkRecipe(projectId, steps)).pipe(observed('recipe.check', log)),
-      'variables.list': (scope) => use(listVariables(scope)).pipe(observed('variables.list', log)),
-      'variables.set': (edit) => use(setVariable(edit)).pipe(observed('variables.set', log)),
-      'variables.remove': (asked) =>
-        use(removeVariable(asked)).pipe(observed('variables.remove', log)),
-      'variables.reveal': (asked) =>
-        use(revealVariable(asked)).pipe(observed('variables.reveal', log)),
-      'catalogue.list': ({ projectId }) =>
-        use(listCommands(projectId)).pipe(observed('catalogue.list', log)),
-      'catalogue.save': (save) => use(saveCommand(save)).pipe(observed('catalogue.save', log)),
-      'catalogue.remove': ({ projectId, id }) =>
-        use(removeCommand(projectId, id)).pipe(observed('catalogue.remove', log)),
-      'catalogue.checkLine': ({ line }) =>
-        checkLine(line).pipe(observed('catalogue.checkLine', log)),
-      'runs.list': ({ projectId, workspaceId }) =>
-        use(listRuns(projectId, workspaceId)).pipe(observed('runs.list', log)),
-      // Started from the window: the user starts it.
-      'runs.start': (asked) =>
-        use(startRun({ ...asked, startedBy: 'user', sessionId: null })).pipe(
-          observed('runs.start', log),
+      ).pipe(observed('chats.send', log)),
+    'chats.stop': ({ chatId }) =>
+      use(Chats.use((chats) => chats.stop(chatId))).pipe(observed('chats.stop', log)),
+    'chats.setModel': ({ chatId, setting }) =>
+      use(Chats.use((chats) => chats.setSetting(chatId, setting))).pipe(
+        observed('chats.setModel', log),
+      ),
+    'chats.transcript': ({ chatId, before }) =>
+      use(transcriptOf(chatId, before)).pipe(observed('chats.transcript', log)),
+    'chats.changes': () => follow(chatsChanges).pipe(observedStream('chats.changes', log)),
+    'setup.cards': ({ projectId }) =>
+      use(Effect.andThen(getProject(projectId), cardsOf(projectId))).pipe(
+        observed('setup.cards', log),
+      ),
+    'setup.accept': ({ cardId }) => use(acceptCard(cardId)).pipe(observed('setup.accept', log)),
+    'setup.decline': ({ cardId }) => use(declineCard(cardId)).pipe(observed('setup.decline', log)),
+    'setup.acceptAll': ({ projectId }) =>
+      use(Effect.andThen(getProject(projectId), acceptAll(projectId))).pipe(
+        observed('setup.acceptAll', log),
+      ),
+    'setup.edit': ({ cardIds, changes }) =>
+      use(
+        editCards(cardIds, changes).pipe(
+          Effect.catchTags({
+            ProposalRefused: (refused) =>
+              Effect.fail(new SetupEditRefused({ reason: refused.reason })),
+            UnknownProject: (unknown) => Effect.die(unknown),
+            UnknownWorkspace: (unknown) => Effect.die(unknown),
+          }),
         ),
-      'runs.stop': ({ id }) => use(stopRun(id)).pipe(observed('runs.stop', log)),
-      'runs.restart': ({ id }) => use(restartRun(id)).pipe(observed('runs.restart', log)),
-      'runs.output': ({ id }) => use(runOutput(id)).pipe(observed('runs.output', log)),
-      'runs.changes': () => follow(runChanges).pipe(observedStream('runs.changes', log)),
-      'missions.list': ({ projectId }) =>
-        use(listMissions(projectId)).pipe(observed('missions.list', log)),
-      'missions.get': ({ id }) => use(getMission(id)).pipe(observed('missions.get', log)),
-      'missions.create': (asked) =>
-        use(createMission(asked)).pipe(observed('missions.create', log)),
-      // The moves the window asks for are the user's: an agent never reaches them.
-      'missions.launch': ({ id }) =>
-        use(moveMission(id, 'launch', 'user')).pipe(observed('missions.launch', log)),
-      'missions.fix': ({ id }) =>
-        use(moveMission(id, 'fix', 'user')).pipe(observed('missions.fix', log)),
-      'missions.ship': ({ id }) =>
-        use(moveMission(id, 'ship', 'user')).pipe(observed('missions.ship', log)),
-      'missions.cancel': ({ id }) =>
-        use(moveMission(id, 'cancel', 'user')).pipe(observed('missions.cancel', log)),
-      'missions.changes': () =>
-        follow(missionChanges).pipe(observedStream('missions.changes', log)),
-      'needs.list': () => use(listNeeds).pipe(observed('needs.list', log)),
-      'needs.get': ({ id }) => use(getNeed(id)).pipe(observed('needs.get', log)),
-      'needs.answer': (asked) => use(answerNeed(asked)).pipe(observed('needs.answer', log)),
-      'needs.retry': ({ id }) => use(retryNeed(id)).pipe(observed('needs.retry', log)),
-      'permissions.neverList': ({ projectId }) =>
-        use(neverList(projectId)).pipe(observed('permissions.neverList', log)),
-      'permissions.setNeverList': ({ projectId, entries }) =>
-        use(setNeverList(projectId, entries)).pipe(observed('permissions.setNeverList', log)),
-      'permissions.grants': ({ missionId }) =>
-        use(listGrants(missionId)).pipe(observed('permissions.grants', log)),
-      'permissions.revoke': ({ grantId }) =>
-        use(revokeGrant(grantId)).pipe(observed('permissions.revoke', log)),
-      'permissions.decisions': () =>
-        follow(decisionChanges).pipe(observedStream('permissions.decisions', log)),
-      'hemeraAuto.setConsent': ({ consent }) =>
-        use(HemeraAuto.use((auto) => auto.setConsent(consent))).pipe(
-          observed('hemeraAuto.setConsent', log),
+      ).pipe(observed('setup.edit', log)),
+    'setup.discuss': ({ cardIds, note }) =>
+      use(
+        Setup.use((setup) => setup.discuss(cardIds, note)).pipe(
+          Effect.catchTags({
+            SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
+            SessionRefused: (refused) => Effect.fail(new SetupRefused({ reason: refused.reason })),
+            DeliveryKindRefused: (refused) => Effect.die(refused),
+            UnknownProject: (unknown) => Effect.die(unknown),
+          }),
         ),
-      'hemeraAuto.whoJudges': ({ agent, mode }) =>
-        use(whoJudgesFor(agent, mode)).pipe(observed('hemeraAuto.whoJudges', log)),
-      // The key itself is main's alone: what main sealed is stored, what main decrypted is held.
-      'jevKey.state': () =>
-        use(HemeraAuto.use((auto) => auto.state)).pipe(observed('jevKey.state', log)),
-      'jevKey.ciphertext': () =>
-        use(HemeraAuto.use((auto) => auto.ciphertext)).pipe(observed('jevKey.ciphertext', log)),
-      'jevKey.store': ({ ciphertext }) =>
-        use(HemeraAuto.use((auto) => auto.storeKey(ciphertext))).pipe(
-          observed('jevKey.store', log),
+      ).pipe(observed('setup.discuss', log)),
+    'setup.propose': ({ projectId }) =>
+      use(
+        Setup.use((setup) => setup.start(projectId)).pipe(
+          Effect.asVoid,
+          Effect.catchTags({
+            SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
+            SessionRefused: (refused) => Effect.fail(new SetupRefused({ reason: refused.reason })),
+          }),
         ),
-      'jevKey.restore': ({ key }) =>
-        use(HemeraAuto.use((auto) => auto.restoreKey(key))).pipe(observed('jevKey.restore', log)),
-      'jevKey.remove': () =>
-        use(HemeraAuto.use((auto) => auto.removeKey)).pipe(observed('jevKey.remove', log)),
-      // The sessions are read for diagnosis only: nothing here writes to one.
-      'sessions.list': ({ ownerKind, ownerId }) =>
-        use(
-          Effect.map(sessionsIn(SESSION_STATES, ownerOf(ownerKind, ownerId)), (sessions) =>
-            sessions.map((session) => ({
-              id: session.id,
-              provider: session.provider,
-              role: session.role,
-              lineage: session.lineage,
-              parent: session.parent,
-              depth: session.depth,
-              epoch: session.epoch,
-              state: session.state,
-              stateReason: session.stateReason,
-              createdAt: session.createdAt,
-              endedAt: session.endedAt,
+      ).pipe(observed('setup.propose', log)),
+    'setup.standing': ({ projectId }) =>
+      use(Setup.use((setup) => setup.standing(projectId))).pipe(observed('setup.standing', log)),
+    'setup.changes': () => follow(setupChanges).pipe(observedStream('setup.changes', log)),
+    'tester.findings': () =>
+      use(
+        TesterFindings.use((findings) => findings.list).pipe(
+          Effect.map((all) =>
+            all.map(({ head, file }) => ({
+              number: head.number,
+              title: head.title,
+              kind: head.kind,
+              place: head.place,
+              severity: head.severity,
+              occurrences: head.occurrences,
+              lastSeen: head.lastSeen,
+              file,
             })),
           ),
-        ).pipe(observed('sessions.list', log)),
-      'sessions.thread': ({ id }) => use(threadOf(id)).pipe(observed('sessions.thread', log)),
-      'sessions.instructionFiles': ({ projectId }) =>
-        use(instructionFilesOf(projectId, process.platform)).pipe(
-          observed('sessions.instructionFiles', log),
+          Effect.mapError((failed) => new TesterFolderUnreadable({ reason: failed.message })),
         ),
-      'chats.list': ({ projectId }) =>
-        use(
-          Effect.gen(function* () {
-            yield* getProject(projectId)
-            const chats = yield* Chats
-            return yield* Effect.forEach(yield* chatsOf(projectId), (chat) =>
-              Effect.map(chats.working(chat), (working) => chatSummary(chat, working)),
-            )
-          }),
-        ).pipe(observed('chats.list', log)),
-      'chats.create': ({ projectId }) =>
-        use(Chats.use((chats) => chats.create(projectId))).pipe(
-          Effect.map((chat) => chatSummary(chat, false)),
-          observed('chats.create', log),
-        ),
-      'chats.rename': ({ chatId, title }) =>
-        use(renameChat(chatId, title)).pipe(observed('chats.rename', log)),
-      'chats.send': ({ chatId, text, mentions }) =>
-        use(
-          Chats.use((chats) => chats.send(chatId, text, mentions)).pipe(
-            Effect.catchTags({
-              SessionRefused: (refused) => Effect.fail(new ChatRefused({ reason: refused.reason })),
-              DeliveryKindRefused: (refused) =>
-                Effect.fail(new ChatRefused({ reason: refused.reason })),
-            }),
+      ).pipe(observed('tester.findings', log)),
+    'tester.folder': () =>
+      use(TesterFindings.use((findings) => Effect.succeed(findings.folder))).pipe(
+        observed('tester.folder', log),
+      ),
+    'snapshots.diagnose': ({ missionId }) =>
+      use(Snapshots.use((snapshots) => snapshots.diagnose(missionId))).pipe(
+        observed('snapshots.diagnose', log),
+      ),
+    'resources.list': ({ projectId }) =>
+      use(listResources(projectId)).pipe(observed('resources.list', log)),
+    'resources.save': ({ projectId, resources }) =>
+      use(saveResources(projectId, resources)).pipe(observed('resources.save', log)),
+    'resources.holders': () =>
+      use(ExclusiveResources.use((reservations) => reservations.holders)).pipe(
+        observed('resources.holders', log),
+      ),
+    'resources.changed': () =>
+      follow(
+        Stream.unwrap(ExclusiveResources.useSync((reservations) => reservations.changes)),
+      ).pipe(observedStream('resources.changed', log)),
+    'tickets.providers': ({ projectId }) =>
+      use(providersOf(projectId)).pipe(observed('tickets.providers', log)),
+    'tickets.proposeGithub': ({ projectId, host }) =>
+      use(proposeGithub(projectId, host)).pipe(observed('tickets.proposeGithub', log)),
+    'tickets.addGithub': ({ projectId, config }) =>
+      use(addGithub(projectId, config)).pipe(observed('tickets.addGithub', log)),
+    'tickets.addJira': ({ projectId, config }) =>
+      use(addJira(projectId, config)).pipe(observed('tickets.addJira', log)),
+    'tickets.jiraDeployment': ({ site }) =>
+      use(jiraDeployment(site)).pipe(observed('tickets.jiraDeployment', log)),
+    // A Jira token is main's to seal and to open: the engine stores its ciphertext only.
+    'jiraToken.save': ({ providerId, ciphertext, token }) =>
+      use(saveJiraToken(providerId, ciphertext, token)).pipe(observed('jiraToken.save', log)),
+    'jiraToken.state': ({ providerId }) =>
+      use(jiraTokenState(providerId)).pipe(observed('jiraToken.state', log)),
+    'jiraToken.remove': ({ providerId }) =>
+      use(removeJiraToken(providerId)).pipe(observed('jiraToken.remove', log)),
+    'tickets.updateProvider': ({ providerId, config }) =>
+      use(updateProvider(providerId, config)).pipe(observed('tickets.updateProvider', log)),
+    'tickets.removeProvider': ({ providerId }) =>
+      use(removeProvider(providerId)).pipe(observed('tickets.removeProvider', log)),
+    'tickets.status': ({ providerId }) =>
+      use(providerStatus(providerId)).pipe(observed('tickets.status', log)),
+    'tickets.checkAgain': ({ providerId }) =>
+      use(checkAgain(providerId)).pipe(observed('tickets.checkAgain', log)),
+    'tickets.specMode': ({ projectId }) =>
+      use(specModeOf(projectId)).pipe(observed('tickets.specMode', log)),
+    'tickets.setSpecMode': ({ projectId, mode }) =>
+      use(setSpecMode(projectId, mode)).pipe(observed('tickets.setSpecMode', log)),
+    'tickets.ticket': ({ missionId }) =>
+      use(missionTicket(missionId)).pipe(observed('tickets.ticket', log)),
+    'tickets.changed': ({ projectId }) =>
+      follow(ticketsChanges(projectId)).pipe(observedStream('tickets.changed', log)),
+    // The ticket sync (#97): the interval, the last check, the events and their differences.
+    'tickets.syncInterval': ({ projectId }) =>
+      use(syncIntervalOf(projectId)).pipe(observed('tickets.syncInterval', log)),
+    'tickets.setSyncInterval': ({ projectId, minutes }) =>
+      use(TicketSync.use((sync) => sync.setInterval(projectId, minutes))).pipe(
+        observed('tickets.setSyncInterval', log),
+      ),
+    'tickets.lastCheck': ({ projectId }) =>
+      use(lastCheckOf(projectId)).pipe(observed('tickets.lastCheck', log)),
+    'tickets.events': ({ missionId }) =>
+      use(ticketEventsOf(missionId)).pipe(observed('tickets.events', log)),
+    'tickets.difference': ({ eventId }) =>
+      use(ticketEventDifference(eventId)).pipe(observed('tickets.difference', log)),
+    'tickets.acknowledge': ({ eventId }) =>
+      use(acknowledgeEvent(eventId)).pipe(observed('tickets.acknowledge', log)),
+    'tickets.writes': ({ missionId }) =>
+      use(ticketWritesOf(missionId)).pipe(observed('tickets.writes', log)),
+    'tickets.retryWrite': ({ writeId }) =>
+      use(retryWrite(writeId)).pipe(observed('tickets.retryWrite', log)),
+    'models.roles': ({ projectId, missionId }) =>
+      use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
+    'models.setRole': ({ level, scopeId, role, setting }) =>
+      use(setRoleModel(level, scopeId, role, setting)).pipe(observed('models.setRole', log)),
+    'models.marks': () => use(modelMarksOf).pipe(observed('models.marks', log)),
+    'models.mark': (mark) => use(markModel(mark)).pipe(observed('models.mark', log)),
+    'limits.project': ({ projectId }) =>
+      use(projectLimits(projectId)).pipe(observed('limits.project', log)),
+    'limits.setProject': ({ projectId, limits }) =>
+      use(setProjectLimits(projectId, limits)).pipe(observed('limits.setProject', log)),
+    'limits.mission': ({ missionId }) =>
+      use(missionBudget(missionId)).pipe(observed('limits.mission', log)),
+    'memory.now': ({ missionId }) =>
+      use(Memory.use((memory) => memory.now(missionId))).pipe(observed('memory.now', log)),
+    'memory.journal': ({ missionId, before }) =>
+      use(Memory.use((memory) => memory.journal(missionId, before))).pipe(
+        observed('memory.journal', log),
+      ),
+    'memory.notes': ({ missionId, all }) =>
+      use(Memory.use((memory) => memory.notes(missionId, all))).pipe(observed('memory.notes', log)),
+    'memory.evidenceList': ({ missionId, about }) =>
+      use(
+        Memory.use((memory) =>
+          Effect.andThen(
+            Effect.andThen(memory.now(missionId), memory.ready),
+            Evidence.use((evidence) => evidence.list(missionId, about)),
           ),
-        ).pipe(observed('chats.send', log)),
-      'chats.stop': ({ chatId }) =>
-        use(Chats.use((chats) => chats.stop(chatId))).pipe(observed('chats.stop', log)),
-      'chats.setModel': ({ chatId, setting }) =>
-        use(Chats.use((chats) => chats.setSetting(chatId, setting))).pipe(
-          observed('chats.setModel', log),
         ),
-      'chats.transcript': ({ chatId, before }) =>
-        use(transcriptOf(chatId, before)).pipe(observed('chats.transcript', log)),
-      'chats.changes': () => follow(chatsChanges).pipe(observedStream('chats.changes', log)),
-      'setup.cards': ({ projectId }) =>
-        use(Effect.andThen(getProject(projectId), cardsOf(projectId))).pipe(
-          observed('setup.cards', log),
-        ),
-      'setup.accept': ({ cardId }) => use(acceptCard(cardId)).pipe(observed('setup.accept', log)),
-      'setup.decline': ({ cardId }) =>
-        use(declineCard(cardId)).pipe(observed('setup.decline', log)),
-      'setup.acceptAll': ({ projectId }) =>
-        use(Effect.andThen(getProject(projectId), acceptAll(projectId))).pipe(
-          observed('setup.acceptAll', log),
-        ),
-      'setup.edit': ({ cardIds, changes }) =>
-        use(
-          editCards(cardIds, changes).pipe(
-            Effect.catchTags({
-              ProposalRefused: (refused) =>
-                Effect.fail(new SetupEditRefused({ reason: refused.reason })),
-              UnknownProject: (unknown) => Effect.die(unknown),
-              UnknownWorkspace: (unknown) => Effect.die(unknown),
-            }),
+      ).pipe(observed('memory.evidenceList', log)),
+    'memory.evidence': ({ missionId, id }) =>
+      use(
+        Memory.use((memory) =>
+          Effect.andThen(
+            memory.ready,
+            Evidence.use((evidence) => evidence.read(missionId, id)),
           ),
-        ).pipe(observed('setup.edit', log)),
-      'setup.discuss': ({ cardIds, note }) =>
-        use(
-          Setup.use((setup) => setup.discuss(cardIds, note)).pipe(
-            Effect.catchTags({
-              SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
-              SessionRefused: (refused) =>
-                Effect.fail(new SetupRefused({ reason: refused.reason })),
-              DeliveryKindRefused: (refused) => Effect.die(refused),
-              UnknownProject: (unknown) => Effect.die(unknown),
-            }),
-          ),
-        ).pipe(observed('setup.discuss', log)),
-      'setup.propose': ({ projectId }) =>
-        use(
-          Setup.use((setup) => setup.start(projectId)).pipe(
-            Effect.asVoid,
-            Effect.catchTags({
-              SetupBusy: (busy) => Effect.fail(new SetupRefused({ reason: busy.message })),
-              SessionRefused: (refused) =>
-                Effect.fail(new SetupRefused({ reason: refused.reason })),
-            }),
-          ),
-        ).pipe(observed('setup.propose', log)),
-      'setup.standing': ({ projectId }) =>
-        use(Setup.use((setup) => setup.standing(projectId))).pipe(observed('setup.standing', log)),
-      'setup.changes': () => follow(setupChanges).pipe(observedStream('setup.changes', log)),
-      'tester.findings': () =>
-        use(
-          TesterFindings.use((findings) => findings.list).pipe(
-            Effect.map((all) =>
-              all.map(({ head, file }) => ({
-                number: head.number,
-                title: head.title,
-                kind: head.kind,
-                place: head.place,
-                severity: head.severity,
-                occurrences: head.occurrences,
-                lastSeen: head.lastSeen,
-                file,
-              })),
-            ),
-            Effect.mapError((failed) => new TesterFolderUnreadable({ reason: failed.message })),
-          ),
-        ).pipe(observed('tester.findings', log)),
-      'tester.folder': () =>
-        use(TesterFindings.use((findings) => Effect.succeed(findings.folder))).pipe(
-          observed('tester.folder', log),
         ),
-      'snapshots.diagnose': ({ missionId }) =>
-        use(Snapshots.use((snapshots) => snapshots.diagnose(missionId))).pipe(
-          observed('snapshots.diagnose', log),
+      ).pipe(observed('memory.evidence', log)),
+    'memory.changes': ({ missionId }) =>
+      follow(
+        Stream.unwrap(
+          Memory.use((memory) => Effect.as(memory.now(missionId), memory.changes(missionId))),
         ),
-      'resources.list': ({ projectId }) =>
-        use(listResources(projectId)).pipe(observed('resources.list', log)),
-      'resources.save': ({ projectId, resources }) =>
-        use(saveResources(projectId, resources)).pipe(observed('resources.save', log)),
-      'resources.holders': () =>
-        use(ExclusiveResources.use((reservations) => reservations.holders)).pipe(
-          observed('resources.holders', log),
+      ).pipe(observedStream('memory.changes', log)),
+    'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
+    'agents.checkUpdates': () =>
+      Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),
+    // Run only because the user asked, from the window.
+    'agents.update': ({ agent }) =>
+      Agents.use((agents) => agents.update(agent)).pipe(observed('agents.update', log)),
+    'notifications.settings': () =>
+      use(readNotificationSettings(REGISTRY)).pipe(observed('notifications.settings', log)),
+    'notifications.setKind': ({ id, on }) =>
+      use(setNotificationKind(REGISTRY, id, on)).pipe(observed('notifications.setKind', log)),
+    'notifications.setSound': ({ sound, on }) =>
+      use(setNotificationSound(REGISTRY, sound, on)).pipe(observed('notifications.setSound', log)),
+    'notifications.setStyle': ({ style }) =>
+      use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
+    'notifications.setVolume': ({ volume }) =>
+      use(setSoundVolume(REGISTRY, volume)).pipe(observed('notifications.setVolume', log)),
+    'notifications.feed': () =>
+      follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
+    // The field searches first and creates only on the user's explicit choice (#84).
+    'start.search': ({ projectId, text }) =>
+      follow(searchStart(projectId, text)).pipe(observedStream('start.search', log)),
+    'start.create': (asked) => use(createStart(asked)).pipe(observed('start.create', log)),
+    // Home: what happened since the user looked, and the missions opened last.
+    'home.sinceYouLeft': ({ before }) =>
+      use(sinceYouLeft(before)).pipe(observed('home.sinceYouLeft', log)),
+    'home.sinceYouLeftChanged': () =>
+      follow(sinceYouLeftChanges).pipe(observedStream('home.sinceYouLeftChanged', log)),
+    'home.looked': ({ upTo }) => use(lookedAtHome(upTo)).pipe(observed('home.looked', log)),
+    'home.recent': () => use(recentMissions).pipe(observed('home.recent', log)),
+    'home.opened': ({ missionId }) =>
+      use(missionOpened(missionId)).pipe(observed('home.opened', log)),
+    'memory.journalTail': ({ missionIds }) =>
+      use(journalTail(missionIds)).pipe(observed('memory.journalTail', log)),
+    // Planning (#85): the Spec the Planner writes, and the user's side of it.
+    'planning.spec': ({ missionId }) =>
+      use(readSpec(missionId)).pipe(observed('planning.spec', log)),
+    'planning.changesSince': ({ missionId, version: since }) =>
+      use(changesSince(missionId, since)).pipe(observed('planning.changesSince', log)),
+    'planning.markRead': ({ missionId, version: read }) =>
+      use(markRead(missionId, read)).pipe(observed('planning.markRead', log)),
+    'planning.addVision': ({ missionId, text }) =>
+      use(giveVision(missionId, text)).pipe(observed('planning.addVision', log)),
+    'planning.keepAfterTriage': ({ missionId }) =>
+      use(keepPlanning(missionId)).pipe(observed('planning.keepAfterTriage', log)),
+    'planning.changed': ({ missionId }) =>
+      follow(specChanges(missionId)).pipe(observedStream('planning.changed', log)),
+    'planning.specLanguage': ({ projectId }) =>
+      use(specLanguageOf(projectId)).pipe(observed('planning.specLanguage', log)),
+    'planning.setSpecLanguage': ({ projectId, language }) =>
+      use(setSpecLanguage(projectId, language)).pipe(observed('planning.setSpecLanguage', log)),
+    // The cold reads of a mission in Planning (#91): another pass and a dismissal are the user's.
+    'coldRead.list': ({ missionId }) =>
+      use(listColdReads(missionId)).pipe(observed('coldRead.list', log)),
+    'coldRead.again': ({ missionId }) =>
+      use(againColdRead(missionId)).pipe(observed('coldRead.again', log)),
+    'coldRead.dismiss': ({ missionId, findingId }) =>
+      use(dismissFinding(missionId, findingId)).pipe(observed('coldRead.dismiss', log)),
+    'coldRead.freshness': ({ missionId }) =>
+      use(coldReadFreshness(missionId)).pipe(observed('coldRead.freshness', log)),
+    'coldRead.settled': ({ missionId }) =>
+      use(coldReadSettled(missionId)).pipe(observed('coldRead.settled', log)),
+    'coldRead.changed': ({ missionId }) =>
+      follow(coldReadChanges(missionId)).pipe(observedStream('coldRead.changed', log)),
+    // Planning's questions (#86): the waves, the user's answers, the inputs.
+    'planning.waves': ({ missionId }) =>
+      use(wavesOf(missionId)).pipe(observed('planning.waves', log)),
+    'planning.answer': ({ missionId, questionId, optionId, text }) =>
+      use(answerQuestion(missionId, questionId, { optionId, text })).pipe(
+        observed('planning.answer', log),
+      ),
+    'planning.waitOnSomeone': ({ missionId, questionId, note }) =>
+      use(waitOnSomeone(missionId, questionId, note)).pipe(observed('planning.waitOnSomeone', log)),
+    'planning.openQuestions': () =>
+      use(openQuestions).pipe(observed('planning.openQuestions', log)),
+    'planning.questionsChanged': () =>
+      follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
+    'planning.inputs': ({ missionId }) =>
+      use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
+    'planning.visions': ({ missionId }) =>
+      use(visionsSeen(missionId)).pipe(observed('planning.visions', log)),
+    // Answers proposed from the ticket's comments (#97).
+    'planning.acceptProposedAnswer': ({ proposalId, text }) =>
+      use(acceptProposedAnswer(proposalId, text)).pipe(
+        observed('planning.acceptProposedAnswer', log),
+      ),
+    'planning.dismissProposedAnswer': ({ proposalId }) =>
+      use(dismissProposedAnswer(proposalId)).pipe(observed('planning.dismissProposedAnswer', log)),
+    // The living spec (#93): its domains and requirements, its runs, and the user's validation.
+    // Hemera does not detect behaviour changed outside Hemera in 1.0: the user re-runs a domain.
+    'livingSpec.domains': ({ projectId }) =>
+      use(domainsOf(projectId)).pipe(observed('livingSpec.domains', log)),
+    'livingSpec.requirements': ({ projectId, domainId }) =>
+      use(requirementsOf(projectId, domainId)).pipe(observed('livingSpec.requirements', log)),
+    'livingSpec.requirement': ({ id }) =>
+      use(requirementDetail(id)).pipe(observed('livingSpec.requirement', log)),
+    'livingSpec.runs': ({ projectId }) =>
+      use(LivingSpec.use((living) => living.runs(projectId))).pipe(
+        observed('livingSpec.runs', log),
+      ),
+    'livingSpec.validateDomain': ({ domainId, seen }) =>
+      use(Effect.asVoid(validateDomain(domainId, seen))).pipe(
+        observed('livingSpec.validateDomain', log),
+      ),
+    'livingSpec.rejectDomain': ({ domainId, seen }) =>
+      use(rejectDomain(domainId, seen)).pipe(observed('livingSpec.rejectDomain', log)),
+    'livingSpec.dropRequirement': ({ requirementId }) =>
+      use(dropRequirement(requirementId)).pipe(observed('livingSpec.dropRequirement', log)),
+    'livingSpec.bootstrap': ({ projectId, domainId }) =>
+      use(LivingSpec.use((living) => living.bootstrap(projectId, domainId ?? null))).pipe(
+        observed('livingSpec.bootstrap', log),
+      ),
+    'livingSpec.changed': ({ projectId }) =>
+      follow(
+        Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
+      ).pipe(observedStream('livingSpec.changed', log)),
+    // The task graph of a Spec, with its coverage (#90).
+    'planning.tasks': ({ missionId }) =>
+      use(taskGraphOf(missionId)).pipe(observed('planning.tasks', log)),
+    // The Probes of a mission in Planning (#89), as their LiveChips show them; no stop.
+    'probes.list': ({ missionId }) => use(listProbes(missionId)).pipe(observed('probes.list', log)),
+    'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
+    'probes.changed': ({ missionId }) =>
+      follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
+    // The helpers of a Building (#145), as their chips show them; no stop, no write.
+    'helpers.list': ({ missionId }) =>
+      use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
+    'helpers.read': ({ helperId, thread }) =>
+      use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
+    'helpers.changed': ({ missionId }) =>
+      follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
+    // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
+    'discussions.list': ({ missionId }) =>
+      use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),
+    'discussions.read': ({ discussionId }) =>
+      use(readDiscussion(discussionId)).pipe(observed('discussions.read', log)),
+    'discussions.open': ({ missionId, item, text }) =>
+      use(openDiscussion(missionId, item, text)).pipe(observed('discussions.open', log)),
+    'discussions.say': ({ discussionId, text }) =>
+      use(sayInDiscussion(discussionId, text)).pipe(observed('discussions.say', log)),
+    'discussions.accept': ({ discussionId, proposedAt }) =>
+      use(acceptProposal(discussionId, proposedAt)).pipe(observed('discussions.accept', log)),
+    'discussions.close': ({ discussionId, closing }) =>
+      use(closeDiscussion(discussionId, closing)).pipe(observed('discussions.close', log)),
+    'discussions.changed': ({ missionId }) =>
+      follow(discussionChanges(missionId)).pipe(observedStream('discussions.changed', log)),
+    // The Freeze (#92): offered once everything is settled; it and the return are the user's.
+    'missions.freezeReadiness': ({ id }) =>
+      use(freezeReadiness(id)).pipe(observed('missions.freezeReadiness', log)),
+    'missions.freezeReadinessChanged': ({ id }) =>
+      follow(freezeReadinessChanges(id)).pipe(
+        observedStream('missions.freezeReadinessChanged', log),
+      ),
+    'missions.freeze': ({ id, specVersion }) =>
+      use(freezeMission(id, specVersion)).pipe(observed('missions.freeze', log)),
+    'missions.returnToPlanning': ({ id, reason }) =>
+      use(returnToPlanning(id, reason)).pipe(observed('missions.returnToPlanning', log)),
+    // The dependencies between missions (#92): the Planner proposes, the user decides.
+    'dependencies.list': ({ missionId }) =>
+      use(dependenciesOf(missionId)).pipe(observed('dependencies.list', log)),
+    'dependencies.decide': ({ id, accept }) =>
+      use(decideDependency(id, accept)).pipe(observed('dependencies.decide', log)),
+    // The pre-launch check and the launch (#139): both the user's.
+    'building.check': ({ missionId }) =>
+      use(checkMission(missionId)).pipe(observed('building.check', log)),
+    'building.checkView': ({ checkId }) =>
+      use(checkView(checkId)).pipe(observed('building.checkView', log)),
+    'building.launch': ({ missionId, checkId, choice }) =>
+      use(launchMission(missionId, checkId, choice)).pipe(observed('building.launch', log)),
+    'building.backToPlanning': ({ missionId, checkId }) =>
+      use(backToPlanningFromCheck(missionId, checkId)).pipe(
+        observed('building.backToPlanning', log),
+      ),
+    'building.preparation': ({ missionId }) =>
+      use(preparationOf(missionId)).pipe(observed('building.preparation', log)),
+    'building.chooseModel': ({ missionId, setting }) =>
+      use(chooseBuilderModel(missionId, setting)).pipe(observed('building.chooseModel', log)),
+    'building.changed': ({ missionId }) =>
+      follow(buildingChanges(missionId)).pipe(observedStream('building.changed', log)),
+    // The Building's tasks (#141): read-only for the window.
+    // A Building or Review view read compares the Workspace first (#148).
+    'building.read': ({ missionId }) =>
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.compare(missionId, null)),
+          buildingOf(missionId),
         ),
-      'resources.changed': () =>
-        follow(
-          Stream.unwrap(ExclusiveResources.useSync((reservations) => reservations.changes)),
-        ).pipe(observedStream('resources.changed', log)),
-      'tickets.providers': ({ projectId }) =>
-        use(providersOf(projectId)).pipe(observed('tickets.providers', log)),
-      'tickets.proposeGithub': ({ projectId, host }) =>
-        use(proposeGithub(projectId, host)).pipe(observed('tickets.proposeGithub', log)),
-      'tickets.addGithub': ({ projectId, config }) =>
-        use(addGithub(projectId, config)).pipe(observed('tickets.addGithub', log)),
-      'tickets.addJira': ({ projectId, config }) =>
-        use(addJira(projectId, config)).pipe(observed('tickets.addJira', log)),
-      'tickets.jiraDeployment': ({ site }) =>
-        use(jiraDeployment(site)).pipe(observed('tickets.jiraDeployment', log)),
-      // A Jira token is main's to seal and to open: the engine stores its ciphertext only.
-      'jiraToken.save': ({ providerId, ciphertext, token }) =>
-        use(saveJiraToken(providerId, ciphertext, token)).pipe(observed('jiraToken.save', log)),
-      'jiraToken.state': ({ providerId }) =>
-        use(jiraTokenState(providerId)).pipe(observed('jiraToken.state', log)),
-      'jiraToken.remove': ({ providerId }) =>
-        use(removeJiraToken(providerId)).pipe(observed('jiraToken.remove', log)),
-      'tickets.updateProvider': ({ providerId, config }) =>
-        use(updateProvider(providerId, config)).pipe(observed('tickets.updateProvider', log)),
-      'tickets.removeProvider': ({ providerId }) =>
-        use(removeProvider(providerId)).pipe(observed('tickets.removeProvider', log)),
-      'tickets.status': ({ providerId }) =>
-        use(providerStatus(providerId)).pipe(observed('tickets.status', log)),
-      'tickets.checkAgain': ({ providerId }) =>
-        use(checkAgain(providerId)).pipe(observed('tickets.checkAgain', log)),
-      'tickets.specMode': ({ projectId }) =>
-        use(specModeOf(projectId)).pipe(observed('tickets.specMode', log)),
-      'tickets.setSpecMode': ({ projectId, mode }) =>
-        use(setSpecMode(projectId, mode)).pipe(observed('tickets.setSpecMode', log)),
-      'tickets.ticket': ({ missionId }) =>
-        use(missionTicket(missionId)).pipe(observed('tickets.ticket', log)),
-      'tickets.changed': ({ projectId }) =>
-        follow(ticketsChanges(projectId)).pipe(observedStream('tickets.changed', log)),
-      // The ticket sync (#97): the interval, the last check, the events and their differences.
-      'tickets.syncInterval': ({ projectId }) =>
-        use(syncIntervalOf(projectId)).pipe(observed('tickets.syncInterval', log)),
-      'tickets.setSyncInterval': ({ projectId, minutes }) =>
-        use(TicketSync.use((sync) => sync.setInterval(projectId, minutes))).pipe(
-          observed('tickets.setSyncInterval', log),
+      ).pipe(observed('building.read', log)),
+    'building.task': ({ missionId, taskId }) =>
+      use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
+    'building.attempt': ({ missionId, attemptId }) =>
+      use(buildingAttemptOf(missionId, attemptId)).pipe(observed('building.attempt', log)),
+    'building.tasksChanged': ({ missionId }) =>
+      follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
+    'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
+  }).pipe(Layer.provide(listed))
+  // The mission's changes outside Hemera and its services (#148), as a layer of their own.
+  const apart = EngineApartRpcs.toLayer({
+    'mission.outsideChanges': ({ missionId }) =>
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.compare(missionId, null)),
+          OutsideChanges.use((outside) => outside.list(missionId)),
         ),
-      'tickets.lastCheck': ({ projectId }) =>
-        use(lastCheckOf(projectId)).pipe(observed('tickets.lastCheck', log)),
-      'tickets.events': ({ missionId }) =>
-        use(ticketEventsOf(missionId)).pipe(observed('tickets.events', log)),
-      'tickets.difference': ({ eventId }) =>
-        use(ticketEventDifference(eventId)).pipe(observed('tickets.difference', log)),
-      'tickets.acknowledge': ({ eventId }) =>
-        use(acknowledgeEvent(eventId)).pipe(observed('tickets.acknowledge', log)),
-      'tickets.writes': ({ missionId }) =>
-        use(ticketWritesOf(missionId)).pipe(observed('tickets.writes', log)),
-      'tickets.retryWrite': ({ writeId }) =>
-        use(retryWrite(writeId)).pipe(observed('tickets.retryWrite', log)),
-      'models.roles': ({ projectId, missionId }) =>
-        use(roleModelsOf(projectId, missionId)).pipe(observed('models.roles', log)),
-      'models.setRole': ({ level, scopeId, role, setting }) =>
-        use(setRoleModel(level, scopeId, role, setting)).pipe(observed('models.setRole', log)),
-      'models.marks': () => use(modelMarksOf).pipe(observed('models.marks', log)),
-      'models.mark': (mark) => use(markModel(mark)).pipe(observed('models.mark', log)),
-      'limits.project': ({ projectId }) =>
-        use(projectLimits(projectId)).pipe(observed('limits.project', log)),
-      'limits.setProject': ({ projectId, limits }) =>
-        use(setProjectLimits(projectId, limits)).pipe(observed('limits.setProject', log)),
-      'limits.mission': ({ missionId }) =>
-        use(missionBudget(missionId)).pipe(observed('limits.mission', log)),
-      'memory.now': ({ missionId }) =>
-        use(Memory.use((memory) => memory.now(missionId))).pipe(observed('memory.now', log)),
-      'memory.journal': ({ missionId, before }) =>
-        use(Memory.use((memory) => memory.journal(missionId, before))).pipe(
-          observed('memory.journal', log),
-        ),
-      'memory.notes': ({ missionId, all }) =>
-        use(Memory.use((memory) => memory.notes(missionId, all))).pipe(
-          observed('memory.notes', log),
-        ),
-      'memory.evidenceList': ({ missionId, about }) =>
-        use(
-          Memory.use((memory) =>
-            Effect.andThen(
-              Effect.andThen(memory.now(missionId), memory.ready),
-              Evidence.use((evidence) => evidence.list(missionId, about)),
-            ),
-          ),
-        ).pipe(observed('memory.evidenceList', log)),
-      'memory.evidence': ({ missionId, id }) =>
-        use(
-          Memory.use((memory) =>
-            Effect.andThen(
-              memory.ready,
-              Evidence.use((evidence) => evidence.read(missionId, id)),
-            ),
-          ),
-        ).pipe(observed('memory.evidence', log)),
-      'memory.changes': ({ missionId }) =>
-        follow(
-          Stream.unwrap(
-            Memory.use((memory) => Effect.as(memory.now(missionId), memory.changes(missionId))),
-          ),
-        ).pipe(observedStream('memory.changes', log)),
-      'agents.list': () => Agents.use((agents) => agents.list).pipe(observed('agents.list', log)),
-      'agents.checkUpdates': () =>
-        Agents.use((agents) => agents.checkUpdates).pipe(observed('agents.checkUpdates', log)),
-      // Run only because the user asked, from the window.
-      'agents.update': ({ agent }) =>
-        Agents.use((agents) => agents.update(agent)).pipe(observed('agents.update', log)),
-      'notifications.settings': () =>
-        use(readNotificationSettings(REGISTRY)).pipe(observed('notifications.settings', log)),
-      'notifications.setKind': ({ id, on }) =>
-        use(setNotificationKind(REGISTRY, id, on)).pipe(observed('notifications.setKind', log)),
-      'notifications.setSound': ({ sound, on }) =>
-        use(setNotificationSound(REGISTRY, sound, on)).pipe(
-          observed('notifications.setSound', log),
-        ),
-      'notifications.setStyle': ({ style }) =>
-        use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
-      'notifications.setVolume': ({ volume }) =>
-        use(setSoundVolume(REGISTRY, volume)).pipe(observed('notifications.setVolume', log)),
-      'notifications.feed': () =>
-        follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
-      // The field searches first and creates only on the user's explicit choice (#84).
-      'start.search': ({ projectId, text }) =>
-        follow(searchStart(projectId, text)).pipe(observedStream('start.search', log)),
-      'start.create': (asked) => use(createStart(asked)).pipe(observed('start.create', log)),
-      // Home: what happened since the user looked, and the missions opened last.
-      'home.sinceYouLeft': ({ before }) =>
-        use(sinceYouLeft(before)).pipe(observed('home.sinceYouLeft', log)),
-      'home.sinceYouLeftChanged': () =>
-        follow(sinceYouLeftChanges).pipe(observedStream('home.sinceYouLeftChanged', log)),
-      'home.looked': ({ upTo }) => use(lookedAtHome(upTo)).pipe(observed('home.looked', log)),
-      'home.recent': () => use(recentMissions).pipe(observed('home.recent', log)),
-      'home.opened': ({ missionId }) =>
-        use(missionOpened(missionId)).pipe(observed('home.opened', log)),
-      'memory.journalTail': ({ missionIds }) =>
-        use(journalTail(missionIds)).pipe(observed('memory.journalTail', log)),
-      // Planning (#85): the Spec the Planner writes, and the user's side of it.
-      'planning.spec': ({ missionId }) =>
-        use(readSpec(missionId)).pipe(observed('planning.spec', log)),
-      'planning.changesSince': ({ missionId, version: since }) =>
-        use(changesSince(missionId, since)).pipe(observed('planning.changesSince', log)),
-      'planning.markRead': ({ missionId, version: read }) =>
-        use(markRead(missionId, read)).pipe(observed('planning.markRead', log)),
-      'planning.addVision': ({ missionId, text }) =>
-        use(giveVision(missionId, text)).pipe(observed('planning.addVision', log)),
-      'planning.keepAfterTriage': ({ missionId }) =>
-        use(keepPlanning(missionId)).pipe(observed('planning.keepAfterTriage', log)),
-      'planning.changed': ({ missionId }) =>
-        follow(specChanges(missionId)).pipe(observedStream('planning.changed', log)),
-      'planning.specLanguage': ({ projectId }) =>
-        use(specLanguageOf(projectId)).pipe(observed('planning.specLanguage', log)),
-      'planning.setSpecLanguage': ({ projectId, language }) =>
-        use(setSpecLanguage(projectId, language)).pipe(observed('planning.setSpecLanguage', log)),
-      // The cold reads of a mission in Planning (#91): another pass and a dismissal are the user's.
-      'coldRead.list': ({ missionId }) =>
-        use(listColdReads(missionId)).pipe(observed('coldRead.list', log)),
-      'coldRead.again': ({ missionId }) =>
-        use(againColdRead(missionId)).pipe(observed('coldRead.again', log)),
-      'coldRead.dismiss': ({ missionId, findingId }) =>
-        use(dismissFinding(missionId, findingId)).pipe(observed('coldRead.dismiss', log)),
-      'coldRead.freshness': ({ missionId }) =>
-        use(coldReadFreshness(missionId)).pipe(observed('coldRead.freshness', log)),
-      'coldRead.settled': ({ missionId }) =>
-        use(coldReadSettled(missionId)).pipe(observed('coldRead.settled', log)),
-      'coldRead.changed': ({ missionId }) =>
-        follow(coldReadChanges(missionId)).pipe(observedStream('coldRead.changed', log)),
-      // Planning's questions (#86): the waves, the user's answers, the inputs.
-      'planning.waves': ({ missionId }) =>
-        use(wavesOf(missionId)).pipe(observed('planning.waves', log)),
-      'planning.answer': ({ missionId, questionId, optionId, text }) =>
-        use(answerQuestion(missionId, questionId, { optionId, text })).pipe(
-          observed('planning.answer', log),
-        ),
-      'planning.waitOnSomeone': ({ missionId, questionId, note }) =>
-        use(waitOnSomeone(missionId, questionId, note)).pipe(
-          observed('planning.waitOnSomeone', log),
-        ),
-      'planning.openQuestions': () =>
-        use(openQuestions).pipe(observed('planning.openQuestions', log)),
-      'planning.questionsChanged': () =>
-        follow(questionsChanged).pipe(observedStream('planning.questionsChanged', log)),
-      'planning.inputs': ({ missionId }) =>
-        use(inputsOf(missionId)).pipe(observed('planning.inputs', log)),
-      'planning.visions': ({ missionId }) =>
-        use(visionsSeen(missionId)).pipe(observed('planning.visions', log)),
-      // Answers proposed from the ticket's comments (#97).
-      'planning.acceptProposedAnswer': ({ proposalId, text }) =>
-        use(acceptProposedAnswer(proposalId, text)).pipe(
-          observed('planning.acceptProposedAnswer', log),
-        ),
-      'planning.dismissProposedAnswer': ({ proposalId }) =>
-        use(dismissProposedAnswer(proposalId)).pipe(
-          observed('planning.dismissProposedAnswer', log),
-        ),
-      // The living spec (#93): its domains and requirements, its runs, and the user's validation.
-      // Hemera does not detect behaviour changed outside Hemera in 1.0: the user re-runs a domain.
-      'livingSpec.domains': ({ projectId }) =>
-        use(domainsOf(projectId)).pipe(observed('livingSpec.domains', log)),
-      'livingSpec.requirements': ({ projectId, domainId }) =>
-        use(requirementsOf(projectId, domainId)).pipe(observed('livingSpec.requirements', log)),
-      'livingSpec.requirement': ({ id }) =>
-        use(requirementDetail(id)).pipe(observed('livingSpec.requirement', log)),
-      'livingSpec.runs': ({ projectId }) =>
-        use(LivingSpec.use((living) => living.runs(projectId))).pipe(
-          observed('livingSpec.runs', log),
-        ),
-      'livingSpec.validateDomain': ({ domainId, seen }) =>
-        use(Effect.asVoid(validateDomain(domainId, seen))).pipe(
-          observed('livingSpec.validateDomain', log),
-        ),
-      'livingSpec.rejectDomain': ({ domainId, seen }) =>
-        use(rejectDomain(domainId, seen)).pipe(observed('livingSpec.rejectDomain', log)),
-      'livingSpec.dropRequirement': ({ requirementId }) =>
-        use(dropRequirement(requirementId)).pipe(observed('livingSpec.dropRequirement', log)),
-      'livingSpec.bootstrap': ({ projectId, domainId }) =>
-        use(LivingSpec.use((living) => living.bootstrap(projectId, domainId ?? null))).pipe(
-          observed('livingSpec.bootstrap', log),
-        ),
-      'livingSpec.changed': ({ projectId }) =>
-        follow(
-          Stream.unwrap(LivingSpec.use((living) => Effect.succeed(living.changes(projectId)))),
-        ).pipe(observedStream('livingSpec.changed', log)),
-      // The task graph of a Spec, with its coverage (#90).
-      'planning.tasks': ({ missionId }) =>
-        use(taskGraphOf(missionId)).pipe(observed('planning.tasks', log)),
-      // The Probes of a mission in Planning (#89), as their LiveChips show them; no stop.
-      'probes.list': ({ missionId }) =>
-        use(listProbes(missionId)).pipe(observed('probes.list', log)),
-      'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
-      'probes.changed': ({ missionId }) =>
-        follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
-      // The helpers of a Building (#145), as their chips show them; no stop, no write.
-      'helpers.list': ({ missionId }) =>
-        use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
-      'helpers.read': ({ helperId, thread }) =>
-        use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
-      'helpers.changed': ({ missionId }) =>
-        follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
-      // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
-      'discussions.list': ({ missionId }) =>
-        use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),
-      'discussions.read': ({ discussionId }) =>
-        use(readDiscussion(discussionId)).pipe(observed('discussions.read', log)),
-      'discussions.open': ({ missionId, item, text }) =>
-        use(openDiscussion(missionId, item, text)).pipe(observed('discussions.open', log)),
-      'discussions.say': ({ discussionId, text }) =>
-        use(sayInDiscussion(discussionId, text)).pipe(observed('discussions.say', log)),
-      'discussions.accept': ({ discussionId, proposedAt }) =>
-        use(acceptProposal(discussionId, proposedAt)).pipe(observed('discussions.accept', log)),
-      'discussions.close': ({ discussionId, closing }) =>
-        use(closeDiscussion(discussionId, closing)).pipe(observed('discussions.close', log)),
-      'discussions.changed': ({ missionId }) =>
-        follow(discussionChanges(missionId)).pipe(observedStream('discussions.changed', log)),
-      // The Freeze (#92): offered once everything is settled; it and the return are the user's.
-      'missions.freezeReadiness': ({ id }) =>
-        use(freezeReadiness(id)).pipe(observed('missions.freezeReadiness', log)),
-      'missions.freezeReadinessChanged': ({ id }) =>
-        follow(freezeReadinessChanges(id)).pipe(
-          observedStream('missions.freezeReadinessChanged', log),
-        ),
-      'missions.freeze': ({ id, specVersion }) =>
-        use(freezeMission(id, specVersion)).pipe(observed('missions.freeze', log)),
-      'missions.returnToPlanning': ({ id, reason }) =>
-        use(returnToPlanning(id, reason)).pipe(observed('missions.returnToPlanning', log)),
-      // The dependencies between missions (#92): the Planner proposes, the user decides.
-      'dependencies.list': ({ missionId }) =>
-        use(dependenciesOf(missionId)).pipe(observed('dependencies.list', log)),
-      'dependencies.decide': ({ id, accept }) =>
-        use(decideDependency(id, accept)).pipe(observed('dependencies.decide', log)),
-      // The pre-launch check and the launch (#139): both the user's.
-      'building.check': ({ missionId }) =>
-        use(checkMission(missionId)).pipe(observed('building.check', log)),
-      'building.checkView': ({ checkId }) =>
-        use(checkView(checkId)).pipe(observed('building.checkView', log)),
-      'building.launch': ({ missionId, checkId, choice }) =>
-        use(launchMission(missionId, checkId, choice)).pipe(observed('building.launch', log)),
-      'building.backToPlanning': ({ missionId, checkId }) =>
-        use(backToPlanningFromCheck(missionId, checkId)).pipe(
-          observed('building.backToPlanning', log),
-        ),
-      'building.preparation': ({ missionId }) =>
-        use(preparationOf(missionId)).pipe(observed('building.preparation', log)),
-      'building.chooseModel': ({ missionId, setting }) =>
-        use(chooseBuilderModel(missionId, setting)).pipe(observed('building.chooseModel', log)),
-      'building.changed': ({ missionId }) =>
-        follow(buildingChanges(missionId)).pipe(observedStream('building.changed', log)),
-      // The Building's tasks (#141): read-only for the window.
-      'building.read': ({ missionId }) =>
-        use(buildingOf(missionId)).pipe(observed('building.read', log)),
-      'building.task': ({ missionId, taskId }) =>
-        use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
-      'building.attempt': ({ missionId, attemptId }) =>
-        use(buildingAttemptOf(missionId, attemptId)).pipe(observed('building.attempt', log)),
-      'building.tasksChanged': ({ missionId }) =>
-        follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
-      'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
-    }).pipe(Layer.provide(listed)),
-  )
+      ).pipe(observed('mission.outsideChanges', log)),
+    'mission.outsideContents': ({ missionId, changeId }) =>
+      use(OutsideChanges.use((outside) => outside.contents(missionId, changeId))).pipe(
+        observed('mission.outsideContents', log),
+      ),
+    'mission.services': ({ missionId }) =>
+      use(missionServices(missionId)).pipe(observed('mission.services', log)),
+    'mission.serviceStart': ({ missionId, commandId }) =>
+      use(startService(missionId, commandId)).pipe(observed('mission.serviceStart', log)),
+    'mission.serviceStop': ({ missionId, runId }) =>
+      use(stopService(missionId, runId)).pipe(observed('mission.serviceStop', log)),
+    'mission.serviceRestart': ({ missionId, runId }) =>
+      use(restartService(missionId, runId)).pipe(observed('mission.serviceRestart', log)),
+    'mission.serviceDismiss': ({ missionId, runId }) =>
+      use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
+    'mission.focused': () =>
+      use(OutsideChanges.use((outside) => outside.focused)).pipe(observed('mission.focused', log)),
+    'mission.changed': () =>
+      follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
+        observedStream('mission.changed', log),
+      ),
+  })
+  return Layer.mergeAll(core, apart, checksHandlers(profile, log))
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineServedRpcs`). */
