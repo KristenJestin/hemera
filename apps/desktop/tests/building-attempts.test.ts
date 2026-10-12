@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
+import { buildingAttemptOf } from '../src/engine/building/tasks.ts'
 import { ONE_COMMIT_PER_TASK } from '../src/engine/building/validation.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
 import { getMission } from '../src/engine/missions.ts'
@@ -469,11 +470,13 @@ describe('The verdict loop', () => {
           yield* call(helper.grantId, 'task_start', { task: 'T2' })
           const first = yield* call(helper.grantId, 'task_finished', { task: 'T2', summary: 'A.' })
           const between = yield* buildingNow(mission.id)
+          const redId = between.tasks.find((task) => task.id === 'T2')?.attempts[0]?.id ?? ''
           const second = yield* call(helper.grantId, 'task_finished', { task: 'T2', summary: 'B.' })
           return {
             first,
             second,
             between,
+            asked: yield* buildingAttemptOf(mission.id, redId),
             after: yield* buildingNow(mission.id),
             delivered: yield* deliveriesTo(helper.lineage, 'red'),
             reds: yield* eventsOf(mission.id, 'building.attempt_red'),
@@ -489,6 +492,8 @@ describe('The verdict loop', () => {
       [2, null, true],
     ])
     expect(t2?.attempts[0]?.checks[0]).toMatchObject({ name: 'unit tests', verdict: 'red' })
+    expect(seen.asked).toMatchObject({ id: t2?.attempts[0]?.id, number: 1, verdict: 'red' })
+    expect(seen.asked.checks[0]).toMatchObject({ name: 'unit tests', place: 'api', verdict: 'red' })
     const body = seen.delivered[0]?.body ?? ''
     expect(body).toContain('unit tests')
     expect(body).toContain('in api')
