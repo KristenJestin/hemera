@@ -60,8 +60,13 @@ describe('A mission’s frame', () => {
     await expect(track().$('li[aria-current="step"]')).toHaveText('Planning', { containing: true })
   })
 
-  it('keeps the mission’s needs at the top, above the base', async () => {
-    await expect($('ul[aria-label="Needs you"]')).toHaveText(/Who may read the audit log\?/)
+  it('lists the mission’s needs in Planning’s For you, not above the base', async () => {
+    const forYou = $('section[aria-label="For you"]')
+    await forYou.$('button*=Needs').click()
+    await expect(
+      forYou.$('button[aria-label="Hemera: Who may read the audit log?"]'),
+    ).toBeDisplayed()
+    await expect($('ul[aria-label="Needs you"]')).not.toBeExisting()
     await expect(base()).toBeDisplayed()
   })
 

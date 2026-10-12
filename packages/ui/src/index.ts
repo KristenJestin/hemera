@@ -172,12 +172,11 @@ export * from './blocks/mission/mission-row.tsx'
 export * from './blocks/mission/stage-card.tsx'
 export * from './surfaces/living-spec/living-spec-types.ts'
 export * from './surfaces/living-spec/living-spec-page.tsx'
-/** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Wave`. */
+/** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Probe`. */
 export * as Planning from './blocks/planning/planning-types.ts'
 export {
   PlanningPage,
   discussionViewId,
-  focusTarget,
   probeViewId,
   type PlanningPageProps,
 } from './surfaces/planning/planning-page.tsx'

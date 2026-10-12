@@ -4,6 +4,7 @@ import {
   AgentWorking,
   DecisionFields,
   MissionOwner,
+  PermissionFields,
   OutdatedMark,
   markIdentity,
 } from '@hemera/core/domain'
@@ -34,6 +35,18 @@ const need = (id: string, question: string): Need => ({
   endedReason: null,
   createdAt: '2026-10-05T09:00:00.000Z',
   endedAt: null,
+})
+
+const permission = (id: string, call: string): Need => ({
+  ...need(id, ''),
+  fields: PermissionFields.make({
+    call,
+    agentReason: 'To see whether a slash in a title breaks the export today.',
+    hemeraReason: 'Tests of api write to a database: the setting asks first.',
+    sensitive: false,
+  }),
+  choices: ['allow-once', 'allow-for-mission', 'deny'],
+  requestedBy: 'probe',
 })
 
 const mission = (more: Partial<Mission> = {}): Mission => ({
@@ -292,5 +305,46 @@ describe('The views over the base', () => {
   test('a view the registry does not know is not shown', () => {
     const frame: MissionFrameState = { open: ['task:T1'], shown: 'task:T1' }
     expect(drawn({ frame })).not.toMatch(/data-base=""[^>]*inert/)
+  })
+})
+
+describe('The needs of a mission in Planning', () => {
+  const waiting = [
+    permission('n1', 'pnpm --filter api test notes-export'),
+    need('n2', 'Who may read the audit log?'),
+  ]
+
+  test('are not drawn above the Spec: they are For you’s first line', () => {
+    const markup = drawn({ mission: mission({ needs: waiting }) })
+    expect(markup).not.toContain('<ul aria-label="Needs you"')
+  })
+
+  test('are handed to the Planning page, with what answers them', () => {
+    let handed: StagePageProps['needs'] = { rows: [], on: () => ({}) }
+    const pages = {
+      Planning: ({ frame, needs }: StagePageProps): ReactNode => {
+        handed = needs
+        return frame({ base: null, needs: [] })
+      },
+    }
+    drawn({ pages, mission: mission({ needs: waiting }) })
+    expect(handed.rows.map((row) => row.id)).toEqual(['n1', 'n2'])
+    expect(handed.on('n1').onPermission).toBeTypeOf('function')
+  })
+
+  test('another stage keeps them above its page', () => {
+    const markup = drawn({ mission: mission({ stage: 'building', frozen: true, needs: waiting }) })
+    expect(markup).toContain('<ul aria-label="Needs you"')
+  })
+})
+
+describe('The head of a mission in Planning', () => {
+  test('draws the ball without the face, and no Now line: the stage card says it', () => {
+    const planning = drawn()
+    expect(planning).toContain('data-ball="agent"')
+    expect(planning).not.toContain('data-now=""')
+    expect(drawn({ mission: mission({ stage: 'building', frozen: true }) })).not.toContain(
+      'data-ball="agent"',
+    )
   })
 })

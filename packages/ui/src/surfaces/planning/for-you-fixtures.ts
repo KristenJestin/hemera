@@ -3,46 +3,29 @@ import type {
   ColdReadPass,
   Finding,
   PlanningData,
+  PlanningNeed,
   Probe,
   Question,
   SpecSection,
-  Wave,
 } from '../../blocks/planning/planning-types.ts'
-import type { Planner, PlanningFacts } from '../../blocks/planning/planning-progress.ts'
+import type { Planner } from '../../blocks/planning/planning-progress.ts'
 import {
   DEPENDENCIES,
+  type PlanningMoment,
   REQUIREMENTS,
   TASKS,
   WRITTEN,
-} from '../../surfaces/planning/planning-fixtures.ts'
+} from './planning-fixtures.ts'
 
 /**
- * ACME-12, "Export notes as Markdown", at a real size: eight questions, a cold read
- * of seven findings of a paragraph each, two Probes, five permission requests, and a Spec half
- * written. Each moment of the journey the page must make readable is one function.
+ * ACME-12, "Export notes as Markdown", at a real size, as #193 drew it: eight questions, a cold
+ * read of seven findings of a paragraph each, two Probes, five permission requests, and a Spec
+ * half written. Each moment of the journey For you must make readable is one function.
  */
 
 const NOW = Date.now()
 
 const SECONDS = 1000
-
-/** A permission an agent of the mission asks for: the command, who asks, and why. */
-export interface PermissionAsk {
-  id: string
-  /** Who asks, as the page names it: `Probe #2`, `Planner`. */
-  who: string
-  command: string
-  /** Why the agent wants it, in its words. */
-  agentReason: string
-  /** Why Hemera asks rather than allows. */
-  hemeraReason: string
-  when: string
-}
-
-/** One moment of the journey: what the page knows, and the permissions that wait. */
-export interface AttentionMoment extends PlanningFacts {
-  permissions: readonly PermissionAsk[]
-}
 
 const IDLE: Planner = { state: 'idle', doing: null, next: null, reason: null }
 
@@ -64,7 +47,7 @@ const answer = (
 function question(
   given: Pick<
     Question,
-    'id' | 'wave' | 'text' | 'why' | 'options' | 'recommended' | 'recommendedReason' | 'section'
+    'id' | 'text' | 'why' | 'options' | 'recommended' | 'recommendedReason' | 'section'
   > &
     Partial<Question>,
 ): Question {
@@ -85,7 +68,6 @@ function question(
 
 const Q1 = question({
   id: 'Q1',
-  wave: 1,
   text: 'Should a note’s attachments leave with it?',
   why: 'A note can hold images and files; a Markdown file alone cannot carry them.',
   options: [
@@ -99,7 +81,6 @@ const Q1 = question({
 
 const Q2 = question({
   id: 'Q2',
-  wave: 1,
   text: 'Which Markdown?',
   why: 'Notes hold tables, which plain Markdown has no syntax for.',
   options: [
@@ -113,7 +94,6 @@ const Q2 = question({
 
 const Q3 = question({
   id: 'Q3',
-  wave: 1,
   text: 'Does the front matter hold every field of the note, or only its title?',
   why: 'A wiki reads the front matter; fields it does not know it keeps as they are.',
   options: [
@@ -131,7 +111,6 @@ const Q3 = question({
 
 const Q4 = question({
   id: 'Q4',
-  wave: 1,
   text: 'Who may export a shared note?',
   why: 'A shared note can be read by people outside its workspace; an export is a copy that leaves Acme.',
   options: [
@@ -151,7 +130,6 @@ const Q4 = question({
 
 const Q5 = question({
   id: 'Q5',
-  wave: 1,
   text: 'What is the file called when the note has no title?',
   why: 'A file needs a name; about one note in twenty has no title today.',
   options: [
@@ -169,7 +147,6 @@ const Q5 = question({
 
 const Q6 = question({
   id: 'Q6',
-  wave: 1,
   text: 'From how many notes does an export run in the background?',
   why: 'Below it, the file comes in the same request; above it, a job writes an archive and says when it is ready.',
   options: [
@@ -185,7 +162,6 @@ const Q6 = question({
 
 const Q7 = question({
   id: 'Q7',
-  wave: 1,
   text: 'Are the dates written in the reader’s time zone or in UTC?',
   why: 'The front matter keeps created and updated dates; a wiki shows them as they are written.',
   options: [
@@ -199,7 +175,6 @@ const Q7 = question({
 
 const Q8 = question({
   id: 'Q8',
-  wave: 1,
   text: 'Do tags go in the front matter, or as a line at the end of the body?',
   why: 'Some wikis read tags from the front matter, others from #words in the text.',
   options: [
@@ -221,14 +196,6 @@ const answered = (q: Question, given: AnswerVersion): Question => ({
   waitingNote: null,
   answers: [given],
 })
-
-/**
- * The questions as the page sees them: one list that grows, in the order they were asked. The
- * data still carries waves until the build drops them; the page draws none.
- */
-function asked(questions: readonly Question[]): Wave[] {
-  return [{ number: 1, askedAt: '10:12', questions }]
-}
 
 /** Half of the Spec: Why, Goals and Impact written, Requirements being written, the rest empty. */
 const HALF: readonly SpecSection[] = WRITTEN.map((section) =>
@@ -358,48 +325,75 @@ const ENDED_PROBES: readonly Probe[] = PROBES.map((probe, index) => ({
 
 const OUTSIDE = 'It runs outside the mission’s Workspace.'
 
-export const PERMISSIONS: readonly PermissionAsk[] = [
-  {
-    id: 'pr1',
-    who: 'Probe #1',
-    command: 'pnpm --filter api test notes-export',
-    agentReason: 'To see whether a slash in a title breaks the export today.',
-    hemeraReason: 'Tests of api write to a database: the setting asks first.',
-    when: '2 min',
-  },
-  {
-    id: 'pr2',
-    who: 'Probe #1',
-    command: 'docker compose -f api/compose.test.yml up -d postgres',
-    agentReason: 'The export test needs its database running.',
-    hemeraReason: OUTSIDE,
-    when: '2 min',
-  },
-  {
-    id: 'pr3',
-    who: 'Probe #2',
-    command: 'node api/scripts/seed-notes.ts --workspace large-copy --count 5000',
-    agentReason: 'To time an export of 5 000 notes on a copy of the largest workspace.',
-    hemeraReason: 'It writes 5 000 rows: the setting asks before a write of that size.',
-    when: '1 min',
-  },
-  {
-    id: 'pr4',
-    who: 'Probe #2',
-    command:
-      'curl -s -o /dev/null -w "%{time_total}" localhost:4000/notes/export?workspace=large-copy',
-    agentReason: 'To measure how long the export takes.',
-    hemeraReason: 'It calls a server on this machine: the setting asks first.',
-    when: '1 min',
-  },
-  {
-    id: 'pr5',
-    who: 'Probe #2',
-    command: 'psql "$TEST_DATABASE_URL" -c "drop schema large_copy cascade"',
-    agentReason: 'To remove the copy once it has its measure.',
-    hemeraReason: 'It deletes data: Hemera always asks.',
-    when: '40 s',
-  },
+/** A permission a Probe of the mission asks for, as its need card shows it. */
+function permission(
+  id: string,
+  who: string,
+  command: string,
+  agentReason: string,
+  hemeraReason: string,
+  when: string,
+): PlanningNeed {
+  return {
+    id,
+    who,
+    need: {
+      ask: {
+        kind: 'permission',
+        command,
+        agentReason,
+        hemeraReason,
+        choices: ['allow-once', 'allow-for-mission', 'deny'],
+      },
+      title: `${who} asks to run a command`,
+      when,
+      role: 'Probe',
+      planning: true,
+    },
+  }
+}
+
+export const PERMISSIONS: readonly PlanningNeed[] = [
+  permission(
+    'pr1',
+    'Probe #1',
+    'pnpm --filter api test notes-export',
+    'To see whether a slash in a title breaks the export today.',
+    'Tests of api write to a database: the setting asks first.',
+    '2 min',
+  ),
+  permission(
+    'pr2',
+    'Probe #1',
+    'docker compose -f api/compose.test.yml up -d postgres',
+    'The export test needs its database running.',
+    OUTSIDE,
+    '2 min',
+  ),
+  permission(
+    'pr3',
+    'Probe #2',
+    'node api/scripts/seed-notes.ts --workspace large-copy --count 5000',
+    'To time an export of 5 000 notes on a copy of the largest workspace.',
+    'It writes 5 000 rows: the setting asks before a write of that size.',
+    '1 min',
+  ),
+  permission(
+    'pr4',
+    'Probe #2',
+    'curl -s -o /dev/null -w "%{time_total}" localhost:4000/notes/export?workspace=large-copy',
+    'To measure how long the export takes.',
+    'It calls a server on this machine: the setting asks first.',
+    '1 min',
+  ),
+  permission(
+    'pr5',
+    'Probe #2',
+    'psql "$TEST_DATABASE_URL" -c "drop schema large_copy cascade"',
+    'To remove the copy once it has its measure.',
+    'It deletes data: Hemera always asks.',
+    '40 s',
+  ),
 ]
 
 /** The page with nothing written, asked or run: the base of every moment. */
@@ -410,7 +404,7 @@ function base(): PlanningData {
     requirementsState: 'empty',
     requirements: [],
     tasks: [],
-    waves: [],
+    questions: [],
     discussions: [],
     probes: [],
     passes: [],
@@ -426,17 +420,17 @@ function base(): PlanningData {
 const moment = (
   data: Partial<PlanningData>,
   planner: Planner = IDLE,
-  more: Partial<AttentionMoment> = {},
-): AttentionMoment => ({
+  more: { declaredComplete?: boolean; needs?: readonly PlanningNeed[] } = {},
+): PlanningMoment => ({
   data: { ...base(), ...data },
   planner,
-  declaredComplete: false,
-  permissions: [],
-  ...more,
+  declaredComplete: more.declaredComplete ?? false,
+  needs: more.needs ?? [],
+  head: { now: planner.doing, frozen: false, declared: more.declaredComplete },
 })
 
 /** The first minutes: the Planner reads what exists before it writes a line. */
-export function reading(): AttentionMoment {
+export function reading(): PlanningMoment {
   return moment(
     {},
     working(
@@ -453,11 +447,11 @@ const HALF_WRITTEN: Partial<PlanningData> = {
 }
 
 /** Eight questions asked: two answered, one waits on someone, five wait for the user. */
-export function questionsWaiting(): AttentionMoment {
+export function questionsWaiting(): PlanningMoment {
   return moment({
     ...HALF_WRITTEN,
     requirementsState: 'written',
-    waves: asked([
+    questions: [
       answered(Q1, answer('A', 'integrated', '10:20')),
       answered(Q2, answer('B', 'integrated', '10:21')),
       Q3,
@@ -466,19 +460,19 @@ export function questionsWaiting(): AttentionMoment {
       Q6,
       Q7,
       Q8,
-    ]),
+    ],
   })
 }
 
 /** Every question answered; the Planner takes the last six into account and rewrites. */
-export function takingAnswers(): AttentionMoment {
+export function takingAnswers(): PlanningMoment {
   return moment(
     {
       sections: WRITTEN,
       requirementsState: 'written',
       requirements: REQUIREMENTS,
       tasks: TASKS,
-      waves: asked([
+      questions: [
         answered(Q1, answer('A', 'integrated', '10:20')),
         answered(Q2, answer('B', 'integrated', '10:21')),
         answered(Q3, answer('A', 'integrated', '10:51')),
@@ -487,29 +481,27 @@ export function takingAnswers(): AttentionMoment {
         answered(Q6, answer('A', 'delivered', '11:05')),
         answered(Q7, answer('A', 'received', '11:06')),
         answered(Q8, answer('B', 'received', '11:06')),
-      ]),
+      ],
       dependencies: DEPENDENCIES.filter((dependency) => dependency.state !== 'proposed'),
     },
     working('Takes your answers to Q4–Q8 into account in Requirements and Decisions'),
   )
 }
 
-const ALL_SETTLED = (): Wave[] =>
-  asked(
-    [Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8].map((q) =>
-      answered(q, answer(q.recommended, 'integrated', '10:52')),
-    ),
+const ALL_SETTLED = (): Question[] =>
+  [Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8].map((q) =>
+    answered(q, answer(q.recommended, 'integrated', '10:52')),
   )
 
 /** Declared complete; the cold read reported seven findings, five of them to settle. */
-export function coldReadFindings(): AttentionMoment {
+export function coldReadFindings(): PlanningMoment {
   return moment(
     {
       sections: WRITTEN,
       requirementsState: 'written',
       requirements: REQUIREMENTS,
       tasks: TASKS,
-      waves: ALL_SETTLED(),
+      questions: ALL_SETTLED(),
       passes: [PASS],
       probes: ENDED_PROBES,
       dependencies: DEPENDENCIES.filter((dependency) => dependency.state !== 'proposed'),
@@ -528,24 +520,24 @@ export function coldReadFindings(): AttentionMoment {
 }
 
 /** Two Probes run on the half-written Spec and wait on five permissions; the first three questions are answered. */
-export function probesWithPermissions(): AttentionMoment {
+export function probesWithPermissions(): PlanningMoment {
   return moment(
     {
       ...HALF_WRITTEN,
-      waves: asked([
+      questions: [
         answered(Q1, answer('A', 'integrated', '10:20')),
         answered(Q2, answer('B', 'integrated', '10:21')),
         answered(Q3, answer('A', 'integrated', '10:22')),
-      ]),
+      ],
       probes: PROBES,
     },
     IDLE,
-    { permissions: PERMISSIONS },
+    { needs: PERMISSIONS },
   )
 }
 
 /** Nothing left: every finding settled, every answer in the Spec; Freeze is the user's. */
-export function readyToFreeze(): AttentionMoment {
+export function readyToFreeze(): PlanningMoment {
   const settled = FINDINGS.map((one): Finding =>
     one.fate === 'open'
       ? Object.assign({}, one, {
@@ -560,15 +552,3 @@ export function readyToFreeze(): AttentionMoment {
     data: { ...before.data, passes: [{ ...PASS, findings: settled }] },
   }
 }
-
-/** The moments a story can show, by name. */
-export const MOMENTS = {
-  reading,
-  questionsWaiting,
-  takingAnswers,
-  coldReadFindings,
-  probesWithPermissions,
-  readyToFreeze,
-} as const
-
-export type MomentName = keyof typeof MOMENTS

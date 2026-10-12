@@ -44,8 +44,8 @@ describe('the first second of a mission', () => {
   })
 })
 
-describe('a wave of questions', () => {
-  const facts = moments.wave()
+describe('questions asked', () => {
+  const facts = moments.asked()
 
   test('the questions step waits for the user, with how many', () => {
     const steps = stepsOf(facts)

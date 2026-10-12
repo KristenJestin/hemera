@@ -204,16 +204,17 @@ function says(canvasElement: HTMLElement, words: string): boolean {
   )
 }
 
-/** Planning: the Spec not frozen yet, Freeze as its action, the stage track at its first step, the needs at the top. */
+/**
+ * Planning: the Spec not frozen yet, Freeze as its action, the stage track at its first step; no
+ * needs at the top, the Planning page lists them under For you.
+ */
 export const MissionPlanning: Story = {
   render: () => <MissionStageFixture missionKey="ACME-14" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('button', { name: 'Freeze' })).toBeVisible()
     expect(canvas.getByRole('button', { name: 'Cancel' })).toBeVisible()
-    expect(
-      within(canvas.getByRole('list', { name: 'Needs you' })).getAllByRole('listitem'),
-    ).toHaveLength(2)
+    expect(canvas.queryByRole('list', { name: 'Needs you' })).toBeNull()
     expect(canvas.queryByRole('img', { name: 'Spec frozen' })).toBeNull()
     const track = canvas.getByRole('list', { name: 'Stage' })
     expect(within(track).getAllByRole('listitem')).toHaveLength(6)
@@ -226,7 +227,7 @@ export const MissionPlanning: Story = {
 
 /** A need of the top list unfolds to its card, in place, and the card answers. */
 export const MissionNeedUnfolded: Story = {
-  render: () => <MissionStageFixture missionKey="ACME-14" />,
+  render: () => <MissionStageFixture missionKey="ACME-17" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const [first] = canvas.getAllByRole('button', { name: 'Answer here' })
@@ -249,11 +250,16 @@ export const MissionBlockedByDependency: Story = {
   },
 }
 
-/** Building, blocked by a shared resource another mission holds. */
+/** Building, blocked by a shared resource another mission holds, its needs at the top. */
 export const MissionBlockedByResource: Story = {
   render: () => <MissionStageFixture missionKey="ACME-17" />,
   play: async ({ canvasElement }) => {
     expect(says(canvasElement, 'Blocked by shared database · ACME-15')).toBe(true)
+    expect(
+      within(within(canvasElement).getByRole('list', { name: 'Needs you' })).getAllByRole(
+        'listitem',
+      ),
+    ).toHaveLength(2)
     expect(within(canvasElement).queryByRole('button', { name: 'Launch' })).toBeNull()
     expect(
       within(within(canvasElement).getByRole('list', { name: 'Stage' })).getByText('Building'),

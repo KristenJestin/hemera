@@ -1,50 +1,53 @@
 import { type ReactNode, useState } from 'react'
 
+import type { PermissionChoice } from '../../blocks/need/need-card.tsx'
 import type {
   DiscussionHandlers,
   DiscussionItem,
+  Finding,
   PlanningHandlers,
   Question,
 } from '../../blocks/planning/planning-types.ts'
 import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
-import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { freezeOf, planningNow } from '../../blocks/planning/planning-progress.ts'
-import { IconEye } from '../../icons.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
 import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
+import * as forYou from './for-you-fixtures.ts'
 import * as moments from './planning-fixtures.ts'
-import { PlanningPage, discussionViewId, focusTarget, probeViewId } from './planning-page.tsx'
+import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
 import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
 const MOMENTS = {
-  starting: moments.starting,
+  reading: forYou.reading,
+  questionsWaiting: forYou.questionsWaiting,
+  takingAnswers: forYou.takingAnswers,
+  coldReadFindings: forYou.coldReadFindings,
+  probesWithPermissions: forYou.probesWithPermissions,
+  readyToFreeze: forYou.readyToFreeze,
   writing: moments.writing,
-  waveToAnswer: moments.waveToAnswer,
+  asked: moments.asked,
+  threeToAnswer: moments.threeToAnswer,
+  firstQuestions: moments.firstQuestions,
   plannerFailed: moments.plannerFailed,
   plannerSilent: moments.plannerSilent,
-  firstWave: moments.firstWave,
-  wave: moments.wave,
   discussing: moments.discussing,
   probing: moments.probing,
   coldReadRunning: moments.coldReadRunning,
-  findings: moments.findings,
   coldReadFailed: moments.coldReadFailed,
   dependencyProposed: moments.dependencyProposed,
   changed: moments.changed,
   vision: moments.vision,
   almostReady: moments.almostReady,
-  readyToFreeze: moments.readyToFreeze,
+  settled: moments.readyToFreeze,
+  mootByDiscussion: moments.mootByDiscussion,
   freezeRefused: moments.freezeRefused,
   frozen: moments.frozen,
   outdated: moments.outdated,
   triaged: moments.triaged,
   proposedAnswer: moments.proposedAnswer,
   restarted: moments.restarted,
-  answerReceived: moments.answerReceived,
-  answerDelivered: moments.answerDelivered,
-  answerIntegrated: moments.answerIntegrated,
   long: moments.long,
 } as const
 
@@ -56,46 +59,69 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   opened?: string | undefined
   /** Why the page stopped following the engine after it was drawn. */
   failure?: string | undefined
+  onPermission: (id: string, choice: PermissionChoice) => void
   onFreeze: () => void
   onRetry: () => void
 }
 
-/** A moment with the answers the story's engine took, each sent and not yet read by the Planner. */
-function withAnswers(
+type Given = { optionId: string } | { text: string }
+
+/**
+ * A moment as the story's engine left it: each answer it took sent and not yet read by the
+ * Planner, each question put on hold waiting, each permission answered gone, each finding
+ * dismissed settled.
+ */
+function played(
   moment: moments.PlanningMoment,
-  taken: ReadonlyMap<string, { optionId: string } | { text: string }>,
+  taken: ReadonlyMap<string, Given>,
+  held: ReadonlyMap<string, string | null>,
+  allowed: ReadonlySet<string>,
+  dismissed: ReadonlySet<string>,
 ): moments.PlanningMoment {
-  if (taken.size === 0) return moment
-  const waves = moment.data.waves.map((wave) =>
-    Object.assign({}, wave, {
-      questions: wave.questions.map((question): Question => {
-        const given = taken.get(question.id)
-        if (given === undefined) return question
-        return Object.assign({}, question, {
-          state: 'answered' as const,
-          answers: [
-            ...question.answers.map((version) =>
-              Object.assign({}, version, { inputState: 'superseded' as const }),
-            ),
-            {
-              version: question.answers.length + 1,
-              optionId: 'optionId' in given ? given.optionId : null,
-              text: 'text' in given ? given.text : null,
-              at: '11:50',
-              inputState: 'received' as const,
-            },
-          ],
-        })
-      }),
+  const answer = (question: Question): Question => {
+    const given = taken.get(question.id)
+    if (given === undefined) {
+      return held.has(question.id)
+        ? Object.assign({}, question, {
+            state: 'waiting' as const,
+            waitingNote: held.get(question.id) ?? null,
+          })
+        : question
+    }
+    return Object.assign({}, question, {
+      state: 'answered' as const,
+      answers: [
+        ...question.answers.map((version) =>
+          Object.assign({}, version, { inputState: 'superseded' as const }),
+        ),
+        {
+          version: question.answers.length + 1,
+          optionId: 'optionId' in given ? given.optionId : null,
+          text: 'text' in given ? given.text : null,
+          at: '11:50',
+          inputState: 'received' as const,
+        },
+      ],
+    })
+  }
+  const dismiss = (finding: Finding): Finding =>
+    dismissed.has(finding.id) ? Object.assign({}, finding, { fate: 'dismissed' as const }) : finding
+  return Object.assign({}, moment, {
+    needs: moment.needs.filter((one) => !allowed.has(one.id)),
+    data: Object.assign({}, moment.data, {
+      questions: moment.data.questions.map(answer),
+      passes: moment.data.passes.map((pass) =>
+        Object.assign({}, pass, { findings: pass.findings.map(dismiss) }),
+      ),
     }),
-  )
-  return Object.assign({}, moment, { data: Object.assign({}, moment.data, { waves }) })
+  })
 }
 
 /**
  * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
- * renderer draws above it, the page as its base, and the views it opens over it — a discussion, a
- * Probe's report. What the window does with the page, played on the fixtures.
+ * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
+ * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
+ * engine takes the answers, the permissions and the dismissals.
  */
 export function PlanningScreen({
   moment,
@@ -103,20 +129,31 @@ export function PlanningScreen({
   failure,
   onFreeze,
   onRetry,
+  onPermission,
   onSay,
   onAccept,
   onClose,
   ...handlers
 }: PlanningScreenProps): ReactNode {
-  // The story's engine: an answer it takes is sent, as the page reads it next.
-  const [taken, setTaken] = useState<ReadonlyMap<string, { optionId: string } | { text: string }>>(
-    new Map(),
-  )
+  const [taken, setTaken] = useState<ReadonlyMap<string, Given>>(new Map())
+  const [held, setHeld] = useState<ReadonlyMap<string, string | null>>(new Map())
+  const [allowed, setAllowed] = useState<ReadonlySet<string>>(new Set())
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
   const shown =
-    moment === 'loading' || moment === 'error' ? null : withAnswers(MOMENTS[moment](), taken)
+    moment === 'loading' || moment === 'error'
+      ? null
+      : played(MOMENTS[moment](), taken, held, allowed, dismissed)
   const answer: PlanningHandlers['onAnswer'] = (questionId, given) =>
     handlers.onAnswer(questionId, given).then(() => {
       setTaken((before) => new Map(before).set(questionId, given))
+    })
+  const waitOnSomeone: PlanningHandlers['onWaitOnSomeone'] = (questionId, note) =>
+    handlers.onWaitOnSomeone(questionId, note).then(() => {
+      setHeld((before) => new Map(before).set(questionId, note))
+    })
+  const dismissFinding: PlanningHandlers['onDismissFinding'] = (findingId) =>
+    handlers.onDismissFinding(findingId).then(() => {
+      setDismissed((before) => new Set(before).add(findingId))
     })
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
@@ -126,7 +163,6 @@ export function PlanningScreen({
   const head = shown?.head ?? { now: null, frozen: false }
   const line = shown === null ? null : planningNow(shown)
   const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
-  const reading = line?.coldRead ?? null
 
   const discuss = (item: DiscussionItem): void => {
     handlers.onDiscuss(item)
@@ -158,27 +194,8 @@ export function PlanningScreen({
       stage={head.frozen ? 'Ready' : 'Planning'}
       frozen={head.frozen}
       type="feature"
-      ball={line?.ball ?? 'idle'}
-      now={line?.text}
-      onNow={
-        line?.target === null || line?.target === undefined
-          ? undefined
-          : () => {
-              if (line.target !== null) focusTarget(line.target)
-            }
-      }
-      nowChip={
-        reading === null ? undefined : (
-          <LiveChip
-            name={`Cold read ${reading.label}`}
-            icon={<IconEye size="sm" />}
-            state="running"
-            startedAt={reading.startedAt}
-            endedAt={null}
-            onPress={() => focusTarget({ kind: 'coldRead' })}
-          />
-        )
-      }
+      ball={(shown?.needs.length ?? 0) > 0 ? 'you' : (line?.ball ?? 'idle')}
+      ballFace={false}
       marks={head.outdated === true ? [{ kind: 'outdated' }] : []}
       ticket={{ key: 'acme/shop#41' }}
       action={
@@ -194,10 +211,19 @@ export function PlanningScreen({
           error={moment === 'error' ? 'The engine did not answer in time.' : failure}
           planner={shown?.planner}
           declaredComplete={shown?.declaredComplete}
+          needs={shown?.needs}
+          onNeed={(id) => ({
+            onPermission: (choice) => {
+              onPermission(id, choice)
+              setAllowed((before) => new Set(before).add(id))
+            },
+          })}
           mentionables={MENTIONABLES}
           onRetry={onRetry}
           {...handlers}
           onAnswer={answer}
+          onWaitOnSomeone={waitOnSomeone}
+          onDismissFinding={dismissFinding}
           onDiscuss={discuss}
           onOpenProbe={openProbe}
         />
