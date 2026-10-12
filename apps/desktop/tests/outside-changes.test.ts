@@ -11,7 +11,17 @@
  * folders as the Workspace, and small Node scripts as the catalogue's commands.
  */
 
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { ChangedOutsideMark, PermissionAnswer, markIdentity } from '@hemera/core/domain'
@@ -51,6 +61,7 @@ import { builderAgents, builderOf, launched } from './builder-world.ts'
 import { SERVES, nodeLine, script } from './commands-engine.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { ALLOW, verdictsSaying } from './tools-world.ts'
+import { git } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -218,6 +229,35 @@ const comparedAfterEnd = (missionId: string) =>
         watches.some((watch) => end.endedAt !== null && watch.comparedAt >= end.endedAt),
     )
   })
+
+/**
+ * The user's index as if `path` had been checked out, the index written and the file rewritten at
+ * the same size all in one second, a minute ago: its entry keeps the old content under the file's
+ * present times, and the index's own time is that second, so Git reads the entry as racy and looks
+ * at the content. Whenever a compare copies the index, it is in a later second.
+ */
+const inOneSecond = (repository: string, path: string) => {
+  const target = join(repository, path)
+  const then = Math.floor(Date.now() / 1000) - 60
+  utimesSync(target, then, then)
+  const file = statSync(target, { bigint: true })
+  const index = git(repository, 'rev-parse', '--path-format=absolute', '--git-path', 'index')
+  const bytes = readFileSync(index)
+  if (bytes.readUInt32BE(4) !== 2) throw new Error('the index is not of version 2')
+  // A version 2 entry: 40 bytes of times and stat, the 20 bytes of its sha-1, 2 of flags, the path.
+  const at = bytes.indexOf(Buffer.from(`${path}\0`)) - 62
+  const second = 1_000_000_000n
+  const times = [
+    file.ctimeNs / second,
+    file.ctimeNs % second,
+    file.mtimeNs / second,
+    file.mtimeNs % second,
+  ]
+  for (const [slot, value] of times.entries()) bytes.writeUInt32BE(Number(value), at + slot * 4)
+  const body = bytes.subarray(0, bytes.length - 20)
+  writeFileSync(index, Buffer.concat([body, createHash('sha1').update(body).digest()]))
+  utimesSync(index, then, then)
+}
 
 const compare = (missionId: string) =>
   OutsideChanges.use((outside) => outside.compare(missionId, null))
@@ -565,6 +605,28 @@ describe('Races and restarts', () => {
       ),
     )
     expect(seen).toEqual(['api/mine.md'])
+  })
+
+  test('a file I rewrite at the same size in the second its Workspace was checked out is detected', async () => {
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { session } = yield* builderOf(mission.id)
+          const api = join(session.folder, 'api')
+          // "Acme api" and "mine too" are nine bytes each.
+          writeFileSync(join(api, 'README.md'), 'mine too\n')
+          inOneSecond(api, 'README.md')
+          // Git, on the user's own index, sees it changed.
+          expect(git(api, 'ls-files', '--modified')).toBe('README.md')
+          yield* compare(mission.id)
+          return yield* recorded(mission.id)
+        }),
+      ),
+    )
+    expect(seen).toEqual(['api/README.md'])
   })
 
   test('after a restart, a change made while Hemera was stopped is detected once, and one detected before is not reported again', async () => {
