@@ -28,17 +28,19 @@ questions above, in an order that never changes:
   that says what happens or what waits (the Planner's own line while it works, then the facts:
   "5 questions wait for your answer"); the progress line under it, the step under way and how far
   it is ("The Spec · 4 of 8 sections written"); the chips of what runs (the cold read, the
-  Probes). Nothing in the card leads elsewhere: what waits is right under it. The card is the
+  Probes, the Prototypers: the agents only). Nothing in the card leads elsewhere: what waits is right under it. The card is the
   design system's `StageCard` (`Blocks/Mission/Stage card`), the same on Ready and Building.
 - **For you: what waits.** One line per kind, the agents blocked first: the permissions, the
-  questions, the findings to settle. The questions are one list that grows, in the order they
+  questions, the findings to settle, a Prototyper's result to look at. The questions are one list that grows, in the order they
   were asked, newest last: no wave, no grouping and no count by wave. A line unfolds to one line per item; an item unfolds to the
-  whole of it (a permission to its need card, a finding to its paragraph and Dismiss). The
+  whole of it (a permission to its need card, a finding to its paragraph and Dismiss, a
+  Prototyper's result to what it built, its folder, Validate and Set aside with a note). The
   questions stand open, because answering them is the work of the page: one question whole, the
   others one line each. Nothing waits: "Nothing waits for you"; only Freeze left: "Only Freeze is
   left".
 - **The rest**, one quiet line each, folded: the questions answered (and how many the Planner
-  still takes in), what the cold read settled, the Probes that ended, the dependencies, the vision.
+  still takes in), what the cold read settled, the Probes that ended, the Prototypers judged or
+  failed with their verdict and the field to ask for a prototype, the dependencies, the vision.
 
 Why this one: the user sees at once how much waits and of which kind, decides the order, and
 nothing grows unless they open it. A cold read of seven paragraphs is one line until it is read.
@@ -67,7 +69,7 @@ The face follows what happens, by what matters first, and holds still in it:
 | A permission waits | `permission` |
 | A question or a finding waits | `question` |
 | The cold read reads | `reading` |
-| A Probe runs, nothing waits | `running` |
+| A Probe or a Prototyper runs, nothing waits | `running` |
 | Only Freeze is left, or frozen | `done` |
 | The Planner stopped, or the cold read failed | `error` |
 | The Planner gave no sign, or a question waits on someone | `blocked` |
@@ -104,6 +106,13 @@ user could not see what waits behind the first thing nor choose the order. The m
 - The view no longer carries waves: the page reads one list of questions, which the renderer
   flattens from the engine's waves (the engine keeps them).
 - A finding's line truncates its first sentence to one line; unfolded, the line wraps whole.
+
+- A Prototyper's result unjudged holds nothing (#222): it is For you's to look at and counted
+  there, but the face, the card's line and Freeze read as if it were not; the frozen Spec records
+  it as not judged. Its result is shown as the Planner reads it, without the line said to the
+  Planner, and its folder as a path to copy: the page opens no folder.
+- A prototype is asked for under the rest's Prototypes line, beside the vision: the two things
+  the user asks of the Planner at any time.
 
 ## Not settled here
 

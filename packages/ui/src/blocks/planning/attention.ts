@@ -7,7 +7,7 @@ import {
   planningSteps,
   tally,
 } from './planning-progress.ts'
-import type { Finding, PlanningData, PlanningNeed } from './planning-types.ts'
+import { type Finding, type PlanningData, type PlanningNeed, toLookAt } from './planning-types.ts'
 
 /**
  * What the Planning page tells at a glance, read from the facts alone: what happens now (the
@@ -20,7 +20,10 @@ export interface Attention {
   now: string
   /** Where Planning stands: the step under way and how far it is. */
   progress: { step: string; detail: string }
-  /** How many things wait for the user: needs, questions to answer, findings to settle. */
+  /**
+   * How many things wait for the user: needs, questions to answer, findings to settle, results of
+   * Prototypers to look at.
+   */
   waiting: number
   /** Whether nothing is left but Freeze. */
   ready: boolean
@@ -48,7 +51,8 @@ const coldReadReading = (data: PlanningData): boolean => {
 }
 
 const running = (data: PlanningData): boolean =>
-  data.probes.some((probe) => probe.state === 'running' || probe.state === 'preparing')
+  data.probes.some((probe) => probe.state === 'running' || probe.state === 'preparing') ||
+  data.prototypes.some((prototype) => prototype.state === 'running')
 
 /**
  * The face, by what matters first. While the Planner works, it is the Planner's: writing a
@@ -112,7 +116,11 @@ export function attentionOf(facts: AttentionFacts): Attention {
       ? `${askers(needs)} ${needs.length === 1 ? 'waits' : 'wait'} for your ${permissionsOnly(needs) ? 'permission' : 'answer'}`
       : line.text,
     progress: progressOf(planningSteps(facts)),
-    waiting: needs.length + open.length + findingsToSettle(data).length,
+    waiting:
+      needs.length +
+      open.length +
+      findingsToSettle(data).length +
+      data.prototypes.filter(toLookAt).length,
     ready,
   }
 }

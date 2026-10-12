@@ -4,12 +4,13 @@
  * gestures.
  */
 
-import { AgentWorking } from '@hemera/core/domain'
+import { AgentWorking, PROTOTYPE_RESULT_NOTE } from '@hemera/core/domain'
 import type {
   ColdReadPass,
   Discussion,
   FreezeReadiness,
   HelperChip,
+  HelperDetail,
   Mission,
   Now,
   PlanningInput,
@@ -32,6 +33,7 @@ import {
   planningNeedOf,
   plannerOf,
   probeOf,
+  prototypeOf,
   type PlanningLink,
   type PlanningRead,
   type PlanningView,
@@ -140,6 +142,8 @@ const read = (more: Partial<PlanningRead> = {}): PlanningRead => ({
   visions: [],
   discussions: [],
   probes: [],
+  prototypes: [],
+  prototypeResults: new Map(),
   passes: [],
   freshness: { readVersion: null, specVersion: 4, changes: [] },
   dependencies: { dependsOn: [], dependedOnBy: [] },
@@ -930,6 +934,86 @@ describe('The Prototyper on the Planning page (#222)', () => {
     played.listeners.prototypes([PROTOTYPER])
     await flush()
     expect(played.named('helper')).toHaveLength(2)
+  })
+})
+
+const PROTOTYPE_RESULT: HelperDetail = {
+  ...PROTOTYPER,
+  state: 'done',
+  step: null,
+  endedAt: AT,
+  brief: 'Does a preview beside the note read well?',
+  place: 'prototype',
+  folder: '/data/missions/ACME-12/prototypes/1',
+  writes: true,
+  result: `Tried: a preview pane.\n${PROTOTYPE_RESULT_NOTE}`,
+  failure: null,
+  verdict: 'set-aside',
+  verdictNote: 'Images first.',
+  judgedAt: AT,
+  thread: null,
+}
+
+describe('Showing and judging the Prototyper on the Planning page (#234)', () => {
+  test('a Prototyper running is drawn from its chip: its step, its question once read', () => {
+    expect(prototypeOf(PROTOTYPER, undefined)).toEqual({
+      id: 'h1',
+      label: 'H1',
+      question: null,
+      state: 'running',
+      stuck: false,
+      step: 'Write list.html',
+      startedAt: Date.parse(AT),
+      endedAt: null,
+      result: null,
+      folder: null,
+      failure: null,
+      verdict: null,
+      verdictNote: null,
+    })
+  })
+
+  test('a Prototyper’s result to look at holds what it built, where, and the verdict given, not what is said to the Planner', () => {
+    const done: HelperChip = {
+      ...PROTOTYPER,
+      state: 'done',
+      step: null,
+      endedAt: AT,
+      verdict: 'set-aside',
+    }
+    expect(prototypeOf(done, PROTOTYPE_RESULT)).toMatchObject({
+      question: 'Does a preview beside the note read well?',
+      state: 'done',
+      step: undefined,
+      endedAt: Date.parse(AT),
+      result: 'Tried: a preview pane.',
+      folder: '/data/missions/ACME-12/prototypes/1',
+      verdict: 'set-aside',
+      verdictNote: 'Images first.',
+    })
+  })
+
+  test('every Prototyper heard is read once, and again when its state or its verdict moves', async () => {
+    const played = world()
+    const done: HelperChip = { ...PROTOTYPER, state: 'done', step: null, endedAt: AT }
+    played.listeners.prototypes([done])
+    await flush()
+    played.listeners.prototypes([done])
+    await flush()
+    expect(played.named('helper')).toHaveLength(1)
+    played.listeners.prototypes([{ ...done, verdict: 'validated' }])
+    await flush()
+    expect(played.named('helper')).toHaveLength(2)
+  })
+
+  test('the page draws the mission’s Prototypers with their results', async () => {
+    const played = world()
+    played.listeners.spec(spec())
+    played.listeners.prototypes([{ ...PROTOTYPER, state: 'done', step: null, endedAt: AT }])
+    await flush()
+    expect(played.last().data?.prototypes.map((one) => [one.label, one.result])).toEqual([
+      ['H1', 'Tried: two columns.'],
+    ])
   })
 })
 

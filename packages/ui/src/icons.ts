@@ -85,6 +85,7 @@ import {
   IconScript as TablerScript,
   IconServer as TablerServer,
   IconTestPipe as TablerTestPipe,
+  IconFlask as TablerFlask,
   IconVariable as TablerVariable,
   IconWorld as TablerWorld,
   IconBolt as TablerBolt,
@@ -272,6 +273,7 @@ export const IconLock = catalogued(TablerLock, TablerLock, 'IconLock')
 export const IconScript = catalogued(TablerScript, TablerScript, 'IconScript')
 export const IconServer = catalogued(TablerServer, TablerServer, 'IconServer')
 export const IconTestPipe = catalogued(TablerTestPipe, TablerTestPipe, 'IconTestPipe')
+export const IconFlask = catalogued(TablerFlask, TablerFlask, 'IconFlask')
 export const IconVariable = catalogued(TablerVariable, TablerVariable, 'IconVariable')
 export const IconWorld = catalogued(TablerWorld, TablerWorld, 'IconWorld')
 export const IconBolt = catalogued(TablerBolt, TablerBolt, 'IconBolt')

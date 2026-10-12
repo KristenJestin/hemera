@@ -187,6 +187,41 @@ export interface ProbeDetail extends Probe {
   failure: string | null
 }
 
+/** What the user says of a Prototyper's result: taken as it is, or set aside. */
+export type PrototypeVerdict = 'validated' | 'set-aside'
+
+/**
+ * A Prototyper the Planner launched (#222): it tries one approach in a throwaway folder of the
+ * mission and hands back what works and what does not, for the user to judge before the Freeze.
+ */
+export interface Prototype {
+  id: string
+  /** `H2`. */
+  label: string
+  /** The question it answers, as the Planner briefed it; null until read. */
+  question: string | null
+  state: 'running' | 'done' | 'failed'
+  stuck: boolean
+  /** In milliseconds since the epoch. */
+  startedAt: number
+  endedAt: number | null
+  /** What it is doing, in words, while it runs. */
+  step?: string | undefined
+  /** What it handed back, in words, once done and read: what it tried, what works, what does not. */
+  result: string | null
+  /** Its throwaway folder, where what it built is. */
+  folder: string | null
+  /** Why it failed, in words. */
+  failure: string | null
+  verdict: PrototypeVerdict | null
+  /** What the user said with their verdict. */
+  verdictNote: string | null
+}
+
+/** A Prototyper's result that waits for the user's verdict. */
+export const toLookAt = (prototype: Prototype): boolean =>
+  prototype.state === 'done' && prototype.verdict === null
+
 export type Severity = 'blocking' | 'warning' | 'suggestion'
 
 export type FindingFate = 'open' | 'asked' | 'fixed' | 'dismissed'
@@ -296,6 +331,8 @@ export interface PlanningData {
   questions: readonly Question[]
   discussions: readonly Discussion[]
   probes: readonly Probe[]
+  /** The mission's Prototypers, the first launched first. */
+  prototypes: readonly Prototype[]
   passes: readonly ColdReadPass[]
   freshness: Freshness
   dependencies: readonly Dependency[]
@@ -320,6 +357,10 @@ export interface PlanningHandlers {
   onDismissProposed: (proposalId: string) => Promise<void>
   onDiscuss: (item: DiscussionItem) => void
   onOpenProbe: (probeId: string) => void
+  /** The user's verdict on a Prototyper's result, with what they say of it. */
+  onJudgePrototype: (id: string, verdict: PrototypeVerdict, note: string | null) => Promise<void>
+  /** The user asks the Planner for a prototype: what to try. */
+  onAskPrototype: (question: string) => Promise<void>
   onDismissFinding: (findingId: string) => Promise<void>
   onRunColdRead: () => Promise<void>
   onDecideDependency: (id: string, accept: boolean) => Promise<void>

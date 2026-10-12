@@ -1,12 +1,19 @@
 import type { ReactNode } from 'react'
 
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
-import { IconCheck, IconEye, IconLink, IconMessages, IconTestPipe } from '../../icons.ts'
+import { IconCheck, IconEye, IconFlask, IconLink, IconMessages, IconTestPipe } from '../../icons.ts'
 import { FreshnessLine } from './cold-read.tsx'
 import { FindingLine } from './for-you.tsx'
 import { DependenciesCard, VisionCard } from './planning-cards.tsx'
-import type { PlanningData, PlanningHandlers, Question } from './planning-types.ts'
+import {
+  type PlanningData,
+  type PlanningHandlers,
+  type Prototype,
+  type Question,
+  toLookAt,
+} from './planning-types.ts'
 import { ProbeChip } from './probes.tsx'
+import { AskPrototype, PrototypeLine } from './prototypes.tsx'
 import { QuestionCard } from './question-card.tsx'
 import { Fold } from './rail-fold.tsx'
 import { SendButton } from './sending.tsx'
@@ -21,11 +28,26 @@ export interface EverythingElseProps {
 const setAside = ({ state }: Question): boolean =>
   state === 'withdrawn' || state === 'replaced' || state === 'moot'
 
+/** The Prototypers that ended, counted by what became of them: "2 validated · 1 failed". */
+function prototypesDetail(ended: readonly Prototype[]): string {
+  if (ended.length === 0) return 'Ask for one'
+  const count = (keep: (prototype: Prototype) => boolean, words: string): string[] => {
+    const many = ended.filter(keep).length
+    return many > 0 ? [`${String(many)} ${words}`] : []
+  }
+  return [
+    ...count((one) => one.verdict === 'validated', 'validated'),
+    ...count((one) => one.verdict === 'set-aside', 'set aside'),
+    ...count((one) => one.state === 'failed', 'failed'),
+  ].join(' · ')
+}
+
 /**
  * What no longer waits, one quiet line each, every one folded: the questions answered (and how
  * many the Planner still takes in), the cold read's last pass — what it settled, or why it
- * stopped, and another pass to run —, the Probes that ended, the dependencies, and the vision,
- * which the user may give at any time. Its lines start where For you's do, in its frame: the
+ * stopped, and another pass to run —, the Probes that ended, the Prototypers judged or failed —
+ * with a prototype to ask for —, the dependencies, and the vision, which the user may give at any
+ * time. Its lines start where For you's do, in its frame: the
  * frame's room in from the rail.
  */
 export function EverythingElse({ data, mentionables, handlers }: EverythingElseProps): ReactNode {
@@ -37,6 +59,9 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
   const settled = done?.findings.filter((finding) => finding.fate !== 'open') ?? []
   const ended = data.probes.filter(
     (probe) => probe.state !== 'running' && probe.state !== 'preparing',
+  )
+  const judged = data.prototypes.filter(
+    (prototype) => prototype.state !== 'running' && !toLookAt(prototype),
   )
   const dependencies = data.dependencies.filter((dependency) => dependency.state !== 'rejected')
   const proposed = dependencies.filter((dependency) => dependency.state === 'proposed')
@@ -121,6 +146,24 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
             {ended.map((probe) => (
               <ProbeChip key={probe.id} probe={probe} onOpen={handlers.onOpenProbe} />
             ))}
+          </div>
+        </Fold>
+      )}
+      {(judged.length > 0 || !data.frozen) && (
+        <Fold glyph={<IconFlask size="sm" />} title="Prototypes" detail={prototypesDetail(judged)}>
+          <div className="flex flex-col pb-2">
+            {judged.length > 0 && (
+              <ul aria-label="Prototypes" className="flex flex-col">
+                {judged.map((prototype) => (
+                  <PrototypeLine key={prototype.id} prototype={prototype} />
+                ))}
+              </ul>
+            )}
+            {!data.frozen && (
+              <div className="px-4 pt-1 pl-10">
+                <AskPrototype mentionables={mentionables} onAsk={handlers.onAskPrototype} />
+              </div>
+            )}
           </div>
         </Fold>
       )}
