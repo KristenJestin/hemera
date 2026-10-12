@@ -49,12 +49,20 @@ function comesToRest(
   const started = performance.now()
   let box = ''
   let frames = 0
-  const look = (): void => {
+  /** Where the pointer would land in the middle of the control, and the control's box there. */
+  const aim = () => {
     const rect = element.getBoundingClientRect()
-    const middle = [rect.left + rect.width / 2, rect.top + rect.height / 2] as const
-    if (middle[1] < 0 || middle[1] > innerHeight) element.scrollIntoView({ block: 'nearest' })
-    const hit = document.elementFromPoint(...middle)
-    const reached = hit !== null && element.contains(hit)
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return { rect, hit, reached: hit !== null && element.contains(hit) }
+  }
+  const look = (): void => {
+    let { rect, hit, reached } = aim()
+    if (!reached) {
+      // What a click does first: bring the control to the middle of what scrolls. A control under
+      // the bottom edge of a thread, behind its composer, is reached only from there.
+      element.scrollIntoView({ block: 'center', inline: 'center' })
+      ;({ rect, hit, reached } = aim())
+    }
     const here = `${rect.left},${rect.top} ${rect.width}x${rect.height}`
     frames = reached && here === box ? frames + 1 : 0
     box = here
@@ -74,6 +82,8 @@ export function holdClicksUntilAtRest(): void {
   browser.overwriteCommand(
     'click',
     async function (this: WebdriverIO.Element, click, options) {
+      // The wait for the element to exist that a click makes itself, which happens after this one.
+      await this.waitForExist()
       const rest = await browser.executeAsync(comesToRest, this, REST_WITHIN)
       if (!rest.rested || rest.waited >= WORTH_SAYING) {
         const said = rest.rested ? 'came to rest' : 'did not come to rest'
