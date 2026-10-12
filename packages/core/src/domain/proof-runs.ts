@@ -76,7 +76,7 @@ export interface ProofRunClass {
     readonly file: string | null
     readonly assertion: boolean
   }>
-  /** The lines of the whole output a runner marks as failing (`×`, `FAIL`, `FAILED`, `--- FAIL`). */
+  /** The lines of the whole output that start with a known runner's failure mark, uncoloured. */
   readonly failingLines: ReadonlyArray<string>
 }
 
@@ -102,13 +102,23 @@ const BEFORE_TEST =
  */
 const ASSERTION =
   /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |\bassertion\b.*\bfailed\b|\bpanicked at\b/m
-/** A line a test runner prints for a test that failed. */
-const FAILING_LINE = /[×✕✗✖●]|\bFAIL(ED)?\b|^\s*not ok \d+/
+/**
+ * A line a known test runner starts with for a test that failed, never a mark in the middle of a
+ * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading; vitest and jest's
+ * `FAIL <file>`; TAP's `not ok n`; mocha's `1) name`; pytest's `FAILED file::test`; Go's
+ * `--- FAIL: TestX`; Rust's `test x ... FAILED`.
+ */
+const FAILING_LINE =
+  /^\s*[×✕✖●]\s|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*not ok \d+|^\s*\d+\) |^FAILED \S+::|^\s*--- FAIL: |^test \S+ \.\.\. FAILED\s*$/
 /** At most this many failing lines are kept. */
 const FAILING_LINES = 500
 /** Signs of a test file the runner did not find. */
 const NOT_FOUND =
   /Could not find '|No test files? found|no tests? (were )?found|ENOENT[^\n]*\.test\./i
+
+/** A line without its ANSI colours and cursor moves. */
+// oxlint-disable-next-line no-control-regex -- the escape character is what is matched
+const uncoloured = (line: string): string => line.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
 
 const unescapeXml = (text: string): string =>
   text
@@ -201,6 +211,7 @@ export function classifyProofRun(run: {
 }): ProofRunClass {
   const failingLines = run.output
     .split(/\r?\n/)
+    .map(uncoloured)
     .filter((line) => FAILING_LINE.test(line))
     .slice(0, FAILING_LINES)
   const none = { failingTest: null, assertion: null, failingFile: null, failures: [], failingLines }
@@ -312,11 +323,19 @@ export const validRed = (
   return named(failing, testNames) || keyLineMatched === true
 }
 
-/** The name a test is declared with, as `test('…'` or `it("…"` declares it. */
-const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])((?:(?!\1).)+)\1/g
+/**
+ * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`,
+ * a Go `func TestX(t *testing.T)`, a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
+ */
+const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
 /** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
 const EACH_NAME =
-  /\b(?:test|it)(?:\.\w+)*\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*\(\s*(['"`])((?:(?!\1).)+)\1/g
+  /\b(?:test|it)(?:\.\w+)*\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
+
+const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
+const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
+const RUST_NAME =
+  /#\[(?:\w+::)*test\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 
 /**
  * The tests a proof adds: every test its new file declares, or those the lines its patch adds
@@ -335,9 +354,10 @@ export const addedTestNames = (test: {
           .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
           .map((line) => line.slice(1))
           .join('\n')
-  return [...added.matchAll(TEST_NAME), ...added.matchAll(EACH_NAME)]
-    .toSorted((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map((found) => found[2] ?? '')
+  return [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME]
+    .flatMap((pattern) => Array.from(added.matchAll(pattern)))
+    .toSorted((a, b) => a.index - b.index)
+    .map((found) => found.groups?.['name'] ?? '')
     .filter((name) => name !== '')
 }
 
