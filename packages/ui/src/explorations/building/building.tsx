@@ -200,6 +200,8 @@ export function BuildingCard({
 /**
  * What the catalogue offers beyond the mission's services, behind one quiet action: a picker the
  * search narrows, each service with its command. Choosing one starts it for this mission only.
+ * It hangs under its action, as wide as the fold and against its edge, and turns upward only when
+ * there is no room below.
  */
 function CataloguePicker({
   catalogue,
@@ -244,6 +246,8 @@ function CataloguePicker({
         setActive(0)
       }}
       align="start"
+      fit="row"
+      className="flex w-full"
       label="Start a service from the catalogue"
       initialFocus={search}
       trigger={
@@ -253,7 +257,7 @@ function CataloguePicker({
         </Button>
       }
     >
-      <div className="flex w-picker flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-2">
         <label className="flex h-control-md min-w-0 items-center gap-2 rounded-md border border-input bg-input-fill px-2.5 focus-ring">
           <IconSearch size="sm" aria-hidden="true" className="text-muted-foreground" />
           <input
@@ -377,7 +381,7 @@ function Services({
             </li>
           ))}
         </ul>
-        <div className="flex px-2 pt-1">
+        <div className="flex pt-1 pr-4 pl-2">
           <CataloguePicker catalogue={moment.catalogue} onService={onService} />
         </div>
       </div>

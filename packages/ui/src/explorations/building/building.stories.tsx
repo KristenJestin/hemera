@@ -193,7 +193,10 @@ export const Services: Story = {
   },
 }
 
-/** The catalogue's picker open on twenty services, the search narrowing it as one types. */
+/**
+ * The catalogue's picker open on twenty services, the search narrowing it as one types: under its
+ * action when there is room, else above it, always against the fold's edge and as wide as it.
+ */
 export const CataloguePicker: Story = {
   args: { moment: 'services' },
   play: async ({ canvasElement, args }) => {
@@ -212,13 +215,22 @@ export const CataloguePicker: Story = {
     await expect(within(list).getAllByRole('option')).toHaveLength(4)
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onService).toHaveBeenCalledWith('minio', 'start')
-    await userEvent.click(
-      canvas.getByRole('button', { name: 'Start a service from the catalogue…' }),
-    )
+    const action = canvas.getByRole('button', { name: 'Start a service from the catalogue…' })
+    await userEvent.click(action)
     await userEvent.type(
       await waitFor(() => body.getByRole('combobox', { name: 'Search the catalogue' })),
       'mail',
     )
+    // It hangs against its action's edge, as wide as the fold: never shifted onto the spine.
+    const panel = body.getByRole('dialog', { name: 'Start a service from the catalogue' })
+    const fold = within(canvasElement)
+      .getByRole('list', { name: 'Services' })
+      .getBoundingClientRect()
+    await waitFor(() => {
+      const box = panel.getBoundingClientRect()
+      expect(Math.abs(box.left - action.getBoundingClientRect().left)).toBeLessThanOrEqual(1)
+      expect(box.right).toBeLessThanOrEqual(fold.right + 1)
+    })
   },
 }
 
