@@ -653,10 +653,10 @@ describe('Every decision is told, with its policy, never with a secret', () => {
       verdict: 'deny',
       by: 'rules',
       reasons: ['no agent of a mission may run git push'],
-      policyVersion: 1,
+      policyVersion: 2,
       level: 'normal',
     })
-    expect(readme).toMatchObject({ tool: 'fs_read', verdict: 'allow', policyVersion: 1 })
+    expect(readme).toMatchObject({ tool: 'fs_read', verdict: 'allow', policyVersion: 2 })
   })
 
   test('one line of the diagnostic log per decision, masked', async () => {
@@ -675,7 +675,7 @@ describe('Every decision is told, with its policy, never with a secret', () => {
     )
     expect(told).toHaveLength(1)
     expect(told[0]).toContain('deny by rules')
-    expect(told[0]).toContain('[policy 1, normal]')
+    expect(told[0]).toContain('[policy 2, normal]')
     expect(told[0]).not.toContain('hunter2-not-real')
   })
 })

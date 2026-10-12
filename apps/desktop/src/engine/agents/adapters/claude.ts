@@ -11,7 +11,7 @@
  * Bare mode goes through `session/new` `_meta.claudeCode.options`: no built-in tool, no settings
  * source (so it reads neither `CLAUDE.md` nor `AGENTS.md` on its own), only the MCP servers
  * handed in, and Hemera's system prompt, in blocks around the cache boundary when its text holds one. `CLAUDE_CONFIG_DIR` is left where the user has it: the
- * login lives there.
+ * login lives there. Its judge session is the same with no MCP server at all, on Haiku.
  */
 
 import { join } from 'node:path'
@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { Qualified } from '@hemera/ipc'
 
 import type { AgentAdapter } from '../adapter.ts'
-import { hemeraServer } from '../bare.ts'
+import { type ClaudeCodeMeta, firstOffered, hemeraServer } from '../bare.ts'
 import { promptBlocks } from '../prompt-blocks.ts'
 
 /** How long the agent waits on one of Hemera's tools, which may wait on the user: ten minutes. */
@@ -27,6 +27,30 @@ export const TOOL_WAIT_MS = 600_000
 
 /** The two logins the adapter announces when the machine still has to sign in. */
 const LOGINS: ReadonlySet<string> = new Set(['claude-ai-login', 'console-login'])
+
+/** The options of a session: no built-in tool, no settings source, only the servers handed in. */
+const metaOf = (
+  prompt: string | ReadonlyArray<string>,
+  allowedTools: ReadonlyArray<string>,
+): ClaudeCodeMeta => ({
+  claudeCode: {
+    options: {
+      tools: [],
+      allowedTools,
+      settingSources: [],
+      strictMcpConfig: true,
+      systemPrompt: { type: 'custom', prompt, snapshot: true },
+      env: {
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+        // A call waiting on the user sends nothing: both the total and the idle limit must
+        // outlast the wait, or Claude Code aborts the call first.
+        MCP_TOOL_TIMEOUT: String(TOOL_WAIT_MS),
+        CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(TOOL_WAIT_MS),
+      },
+    },
+  },
+})
 
 export const claude: AgentAdapter = {
   id: 'claude',
@@ -55,30 +79,16 @@ export const claude: AgentAdapter = {
   qualification: () => Qualified.make({}),
   bareOptions: (input) => ({
     mcpServers: [hemeraServer(input.hemera)],
-    meta: {
-      claudeCode: {
-        options: {
-          tools: [],
-          allowedTools: input.allowedTools ?? [],
-          settingSources: [],
-          strictMcpConfig: true,
-          systemPrompt: {
-            type: 'custom',
-            prompt: promptBlocks(input.systemPrompt),
-            snapshot: true,
-          },
-          env: {
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-            ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
-            // A call waiting on the user sends nothing: both the total and the idle limit must
-            // outlast the wait, or Claude Code aborts the call first.
-            MCP_TOOL_TIMEOUT: String(TOOL_WAIT_MS),
-            CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(TOOL_WAIT_MS),
-          },
-        },
-      },
-    },
+    meta: metaOf(promptBlocks(input.systemPrompt), input.allowedTools ?? []),
     env: {},
     systemPromptAs: 'session-meta',
   }),
+  // No MCP server and no tool: its only way out is its answer.
+  judgeOptions: (input) => ({
+    mcpServers: [],
+    meta: metaOf(input.instructions, []),
+    env: {},
+    systemPromptAs: 'session-meta',
+  }),
+  judgeModel: (offered) => firstOffered(offered, [/haiku/i]),
 }

@@ -6,10 +6,11 @@
  *   the key over, and the engine holds it in memory only, registered as a secret. Jev is used only
  *   once a key is held and the user consented. A key Jev rejects (401, 403) is not sent again.
  * - What Jev is told of the user's intent (`HumanIntent`): only the user's own words, bounded.
- * - The judge (`jevJudgeLayer`): the call as Hemera will run it, masked; the verdict from the
- *   scores at the Normal level; a verdict reused for an identical call within the same turn; a
- *   verdict judged again when the user said something new before the call runs; and every
- *   failure `unavailable`, which asks.
+ * - The judge (`jevJudgeLayer`): Jev when it is ready, otherwise the session's own agent through
+ *   its judge session (`agent-judge.ts`, #197); the call as Hemera will run it, masked; the
+ *   verdict from the scores at the Normal level; a verdict reused for an identical call within
+ *   the same turn; a verdict judged again when the user said something new before the call runs;
+ *   and every failure `unavailable`, which asks.
  * - Who judges (`whoJudgesFor`) and the live decisions (`decisionChanges`), for the settings.
  */
 
@@ -40,6 +41,7 @@ import { Database, type DatabaseError, refusedWhile } from '../storage/database.
 import { answers, appPreferences, needs, questions } from '../storage/schema.ts'
 import { shownPath } from '../tools/paths.ts'
 import type { CallSession, JudgedCall } from '../tools/ports.ts'
+import { AgentJudges, type AgentJudgeFailure } from './agent-judge.ts'
 import { type JevResult, type JevTransport, askJev } from './jev.ts'
 import { Judge, type JudgeAnswer, SessionTurns } from './ports.ts'
 
@@ -177,13 +179,13 @@ export const hemeraAutoLayer = (log: Log) =>
     }),
   )
 
-/** Who judges a call of this agent in this mode: neither changes it in this version. */
+/** Who judges a call of this agent: Jev, or the agent's own judge. Its mode changes nothing. */
 export const whoJudgesFor = (
-  _agent: AgentProvider,
+  agent: AgentProvider,
   _mode: string | null,
 ): Effect.Effect<WhoJudges, never, HemeraAuto> =>
   HemeraAuto.use((auto) => auto.readiness).pipe(
-    Effect.map((readiness) => whoJudges(readiness.ready)),
+    Effect.map((readiness) => whoJudges(readiness.ready, agent)),
   )
 
 // ---------------------------------------------------------------------------------------------
@@ -367,12 +369,30 @@ const ROUNDS = 3
 
 type Evaluated = Extract<JevResult, { readonly kind: 'evaluated' }>
 
+/** A judge's rating of a call: who rated it, on which model, its scores and its round trip. */
+interface Rated {
+  readonly judge: string
+  readonly model: string
+  readonly scores: Evaluated['scores']
+  readonly ms: number
+  /** `jev` for Jev, `agent` for the agent's own judge. */
+  readonly by: 'jev' | 'agent'
+}
+
 const FAILURES: Readonly<Record<Exclude<JevResult, Evaluated>['failure'], string>> = {
   input: 'the call could not be sent to Jev whole',
   response: 'Jev’s answer could not be read',
   network: 'Jev could not be reached',
   timeout: 'Jev did not answer within 10 seconds',
   http: 'Jev answered HTTP',
+}
+
+const AGENT_FAILURES: Readonly<Record<AgentJudgeFailure, (judge: string) => string>> = {
+  input: (judge) => `the call could not be sent to ${judge}’s judge whole`,
+  start: (judge) => `${judge}’s judge could not be started`,
+  timeout: (judge) => `${judge}’s judge did not answer in time`,
+  response: (judge) => `${judge}’s judge answered something that does not read`,
+  gone: (judge) => `${judge}’s judge stopped before it answered`,
 }
 
 const NOT_READY = {
@@ -382,38 +402,116 @@ const NOT_READY = {
   refused: 'Jev refused the saved key',
 } as const
 
-const rated = (scores: Evaluated['scores']): string =>
-  `Jev rates it risk ${String(scores.risk)}, approval ${String(scores.approval)}, asked by the user ${String(scores.userRequested)}`
+const ratedSaid = (judge: string, scores: Evaluated['scores']): string =>
+  `${judge} rates it risk ${String(scores.risk)}, approval ${String(scores.approval)}, asked by the user ${String(scores.userRequested)}`
 
-/** Jev as the judge of step 5: allows or asks, never refuses; any failure is `unavailable`. */
+/**
+ * Step 5 of the order: Jev when it is ready, otherwise the session's own agent through its judge
+ * (#197). Either allows or asks, never refuses; any failure is `unavailable`, which asks. A rating
+ * is reused for an identical call within the same turn, and the call is judged again when the user
+ * said something new before it runs.
+ */
 export const jevJudgeLayer = (settings: JudgeSettings) =>
   Layer.effect(
     Judge,
     Effect.gen(function* () {
       const services = yield* Effect.context<
-        HemeraAuto | HumanIntent | SessionTurns | JevTransport | Secrets
+        HemeraAuto | HumanIntent | SessionTurns | JevTransport | Secrets | AgentJudges
       >()
-      /** The verdicts of each session's current turn, by call. */
-      const turns = new Map<string, { turn: number; verdicts: Map<string, Evaluated> }>()
+      /** The ratings of each session's current turn, by call. */
+      const turns = new Map<string, { turn: number; verdicts: Map<string, Rated> }>()
       const verdictsOf = (sessionId: string, turn: number) => {
         const kept = turns.get(sessionId)
         turns.delete(sessionId)
-        const now = kept?.turn === turn ? kept : { turn, verdicts: new Map<string, Evaluated>() }
+        const now = kept?.turn === turn ? kept : { turn, verdicts: new Map<string, Rated>() }
         turns.set(sessionId, now)
         if (turns.size > SESSIONS_KEPT) turns.delete(turns.keys().next().value ?? '')
         return now.verdicts
       }
 
-      const judge = (call: JudgedCall): Effect.Effect<JudgeAnswer> =>
+      /** Jev's rating of the action, or why it gave none. */
+      const askedJev = (
+        key: string,
+        action: Schema.JsonObject,
+        told: ReadonlyArray<string>,
+      ): Effect.Effect<Rated | JudgeAnswer, never, HemeraAuto | JevTransport | Secrets> =>
         Effect.gen(function* () {
-          const readiness = yield* HemeraAuto.use((auto) => auto.readiness)
-          if (!readiness.ready) {
+          const known = yield* Secrets.useSync((secrets) => secrets.values())
+          const result = yield* askJev({ action, humanContext: told }, key, known)
+          if (result.kind === 'evaluated') {
+            return {
+              judge: 'Jev',
+              model: result.model,
+              scores: result.scores,
+              ms: result.ms,
+              by: 'jev',
+            } satisfies Rated
+          }
+          const rejected =
+            result.failure === 'http' && (result.status === 401 || result.status === 403)
+          const failure =
+            result.failure === 'http' ? `http ${String(result.status)}` : result.failure
+          if (rejected) {
+            yield* HemeraAuto.use((auto) => auto.refuse(key))
             return {
               verdict: 'unavailable',
-              reason: NOT_READY[readiness.why],
+              reason: NOT_READY.refused,
+              failure,
+              roundTripMs: result.ms,
               settingsSection: HEMERA_AUTO_SECTION,
             } satisfies JudgeAnswer
           }
+          return {
+            verdict: 'unavailable',
+            reason:
+              result.failure === 'http'
+                ? `${FAILURES.http} ${String(result.status)}`
+                : FAILURES[result.failure],
+            failure,
+            roundTripMs: result.ms,
+          } satisfies JudgeAnswer
+        })
+
+      /** The agent's own rating, or why it gave none; without one, the call asks as before. */
+      const askedAgent = (
+        call: JudgedCall,
+        why: keyof typeof NOT_READY,
+        action: Schema.JsonObject,
+        told: ReadonlyArray<string>,
+      ): Effect.Effect<Rated | JudgeAnswer, never, AgentJudges | Secrets> =>
+        Effect.gen(function* () {
+          const known = yield* Secrets.useSync((secrets) => secrets.values())
+          const rating = yield* AgentJudges.use((judges) =>
+            judges.rate(call.session, { action, humanContext: told }, known),
+          )
+          if (rating.kind === 'none') {
+            return {
+              verdict: 'unavailable',
+              reason: NOT_READY[why],
+              settingsSection: HEMERA_AUTO_SECTION,
+            } satisfies JudgeAnswer
+          }
+          if (rating.kind === 'unavailable') {
+            return {
+              verdict: 'unavailable',
+              reason: AGENT_FAILURES[rating.failure](rating.judge),
+              failure: `agent ${rating.failure}`,
+              roundTripMs: rating.ms,
+              settingsSection: HEMERA_AUTO_SECTION,
+            } satisfies JudgeAnswer
+          }
+          return {
+            judge: rating.judge,
+            model: rating.model,
+            scores: rating.scores,
+            ms: rating.ms,
+            by: 'agent',
+          } satisfies Rated
+        })
+
+      const judge = (call: JudgedCall): Effect.Effect<JudgeAnswer> =>
+        Effect.gen(function* () {
+          const readiness = yield* HemeraAuto.use((auto) => auto.readiness)
           const action = jevAction(call, settings.home, settings.platform)
           const sessionId = call.session.sessionId
           const intent = HumanIntent.use((human) => human.of(call.session))
@@ -422,54 +520,37 @@ export const jevJudgeLayer = (settings: JudgeSettings) =>
             const told = boundedHumanContext(seen.items)
             const turn = yield* SessionTurns.use((one) => one.current(sessionId))
             const verdicts = verdictsOf(sessionId, turn)
-            const identity = JSON.stringify([PERMISSION_POLICY.policyVersion, seen.version, action])
+            // Jev's and the agent's ratings are kept apart: a key saved meanwhile is asked anew.
+            const identity = JSON.stringify([
+              PERMISSION_POLICY.policyVersion,
+              readiness.ready ? 'jev' : 'agent',
+              seen.version,
+              action,
+            ])
             const kept = verdicts.get(identity)
-            let evaluated: Evaluated
+            let rated: Rated
             if (kept === undefined) {
-              const known = yield* Secrets.useSync((secrets) => secrets.values())
-              const result = yield* askJev({ action, humanContext: told }, readiness.key, known)
-              if (result.kind === 'unavailable') {
-                const rejected =
-                  result.failure === 'http' && (result.status === 401 || result.status === 403)
-                const failure =
-                  result.failure === 'http' ? `http ${String(result.status)}` : result.failure
-                if (rejected) {
-                  yield* HemeraAuto.use((auto) => auto.refuse(readiness.key))
-                  return {
-                    verdict: 'unavailable',
-                    reason: NOT_READY.refused,
-                    failure,
-                    roundTripMs: result.ms,
-                    settingsSection: HEMERA_AUTO_SECTION,
-                  } satisfies JudgeAnswer
-                }
-                return {
-                  verdict: 'unavailable',
-                  reason:
-                    result.failure === 'http'
-                      ? `${FAILURES.http} ${String(result.status)}`
-                      : FAILURES[result.failure],
-                  failure,
-                  roundTripMs: result.ms,
-                } satisfies JudgeAnswer
-              }
-              evaluated = result
-              verdicts.set(identity, result)
+              const asked = readiness.ready
+                ? yield* askedJev(readiness.key, action, told)
+                : yield* askedAgent(call, readiness.why, action, told)
+              if ('verdict' in asked) return asked
+              rated = asked
+              verdicts.set(identity, asked)
             } else {
-              evaluated = kept
+              rated = kept
             }
             // The verdict holds only for what the user had said: something new, and it is judged
             // again before the call runs.
             if ((yield* intent).version !== seen.version) continue
             return {
-              verdict: verdictFromScores(evaluated.scores, told.length > 0),
-              reason: rated(evaluated.scores),
+              verdict: verdictFromScores(rated.scores, told.length > 0),
+              reason: ratedSaid(rated.judge, rated.scores),
               judged: {
-                judge: 'Jev',
-                model: evaluated.model,
-                scores: evaluated.scores,
-                settled: kept === undefined ? 'jev' : 'reused',
-                roundTripMs: kept === undefined ? evaluated.ms : null,
+                judge: rated.judge,
+                model: rated.model,
+                scores: rated.scores,
+                settled: kept === undefined ? rated.by : 'reused',
+                roundTripMs: kept === undefined ? rated.ms : null,
               },
             } satisfies JudgeAnswer
           }

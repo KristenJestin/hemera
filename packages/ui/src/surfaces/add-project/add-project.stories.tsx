@@ -46,7 +46,7 @@ function AddProjectFixture({
   const [identity, setIdentity] = useState<Identity>({})
   const [byHand, setByHand] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
-  const [settingUp, setSettingUp] = useState(false)
+  const [settingUp, setSettingUp] = useState(setUp === 'offered')
   // The system's picker, as a story can have it: it gives Acme's folder, and Hemera looks in it.
   const [looking, setLooking] = useState(detecting)
   useEffect(() => {
@@ -317,7 +317,7 @@ export const Marked: Story = {
   },
 }
 
-/** An agent can propose the rest of the setup: offered, unticked, the user's choice. */
+/** An agent can propose the rest of the setup: ticked by default, and the user can untick it. */
 export const SetUpOffered: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND, setUp: 'offered' },
   play: async () => {
@@ -325,20 +325,22 @@ export const SetUpOffered: Story = {
     const offer = within(dialog).getByRole('checkbox', {
       name: /^Let an agent propose the rest of the setup/,
     })
-    expect(offer).toHaveAttribute('aria-checked', 'false')
-    await userEvent.click(offer)
     expect(offer).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(offer)
+    expect(offer).toHaveAttribute('aria-checked', 'false')
   },
 }
 
-/** No agent can: why, and nothing to tick. */
+/** No agent can: unticked and disabled, with why. */
 export const SetUpUnavailable: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND, setUp: 'unavailable' },
   play: async () => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    const offer = within(dialog).getByRole('checkbox', {
+      name: /^Let an agent propose the rest of the setup/,
+    })
+    expect(offer).toHaveAttribute('aria-checked', 'false')
+    expect(offer).toHaveAttribute('aria-disabled', 'true')
     expect(within(dialog).getByText(/Claude Code is not signed in/)).toBeVisible()
-    expect(
-      within(dialog).queryByRole('checkbox', { name: /propose the rest of the setup/ }),
-    ).toBeNull()
   },
 }

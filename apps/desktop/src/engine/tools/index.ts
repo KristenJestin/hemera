@@ -16,7 +16,9 @@ import { and, eq } from 'drizzle-orm'
 import { Effect, Layer, Option, Schema } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
+import type { Discovery } from '../agents/discovery.ts'
 import { HemeraEndpoint } from '../agents/endpoint.ts'
+import type { AgentStarter } from '../agents/runtime.ts'
 import { getAgentSession } from '../agents/sessions.ts'
 import { getProject } from '../projects.ts'
 import type { DomainEvents } from '../domain-events.ts'
@@ -36,6 +38,7 @@ import {
   humanIntentLayer,
   jevJudgeLayer,
 } from '../permissions/hemera-auto.ts'
+import { AgentJudges, noAgentJudges } from '../permissions/agent-judge.ts'
 import { JevTransport, jevTransport } from '../permissions/jev.ts'
 import { decisionOrderLayer } from '../permissions/order.ts'
 import {
@@ -71,7 +74,7 @@ import { readPreferences } from '../preferences.ts'
 import { instructionsKept } from '../sessions/store.ts'
 import { startedWithTesterMode } from '../tester/mode.ts'
 
-export { HemeraAuto, ToolAccess, ToolGate, ToolServer }
+export { AgentJudges, HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
 /** What later tickets plug into the gate; the defaults otherwise. */
 export interface ToolsParts {
@@ -81,6 +84,11 @@ export interface ToolsParts {
   readonly guards?: Layer.Layer<GateGuards>
   /** Step 5 of the order of decision: Jev, through Hemera Auto, otherwise. */
   readonly judge?: Layer.Layer<Judge>
+  /**
+   * The agents' own judges, asked when Jev is not ready (#197); none otherwise, and the call asks.
+   * The Profile hands the real ones whenever it can start an agent.
+   */
+  readonly agentJudges?: Layer.Layer<AgentJudges, never, AgentStarter | Discovery | Database>
   /** How Jev is reached; the pinned endpoint otherwise. Suites hand a fake Jev. */
   readonly jevTransport?: Layer.Layer<JevTransport>
   /** What the user said that Jev is told; the user's answers in the database otherwise. */
@@ -229,6 +237,7 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
         hemeraAutoLayer(log),
         parts.humanIntent ?? humanIntentLayer,
         parts.jevTransport ?? Layer.succeed(JevTransport, jevTransport),
+        parts.agentJudges ?? noAgentJudges,
       ),
     ),
   )

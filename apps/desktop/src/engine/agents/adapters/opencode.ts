@@ -10,7 +10,8 @@
  * permissions deny everything but Hemera's tools, `build` and `plan` disabled (so it offers no
  * mode), its configuration folder moved to Hemera's and the project's own configuration off. The
  * move hides the user's own file, and with it the model they work with: that model (and their
- * small model) is read from their files and merged in, and nothing else of them.
+ * small model) is read from their files and merged in, and nothing else of them. Its judge
+ * session is another primary agent, `judge`, that denies everything, on the user's small model.
  */
 
 import { join } from 'node:path'
@@ -19,7 +20,7 @@ import { NotQualified, Qualified } from '@hemera/ipc'
 import { Option, Schema } from 'effect'
 
 import type { AgentAdapter, Environment } from '../adapter.ts'
-import { hemeraServer } from '../bare.ts'
+import { firstOffered, hemeraServer } from '../bare.ts'
 
 /**
  * Why OpenCode is not qualified on Linux: nothing in its means depends on the OS, but it has not
@@ -36,6 +37,16 @@ const BARE_AGENT = {
   default_agent: 'hemera',
   agent: {
     hemera: { mode: 'primary', permission: { '*': 'deny', 'hemera_*': 'allow' } },
+    build: { disable: true },
+    plan: { disable: true },
+  },
+}
+
+/** The judge's agent: every permission denied, so no tool reaches the model at all. */
+const JUDGE_AGENT = {
+  default_agent: 'judge',
+  agent: {
+    judge: { mode: 'primary', permission: { '*': 'deny' } },
     build: { disable: true },
     plan: { disable: true },
   },
@@ -120,6 +131,25 @@ export const opencode: AgentAdapter = {
     },
     systemPromptAs: 'embedded-resource',
   }),
+  judgeOptions: (input) => ({
+    mcpServers: [],
+    meta: undefined,
+    env: {
+      XDG_CONFIG_HOME: input.agentDirectory,
+      OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...input.own, ...JUDGE_AGENT }),
+    },
+    systemPromptAs: 'embedded-resource',
+  }),
+  // The user's own small model first, when it is offered.
+  judgeModel: (offered, own) =>
+    firstOffered(offered, [
+      ...(own.small_model === undefined ? [] : [new RegExp(`^${RegExp.escape(own.small_model)}$`)]),
+      /haiku/i,
+      /nano/i,
+      /mini/i,
+      /flash/i,
+    ]),
   ownSettings: {
     // The global configuration files in the order OpenCode merges them (a later one wins), then
     // the state file of its interface, which bare mode does not move.

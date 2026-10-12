@@ -170,7 +170,13 @@ export const WaitsForYou: Story = {
  * and its icon gives way to a paused clock in the warning tone. The legend says it in words.
  */
 export const Stuck: Story = {
-  args: { name: 'Reviewer', state: 'stuck', startedAt: Date.now() - 412_000 },
+  args: { name: 'Reviewer', state: 'stuck' },
+  // Started 412 seconds before it is drawn, not before the file was read: the seconds tick, and
+  // the play expects 410 to 419, which is no longer true once the page has waited eight seconds.
+  render: (args) => {
+    const [startedAt] = useState(() => Date.now() - 412_000)
+    return <LiveChip {...args} startedAt={startedAt} />
+  },
   play: async ({ canvasElement }) => {
     const chip = within(canvasElement).getByRole('button', { name: 'Reviewer, no activity' })
     expect(chip.querySelector('[data-breath]')).toBeNull()
