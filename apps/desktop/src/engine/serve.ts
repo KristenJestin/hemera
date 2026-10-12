@@ -8,7 +8,8 @@
 
 import {
   ChatRefused,
-  EngineMainRpcs,
+  EngineApartRpcs,
+  EngineMainCoreRpcs,
   type EngineStart,
   type EngineStatus,
   SetupEditRefused,
@@ -27,6 +28,14 @@ import {
   chooseBuilderModel,
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
+import { OutsideChanges } from './building/outside.ts'
+import {
+  dismissService,
+  missionServices,
+  restartService,
+  startService,
+  stopService,
+} from './building/services.ts'
 import {
   buildingAttemptOf,
   buildingOf,
@@ -207,7 +216,7 @@ export const engineHandlers = (
     database,
   })
   const { calls, use, follow } = profile
-  return EngineMainRpcs.toLayer({
+  const core = EngineMainCoreRpcs.toLayer({
     'engine.status': () =>
       SubscriptionRef.get(profile.database).pipe(
         Effect.map(statusOf),
@@ -766,8 +775,14 @@ export const engineHandlers = (
     'building.changed': ({ missionId }) =>
       follow(buildingChanges(missionId)).pipe(observedStream('building.changed', log)),
     // The Building's tasks (#141): read-only for the window.
+    // A Building or Review view read compares the Workspace first (#148).
     'building.read': ({ missionId }) =>
-      use(buildingOf(missionId)).pipe(observed('building.read', log)),
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.compare(missionId, null)),
+          buildingOf(missionId),
+        ),
+      ).pipe(observed('building.read', log)),
     'building.task': ({ missionId, taskId }) =>
       use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
     'building.attempt': ({ missionId, attemptId }) =>
@@ -776,4 +791,35 @@ export const engineHandlers = (
       follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
+  // The mission's changes outside Hemera and its services (#148), as a layer of their own.
+  const apart = EngineApartRpcs.toLayer({
+    'mission.outsideChanges': ({ missionId }) =>
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.compare(missionId, null)),
+          OutsideChanges.use((outside) => outside.list(missionId)),
+        ),
+      ).pipe(observed('mission.outsideChanges', log)),
+    'mission.outsideContents': ({ missionId, changeId }) =>
+      use(OutsideChanges.use((outside) => outside.contents(missionId, changeId))).pipe(
+        observed('mission.outsideContents', log),
+      ),
+    'mission.services': ({ missionId }) =>
+      use(missionServices(missionId)).pipe(observed('mission.services', log)),
+    'mission.serviceStart': ({ missionId, commandId }) =>
+      use(startService(missionId, commandId)).pipe(observed('mission.serviceStart', log)),
+    'mission.serviceStop': ({ missionId, runId }) =>
+      use(stopService(missionId, runId)).pipe(observed('mission.serviceStop', log)),
+    'mission.serviceRestart': ({ missionId, runId }) =>
+      use(restartService(missionId, runId)).pipe(observed('mission.serviceRestart', log)),
+    'mission.serviceDismiss': ({ missionId, runId }) =>
+      use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
+    'mission.focused': () =>
+      use(OutsideChanges.use((outside) => outside.focused)).pipe(observed('mission.focused', log)),
+    'mission.changed': () =>
+      follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
+        observedStream('mission.changed', log),
+      ),
+  })
+  return Layer.mergeAll(core, apart)
 }
