@@ -230,7 +230,6 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'setup_cards',
       'setup_cards_by_project',
       'snapshot_changes',
-      'snapshot_contents',
       'snapshot_files',
       'spec_changes',
       'spec_changes_by_mission',
@@ -379,6 +378,69 @@ describe('A data folder from before the start field', () => {
     const row = after.prepare("SELECT search_text FROM missions WHERE id = 'mission-1'").get()
     after.close()
     expect(row?.search_text).toBe('acme-4 export notes as markdown')
+  })
+})
+
+describe('A data folder from before the Freeze took its snapshot through the snapshot service', () => {
+  test('its snapshot_contents rows go with their table, and its Freezes keep their dirty files', async () => {
+    const data = temporaryFolder('before-freeze-snapshots')
+    const before = temporaryFolder('migrations-before-freeze-snapshots')
+    const shipped = readdirSync(SHIPPED).toSorted()
+    const dropping = shipped.find((name) =>
+      readFileSync(join(SHIPPED, name, 'migration.sql'), 'utf8').includes(
+        'DROP TABLE `snapshot_contents`',
+      ),
+    )
+    expect(dropping).toBeDefined()
+    for (const name of shipped.filter((one) => one < (dropping ?? ''))) {
+      cpSync(join(SHIPPED, name), join(before, name), { recursive: true })
+    }
+    await on(data, openProfile(data, before, '1.0.0'))
+    const at = '2026-10-01T10:00:00.000Z'
+    const file = new DatabaseSync(join(data, DATABASE_FILE))
+    file
+      .prepare(
+        'INSERT INTO projects (id, name, main_checkout, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('project-1', 'Acme', '/acme', at, at, 1)
+    file
+      .prepare(
+        'INSERT INTO missions (id, project_id, key_prefix, key_number, title, idea_sentence, type, stage, round, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run('mission-1', 'project-1', 'ACME', 4, 'Export', 'As CSV', 'feature', 'ready', 0, at, at)
+    file
+      .prepare(
+        'INSERT INTO freezes (id, mission_id, cycle, spec_version, bases, frozen_at) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('freeze-1', 'mission-1', 1, 11, '[]', at)
+    const sha256 = 'a'.repeat(64)
+    file
+      .prepare(
+        'INSERT INTO freeze_files (freeze_id, repository, path, status, sha256, withheld) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('freeze-1', 'api', 'invoices.ts', 'modified', sha256, null)
+    file
+      .prepare('INSERT INTO snapshot_contents (sha256, content) VALUES (?, ?)')
+      .run(sha256, 'export const invoices = [1]\n')
+    file.close()
+
+    await on(data, openProfile(data, SHIPPED, '1.0.0'))
+    const after = new DatabaseSync(join(data, DATABASE_FILE))
+    const tables = after.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+    const files = after.prepare('SELECT * FROM freeze_files').all()
+    after.close()
+    expect(tables.map((row) => row.name)).not.toContain('snapshot_contents')
+    expect(files).toEqual([
+      {
+        freeze_id: 'freeze-1',
+        repository: 'api',
+        path: 'invoices.ts',
+        status: 'modified',
+        sha256,
+        withheld: null,
+        tree: null,
+      },
+    ])
   })
 })
 

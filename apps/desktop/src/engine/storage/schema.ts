@@ -1938,7 +1938,9 @@ export const freezes = sqliteTable(
 /**
  * The files of a main checkout that were dirty when the Spec was frozen (CT-23): by repository and
  * path, how they differed, and the sha256 of their content (none for a deleted file). `withheld`
- * says why the content was not kept (a sensitive place such as a `.env`, a binary file, a link).
+ * says why the content was not kept, in the snapshot service's words. `tree` is the snapshot of
+ * the repository the Freeze took (#208), where the content is read back; null for a Freeze from
+ * before it.
  */
 export const freezeFiles = sqliteTable(
   'freeze_files',
@@ -1951,15 +1953,10 @@ export const freezeFiles = sqliteTable(
     status: text('status').notNull(),
     sha256: text('sha256'),
     withheld: text('withheld'),
+    tree: text('tree'),
   },
   (table) => [primaryKey({ columns: [table.freezeId, table.repository, table.path] })],
 )
-
-/** The contents the Freeze's snapshots kept, masked, once each by their sha256 (B2's stand-in). */
-export const snapshotContents = sqliteTable('snapshot_contents', {
-  sha256: text('sha256').primaryKey(),
-  content: text('content').$type<Masked<string>>().notNull(),
-})
 
 /**
  * A mission's dependency on another mission of its Project (#92): proposed by the Planner with its
