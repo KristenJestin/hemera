@@ -10,8 +10,16 @@
  */
 
 import {
+  BuildingRpcs,
+  ColdReadRpcs,
   closedAs,
+  DependenciesRpcs,
+  DiscussionsRpcs,
   EngineGone,
+  FreezeRpcs,
+  HelpersRpcs,
+  PlanningRpcs,
+  ProbesRpcs,
   streamClosedAs,
   WindowRpcs,
   type EngineMainRpcs,
@@ -29,9 +37,9 @@ import {
   type StorageFailed,
   type WindowNotice,
 } from '@hemera/ipc'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import type { Stream } from 'effect'
-import type { RpcClient, RpcClientError, RpcGroup } from 'effect/rpc'
+import type { Rpc, RpcClient, RpcClientError, RpcGroup } from 'effect/rpc'
 
 import { observed, observedStream, type Log } from './diagnostic.ts'
 
@@ -97,8 +105,9 @@ export const restoreProfile =
   (engine: EngineClient, application: Application) => (folder: string) =>
     engine['profile.restore']({ folder }).pipe(closedAs(gone), Effect.andThen(application.relaunch))
 
-export const windowHandlers = (engine: EngineClient, application: Application, log: Log) =>
-  WindowRpcs.toLayer({
+/** What main answers the window but the calls of a mission's Planning and Building. */
+const mainHandlers = (engine: EngineClient, application: Application, log: Log) =>
+  WindowRpcs.omit(...missionWorkTags).toLayer({
     'engine.status': () =>
       engine['engine.status']().pipe(closedAs(gone), observed('engine.status', log)),
     'engine.statusChanges': () =>
@@ -403,44 +412,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('memory.journalTail', log),
       ),
-    'planning.spec': (request) =>
-      engine['planning.spec'](request).pipe(closedAs(gone), observed('planning.spec', log)),
-    'planning.changesSince': (request) =>
-      engine['planning.changesSince'](request).pipe(
-        closedAs(gone),
-        observed('planning.changesSince', log),
-      ),
-    'planning.markRead': (request) =>
-      engine['planning.markRead'](request).pipe(closedAs(gone), observed('planning.markRead', log)),
-    'planning.addVision': (request) =>
-      engine['planning.addVision'](request).pipe(
-        closedAs(gone),
-        observed('planning.addVision', log),
-      ),
-    'planning.visions': (request) =>
-      engine['planning.visions'](request).pipe(closedAs(gone), observed('planning.visions', log)),
-    'planning.keepAfterTriage': (request) =>
-      engine['planning.keepAfterTriage'](request).pipe(
-        closedAs(gone),
-        observed('planning.keepAfterTriage', log),
-      ),
-    'planning.changed': (request) =>
-      engine['planning.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('planning.changed', log),
-      ),
-    'planning.specLanguage': (request) =>
-      engine['planning.specLanguage'](request).pipe(
-        closedAs(gone),
-        observed('planning.specLanguage', log),
-      ),
-    'planning.setSpecLanguage': (request) =>
-      engine['planning.setSpecLanguage'](request).pipe(
-        closedAs(gone),
-        observed('planning.setSpecLanguage', log),
-      ),
-    'planning.tasks': (request) =>
-      engine['planning.tasks'](request).pipe(closedAs(gone), observed('planning.tasks', log)),
     'resources.list': (request) =>
       engine['resources.list'](request).pipe(closedAs(gone), observed('resources.list', log)),
     'resources.save': (request) =>
@@ -451,55 +422,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['resources.changed']().pipe(
         streamClosedAs(gone),
         observedStream('resources.changed', log),
-      ),
-    'coldRead.list': (request) =>
-      engine['coldRead.list'](request).pipe(closedAs(gone), observed('coldRead.list', log)),
-    'coldRead.again': (request) =>
-      engine['coldRead.again'](request).pipe(closedAs(gone), observed('coldRead.again', log)),
-    'coldRead.dismiss': (request) =>
-      engine['coldRead.dismiss'](request).pipe(closedAs(gone), observed('coldRead.dismiss', log)),
-    'coldRead.freshness': (request) =>
-      engine['coldRead.freshness'](request).pipe(
-        closedAs(gone),
-        observed('coldRead.freshness', log),
-      ),
-    'coldRead.settled': (request) =>
-      engine['coldRead.settled'](request).pipe(closedAs(gone), observed('coldRead.settled', log)),
-    'coldRead.changed': (request) =>
-      engine['coldRead.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('coldRead.changed', log),
-      ),
-    'planning.waves': (request) =>
-      engine['planning.waves'](request).pipe(closedAs(gone), observed('planning.waves', log)),
-    'planning.answer': (request) =>
-      engine['planning.answer'](request).pipe(closedAs(gone), observed('planning.answer', log)),
-    'planning.waitOnSomeone': (request) =>
-      engine['planning.waitOnSomeone'](request).pipe(
-        closedAs(gone),
-        observed('planning.waitOnSomeone', log),
-      ),
-    'planning.openQuestions': (request) =>
-      engine['planning.openQuestions'](request).pipe(
-        closedAs(gone),
-        observed('planning.openQuestions', log),
-      ),
-    'planning.questionsChanged': (request) =>
-      engine['planning.questionsChanged'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('planning.questionsChanged', log),
-      ),
-    'planning.inputs': (request) =>
-      engine['planning.inputs'](request).pipe(closedAs(gone), observed('planning.inputs', log)),
-    'planning.acceptProposedAnswer': (request) =>
-      engine['planning.acceptProposedAnswer'](request).pipe(
-        closedAs(gone),
-        observed('planning.acceptProposedAnswer', log),
-      ),
-    'planning.dismissProposedAnswer': (request) =>
-      engine['planning.dismissProposedAnswer'](request).pipe(
-        closedAs(gone),
-        observed('planning.dismissProposedAnswer', log),
       ),
     'livingSpec.domains': (request) =>
       engine['livingSpec.domains'](request).pipe(
@@ -542,44 +464,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['livingSpec.changed'](request).pipe(
         streamClosedAs(gone),
         observedStream('livingSpec.changed', log),
-      ),
-    'probes.list': (request) =>
-      engine['probes.list'](request).pipe(closedAs(gone), observed('probes.list', log)),
-    'probes.read': (request) =>
-      engine['probes.read'](request).pipe(closedAs(gone), observed('probes.read', log)),
-    'probes.changed': (request) =>
-      engine['probes.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('probes.changed', log),
-      ),
-    'helpers.list': (request) =>
-      engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
-    'helpers.read': (request) =>
-      engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
-    'helpers.changed': (request) =>
-      engine['helpers.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('helpers.changed', log),
-      ),
-    'discussions.list': (request) =>
-      engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
-    'discussions.read': (request) =>
-      engine['discussions.read'](request).pipe(closedAs(gone), observed('discussions.read', log)),
-    'discussions.open': (request) =>
-      engine['discussions.open'](request).pipe(closedAs(gone), observed('discussions.open', log)),
-    'discussions.say': (request) =>
-      engine['discussions.say'](request).pipe(closedAs(gone), observed('discussions.say', log)),
-    'discussions.accept': (request) =>
-      engine['discussions.accept'](request).pipe(
-        closedAs(gone),
-        observed('discussions.accept', log),
-      ),
-    'discussions.close': (request) =>
-      engine['discussions.close'](request).pipe(closedAs(gone), observed('discussions.close', log)),
-    'discussions.changed': (request) =>
-      engine['discussions.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('discussions.changed', log),
       ),
     'tickets.providers': (request) =>
       engine['tickets.providers'](request).pipe(closedAs(gone), observed('tickets.providers', log)),
@@ -666,70 +550,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('tickets.retryWrite', log),
       ),
-    'missions.freezeReadiness': (request) =>
-      engine['missions.freezeReadiness'](request).pipe(
-        closedAs(gone),
-        observed('missions.freezeReadiness', log),
-      ),
-    'missions.freezeReadinessChanged': (request) =>
-      engine['missions.freezeReadinessChanged'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('missions.freezeReadinessChanged', log),
-      ),
-    'missions.freeze': (request) =>
-      engine['missions.freeze'](request).pipe(closedAs(gone), observed('missions.freeze', log)),
-    'missions.returnToPlanning': (request) =>
-      engine['missions.returnToPlanning'](request).pipe(
-        closedAs(gone),
-        observed('missions.returnToPlanning', log),
-      ),
-    'building.check': (request) =>
-      engine['building.check'](request).pipe(closedAs(gone), observed('building.check', log)),
-    'building.checkView': (request) =>
-      engine['building.checkView'](request).pipe(
-        closedAs(gone),
-        observed('building.checkView', log),
-      ),
-    'building.launch': (request) =>
-      engine['building.launch'](request).pipe(closedAs(gone), observed('building.launch', log)),
-    'building.backToPlanning': (request) =>
-      engine['building.backToPlanning'](request).pipe(
-        closedAs(gone),
-        observed('building.backToPlanning', log),
-      ),
-    'building.preparation': (request) =>
-      engine['building.preparation'](request).pipe(
-        closedAs(gone),
-        observed('building.preparation', log),
-      ),
-    'building.chooseModel': (request) =>
-      engine['building.chooseModel'](request).pipe(
-        closedAs(gone),
-        observed('building.chooseModel', log),
-      ),
-    'building.read': (request) =>
-      engine['building.read'](request).pipe(closedAs(gone), observed('building.read', log)),
-    'building.task': (request) =>
-      engine['building.task'](request).pipe(closedAs(gone), observed('building.task', log)),
-    'building.attempt': (request) =>
-      engine['building.attempt'](request).pipe(closedAs(gone), observed('building.attempt', log)),
-    'building.tasksChanged': (request) =>
-      engine['building.tasksChanged'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('building.tasksChanged', log),
-      ),
-    'building.changed': (request) =>
-      engine['building.changed'](request).pipe(
-        streamClosedAs(gone),
-        observedStream('building.changed', log),
-      ),
-    'dependencies.list': (request) =>
-      engine['dependencies.list'](request).pipe(closedAs(gone), observed('dependencies.list', log)),
-    'dependencies.decide': (request) =>
-      engine['dependencies.decide'](request).pipe(
-        closedAs(gone),
-        observed('dependencies.decide', log),
-      ),
     'models.roles': (request) =>
       engine['models.roles'](request).pipe(closedAs(gone), observed('models.roles', log)),
     'models.setRole': (request) =>
@@ -809,3 +629,220 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
     'application.chooseFolder': () =>
       application.chooseFolder.pipe(observed('application.chooseFolder', log)),
   })
+
+/**
+ * The calls of a mission's Planning and Building, which main forwards as they are: served by a
+ * layer of their own, as one object of every call the window may make is deeper than TypeScript
+ * infers (TS2589).
+ */
+const MissionWorkRpcs = PlanningRpcs.merge(
+  ProbesRpcs,
+  DiscussionsRpcs,
+  ColdReadRpcs,
+  FreezeRpcs,
+  DependenciesRpcs,
+  BuildingRpcs,
+  HelpersRpcs,
+)
+
+type MissionWorkTag = Rpc.Tag<RpcGroup.Rpcs<typeof MissionWorkRpcs>>
+
+const isMissionWork = (tag: string): tag is MissionWorkTag => MissionWorkRpcs.requests.has(tag)
+
+const missionWorkTags = [...MissionWorkRpcs.requests.keys()].filter(isMissionWork)
+
+const missionWorkHandlers = (engine: EngineClient, log: Log) =>
+  MissionWorkRpcs.toLayer({
+    'planning.spec': (request) =>
+      engine['planning.spec'](request).pipe(closedAs(gone), observed('planning.spec', log)),
+    'planning.changesSince': (request) =>
+      engine['planning.changesSince'](request).pipe(
+        closedAs(gone),
+        observed('planning.changesSince', log),
+      ),
+    'planning.markRead': (request) =>
+      engine['planning.markRead'](request).pipe(closedAs(gone), observed('planning.markRead', log)),
+    'planning.addVision': (request) =>
+      engine['planning.addVision'](request).pipe(
+        closedAs(gone),
+        observed('planning.addVision', log),
+      ),
+    'planning.visions': (request) =>
+      engine['planning.visions'](request).pipe(closedAs(gone), observed('planning.visions', log)),
+    'planning.keepAfterTriage': (request) =>
+      engine['planning.keepAfterTriage'](request).pipe(
+        closedAs(gone),
+        observed('planning.keepAfterTriage', log),
+      ),
+    'planning.changed': (request) =>
+      engine['planning.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('planning.changed', log),
+      ),
+    'planning.specLanguage': (request) =>
+      engine['planning.specLanguage'](request).pipe(
+        closedAs(gone),
+        observed('planning.specLanguage', log),
+      ),
+    'planning.setSpecLanguage': (request) =>
+      engine['planning.setSpecLanguage'](request).pipe(
+        closedAs(gone),
+        observed('planning.setSpecLanguage', log),
+      ),
+    'planning.tasks': (request) =>
+      engine['planning.tasks'](request).pipe(closedAs(gone), observed('planning.tasks', log)),
+    'coldRead.list': (request) =>
+      engine['coldRead.list'](request).pipe(closedAs(gone), observed('coldRead.list', log)),
+    'coldRead.again': (request) =>
+      engine['coldRead.again'](request).pipe(closedAs(gone), observed('coldRead.again', log)),
+    'coldRead.dismiss': (request) =>
+      engine['coldRead.dismiss'](request).pipe(closedAs(gone), observed('coldRead.dismiss', log)),
+    'coldRead.freshness': (request) =>
+      engine['coldRead.freshness'](request).pipe(
+        closedAs(gone),
+        observed('coldRead.freshness', log),
+      ),
+    'coldRead.settled': (request) =>
+      engine['coldRead.settled'](request).pipe(closedAs(gone), observed('coldRead.settled', log)),
+    'coldRead.changed': (request) =>
+      engine['coldRead.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('coldRead.changed', log),
+      ),
+    'planning.waves': (request) =>
+      engine['planning.waves'](request).pipe(closedAs(gone), observed('planning.waves', log)),
+    'planning.answer': (request) =>
+      engine['planning.answer'](request).pipe(closedAs(gone), observed('planning.answer', log)),
+    'planning.waitOnSomeone': (request) =>
+      engine['planning.waitOnSomeone'](request).pipe(
+        closedAs(gone),
+        observed('planning.waitOnSomeone', log),
+      ),
+    'planning.openQuestions': (request) =>
+      engine['planning.openQuestions'](request).pipe(
+        closedAs(gone),
+        observed('planning.openQuestions', log),
+      ),
+    'planning.questionsChanged': (request) =>
+      engine['planning.questionsChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('planning.questionsChanged', log),
+      ),
+    'planning.inputs': (request) =>
+      engine['planning.inputs'](request).pipe(closedAs(gone), observed('planning.inputs', log)),
+    'planning.acceptProposedAnswer': (request) =>
+      engine['planning.acceptProposedAnswer'](request).pipe(
+        closedAs(gone),
+        observed('planning.acceptProposedAnswer', log),
+      ),
+    'planning.dismissProposedAnswer': (request) =>
+      engine['planning.dismissProposedAnswer'](request).pipe(
+        closedAs(gone),
+        observed('planning.dismissProposedAnswer', log),
+      ),
+    'probes.list': (request) =>
+      engine['probes.list'](request).pipe(closedAs(gone), observed('probes.list', log)),
+    'probes.read': (request) =>
+      engine['probes.read'](request).pipe(closedAs(gone), observed('probes.read', log)),
+    'probes.changed': (request) =>
+      engine['probes.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('probes.changed', log),
+      ),
+    'helpers.list': (request) =>
+      engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
+    'helpers.read': (request) =>
+      engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
+    'helpers.changed': (request) =>
+      engine['helpers.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('helpers.changed', log),
+      ),
+    'discussions.list': (request) =>
+      engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
+    'discussions.read': (request) =>
+      engine['discussions.read'](request).pipe(closedAs(gone), observed('discussions.read', log)),
+    'discussions.open': (request) =>
+      engine['discussions.open'](request).pipe(closedAs(gone), observed('discussions.open', log)),
+    'discussions.say': (request) =>
+      engine['discussions.say'](request).pipe(closedAs(gone), observed('discussions.say', log)),
+    'discussions.accept': (request) =>
+      engine['discussions.accept'](request).pipe(
+        closedAs(gone),
+        observed('discussions.accept', log),
+      ),
+    'discussions.close': (request) =>
+      engine['discussions.close'](request).pipe(closedAs(gone), observed('discussions.close', log)),
+    'discussions.changed': (request) =>
+      engine['discussions.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('discussions.changed', log),
+      ),
+    'missions.freezeReadiness': (request) =>
+      engine['missions.freezeReadiness'](request).pipe(
+        closedAs(gone),
+        observed('missions.freezeReadiness', log),
+      ),
+    'missions.freezeReadinessChanged': (request) =>
+      engine['missions.freezeReadinessChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('missions.freezeReadinessChanged', log),
+      ),
+    'missions.freeze': (request) =>
+      engine['missions.freeze'](request).pipe(closedAs(gone), observed('missions.freeze', log)),
+    'missions.returnToPlanning': (request) =>
+      engine['missions.returnToPlanning'](request).pipe(
+        closedAs(gone),
+        observed('missions.returnToPlanning', log),
+      ),
+    'building.check': (request) =>
+      engine['building.check'](request).pipe(closedAs(gone), observed('building.check', log)),
+    'building.checkView': (request) =>
+      engine['building.checkView'](request).pipe(
+        closedAs(gone),
+        observed('building.checkView', log),
+      ),
+    'building.launch': (request) =>
+      engine['building.launch'](request).pipe(closedAs(gone), observed('building.launch', log)),
+    'building.backToPlanning': (request) =>
+      engine['building.backToPlanning'](request).pipe(
+        closedAs(gone),
+        observed('building.backToPlanning', log),
+      ),
+    'building.preparation': (request) =>
+      engine['building.preparation'](request).pipe(
+        closedAs(gone),
+        observed('building.preparation', log),
+      ),
+    'building.chooseModel': (request) =>
+      engine['building.chooseModel'](request).pipe(
+        closedAs(gone),
+        observed('building.chooseModel', log),
+      ),
+    'building.read': (request) =>
+      engine['building.read'](request).pipe(closedAs(gone), observed('building.read', log)),
+    'building.task': (request) =>
+      engine['building.task'](request).pipe(closedAs(gone), observed('building.task', log)),
+    'building.attempt': (request) =>
+      engine['building.attempt'](request).pipe(closedAs(gone), observed('building.attempt', log)),
+    'building.tasksChanged': (request) =>
+      engine['building.tasksChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('building.tasksChanged', log),
+      ),
+    'building.changed': (request) =>
+      engine['building.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('building.changed', log),
+      ),
+    'dependencies.list': (request) =>
+      engine['dependencies.list'](request).pipe(closedAs(gone), observed('dependencies.list', log)),
+    'dependencies.decide': (request) =>
+      engine['dependencies.decide'](request).pipe(
+        closedAs(gone),
+        observed('dependencies.decide', log),
+      ),
+  })
+
+export const windowHandlers = (engine: EngineClient, application: Application, log: Log) =>
+  Layer.merge(mainHandlers(engine, application, log), missionWorkHandlers(engine, log))
