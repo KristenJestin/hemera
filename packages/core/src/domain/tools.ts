@@ -36,6 +36,7 @@ import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
 import { DocsReport } from './docs.ts'
+import { CheckpointRead, EvidenceRead, ReviewReport } from './review.ts'
 import { TaskAmendment } from './build-tasks.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
@@ -932,7 +933,7 @@ const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
 /** Every tool of Hemera's, by its name as the agent asks for it. */
 export const TOOLS = {
   fs_read: tool({
-    roles: [...READERS, 'code-reviewer'],
+    roles: [...READERS, 'spec-reviewer', 'code-reviewer'],
     gate: 'local',
     effect: 'reads',
     path: 'path',
@@ -1097,6 +1098,8 @@ export const TOOLS = {
       'helper',
       'prototyper',
       'documenter',
+      'spec-reviewer',
+      'code-reviewer',
     ],
     gate: 'workflow',
     effect: 'reads',
@@ -1528,6 +1531,34 @@ export const TOOLS = {
       doing: 'Reporting the documentation',
     },
   }),
+  checkpoint_read: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: CheckpointRead,
+    label: {
+      label: 'Read the checkpoint',
+      mark: 'checkpoint-read',
+      doing: 'Reading the checkpoint',
+    },
+  }),
+  evidence_read: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: EvidenceRead,
+    label: { label: 'Read the evidence', mark: 'evidence-read', doing: 'Reading the evidence' },
+  }),
+  review_report: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: ReviewReport,
+    label: { label: 'Report the review', mark: 'review-report', doing: 'Reporting the review' },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1614,6 +1645,9 @@ export const TOOL_NAMES = [
   'prototype_read',
   'helper_result',
   'docs_report',
+  'checkpoint_read',
+  'evidence_read',
+  'review_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
