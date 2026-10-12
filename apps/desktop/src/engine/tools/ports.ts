@@ -21,6 +21,7 @@ import type { Command } from '@hemera/ipc'
 import { Context, Effect, Layer } from 'effect'
 import type { Schema } from 'effect'
 
+import type { LaunchWithdrawn } from '../runs.ts'
 import type { DatabaseError, EngineTransaction } from '../storage/database.ts'
 
 import type { Grant, GrantAsked } from './access.ts'
@@ -249,16 +250,19 @@ export interface CommandAsked {
  * A writing command the Building watches. Nothing is held until `launch`, which runs right before
  * its process launches, once its reservation and its permission no longer hold it: it takes the
  * write lock (waiting for another task's, said in `note`) and the snapshots before. `finish`
- * takes those after, attributes what it changed and releases the lock: once, whichever comes
- * first of the run's end and its call's end of waiting (null when it never ran).
+ * takes those after, attributes what it changed and releases the lock: once, when the run ends (null when it never ran). A call that stops waiting does not finish it: the
+ * run keeps its lock until it really ends.
  */
 export interface CommandWatch {
   /** What its launch waited for, once it waited; null otherwise. */
   readonly note: () => string | null
   /** The task the command belongs to, or null when its session runs none. */
   readonly taskId: string | null
-  /** Takes the lock and the snapshots before; whatever ends it early lets the lock go. */
-  readonly launch: Effect.Effect<void>
+  /**
+   * Takes the lock and the snapshots before; whatever ends it early lets the lock go. Fails when
+   * its call already ended or a snapshot could not be taken: the run must not launch unwatched.
+   */
+  readonly launch: Effect.Effect<void, LaunchWithdrawn>
   /** What the run's intent keeps for a restart to attribute it: the trees before, its globs. */
   readonly recorded: () => Schema.JsonObject
   readonly finish: (runId: string | null) => Effect.Effect<void>

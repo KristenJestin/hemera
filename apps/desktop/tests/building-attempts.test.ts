@@ -37,6 +37,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import {
   commandRuns,
   domainEvents,
+  effectfulActions,
   missionValidationSettings,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
@@ -385,7 +386,7 @@ describe('The write lock of a command', () => {
     expect(seen.writeEndedSoon).toBe(true)
   })
 
-  test('a writing command that outlives its call’s wait lets the lock go when the call stops waiting, and what it writes after is nobody’s', async () => {
+  test('a writing command that outlives its call’s wait keeps the lock until it ends: another task’s write waits, and what it wrote after the call stopped waiting is its own task’s', async () => {
     const release = join(scripts, 'release-slow')
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) =>
@@ -410,18 +411,67 @@ describe('The write lock of a command', () => {
           )
           const writeEndedSoon = yield* endedSoon(writing)
           writeFileSync(release, '')
+          const written = yield* Fiber.join(writing)
           yield* until(Effect.map(runningOf(format.id), (going) => !going))
           yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
-          return { ran, writeEndedSoon, view: yield* buildingNow(mission.id) }
+          return { ran, writeEndedSoon, written, view: yield* buildingNow(mission.id) }
         }),
       ),
     )
     expect(seen.ran).not.toMatch(/exit code/)
-    expect(seen.writeEndedSoon).toBe(true)
-    expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual([])
-    expect(seen.view.unattributed.map((one) => `${one.repository}/${one.path}`)).toContain(
-      'api/invoices.ts',
+    expect(seen.writeEndedSoon).toBe(false)
+    expect(seen.written).toContain('waiting for `format` (T4), which writes in api')
+    expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual(['api/invoices.ts'])
+    expect(attemptsOf(seen.view, 'T2')[0]?.conflicts ?? []).toEqual([])
+    expect(seen.view.unattributed).toEqual([])
+  })
+
+  test('a command whose reservation comes after its call stopped waiting takes the lock and the snapshots like any run', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          const migrate = yield* apiCommand(project.id, 'db:migrate', ['schema.sql=migrated'])
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          // With no reset command, taking the reservation asks the user first: the run waits.
+          yield* saveResources(project.id, [
+            {
+              name: 'Shared database',
+              description: 'The team database.',
+              uses: [],
+              changes: [migrate.id],
+              resetCommandId: null,
+            },
+          ])
+          const ran = yield* call(grantId, 'commands_run', { command: migrate.id, timeout: 1 })
+          const environment = () =>
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+          yield* until(Effect.map(environment(), (need) => need !== undefined))
+          yield* retryNeed((yield* environment())?.id ?? '')
+          // Its outcome is written once what it changed is attributed.
+          const database = yield* Database
+          yield* until(
+            Effect.map(
+              database
+                .select({ state: effectfulActions.state })
+                .from(effectfulActions)
+                .where(eq(effectfulActions.kind, 'command.run')),
+              (rows) => rows.some((row) => row.state === 'done'),
+            ),
+          )
+          yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Migrated.' })
+          return { ran, view: yield* buildingNow(mission.id) }
+        }),
+      ),
     )
+    expect(seen.ran).not.toMatch(/exit code/)
+    expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual(['api/schema.sql'])
+    expect(seen.view.unattributed).toEqual([])
   })
 
   test('a command waiting for its exclusive reservation holds no lock', async () => {

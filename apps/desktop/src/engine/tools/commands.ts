@@ -159,8 +159,10 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       if (Result.isFailure(launched)) return launched
       const run = launched.success
       // The outcome is written when the run ends, whenever that is: the call may answer before.
-      // Its changes are attributed and its lock released then, if its call has not done it first.
+      // Its changes are attributed and its lock released first, so an outcome written says its
+      // changes are already its task's.
       yield* awaitRun(run.id).pipe(
+        Effect.tap(() => (watch === null ? Effect.void : watch.finish(run.id))),
         Effect.flatMap((ended) =>
           intent === null
             ? neverLaunched(`it never launched: ${ended.state}`)
@@ -197,8 +199,8 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
     const run = started.success
     const seconds = args.timeout ?? RUN_WAIT_SECONDS
     // Its changes are attributed once it ends: the call that waits for it answers after that. A
-    // call that stops waiting first attributes what it changed so far and lets the lock go: a
-    // run that outlives its call never holds its repository (#142).
+    // call that stops waiting first leaves it its lock: it is released, and what the run changed
+    // attributed, when the run really ends (#142).
     const settled = (done: Run) =>
       watch === null ? Effect.succeed(done) : Effect.as(watch.settled, done)
     const ended =
@@ -209,14 +211,7 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
             // Started for this call and waited for by it: an agent that stops waiting leaves
             // nobody to read it, and it is stopped rather than left behind.
             Effect.onInterrupt(() => stopRun(run.id).pipe(Effect.ignore)),
-            Effect.flatMap((done) =>
-              Option.isSome(done)
-                ? settled(done.value)
-                : Effect.andThen(
-                    watch === null ? Effect.void : watch.finish(run.id),
-                    getRun(run.id),
-                  ),
-            ),
+            Effect.flatMap((done) => (Option.isSome(done) ? settled(done.value) : getRun(run.id))),
           )
     const { output } = yield* runOutput(run.id)
     const text = describeRun(ended, output, OUTPUT_TAIL_LINES)

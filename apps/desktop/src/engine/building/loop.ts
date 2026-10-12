@@ -69,6 +69,7 @@ import { type EffectfulAction, actionDone, actionFailed, beginAction } from '../
 import type { Grant } from '../tools/access.ts'
 import { answered, refusal } from '../tools/files.ts'
 import type { CommandAsked, CommandWatch, WritingFile, WrittenFile } from '../tools/ports.ts'
+import { LaunchWithdrawn } from '../runs.ts'
 import { mutate } from '../transaction.ts'
 import {
   attributedIn,
@@ -390,7 +391,7 @@ export const buildingLoop = (parts: LoopParts) => {
       let closed = false
       const letGo = Effect.suspend(() => locks.release(taken.splice(0)))
       const launch = Effect.gen(function* () {
-        if (closed) return
+        if (closed) return yield* new LaunchWithdrawn({ reason: 'its call already ended' })
         const started = Date.now()
         waited = yield* counted(
           session.id,
@@ -414,7 +415,10 @@ export const buildingLoop = (parts: LoopParts) => {
           1,
         )(
           Effect.gen(function* () {
-            if (closed) return yield* letGo
+            if (closed) {
+              yield* letGo
+              return yield* new LaunchWithdrawn({ reason: 'its call already ended' })
+            }
             const snapshots = yield* Snapshots
             const trees = yield* Effect.result(
               Effect.forEach(repositories, (base) =>
@@ -432,7 +436,10 @@ export const buildingLoop = (parts: LoopParts) => {
             if (Result.isFailure(trees)) {
               yield* snapshots.failed(building.missionId, trees.failure)
               closed = true
-              return yield* letGo
+              yield* letGo
+              return yield* new LaunchWithdrawn({
+                reason: `the snapshot before it could not be taken: ${trees.failure.message}`,
+              })
             }
             before = trees.success
           }),
