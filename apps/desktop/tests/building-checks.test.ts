@@ -14,10 +14,11 @@ import { basename, join } from 'node:path'
 
 import { type CheckDraft, PermissionAnswer } from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect, Fiber, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { removeCommand, saveCommand } from '../src/engine/catalogue.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
@@ -27,7 +28,12 @@ import { saveResources } from '../src/engine/resources/declarations.ts'
 import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { buildingCheckRuns, commandRuns, memoryJournal } from '../src/engine/storage/schema.ts'
+import {
+  buildingCheckRuns,
+  commandRuns,
+  domainEvents,
+  memoryJournal,
+} from '../src/engine/storage/schema.ts'
 import { call, eventsOf, grantOf, plannedIn } from './building-world.ts'
 import { builderAgents, builderOf, buildingNow, launched } from './builder-world.ts'
 import { nodeLine } from './commands-engine.ts'
@@ -47,10 +53,11 @@ beforeEach(() => {
 afterEach(removeFolders)
 
 /** The engine with the Builder of this version, its real checks, and every agent call allowed. */
-const checksEngine = (dataFolder: string) =>
+const checksEngine = (dataFolder: string, hold?: BuilderHold) =>
   sessionsEngine(dataFolder, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    ...(hold === undefined ? {} : { building: { hold } }),
   })
 
 /**
@@ -553,6 +560,153 @@ describe('A requirement’s checks', () => {
       ['requirement', 'R1', 'green'],
     ])
     expect(checksOf(seen.view.scopes[0])).toEqual([
+      { name: 'unit', place: '', verdict: 'green', detail: '' },
+    ])
+    expect(ranIn('unit.log')).toHaveLength(1)
+  })
+})
+
+describe('The last requirement before the end', () => {
+  test('the last task’s requirement checks are judged before the end is called, never after', async () => {
+    const seen = await checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, (projectId) =>
+            Effect.asVoid(
+              saveCheck(
+                projectId,
+                null,
+                check('unit', checkLine('unit.log', 0), { when: 'requirement' }),
+              ),
+            ),
+          )
+          const { grantId } = yield* builderOf(mission.id)
+          for (const task of ['T1', 'T2', 'T4', 'T3']) {
+            yield* call(grantId, 'task_start', { task })
+            yield* call(grantId, 'task_finished', { task, summary: 'Done.' })
+          }
+          const database = yield* Database
+          const order = Effect.map(
+            database
+              .select({ type: domainEvents.type })
+              .from(domainEvents)
+              .where(
+                and(
+                  eq(domainEvents.entityId, mission.id),
+                  inArray(domainEvents.type, ['building.checks_ran', 'building.tasks_done']),
+                ),
+              )
+              .orderBy(asc(domainEvents.sequence)),
+            (rows) => rows.map((row) => row.type),
+          )
+          yield* until(Effect.map(order, (types) => types.length === 2))
+          return yield* order
+        }),
+      ),
+    )
+    expect(seen).toEqual(['building.checks_ran', 'building.tasks_done'])
+  })
+})
+
+describe('A restart before or during a requirement’s checks', () => {
+  /** Atlas with one requirement check, its line waiting for `release` when named. */
+  const withUnit = (release?: string) =>
+    launched(work, (projectId) =>
+      Effect.asVoid(
+        saveCheck(
+          projectId,
+          null,
+          check('unit', checkLine('unit.log', 0, '-', release === undefined ? {} : { release }), {
+            when: 'requirement',
+          }),
+        ),
+      ),
+    )
+
+  /** Every task of R1 done in order, the last one's call left to finish on its own. */
+  const allDone = (grantId: string) =>
+    Effect.gen(function* () {
+      for (const task of ['T1', 'T2', 'T4', 'T3']) {
+        yield* call(grantId, 'task_start', { task })
+        const finished = call(grantId, 'task_finished', { task, summary: 'Done.' })
+        if (task === 'T3') yield* Effect.forkChild(finished)
+        else yield* finished
+      }
+    })
+
+  /** The scopes judged after a restart, once one has its verdict. */
+  const judgedAfterRestart = (missionId: string) =>
+    checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(
+            Effect.map(buildingNow(missionId), (view) =>
+              view.scopes.some((one) => one.verdict !== null),
+            ),
+            15_000,
+          )
+          return yield* buildingNow(missionId)
+        }),
+      ),
+    )
+
+  test('an engine stopped after the last task of a requirement is done, before its checks start: they run at the next start', async () => {
+    const reached = Promise.withResolvers<void>()
+    const hold: BuilderHold = (at) =>
+      at === 'requirements'
+        ? Effect.andThen(
+            Effect.sync(() => reached.resolve()),
+            Effect.never,
+          )
+        : Effect.void
+    const first = await checksEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* withUnit()
+          const { grantId } = yield* builderOf(mission.id)
+          yield* allDone(grantId)
+          yield* Effect.promise(() => reached.promise)
+          return { mission }
+        }),
+      ),
+    )
+    expect(existsSync(join(scripts, 'unit.log'))).toBe(false)
+    const view = await judgedAfterRestart(first.mission.id)
+    expect(view.scopes.map((one) => [one.scope, one.subject, one.verdict])).toEqual([
+      ['requirement', 'R1', 'green'],
+    ])
+    expect(ranIn('unit.log')).toHaveLength(1)
+  })
+
+  test('an engine stopped while a requirement’s check runs: the open attempt is judged again at the next start', async () => {
+    const release = join(scripts, 'release-unit')
+    const first = await checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* withUnit(release)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* allDone(grantId)
+          const database = yield* Database
+          yield* until(
+            Effect.map(
+              database.select().from(buildingCheckRuns).where(eq(buildingCheckRuns.name, 'unit')),
+              (rows) => rows.some((row) => row.runId !== null),
+            ),
+          )
+          return { mission }
+        }),
+      ),
+    )
+    writeFileSync(release, '')
+    const view = await judgedAfterRestart(first.mission.id)
+    expect(view.scopes.map((one) => [one.scope, one.subject, one.verdict])).toEqual([
+      ['requirement', 'R1', 'green'],
+    ])
+    expect(checksOf(view.scopes[0])).toEqual([
       { name: 'unit', place: '', verdict: 'green', detail: '' },
     ])
     expect(ranIn('unit.log')).toHaveLength(1)
