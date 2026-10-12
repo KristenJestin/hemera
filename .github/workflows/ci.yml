@@ -134,6 +134,52 @@ jobs:
       - working-directory: source
         run: pnpm build
 
+      # TEMPORARY (#277): what the runner is, and what one process start costs on it.
+      - name: Measure the runner (temporary)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "cores: $([Environment]::ProcessorCount)"
+          Get-MpComputerStatus | Select-Object AMRunningMode, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled | Format-List
+          "exclusions: $((Get-MpPreference).ExclusionPath -join ', ')"
+          "exclusion processes: $((Get-MpPreference).ExclusionProcess -join ', ')"
+          where.exe git sh node
+          git --version
+          git config --show-origin --list --system
+          @'
+          import { spawnSync } from 'node:child_process'
+          import { mkdtempSync } from 'node:fs'
+          import { join } from 'node:path'
+          const git = process.argv[2]
+          const label = process.argv[3]
+          const time = (what, n, f) => {
+            const start = performance.now()
+            for (let i = 0; i < n; i++) f(i)
+            console.log(`${label} | ${what}: ${((performance.now() - start) / n).toFixed(1)} ms`)
+          }
+          const root = mkdtempSync(join(process.env.RUNNER_TEMP, 'bench-'))
+          time('git --version', 40, () => spawnSync(git, ['--version']))
+          time('node -e 0', 20, () => spawnSync(process.execPath, ['-e', '0']))
+          time('git init + empty commit', 20, (i) => {
+            const at = join(root, `r${i}`)
+            spawnSync(git, ['init', '-q', at])
+            spawnSync(git, ['-C', at, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'])
+          })
+          time('git status in a repository', 40, () => spawnSync(git, ['-C', join(root, 'r0'), 'status', '--porcelain']))
+          '@ | Set-Content "$env:RUNNER_TEMP\bench.mjs"
+          $real = 'C:\Program Files\Git\mingw64\bin\git.exe'
+          node "$env:RUNNER_TEMP\bench.mjs" git 'PATH git, defender as found'
+          node "$env:RUNNER_TEMP\bench.mjs" $real 'mingw64 git, defender as found'
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          (Get-MpComputerStatus).RealTimeProtectionEnabled
+          node "$env:RUNNER_TEMP\bench.mjs" git 'PATH git, realtime off'
+          node "$env:RUNNER_TEMP\bench.mjs" $real 'mingw64 git, realtime off'
+      - name: Sample the processors and the disks (temporary)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process typeperf -WindowStyle Hidden -ArgumentList @('"\Processor(_Total)\% Processor Time"', '"\PhysicalDisk(*)\% Idle Time"', '"\Memory\Available MBytes"', '-si', '5', '-f', 'CSV', '-o', "$env:RUNNER_TEMP\perf.csv", '-y')
+
       # The suites that need a window run in the `e2e` job below. The stories run headless,
       # which is a page and not a window.
       #
@@ -170,6 +216,20 @@ jobs:
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project storybook-light --project storybook-dark
+      - name: Summarise the samples (temporary)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Process typeperf -ErrorAction SilentlyContinue | Stop-Process
+          $rows = Import-Csv "$env:RUNNER_TEMP\perf.csv"
+          $columns = $rows[0].PSObject.Properties.Name | Select-Object -Skip 1
+          "samples: $($rows.Count) every 5 s"
+          foreach ($column in $columns) {
+            $values = $rows | ForEach-Object { $_.$column } | Where-Object { $_ -match '^[0-9. ]+$' } | ForEach-Object { [double]$_ }
+            if ($values) { $m = $values | Measure-Object -Average -Minimum -Maximum; '{0}: avg {1:N1} min {2:N1} max {3:N1}' -f $column, $m.Average, $m.Minimum, $m.Maximum }
+          }
+          # One line a minute, to read the shape over the two test steps.
+          $rows | Select-Object -Index (0..($rows.Count - 1) | Where-Object { $_ % 12 -eq 0 }) | Format-Table -AutoSize | Out-String -Width 400
 
   # The end-to-end suite, which drives the built application's window. A runner has no display,
   # so the window opens in a virtual X server (`xvfb-run`); the run needs no compositor of its
