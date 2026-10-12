@@ -302,6 +302,10 @@ export function recipeRefusals(draft: DocRecipeDraft): DocRecipeRefusals {
   const leaves = draft.path.startsWith('/') || draft.path.split('/').some((part) => part === '..')
   return {
     path: leaves ? `${draft.path} leaves ${inside}: name files inside it.` : undefined,
+    purpose:
+      draft.path.trim() !== '' && draft.purpose.trim() === ''
+        ? 'Say in one sentence what the files are for.'
+        : undefined,
     words:
       draft.words !== null && draft.words.every((word) => word.trim() === '')
         ? 'Name at least one word the Impact may hold.'
