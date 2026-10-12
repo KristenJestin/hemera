@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { browser } from '@wdio/globals'
 
 import { FAKE_GH_SPECS, RUNS_FAKE_GH, fakeGhOf } from './e2e/fake-gh.ts'
+import { holdClicksUntilAtRest } from './e2e/hold-still.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -92,6 +93,10 @@ export const config: WebdriverIO.Config = {
   },
   onWorkerStart(_cid, _capabilities, specs) {
     process.env.PATH = pathFor(specs[0] ?? '')
+  },
+  // Every click waits for its control to have come to rest (`e2e/hold-still.ts`).
+  before() {
+    holdClicksUntilAtRest()
   },
   // The Electron service drives the main process through Node's inspector and never lets go of
   // it, and a Node process asked to exit while a debugger is attached waits for it to leave: the

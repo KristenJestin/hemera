@@ -41,6 +41,12 @@ pnpm --filter @hemera/desktop e2e:headless    # never the visible `e2e`
   leftover `hemera-e2e-*` folders before a run if the last one was interrupted.
 - Every spec file is one capability. `e2e:headless --spec <file>` runs that file once per
   capability on the wrong data folders: run the full suite, or a local subset config.
+- Every `click` waits for its control to have come to rest (`e2e/hold-still.ts`): its box the same
+  over three frames and the pointer reaching its middle, within fifteen seconds. What enters the
+  window grows on a spring inside a clipped box, and on a slow runner that takes seconds; WebDriver
+  refuses the click for a while, then gives up. Do not add pauses or retries around a click: when
+  the line `click: … did not come to rest` appears in a log, the page was not ready, and the line
+  says where the control stood and what the pointer reached.
 - `N passed, M total` from wdio counts spec files × capabilities: "14 passed, 196 total (7%
   completed)" is a full green run of 14 spec files.
 - On Linux, an off-screen window means nothing to a Wayland compositor: the headless config
