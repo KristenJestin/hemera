@@ -528,6 +528,15 @@ const attemptViewOf = (row: AttemptRow, extras: AttemptExtras): BuildingAttemptV
       detail: one.detail,
       outputTail: one.outputTail,
       runId: one.runId,
+      line: one.line,
+      exitCode: one.exitCode,
+      value: one.value,
+      trees: one.trees === null ? [] : Option.getOrElse(trees.read(one.trees), () => []),
+      evidenceId: one.evidenceId,
+      // An intermediate check stays quiet unless red; the end's are the final checks (#143).
+      shown:
+        row.scope === 'end' ? 'final' : one.verdict === 'red' ? 'stands-out' : ('quiet' as const),
+      at: one.at,
     })),
   // A conflict is on both tasks: the attempt of the command's task, and the one that held it.
   conflicts: extras.conflicts

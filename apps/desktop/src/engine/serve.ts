@@ -8,6 +8,7 @@
 
 import {
   ChatRefused,
+  ChecksRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -112,6 +113,14 @@ import {
 } from './living-spec/store.ts'
 import { TesterFindings } from './tester/findings.ts'
 import { Snapshots } from './building/snapshots.ts'
+import {
+  acceptChecks,
+  listChecks,
+  moveCheck,
+  proposedChecks,
+  removeCheck,
+  saveCheck,
+} from './project-checks.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
@@ -821,5 +830,23 @@ export const engineHandlers = (
         observedStream('mission.changed', log),
       ),
   })
-  return Layer.mergeAll(core, apart)
+  return Layer.mergeAll(core, apart, checksHandlers(profile, log))
+}
+
+/** The Project's checks (#143), a layer of their own (see `EngineServedRpcs`). */
+const checksHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return ChecksRpcs.toLayer({
+    'checks.list': ({ projectId }) => use(listChecks(projectId)).pipe(observed('checks.list', log)),
+    'checks.propose': ({ projectId, asked }) =>
+      use(proposedChecks(projectId, asked)).pipe(observed('checks.propose', log)),
+    'checks.accept': ({ projectId, proposals }) =>
+      use(acceptChecks(projectId, proposals)).pipe(observed('checks.accept', log)),
+    'checks.save': ({ projectId, id, check }) =>
+      use(saveCheck(projectId, id, check)).pipe(observed('checks.save', log)),
+    'checks.remove': ({ projectId, id }) =>
+      use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
+    'checks.move': ({ projectId, id, rank }) =>
+      use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
+  })
 }

@@ -489,6 +489,76 @@ export const buildingLoop = (parts: LoopParts) => {
     })
 
   /**
+   * A check's run (#143): Hemera's, no task's. Right before it launches it takes the write locks of
+   * its repositories, waiting for every task's writing command and file write there, then the
+   * snapshot of each: the trees it ran on. Once it ends, what it changed is the Building's.
+   */
+  const checkRun = (missionId: string, name: string, repositories: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const building = yield* activeBuildingIn(yield* Database, missionId)
+      if (building === null) return null
+      const places = basesOf(building).filter((one) => repositories.includes(one.repository))
+      const watchId = crypto.randomUUID()
+      const context = yield* Effect.context<
+        Database | DomainEvents | Secrets | Snapshots | SessionPost | OutsideChanges
+      >()
+      // A check that overwrites a change the user made outside Hemera is the Builder's to hear of.
+      const told = { id: '', lineage: (yield* builderLineage(missionId)) ?? '' }
+      const taken: WriteLock[] = []
+      let before: ReadonlyArray<{ readonly base: BuildingBase; readonly tree: string }> | null =
+        null
+      const letGo = Effect.suspend(() => locks.release(taken.splice(0)))
+      const launch = Effect.gen(function* () {
+        yield* locks.take(
+          building.id,
+          null,
+          name,
+          places.map((one) => one.repository),
+          null,
+          taken,
+        )
+        const snapshots = yield* Snapshots
+        const trees = yield* Effect.result(
+          Effect.forEach(places, (base) =>
+            Effect.map(
+              snapshots.take(placeOfBase(base), {
+                kind: 'run',
+                missionId,
+                runId: watchId,
+                side: 'before',
+              }),
+              (tree) => ({ base, tree }),
+            ),
+          ),
+        )
+        if (Result.isFailure(trees)) {
+          yield* snapshots.failed(missionId, trees.failure)
+          return yield* new LaunchWithdrawn({
+            reason: `the snapshot before it could not be taken: ${trees.failure.message}`,
+          })
+        }
+        before = trees.success
+        return trees.success.map((one) => ({ repository: one.base.repository, tree: one.tree }))
+      }).pipe(
+        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : letGo)),
+        Effect.provide(context),
+      )
+      const finish = (runId: string | null) =>
+        Effect.suspend(() =>
+          runId === null || before === null
+            ? Effect.void
+            : afterCommand(building, null, told, name, null, watchId, runId, before),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            said(`a check's changes were not recorded: ${String(cause)}`),
+          ),
+          Effect.ensuring(letGo),
+          Effect.provide(context),
+        )
+      return { launch, finish }
+    })
+
+  /**
    * The hold of a file tool write of a mission's session, begun once no other task's command
    * holds its file and put into `sink`: no command starts there until `endHold`. Answers what it
    * waited for, or null.
@@ -519,7 +589,7 @@ export const buildingLoop = (parts: LoopParts) => {
   const afterCommand = (
     building: BuildingRow,
     task: TaskNow | null,
-    session: RoleSession,
+    session: Pick<RoleSession, 'id' | 'lineage'>,
     name: string,
     globs: ReadonlyArray<string> | null,
     watchId: string,
@@ -1141,6 +1211,8 @@ export const buildingLoop = (parts: LoopParts) => {
         files,
       )
       const verdict = judged.verdict
+      // Cancelled while its checks ran: the attempt stays as it was, and no result is said.
+      if (verdict === null) return 'pending' as const
       const results = judged.results
       yield* mutate('ending a scope attempt', (transaction) =>
         transaction
@@ -1772,6 +1844,7 @@ export const buildingLoop = (parts: LoopParts) => {
 
   return {
     attribution: { written, command },
+    checkRun,
     beginHold,
     endHold: locks.endWrite,
     waitForLock,
