@@ -1377,11 +1377,14 @@ describe('The end never waits on a scenario nothing can move', () => {
   })
 
   test('a listed scenario that moves withdraws the need, and the end is judged again', async () => {
-    const seen = await proofsEngine(data).run(({ profile }) =>
+    const builder = busyBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
           const { mission, grantId } = yield* stuck
+          // Still at work: its turn on what it is told stays open.
+          yield* builder.busy
           // The Builder makes the test fail as Planning saw it: its red is a decision again.
           writeFileSync(
             join(yield* apiOf(mission.id), EXPORT_PATH),
