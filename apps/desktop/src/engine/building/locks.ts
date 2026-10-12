@@ -3,7 +3,9 @@
  * that can write holds its repository (or, when it declares write globs, the paths matching them)
  * while it runs. Another task's file tool write there waits until it ends, and no other task's
  * writing command starts in that repository meanwhile. A command of the same task does not wait
- * for itself. A restart ends every run, so nothing of a lock outlives the engine.
+ * for itself. A file tool write holds its file while it is written, so no other task's command
+ * starts there in the middle of it. A restart ends every run, so nothing of a lock outlives the
+ * engine.
  */
 
 import { posix } from 'node:path'
@@ -35,8 +37,18 @@ const holds = (lock: WriteLock, path: string): boolean =>
 const others = (lock: WriteLock, taskIds: ReadonlyArray<string>): boolean =>
   lock.taskId === null || !taskIds.includes(lock.taskId)
 
+/** A file tool write in progress: no other task's command takes its repository meanwhile. */
+export interface WriteInProgress {
+  readonly id: string
+  readonly buildingId: string
+  readonly repository: string
+  readonly taskIds: ReadonlyArray<string>
+  readonly done: Deferred.Deferred<void>
+}
+
 export const writeLocks = () => {
   const held = new Map<string, WriteLock>()
+  const writing = new Map<string, WriteInProgress>()
 
   /** The lock another task holds on a file, or null. */
   const onFile = (
@@ -65,6 +77,19 @@ export const writeLocks = () => {
         others(lock, taskIds),
     ) ?? null
 
+  /** Another task's file tool write in progress in one of these repositories, or null. */
+  const writeIn = (
+    buildingId: string,
+    taskIds: ReadonlyArray<string>,
+    repositories: ReadonlyArray<string>,
+  ): WriteInProgress | null =>
+    [...writing.values()].find(
+      (one) =>
+        one.buildingId === buildingId &&
+        repositories.includes(one.repository) &&
+        !one.taskIds.some((id) => taskIds.includes(id)),
+    ) ?? null
+
   /**
    * Waits while `find` names a lock, each time until it is released; answers the first one waited
    * for, or null when none held the way.
@@ -79,6 +104,22 @@ export const writeLocks = () => {
       return first
     })
 
+  /** Waits until no other task's file tool write is in progress in these repositories. */
+  const waitForWrites = (
+    buildingId: string,
+    taskIds: ReadonlyArray<string>,
+    repositories: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      for (
+        let one = writeIn(buildingId, taskIds, repositories);
+        one !== null;
+        one = writeIn(buildingId, taskIds, repositories)
+      ) {
+        yield* Deferred.await(one.done)
+      }
+    })
+
   return {
     /** The way a file tool write of these tasks is held, waited out; the first lock, or null. */
     waitForFile: (
@@ -89,8 +130,43 @@ export const writeLocks = () => {
     /** The lock a file tool write of these tasks would wait for now, or null. */
     heldFile: onFile,
     /**
-     * The locks of a writing command taken once no other task's command holds its repositories,
-     * in one step with the last check; answers them and the first lock waited for.
+     * A file tool write of these tasks begun once no other task's command holds its file, in one
+     * step with the last check, and put into `sink` in that same step: answers the first lock
+     * waited for. `endWrite` ends it.
+     */
+    beginWrite: (
+      buildingId: string,
+      taskIds: ReadonlyArray<string>,
+      file: { readonly repository: string; readonly path: string },
+      sink: WriteInProgress[],
+    ) =>
+      Effect.gen(function* () {
+        let first: WriteLock | null = null
+        for (;;) {
+          const waited = yield* waitWhile(() => onFile(buildingId, taskIds, file))
+          first ??= waited
+          if (onFile(buildingId, taskIds, file) !== null) continue
+          const begun: WriteInProgress = {
+            id: crypto.randomUUID(),
+            buildingId,
+            repository: file.repository,
+            taskIds,
+            done: Deferred.makeUnsafe<void>(),
+          }
+          writing.set(begun.id, begun)
+          sink.push(begun)
+          return first
+        }
+      }),
+    endWrite: (begun: WriteInProgress) =>
+      Effect.suspend(() => {
+        writing.delete(begun.id)
+        return Deferred.succeed(begun.done, undefined)
+      }),
+    /**
+     * The locks of a writing command taken once no other task's command or file write holds its
+     * repositories, in one step with the last check; answers the first lock waited for. The locks
+     * go into `sink` in that same step, so whoever holds the sink can release them on any exit.
      */
     take: (
       buildingId: string,
@@ -98,6 +174,7 @@ export const writeLocks = () => {
       command: string,
       repositories: ReadonlyArray<string>,
       globs: ReadonlyArray<string> | null,
+      sink: WriteLock[],
     ) =>
       Effect.gen(function* () {
         const mine = taskId === null ? [] : [taskId]
@@ -105,9 +182,13 @@ export const writeLocks = () => {
         for (;;) {
           const waited = yield* waitWhile(() => onRepositories(buildingId, mine, repositories))
           first ??= waited
+          yield* waitForWrites(buildingId, mine, repositories)
           // Nothing yields between the last check and the take: no other command slips in.
-          if (onRepositories(buildingId, mine, repositories) !== null) continue
-          const taken: WriteLock[] = []
+          if (
+            onRepositories(buildingId, mine, repositories) !== null ||
+            writeIn(buildingId, mine, repositories) !== null
+          )
+            continue
           for (const repository of repositories) {
             const lock: WriteLock = {
               id: crypto.randomUUID(),
@@ -119,9 +200,9 @@ export const writeLocks = () => {
               released: Deferred.makeUnsafe<void>(),
             }
             held.set(lock.id, lock)
-            taken.push(lock)
+            sink.push(lock)
           }
-          return { taken, waited: first }
+          return first
         }
       }),
     /** Releases locks: whatever waited for them goes on. */

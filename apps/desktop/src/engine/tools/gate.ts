@@ -145,7 +145,7 @@ import {
   SessionNotes,
   SetupDesk,
   Verdicts,
-  type WriteAttribution,
+  WriteAttribution,
   outsideReason,
 } from './ports.ts'
 
@@ -705,6 +705,32 @@ export const toolGateLayer = (settings: GateSettings) =>
           return prepared
         })
 
+      /**
+       * A mission's file write, done once no other task's command holds the file and holding it
+       * while it is written (#142): a command never starts in the middle of it.
+       */
+      const held = <E, R>(
+        grant: Grant,
+        path: JudgedPath,
+        write: Effect.Effect<ToolAnswer, E, R>,
+      ) =>
+        grant.missionId === null
+          ? write
+          : WriteAttribution.use((attribution) =>
+              attribution.holding(
+                {
+                  sessionId: grant.sessionId,
+                  missionId: grant.missionId ?? '',
+                  path: path.resolved,
+                },
+                write,
+              ),
+            ).pipe(
+              Effect.map(({ result, waited }) =>
+                waited === null ? result : { ...result, text: `${result.text}\n\n${waited}` },
+              ),
+            )
+
       /** 9. The execution. */
       const execute = (grant: Grant, prepared: Prepared) =>
         Effect.gen(function* () {
@@ -728,9 +754,9 @@ export const toolGateLayer = (settings: GateSettings) =>
             case 'search':
               return yield* search(fileCall(pathOf()), call.args)
             case 'fs_write':
-              return yield* fsWrite(fileCall(pathOf()), call.args)
+              return yield* held(grant, pathOf(), fsWrite(fileCall(pathOf()), call.args))
             case 'fs_edit':
-              return yield* fsEdit(fileCall(pathOf()), call.args)
+              return yield* held(grant, pathOf(), fsEdit(fileCall(pathOf()), call.args))
             case 'commands_list':
               return yield* commandsList(grant)
             case 'commands_run':

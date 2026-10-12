@@ -90,7 +90,7 @@ import { type Preparations, getWorkspace } from '../workspaces.ts'
 import { readyLine, readySaid } from './builder-role.ts'
 import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
-import { writeLocks } from './locks.ts'
+import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
 import { BuildingStart } from './launch.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
@@ -247,7 +247,9 @@ const answerOf = (need: Need): string | null => {
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
  */
-export type BuilderHold = (at: 'starting' | 'finishing' | 'judging') => Effect.Effect<void>
+export type BuilderHold = (
+  at: 'starting' | 'finishing' | 'judging' | 'locked',
+) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
@@ -1203,6 +1205,20 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.as(said(`a command was not watched: ${String(cause)}`), null),
                 ),
               ),
+            // Whatever ends the write, interrupted or dead included, ends its hold.
+            holding: (file, write) =>
+              Effect.suspend(() => {
+                const sink: WriteInProgress[] = []
+                return loop.beginHold(file, sink).pipe(
+                  provided,
+                  Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
+                  Effect.ensuring(
+                    Effect.suspend(() =>
+                      Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
+                    ),
+                  ),
+                )
+              }),
           },
           judgeScope: (missionId, scope, subject) =>
             loop.judgeScope(missionId, scope, subject).pipe(provided, Effect.orDie),

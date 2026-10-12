@@ -75,6 +75,8 @@ export const buildDeskLayer = Layer.effect(
         written: (file) => (transaction) =>
           Effect.flatMap(work, (one) => one.attribution.written(file)(transaction)),
         command: (asked) => Effect.flatMap(work, (one) => one.attribution.command(asked)),
+        holding: (file, write) =>
+          Effect.flatMap(work, (one) => one.attribution.holding(file, write)),
       },
       judgeScope: (missionId, scope, subject) =>
         Effect.flatMap(work, (one) => one.judgeScope(missionId, scope, subject)),

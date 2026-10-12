@@ -17,7 +17,7 @@ import {
   type ToolArguments,
 } from '@hemera/core/domain'
 import type { Command, Run } from '@hemera/ipc'
-import { Duration, Effect, Option, Predicate, Result, type Scope } from 'effect'
+import { Duration, Effect, Exit, Option, Predicate, Result, type Scope } from 'effect'
 
 import { listCommands } from '../catalogue.ts'
 import { type RunServices, awaitRun, getRun, runOutput, startRun, stopRun } from '../runs.ts'
@@ -101,8 +101,9 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       command === null && args.repository !== undefined && args.repository !== ROOT_REPOSITORY
         ? args.repository
         : null
-    // A writing command of a mission takes its repository's write lock (waiting for another
-    // task's), and the snapshot before it: what it changes is its task's (#142, CT-02).
+    // A writing command of a mission is watched: right before it launches it takes its
+    // repository's write lock (waiting for another task's) and the snapshot before it; what it
+    // changes is its task's (#142, CT-02).
     const watch =
       grant.missionId === null
         ? null
@@ -119,30 +120,69 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       watch?.taskId != null && call.owner.kind === 'mission'
         ? { ...call.owner, taskId: watch.taskId }
         : call.owner
-    const noted = (answer: ToolAnswer): ToolAnswer =>
-      watch?.note == null ? answer : { ...answer, text: `${answer.text}\n\n${watch.note}` }
+    const noted = (answer: ToolAnswer): ToolAnswer => {
+      const note = watch?.note() ?? null
+      return note === null ? answer : { ...answer, text: `${answer.text}\n\n${note}` }
+    }
     const details = { command: command?.id ?? null, line, folder, sessionId: grant.sessionId }
     // Written as the process launches: a run that waits for a reservation and is stopped first
-    // never ran, and leaves no intent to be "maybe done" at a restart, only its record.
+    // never ran, and leaves no intent to be "maybe done" at a restart, only its record. It keeps
+    // what a restart needs to attribute the run.
     let intent: string | null = null
-    const begin = Effect.map(actions.begin('command.run', owner, details), (id) => {
-      intent = id
-    })
+    const begin = Effect.suspend(() =>
+      Effect.map(
+        actions.begin('command.run', owner, { ...details, ...(watch?.recorded() ?? {}) }),
+        (id) => {
+          intent = id
+        },
+      ),
+    )
     const neverLaunched = (reason: string) =>
       Effect.flatMap(actions.begin('command.run', owner, details), (id) =>
         actions.failed(id, reason),
       )
-    const started = yield* startRun({
-      projectId: grant.projectId,
-      workspaceId: grant.workspaceId,
-      commandId: command?.id ?? null,
-      line: command === null ? line : null,
-      folder,
-      startedBy: 'agent',
-      sessionId: grant.sessionId,
-      missionId: grant.missionId,
-      intent: begin,
-    }).pipe(Effect.result)
+    // From the start to the fork that watches the run's end, whatever ends this call (an
+    // interrupt, a defect) lets the lock go: nothing else would.
+    const started = yield* Effect.gen(function* () {
+      const launched = yield* startRun({
+        projectId: grant.projectId,
+        workspaceId: grant.workspaceId,
+        commandId: command?.id ?? null,
+        line: command === null ? line : null,
+        folder,
+        startedBy: 'agent',
+        sessionId: grant.sessionId,
+        missionId: grant.missionId,
+        intent: begin,
+        beforeLaunch: watch === null ? Effect.void : watch.launch,
+      }).pipe(Effect.result)
+      if (Result.isFailure(launched)) return launched
+      const run = launched.success
+      // The outcome is written when the run ends, whenever that is: the call may answer before.
+      // Its changes are attributed and its lock released then, if its call has not done it first.
+      yield* awaitRun(run.id).pipe(
+        Effect.flatMap((ended) =>
+          intent === null
+            ? neverLaunched(`it never launched: ${ended.state}`)
+            : ended.exitCode === null && ended.state === 'failed'
+              ? actions.failed(intent, 'it did not run')
+              : actions.done(
+                  intent,
+                  ended.exitCode === null
+                    ? ended.state
+                    : `${ended.state}, exit code ${String(ended.exitCode)}`,
+                ),
+        ),
+        Effect.ignore,
+        Effect.ensuring(watch === null ? Effect.void : watch.finish(run.id)),
+        Effect.forkIn(call.scope),
+      )
+      return launched
+    }).pipe(
+      Effect.onExit((exit) =>
+        watch === null || Exit.isSuccess(exit) ? Effect.void : watch.finish(null),
+      ),
+    )
     if (Result.isFailure(started)) {
       const reason = started.failure.message
       yield* intent === null ? neverLaunched(reason) : actions.failed(intent, reason)
@@ -155,29 +195,12 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       )
     }
     const run = started.success
-    // The outcome is written when the run ends, whenever that is: the call may answer before. Its
-    // changes are attributed and its lock released then too.
-    yield* awaitRun(run.id).pipe(
-      Effect.flatMap((ended) =>
-        intent === null
-          ? neverLaunched(`it never launched: ${ended.state}`)
-          : ended.exitCode === null && ended.state === 'failed'
-            ? actions.failed(intent, 'it did not run')
-            : actions.done(
-                intent,
-                ended.exitCode === null
-                  ? ended.state
-                  : `${ended.state}, exit code ${String(ended.exitCode)}`,
-              ),
-      ),
-      Effect.ignore,
-      Effect.ensuring(watch === null ? Effect.void : watch.finish(run.id)),
-      Effect.forkIn(call.scope),
-    )
     const seconds = args.timeout ?? RUN_WAIT_SECONDS
-    // Its changes are attributed once it ends: the call that waits for it answers after that.
+    // Its changes are attributed once it ends: the call that waits for it answers after that. A
+    // call that stops waiting first attributes what it changed so far and lets the lock go: a
+    // run that outlives its call never holds its repository (#142).
     const settled = (done: Run) =>
-      watch === null ? Effect.succeed(done) : Effect.as(watch.settled(run.id), done)
+      watch === null ? Effect.succeed(done) : Effect.as(watch.settled, done)
     const ended =
       run.type === 'serve'
         ? run
@@ -186,7 +209,14 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
             // Started for this call and waited for by it: an agent that stops waiting leaves
             // nobody to read it, and it is stopped rather than left behind.
             Effect.onInterrupt(() => stopRun(run.id).pipe(Effect.ignore)),
-            Effect.flatMap((done) => (Option.isSome(done) ? settled(done.value) : getRun(run.id))),
+            Effect.flatMap((done) =>
+              Option.isSome(done)
+                ? settled(done.value)
+                : Effect.andThen(
+                    watch === null ? Effect.void : watch.finish(run.id),
+                    getRun(run.id),
+                  ),
+            ),
           )
     const { output } = yield* runOutput(run.id)
     const text = describeRun(ended, output, OUTPUT_TAIL_LINES)

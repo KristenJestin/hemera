@@ -536,6 +536,12 @@ export interface RunAsked {
    * step: a run that waited and never launched leaves none, so nothing is "maybe done" for it.
    */
   readonly intent?: Effect.Effect<void, DatabaseError>
+  /**
+   * What the run waits for last, once nothing else holds it and before its intent: a Building's
+   * write lock and its snapshots before (#142), never held while the run waits for its
+   * reservation or its permission.
+   */
+  readonly beforeLaunch?: Effect.Effect<void>
 }
 
 /** A line checked for a run: no shell syntax, only template names Hemera fills. */
@@ -703,12 +709,16 @@ export const startRun = (asked: RunAsked) =>
      * What a run waiting for permission or for its reservation does once it may start: it no
      * longer waits and starts, at once and whole, so a stop finds it either waiting or started.
      */
-    const started = Effect.uninterruptible(
-      Effect.andThen(
-        Effect.sync(() => {
-          live.waiting = null
-        }),
-        launching,
+    const ready = asked.beforeLaunch ?? Effect.void
+    const started = Effect.andThen(
+      ready,
+      Effect.uninterruptible(
+        Effect.andThen(
+          Effect.sync(() => {
+            live.waiting = null
+          }),
+          launching,
+        ),
       ),
     )
     const proceed =
@@ -728,6 +738,7 @@ export const startRun = (asked: RunAsked) =>
           )
 
     if (command === null || (!ask && reservation === null)) {
+      yield* ready
       yield* launching
       return live.run
     }

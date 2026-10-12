@@ -236,17 +236,32 @@ export interface CommandAsked {
 }
 
 /**
- * A writing command the Building watches: its lock taken (after waiting, said in `note`), the
- * snapshots before it taken; `finish` takes those after it once it ends (null when it never ran),
- * attributes what it changed, and releases the lock.
+ * A writing command the Building watches. Nothing is held until `launch`, which runs right before
+ * its process launches, once its reservation and its permission no longer hold it: it takes the
+ * write lock (waiting for another task's, said in `note`) and the snapshots before. `finish`
+ * takes those after, attributes what it changed and releases the lock: once, whichever comes
+ * first of the run's end and its call's end of waiting (null when it never ran).
  */
 export interface CommandWatch {
-  readonly note: string | null
+  /** What its launch waited for, once it waited; null otherwise. */
+  readonly note: () => string | null
   /** The task the command belongs to, or null when its session runs none. */
   readonly taskId: string | null
+  /** Takes the lock and the snapshots before; whatever ends it early lets the lock go. */
+  readonly launch: Effect.Effect<void>
+  /** What the run's intent keeps for a restart to attribute it: the trees before, its globs. */
+  readonly recorded: () => Schema.JsonObject
   readonly finish: (runId: string | null) => Effect.Effect<void>
   /** Waits until `finish` attributed what the run changed. */
-  readonly settled: (runId: string) => Effect.Effect<void>
+  readonly settled: Effect.Effect<void>
+}
+
+/** A file a mission's session is about to write. */
+export interface WritingFile {
+  readonly sessionId: string
+  readonly missionId: string
+  /** Resolved and absolute. */
+  readonly path: string
 }
 
 /**
@@ -261,10 +276,19 @@ export class WriteAttribution extends Context.Service<
       file: WrittenFile,
     ) => (transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>
     readonly command: (asked: CommandAsked) => Effect.Effect<CommandWatch | null>
+    /**
+     * A file tool write, done once no other task's command holds its file and holding it while
+     * it is written: answers what it answered, and what it waited for, or null.
+     */
+    readonly holding: <A, E, R>(
+      file: WritingFile,
+      write: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<{ readonly result: A; readonly waited: string | null }, E, R>
   }
 >()('WriteAttribution') {}
 
 export const noWriteAttribution = Layer.succeed(WriteAttribution, {
   written: () => () => Effect.void,
   command: () => Effect.succeed(null),
+  holding: (_file, write) => Effect.map(write, (result) => ({ result, waited: null })),
 })

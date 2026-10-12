@@ -16,9 +16,10 @@ import { join } from 'node:path'
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
-import { Effect, Fiber, Layer, Predicate } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { buildingAttemptOf } from '../src/engine/building/tasks.ts'
@@ -36,6 +37,7 @@ import {
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
 import { beginAction } from '../src/engine/tools/actions.ts'
+import { type JudgedCall, Verdicts } from '../src/engine/tools/ports.ts'
 import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import { builderAgents, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
@@ -63,13 +65,19 @@ afterEach(removeFolders)
 const builderEngine = (
   dataFolder: string,
   workFolder: string,
-  building: { readonly checks?: Layer.Layer<TaskChecks> } = {},
-) =>
-  sessionsEngine(dataFolder, builderAgents, {
+  building: {
+    readonly checks?: Layer.Layer<TaskChecks>
+    readonly hold?: BuilderHold
+    readonly verdicts?: Layer.Layer<Verdicts>
+  } = {},
+) => {
+  const { verdicts, ...rest } = building
+  return sessionsEngine(dataFolder, builderAgents, {
     roles: [HELPER],
-    tools: { home: workFolder, verdicts: verdictsSaying(() => ALLOW).layer },
-    building,
+    tools: { home: workFolder, verdicts: verdicts ?? verdictsSaying(() => ALLOW).layer },
+    building: rest,
   })
+}
 
 /**
  * A command's script: waits for `release` when it names one, then writes each `path=content` given
@@ -334,6 +342,181 @@ describe('The write lock of a command', () => {
     expect(seen.written).toContain('waiting for `format` (T4), which writes in api')
     expect(seen.generated).toContain('waiting for `format` (T4), which writes in api')
     expect(seen.generated).toMatch(/exit code 0/)
+  })
+
+  test('a call interrupted once its lock is taken, before its run starts, lets the lock go', async () => {
+    const locked = Deferred.makeUnsafe<void>()
+    const hold: BuilderHold = (at) =>
+      at === 'locked'
+        ? Effect.andThen(Deferred.succeed(locked, undefined), Effect.never)
+        : Effect.void
+    const { run } = builderEngine(data, work, { hold })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          const format = yield* apiCommand(project.id, 'format', ['invoices.ts=formatted'])
+          const { session, grantId } = yield* builderOf(mission.id)
+          const helper = yield* helperOf(mission.id, session.folder)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          const formatting = yield* Effect.forkChild(
+            call(grantId, 'commands_run', { command: format.id, timeout: 60 }),
+          )
+          yield* Deferred.await(locked)
+          yield* Fiber.interrupt(formatting)
+          const writing = yield* Effect.forkChild(
+            call(helper.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const markdown = true\n',
+            }),
+          )
+          const writeEndedSoon = yield* endedSoon(writing)
+          return { writeEndedSoon }
+        }),
+      ),
+    )
+    expect(seen.writeEndedSoon).toBe(true)
+  })
+
+  test('a writing command that outlives its call’s wait lets the lock go when the call stops waiting, and what it writes after is nobody’s', async () => {
+    const release = join(scripts, 'release-slow')
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          const format = yield* apiCommand(project.id, 'format', ['invoices.ts=formatted'], {
+            release,
+          })
+          const { session, grantId } = yield* builderOf(mission.id)
+          const helper = yield* helperOf(mission.id, session.folder)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          const ran = yield* call(grantId, 'commands_run', { command: format.id, timeout: 1 })
+          const writing = yield* Effect.forkChild(
+            call(helper.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const markdown = true\n',
+            }),
+          )
+          const writeEndedSoon = yield* endedSoon(writing)
+          writeFileSync(release, '')
+          yield* until(Effect.map(runningOf(format.id), (going) => !going))
+          yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
+          return { ran, writeEndedSoon, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.ran).not.toMatch(/exit code/)
+    expect(seen.writeEndedSoon).toBe(true)
+    expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual([])
+    expect(seen.view.unattributed.map((one) => `${one.repository}/${one.path}`)).toContain(
+      'api/invoices.ts',
+    )
+  })
+
+  test('a command waiting for its exclusive reservation holds no lock', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          const migrate = yield* apiCommand(project.id, 'db:migrate', ['schema.sql=migrated'])
+          const { session, grantId } = yield* builderOf(mission.id)
+          const helper = yield* helperOf(mission.id, session.folder)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          // With no reset command, taking the reservation asks the user first: the run waits.
+          yield* saveResources(project.id, [
+            {
+              name: 'Shared database',
+              description: 'The team database.',
+              uses: [],
+              changes: [migrate.id],
+              resetCommandId: null,
+            },
+          ])
+          const migrating = yield* Effect.forkChild(
+            call(grantId, 'commands_run', { command: migrate.id, timeout: 60 }),
+          )
+          yield* Effect.sleep('300 millis')
+          const writing = yield* Effect.forkChild(
+            call(helper.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const markdown = true\n',
+            }),
+          )
+          const writeEndedSoon = yield* endedSoon(writing)
+          const written = writeEndedSoon ? yield* Fiber.join(writing) : ''
+          yield* Fiber.interrupt(migrating)
+          return { writeEndedSoon, written }
+        }),
+      ),
+    )
+    expect(seen.writeEndedSoon).toBe(true)
+    expect(seen.written).not.toContain('waiting')
+  })
+
+  test('a file write approved while another task’s command took the lock lands after that command, attributed to its writer alone', async () => {
+    const release = join(scripts, 'release-approved')
+    const judged = Deferred.makeUnsafe<void>()
+    const approve = Deferred.makeUnsafe<void>()
+    const verdicts = Layer.succeed(Verdicts, {
+      judge: (asked: JudgedCall) =>
+        asked.tool === 'fs_write' && asked.path?.named.endsWith('export.ts') === true
+          ? Effect.andThen(
+              Deferred.succeed(judged, undefined),
+              Effect.as(Deferred.await(approve), ALLOW),
+            )
+          : Effect.succeed(ALLOW),
+      refusal: () => Effect.succeed(null),
+    })
+    const { run } = builderEngine(data, work, { verdicts })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          const format = yield* apiCommand(project.id, 'format', ['invoices.ts=formatted'], {
+            release,
+          })
+          const { session, grantId } = yield* builderOf(mission.id)
+          const helper = yield* helperOf(mission.id, session.folder)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          const writing = yield* Effect.forkChild(
+            call(helper.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const markdown = true\n',
+            }),
+          )
+          yield* Deferred.await(judged)
+          const formatting = yield* Effect.forkChild(
+            call(grantId, 'commands_run', { command: format.id, timeout: 60 }),
+          )
+          yield* until(runningOf(format.id))
+          yield* Deferred.succeed(approve, undefined)
+          const writeEndedSoon = yield* endedSoon(writing)
+          writeFileSync(release, '')
+          yield* Fiber.join(formatting)
+          yield* Fiber.join(writing)
+          yield* call(grantId, 'task_finished', { task: 'T4', summary: 'Named.' })
+          return { writeEndedSoon, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.writeEndedSoon).toBe(false)
+    expect(pathsOf(attemptsOf(seen.view, 'T4')[0])).toEqual(['api/invoices.ts'])
+    const t2 = attemptsOf(seen.view, 'T2')[0]
+    expect(t2?.conflicts ?? []).toEqual([])
   })
 
   test('a command declaring **/*.generated.ts blocks only those paths; a command declaring no writes takes no lock', async () => {

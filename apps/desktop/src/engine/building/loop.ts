@@ -34,7 +34,7 @@ import {
   placeWords,
 } from '@hemera/core/domain'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
-import { Deferred, Effect, Option, Predicate, Result, Schema } from 'effect'
+import { Deferred, Effect, Exit, Option, Predicate, Result, Schema, Semaphore } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
 import { getProject } from '../projects.ts'
@@ -65,7 +65,7 @@ import {
 import { type EffectfulAction, actionDone, actionFailed, beginAction } from '../tools/actions.ts'
 import type { Grant } from '../tools/access.ts'
 import { answered, refusal } from '../tools/files.ts'
-import type { CommandAsked, CommandWatch, WrittenFile } from '../tools/ports.ts'
+import type { CommandAsked, CommandWatch, WritingFile, WrittenFile } from '../tools/ports.ts'
 import { mutate } from '../transaction.ts'
 import {
   attributedIn,
@@ -75,7 +75,7 @@ import {
   writesIn,
 } from './attempts.ts'
 import { TaskChecks, checkAttempt } from './checks.ts'
-import { type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
+import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { type ChangedFile, Snapshots } from './snapshots.ts'
 import {
   type AttemptFile,
@@ -115,7 +115,7 @@ export interface LoopParts {
   readonly needs: NeedService
   readonly locks: WriteLocks
   readonly said: (line: string) => Effect.Effect<void>
-  readonly hold: (at: 'starting' | 'finishing' | 'judging') => Effect.Effect<void>
+  readonly hold: (at: 'starting' | 'finishing' | 'judging' | 'locked') => Effect.Effect<void>
   /** A delivery to a lineage of the mission, or to its Builder. */
   readonly deliver: (
     building: BuildingRow,
@@ -242,28 +242,24 @@ export const buildingLoop = (parts: LoopParts) => {
       (live) => live.find((one) => one.role === 'builder')?.lineage ?? null,
     )
 
-  const waitingFor = (
-    building: BuildingRow,
-    sessionId: string,
-    started: number,
-    lock: WriteLock,
-  ) =>
-    Date.now() - started < LONG_WAIT_MS
-      ? Effect.void
-      : mutate('saying a write waited', () =>
-          Effect.succeed({
-            result: undefined,
-            events: [
-              buildingEvent(building.missionId, 'building.write_waiting', {
-                command: lock.command,
-                task: lock.taskId,
-                repository: lock.repository,
-                seconds: Math.round((Date.now() - started) / 1000),
-                sessionId,
-              }),
-            ],
-          }),
-        )
+  const waitingFor = (building: BuildingRow, sessionId: string, started: number, lock: WriteLock) =>
+    Effect.gen(function* () {
+      if (Date.now() - started < LONG_WAIT_MS) return
+      yield* mutate('saying a write waited', () =>
+        Effect.succeed({
+          result: undefined,
+          events: [
+            buildingEvent(building.missionId, 'building.write_waiting', {
+              command: lock.command,
+              task: lock.taskId,
+              repository: lock.repository,
+              seconds: Math.round((Date.now() - started) / 1000),
+              sessionId,
+            }),
+          ],
+        }),
+      )
+    })
 
   /** A wait for a write lock, counted as a running command for the stuck rule. */
   const counted = <A, E, R>(sessionId: string, wait: Effect.Effect<A, E, R>) =>
@@ -346,11 +342,15 @@ export const buildingLoop = (parts: LoopParts) => {
       return found === undefined ? all : [found]
     })
 
-  /** A writing command of a mission's session: its lock, then the snapshots before it. */
+  /**
+   * A writing command of a mission's session, watched: nothing is held until its launch, which
+   * takes its lock and the snapshots before it; its finish attributes and lets the lock go.
+   */
   const command = (asked: CommandAsked) =>
     Effect.gen(function* () {
-      // A command that writes nothing takes no lock and gets no snapshot pair.
-      if (asked.command?.readOnly === true) return null
+      // A command that writes nothing takes no lock and gets no snapshot pair; nor does a
+      // service, which runs until it is stopped and would hold its repository all that time.
+      if (asked.command?.readOnly === true || asked.command?.type === 'serve') return null
       const database = yield* Database
       const building = yield* activeBuildingIn(database, asked.missionId)
       if (building === null) return null
@@ -363,59 +363,142 @@ export const buildingLoop = (parts: LoopParts) => {
           ? null
           : asked.command.writeGlobs.map((glob) => posix.normalize(`${prefix}${glob}`))
       const name = asked.command?.name ?? asked.line
-      const started = Date.now()
-      const { taken, waited } = yield* counted(
-        session.id,
-        locks.take(
-          building.id,
-          task?.id ?? null,
-          name,
-          repositories.map((one) => one.repository),
-          globs,
-        ),
-      )
-      if (waited !== null) yield* waitingFor(building, session.id, started, waited)
       const watchId = crypto.randomUUID()
-      const snapshots = yield* Snapshots
-      const before = yield* Effect.result(
-        Effect.forEach(repositories, (base) =>
-          Effect.map(
-            snapshots.take(placeOfBase(base), {
-              kind: 'run',
-              missionId: building.missionId,
-              runId: watchId,
-              side: 'before',
-            }),
-            (tree) => ({ base, tree }),
-          ),
-        ),
-      )
-      if (Result.isFailure(before)) {
-        yield* snapshots.failed(building.missionId, before.failure)
-        yield* locks.release(taken)
-        return null
-      }
+      const context = yield* Effect.context<
+        Database | DomainEvents | Secrets | Snapshots | SessionPost
+      >()
+      // One at a time: the launch's snapshots and the finish never cross.
+      const turn = yield* Semaphore.make(1)
       const done = yield* Deferred.make<void>()
-      const context = yield* Effect.context<Database | DomainEvents | Secrets | Snapshots>()
-      const watch: CommandWatch = {
-        note: waited === null ? null : waitingSaid(waited),
-        taskId: task?.id ?? null,
-        finish: (runId) =>
-          (runId === null
-            ? Effect.void
-            : afterCommand(building, task, session, name, globs, watchId, runId, before.success)
-          ).pipe(
-            Effect.catchCause((cause) =>
-              said(`a command's changes were not attributed: ${String(cause)}`),
-            ),
-            Effect.ensuring(locks.release(taken)),
-            Effect.ensuring(Deferred.succeed(done, undefined)),
-            Effect.provide(context),
+      const taken: WriteLock[] = []
+      let waited: WriteLock | null = null
+      let before: ReadonlyArray<{ readonly base: BuildingBase; readonly tree: string }> | null =
+        null
+      let closed = false
+      const letGo = Effect.suspend(() => locks.release(taken.splice(0)))
+      const launch = Effect.gen(function* () {
+        if (closed) return
+        const started = Date.now()
+        waited = yield* counted(
+          session.id,
+          locks.take(
+            building.id,
+            task?.id ?? null,
+            name,
+            repositories.map((one) => one.repository),
+            globs,
+            taken,
           ),
-        settled: () => Deferred.await(done),
+        )
+        if (waited !== null) {
+          yield* waitingFor(building, session.id, started, waited).pipe(
+            Effect.catch((refused) => said(`a long wait was not said: ${refused.message}`)),
+          )
+        }
+        yield* hold('locked')
+        yield* Semaphore.withPermits(
+          turn,
+          1,
+        )(
+          Effect.gen(function* () {
+            if (closed) return yield* letGo
+            const snapshots = yield* Snapshots
+            const trees = yield* Effect.result(
+              Effect.forEach(repositories, (base) =>
+                Effect.map(
+                  snapshots.take(placeOfBase(base), {
+                    kind: 'run',
+                    missionId: building.missionId,
+                    runId: watchId,
+                    side: 'before',
+                  }),
+                  (tree) => ({ base, tree }),
+                ),
+              ),
+            )
+            if (Result.isFailure(trees)) {
+              yield* snapshots.failed(building.missionId, trees.failure)
+              closed = true
+              return yield* letGo
+            }
+            before = trees.success
+          }),
+        )
+      }).pipe(
+        // Interrupted or dead before it was watching: nothing of the lock stays.
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit)
+            ? Effect.void
+            : Effect.suspend(() => {
+                closed = true
+                return letGo
+              }),
+        ),
+        Effect.provide(context),
+      )
+      const finish = (runId: string | null) =>
+        Semaphore.withPermits(
+          turn,
+          1,
+        )(
+          Effect.gen(function* () {
+            if (closed) return
+            closed = true
+            if (runId !== null && before !== null) {
+              yield* afterCommand(building, task, session, name, globs, watchId, runId, before)
+            }
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            said(`a command's changes were not attributed: ${String(cause)}`),
+          ),
+          Effect.ensuring(letGo),
+          Effect.ensuring(Deferred.succeed(done, undefined)),
+          Effect.provide(context),
+        )
+      const watch: CommandWatch = {
+        note: () => (waited === null ? null : waitingSaid(waited)),
+        taskId: task?.id ?? null,
+        launch,
+        recorded: () =>
+          before === null
+            ? {}
+            : {
+                before: before.map((one) => ({ repository: one.base.repository, tree: one.tree })),
+                globs: globs === null ? null : [...globs],
+              },
+        finish,
+        settled: Deferred.await(done),
       }
       return watch
     })
+
+  /**
+   * The hold of a file tool write of a mission's session, begun once no other task's command
+   * holds its file and put into `sink`: no command starts there until `endHold`. Answers what it
+   * waited for, or null.
+   */
+  const beginHold = (file: WritingFile, sink: WriteInProgress[]) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const building = yield* activeBuildingIn(database, file.missionId)
+      const located = building === null ? null : fileOf(building, file.path)
+      const lineage = yield* lineageIn(database, file.sessionId)
+      if (building === null || located === null || lineage === null) return null
+      const mine = runningOf(yield* tasksIn(database, building.id), lineage).map((one) => one.id)
+      const started = Date.now()
+      const waited = yield* counted(
+        file.sessionId,
+        locks.beginWrite(building.id, mine, located, sink),
+      )
+      if (waited === null) return null
+      yield* waitingFor(building, file.sessionId, started, waited)
+      return waitingSaid(waited)
+    }).pipe(
+      Effect.catch((refused) =>
+        Effect.as(said(`a write was not held against the commands: ${refused.message}`), null),
+      ),
+    )
 
   /** What a command changed, attributed to its task; a held file of another task is a conflict. */
   const afterCommand = (
@@ -1398,6 +1481,8 @@ export const buildingLoop = (parts: LoopParts) => {
 
   return {
     attribution: { written, command },
+    beginHold,
+    endHold: locks.endWrite,
     waitForLock,
     attemptFilesOf,
     keepFilesIn,
