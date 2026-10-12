@@ -71,7 +71,7 @@ export const CleanupConfirmation: Story = {
       await waitFor(() => within(document.body).getByRole('dialog', { name: 'Clean up ACME-12?' })),
     )
     const kept = within(dialog.getByRole('region', { name: 'Kept by the guard' }))
-    await expect(kept.getByText(/on no branch of the forge/)).toBeVisible()
+    await expect(kept.getByText(/#18 and #22 are still open/)).toBeVisible()
     await expect(
       within(dialog.getByRole('region', { name: 'Removed' })).getAllByRole('listitem'),
     ).toHaveLength(3)
@@ -87,6 +87,6 @@ export const CleanedUp: Story = {
   args: { cancelled: 'cleaned' },
   play: async ({ canvasElement }) => {
     const cleanup = within(within(canvasElement).getByRole('list', { name: 'Cleanup' }))
-    await expect(cleanup.getAllByRole('img', { name: 'Kept by the guard' })).toHaveLength(1)
+    await expect(cleanup.getAllByRole('img', { name: 'Kept by the guard' })).toHaveLength(2)
   },
 }

@@ -273,20 +273,24 @@ export function StepLine({
 /** A repository in its wave: one line, open on its steps, its delivery view a press away. */
 function RepositoryLine({
   delivery,
+  wave,
   handlers,
 }: {
   delivery: RepositoryDelivery
+  wave: number
   handlers: DeliveryHandlers
 }): ReactNode {
   const [open, setOpen] = useState(calls(delivery.state))
   const step = currentStep(delivery)
   const name = delivery.repository
   const summary =
-    delivery.state === 'delivered'
-      ? `Delivered · ${delivery.steps.findLast((one) => one.outcome !== undefined)?.outcome ?? ''}`
-      : step === undefined
-        ? ''
-        : `${step.name} · ${step.waits ?? step.task}`
+    delivery.state === 'todo'
+      ? `Not started · after wave ${String(wave - 1)}`
+      : delivery.state === 'delivered'
+        ? `Delivered · ${delivery.steps.findLast((one) => one.outcome !== undefined)?.outcome ?? ''}`
+        : step === undefined
+          ? ''
+          : `${step.name} · ${step.waits ?? step.task}`
   return (
     <li className="flex flex-col" aria-label={name}>
       <div className="flex min-w-0 items-center pr-2 pl-4 hover:tinted hover-motion">
@@ -345,7 +349,7 @@ function Wave({ wave, handlers }: { wave: DeliveryWave; handlers: DeliveryHandle
       <Frame>
         <ul className="flex flex-col py-1">
           {wave.repositories.map((one) => (
-            <RepositoryLine key={one.repository} delivery={one} handlers={handlers} />
+            <RepositoryLine key={one.repository} delivery={one} wave={wave.n} handlers={handlers} />
           ))}
         </ul>
       </Frame>

@@ -102,7 +102,14 @@ function walk(steps: readonly Step[], progress: Progress): readonly Step[] {
   return steps.map((one, index) => {
     if (index < progress.at) return { ...one, state: 'done' }
     if (index === progress.at) return { ...one, state: progress.state, ...progress.extra }
-    return { ...one, state: 'todo', outcome: undefined, checks: undefined, journal: undefined }
+    return {
+      ...one,
+      state: 'todo',
+      outcome: undefined,
+      url: undefined,
+      checks: undefined,
+      journal: undefined,
+    }
   })
 }
 
@@ -976,15 +983,35 @@ const STOPPED: CancelledMoment['stopped'] = [
   { what: 'The agent of Shipping', detail: 'its turn ended' },
 ]
 
+/** Cancelled in Review: web's unpushed commits are kept, the rest is pushed or disposable. */
+const REVIEW_CLEANUP: readonly CleanupItem[] = [
+  { what: 'The Workspace of ACME-12', kind: 'workspace', state: 'todo' },
+  {
+    what: 'feat/acme-12-export-invoices in web',
+    kind: 'branch',
+    state: 'kept',
+    reason: '2 of its commits are not pushed: nothing else holds them',
+  },
+  { what: 'feat/acme-12-export-invoices in api, shared', kind: 'branch', state: 'todo' },
+  { what: 'The service web · dev server', kind: 'service', state: 'todo' },
+]
+
+/** Cancelled while shipping: the open pull requests and web's unpushed commits are kept. */
 const CANCEL_CLEANUP: readonly CleanupItem[] = [
   { what: 'The Workspace of ACME-12', kind: 'workspace', state: 'todo' },
   {
-    what: 'feat/acme-12-export-invoices in api, web',
+    what: 'feat/acme-12-export-invoices in lib-a, lib-b',
     kind: 'branch',
     state: 'kept',
-    reason: 'their commits are on no branch of the forge: the guard keeps them so nothing is lost',
+    reason: 'their pull requests #18 and #22 are still open',
   },
-  { what: 'feat/acme-12-export-invoices in shared', kind: 'branch', state: 'todo' },
+  {
+    what: 'feat/acme-12-export-invoices in web',
+    kind: 'branch',
+    state: 'kept',
+    reason: '2 of its commits are not pushed: nothing else holds them',
+  },
+  { what: 'feat/acme-12-export-invoices in shared, api', kind: 'branch', state: 'todo' },
   { what: 'The service web · dev server', kind: 'service', state: 'todo' },
 ]
 
@@ -1001,7 +1028,7 @@ export const CANCELLED_MOMENTS = {
       { repository: 'web', branch: BRANCH, detail: '9 commits, 2 not pushed' },
       { repository: 'shared', branch: BRANCH, detail: '3 commits, pushed' },
     ],
-    cleanup: CANCEL_CLEANUP,
+    cleanup: REVIEW_CLEANUP,
     cleaned: false,
   }),
   /** Cancelled while shipping: shared was delivered and stays so. */
@@ -1022,7 +1049,8 @@ export const CANCELLED_MOMENTS = {
     stopped: STOPPED,
     delivered: [SHARED_DELIVERED],
     kept: [
-      { repository: 'api', branch: BRANCH, detail: '14 commits, pushed' },
+      { repository: 'lib-a', branch: BRANCH, detail: '#18 open, its CI stopped' },
+      { repository: 'lib-b', branch: BRANCH, detail: '#22 open' },
       { repository: 'web', branch: BRANCH, detail: '9 commits, 2 not pushed' },
     ],
     cleanup: CANCEL_CLEANUP.map(removedUnlessKept),
