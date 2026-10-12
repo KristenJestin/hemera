@@ -647,6 +647,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const caller = yield* callerOf(grant)
           if ('refused' in caller) return caller.refused
           const { building, session } = caller
+          // A helper (#145) starts the one task it is tied to, and no other.
+          if (grant.helper !== undefined && grant.helper.taskId !== args.task) {
+            return refusal(
+              `refused: ${grant.helper.label} starts only its own task${grant.helper.taskId === null ? '' : `, ${grant.helper.taskId}`}.`,
+            )
+          }
           const database = yield* Database
           const task = taskIn(yield* tasksIn(database, building.id), args.task)
           if (task === null) return refusal(`refused: ${args.task} is not a task of the plan.`)

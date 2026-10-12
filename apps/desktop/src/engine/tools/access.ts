@@ -30,7 +30,20 @@ export interface Grant {
   readonly epoch: number
   readonly role: Role
   readonly tools: ReadonlyArray<ToolName>
-  readonly place: { readonly kind: PlaceKind; readonly readOnly: boolean; readonly root: string }
+  readonly place: {
+    readonly kind: PlaceKind
+    readonly readOnly: boolean
+    readonly root: string
+    /**
+     * A folder it reads beside its own, never writes (the Prototyper's Workspace, #145): the
+     * repositories it names are there.
+     */
+    readonly readable?: string | undefined
+  }
+  /** The helper the session runs, for the question its call may become (#145); none otherwise. */
+  readonly helper?:
+    | { readonly label: string; readonly taskId: string | null; readonly depth: number }
+    | undefined
   readonly projectId: string
   readonly missionId: string | null
   /** The Workspace the place is, or null for the main checkout or a place of its own. */

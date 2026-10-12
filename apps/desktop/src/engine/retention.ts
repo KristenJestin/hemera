@@ -131,6 +131,9 @@ export const TABLE_CLASSES = {
   building_attempts: 'permanent',
   building_claims: 'state',
   building_decisions: 'permanent',
+  helpers: 'permanent',
+  // A result waits here only until its parent's lineage takes it.
+  queued_results: 'state',
   mission_validation_settings: 'permanent',
   proposed_answers: 'permanent',
   jira_tokens: 'state',

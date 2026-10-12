@@ -30,7 +30,17 @@ export interface CallSession {
   readonly role: Role
   readonly projectId: string
   readonly missionId: string | null
-  readonly place: { readonly kind: PlaceKind; readonly readOnly: boolean; readonly root: string }
+  readonly place: {
+    readonly kind: PlaceKind
+    readonly readOnly: boolean
+    readonly root: string
+    /** A folder it reads beside its own, never writes (the Prototyper's Workspace, #145). */
+    readonly readable?: string | undefined
+  }
+  /** The helper the session runs (#145); none otherwise. */
+  readonly helper?:
+    | { readonly label: string; readonly taskId: string | null; readonly depth: number }
+    | undefined
 }
 
 /** A path a call acts on, resolved. */

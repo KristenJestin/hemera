@@ -11,7 +11,15 @@
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
-import { ROLE_PLACES, Role, TESTER_TOOLS, toolsOf } from '@hemera/core/domain'
+import {
+  ROLE_PLACES,
+  Role,
+  TESTER_TOOLS,
+  definedHelperNamed,
+  helperLabel,
+  helperToolsOf,
+  toolsOf,
+} from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
 import { Effect, Layer, Option, Schema } from 'effect'
 
@@ -20,11 +28,13 @@ import type { Discovery } from '../agents/discovery.ts'
 import { HemeraEndpoint } from '../agents/endpoint.ts'
 import type { AgentStarter } from '../agents/runtime.ts'
 import { getAgentSession } from '../agents/sessions.ts'
+import { chosenToolsOf, helperOfLineage } from '../building/helper-store.ts'
+import { sessionsOfLineage } from '../sessions/store.ts'
 import { getProject } from '../projects.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { missions, workspaces } from '../storage/schema.ts'
+import { agentSessions, missions, workspaces } from '../storage/schema.ts'
 import { Memory, SessionEpochs } from '../memory/index.ts'
 import { ToolAccess, toolAccessLayer } from './access.ts'
 import { effectfulActionsLayer } from './actions.ts'
@@ -144,24 +154,69 @@ const grantOf = (sessionId: string) =>
       .from(workspaces)
       .where(and(eq(workspaces.projectId, projectId), eq(workspaces.folder, session.folder)))
       .pipe(Effect.mapError(refusedWhile('reading the Workspaces')))
+    const helped = yield* helperOf(sessionId)
     return Option.match(role, {
       // A role this version does not know is handed no tool rather than guessed at.
       onNone: () => ({ role: null, sessionId, epoch, projectId, missionId, folder }),
-      onSome: (known) => ({
-        role: known,
-        grant: {
-          sessionId,
-          epoch,
+      onSome: (known) => {
+        const tools = toolsOf(known).filter((tool) => testing || !TESTER_TOOLS.includes(tool))
+        return {
           role: known,
-          tools: toolsOf(known).filter((tool) => testing || !TESTER_TOOLS.includes(tool)),
-          place: { ...ROLE_PLACES[known], root: folder },
-          projectId,
-          missionId,
-          workspaceId: workspace?.id ?? null,
-          mainCheckout: resolve(project.mainCheckout) === folder,
-        },
-      }),
+          grant: {
+            sessionId,
+            epoch,
+            role: known,
+            // A helper's session holds what its depth, its task and its parent give it (#145).
+            tools:
+              helped === null
+                ? tools
+                : helperToolsOf({
+                    role: tools,
+                    defined:
+                      helped.row.definition === null
+                        ? null
+                        : (definedHelperNamed(helped.row.definition)?.tools ?? []),
+                    depth: helped.row.depth,
+                    task: helped.row.taskId !== null,
+                    writes: helped.row.writes,
+                    chosen: chosenToolsOf(helped.row),
+                  }),
+            place: { ...ROLE_PLACES[known], root: folder, readable: helped?.readable },
+            helper:
+              helped === null
+                ? undefined
+                : {
+                    label: helperLabel(helped.row.number),
+                    taskId: helped.row.taskId,
+                    depth: helped.row.depth,
+                  },
+            projectId,
+            missionId,
+            workspaceId: workspace?.id ?? null,
+            mainCheckout: resolve(project.mainCheckout) === folder,
+          },
+        }
+      },
     })
+  })
+
+/**
+ * The helper a session runs, and for one in a folder of its own the Workspace it reads, its
+ * parent's place (#145); null for a session that runs none.
+ */
+const helperOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [found] = yield* database
+      .select({ lineage: agentSessions.lineage })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .pipe(Effect.mapError(refusedWhile('reading a session')))
+    const row = yield* helperOfLineage(found?.lineage ?? sessionId)
+    if (row === null) return null
+    if (row.place !== 'prototype') return { row, readable: undefined }
+    const parent = (yield* sessionsOfLineage(row.parentLineage)).at(0)
+    return { row, readable: parent === undefined ? undefined : resolve(parent.folder) }
   })
 
 /** The endpoint agents are started with: the server's address, and a token per session. */
