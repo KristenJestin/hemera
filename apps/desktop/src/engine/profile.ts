@@ -360,6 +360,7 @@ export type EngineServices =
   | TicketProviders
   | TicketSync
   | TicketWrites
+  | SessionPost
 
 export interface ProfileStart {
   readonly dataFolder: string

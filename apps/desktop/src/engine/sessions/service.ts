@@ -1064,9 +1064,9 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         yield* AutomationGate.use((gate) => gate.pass)
         yield* Memory.use((memory) => memory.ready)
         // Orphan agent processes a stopped engine left are ended before anything starts.
-        const orphans = yield* ProcessSupervisor.use((supervisor) =>
+        const orphans = (yield* ProcessSupervisor.use((supervisor) =>
           supervisor.endOrphans('session'),
-        )
+        )).filter((orphan) => orphan.ended)
         if (orphans.length > 0)
           yield* said(`ended ${String(orphans.length)} orphan agent process(es)`)
         // What a stopped engine left: sessions opened before this one started.

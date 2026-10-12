@@ -384,9 +384,15 @@ export function stillRuns(
 /** A root left by a previous engine, and whether it was ended. */
 export interface Orphan {
   readonly root: RegisteredRoot
-  /** True when it was alive and still ours, and its tree was ended. */
+  /** True when it was alive and still ours, and its root was seen gone after its tree was ended. */
   readonly ended: boolean
 }
+
+/**
+ * How long an orphan's root is given to be gone once its tree was ended: `taskkill` answers when
+ * Windows was asked, and a process ends a moment after.
+ */
+export const ORPHAN_EXIT_MS = 10_000
 
 /** How long a child is given to end itself before its tree is taken down, unless told. */
 export const DEFAULT_GRACE_MS = 5_000
@@ -644,24 +650,41 @@ export const processSupervisorLayer = Layer.effect(
         })),
       )
 
+    /** Whether a pid is gone within `ORPHAN_EXIT_MS`, as the system says it. */
+    const goneWithin = (pid: number) => {
+      const gone: Effect.Effect<void> = Effect.suspend(() =>
+        host.alive(pid) ? Effect.andThen(Effect.sleep('25 millis'), gone) : Effect.void,
+      )
+      return gone.pipe(
+        Effect.timeoutOption(Duration.millis(ORPHAN_EXIT_MS)),
+        Effect.map(Option.isSome),
+      )
+    }
+
     const endOrphans = (kind: ProcessOwner['kind']) =>
       Effect.gen(function* () {
         const left = yield* registry.leftBy(kind, engine)
         const orphans: Orphan[] = []
         for (const root of left) {
           let ours = false
+          let gone = false
           if (host.alive(root.pid)) {
             const line = yield* host.commandLineOf(root.pid)
             ours = line !== null && stillRuns(root, line, host.platform)
           }
           if (ours) {
             yield* host.killTree(root.pid, host.platform !== 'win32')
+            // Said ended only once the system says the pid is gone, not when the kill was asked.
+            gone = yield* goneWithin(root.pid)
+            const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
             yield* sink.write(
-              `ended ${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`,
+              gone
+                ? `ended ${which}`
+                : `could not end ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed`,
             )
           }
           yield* registry.remove(root.id)
-          orphans.push({ root, ended: ours })
+          orphans.push({ root, ended: gone })
         }
         return orphans
       })
