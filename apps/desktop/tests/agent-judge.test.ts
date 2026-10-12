@@ -3,7 +3,7 @@
  * #32 as the judge behind the starter — never a real agent, never a real provider. When Jev is not
  * ready, a call the local rules leave open is rated by a judge session of the session's own agent:
  * it allows or asks, every failure asks, steps 1 to 4 never reach it, it can do nothing, it is told
- * nothing secret, and one judge is kept open per agent.
+ * nothing secret, and one judge is kept open per Project and agent (#209), never beside Jev.
  */
 
 import { mkdirSync, realpathSync } from 'node:fs'
@@ -29,6 +29,7 @@ import { Discovery } from '../src/engine/agents/discovery.ts'
 import { type FakeAgent, type FakeStep, fakeAgent } from '../src/engine/agents/fake.ts'
 import { AgentStarter } from '../src/engine/agents/runtime.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
+import { createMission } from '../src/engine/missions.ts'
 import { AGENT_REQUESTS, answerNeed, createNeed } from '../src/engine/needs.ts'
 import { JUDGEMENTS, JUDGE_IDLE } from '../src/engine/permissions/agent-judge.ts'
 import { HemeraAuto } from '../src/engine/permissions/hemera-auto.ts'
@@ -36,6 +37,7 @@ import { JevTransport, fetchTransport } from '../src/engine/permissions/jev.ts'
 import { setNeverList } from '../src/engine/permissions/never-list.ts'
 import { SessionTurns } from '../src/engine/permissions/ports.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
+import { createProject } from '../src/engine/projects.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -84,6 +86,8 @@ interface Judges {
   steps: ReadonlyArray<FakeStep>
   /** Awaited before each step: a promise that never settles holds the turn for ever. */
   hold: () => Promise<void>
+  /** Awaited before a judge is started: a test can hold a start under way. */
+  starting: () => Promise<void>
 }
 
 interface World {
@@ -94,6 +98,8 @@ interface World {
   readonly main: string
   readonly projectId: string
   readonly missionId: string
+  /** The engine's diagnostic lines, as they are written. */
+  readonly lines: ReadonlyArray<string>
 }
 
 /**
@@ -113,21 +119,24 @@ const withJudge = <A, E>(
     started: [],
     steps: options.steps ?? [says(0.2, 0.1, 0)],
     hold: () => Promise.resolve(),
+    starting: () => Promise.resolve(),
   }
   const questions = questionsKept()
   const starter = Layer.succeed(AgentStarter, {
     start: () =>
-      Effect.sync(() => {
-        const agent = fakeAgent({
-          configOptions: [MODELS],
-          get steps() {
-            return judges.steps
-          },
-          between: () => judges.hold(),
-        })
-        judges.started.push(agent)
-        return agent.process
-      }),
+      Effect.promise(() => judges.starting()).pipe(
+        Effect.map(() => {
+          const agent = fakeAgent({
+            configOptions: [MODELS],
+            get steps() {
+              return judges.steps
+            },
+            between: () => judges.hold(),
+          })
+          judges.started.push(agent)
+          return agent.process
+        }),
+      ),
   })
   const discovery = Layer.succeed(Discovery, {
     list: Effect.succeed([]),
@@ -173,6 +182,7 @@ const withJudge = <A, E>(
             main,
             projectId: project.id,
             missionId: mission.id,
+            lines: started.lines,
           })
         }),
       )
@@ -185,6 +195,35 @@ const withJudge = <A, E>(
     }),
   )
 }
+
+/** A second Project, Globex, with a mission and its Builder: the same agent as Acme's. */
+const globexBuilder = Effect.gen(function* () {
+  const main = join(work, 'globex')
+  mkdirSync(main, { recursive: true })
+  const project = yield* createProject({ name: 'Globex', mainCheckout: main, repositories: [] })
+  const mission = yield* createMission({
+    projectId: project.id,
+    idea: { sentence: 'Send the reports by mail', ticket: null },
+  })
+  const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+  return builder.grantId
+})
+
+/** A Jev key saved and consented to, in either order: Jev is ready once both are. */
+const jevReady = (consentFirst: boolean) =>
+  HemeraAuto.use((auto) =>
+    consentFirst
+      ? Effect.andThen(auto.setConsent(true), auto.storeKey('c2VhbGVk')).pipe(
+          Effect.andThen(auto.restoreKey(KEY)),
+        )
+      : Effect.andThen(auto.storeKey('c2VhbGVk'), auto.restoreKey(KEY)).pipe(
+          Effect.andThen(auto.setConsent(true)),
+        ),
+  )
+
+/** The judge sessions let go because Jev is ready, as the diagnostic log says it. */
+const letGoForJev = (lines: ReadonlyArray<string>) =>
+  lines.filter((line) => /^judge claude: Jev is ready, the judge session is let go/.test(line))
 
 const write = (grantId: string, path = 'notes.md') =>
   callTool(grantId, 'fs_write', { path, content: 'hello\n' })
@@ -513,5 +552,159 @@ describe('One judge kept open per agent', () => {
       { testClock: true },
     )
     expect(judges.started.map((judge) => judge.answers.prompts.length)).toEqual([1, 1])
+  })
+})
+
+describe('One judge per Project and agent (#209)', () => {
+  test('two Projects on the same agent get two judge sessions; a call of one never reaches the other’s', async () => {
+    const { judges } = await withJudge(({ builder }) =>
+      Effect.gen(function* () {
+        const globex = yield* globexBuilder
+        yield* write(builder, 'acme-1.md')
+        yield* write(globex, 'globex-1.md')
+        yield* write(builder, 'acme-2.md')
+        yield* write(globex, 'globex-2.md')
+      }),
+    )
+    expect(judges.started).toHaveLength(2)
+    const told = judges.started.map((judge) => judge.answers.prompts.map(textOf).join('\n'))
+    expect(judges.started.map((judge) => judge.answers.prompts.length)).toEqual([2, 2])
+    expect(told[0]).toContain('~/acme/acme-1.md')
+    expect(told[0]).toContain('~/acme/acme-2.md')
+    expect(told[0]).not.toContain('globex')
+    expect(told[1]).toContain('~/globex/globex-1.md')
+    expect(told[1]).toContain('~/globex/globex-2.md')
+    expect(told[1]).not.toContain('acme')
+  })
+
+  test('a Project’s judge let go after a failure leaves the other Project’s judge open', async () => {
+    const { answer, judges } = await withJudge(({ builder, judges: held }) =>
+      Effect.gen(function* () {
+        const globex = yield* globexBuilder
+        const first = yield* write(builder, 'acme-1.md')
+        held.steps = [{ does: 'says', text: 'not scores' }]
+        const failed = yield* write(globex, 'globex-1.md')
+        held.steps = [says(0.2, 0.1, 0)]
+        const again = yield* write(builder, 'acme-2.md')
+        return [first.ok, failed.ok, again.ok]
+      }),
+    )
+    expect(answer).toEqual([true, false, true])
+    const told = judges.started.map((judge) => judge.answers.prompts.map(textOf).join('\n'))
+    expect(told).toHaveLength(2)
+    expect(told[0]).toContain('~/acme/acme-1.md')
+    expect(told[0]).toContain('~/acme/acme-2.md')
+    expect(told[1]).toContain('~/globex/globex-1.md')
+  })
+})
+
+describe('Never an agent’s judge beside Jev (#209)', () => {
+  test('Jev ready: no judge session is started for any Project', async () => {
+    jev.answer = () => scored(0.3, 0, 0)
+    const { judges } = await withJudge(
+      ({ builder }) =>
+        Effect.gen(function* () {
+          const globex = yield* globexBuilder
+          yield* write(builder, 'acme-1.md')
+          yield* write(globex, 'globex-1.md')
+          yield* run(builder, 'make build')
+          yield* run(globex, 'make build')
+        }),
+      { jev: true },
+    )
+    expect(jev.received).toHaveLength(4)
+    expect(judges.started).toHaveLength(0)
+  })
+
+  test.each([
+    ['the key saved, then consented to', false],
+    ['consent given, then the key saved', true],
+  ])(
+    'a judge open before Jev is ready is let go once %s, and the next call goes to Jev',
+    async (_case, consentFirst) => {
+      jev.answer = () => scored(0.3, 0, 0)
+      const { answer, judges, lines } = await withJudge(({ builder, lines: said }) =>
+        Effect.gen(function* () {
+          const globex = yield* globexBuilder
+          yield* write(builder, 'acme-1.md')
+          yield* write(globex, 'globex-1.md')
+          yield* jevReady(consentFirst)
+          // Let go as soon as Jev is ready, before any other call.
+          for (let tries = 0; letGoForJev(said).length < 2 && tries < 100; tries += 1) {
+            yield* Effect.yieldNow
+          }
+          const before = letGoForJev(said).length
+          yield* write(builder, 'acme-2.md')
+          yield* write(globex, 'globex-2.md')
+          return { before, events: yield* decided }
+        }),
+      )
+      expect(answer.before).toBe(2)
+      expect(letGoForJev(lines)).toHaveLength(2)
+      expect(judges.started.map((judge) => judge.answers.prompts.length)).toEqual([1, 1])
+      expect(jev.received).toHaveLength(2)
+      expect(answer.events.map((event) => event.payload['settled'])).toEqual([
+        'agent',
+        'agent',
+        'jev',
+        'jev',
+      ])
+    },
+  )
+
+  test('a key saved while a judge’s turn is under way: the judge is let go, and the call goes to Jev', async () => {
+    jev.answer = () => scored(0.3, 0, 0)
+    const { answer, judges, lines } = await withJudge(({ builder, judges: held }) =>
+      Effect.gen(function* () {
+        let begun: () => void = () => undefined
+        const turning = new Promise<void>((resolve) => {
+          begun = resolve
+        })
+        held.hold = () => {
+          begun()
+          return new Promise<void>(() => undefined)
+        }
+        const call = yield* Effect.forkChild(write(builder, 'a.md'))
+        yield* Effect.promise(() => turning)
+        yield* jevReady(false)
+        const first = yield* Fiber.join(call)
+        return { ok: first.ok, events: yield* decided }
+      }),
+    )
+    expect(answer.ok).toBe(true)
+    expect(judges.started).toHaveLength(1)
+    expect(letGoForJev(lines)).toHaveLength(1)
+    expect(jev.received).toHaveLength(1)
+    expect(answer.events.map((event) => event.payload['settled'])).toEqual(['jev'])
+  })
+
+  test('a key saved while a judge is starting: it is let go once started, and the call goes to Jev', async () => {
+    jev.answer = () => scored(0.3, 0, 0)
+    const { answer, judges, lines } = await withJudge(({ builder, judges: held }) =>
+      Effect.gen(function* () {
+        let begun: () => void = () => undefined
+        const asked = new Promise<void>((resolve) => {
+          begun = resolve
+        })
+        let release: () => void = () => undefined
+        held.starting = () => {
+          begun()
+          return new Promise<void>((resolve) => {
+            release = resolve
+          })
+        }
+        const call = yield* Effect.forkChild(write(builder, 'a.md'))
+        yield* Effect.promise(() => asked)
+        yield* jevReady(true)
+        release()
+        const first = yield* Fiber.join(call)
+        return { ok: first.ok, events: yield* decided }
+      }),
+    )
+    expect(answer.ok).toBe(true)
+    expect(judges.started).toHaveLength(1)
+    expect(judges.started[0]?.answers.prompts).toHaveLength(0)
+    expect(letGoForJev(lines)).toHaveLength(1)
+    expect(answer.events.map((event) => event.payload['settled'])).toEqual(['jev'])
   })
 })

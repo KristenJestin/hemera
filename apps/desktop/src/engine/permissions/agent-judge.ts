@@ -3,9 +3,12 @@
  * by a judge session of the session's own agent, over ACP like every session of Hemera (never a
  * one-shot command line), with the same login and its smallest model.
  *
- * - One judge per agent, kept open: each call to rate is a new turn of it, so its instructions
+ * - One judge per Project and agent, kept open (#209): what one Project's calls and its user said
+ *   never reach the judge of another. Each call to rate is a new turn of it, so its instructions
  *   stay cached. It is started on its first call, and let go after `JUDGEMENTS` judgements or
  *   `JUDGE_IDLE` without one; the next call starts it again.
+ * - Never beside Jev (#209): with Jev ready, no judge is started, and every judge open, starting
+ *   or in a turn is let go as soon as Jev becomes ready; the call it was rating goes to Jev.
  * - It can do nothing: no MCP server, no tool (its adapter's `judgeOptions`), every permission it
  *   asks refused, and a folder of its own in Hemera's data folder to run in.
  * - It is told what Jev is told, masked, as fenced data, and answers only the three scores, read
@@ -102,22 +105,34 @@ export type AgentRating =
     }
   /** No agent's judge in this engine: the call asks as it did before. */
   | { readonly kind: 'none' }
+  /** Jev became ready meanwhile: the call goes to Jev, never to the agent's judge. */
+  | { readonly kind: 'superseded' }
 
 export class AgentJudges extends Context.Service<
   AgentJudges,
   {
-    /** The judge of the session's agent rates the call; `known` are the secret values to mask. */
+    /**
+     * The judge of the session's Project and agent rates the call; `known` are the secret values
+     * to mask. `jevReady` is asked once the call's turn comes: Jev ready, no judge is started.
+     */
     readonly rate: (
       session: CallSession,
       input: AgentJudgeInput,
       known: ReadonlyArray<string>,
+      jevReady: Effect.Effect<boolean>,
     ) => Effect.Effect<AgentRating>
+    /**
+     * Jev became ready: every judge is let go, one starting once started, and a call they were
+     * rating is `superseded`.
+     */
+    readonly letGoForJev: Effect.Effect<void>
   }
 >()('AgentJudges') {}
 
 /** No agent's judge: an engine that cannot start an agent. */
 export const noAgentJudges = Layer.succeed(AgentJudges, {
   rate: () => Effect.succeed({ kind: 'none' }),
+  letGoForJev: Effect.void,
 })
 
 /** Every permission a judge asks for is refused: it has nothing to ask permission for. */
@@ -146,8 +161,12 @@ interface Open {
   gone: boolean
 }
 
-/** One agent's judge: open or not, the start under way, and the lock its turns take. */
+/**
+ * One Project's judge of one agent: open or not, the start under way, and the lock its turns
+ * take.
+ */
 interface Slot {
+  readonly provider: AgentProvider
   open: Open | null
   starting: Fiber.Fiber<Open, 'start'> | null
   readonly lock: Semaphore.Semaphore
@@ -176,14 +195,24 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
       const context = yield* Effect.context<AgentStarter | Discovery | Database>()
       const scope = yield* Effect.scope
       const { log } = settings
-      const slots = new Map<AgentProvider, Slot>()
-      const slotOf = (provider: AgentProvider): Slot => {
-        const found = slots.get(provider)
+      /** The judges, by Project and agent. */
+      const slots = new Map<string, Slot>()
+      const slotOf = (projectId: string, provider: AgentProvider): Slot => {
+        const key = JSON.stringify([projectId, provider])
+        const found = slots.get(key)
         if (found !== undefined) return found
-        const made: Slot = { open: null, starting: null, lock: Semaphore.makeUnsafe(1), busy: 0 }
-        slots.set(provider, made)
+        const made: Slot = {
+          provider,
+          open: null,
+          starting: null,
+          lock: Semaphore.makeUnsafe(1),
+          busy: 0,
+        }
+        slots.set(key, made)
         return made
       }
+      /** How many times Jev became ready: a judge started or rating across a change is let go. */
+      let jevTimes = 0
 
       /** Lets a judge go, once: the next call starts another. */
       const letGo = (slot: Slot, open: Open, why: string) =>
@@ -191,7 +220,7 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
           if (slot.open === open) slot.open = null
           if (open.gone) return Effect.void
           open.gone = true
-          log(`judge: ${why}, the judge session is let go`)
+          log(`judge ${slot.provider}: ${why}, the judge session is let go`)
           return Scope.close(open.scope, Exit.void)
         })
 
@@ -281,8 +310,9 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
        * The open judge of the agent, started when there is none. A start runs in the layer's
        * scope: a call that stops waiting on it leaves it to finish for the next one.
        */
-      const ready = (provider: AgentProvider, slot: Slot, sessionModel: string | null) =>
+      const ready = (slot: Slot, sessionModel: string | null) =>
         Effect.gen(function* () {
+          const provider = slot.provider
           const now = yield* Clock.currentTimeMillis
           const held = slot.open
           if (held !== null) {
@@ -294,11 +324,14 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
               return held
             }
           }
+          const seen = jevTimes
           const starting =
             slot.starting ??
             (yield* start(provider, sessionModel).pipe(
               Effect.tap((open) =>
                 Effect.gen(function* () {
+                  // Jev became ready while it started: it is not needed.
+                  if (jevTimes !== seen) return yield* letGo(slot, open, 'Jev is ready')
                   slot.open = open
                   // A judge that dies is let go: the next call starts another.
                   yield* open.connection.gone.pipe(
@@ -350,6 +383,7 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
         session: CallSession,
         input: AgentJudgeInput,
         known: ReadonlyArray<string>,
+        jevReady: Effect.Effect<boolean>,
       ): Effect.Effect<AgentRating> =>
         Effect.gen(function* () {
           const record = yield* getAgentSession(session.sessionId).pipe(Effect.option)
@@ -362,14 +396,18 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
           if (action === null)
             return { kind: 'unavailable', judge, failure: 'input', ms: null } as const
           const told = input.humanContext.map((item) => maskText(item, known))
-          const slot = slotOf(provider)
+          const slot = slotOf(session.projectId, provider)
           const began = yield* Clock.currentTimeMillis
           const since = Effect.map(Clock.currentTimeMillis, (now) =>
             Math.max(0, Math.round(now - began)),
           )
+          const seen = jevTimes
           slot.busy += 1
           const rated = yield* Effect.gen(function* () {
-            const open = yield* ready(provider, slot, chosen.model ?? taken.model)
+            // Jev ready, or made ready while the call waited: no judge is started.
+            if (yield* jevReady) return null
+            const open = yield* ready(slot, chosen.model ?? taken.model)
+            if (jevTimes !== seen) return null
             const answered = yield* turn(slot, open, { action, humanContext: told })
             return { ...answered, model: open.model }
           }).pipe(
@@ -378,6 +416,8 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
             Effect.result,
             Effect.ensuring(Effect.sync(() => (slot.busy -= 1))),
           )
+          // Whatever became of the turn, Jev ready meanwhile rates the call.
+          if (jevTimes !== seen) return { kind: 'superseded' } as const
           const ms = yield* since
           if (Result.isFailure(rated)) {
             return { kind: 'unavailable', judge, failure: rated.failure, ms } as const
@@ -385,10 +425,18 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
           if (Option.isNone(rated.success)) {
             return { kind: 'unavailable', judge, failure: 'timeout', ms } as const
           }
+          if (rated.success.value === null) return { kind: 'superseded' } as const
           const { scores, usage, model } = rated.success.value
           log(`judge ${provider}: rated on ${model} in ${String(ms)}ms${tokensSaid(usage)}`)
           return { kind: 'evaluated', judge, model, scores, ms } as const
         }).pipe(Effect.provide(context))
+
+      const letGoForJev = Effect.gen(function* () {
+        jevTimes += 1
+        for (const slot of slots.values()) {
+          if (slot.open !== null) yield* letGo(slot, slot.open, 'Jev is ready')
+        }
+      })
 
       // The judges idle for 10 minutes are let go, looked at every minute.
       yield* Effect.gen(function* () {
@@ -406,6 +454,6 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
         Effect.forkScoped,
       )
 
-      return { rate }
+      return { rate, letGoForJev }
     }),
   )

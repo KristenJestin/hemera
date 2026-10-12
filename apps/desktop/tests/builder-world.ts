@@ -18,6 +18,7 @@ import { checkMission } from '../src/engine/building/check.ts'
 import { launchMission } from '../src/engine/building/launch.ts'
 import type { BuilderHold, BuildingEnd, TaskVerdict } from '../src/engine/building/builder.ts'
 import { buildingOf } from '../src/engine/building/builder.ts'
+import type { TaskChecks } from '../src/engine/building/checks.ts'
 import { freezeMission } from '../src/engine/planning/freeze.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
@@ -43,6 +44,7 @@ export const builderEngine = (
   work: string,
   building: {
     readonly verdict?: Layer.Layer<TaskVerdict>
+    readonly checks?: Layer.Layer<TaskChecks>
     readonly end?: Layer.Layer<BuildingEnd>
     readonly hold?: BuilderHold
   } = {},
@@ -103,10 +105,17 @@ export const PLAN = [
   },
 ]
 
-/** A mission of Acme planned with the four tasks, frozen, checked and launched: Building. */
-export const launched = (work: string) =>
+/**
+ * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
+ * runs on the Project before the launch, for what the launch must already see.
+ */
+export const launched = <E = never, R = never>(
+  work: string,
+  before: (projectId: string) => Effect.Effect<void, E, R> = () => Effect.void,
+) =>
   Effect.gen(function* () {
     const { project, main } = yield* acmeAt(work)
+    yield* before(project.id)
     const { mission, grantId } = yield* plannedIn(project.id, main)
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {

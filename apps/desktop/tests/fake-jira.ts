@@ -9,7 +9,10 @@
  * - Cloud `POST /rest/api/3/search/jql`, Data Center `POST /rest/api/2/search`, reading only the
  *   JQL Hemera writes: `project in (…)`, `text ~ "…"`, `key in (…)`;
  * - `PUT …/issue/{key}` with `fields.description` only (#98): the description replaced (rewritten
- *   first when the suite says how Jira stores it), the update date a minute later, `204`.
+ *   first when the suite says how Jira stores it), the update date a minute later, `204`;
+ * - the issue's changelog (#207): Cloud `GET /rest/api/3/issue/{key}/changelog?startAt=&maxResults=`
+ *   (paged from the oldest, `isLast`), Data Center `GET /rest/api/2/issue/{key}?expand=changelog`
+ *   (`changelog.histories`).
  *
  * Every request is written down. A rule answers before the routes: a status, headers and a body,
  * or a hang (the connection held until the client closes it, counted in `closed`).
@@ -41,6 +44,20 @@ export interface FakeIssue {
   readonly reporter: string | null
   readonly updated: string
   readonly comments: ReadonlyArray<FakeComment>
+  /** The issue's changelog, the oldest first, as Jira answers it. */
+  readonly changelog?: ReadonlyArray<FakeHistory>
+}
+
+/** One entry of a changelog: who, when, and the fields changed. */
+export interface FakeHistory {
+  readonly id: string
+  readonly author: string | null
+  readonly created: string
+  readonly items: ReadonlyArray<{
+    readonly field: string
+    readonly fromString: string | null
+    readonly toString: string | null
+  }>
 }
 
 export interface SeenRequest {
@@ -76,6 +93,8 @@ export interface FakeJiraOptions {
   readonly rules?: ReadonlyArray<JiraRule>
   /** How many comments one page holds at most. */
   readonly commentPage?: number
+  /** How many changes one page of a Cloud changelog holds at most. */
+  readonly changelogPage?: number
   /** What it keeps of a description written, as Jira rewrites what it stores; as sent otherwise. */
   readonly stored?: (description: Schema.Json) => Schema.Json
 }
@@ -168,6 +187,22 @@ const fieldsOf = (issue: FakeIssue, wanted: ReadonlyArray<string>) => {
   return fields
 }
 
+/** A changelog entry as Jira answers it. */
+const historyOf = (history: FakeHistory) => ({
+  id: history.id,
+  author: history.author === null ? undefined : { displayName: history.author, active: true },
+  created: history.created,
+  items: history.items.map((item) => ({
+    field: item.field,
+    fieldtype: 'jira',
+    fieldId: item.field,
+    from: null,
+    fromString: item.fromString,
+    to: null,
+    toString: item.toString,
+  })),
+})
+
 /** Starts a fake Jira; `close()` stops it. */
 export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
   const seen: SeenRequest[] = []
@@ -181,6 +216,7 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
       : `Bearer ${options.token}`
   const issues = [...(options.issues ?? [])]
   const page = options.commentPage ?? 2
+  const changelogPage = options.changelogPage ?? 100
 
   const send = (
     response: ServerResponse,
@@ -235,6 +271,25 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
         }),
       )
     }
+    const changelog = /^issue\/([A-Z][A-Z0-9]*-\d+)\/changelog$/.exec(rest)
+    if (changelog !== null && options.deployment === 'cloud') {
+      const issue = issues.find((candidate) => candidate.key === changelog[1])
+      if (issue === undefined) return send(response, 404, NOT_FOUND)
+      const all = issue.changelog ?? []
+      const startAt = Number(query.get('startAt') ?? '0')
+      const max = Math.min(Number(query.get('maxResults') ?? '100'), changelogPage)
+      return send(
+        response,
+        200,
+        JSON.stringify({
+          startAt,
+          maxResults: max,
+          total: all.length,
+          isLast: startAt + max >= all.length,
+          values: all.slice(startAt, startAt + max).map(historyOf),
+        }),
+      )
+    }
     const one = /^issue\/([A-Za-z][A-Za-z0-9]*-\d+)$/.exec(rest)
     if (one !== null && request.method === 'PUT') {
       const at = issues.findIndex((candidate) => candidate.key === one[1])
@@ -255,10 +310,27 @@ export const fakeJira = async (options: FakeJiraOptions): Promise<FakeJira> => {
       const issue = issues.find((candidate) => candidate.key === one[1])
       if (issue === undefined) return send(response, 404, NOT_FOUND)
       const wanted = (query.get('fields') ?? '').split(',').filter((name) => name !== '')
+      const all = issue.changelog ?? []
+      const expanded =
+        options.deployment === 'datacenter' && (query.get('expand') ?? '').includes('changelog')
+          ? {
+              changelog: {
+                startAt: 0,
+                maxResults: all.length,
+                total: all.length,
+                histories: all.map(historyOf),
+              },
+            }
+          : {}
       return send(
         response,
         200,
-        JSON.stringify({ id: '10001', key: issue.key, fields: fieldsOf(issue, wanted) }),
+        JSON.stringify({
+          id: '10001',
+          key: issue.key,
+          fields: fieldsOf(issue, wanted),
+          ...expanded,
+        }),
       )
     }
     const searchPath = options.deployment === 'cloud' ? 'search/jql' : 'search'

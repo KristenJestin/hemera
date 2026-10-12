@@ -57,6 +57,12 @@ export class SessionPost extends Context.Service<
     /** A Hemera phase of a mission waits for a slot of the cap, said for Now; null once it has one. */
     readonly slotWait: (missionId: string, sentence: string | null) => Effect.Effect<void>
     readonly slotWaitOf: (missionId: string) => Effect.Effect<string | null>
+    /**
+     * A session's write or command waits for another task's write lock (#142): the wait counts as
+     * a running command for the stuck rule (CT-12). Counted, so two waits of one session overlap.
+     */
+    readonly lockWait: (sessionId: string, on: boolean) => Effect.Effect<void>
+    readonly lockWaiting: (sessionId: string) => Effect.Effect<boolean>
   }
 >()('SessionPost') {}
 
@@ -67,6 +73,7 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
   const pinned = new Map<string, PinnedNote>()
   const stopper = yield* Deferred.make<(owner: SessionOwner) => Effect.Effect<void>>()
   const turns = new Map<string, string | null>()
+  const lockWaits = new Map<string, number>()
   const turned = yield* PubSub.unbounded<{ readonly sessionId: string; readonly on: boolean }>()
   const handler = yield* Deferred.make<NeedHandler>()
   const waits = new Map<string, string>()
@@ -109,6 +116,13 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
         else waits.set(missionId, sentence)
       }),
     slotWaitOf: (missionId) => Effect.sync(() => waits.get(missionId) ?? null),
+    lockWait: (sessionId, on) =>
+      Effect.sync(() => {
+        const count = (lockWaits.get(sessionId) ?? 0) + (on ? 1 : -1)
+        if (count <= 0) lockWaits.delete(sessionId)
+        else lockWaits.set(sessionId, count)
+      }),
+    lockWaiting: (sessionId) => Effect.sync(() => lockWaits.has(sessionId)),
   }
 })
 

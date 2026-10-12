@@ -13,6 +13,8 @@
  *   JSON body on the standard input (`--input -`), never in an argument; then read back. A refusal
  *   (the account may read the repository but not write to it) is `TicketForbidden`, masked; a body
  *   refused as sent (400, 422) is a Spec too long when GitHub says so, `TicketWriteRejected` else.
+ * - `edits` (#207): the issue's `userContentEdits` over GraphQL, the 100 GitHub answers first
+ *   (the latest), each with its date, its editor and its `diff`, the body that edit left.
  *
  * Every API call asks for the response's headers too (`--include`): a rate limit's reset is in
  * `x-ratelimit-reset`. An answer with no HTTP status at all is a call that never reached GitHub.
@@ -44,6 +46,7 @@ import { Effect, Option, Predicate, Result, Schema } from 'effect'
 
 import { GH_INSTALL, type GhAnswer, GhCli, githubLabel } from './gh.ts'
 import {
+  type DescriptionEdit,
   MissingTicket,
   MovedTicket,
   type TicketChange,
@@ -100,6 +103,36 @@ const IssueNode = Schema.Struct({
     }),
     nodes: Schema.Array(Schema.NullOr(CommentNode)),
   }),
+})
+
+const EditsAnswer = Schema.Struct({
+  data: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        repository: Schema.NullOr(
+          Schema.Struct({
+            issue: Schema.NullOr(
+              Schema.Struct({
+                userContentEdits: Schema.NullOr(
+                  Schema.Struct({
+                    nodes: Schema.Array(
+                      Schema.NullOr(
+                        Schema.Struct({
+                          editedAt: Schema.String,
+                          editor: login,
+                          diff: Schema.NullOr(Schema.String),
+                        }),
+                      ),
+                    ),
+                  }),
+                ),
+              }),
+            ),
+          }),
+        ),
+      }),
+    ),
+  ),
 })
 
 const GraphqlError = Schema.Struct({
@@ -165,6 +198,7 @@ const isPullRequest = Schema.is(Schema.Struct({ __typename: Schema.Literal('Pull
 const readErrors = Schema.decodeUnknownOption(Schema.fromJsonString(ErrorsOnly))
 const readIssue = Schema.decodeUnknownOption(Schema.fromJsonString(ReadAnswer))
 const readChanged = Schema.decodeUnknownOption(Schema.fromJsonString(ChangedAnswer))
+const readEdits = Schema.decodeUnknownOption(Schema.fromJsonString(EditsAnswer))
 const readHits = Schema.decodeUnknownOption(Schema.fromJsonString(SearchAnswer))
 
 /** A `gh api --include` answer, split; null when it holds no HTTP status line. */
@@ -203,6 +237,15 @@ const READ_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after
           nodes { id author { login } body createdAt lastEditedAt }
         }
       }
+    }
+  }
+}`
+
+/** The edits of an issue's body GitHub keeps: when, by whom, and the body each left. */
+const EDITS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      userContentEdits(first: 100) { nodes { editedAt editor { login } diff } }
     }
   }
 }`
@@ -586,5 +629,43 @@ export const githubProvider = (config: GithubConfig) =>
         return yield* read(reference)
       })
 
-    return { kind: 'github', label, status, reads, read, search, changedSince, write }
+    const edits = (reference: TicketReference) =>
+      Effect.gen(function* () {
+        const key = ticketKeyOf(reference)
+        if (!Predicate.isTagged(reference, 'GithubIssue')) {
+          return yield* new TicketUnreadable({ key, detail: `${key} is not a GitHub issue.` })
+        }
+        const issue = GithubIssue.make({ ...reference, host })
+        const { answer, response } = yield* graphql(EDITS_QUERY, [
+          '-f',
+          `owner=${issue.owner}`,
+          '-f',
+          `name=${issue.repo}`,
+          '-F',
+          `number=${String(issue.number)}`,
+        ])
+        if (response === null || answer.code !== 0) return yield* failureOf(key, answer)
+        const decoded = readEdits(response.body)
+        const found = Option.isSome(decoded) ? decoded.value.data?.repository?.issue : undefined
+        if (found === undefined || found === null) {
+          return yield* new TicketUnreadable({
+            key,
+            detail: `${key}'s edit history could not be read: GitHub's answer was not the one asked for.`,
+          })
+        }
+        return (found.userContentEdits?.nodes ?? []).flatMap(
+          (node): ReadonlyArray<DescriptionEdit> =>
+            node === null
+              ? []
+              : [
+                  {
+                    at: node.editedAt,
+                    author: node.editor?.login ?? null,
+                    description: node.diff ?? '',
+                  },
+                ],
+        )
+      })
+
+    return { kind: 'github', label, status, reads, read, search, changedSince, write, edits }
   })
