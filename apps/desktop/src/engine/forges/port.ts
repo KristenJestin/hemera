@@ -88,6 +88,8 @@ interface CliCheck {
   readonly state: CliState
   readonly fix: string | null
   readonly detail: string | null
+  /** The bkt context of the repository's host, which every bkt write names; null for gh. */
+  readonly context: string | null
 }
 
 /** A failure of an operation once its CLI was ready: the forge's own, or the call's. */
@@ -106,6 +108,12 @@ export interface ForgeTarget {
   readonly identity: ForgeIdentity & { readonly host: string }
   readonly cli: ForgeCli
   readonly forge: ForgeName
+  /**
+   * The flags that name the repository on its forge, which every write carries: for gh
+   * `--repo host/owner/repo`; for bkt the context of the repository's host (bkt would send the
+   * command to its active context otherwise), the workspace or project, and the repository.
+   */
+  readonly place: ReadonlyArray<string>
 }
 
 export class ForgePort extends Context.Service<
@@ -176,6 +184,17 @@ const BktStatus = Schema.fromJsonString(
         }),
       ),
     ),
+    contexts: Schema.optionalKey(
+      Schema.NullOr(
+        Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            host: Schema.String,
+            active: Schema.optionalKey(Schema.Boolean),
+          }),
+        ),
+      ),
+    ),
   }),
 )
 const readBktStatus = Schema.decodeUnknownOption(BktStatus)
@@ -207,6 +226,22 @@ const bktServes = (
   if (forge === 'bitbucket-cloud')
     return name === 'api.bitbucket.org' || name === BITBUCKET_CLOUD_HOST
   return name === hostName(host)
+}
+
+/** A Data Center project key, which its SSH and HTTPS remotes write in lower case. */
+const projectKey = (owner: string): string => owner.toUpperCase()
+
+/**
+ * The bkt context to make when bkt is signed in on the repository's host but has no context for
+ * it: named after the workspace or project and the host, on bkt's key for the host.
+ */
+const contextLine = (forge: ForgeName, host: string, key: string, owner: string | null): string => {
+  const name = owner === null ? hostName(host) : `${owner.toLowerCase()}-${hostName(host)}`
+  const line = `bkt context create ${name} --host ${key}`
+  if (owner === null) return line
+  return forge === 'bitbucket-cloud'
+    ? `${line} --workspace ${owner}`
+    : `${line} --project ${projectKey(owner)}`
 }
 
 /** The CLI a forge is reached through, or none. */
@@ -278,10 +313,11 @@ export const forgeError = (
 /** What the port stands on. */
 export type ForgePortServices = NeedServices | Git | ForgeRunner
 
-/** One repository's state, with the Project it belongs to. */
+/** One repository's state, with the Project it belongs to and the bkt context of its host. */
 interface Known {
   readonly projectId: string
   readonly status: ForgeRepositoryStatus
+  readonly context: string | null
 }
 
 /**
@@ -353,9 +389,16 @@ export const forgePort = () => {
         state: Predicate.isTagged(failure, 'ForgeCliMissing') ? 'missing' : 'unreachable',
         fix: null,
         detail: failure.message,
+        context: null,
       })
 
-      const checkCli = (cli: ForgeCli, forge: ForgeName, host: string, projectId: string) =>
+      const checkCli = (
+        cli: ForgeCli,
+        forge: ForgeName,
+        host: string,
+        owner: string | null,
+        projectId: string,
+      ) =>
         Effect.gen(function* () {
           const call = (args: ReadonlyArray<string>) =>
             runner.run({ cli, forge, host, projectId, args })
@@ -365,6 +408,7 @@ export const forgePort = () => {
               state: 'missing',
               fix: installLine(cli, lookup),
               detail: null,
+              context: null,
             } satisfies CliCheck
           }
           const printed = yield* Effect.result(call(['--version']))
@@ -374,7 +418,13 @@ export const forgePort = () => {
             const auth = yield* Effect.result(call(['auth', 'status', '--hostname', host]))
             if (Result.isFailure(auth)) return unreachable(auth.failure, version)
             if (auth.success.code === 0) {
-              return { version, state: 'ready', fix: null, detail: null } satisfies CliCheck
+              return {
+                version,
+                state: 'ready',
+                fix: null,
+                detail: null,
+                context: null,
+              } satisfies CliCheck
             }
             if (NETWORK.test(auth.success.stderr)) {
               return {
@@ -382,6 +432,7 @@ export const forgePort = () => {
                 state: 'unreachable',
                 fix: null,
                 detail: auth.success.stderr,
+                context: null,
               } satisfies CliCheck
             }
             return {
@@ -389,6 +440,7 @@ export const forgePort = () => {
               state: 'signed-out',
               fix: loginLine(forge, host),
               detail: null,
+              context: null,
             } satisfies CliCheck
           }
           const auth = yield* Effect.result(call(['auth', 'status', '--json']))
@@ -403,16 +455,39 @@ export const forgePort = () => {
                 auth.success.stderr === ''
                   ? 'bkt auth status answered what Hemera cannot read'
                   : auth.success.stderr,
+              context: null,
             } satisfies CliCheck
           }
-          const signedIn = (read.value.hosts ?? []).some((one) => bktServes(one, forge, host))
-          return signedIn
-            ? ({ version, state: 'ready', fix: null, detail: null } satisfies CliCheck)
-            : ({
+          const signedIn = (read.value.hosts ?? []).find((one) => bktServes(one, forge, host))
+          if (signedIn === undefined) {
+            return {
+              version,
+              state: 'signed-out',
+              fix: loginLine(forge, host),
+              detail: null,
+              context: null,
+            } satisfies CliCheck
+          }
+          // bkt sends a command to its active context, whatever its host: a write names the
+          // context of the repository's host, the active one when several are.
+          const contexts = (read.value.contexts ?? []).filter((one) =>
+            bktServes({ key: one.host }, forge, host),
+          )
+          const chosen = contexts.find((one) => one.active === true) ?? contexts[0]
+          return chosen === undefined
+            ? ({
                 version,
                 state: 'signed-out',
-                fix: loginLine(forge, host),
+                fix: contextLine(forge, host, signedIn.key, owner),
                 detail: null,
+                context: null,
+              } satisfies CliCheck)
+            : ({
+                version,
+                state: 'ready',
+                fix: null,
+                detail: null,
+                context: chosen.name,
               } satisfies CliCheck)
         })
 
@@ -480,7 +555,11 @@ export const forgePort = () => {
         }).pipe(Effect.catch(() => Effect.void))
 
       /** Remembers a repository's state; a change is written to the journal and told. */
-      const remember = (projectId: string, status: ForgeRepositoryStatus) =>
+      const remember = (
+        projectId: string,
+        status: ForgeRepositoryStatus,
+        bktContext: string | null,
+      ) =>
         Effect.gen(function* () {
           const before = (yield* SubscriptionRef.get(memory)).get(status.repositoryId)?.status
           const changed =
@@ -515,7 +594,7 @@ export const forgePort = () => {
             )
           }
           yield* SubscriptionRef.update(memory, (known) =>
-            new Map(known).set(status.repositoryId, { projectId, status }),
+            new Map(known).set(status.repositoryId, { projectId, status, context: bktContext }),
           )
           return status
         })
@@ -529,12 +608,18 @@ export const forgePort = () => {
             const cli = cliOf(identity.forge)
             let found: CliCheck | null = null
             if (cli !== null && identity.host !== null) {
-              const key = `${cli}|${identity.host}`
+              // A missing bkt context is fixed per workspace or project: checked per owner.
+              const key = `${cli}|${identity.host}|${cli === 'bkt' ? (identity.owner ?? '') : ''}`
               found =
-                checks.get(key) ?? (yield* checkCli(cli, identity.forge, identity.host, project.id))
+                checks.get(key) ??
+                (yield* checkCli(cli, identity.forge, identity.host, identity.owner, project.id))
               checks.set(key, found)
             }
-            yield* remember(project.id, statusOf(repository, identity, found))
+            yield* remember(
+              project.id,
+              statusOf(repository, identity, found),
+              found?.context ?? null,
+            )
           }
           yield* settleNeeds(project.id)
         })
@@ -636,7 +721,7 @@ export const forgePort = () => {
           yield* check(project, [repository])
           const known = (yield* SubscriptionRef.get(memory)).get(repositoryId)
           if (known === undefined) return yield* Effect.die('a checked repository has no state')
-          return { project, repository, status: known.status }
+          return { project, repository, status: known.status, context: known.context }
         })
 
       /** The Project's need for this CLI and host, made once however many operations wait. */
@@ -757,7 +842,7 @@ export const forgePort = () => {
                 ),
               )
               if (Option.isNone(looked)) continue
-              const { project, status: now } = looked.value
+              const { project, status: now, context: bktContext } = looked.value
               if (now.cli === null || now.host === null || now.state === 'not-needed') {
                 return yield* new ForgeRefused({
                   reason: 'This repository has no forge Hemera can reach.',
@@ -765,11 +850,30 @@ export const forgePort = () => {
               }
               const { cli, host, forge } = now
               const identity = yield* identityOf(project, (yield* located(repositoryId)).repository)
+              const { owner, slug } = identity
+              if (owner === null || slug === null || (cli === 'bkt' && bktContext === null)) {
+                return yield* new ForgeRefused({
+                  reason: 'The remote of this repository names no repository on its forge.',
+                })
+              }
+              const place =
+                cli === 'gh'
+                  ? ['--repo', `${host}/${owner}/${slug}`]
+                  : [
+                      '--context',
+                      bktContext ?? '',
+                      ...(forge === 'bitbucket-cloud'
+                        ? ['--workspace', owner]
+                        : ['--project', projectKey(owner)]),
+                      '--repo',
+                      slug,
+                    ]
               const target: ForgeTarget = {
                 projectId: project.id,
                 identity: { ...identity, host },
                 cli,
                 forge,
+                place,
               }
               const run = (args: ReadonlyArray<string>, input?: string) => {
                 const plain: ForgeCall = { cli, forge, host, projectId: project.id, args }

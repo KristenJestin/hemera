@@ -12,7 +12,13 @@
  * that is not a flag, which a pattern may narrow; then only the flags it names, each at most once,
  * written apart from its value (`--repo acme/shop`, never `--repo=acme/shop`): a switch, a flag
  * with a value (which a pattern may narrow), or a fixed word such as `--close-source=false`. A
- * required flag must be there. Nothing else may follow: no other flag, no positional, no `--`.
+ * required flag must be there, and of flags that are one of a kind exactly one. Nothing else may
+ * follow: no other flag, no positional, no `--`.
+ *
+ * A write names its forge: a gh command its repository with its host (`--repo host/owner/repo`), a
+ * bkt command its context (bkt sends a command to its active context otherwise, whatever the
+ * repository's host) and its workspace or project. The runner also checks that a gh command aims at
+ * the host of its call (`aimsAt`).
  */
 
 import type { ForgeCli } from '@hemera/ipc'
@@ -24,6 +30,8 @@ export interface FlagRule {
   readonly value: boolean
   readonly pattern?: RegExp
   readonly required: boolean
+  /** Of the flags sharing this name, exactly one must be there. */
+  readonly oneOf?: string
 }
 
 export interface CommandShape {
@@ -68,17 +76,26 @@ const read = (cli: ForgeCli, operation: string, words: ReadonlyArray<string>) =>
 
 const NUMBER: readonly [string, RegExp] = ['<number>', /^\d+$/]
 /** One owner or repository name: never `.` or `..`, which would walk out of the path. */
-const NAME = String.raw`(?!\.{1,2}/)[A-Za-z0-9._-]+`
+const NAME = String.raw`(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
 
-/** The repository a gh command acts on, always named. */
-const GH_REPO: readonly [string, FlagRule] = ['--repo', valueFlag(true)]
-/** Where a bkt command acts: its workspace (Cloud) or project (Data Center), and its repository. */
+/** The repository a gh command acts on, always named with its host: `host/owner/repo`. */
+const GH_REPO: readonly [string, FlagRule] = [
+  '--repo',
+  valueFlag(true, new RegExp(String.raw`^[A-Za-z0-9.-]+(:\d+)?/${NAME}/${NAME}$`)),
+]
+/** The bkt context a command goes through: the one of the repository's host. */
+const BKT_CONTEXT: readonly [string, FlagRule] = ['--context', valueFlag(true)]
+/**
+ * Where a bkt command acts: its context, its workspace (Cloud) or project (Data Center), one of the
+ * two, and its repository.
+ */
 const BKT_PLACE: ReadonlyArray<readonly [string, FlagRule]> = [
-  ['--workspace', valueFlag()],
-  ['--project', valueFlag()],
+  BKT_CONTEXT,
+  ['--workspace', { value: true, required: false, oneOf: 'place' }],
+  ['--project', { value: true, required: false, oneOf: 'place' }],
   ['--repo', valueFlag(true)],
 ]
 
@@ -212,7 +229,8 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     'pipeline.run',
     ['pipeline', 'run'],
     [
-      ['--workspace', valueFlag()],
+      BKT_CONTEXT,
+      ['--workspace', valueFlag(true)],
       ['--repo', valueFlag(true)],
       ['--ref', valueFlag(true)],
       ['--selector-type', valueFlag()],
@@ -242,7 +260,17 @@ const fitsFlags = (owner: CommandShape, rest: ReadonlyArray<string>): boolean =>
     if (value === undefined) return false
     if (rule.pattern !== undefined && !rule.pattern.test(value)) return false
   }
-  return [...owner.flags].every(([name, rule]) => !rule.required || seen.has(name))
+  const flags = [...owner.flags]
+  const groups = new Set(
+    flags.flatMap(([, rule]) => (rule.oneOf === undefined ? [] : [rule.oneOf])),
+  )
+  return (
+    flags.every(([name, rule]) => !rule.required || seen.has(name)) &&
+    [...groups].every(
+      (group) =>
+        flags.filter(([name, rule]) => rule.oneOf === group && seen.has(name)).length === 1,
+    )
+  )
 }
 
 /** The shape these arguments of this CLI match, the first in the list; null when none does. */
@@ -254,3 +282,20 @@ export const shapeOf = (cli: ForgeCli, args: ReadonlyArray<string>): CommandShap
       one.words.every((word, at) => fitsWord(one, word, args[at] ?? '')) &&
       fitsFlags(one, args.slice(one.words.length)),
   ) ?? null
+
+/** The value that follows a flag among the arguments, or null. */
+const valueAfter = (args: ReadonlyArray<string>, flag: string): string | null => {
+  const at = args.indexOf(flag)
+  return at < 0 ? null : (args[at + 1] ?? null)
+}
+
+/**
+ * Whether a command aims at this host only. A gh command names its host in `--hostname`, or in its
+ * `--repo host/owner/repo`; one that names neither (`--version`) reaches no forge. A bkt command
+ * goes through the context the port chose for the host.
+ */
+export const aimsAt = (cli: ForgeCli, args: ReadonlyArray<string>, host: string): boolean => {
+  if (cli === 'bkt') return true
+  const named = valueAfter(args, '--hostname') ?? valueAfter(args, '--repo')?.split('/')[0] ?? null
+  return named === null || named.toLowerCase() === host.toLowerCase()
+}

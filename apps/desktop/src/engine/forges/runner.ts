@@ -2,7 +2,8 @@
  * The one runner of the forge CLIs (#253): every `gh` and `bkt` call Hemera makes goes through it.
  *
  * - It refuses, before spawning, any command whose arguments match no registered shape
- *   (`shapes.ts`): what Hemera may write on a forge is that list.
+ *   (`shapes.ts`): what Hemera may write on a forge is that list. A gh command that names another
+ *   host than its call's is refused too.
  * - The CLI is found on the user's `PATH` (`gh.exe`, `bkt.exe`, or a `.cmd` shim, which `cmd.exe`
  *   runs, on Windows) and run as a program with an argument array, never through a shell, under
  *   the process supervisor, in the user's own environment: never the agents' (no empty
@@ -25,7 +26,7 @@ import type { Database, DatabaseError } from '../storage/database.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
 import { actionDone, actionFailed, beginAction, settleActionIn } from '../tools/actions.ts'
 import { mutate, outsideTransaction } from '../transaction.ts'
-import { type CommandShape, shapeOf } from './shapes.ts'
+import { type CommandShape, aimsAt, shapeOf } from './shapes.ts'
 
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
@@ -291,7 +292,10 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         Effect.gen(function* () {
           const command = secrets.mask([call.cli, ...call.args].join(' '))
           const shape = shapeOf(call.cli, call.args)
-          if (shape === null) return yield* new ForgeCommandRefused({ command })
+          // A command for another host than its call's would reach a forge it was not meant for.
+          if (shape === null || !aimsAt(call.cli, call.args, call.host)) {
+            return yield* new ForgeCommandRefused({ command })
+          }
           const program = yield* find(call.cli)
           if (Option.isNone(program)) return yield* new ForgeCliMissing({ cli: call.cli })
           const limit = shape.class === 'read' ? limits.read : limits.write

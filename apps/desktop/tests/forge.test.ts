@@ -675,6 +675,7 @@ describe('What a CLI prints and the command it ran are masked', () => {
               token_source: 'keyring',
             },
           ],
+          contexts: [{ name: 'work', host: 'git.acme.test:7990', active: true }],
         }),
       },
     ])
