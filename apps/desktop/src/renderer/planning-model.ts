@@ -6,7 +6,13 @@
  * is the design system's.
  */
 
-import { TICKET_EVENT_SAID, type InputState, type ProofSeen } from '@hemera/core/domain'
+import {
+  ROLE_NAMES,
+  ROLES,
+  TICKET_EVENT_SAID,
+  type InputState,
+  type ProofSeen,
+} from '@hemera/core/domain'
 import type {
   ColdReadFreshness,
   ColdReadPass as EnginePass,
@@ -32,6 +38,7 @@ import {
   planningNow,
   type FreezeOffer,
   type Mentionable,
+  type NeedRow,
   type Planner,
   type Planning,
   type PlanningNow,
@@ -91,7 +98,6 @@ const stateOf = (inputs: ReadonlyArray<PlanningInput>, id: string | null): Input
 /** A question as the page draws it: only the answers proposed from the ticket that still wait. */
 export const questionOf = (one: EngineQuestion, now: Date): Planning.Question => ({
   id: one.id,
-  wave: one.wave,
   text: one.text,
   why: one.why,
   options: one.options,
@@ -123,11 +129,9 @@ export const questionOf = (one: EngineQuestion, now: Date): Planning.Question =>
     })),
 })
 
-export const waveOf = (one: EngineWave, now: Date): Planning.Wave => ({
-  number: one.number,
-  askedAt: wordsOf(one.askedAt, now),
-  questions: one.questions.map((question) => questionOf(question, now)),
-})
+/** The questions of every wave, one list in the order they were asked: the page draws no wave. */
+export const questionsOf = (waves: ReadonlyArray<EngineWave>, now: Date): Planning.Question[] =>
+  waves.flatMap((wave) => wave.questions.map((question) => questionOf(question, now)))
 
 export const discussionOf = (one: EngineDiscussion, now: Date): Planning.Discussion => ({
   id: one.id,
@@ -303,7 +307,7 @@ export function planningDataOf(read: PlanningRead, now: Date): PlanningData {
       })),
       dependsOn: task.dependsOn,
     })),
-    waves: read.waves.map((wave) => waveOf(wave, now)),
+    questions: questionsOf(read.waves, now),
     discussions: read.discussions.map((one) => discussionOf(one, now)),
     probes: read.probes.map(probeOf),
     passes: read.passes.map(passOf),
@@ -394,6 +398,20 @@ export function planningHeadOf(
         ? { shown: true, reasons: [CHECKING] }
         : { shown: true, reasons: readiness.ready ? [] : readiness.unsettled }
   return { now: planningNow(facts), freeze }
+}
+
+/**
+ * A need of the mission as For you lists it: who asks, by the role that asked ("Probe", "Cold
+ * read"), Hemera when no agent did; its card may be discussed, the mission being in Planning.
+ */
+export function planningNeedOf(row: NeedRow): Planning.PlanningNeed {
+  const role = ROLES.find((one) => one === row.need.role)
+  const name = role === undefined ? 'Hemera' : ROLE_NAMES[role].replace(/^(the|a) /, '')
+  return {
+    id: row.id,
+    who: `${name.charAt(0).toUpperCase()}${name.slice(1)}`,
+    need: { ...row.need, planning: true },
+  }
 }
 
 /** What the page shows of the follower. */
