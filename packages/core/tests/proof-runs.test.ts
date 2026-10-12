@@ -1018,6 +1018,33 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
     expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, imported)).toBe(true)
   })
 
+  test('a slash in another runner’s line is not a separator: GET /users is not users, exports/markdown is not markdown', () => {
+    const path = 'tests/export.test.ts'
+    const vitest = ['  × GET /users 5ms', 'AssertionError: expected 404 to be 200'].join('\n')
+    expect(validRed(run(vitest, 1, path), path, ['users'])).toBe(false)
+    const tap = [
+      'TAP version 13',
+      'not ok 3 - GET /users',
+      '  ---',
+      "  error: 'AssertionError: expected 404 to be 200'",
+      '  ...',
+      '# tests 3',
+    ].join('\n')
+    expect(validRed(run(tap, 1, path), path, ['users'])).toBe(false)
+    const mocha = [
+      '  1) exports/markdown',
+      'AssertionError: expected "" to equal "| total |"',
+    ].join('\n')
+    expect(validRed(run(mocha, 1, path), path, ['markdown'])).toBe(false)
+  })
+
+  test('a bracket or an underscore is pytest’s and Go’s only: items[0] is not items, as_markdown is not as markdown', () => {
+    const path = 'tests/export.test.ts'
+    const output = (line: string) => [line, 'AssertionError: no'].join('\n')
+    expect(validRed(run(output('  × items[0] is defined'), 1, path), path, ['items'])).toBe(false)
+    expect(validRed(run(output('  × as_markdown'), 1, path), path, ['as markdown'])).toBe(false)
+  })
+
   test('a subtest whose parent the code does not say is not named', () => {
     const patch = ['@@ -3,0 +4,3 @@', '+\tt.Run("empty", func(t *testing.T) {', '+\t})'].join('\n')
     expect(addedTests({ insertion: 'addition', code: '', patch })).toEqual([])

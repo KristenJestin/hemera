@@ -276,23 +276,19 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
  * A test's declared name as a pattern matched whole: from the start of a line or after a
- * separator (`>`, `›`, `::`, a space, Go's `/` before a subtest), up to the end of the line or what
- * a runner prints after a name (a duration, `(`, `[` as pytest's case id, ` - `, ` ...`). A space
- * in a name also matches the `_` Go prints for it. What `%s`, `$name` or `${…}` stand for (`each`,
- * a template literal) matches words within a name; a name made of placeholders alone is none.
+ * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
+ * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. What
+ * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
+ * name made of placeholders alone is none.
  */
 const namePattern = (name: string): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
   if (parts.every((part, at) => at % 2 === 1 || part.trim() === '')) return null
   const body = parts
-    .map((part, at) =>
-      at % 2 === 1
-        ? '[^\\n>›]+?'
-        : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s/g, '[\\s_]'),
-    )
+    .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
   return new RegExp(
-    `(?:^|[\\s>›/]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s*\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `::${body}\\[|(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
