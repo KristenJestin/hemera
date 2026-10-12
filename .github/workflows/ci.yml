@@ -212,11 +212,6 @@ jobs:
       - working-directory: source
         run: pnpm build
 
-      - name: Sample the processors and the disks (temporary)
-        shell: pwsh
-        run: |
-          Start-Process typeperf -WindowStyle Hidden -ArgumentList @('"\Processor(_Total)\% Processor Time"', '"\PhysicalDisk(*)\% Idle Time"', '"\Memory\Available MBytes"', '-si', '5', '-f', 'CSV', '-o', "$env:RUNNER_TEMP\perf.csv", '-y')
-
       # The stories do not run beside the repository suites: there, the stories' two Chromiums
       # held the processors at full load and a `git` a suite starts took seconds instead of
       # milliseconds. Each part has a runner of its own instead.
@@ -245,20 +240,6 @@ jobs:
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project storybook-light --project storybook-dark
-      - name: Summarise the samples (temporary)
-        if: always()
-        shell: pwsh
-        run: |
-          Get-Process typeperf -ErrorAction SilentlyContinue | Stop-Process
-          $rows = Import-Csv "$env:RUNNER_TEMP\perf.csv"
-          $columns = $rows[0].PSObject.Properties.Name | Select-Object -Skip 1
-          "samples: $($rows.Count) every 5 s"
-          foreach ($column in $columns) {
-            $values = $rows | ForEach-Object { $_.$column } | Where-Object { $_ -match '^[0-9. ]+$' } | ForEach-Object { [double]$_ }
-            if ($values) { $m = $values | Measure-Object -Average -Minimum -Maximum; '{0}: avg {1:N1} min {2:N1} max {3:N1}' -f $column, $m.Average, $m.Minimum, $m.Maximum }
-          }
-          # One line a minute, to read the shape over the two test steps.
-          $rows | Select-Object -Index (0..($rows.Count - 1) | Where-Object { $_ % 12 -eq 0 }) | Format-Table -AutoSize | Out-String -Width 400
 
   # The check the branch rules require, under the name it had when one runner did it all.
   windows-result:
