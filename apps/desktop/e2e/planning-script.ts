@@ -158,19 +158,20 @@ export const COLD_READER = {
 } as const
 
 export const PROTOTYPE_MARK = 'The notes leave the app one at a time.'
-export const PROTOTYPE_ASKED = 'Show the export as one zip of every note.'
+export const PROTOTYPE_BRIEF = 'Try the export as one zip of every note.'
 export const PROTOTYPE_TRIED = 'A zip of every note, written by a script of its own.'
 export const PROTOTYPE_JUDGED = 'The prototype is in the decisions.'
 
 /**
- * The Planner of `planning-prototype.e2e.ts`: a section for the vision, the Prototyper launched
- * when the user asks for a prototype, and a decision written once its result is handed back.
+ * The Planner of `planning-prototype.e2e.ts`: a section for the vision, the Prototyper launched on
+ * its own when a second vision changes how notes leave the app, and a decision written once its
+ * result is handed back.
  */
 export const PROTOTYPE_PLANNER = {
   turns: [
     [section('why', PROTOTYPE_MARK, 0), integrated('I1', 'why')],
     [
-      uses('toolu_launch', 'helper_launch', { helper: 'prototyper', brief: PROTOTYPE_ASKED }),
+      uses('toolu_launch', 'helper_launch', { helper: 'prototyper', brief: PROTOTYPE_BRIEF }),
       integrated('I2', { no_change: 'The Prototyper tries it.' }),
     ],
     [section('decisions', PROTOTYPE_JUDGED, 0)],

@@ -5,7 +5,6 @@ import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { LiveChip, type LiveState } from '../../components/live-chip/live-chip.tsx'
-import { type Mentionable, MentionField } from '../../components/mention-field/mention-field.tsx'
 import { IconCheck, IconFolder, IconMinus, IconX } from '../../icons.ts'
 import type { Prototype, PrototypeVerdict } from './planning-types.ts'
 import { LINE, QUIET, Unfolding } from './rail-fold.tsx'
@@ -202,38 +201,5 @@ export function PrototypeLine({
         </div>
       </Unfolding>
     </li>
-  )
-}
-
-/** What the user asks the Planner to try: sent as it is, and the field let go once it is taken. */
-export function AskPrototype({
-  mentionables,
-  onAsk,
-}: {
-  mentionables: readonly Mentionable[]
-  onAsk: (question: string) => Promise<void>
-}): ReactNode {
-  const [text, setText] = useState('')
-  const asking = useSending()
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <MentionField
-        label="Ask for a prototype"
-        placeholder="What to try, in a throwaway folder…"
-        value={text}
-        onValueChange={(value) => setText(value)}
-        mentionables={mentionables}
-        disabled={asking.busy}
-        onSubmit={() => {
-          const said = text.trim()
-          if (said === '') return
-          asking.send(
-            () => onAsk(said),
-            () => setText(''),
-          )
-        }}
-      />
-      <NotSent refusal={asking.refusal} />
-    </div>
   )
 }

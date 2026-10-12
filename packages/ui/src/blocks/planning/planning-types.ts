@@ -359,8 +359,6 @@ export interface PlanningHandlers {
   onOpenProbe: (probeId: string) => void
   /** The user's verdict on a Prototyper's result, with what they say of it. */
   onJudgePrototype: (id: string, verdict: PrototypeVerdict, note: string | null) => Promise<void>
-  /** The user asks the Planner for a prototype: what to try. */
-  onAskPrototype: (question: string) => Promise<void>
   onDismissFinding: (findingId: string) => Promise<void>
   onRunColdRead: () => Promise<void>
   onDecideDependency: (id: string, accept: boolean) => Promise<void>

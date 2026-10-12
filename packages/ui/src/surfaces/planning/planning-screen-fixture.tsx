@@ -38,7 +38,6 @@ const MOMENTS = {
   probing: moments.probing,
   prototyping: moments.prototyping,
   prototypeToLookAt: moments.prototypeToLookAt,
-  noPrototypeYet: moments.noPrototypeYet,
   readyWithUnjudgedPrototype: moments.readyWithUnjudgedPrototype,
   coldReadRunning: moments.coldReadRunning,
   coldReadFailed: moments.coldReadFailed,

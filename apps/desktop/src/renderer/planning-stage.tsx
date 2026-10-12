@@ -77,7 +77,6 @@ export function PlanningStage({
         onDiscuss={discuss}
         onOpenProbe={openProbe}
         onJudgePrototype={act.judgePrototype}
-        onAskPrototype={act.askPrototype}
         onDismissFinding={act.dismissFinding}
         onRunColdRead={act.runColdRead}
         onDecideDependency={act.decideDependency}

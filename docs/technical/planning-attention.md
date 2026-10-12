@@ -40,7 +40,7 @@ questions above, in an order that never changes:
   left".
 - **The rest**, one quiet line each, folded: the questions answered (and how many the Planner
   still takes in), what the cold read settled, the Probes that ended, the Prototypers judged or
-  failed with their verdict and the field to ask for a prototype, the dependencies, the vision.
+  failed with their verdict (only once there is one to read), the dependencies, the vision.
 
 Why this one: the user sees at once how much waits and of which kind, decides the order, and
 nothing grows unless they open it. A cold read of seven paragraphs is one line until it is read.
@@ -111,8 +111,10 @@ user could not see what waits behind the first thing nor choose the order. The m
   there, but the face, the card's line and Freeze read as if it were not; the frozen Spec records
   it as not judged. Its result is shown as the Planner reads it, without the line said to the
   Planner, and its folder as a path to copy: the page opens no folder.
-- A prototype is asked for under the rest's Prototypes line, beside the vision: the two things
-  the user asks of the Planner at any time.
+- No field asks for a prototype: a prototype is the Planner's move, launched when an interface or
+  an approach needs trying, or something the user says to the Planner where they already talk to
+  it (their own words on a question, Discuss). `planning.askPrototype` stays in the engine, unused
+  by the page.
 
 ## Not settled here
 

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../../components/button/button.tsx'
-import { EDITOR_LOADED, settled, writeAndSend } from '../../blocks/planning/planning-play.ts'
+import { settled } from '../../blocks/planning/planning-play.ts'
 import { type MomentName, PlanningScreen } from './planning-screen-fixture.tsx'
 
 /**
@@ -32,7 +32,6 @@ const meta = {
     onDiscuss: fn(),
     onOpenProbe: fn(),
     onJudgePrototype: fn(() => Promise.resolve()),
-    onAskPrototype: fn(() => Promise.resolve()),
     onDismissFinding: fn(() => Promise.resolve()),
     onRunColdRead: fn(() => Promise.resolve()),
     onDecideDependency: fn(() => Promise.resolve()),
@@ -565,10 +564,14 @@ export const ProbeNotReproduced: Story = {
   },
 }
 
-/** A Prototyper the Planner launched: its chip in the stage card, like a Probe's, its step in its glance. */
+/**
+ * A Prototyper the Planner launched: its chip in the stage card, like a Probe's, its step in its
+ * glance. Nothing to read of it yet: the rest has no Prototypes line.
+ */
 export const PrototyperRunning: Story = {
   args: { moment: 'prototyping' },
   play: async ({ canvasElement }) => {
+    await expect(rest(canvasElement).queryByRole('button', { name: /^Prototypes/ })).toBeNull()
     const chip = card(canvasElement).getByRole('button', { name: /^Prototyper H1/ })
     await userEvent.click(chip)
     await expect(
@@ -640,21 +643,6 @@ export const PrototypeSetAside: Story = {
     await expect(
       rest(canvasElement).getByRole('button', { name: /^Prototypes/ }),
     ).toHaveTextContent('1 validated · 1 set aside')
-  },
-}
-
-/** Asking the Planner for a prototype, from the rest, where the page takes what is asked of it. */
-export const AskingForAPrototype: Story = {
-  args: { moment: 'noPrototypeYet' },
-  loaders: EDITOR_LOADED,
-  play: async ({ canvasElement, args }) => {
-    const others = rest(canvasElement)
-    const line = others.getByRole('button', { name: /^Prototypes/ })
-    await expect(line).toHaveTextContent('Ask for one')
-    await userEvent.click(line)
-    const field = await others.findByRole('textbox', { name: 'Ask for a prototype' })
-    await writeAndSend(field, 'Try one zip of every note')
-    await expect(args.onAskPrototype).toHaveBeenCalledWith('Try one zip of every note')
   },
 }
 

@@ -1,7 +1,7 @@
 /**
  * A Prototyper on the Planning page, in the real application, the Planner and the Prototyper the
- * fake agent the suite scripts (`planning-script.ts`): the user asks for a prototype, the Planner
- * launches the Prototyper, whose chip is in the stage card while it runs; its result is For you's
+ * fake agent the suite scripts (`planning-script.ts`): the Planner launches the Prototyper on its
+ * own, after the user's second vision, and its chip is in the stage card while it runs; its result is For you's
  * to look at, Validate records the verdict, and the result stays under the rest with it.
  */
 
@@ -13,7 +13,6 @@ import { $, browser, expect } from '@wdio/globals'
 
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
 import {
-  PROTOTYPE_ASKED,
   PROTOTYPE_JUDGED,
   PROTOTYPE_MARK,
   PROTOTYPE_PLANNER,
@@ -77,14 +76,14 @@ describe('A prototype asked for, shown and judged on the Planning page', () => {
     )
   })
 
-  it('asks for a prototype: the Prototyper the Planner launches shows its chip in the card', async () => {
+  it('shows the chip of the Prototyper the Planner launches on its own in the card', async () => {
     // The Planner's session keeps its script; the Prototyper's, started after this, takes this one.
     await browser.electron.execute(
       async (_, script) => await globalThis.hemeraProbe?.scriptAgent(script),
       PROTOTYPER,
     )
-    await restLine('Prototypes').click()
-    await say(rail().$('[role="textbox"][aria-label="Ask for a prototype"]'), PROTOTYPE_ASKED)
+    await expect(restLine('Prototypes')).not.toBeExisting()
+    await say(rail().$('[role="textbox"][aria-label="Your vision"]'), 'Every note, in one go.')
     await expect(
       stageCard().$('button[data-live-chip][aria-label^="Prototyper H1"]'),
     ).toBeDisplayed({

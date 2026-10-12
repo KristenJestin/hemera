@@ -908,11 +908,6 @@ export function prototypeToLookAt(): PlanningMoment {
   })
 }
 
-/** The user asks for a prototype from the rest, where the page takes what they ask of the Planner. */
-export function noPrototypeYet(): PlanningMoment {
-  return scene({ data: base(), head: YOUR_TURN })
-}
-
 /** Every question answered and integrated: what a settled Planning holds. */
 function answered(): Question[] {
   return QUESTIONS.map((question): Question => {

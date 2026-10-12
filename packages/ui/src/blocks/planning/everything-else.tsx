@@ -13,7 +13,7 @@ import {
   toLookAt,
 } from './planning-types.ts'
 import { ProbeChip } from './probes.tsx'
-import { AskPrototype, PrototypeLine } from './prototypes.tsx'
+import { PrototypeLine } from './prototypes.tsx'
 import { QuestionCard } from './question-card.tsx'
 import { Fold } from './rail-fold.tsx'
 import { SendButton } from './sending.tsx'
@@ -30,7 +30,6 @@ const setAside = ({ state }: Question): boolean =>
 
 /** The Prototypers that ended, counted by what became of them: "2 validated · 1 failed". */
 function prototypesDetail(ended: readonly Prototype[]): string {
-  if (ended.length === 0) return 'Ask for one'
   const count = (keep: (prototype: Prototype) => boolean, words: string): string[] => {
     const many = ended.filter(keep).length
     return many > 0 ? [`${String(many)} ${words}`] : []
@@ -45,8 +44,8 @@ function prototypesDetail(ended: readonly Prototype[]): string {
 /**
  * What no longer waits, one quiet line each, every one folded: the questions answered (and how
  * many the Planner still takes in), the cold read's last pass — what it settled, or why it
- * stopped, and another pass to run —, the Probes that ended, the Prototypers judged or failed —
- * with a prototype to ask for —, the dependencies, and the vision, which the user may give at any
+ * stopped, and another pass to run —, the Probes that ended, the Prototypers judged or failed,
+ * the dependencies, and the vision, which the user may give at any
  * time. Its lines start where For you's do, in its frame: the
  * frame's room in from the rail.
  */
@@ -149,22 +148,13 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
           </div>
         </Fold>
       )}
-      {(judged.length > 0 || !data.frozen) && (
+      {judged.length > 0 && (
         <Fold glyph={<IconFlask size="sm" />} title="Prototypes" detail={prototypesDetail(judged)}>
-          <div className="flex flex-col pb-2">
-            {judged.length > 0 && (
-              <ul aria-label="Prototypes" className="flex flex-col">
-                {judged.map((prototype) => (
-                  <PrototypeLine key={prototype.id} prototype={prototype} />
-                ))}
-              </ul>
-            )}
-            {!data.frozen && (
-              <div className="px-4 pt-1 pl-10">
-                <AskPrototype mentionables={mentionables} onAsk={handlers.onAskPrototype} />
-              </div>
-            )}
-          </div>
+          <ul aria-label="Prototypes" className="flex flex-col pb-2">
+            {judged.map((prototype) => (
+              <PrototypeLine key={prototype.id} prototype={prototype} />
+            ))}
+          </ul>
         </Fold>
       )}
       {dependencies.length > 0 && (
