@@ -28,6 +28,11 @@ export default {
         files: ['src/blocks/planning/prose.tsx'],
         rules: ['react-doctor/no-array-index-as-key'],
       },
+      // The frames of a motion are taken one after the other, on the clock: that is the point.
+      {
+        files: ['frames.ts'],
+        rules: ['react-doctor/async-await-in-loop'],
+      },
     ],
   },
 } satisfies ReactDoctorConfig
