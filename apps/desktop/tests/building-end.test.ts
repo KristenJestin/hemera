@@ -710,6 +710,18 @@ describe('The findings and their fate', () => {
             yield* Effect.sleep('1 second')
             const waiting = yield* getMission(mission.id)
             const toldBefore = yield* toBuilder(mission.id, builder.session.lineage)
+            // What the Builder reads of the Memory: that a decision waits, never the finding.
+            yield* until(
+              Effect.map(journalOf(mission.id), (lines) =>
+                lines.some((line) => line.includes('waits on the user')),
+              ),
+              LONG,
+            )
+            const read = {
+              now: yield* call(builder.grantId, 'memory_read', { part: 'now' }),
+              journal: yield* call(builder.grantId, 'memory_read', { part: 'journal' }),
+              brief: yield* Memory.use((memory) => memory.briefBlock(mission.id)),
+            }
             const need = waiting.needs[0]
             yield* answerNeed({
               id: need?.id ?? '',
@@ -733,7 +745,13 @@ describe('The findings and their fate', () => {
             )
             yield* documented(world, mission.id, 2)
             yield* inReview(mission.id)
-            return { waiting, toldBefore, toldAfter, review: yield* autoReviewOf(mission.id) }
+            return {
+              waiting,
+              toldBefore,
+              read,
+              toldAfter,
+              review: yield* autoReviewOf(mission.id),
+            }
           }),
         ),
       )
@@ -749,6 +767,11 @@ describe('The findings and their fate', () => {
         ])
       }
       expect(seen.toldBefore.join('\n')).not.toContain('header row')
+      for (const [part, read] of Object.entries(seen.read)) {
+        expect(read, part).not.toContain('header row')
+        expect(read, part).not.toContain('invoices.ts writes no header')
+        expect(read, part).toContain('a finding of the automatic review')
+      }
       expect(seen.toldAfter.join('\n')).toContain('RV1')
       const finding = seen.review?.findings[0]
       expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1', contradictsSpec: true })

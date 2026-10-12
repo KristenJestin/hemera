@@ -46,7 +46,7 @@ import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
-import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
+import { DeliveryFailed, type NeedHandler, createNeedIn } from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
 import { SessionPost } from '../sessions/post.ts'
@@ -74,6 +74,7 @@ import { passesIn } from './documenter-store.ts'
 import { finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
+  REVIEW_NEEDS,
   type ReviewFindingRow,
   reviewFindingsIn,
   reviewPassesIn,
@@ -91,9 +92,6 @@ import {
   tasksIn,
   writeStrings,
 } from './tasks.ts'
-
-/** The service the needs of the automatic review belong to: a finding that contradicts the Spec. */
-export const REVIEW_NEEDS = needService('review')
 
 /** The steps of the end, in their order, as `buildings.phase` keeps them. */
 export const END_PHASES = [

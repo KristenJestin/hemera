@@ -20,6 +20,7 @@ import { Effect, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { getMission } from '../missions.ts'
+import { needService } from '../needs.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   buildingTasks,
@@ -33,6 +34,9 @@ import {
 } from '../storage/schema.ts'
 
 type Reader = EngineTransaction | Database['Service']
+
+/** The service the needs of the automatic review belong to: a finding that contradicts the Spec. */
+export const REVIEW_NEEDS = needService('review')
 
 export type ReviewPassRow = typeof reviewPasses.$inferSelect
 export type ReviewFindingRow = typeof reviewFindings.$inferSelect

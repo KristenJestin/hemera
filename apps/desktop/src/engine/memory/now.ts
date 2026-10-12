@@ -28,9 +28,16 @@ import {
   buildings,
   memoryNext,
   memoryNowLines,
+  reviewFindings,
   reviewPasses,
 } from '../storage/schema.ts'
 import { RunningSessions, SlotWaits } from './ports.ts'
+
+/**
+ * What Now and the Journal say of a finding of the automatic review that contradicts the Spec
+ * (#147): never its text, which reaches no agent before the user's answer.
+ */
+export const FINDING_HELD = 'a finding of the automatic review contradicts the Spec'
 
 /** What a need waits on, in one sentence of its own fields. */
 export const needSentence = (need: Need): string =>
@@ -113,6 +120,11 @@ export const nowOf = (mission: Mission) =>
     const running = yield* RunningSessions.use((sessions) => sessions(mission.id))
     const slotWait = yield* SlotWaits.use((waits) => waits(mission.id))
     const main = mainRoleOf(mission.stage)
+    const held = (yield* database
+      .select({ needId: reviewFindings.needId })
+      .from(reviewFindings)
+      .where(eq(reviewFindings.missionId, mission.id))
+      .pipe(Effect.mapError(refusedWhile('reading Now')))).map((one) => one.needId)
     const doing = lines.map((line) => ({
       sessionId: line.sessionId,
       role: line.role,
@@ -130,7 +142,7 @@ export const nowOf = (mission: Mission) =>
       waiting: mission.needs.map((need) => ({
         needId: need.id,
         kind: needKind(need.fields),
-        sentence: needSentence(need),
+        sentence: held.includes(need.id) ? FINDING_HELD : needSentence(need),
       })),
       running: running.map((session) => ({ sessionId: session.sessionId, role: session.role })),
       slotWait,
