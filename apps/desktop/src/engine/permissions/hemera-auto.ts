@@ -7,10 +7,10 @@
  *   once a key is held and the user consented. A key Jev rejects (401, 403) is not sent again.
  * - What Jev is told of the user's intent (`HumanIntent`): only the user's own words, bounded.
  * - The judge (`jevJudgeLayer`): Jev when it is ready, otherwise the session's own agent through
- *   its judge session (`agent-judge.ts`, #197); the call as Hemera will run it, masked; the
- *   verdict from the scores at the Normal level; a verdict reused for an identical call within
- *   the same turn; a verdict judged again when the user said something new before the call runs;
- *   and every failure `unavailable`, which asks.
+ *   its judge session (`agent-judge.ts`, #197), let go as soon as Jev is ready (#209); the call
+ *   as Hemera will run it, masked; the verdict from the scores at the Normal level; a verdict
+ *   reused for an identical call within the same turn; a verdict judged again when the user said
+ *   something new before the call runs; and every failure `unavailable`, which asks.
  * - Who judges (`whoJudgesFor`) and the live decisions (`decisionChanges`), for the settings.
  */
 
@@ -31,7 +31,18 @@ import {
 } from '@hemera/core/domain'
 import { PermissionDecision } from '@hemera/ipc'
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import { Context, Effect, Layer, Option, Predicate, Result, Schema, Stream } from 'effect'
+import {
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  PubSub,
+  Result,
+  Schema,
+  type Scope,
+  Stream,
+} from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { findOnPath, hostLookup, invocationOf } from '../command-line.ts'
@@ -86,6 +97,11 @@ export class HemeraAuto extends Context.Service<
     readonly readiness: Effect.Effect<JevReadiness>
     /** Jev rejected this key: it is not sent again until another one is handed over. */
     readonly refuse: (key: string) => Effect.Effect<void>
+    /**
+     * Each key handed over and each consent set, from the moment the subscription is taken: what
+     * can make Jev ready.
+     */
+    readonly changes: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>
   }
 >()('HemeraAuto') {}
 
@@ -97,6 +113,8 @@ export const hemeraAutoLayer = (log: Log) =>
       const secrets = yield* Secrets
       let key: string | null = null
       let refused = false
+      const hub = yield* PubSub.unbounded<void>()
+      const changed = PubSub.publish(hub, undefined)
       const valueOf = (name: string) =>
         database
           .select({ value: appPreferences.value })
@@ -138,7 +156,7 @@ export const hemeraAutoLayer = (log: Log) =>
             if (given !== key) refused = false
             key = given
             secrets.register(KEY_SOURCE, [given])
-          }),
+          }).pipe(Effect.andThen(changed)),
         removeKey: database
           .delete(appPreferences)
           .where(eq(appPreferences.key, CIPHERTEXT_KEY))
@@ -157,6 +175,7 @@ export const hemeraAutoLayer = (log: Log) =>
             Effect.tap(() =>
               Effect.sync(() => log(`hemera auto: consent ${consent ? 'given' : 'withdrawn'}`)),
             ),
+            Effect.andThen(changed),
           ),
         readiness: Effect.gen(function* () {
           if (key === null) {
@@ -175,6 +194,9 @@ export const hemeraAutoLayer = (log: Log) =>
               'hemera auto: Jev refused the saved key; it is not sent again until a new one is saved',
             )
           }),
+        changes: Effect.map(PubSub.subscribe(hub), (subscription) =>
+          Stream.fromSubscription(subscription),
+        ),
       }
     }),
   )
@@ -418,6 +440,21 @@ export const jevJudgeLayer = (settings: JudgeSettings) =>
       const services = yield* Effect.context<
         HemeraAuto | HumanIntent | SessionTurns | JevTransport | Secrets | AgentJudges
       >()
+      const jevReady = HemeraAuto.use((auto) => auto.readiness).pipe(
+        Effect.map((readiness) => readiness.ready),
+        Effect.provide(services),
+      )
+      // Never an agent's judge beside Jev (#209): once Jev is ready, every judge is let go.
+      const changes = yield* HemeraAuto.use((auto) => auto.changes)
+      yield* changes.pipe(
+        Stream.runForEach(() =>
+          Effect.gen(function* () {
+            if (yield* jevReady) yield* AgentJudges.use((judges) => judges.letGoForJev)
+          }),
+        ),
+        Effect.provide(services),
+        Effect.forkScoped,
+      )
       /** The ratings of each session's current turn, by call. */
       const turns = new Map<string, { turn: number; verdicts: Map<string, Rated> }>()
       const verdictsOf = (sessionId: string, turn: number) => {
@@ -472,18 +509,22 @@ export const jevJudgeLayer = (settings: JudgeSettings) =>
           } satisfies JudgeAnswer
         })
 
-      /** The agent's own rating, or why it gave none; without one, the call asks as before. */
+      /**
+       * The agent's own rating, or why it gave none; without one, the call asks as before. Null
+       * when Jev became ready meanwhile: the call is Jev's to rate.
+       */
       const askedAgent = (
         call: JudgedCall,
         why: keyof typeof NOT_READY,
         action: Schema.JsonObject,
         told: ReadonlyArray<string>,
-      ): Effect.Effect<Rated | JudgeAnswer, never, AgentJudges | Secrets> =>
+      ): Effect.Effect<Rated | JudgeAnswer | null, never, AgentJudges | Secrets> =>
         Effect.gen(function* () {
           const known = yield* Secrets.useSync((secrets) => secrets.values())
           const rating = yield* AgentJudges.use((judges) =>
-            judges.rate(call.session, { action, humanContext: told }, known),
+            judges.rate(call.session, { action, humanContext: told }, known, jevReady),
           )
+          if (rating.kind === 'superseded') return null
           if (rating.kind === 'none') {
             return {
               verdict: 'unavailable',
@@ -511,11 +552,12 @@ export const jevJudgeLayer = (settings: JudgeSettings) =>
 
       const judge = (call: JudgedCall): Effect.Effect<JudgeAnswer> =>
         Effect.gen(function* () {
-          const readiness = yield* HemeraAuto.use((auto) => auto.readiness)
           const action = jevAction(call, settings.home, settings.platform)
           const sessionId = call.session.sessionId
           const intent = HumanIntent.use((human) => human.of(call.session))
           for (let round = 0; round < ROUNDS; round += 1) {
+            // Read at each round: Jev made ready while the agent's judge rated takes the call over.
+            const readiness = yield* HemeraAuto.use((auto) => auto.readiness)
             const seen = yield* intent
             const told = boundedHumanContext(seen.items)
             const turn = yield* SessionTurns.use((one) => one.current(sessionId))
@@ -533,6 +575,7 @@ export const jevJudgeLayer = (settings: JudgeSettings) =>
               const asked = readiness.ready
                 ? yield* askedJev(readiness.key, action, told)
                 : yield* askedAgent(call, readiness.why, action, told)
+              if (asked === null) continue
               if ('verdict' in asked) return asked
               rated = asked
               verdicts.set(identity, asked)
