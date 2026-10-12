@@ -35,6 +35,12 @@ describe('A Project added and set up from its settings', () => {
     await expect(
       adding.$('[data-found="services/billing"]').$('[role="checkbox"]'),
     ).toHaveAttribute('aria-checked', 'true')
+    // The setup is ticked by default: unticked, as this Project is added without one.
+    const setupBox = adding
+      .$('label*=Let an agent propose the rest of the setup')
+      .$('[role="checkbox"]')
+    await setupBox.click()
+    await expect(setupBox).toHaveAttribute('aria-checked', 'false')
     await adding.$('button=Add acme').click()
     await expect(adding).not.toBeExisting()
     await expect($('main h1')).toHaveText('acme', { containing: true })
