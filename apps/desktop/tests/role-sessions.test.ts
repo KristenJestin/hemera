@@ -33,7 +33,7 @@ import {
   sessionsIn,
 } from '../src/engine/sessions/store.ts'
 import { Database, DatabaseError } from '../src/engine/storage/database.ts'
-import { WINDOWS_COMMAND_LINE_MS } from '../src/engine/supervisor.ts'
+import { HostProcesses, ORPHAN_EXIT_MS, hostProcessesLayer } from '../src/engine/supervisor.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
 import {
   domainEvents,
@@ -888,6 +888,22 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       { detached: true, stdio: 'ignore' },
     )
     orphan.unref()
+    // What the orphan runs is answered here as the system says it, the rest asked of the machine.
+    // On Windows the engine asks PowerShell, which a loaded runner was seen to answer only past
+    // `WINDOWS_COMMAND_LINE_MS`: the orphan then stays unknown and is never ended. That query is
+    // the supervisor suite's; this scenario is the tree's, and its orphan is still really killed.
+    const orphanLine = [process.execPath, ...orphan.spawnargs.slice(1)].join(' ')
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const machine = yield* HostProcesses
+        return {
+          ...machine,
+          commandLineOf: (pid: number) =>
+            pid === orphan.pid ? Effect.succeed(orphanLine) : machine.commandLineOf(pid),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
     const before = await run(({ profile }) =>
       within(
         profile,
@@ -913,17 +929,18 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
         }),
       ),
     )
-    const after = engine(() => ({ steps: [{ does: 'says', text: 'resumed' }] }))
+    const after = engine(() => ({ steps: [{ does: 'says', text: 'resumed' }] }), {
+      hostProcesses: host,
+    })
     const [rebuilt, lease, lines] = await after.run(({ profile, lines: said }) =>
       within(
         profile,
         Effect.gen(function* () {
-          // The orphan is ended first. On Windows, what it runs is asked of PowerShell, which the
-          // engine waits on for as long as `WINDOWS_COMMAND_LINE_MS`: the wait is that long too,
-          // and a loaded runner was seen to need more than the 5 seconds of the others.
+          // The orphan is ended first: its tree killed, then seen gone, which the engine waits on
+          // for as long as `ORPHAN_EXIT_MS` (`taskkill` answers before the process has exited).
           yield* until(
             Effect.sync(() => said.some((line) => line.includes('orphan agent process'))),
-            WINDOWS_COMMAND_LINE_MS,
+            ORPHAN_EXIT_MS,
           )
           // The sessions the stopped engine left are replaced, then their successors settle.
           yield* until(
@@ -947,8 +964,8 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
     expect(helper?.parent).toBe(builder?.lineage)
     expect((builder?.createdAt ?? '') <= (helper?.createdAt ?? '')).toBe(true)
     expect(lease?.sessionId).toBe(builder?.id)
-    const orphanLine = lines.findIndex((line) => line.includes('orphan agent process'))
-    expect(orphanLine).toBeGreaterThanOrEqual(0)
+    const orphanSaid = lines.findIndex((line) => line.includes('orphan agent process'))
+    expect(orphanSaid).toBeGreaterThanOrEqual(0)
     expect(() => process.kill(orphan.pid ?? 0, 0)).toThrow()
     expect(after.world.agents.map((agent) => text(agent.answers.prompts[0] ?? []))).toEqual([
       expect.stringContaining('[hemera:resume]'),

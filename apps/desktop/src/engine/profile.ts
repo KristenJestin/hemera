@@ -94,7 +94,7 @@ import {
   runsRecipeRunnerLayer,
 } from './runs.ts'
 import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
-import { supervisorLayer } from './supervisor.ts'
+import { type HostProcesses, supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 import {
   type MissionParts,
@@ -264,6 +264,8 @@ export interface ProfileParts {
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** How the supervisor asks about and ends the machine's processes; this machine's otherwise. */
+  readonly hostProcesses?: Layer.Layer<HostProcesses> | undefined
   /**
    * Where a launched mission's Building starts (#139), how a finished task is judged and where the
    * end of the tasks goes (#141): the Builder, no check and `building.tasks_done` otherwise.
@@ -692,7 +694,7 @@ export const startProfile = (
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
-          supervisorLayer(log),
+          supervisorLayer(log, parts.hostProcesses),
           runsLayer(log, {
             agentConfigFolder: join(dataFolder, AGENT_CONFIG_FOLDER),
             ...parts.runs,

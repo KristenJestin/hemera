@@ -132,6 +132,8 @@ export const sessionsEngine = (
     readonly building?: ProfileParts['building']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
+    /** The machine's processes as the supervisor sees them, when a suite answers for some. */
+    readonly hostProcesses?: ProfileParts['hostProcesses']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -161,6 +163,7 @@ export const sessionsEngine = (
   )
   const parts = {
     gh: options.gh,
+    hostProcesses: options.hostProcesses,
     ticketProviders: options.ticketProviders,
     ticketSync: options.ticketSync,
     building: options.building,

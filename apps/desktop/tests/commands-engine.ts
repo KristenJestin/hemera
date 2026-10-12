@@ -58,6 +58,7 @@ export function commandsEngine(
     | 'ticketProviders'
     | 'ticketSync'
     | 'building'
+    | 'hostProcesses'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
   /** The engine's fibers on a test clock the program moves (`TestClock.adjust`). */

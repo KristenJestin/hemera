@@ -693,11 +693,17 @@ export const processSupervisorLayer = Layer.effect(
   }),
 )
 
-/** The supervisor over this machine and the data folder's registry, its stderr into `write`. */
-export const supervisorLayer = (write: (line: string) => void) => {
+/**
+ * The supervisor over this machine (or the `host` a suite stands in for it) and the data folder's
+ * registry, its stderr into `write`.
+ */
+export const supervisorLayer = (
+  write: (line: string) => void,
+  host: Layer.Layer<HostProcesses> = hostProcessesLayer,
+) => {
   const sink = Layer.succeed(StderrSink, { write: (line) => Effect.sync(() => write(line)) })
   return processSupervisorLayer.pipe(
     Layer.provideMerge(databaseRegistryLayer),
-    Layer.provideMerge(Layer.merge(hostProcessesLayer, sink)),
+    Layer.provideMerge(Layer.merge(host, sink)),
   )
 }
