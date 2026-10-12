@@ -1518,6 +1518,60 @@ describe('Commits per task', () => {
     expect(asked.missing).toContain('detached HEAD')
   })
 
+  test('two tasks done on a detached HEAD are both named, the second beside the first’s pending need', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, session, grantId, api, head } = yield* committing()
+          const helper = yield* helperOf(mission.id, session.folder)
+          // The Workspace was taken on a detached HEAD: its bases name no branch.
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ id: buildings.id, bases: buildings.bases })
+            .from(buildings)
+            .where(eq(buildings.missionId, mission.id))
+          const bases = JSON.parse(row?.bases ?? '[]').map((base: { branch: string | null }) =>
+            Object.assign(base, { branch: null }),
+          )
+          yield* database
+            .update(buildings)
+            .set({ bases: JSON.stringify(bases) })
+            .where(eq(buildings.id, row?.id ?? ''))
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          yield* call(helper.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: 'export const markdown = true\n',
+          })
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* taskIn(mission.id, 'T1', 'done')
+          const environments = () =>
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.flatMap((need) =>
+                Predicate.isTagged(need.fields, 'Environment') ? [need.fields.missing] : [],
+              ),
+            )
+          yield* until(Effect.map(environments(), (said) => said.length > 0))
+          yield* call(helper.grantId, 'task_finished', { task: 'T2', summary: 'Markdown.' })
+          yield* taskIn(mission.id, 'T2', 'done')
+          yield* until(Effect.map(environments(), (said) => said.length > 1)).pipe(
+            Effect.timeoutOption('3 seconds'),
+          )
+          return {
+            log: git(api, 'log', '--format=%s', `${head}..HEAD`),
+            said: yield* environments(),
+          }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('')
+    expect(seen.said).toHaveLength(2)
+    expect(seen.said.filter((missing) => missing.includes('T1'))).toHaveLength(1)
+    expect(seen.said.filter((missing) => missing.includes('T2'))).toHaveLength(1)
+  })
+
   test('once the user confirms the branch is back, the task is committed then', async () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) =>

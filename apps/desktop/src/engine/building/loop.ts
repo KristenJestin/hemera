@@ -1840,8 +1840,12 @@ export const buildingLoop = (parts: LoopParts) => {
     onBranch: string | null,
   ) =>
     Effect.gen(function* () {
-      const [asking] = yield* (yield* Database)
-        .select({ id: buildingDecisions.id })
+      const missing =
+        branch === null
+          ? `${repository} has no branch for this Building (it was taken on a detached HEAD): Hemera did not commit ${taskId}`
+          : `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
+      const asking = yield* (yield* Database)
+        .select({ question: buildingDecisions.question })
         .from(buildingDecisions)
         .where(
           and(
@@ -1851,11 +1855,10 @@ export const buildingLoop = (parts: LoopParts) => {
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the decisions')))
-      if (asking !== undefined) return
-      const missing =
-        branch === null
-          ? `${repository} has no branch for this Building (it was taken on a detached HEAD): Hemera did not commit ${taskId}`
-          : `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
+      // A branch to switch back to is asked once for the Building; a commit left to the user is
+      // said for each task, since the pending need names only the one it was raised for.
+      if (branch === null ? asking.some((one) => one.question === missing) : asking.length > 0)
+        return
       const write = yield* createNeedIn(
         parts.needs,
         owner,
