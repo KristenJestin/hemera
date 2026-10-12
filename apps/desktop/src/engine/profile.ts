@@ -176,6 +176,7 @@ import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
+import { type Diffs, diffsLayer } from './review/diffs.ts'
 import {
   type OutsideChanges,
   type OutsideSettings,
@@ -363,6 +364,7 @@ export type EngineServices =
   | BuildingStart
   | OutsideChanges
   | Checkpoints
+  | Diffs
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -512,6 +514,9 @@ export const startProfile = (
           ).pipe(Layer.provide(machineSnapshots))
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
+    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+      Layer.provideMerge(snapshots),
+    )
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -647,7 +652,10 @@ export const startProfile = (
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       outside,
-      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
+      checkpoints,
+      diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
+        Layer.provide(Layer.mergeAll(checkpoints, outside)),
+      ),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
