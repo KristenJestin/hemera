@@ -51,6 +51,7 @@ export const TABLE_CLASSES = {
   workspace_steps: 'state',
   environment_variables: 'state',
   project_commands: 'state',
+  project_checks: 'state',
   project_never_entries: 'state',
   command_runs: 'diagnostic',
   supervised_processes: 'state',
@@ -135,6 +136,7 @@ export const TABLE_CLASSES = {
   building_unattributed: 'permanent',
   building_conflicts: 'permanent',
   building_check_results: 'permanent',
+  building_check_runs: 'state',
   helpers: 'permanent',
   // A result waits here only until its parent's lineage takes it.
   queued_results: 'state',

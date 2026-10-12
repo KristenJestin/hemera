@@ -103,6 +103,14 @@ import {
 } from './living-spec/store.ts'
 import { TesterFindings } from './tester/findings.ts'
 import { Snapshots } from './building/snapshots.ts'
+import {
+  acceptChecks,
+  listChecks,
+  moveCheck,
+  proposedChecks,
+  removeCheck,
+  saveCheck,
+} from './project-checks.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
@@ -491,6 +499,17 @@ export const engineHandlers = (
       follow(
         Stream.unwrap(ExclusiveResources.useSync((reservations) => reservations.changes)),
       ).pipe(observedStream('resources.changed', log)),
+    'checks.list': ({ projectId }) => use(listChecks(projectId)).pipe(observed('checks.list', log)),
+    'checks.propose': ({ projectId, asked }) =>
+      use(proposedChecks(projectId, asked)).pipe(observed('checks.propose', log)),
+    'checks.accept': ({ projectId, proposals }) =>
+      use(acceptChecks(projectId, proposals)).pipe(observed('checks.accept', log)),
+    'checks.save': ({ projectId, id, check }) =>
+      use(saveCheck(projectId, id, check)).pipe(observed('checks.save', log)),
+    'checks.remove': ({ projectId, id }) =>
+      use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
+    'checks.move': ({ projectId, id, rank }) =>
+      use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
     'tickets.providers': ({ projectId }) =>
       use(providersOf(projectId)).pipe(observed('tickets.providers', log)),
     'tickets.proposeGithub': ({ projectId, host }) =>

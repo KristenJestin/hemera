@@ -290,6 +290,33 @@ export const projectCommands = sqliteTable(
 )
 
 /**
+ * A Project's checks (#143): a catalogue command or a free line, exactly one of the two, run where
+ * and when the Project says, judged by its exit code or by a number its output shows. A check of a
+ * command leaves the Project with that command.
+ */
+export const projectChecks = sqliteTable(
+  'project_checks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'cascade' }),
+    line: text('line'),
+    where: text('where').notNull(),
+    repository: text('repository'),
+    when: text('when').notNull(),
+    expectPattern: text('expect_pattern'),
+    expectMinimum: real('expect_minimum'),
+    files: text('files'),
+    rank: integer('rank').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [unique('check_name_once_in_project').on(table.projectId, table.name)],
+)
+
+/**
  * A Project's "never" list: the commands always refused to its agents, in the order they were
  * listed. `entry` is the JSON of a `NeverEntry`: a program with its leading arguments, or a
  * catalogue command by its id. Read live by every call, never copied into a mission.
@@ -2548,8 +2575,37 @@ export const buildingCheckResults = sqliteTable(
     outputTail: text('output_tail').$type<Masked<string>>().notNull(),
     runId: text('run_id'),
     at: text('at').notNull(),
+    /** The line as it ran, `{files}` filled (#143); null for a result kept by #142's port alone. */
+    line: text('line').$type<Masked<string>>(),
+    exitCode: integer('exit_code'),
+    /** The number its `expect` read. */
+    value: real('value'),
+    /** The tree of the repository it ran on (#140), for telling when a final check is stale. */
+    tree: text('tree'),
+    /** The whole output kept as the mission's evidence, for a final check. */
+    evidenceId: text('evidence_id'),
   },
   (table) => [index('building_check_results_of_attempt').on(table.attemptId)],
+)
+
+/**
+ * A check launched and not yet judged (#143): written as its process launches, removed with its
+ * result. One a stopped engine left is run again at the next start, or, on an exclusive resource,
+ * never run blindly again.
+ */
+export const buildingCheckRuns = sqliteTable(
+  'building_check_runs',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildingAttempts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    place: text('place').notNull(),
+    runId: text('run_id').notNull(),
+    commandId: text('command_id'),
+    startedAt: text('started_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.name, table.place] })],
 )
 
 /** The files a running task holds, from its targets: one holder per file of a Building. */

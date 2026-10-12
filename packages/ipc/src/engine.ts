@@ -35,6 +35,7 @@ import { StartRpcs } from './start.ts'
 import { JiraTokenEngineRpcs, TicketsRpcs } from './tickets.ts'
 import { PlanningRpcs } from './planning.ts'
 import { ResourcesRpcs } from './resources.ts'
+import { ChecksRpcs } from './checks.ts'
 import { LivingSpecRpcs } from './living-spec.ts'
 import { ProbesRpcs } from './probes.ts'
 import { DiscussionsRpcs } from './discussions.ts'
@@ -168,4 +169,7 @@ export const EngineMainRpcs = EngineRpcs.merge(
   NoticeFeedRpcs,
   JevKeyRpcs,
   JiraTokenEngineRpcs,
+  // The Project's checks (#143): served to main only until their screen (#150). One more group
+  // in the window's handlers is more than TypeScript instantiates (TS2589).
+  ChecksRpcs,
 )
