@@ -38,6 +38,9 @@ const QUIET = 'min-w-0 truncate text-xs text-muted-foreground'
 /** The names the rows of a menu still searching are drawn at: a file's name, short and long. */
 const LOADING_ROWS = ['server.ts', 'invoices-list.tsx', 'ACME-12']
 
+/** The id of the menu's entry at a place, under the field's own id. */
+const optionIdOf = (id: string, at: number): string => `${id}-mention-${String(at)}`
+
 /**
  * The mention field's editor, on Tiptap, which owns the editing; `mention-field.tsx` says what
  * the field is and loads this file only once a page shows one.
@@ -163,7 +166,7 @@ export function MentionEditor({
   const handed = useRef(value)
 
   const current = Math.min(active, Math.max(0, (menu?.items.length ?? 1) - 1))
-  const optionId = (at: number) => `${id}-mention-${String(at)}`
+  const optionId = (at: number) => optionIdOf(id, at)
 
   const editor = useEditor({
     immediatelyRender: true,
@@ -306,8 +309,8 @@ export function MentionEditor({
   // The entry walked to is kept in sight in a list that scrolls.
   useLayoutEffect(() => {
     if (menu === null) return
-    document.getElementById(optionId(current))?.scrollIntoView({ block: 'nearest' })
-  }, [menu, current])
+    document.getElementById(optionIdOf(id, current))?.scrollIntoView({ block: 'nearest' })
+  }, [menu, current, id])
 
   const open = menu !== null
 
