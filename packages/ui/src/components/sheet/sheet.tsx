@@ -227,6 +227,7 @@ export function SheetStack({
             {view.form === true ? (
               <div className={FORM}>{view.body}</div>
             ) : (
+              // react-doctor-disable-next-line no-noninteractive-tabindex -- a body that scrolls takes the focus, so the keyboard can scroll it
               <div className={BODY} tabIndex={0}>
                 {view.body}
               </div>
