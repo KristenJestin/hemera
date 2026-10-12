@@ -361,29 +361,31 @@ export const chatsLayer = Layer.effect(
       session.chosen.effort === setting.effort
 
     /**
-     * The Chat's live session on its setting: the one running, or a fresh one on its lineage,
-     * whose brief holds the end of the conversation when it follows an earlier one.
+     * A fresh session on the Chat's lineage, handed the user's message as its brief's: its first
+     * turn takes both. Its brief holds the end of the conversation when it follows an earlier one.
      */
-    const liveSession = (chat: Chat) =>
+    const freshSession = (chat: Chat, body: string) =>
       Effect.gen(function* () {
-        const { live } = yield* sessionsOf(chat)
-        if (live !== null && sameSetting(live, chat.setting)) return live
         const project = yield* getProject(chat.projectId).pipe(Effect.orDie)
-        const asked = {
-          owner: { kind: 'project' as const, projectId: chat.projectId },
-          role: 'chat',
-          provider: chat.setting.agent,
-          chosen: { model: chat.setting.model, effort: chat.setting.effort, mode: null },
-          folder: project.mainCheckout,
-        }
-        if (chat.lineage !== null) {
-          // Under the Sessions' lock: what still lives or starts on the lineage ends first, even
-          // a successor a replacement opened since it was read here.
-          return yield* sessions.reopen(chat.lineage, asked, 'the Chat’s model changed')
-        }
-        const opened = yield* sessions.open(asked)
-        yield* setChatLineage(chat.id, opened.lineage)
-        return opened
+        const owner = { kind: 'project' as const, projectId: chat.projectId }
+        // The lineage is the Chat's before its first session starts: the agent's first turn and
+        // its first call find their Chat by it.
+        const lineage = chat.lineage ?? crypto.randomUUID()
+        if (chat.lineage === null) yield* setChatLineage(chat.id, lineage)
+        // Under the Sessions' lock: what still lives or starts on the lineage ends first, even
+        // a successor a replacement opened since it was read here, and the message is queued
+        // before the fresh one starts.
+        return yield* sessions.deliverAndReopen(
+          { owner, target: { lineage }, kind: USER_MESSAGE, body },
+          {
+            owner,
+            role: 'chat',
+            provider: chat.setting.agent,
+            chosen: { model: chat.setting.model, effort: chat.setting.effort, mode: null },
+            folder: project.mainCheckout,
+          },
+          chat.lineage === null ? 'the Chat’s first message' : 'the Chat’s model changed',
+        )
       })
 
     return {
@@ -407,11 +409,14 @@ export const chatsLayer = Layer.effect(
           // fresh session's brief reads the conversation.
           const { live } = yield* sessionsOf(chat)
           if (live !== null) yield* flush(live.id, chatId)
-          const session = yield* liveSession(chat)
+          if (live === null || !sameSetting(live, chat.setting)) {
+            yield* freshSession(chat, body)
+            return yield* addEntry(chatId, { kind: 'user', text: body })
+          }
           const entry = yield* addEntry(chatId, { kind: 'user', text: body })
           yield* sessions.deliver({
             owner: { kind: 'project', projectId: chat.projectId },
-            target: { lineage: session.lineage },
+            target: { lineage: live.lineage },
             kind: USER_MESSAGE,
             body,
           })

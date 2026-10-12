@@ -167,6 +167,16 @@ export class Sessions extends Context.Service<
       reason: string,
     ) => Effect.Effect<RoleSession, SessionRefused | DatabaseError>
     /**
+     * Stores a delivery to a lineage and opens the lineage's next session, as `reopen` does and
+     * under the same lock: queued before the new session starts and after the old ones ended, the
+     * delivery goes with the new one's brief, in its first turn (a Chat's message that opens it).
+     */
+    readonly deliverAndReopen: (
+      asked: DeliveryAsked & { readonly target: { readonly lineage: string } },
+      start: OpenAsked,
+      reason: string,
+    ) => Effect.Effect<RoleSession, DeliveryKindRefused | SessionRefused | DatabaseError>
+    /**
      * Starts a lineage stopped as failed or ended again, when it has no live successor and its
      * owner is active: the successor takes its leases and the resume block. Null otherwise.
      */
@@ -1228,6 +1238,30 @@ export const sessionsLayer = (settings: SessionsSettings) =>
         }).pipe(run)
 
       /**
+       * Opens the next session of a lineage under the lock, once what lives on it ended and
+       * `first` ran: what `first` queues for the lineage goes to the new session alone.
+       */
+      const reopenAfter = <E>(
+        lineage: string,
+        asked: OpenAsked,
+        reason: string,
+        first: Effect.Effect<unknown, E, Needs>,
+      ) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            // Read again under the lock: a replacement may have moved the lineage on since.
+            const rows = yield* sessionsOfLineage(lineage)
+            yield* endLive(rows, reason)
+            yield* first
+            const epoch = Math.max(-1, ...rows.map((one) => one.epoch)) + 1
+            return yield* openAt(asked, { lineage, epoch })
+          }),
+        ).pipe(run)
+
+      /**
        * A launch an agent asks for: a slot of the cap at once, or refused with the sentence it
        * reads; then one of its mission's launches, or refused the same way. Each refusal is a
        * line of the Journal.
@@ -1394,19 +1428,9 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (live) yield* dispatch
             return id
           }).pipe(run),
-        reopen: (lineage, asked, reason) =>
-          Semaphore.withPermits(
-            lock,
-            1,
-          )(
-            Effect.gen(function* () {
-              // Read again under the lock: a replacement may have moved the lineage on since.
-              const rows = yield* sessionsOfLineage(lineage)
-              yield* endLive(rows, reason)
-              const epoch = Math.max(-1, ...rows.map((one) => one.epoch)) + 1
-              return yield* openAt(asked, { lineage, epoch })
-            }),
-          ).pipe(run),
+        reopen: (lineage, asked, reason) => reopenAfter(lineage, asked, reason, Effect.void),
+        deliverAndReopen: (delivery, asked, reason) =>
+          reopenAfter(delivery.target.lineage, asked, reason, storeDelivery(delivery)),
         resume,
         replace,
         stopTree,
