@@ -76,7 +76,7 @@ import {
   recordWriteIn,
   writesIn,
 } from './attempts.ts'
-import { checkAttempt } from './checks.ts'
+import { checkAttempt, keepCheckResult } from './checks.ts'
 import { documentationAttemptIn } from './documenter-store.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { OutsideChanges } from './outside.ts'
@@ -146,7 +146,7 @@ export const runningOf = (tasks: ReadonlyArray<TaskNow>, lineage: string) =>
   tasks.filter((task) => task.state === 'in_progress' && task.runner === lineage)
 
 /** The task a write belongs to: the one whose targets hold the file, else the first. */
-const taskOfFile = (
+export const taskOfFile = (
   running: ReadonlyArray<TaskNow>,
   file: { readonly repository: string; readonly path: string },
 ) =>
@@ -156,7 +156,7 @@ const taskOfFile = (
   running[0] ??
   null
 
-const lineageIn = (reader: Reader, sessionId: string) =>
+export const lineageIn = (reader: Reader, sessionId: string) =>
   Effect.map(
     reader
       .select({ lineage: agentSessions.lineage })
@@ -1352,6 +1352,151 @@ export const buildingLoop = (parts: LoopParts) => {
       return verdict
     })
 
+  /**
+   * A scenario's proof that is not what it should be (#144): a red that is not one, a test that
+   * could not be merged, a proof still red once its tasks are done. An attempt on that scenario's
+   * proof keeps it, and the Builder is handed it; the third counted red is an error need on that
+   * scope, and while it waits nothing more is opened or asked. A failed green's attempt stays open
+   * until the scenario is green, on the trees of every repository at its failure (`opened`): the
+   * next failure closes it red and opens the next one.
+   */
+  const proofRed = (
+    building: BuildingRow,
+    scenario: string,
+    result: {
+      readonly name: string
+      readonly detail: string
+      readonly outputTail: string
+      readonly runId: string | null
+    },
+    next: string,
+    opened: string | null = null,
+  ) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const { missionId } = building
+      const all = (yield* attemptsIn(database, building.id))
+        .filter((one) => one.taskId === null && one.scope === 'proof' && one.subject === scenario)
+        // The open one of a failed green is closed red below, before the next opens.
+        .map((one) =>
+          one.endedAt === null ? Object.assign({}, one, { verdict: 'red', endedAt: now() }) : one,
+        )
+      const [asking] = yield* database
+        .select({ id: buildingDecisions.id })
+        .from(buildingDecisions)
+        .where(
+          and(
+            eq(buildingDecisions.buildingId, building.id),
+            eq(buildingDecisions.kind, 'error'),
+            eq(buildingDecisions.state, 'pending'),
+            eq(buildingDecisions.scope, 'proof'),
+            eq(buildingDecisions.subject, scenario),
+          ),
+        )
+        .pipe(Effect.mapError(refusedWhile('reading the decisions')))
+      if (asking !== undefined) return
+      const builder = yield* builderLineage(missionId)
+      const at = now()
+      const attemptId = crypto.randomUUID()
+      const number = all.length + 1
+      yield* mutate('opening an attempt on a proof', (transaction) =>
+        Effect.gen(function* () {
+          yield* transaction
+            .update(buildingAttempts)
+            .set({ endedAt: at, outcome: 'red', verdict: 'red' })
+            .where(
+              and(
+                eq(buildingAttempts.buildingId, building.id),
+                isNull(buildingAttempts.taskId),
+                eq(buildingAttempts.scope, 'proof'),
+                eq(buildingAttempts.subject, scenario),
+                isNull(buildingAttempts.endedAt),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('closing the attempt')))
+          yield* transaction
+            .insert(buildingAttempts)
+            .values({
+              id: attemptId,
+              buildingId: building.id,
+              taskId: null,
+              scope: 'proof',
+              subject: scenario,
+              number,
+              runner: builder ?? 'builder',
+              epoch: 0,
+              starts: opened ?? '[]',
+              startedAt: at,
+              endedAt: opened === null ? at : null,
+              outcome: opened === null ? 'red' : null,
+              verdict: opened === null ? 'red' : null,
+              outside: '[]',
+            })
+            .pipe(Effect.mapError(refusedWhile('opening the attempt')))
+          return {
+            result: undefined,
+            events: [
+              buildingEvent(missionId, 'building.attempt_red', {
+                scope: 'proof',
+                subject: scenario,
+                check: result.name,
+                place: null,
+              }),
+            ],
+          }
+        }),
+      )
+      const kept = { ...result, place: '', verdict: 'red' as const }
+      yield* keepCheckResult(attemptId, kept)
+      const target = builder === null ? { role: 'builder' } : { lineage: builder }
+      const label = `${scenario}'s proof`
+      const judgedRed = [
+        ...all.filter((one) => one.counted && one.verdict === 'red'),
+        { id: attemptId, number, runner: builder ?? 'builder' },
+      ]
+      if (judgedRed.length >= REDS_BEFORE_A_NEED) {
+        const failures = yield* failuresOf(judgedRed.slice(-REDS_BEFORE_A_NEED))
+        const { owner } = yield* ownerOf(building, null)
+        const question = `${label}: three red attempts`
+        const write = yield* createNeedIn(
+          parts.needs,
+          owner,
+          ErrorFields.make({ failed: question, attempts: failures, proposals: [] }),
+        )
+        const needId = yield* mutate('stopping a proof after three reds', (transaction) =>
+          Effect.gen(function* () {
+            const made = yield* hemeraNeedIn(transaction, building, write, {
+              kind: 'error',
+              tasks: [],
+              question,
+              options: [],
+              proposer: builder,
+              scope: { scope: 'proof', subject: scenario },
+            })
+            return {
+              result: made.needId,
+              events: [
+                buildingEvent(missionId, 'building.three_reds', {
+                  scope: 'proof',
+                  subject: scenario,
+                  need: made.needId,
+                }),
+                ...made.events,
+              ],
+            }
+          }),
+        )
+        yield* deliver(
+          building,
+          target,
+          'propose',
+          `${label} is red for the third time: Hemera asks the user. Fill what you propose with need_propose (need ${needId}): your options, the one you recommend and why.`,
+        )
+        return
+      }
+      yield* deliver(building, target, 'red', yield* redSaid(label, [kept], next))
+    })
+
   // ---- need_propose.
 
   const propose = (grant: Grant, args: ToolArguments<'need_propose'>) =>
@@ -1905,6 +2050,8 @@ export const buildingLoop = (parts: LoopParts) => {
     redTask,
     greenEvent,
     judgeScope,
+    proofRed,
+    hemeraNeedIn,
     propose,
     answeredErrorIn,
     restarted,
