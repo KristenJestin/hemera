@@ -20,9 +20,9 @@
  */
 
 import { isUtf8 } from 'node:buffer'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { posix } from 'node:path'
+import { join, posix } from 'node:path'
 
 import { sensitivePlace } from '@hemera/core/domain'
 import {
@@ -58,6 +58,7 @@ import {
 import { latestBuildingIn } from '../building/tasks.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { Git, type GitBytesSpawn } from '../git.ts'
+import { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import {
   buildingLaunches,
@@ -199,6 +200,15 @@ const sideOf = (side: FileSide | null): DiffSide | null => {
   return DiffText.make({ text: bytes.toString('utf8'), encoding: 'utf-8', size: side.size })
 }
 
+/** A regular file's bytes on disk, or null: a link, a folder or a file gone is not read. */
+function diskBytes(path: string): Buffer | null {
+  try {
+    return lstatSync(path).isFile() ? readFileSync(path) : null
+  } catch {
+    return null
+  }
+}
+
 const linesOf = (file: DiffFile) => (file.added ?? 0) + (file.removed ?? 0)
 
 /** What one file of a list is, from Git's listing and what is known around it. */
@@ -275,6 +285,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
       const snapshots = yield* Snapshots
       const checkpointsService = yield* Checkpoints
       const outside = yield* OutsideChanges
+      const secrets = yield* Secrets
       const said = (line: string) => Effect.sync(() => log(`diff: ${line}`))
       const scope = yield* Effect.scope
       const hub = yield* PubSub.unbounded<{
@@ -687,8 +698,61 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
                 Effect.catchTag('SnapshotUnavailable', (unavailable) =>
                   Effect.fail(new DiffUnreadable({ reason: unavailable.message })),
                 ),
+                Effect.flatMap((sides) =>
+                  sides === null ? Effect.succeed(null) : checkedOut(place, base, found, sides),
+                ),
               ),
           )
+        })
+
+      /** A text's bytes as they are kept: masked when they hold a known secret. */
+      const textSide = (side: FileSide, bytes: Buffer): FileSide => {
+        if (bytes.includes(0) || !isUtf8(bytes)) return side
+        const original = bytes.toString('utf8')
+        const masked = secrets.mask(original)
+        return {
+          ...side,
+          size: bytes.length,
+          content: Buffer.from(masked, 'utf8'),
+          masked: masked !== original,
+        }
+      }
+
+      /**
+       * Both sides as the user's checkout has them, on any Git configuration: the snapshot holds
+       * what Git stores (`core.autocrlf` or `eol` turn CRLF into LF), so the live side is read from
+       * the disk, and the base side through Git's line-ending conversions. A file whose attributes
+       * name a filter driver keeps its base as stored: a driver is a program of the user's.
+       */
+      const checkedOut = (
+        place: Place,
+        base: string | null,
+        found: DiffFile,
+        sides: { readonly before: FileSide | null; readonly after: FileSide | null },
+      ) =>
+        Effect.gen(function* () {
+          const readable = (side: FileSide | null): side is FileSide =>
+            side !== null && side.withheld === null && side.content !== null
+          const onDisk = readable(sides.after) ? diskBytes(join(place.folder, found.path)) : null
+          const after =
+            onDisk === null || sides.after === null ? sides.after : textSide(sides.after, onDisk)
+          const stored = found.oldPath ?? found.path
+          const before =
+            readable(sides.before) && base !== null
+              ? yield* Effect.gen(function* () {
+                  const attributes = fieldsOf(
+                    yield* run(place.folder, ['check-attr', '-z', 'filter', '--', stored], 'read'),
+                  )
+                  if (attributes[2] !== 'unspecified') return sides.before
+                  const bytes = yield* run(
+                    place.folder,
+                    ['cat-file', '--filters', `${base}:${stored}`],
+                    'read',
+                  )
+                  return sides.before === null ? null : textSide(sides.before, bytes)
+                }).pipe(Effect.orElseSucceed(() => sides.before))
+              : sides.before
+          return { before, after }
         })
 
       /** A reason to compute the mission's repositories again: each one 250 ms after the last. */

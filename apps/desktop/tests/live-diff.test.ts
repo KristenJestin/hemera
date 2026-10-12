@@ -76,6 +76,8 @@ const moreOnBase = () =>
     writeFileSync(join(api, 'link.txt'), 'plain\n')
     writeFileSync(join(api, 'logo.png'), PNG)
     writeFileSync(join(api, '.gitignore'), '*.log\nbuild/\n')
+    // As Git stores a text file whose checkout ends its lines with CRLF under core.autocrlf.
+    writeFileSync(join(api, 'crlf.txt'), 'un\ndeux\n')
     git(api, 'add', '.')
     git(api, 'commit', '-q', '-m', 'more')
     git(api, 'push', '-q', 'origin', 'HEAD')
@@ -546,10 +548,17 @@ describe('The diff follows the Workspace live', () => {
         profile,
         Effect.gen(function* () {
           const { missionId, api } = yield* launchedOverBoth()
+          // Windows runners set it system-wide: Git stores the lines with LF, the disk keeps CRLF.
+          git(api, 'config', 'core.autocrlf', 'true')
           mkdirSync(join(api, 'mes docs'))
           writeFileSync(join(api, 'mes docs', 'été à noël.md'), 'un\r\ndeux\r\n')
+          writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
           const diff = yield* live(missionId)
-          return { diff, contents: yield* fileOf(missionId, 'api', 'mes docs/été à noël.md') }
+          return {
+            diff,
+            added: yield* fileOf(missionId, 'api', 'mes docs/été à noël.md'),
+            modified: yield* fileOf(missionId, 'api', 'crlf.txt'),
+          }
         }),
       ),
     )
@@ -558,7 +567,42 @@ describe('The diff follows the Workspace live', () => {
       treePath: 'api/mes docs/été à noël.md',
       added: 2,
     })
-    expect(textOf(seen.contents, 'after')).toBe('un\r\ndeux\r\n')
+    expect(entry(seen.diff, 'api', 'crlf.txt')).toMatchObject({ letter: 'M', added: 1, removed: 0 })
+    expect(textOf(seen.added, 'after')).toBe('un\r\ndeux\r\n')
+    // Each side as the user's checkout has it: the base with the line endings Git gives it.
+    expect(textOf(seen.modified, 'before')).toBe('un\r\ndeux\r\n')
+    expect(textOf(seen.modified, 'after')).toBe('un\r\ndeux\r\ntrois\r\n')
+  })
+
+  test('a checkpoint keeps a CRLF file as Git stores it', async () => {
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api, rows } = yield* launchedOverBoth()
+          git(api, 'config', 'core.autocrlf', 'true')
+          writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
+          const checkpointId = yield* Checkpoints.use((checkpoints) =>
+            checkpoints.take(
+              missionId,
+              'review',
+              rows.map((row) => ({
+                name: row.path,
+                folder: row.worktree,
+                baseRef: row.baseRef,
+                baseCommit: row.baseCommit,
+              })),
+            ),
+          )
+          return yield* Diffs.use((diffs) =>
+            diffs.fileAtCheckpoint(checkpointId, 'api', 'crlf.txt'),
+          )
+        }),
+      ),
+    )
+    expect(textOf(seen, 'before')).toBe('un\ndeux\n')
+    expect(textOf(seen, 'after')).toBe('un\ndeux\ntrois\n')
   })
 })
 
