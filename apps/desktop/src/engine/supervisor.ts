@@ -436,7 +436,8 @@ export class ProcessSupervisor extends Context.Service<
     ) => Effect.Effect<Supervised, never, Scope.Scope>
     /**
      * The roots of `kind` a previous engine left: each still alive and still the same program is
-     * ended as a tree; every one is forgotten.
+     * ended as a tree; every one is forgotten, but one alive whose program the system could not
+     * say, which is kept for the next start.
      */
     readonly endOrphans: (kind: ProcessOwner['kind']) => Effect.Effect<ReadonlyArray<Orphan>>
   }
@@ -668,15 +669,24 @@ export const processSupervisorLayer = Layer.effect(
         for (const root of left) {
           let ours = false
           let gone = false
+          const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
           if (host.alive(root.pid)) {
             const line = yield* host.commandLineOf(root.pid)
-            ours = line !== null && stillRuns(root, line, host.platform)
+            // Alive, and the system could not say what it runs (on Windows, PowerShell too slow or
+            // failing): neither ended nor forgotten, so that the next start asks again.
+            if (line === null) {
+              yield* sink.write(
+                `kept ${which}: what it runs could not be read, asked again at the next start`,
+              )
+              orphans.push({ root, ended: false })
+              continue
+            }
+            ours = stillRuns(root, line, host.platform)
           }
           if (ours) {
             yield* host.killTree(root.pid, host.platform !== 'win32')
             // Said ended only once the system says the pid is gone, not when the kill was asked.
             gone = yield* goneWithin(root.pid)
-            const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
             yield* sink.write(
               gone
                 ? `ended ${which}`
