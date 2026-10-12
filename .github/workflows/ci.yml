@@ -148,11 +148,18 @@ jobs:
       # suites hold the processors at full load, and a `git` a suite starts takes seconds instead
       # of milliseconds. So Windows runs the two one after the other, and the stories run even
       # when the suites failed, so one run reports both.
+      #
+      # Each cap sits well above what the step takes, so that only a hang reaches it. Measured on
+      # the twenty latest green Windows jobs (12 October 2026): the repository suites took 491 to
+      # 893 s (the slowest within seconds of the old 900 s cap, and the suite is still growing),
+      # the stories 123 to 252 s. The suites get thirty minutes, twice the slowest run; the
+      # stories keep fifteen, three and a half times theirs. The one story run that reached
+      # fifteen minutes was a hang, not a slow run: every other one stayed under 260 s.
       - name: Test the repository suites
         id: repository
         if: runner.os == 'Windows'
         working-directory: source
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: pnpm test --project repository
       - name: Test the stories
         if: runner.os == 'Windows' && (success() || steps.repository.conclusion == 'failure')
