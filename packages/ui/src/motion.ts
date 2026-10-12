@@ -30,6 +30,14 @@ export const morph: Transition = { type: 'spring', stiffness: 260, damping: 33, 
 export const instant: Transition = { duration: 0 }
 
 /**
+ * `instant` for a value that may change just after its element was drawn. Motion applies a
+ * zero-duration change from a frame it schedules and loses it when the target moves again right
+ * after the element appeared (a select enabled as soon as it was drawn stayed at half opacity for
+ * good); a thousandth of a second is not lost, and is as good as nothing to the eye.
+ */
+export const instantEnough: Transition = { duration: 0.001 }
+
+/**
  * How far the edges of a control travel under the hand, in pixels: inwards while it is pressed,
  * outwards while the pointer is over it. Pixels and not a share of the control, so a wide select
  * and a small icon button give by the same distance; both under two pixels, so a label never

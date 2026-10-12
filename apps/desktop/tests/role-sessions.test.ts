@@ -33,6 +33,7 @@ import {
   sessionsIn,
 } from '../src/engine/sessions/store.ts'
 import { Database, DatabaseError } from '../src/engine/storage/database.ts'
+import { WINDOWS_COMMAND_LINE_MS } from '../src/engine/supervisor.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
 import {
   domainEvents,
@@ -917,6 +918,13 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       within(
         profile,
         Effect.gen(function* () {
+          // The orphan is ended first. On Windows, what it runs is asked of PowerShell, which the
+          // engine waits on for as long as `WINDOWS_COMMAND_LINE_MS`: the wait is that long too,
+          // and a loaded runner was seen to need more than the 5 seconds of the others.
+          yield* until(
+            Effect.sync(() => said.some((line) => line.includes('orphan agent process'))),
+            WINDOWS_COMMAND_LINE_MS,
+          )
           // The sessions the stopped engine left are replaced, then their successors settle.
           yield* until(
             Effect.map(
