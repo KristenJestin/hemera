@@ -249,7 +249,7 @@ const answerOf = (need: Need): string | null => {
  * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
  */
 export type BuilderHold = (
-  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing',
+  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -1514,16 +1514,22 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       // At every start: each active Building counts this engine's time, judges again a task left
       // checking, says it resumed, and has its Builder.
-      const resume = Effect.gen(function* () {
+      // What a stop cut in the middle is settled by the start before anything acts again (CT-09):
+      // the writes attributed here, the cut commands handed over, and only then the resume.
+      takeRestart = Effect.gen(function* () {
         for (const building of yield* activeBuildings) {
-          // What a stop cut in the middle, before anything acts again (CT-09).
           yield* loop
             .restarted(building)
             .pipe(
               Effect.catchCause((cause) =>
-                said(`the actions a stop left were not handed over: ${String(cause)}`),
+                said(`the writes a stop left were not attributed: ${String(cause)}`),
               ),
             )
+        }
+      }).pipe(provided, Effect.orDie)
+      const resume = Effect.gen(function* () {
+        yield* Deferred.await(handedOver)
+        for (const building of yield* activeBuildings) {
           const checking = yield* mutate('resuming the Building', (transaction) =>
             Effect.gen(function* () {
               yield* countIn(transaction, building.id)

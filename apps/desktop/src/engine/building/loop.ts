@@ -122,7 +122,7 @@ export interface LoopParts {
   readonly locks: WriteLocks
   readonly said: (line: string) => Effect.Effect<void>
   readonly hold: (
-    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing',
+    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
   ) => Effect.Effect<void>
   /** A delivery to a lineage of the mission, or to its Builder. */
   readonly deliver: (
@@ -1391,6 +1391,7 @@ export const buildingLoop = (parts: LoopParts) => {
       const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
       const details = Option.getOrNull(readParsed(action.details))
       if (building === null || details === null || details.claim !== undefined) return false
+      yield* hold('cutting')
       yield* indeterminate(building, action.id, action.owner.taskId, details)
       return true
     })

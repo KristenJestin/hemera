@@ -1018,7 +1018,7 @@ describe('An action cut by a restart (CT-09)', () => {
     ])
   })
 
-  test('on a command declared on an exclusive resource, a decision need is created and the task waits for it', async () => {
+  test('on a command declared on an exclusive resource, a decision need is created and the task waits for it, and the Building resumes only once it is handed over, however slow', async () => {
     const before = builderEngine(data, work)
     const first = await before.run(({ profile }) =>
       within(
@@ -1061,7 +1061,10 @@ describe('An action cut by a restart (CT-09)', () => {
         }),
       ),
     )
-    const after = builderEngine(data, work)
+    // The hand-over is slow: the Building must still wait for it before it resumes.
+    const after = builderEngine(data, work, {
+      hold: (at) => (at === 'cutting' ? Effect.sleep('500 millis') : Effect.void),
+    })
     const seen = await after.run(({ profile }) =>
       within(
         profile,
