@@ -293,10 +293,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         said,
         hold,
         deliver: (building, target, kind, body) => deliverTo(building, target, kind, body),
+        ran: (building) => Effect.suspend(() => commitsLeft(building)),
       })
       /**
-       * The commits left made in the background: a commit may wait for its task's own commands,
-       * and never holds back the call that finished the task.
+       * The commits left made in the background, never holding back the call that finished the
+       * task: after a task is done, after a task's command ends, at each start, and once the user
+       * confirms a repository is back on its branch.
        */
       const commitsLeft = (building: BuildingRow) =>
         loop.commitLeft(building).pipe(
@@ -1401,6 +1403,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (outcome === null) return
+          if (outcome.decision.kind === 'commit') yield* commitsLeft(outcome.building)
           const tasks = JSON.parse(outcome.decision.tasks).join(', ')
           yield* deliver(
             outcome.building,

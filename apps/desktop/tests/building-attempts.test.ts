@@ -35,13 +35,14 @@ import { saveResources } from '../src/engine/resources/declarations.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  buildings,
   commandRuns,
   domainEvents,
   effectfulActions,
   missionValidationSettings,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
-import { beginAction } from '../src/engine/tools/actions.ts'
+import { actionDone, beginAction } from '../src/engine/tools/actions.ts'
 import { type JudgedCall, Verdicts } from '../src/engine/tools/ports.ts'
 import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
@@ -1348,6 +1349,177 @@ describe('Commits per task', () => {
     )
     expect(seen.early).toEqual([])
     expect(seen.content).toBe('late')
+  })
+
+  test('a long command of another task of the same runner does not hold back a task’s commit', async () => {
+    const release = join(scripts, 'release-never')
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
+          const { session, grantId } = yield* builderOf(mission.id)
+          const api = join(session.folder, 'api')
+          git(api, 'config', 'user.name', 'Ada Lovelace')
+          git(api, 'config', 'user.email', 'ada@example.com')
+          git(api, 'config', 'commit.gpgsign', 'false')
+          // A watch of T2's that never ends, writing only under dist/.
+          const watching = yield* apiCommand(project.id, 'watch', ['dist/app.js=built'], {
+            release,
+            writeGlobs: ['dist/**'],
+          })
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          yield* call(grantId, 'commands_run', { command: watching.id, timeout: 1 })
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* call(grantId, 'fs_read', { repository: 'api', path: 'invoices.ts' })
+          yield* call(grantId, 'fs_write', {
+            repository: 'api',
+            path: 'invoices.ts',
+            content: 'export const invoices = ["csv"]\n',
+          })
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* committed(mission.id)
+          const files = git(api, 'show', '--name-only', '--format=', 'HEAD')
+          writeFileSync(release, '')
+          return { files }
+        }),
+      ),
+    )
+    expect(seen.files).toBe('invoices.ts')
+  })
+
+  test('a task whose own command runs long holds back only its own commit, made once that command ends', async () => {
+    const release = join(scripts, 'release-long')
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission, session, grantId, api } = yield* committing()
+          const helper = yield* helperOf(mission.id, session.folder)
+          const long = yield* apiCommand(project.id, 'long', ['dist/app.js=built'], {
+            release,
+            writeGlobs: ['dist/**'],
+          })
+          yield* call(helper.grantId, 'task_start', { task: 'T2' })
+          yield* call(helper.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: 'export const markdown = true\n',
+          })
+          yield* call(helper.grantId, 'commands_run', { command: long.id, timeout: 1 })
+          yield* call(helper.grantId, 'task_finished', { task: 'T2', summary: 'Markdown.' })
+          yield* taskIn(mission.id, 'T2', 'done')
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* committed(mission.id)
+          yield* Effect.sleep('300 millis')
+          const first = yield* eventsOf(mission.id, 'building.commit')
+          writeFileSync(release, '')
+          yield* until(
+            Effect.map(eventsOf(mission.id, 'building.commit'), (rows) => rows.length > 1),
+          )
+          return {
+            first: first.length,
+            log: git(api, 'log', '--format=%s', '-2'),
+            files: git(api, 'show', '--name-only', '--format=', 'HEAD'),
+          }
+        }),
+      ),
+    )
+    expect(seen.first).toBe(1)
+    expect(seen.log).toBe('ACME-1 T2: Export as Markdown\nACME-1 T1: Export as CSV')
+    expect(seen.files).toBe('export.ts')
+  })
+
+  test('a task committed in one repository is still committed in another whose commit did not happen', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          // Its commit in another repository is done; the one in api never happened.
+          const other = yield* beginAction(
+            'git.commit',
+            { kind: 'mission', missionId: mission.id, taskId: 'T1' },
+            { repository: 'web', paths: ['app.ts'], message: 'ACME-1 T1: Export as CSV' },
+          )
+          yield* actionDone(other, 'committed 0123456789ab')
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* committed(mission.id)
+          return { log: git(api, 'log', '--format=%s', `${head}..HEAD`) }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+  })
+
+  test('a Workspace with no branch for its Building is not committed on: Hemera asks the user instead', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          // The Workspace was taken on a detached HEAD: its bases name no branch.
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ id: buildings.id, bases: buildings.bases })
+            .from(buildings)
+            .where(eq(buildings.missionId, mission.id))
+          const bases = JSON.parse(row?.bases ?? '[]').map((base: { branch: string | null }) =>
+            Object.assign(base, { branch: null }),
+          )
+          yield* database
+            .update(buildings)
+            .set({ bases: JSON.stringify(bases) })
+            .where(eq(buildings.id, row?.id ?? ''))
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* taskIn(mission.id, 'T1', 'done')
+          yield* until(
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.some((need) => Predicate.isTagged(need.fields, 'Environment')),
+            ),
+          ).pipe(Effect.timeoutOption('3 seconds'))
+          return {
+            log: git(api, 'log', '--format=%s', `${head}..HEAD`),
+            needs: (yield* getMission(mission.id)).needs.map((need) => need.fields),
+          }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('')
+    const asked = seen.needs.find((fields) => Predicate.isTagged(fields, 'Environment'))
+    if (!Predicate.isTagged(asked, 'Environment')) return expect.unreachable()
+    expect(asked.missing).toContain('detached HEAD')
+  })
+
+  test('once the user confirms the branch is back, the task is committed then', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          const branch = git(api, 'rev-parse', '--abbrev-ref', 'HEAD')
+          git(api, 'checkout', '-q', '-b', 'elsewhere')
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* taskIn(mission.id, 'T1', 'done')
+          const environment = () =>
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+          yield* until(Effect.map(environment(), (need) => need !== undefined))
+          git(api, 'checkout', '-q', branch)
+          yield* retryNeed((yield* environment())?.id ?? '')
+          yield* committed(mission.id)
+          return { log: git(api, 'log', '--format=%s', `${head}..HEAD`) }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
   })
 
   test('a stop between a task’s done and its commit commits it at the next start', async () => {

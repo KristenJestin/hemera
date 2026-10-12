@@ -27,7 +27,6 @@ import {
   DecisionFields,
   EnvironmentFields,
   ErrorFields,
-  LIVE_RUN_STATES,
   MissionOwner,
   REDS_BEFORE_A_NEED,
   type ToolArguments,
@@ -35,7 +34,7 @@ import {
   outputTail,
   placeWords,
 } from '@hemera/core/domain'
-import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { Deferred, Effect, Exit, Option, Predicate, Result, Schema, Semaphore } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
@@ -61,7 +60,6 @@ import {
   buildingClaims,
   buildingConflicts,
   buildingDecisions,
-  commandRuns,
   effectfulActions,
   missions,
 } from '../storage/schema.ts'
@@ -112,9 +110,6 @@ type Reader = EngineTransaction | Database['Service']
 /** How long a wait for a write lock lasts before the Journal says so. */
 const LONG_WAIT_MS = 60_000
 
-/** How often a commit looks again whether its task's own commands have ended. */
-const RUNS_POLL = '200 millis'
-
 const LIVE = ['starting', 'working', 'idle', 'stuck'] as const
 
 /** What the loop is handed by the Builder that runs it. */
@@ -132,6 +127,8 @@ export interface LoopParts {
     kind: string,
     body: string,
   ) => Effect.Effect<void, DatabaseError>
+  /** A watched command of a task ended: the commits it held back may be made now. */
+  readonly ran: (building: BuildingRow) => Effect.Effect<void>
 }
 
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
@@ -227,9 +224,16 @@ const ActionDetails = Schema.Struct({
 })
 const readDetails = Schema.decodeUnknownOption(Schema.fromJsonString(ActionDetails))
 const readParsed = Schema.decodeUnknownOption(ActionDetails)
+/** The repository a `git.commit` intent was for. */
+const readCommitted = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ repository: Schema.String })),
+)
 
 export const buildingLoop = (parts: LoopParts) => {
   const { locks, said, hold, deliver } = parts
+  /** The watched commands launched and not yet finished, by Building and task. */
+  const going = new Map<string, number>()
+  const goingKey = (buildingId: string, taskId: string) => `${buildingId}\u0000${taskId}`
 
   /** The session a lineage acts through now: its live one, or its parent's when it has ended. */
   const runnerNow = (
@@ -390,8 +394,23 @@ export const buildingLoop = (parts: LoopParts) => {
         null
       let closed = false
       const letGo = Effect.suspend(() => locks.release(taken.splice(0)))
+      // Its task's commit waits until it ends.
+      const key = task === null ? null : goingKey(building.id, task.id)
+      let counting = false
+      const uncount = Effect.suspend(() => {
+        if (!counting || key === null) return Effect.void
+        counting = false
+        const left = (going.get(key) ?? 1) - 1
+        if (left <= 0) going.delete(key)
+        else going.set(key, left)
+        return parts.ran(building)
+      })
       const launch = Effect.gen(function* () {
         if (closed) return yield* new LaunchWithdrawn({ reason: 'its call already ended' })
+        if (key !== null) {
+          counting = true
+          going.set(key, (going.get(key) ?? 0) + 1)
+        }
         const started = Date.now()
         waited = yield* counted(
           session.id,
@@ -451,7 +470,7 @@ export const buildingLoop = (parts: LoopParts) => {
             ? Effect.void
             : Effect.suspend(() => {
                 closed = true
-                return letGo
+                return Effect.andThen(letGo, uncount)
               }),
         ),
         Effect.provide(context),
@@ -474,6 +493,7 @@ export const buildingLoop = (parts: LoopParts) => {
           ),
           Effect.ensuring(letGo),
           Effect.ensuring(Deferred.succeed(done, undefined)),
+          Effect.ensuring(uncount),
           Effect.provide(context),
         )
       const watch: CommandWatch = {
@@ -1549,11 +1569,14 @@ export const buildingLoop = (parts: LoopParts) => {
 
   // ---- Commits per task.
 
-  /** Whether a task has its commit: a `git.commit` of it done, or perhaps done. */
-  const committedTask = (missionId: string, taskId: string) =>
+  /**
+   * The repositories a task has its commit in: a `git.commit` of it there done, or perhaps done.
+   * One that failed, or never began, is committed again.
+   */
+  const committedIn = (missionId: string, taskId: string) =>
     Effect.gen(function* () {
-      const [row] = yield* (yield* Database)
-        .select({ id: effectfulActions.id })
+      const rows = yield* (yield* Database)
+        .select({ details: effectfulActions.details })
         .from(effectfulActions)
         .where(
           and(
@@ -1565,41 +1588,12 @@ export const buildingLoop = (parts: LoopParts) => {
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the commits')))
-      return row !== undefined
-    })
-
-  /**
-   * Waits until the commands the task's runners started have ended (a service apart): a run that
-   * outlived its call may still be writing the files about to be committed.
-   */
-  const ownRunsEnded = (building: BuildingRow, taskId: string) =>
-    Effect.gen(function* () {
-      const database = yield* Database
-      const lineages = new Set(
-        (yield* attemptsIn(database, building.id))
-          .filter((one) => one.taskId === taskId)
-          .map((one) => one.runner),
+      return new Set(
+        rows.flatMap((row) => {
+          const repository = Option.getOrNull(readCommitted(row.details))?.repository
+          return repository === undefined ? [] : [repository]
+        }),
       )
-      const sessions: string[] = []
-      for (const lineage of lineages) {
-        sessions.push(...(yield* sessionsOfLineage(lineage)).map((one) => one.id))
-      }
-      if (sessions.length === 0) return
-      for (;;) {
-        const [going] = yield* database
-          .select({ id: commandRuns.id })
-          .from(commandRuns)
-          .where(
-            and(
-              inArray(commandRuns.sessionId, sessions),
-              inArray(commandRuns.state, [...LIVE_RUN_STATES]),
-              ne(commandRuns.type, 'serve'),
-            ),
-          )
-          .pipe(Effect.mapError(refusedWhile('reading the runs')))
-        if (going === undefined) return
-        yield* Effect.sleep(RUNS_POLL)
-      }
     })
 
   /** One commit pass at a time: a task is never committed twice. */
@@ -1620,7 +1614,9 @@ export const buildingLoop = (parts: LoopParts) => {
         if (rule === null) return
         const tasks = yield* tasksIn(yield* Database, building.id)
         for (const task of tasks.filter((one) => one.state === 'done')) {
-          if (yield* committedTask(building.missionId, task.id)) continue
+          // A command of its own still going may still write what is to be committed: its end
+          // makes the commit then.
+          if (going.has(goingKey(building.id, task.id))) continue
           yield* commitTask(building, task, rule.template)
         }
       }),
@@ -1630,8 +1626,8 @@ export const buildingLoop = (parts: LoopParts) => {
   const commitTask = (building: BuildingRow, task: TaskNow, template: string) =>
     Effect.gen(function* () {
       yield* hold('committing')
-      yield* ownRunsEnded(building, task.id)
       const database = yield* Database
+      const done = yield* committedIn(building.missionId, task.id)
       const tasks = yield* tasksIn(database, building.id)
       const attempts = yield* attemptsIn(database, building.id)
       const filesOf = (ids: ReadonlyArray<string>) =>
@@ -1662,17 +1658,30 @@ export const buildingLoop = (parts: LoopParts) => {
             .filter((one) => one.startsWith(`${base.repository}\u0000`))
             .map((one) => one.slice(base.repository.length + 1)),
         }))
-        .filter((one) => one.paths.length > 0)
-      // Never on another branch than the Building's: a repository switched away is the user's.
-      for (const { base } of planned) {
-        if (base.branch === null) continue
+        .filter((one) => one.paths.length > 0 && !done.has(one.base.repository))
+      // Never on another branch than the Building's: a repository switched away is the user's,
+      // and one taken on a detached HEAD has no branch to commit on.
+      const left = new Set<string>()
+      for (const { base, paths } of planned) {
+        if (base.branch === null) {
+          // Never committable by Hemera: the user is told once, and the commit is theirs.
+          yield* offBranch(building, owner, task.id, base.repository, null, null)
+          const intent = yield* beginAction(
+            'git.commit',
+            { kind: 'mission', missionId: building.missionId, taskId: task.id },
+            { repository: base.repository, paths: [...paths], message },
+          )
+          yield* actionDone(intent, 'left to the user: no branch for this Building')
+          left.add(base.repository)
+          continue
+        }
         const status = yield* Git.use((git) => git.status(base.folder)).pipe(Effect.result)
         const onBranch = Result.isSuccess(status) ? status.success.branch : null
         if (onBranch === base.branch) continue
         yield* offBranch(building, owner, task.id, base.repository, base.branch, onBranch)
         return
       }
-      for (const { base, paths } of planned) {
+      for (const { base, paths } of planned.filter((one) => !left.has(one.base.repository))) {
         const intent = yield* beginAction(
           'git.commit',
           { kind: 'mission', missionId: building.missionId, taskId: task.id },
@@ -1712,14 +1721,15 @@ export const buildingLoop = (parts: LoopParts) => {
   /**
    * A repository found on another branch than its Building's when a task is to be committed:
    * nothing is committed, and the user is asked once to bring it back; the commits left are made
-   * at the next task done or the next start.
+   * once they confirm. One taken on a detached HEAD (no branch): the user is told the commit is
+   * theirs.
    */
   const offBranch = (
     building: BuildingRow,
     owner: Effect.Success<ReturnType<typeof ownerOf>>['owner'],
     taskId: string,
     repository: string,
-    branch: string,
+    branch: string | null,
     onBranch: string | null,
   ) =>
     Effect.gen(function* () {
@@ -1735,13 +1745,19 @@ export const buildingLoop = (parts: LoopParts) => {
         )
         .pipe(Effect.mapError(refusedWhile('reading the decisions')))
       if (asking !== undefined) return
-      const missing = `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
+      const missing =
+        branch === null
+          ? `${repository} has no branch for this Building (it was taken on a detached HEAD): Hemera did not commit ${taskId}`
+          : `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
       const write = yield* createNeedIn(
         parts.needs,
         owner,
         EnvironmentFields.make({
           missing,
-          action: `Switch ${repository} back to ${branch}, then confirm.`,
+          action:
+            branch === null
+              ? `Commit ${taskId} yourself in ${repository} if you want it committed, then confirm.`
+              : `Switch ${repository} back to ${branch}, then confirm.`,
           settingsSection: null,
         }),
       )
