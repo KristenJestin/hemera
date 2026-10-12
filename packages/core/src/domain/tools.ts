@@ -774,6 +774,14 @@ const DiscussionProposeDecision = Schema.Struct({
     'Propose the decision a discussion leads to. It waits for the user, who accepts it, writes another, or ends the discussion without one; a new proposal replaces the pending one.',
 })
 
+const PrototypeRead = Schema.Struct({
+  prototype: Bounded(20, 'The frozen prototype, by its id as the brief names it (`H1`).'),
+  path: Text("The file, relative to the prototype's folder, as the brief lists it."),
+  range: FsRead.fields.range,
+}).annotate({
+  description: `Read one page of a file a prototype kept, frozen with the Spec, by bytes: at most ${String(READ_PAGE_BYTES)} bytes, with its line numbers. Only inside that prototype's folder; nothing of it can be written.`,
+})
+
 const TaskNamed = Bounded(20, 'The task, by its id (`T4`).')
 
 const BuildRead = Schema.Struct({
@@ -1463,6 +1471,14 @@ export const TOOLS = {
     input: HelperRead,
     label: { label: 'Read a helper', mark: 'helper-read', doing: 'Reading a helper' },
   }),
+  prototype_read: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: PrototypeRead,
+    label: { label: 'Read a prototype', mark: 'prototype-read', doing: 'Reading a prototype' },
+  }),
   helper_result: tool({
     roles: ['helper', 'prototyper'],
     gate: 'workflow',
@@ -1557,6 +1573,7 @@ export const TOOL_NAMES = [
   'build_summary',
   'helper_launch',
   'helper_read',
+  'prototype_read',
   'helper_result',
   'hemera_report',
   'hemera_reports',

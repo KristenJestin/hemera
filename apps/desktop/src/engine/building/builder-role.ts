@@ -16,6 +16,7 @@ import { Effect, Option } from 'effect'
 import type { BriefField, RoleEntry, SessionOwner } from '../sessions/roles.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { commandRuns, missions } from '../storage/schema.ts'
+import { frozenPrototypesOf, prototypesSaid } from './prototype-files.ts'
 import { type TaskNow, attemptsIn, bases, causeSaid, latestBuildingIn, tasksIn } from './tasks.ts'
 
 /** The Builder's layer of the instructions, as the ticket writes it. */
@@ -36,13 +37,13 @@ one reads them. Everything they must see goes through a tool.
 ## Inputs
 The frozen Spec with the decisions taken since Freeze and the effective plan (spec_read), the ready
 set, each task's state and attempts, the Workspace (repositories, branches, base commits, variable
-names), the checks, the "who commits" rule, the running services, Now, the Notes and the end of
-the Journal, the sub-agents running and the attempts left.
+names), the checks, the "who commits" rule, the running services, the prototypes frozen with the
+Spec, Now, the Notes and the end of the Journal, the sub-agents running and the attempts left.
 
 ## Tools
 fs_read, fs_list, search, fs_write, fs_edit (the Workspace; a file another running task holds is
 refused); commands_list, commands_run, commands_output, commands_stop; build_read; spec_read;
-memory_read; task_start; task_finished; task_blocked; report_need; need_propose; build_summary;
+prototype_read; memory_read; task_start; task_finished; task_blocked; report_need; need_propose; build_summary;
 journal_add, note_add, now_set; helper_launch, helper_read.
 
 ## How you work
@@ -91,7 +92,9 @@ restore what they meant.
   runner; its reds come back to it. Two tasks never write the same file: Hemera holds each running
   task's files.
 - The Prototyper is not yours: an interface or an approach was tried in Planning and judged by the
-  user before the Freeze. Build what the frozen Spec says.
+  user before the Freeze. Build what the frozen Spec says. Its prototypes, if any, are in your brief:
+  follow a validated one for the interface (read its files with prototype_read), do not do what a
+  set-aside one showed, and treat an unjudged one as undecided. You never write a prototype's files.
 - A launch refused by the cap or the budget is an answer: do the work yourself.
 - [hemera:result] brings a helper's result. Read it before you rely on it: a helper's word is not
   a verification.
@@ -203,6 +206,7 @@ const builderBriefOf = (owner: SessionOwner) =>
           .join('\n'),
       },
       { label: 'Running services', text: yield* runningServicesSaid(building.workspaceId) },
+      { label: 'Prototypes', text: prototypesSaid(yield* frozenPrototypesOf(owner.missionId)) },
       { label: 'Commits', text: COMMITS_SAID },
     ]
     return fields

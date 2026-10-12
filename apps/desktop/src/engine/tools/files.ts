@@ -34,7 +34,7 @@ import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
 import { WriteAttribution } from './ports.ts'
-import { fingerprintOf, numbered, readPage } from './read.ts'
+import { type Page, fingerprintOf, numbered, readPage } from './read.ts'
 import { type SearchResult, searchIn } from './search.ts'
 
 /** What a tool answers: whether it did what was asked, and what the agent reads. */
@@ -141,11 +141,26 @@ const said = (cause: Error): string => {
 }
 
 /** One filesystem call, its failure as a sentence rather than a thrown error. */
-const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
+export const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
   Effect.tryPromise({
     try: run,
     catch: (cause) => (cause instanceof Error ? said(cause) : String(cause)),
   })
+
+/** A page of a file as an agent reads it: its numbered lines, where it stands in the file, and the range. */
+export const pageSaid = (value: Page): string => {
+  const range = JSON.stringify({
+    offset: value.offset,
+    end: value.end,
+    size: value.size,
+    next: value.next,
+  })
+  const where =
+    value.next === null
+      ? `(bytes ${String(value.offset)}-${String(value.end)} of ${String(value.size)}, the end of the file)`
+      : `(bytes ${String(value.offset)}-${String(value.end)} of ${String(value.size)}; the next page starts at offset ${String(value.next)})`
+  return [numbered(value), where, range].filter((part) => part !== '').join('\n')
+}
 
 export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
   Effect.gen(function* () {
@@ -158,17 +173,7 @@ export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
     if (value.offset === 0 && value.next === null)
       call.versions.keep(call.sessionId, call.path, value.text)
     else call.versions.drop(call.sessionId, call.path)
-    const range = JSON.stringify({
-      offset: value.offset,
-      end: value.end,
-      size: value.size,
-      next: value.next,
-    })
-    const where =
-      value.next === null
-        ? `(bytes ${String(value.offset)}-${String(value.end)} of ${String(value.size)}, the end of the file)`
-        : `(bytes ${String(value.offset)}-${String(value.end)} of ${String(value.size)}; the next page starts at offset ${String(value.next)})`
-    return answered([numbered(value), where, range].filter((part) => part !== '').join('\n'))
+    return answered(pageSaid(value))
   })
 
 type Entry = { readonly line: string }

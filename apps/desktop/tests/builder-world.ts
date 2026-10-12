@@ -108,18 +108,24 @@ export const PLAN = [
 /**
  * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
  * runs on the Project before the launch, for what the launch must already see; `impact` is the
- * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks.
+ * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks;
+ * `during` runs in Planning, once the mission exists, with the Planner's grant (#235: the Prototypers).
  */
 export const launched = <E = never, R = never>(
   work: string,
   before: (projectId: string) => Effect.Effect<void, E, R> = () => Effect.void,
   impact = 'The impact.',
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
+  during: (
+    mission: { readonly id: string },
+    plannerGrantId: string,
+  ) => Effect.Effect<void, E, R> = () => Effect.void,
 ) =>
   Effect.gen(function* () {
     const { project, main } = yield* acmeAt(work)
     yield* before(project.id)
     const { mission, grantId } = yield* plannedIn(project.id, main)
+    yield* during(mission, grantId)
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {
         section,
