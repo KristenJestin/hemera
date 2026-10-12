@@ -26,5 +26,9 @@ would be reported as a change made outside.
 
 **While a writing command runs in a repository, a change you make in that repository, within the
 command's globs, is attributed to the command.** It is not reported as changed outside Hemera. The
-window lasts from the command's launch until Hemera records its end. A `serve` that declares no
-write globs explains nothing, so there is no blind window while a service runs.
+window lasts from the command's launch until Hemera has recorded its end and compared the
+Workspace once more, right after that. A `serve` that declares no write globs explains nothing, so
+there is no blind window while a service runs.
+
+A command an engine left running when it stopped is recorded without an outcome
+(`indeterminate`). It explains nothing after the restart: its repository is watched again at once.
