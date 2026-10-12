@@ -11,6 +11,7 @@ import {
   type ScenarioProofState,
   classifyProofRun,
   addedTestNames,
+  addedTests,
   keyLineFound,
   normalisedOutput,
   redPassed,
@@ -894,9 +895,18 @@ const PYTEST_PARAMETRISED_PATCH = [
   '+    assert export(kind) == "total"',
 ].join('\n')
 
+/** go test, Go 1.27: an older TestImport fails on its subtest \`empty\`. */
+const GO_OTHER_PARENT_FAILS = `--- FAIL: TestImport (0.00s)
+    --- FAIL: TestImport/empty (0.00s)
+        export_test.go:7: got 1 rows, want 0
+FAIL
+FAIL	example.com/acme	0.004s
+FAIL
+`
+
 /** Go subtests, as a patch adds them into an older TestExport. */
 const GO_SUBTESTS_PATCH = [
-  '@@ -10,0 +11,8 @@',
+  '@@ -10,0 +11,8 @@ func TestExport(t *testing.T) {',
   '+\tt.Run("as markdown", func(t *testing.T) {',
   '+\t\tif got := Export("md", false); got != "" {',
   '+\t\t\tt.Errorf("got %q, want %q", got, "")',
@@ -956,26 +966,63 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       '\t}',
       '}',
     ].join('\n')
-    const names = addedTestNames({ insertion: 'new_file', code, patch: null })
-    expect(names).toEqual(['TestExport', 'csv', 'as markdown', 'with header'])
+    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+      'TestExport',
+      { parent: 'TestExport', subtest: 'csv' },
+      { parent: 'TestExport', subtest: 'as markdown' },
+      { parent: 'TestExport', subtest: 'with header' },
+    ])
+    expect(addedTestNames({ insertion: 'new_file', code, patch: null })).toEqual([
+      'TestExport',
+      'csv',
+      'as markdown',
+      'with header',
+    ])
     expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestExport'])).toBe(true)
     expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestImport'])).toBe(false)
   })
 
   test('a Go subtest the proof adds is read under the name Go prints, at any depth', () => {
     const path = 'export_test.go'
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['with header'])).toBe(true)
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['as markdown'])).toBe(true)
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['empty'])).toBe(false)
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['txt'])).toBe(false)
+    const red = (subtest: string) =>
+      validRed(run(GO_SUBTEST_FAILS, 1, path), path, [{ parent: 'TestExport', subtest }])
+    expect(red('with header')).toBe(true)
+    expect(red('as markdown')).toBe(true)
+    expect(red('empty')).toBe(false)
+    expect(red('txt')).toBe(false)
   })
 
   test('Go subtests the proof adds, passing or skipped under a parent failing on an older one, are not a red', () => {
     const path = 'export_test.go'
-    const names = addedTestNames({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH })
-    expect(names).toEqual(['as markdown', 'txt'])
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH })
+    expect(names).toEqual([
+      { parent: 'TestExport', subtest: 'as markdown' },
+      { parent: 'TestExport', subtest: 'txt' },
+    ])
     expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, names)).toBe(false)
-    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, ['csv'])).toBe(true)
+    const csv = [{ parent: 'TestExport', subtest: 'csv' }]
+    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, csv)).toBe(true)
+  })
+
+  test('a subtest of the same name under another parent is not the red', () => {
+    const path = 'export_test.go'
+    const code = [
+      'func TestExport(t *testing.T) {',
+      '\tt.Run("empty", func(t *testing.T) {})',
+      '}',
+    ].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual(['TestExport', { parent: 'TestExport', subtest: 'empty' }])
+    expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, names)).toBe(false)
+    const imported = [{ parent: 'TestImport', subtest: 'empty' }]
+    expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, imported)).toBe(true)
+  })
+
+  test('a subtest whose parent the code does not say is not named', () => {
+    const patch = ['@@ -3,0 +4,3 @@', '+\tt.Run("empty", func(t *testing.T) {', '+\t})'].join('\n')
+    expect(addedTests({ insertion: 'addition', code: '', patch })).toEqual([])
+    const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
+    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([])
   })
 })
 
