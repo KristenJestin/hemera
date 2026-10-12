@@ -17,6 +17,10 @@ import {
   TaskTarget,
   MoveRefused,
   PrelaunchAction,
+  ProofClass,
+  ProofMode,
+  ProofPhase,
+  ScenarioProofState,
   SettingLevel,
   Stage,
 } from '@hemera/core/domain'
@@ -264,8 +268,8 @@ export type AttemptConflictView = typeof AttemptConflictView.Type
  */
 export const BuildingAttemptView = Schema.Struct({
   id: Schema.String,
-  scope: Schema.Literals(['task', 'requirement', 'end']),
-  /** The requirement of a `requirement` attempt; null otherwise. */
+  scope: Schema.Literals(['task', 'requirement', 'end', 'proof']),
+  /** The requirement of a `requirement` attempt, the scenario of a `proof` one; null otherwise. */
   subject: Schema.NullOr(Schema.String),
   number: Schema.Number,
   runner: Schema.String,
@@ -329,11 +333,72 @@ export const BuildingDecisionView = Schema.Struct({
 })
 export type BuildingDecisionView = typeof BuildingDecisionView.Type
 
-/** A requirement of the Spec, with the tasks that cover it. */
+/**
+ * One run of a scenario's proof (#144): why it ran, what it ran, how it ended (CT-35), the end of
+ * its output and the evidence of the whole, and the trees it ran on.
+ */
+export const ProofRunView = Schema.Struct({
+  id: Schema.String,
+  phase: ProofPhase,
+  line: Schema.String,
+  /** `repository/path` of its test; null for a command with no test file. */
+  testPath: Schema.NullOr(Schema.String),
+  testSha256: Schema.NullOr(Schema.String),
+  exitCode: Schema.NullOr(Schema.Number),
+  classification: ProofClass,
+  failingTest: Schema.NullOr(Schema.String),
+  assertion: Schema.NullOr(Schema.String),
+  /** Whether the key line Planning observed was found again; null when there is none. */
+  keyLineMatched: Schema.NullOr(Schema.Boolean),
+  outputTail: Schema.String,
+  /** The whole output, and the test as it ran, kept as the mission's evidence. */
+  evidenceId: Schema.NullOr(Schema.String),
+  testEvidenceId: Schema.NullOr(Schema.String),
+  runId: Schema.NullOr(Schema.String),
+  trees: Schema.Array(BuildingTree),
+  at: Schema.String,
+})
+export type ProofRunView = typeof ProofRunView.Type
+
+/** The user's verdict on a scenario verified by hand (CT-36), and the trees it was given on. */
+export const ManualProofView = Schema.Struct({
+  verdict: Schema.Literals(['validated', 'refused']),
+  by: Schema.String,
+  at: Schema.String,
+  note: Schema.NullOr(Schema.String),
+  trees: Schema.Array(BuildingTree),
+})
+
+/**
+ * Where a scenario's proof stands (#144): its red, its green and whether that green is up to date
+ * (CT-38), whether its test changed between the two, and for a scenario verified by hand the
+ * user's verdict.
+ */
+export const ScenarioProofView = Schema.Struct({
+  scenario: Schema.String,
+  requirement: Schema.String,
+  mode: ProofMode,
+  state: ScenarioProofState,
+  red: Schema.NullOr(ProofRunView),
+  green: Schema.NullOr(ProofRunView),
+  /** Its green on the current tree of its repositories; null without a green. */
+  upToDate: Schema.NullOr(Schema.Boolean),
+  /** The test's sha256 at green differs from the one at red. */
+  testChanged: Schema.Boolean,
+  manual: Schema.NullOr(ManualProofView),
+})
+export type ScenarioProofView = typeof ScenarioProofView.Type
+
+/** A requirement of the Spec, with the tasks that cover it and its scenarios' proofs (#144). */
 export const BuildingRequirementView = Schema.Struct({
   id: Schema.String,
   done: Schema.Boolean,
   tasks: Schema.Array(Schema.String),
+  /** Every automated scenario green and up to date. */
+  proven: Schema.Boolean,
+  scenarios: Schema.Array(ScenarioProofView),
+  /** Its scenarios verified by hand, counted apart: how many, and how many validated. */
+  byHand: Schema.Struct({ total: Schema.Number, validated: Schema.Number }),
 })
 
 /** A repository of the Building's Workspace. */
@@ -383,6 +448,13 @@ export const BuildingView = Schema.Struct({
   phase: Schema.String,
   /** Open question 24: done and skipped tasks over the effective plan, in %. */
   percent: Schema.Number,
+  /** The tasks done and the requirements proven (#144), each over its total. */
+  counts: Schema.Struct({
+    tasksDone: Schema.Number,
+    tasks: Schema.Number,
+    requirementsProven: Schema.Number,
+    requirements: Schema.Number,
+  }),
   /** The special tasks, counted apart (CT-41): none until the end sequence adds them. */
   special: Schema.Struct({ done: Schema.Number, total: Schema.Number }),
   /** Open question 28: the time the engine ran since the start, in seconds. */
