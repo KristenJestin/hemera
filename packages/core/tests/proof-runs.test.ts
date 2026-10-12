@@ -249,6 +249,35 @@ describe('A proof run is classified (CT-35)', () => {
     expect(run(TAP_TIMEOUT, 1).classification).toBe('environment')
   })
 
+  test('a pytest assertion, with no report, is assertion_failed', () => {
+    const output = [
+      '    def test_exports_markdown():',
+      '>       assert to_markdown([]) == "| total |"',
+      "E       AssertionError: assert '' == '| total |'",
+      'FAILED tests/test_export.py::test_exports_markdown - AssertionError',
+    ].join('\n')
+    expect(run(output, 1, 'tests/test_export.py').classification).toBe('assertion_failed')
+    const plain = 'E       assert 1 == 2\nFAILED tests/test_export.py::test_one - assert 1 == 2'
+    expect(run(plain, 1, 'tests/test_export.py').classification).toBe('assertion_failed')
+  })
+
+  test('a Go test that failed is assertion_failed', () => {
+    const output =
+      '--- FAIL: TestExportMarkdown (0.00s)\n    export_test.go:12: got "", want "| total |"\nFAIL'
+    expect(run(output, 1, 'export_test.go').classification).toBe('assertion_failed')
+  })
+
+  test('a Rust assertion that failed is assertion_failed', () => {
+    const output = [
+      "thread 'tests::exports_markdown' panicked at src/export.rs:20:9:",
+      'assertion `left == right` failed',
+      '  left: ""',
+      ' right: "| total |"',
+      'test tests::exports_markdown ... FAILED',
+    ].join('\n')
+    expect(run(output, 101, 'src/export.rs').classification).toBe('assertion_failed')
+  })
+
   test('a failing test run whose words name no assertion is error_before_test', () => {
     expect(run('something went wrong', 1).classification).toBe('error_before_test')
   })
@@ -277,23 +306,20 @@ describe('A valid red', () => {
     expect(validRed(run(windows, 1), 'tests/export.test.mjs')).toBe(true)
   })
 
-  test('a red from plain vitest output, with no report, is valid when the scenario’s test is named in it', () => {
+  test('a red from plain vitest output, with no report, is valid when the scenario’s test is named among its failures', () => {
     const output = [
       ' FAIL  tests/export.test.ts > exports > the invoices export as Markdown',
       'AssertionError: expected false to be true // Object.is equality',
       ' Test Files  1 failed (1)',
     ].join('\n')
     const names = ['the invoices export as Markdown']
-    expect(
-      validRed(run(output, 1), 'tests/export.test.ts', names, { output, keyLineMatched: null }),
-    ).toBe(true)
+    expect(validRed(run(output, 1, 'tests/export.test.ts'), 'tests/export.test.ts', names)).toBe(
+      true,
+    )
     const other = output.replace('the invoices export as Markdown', 'one is one')
-    expect(
-      validRed(run(other, 1), 'tests/export.test.ts', names, {
-        output: other,
-        keyLineMatched: null,
-      }),
-    ).toBe(false)
+    expect(validRed(run(other, 1, 'tests/export.test.ts'), 'tests/export.test.ts', names)).toBe(
+      false,
+    )
   })
 
   test('a JUnit report that names the file only in its classname is a valid red by the test’s name', () => {
@@ -307,14 +333,11 @@ describe('A valid red', () => {
 </testsuites>
 `
     expect(
-      validRed(run(output, 1), 'tests/export.test.ts', ['the invoices export as Markdown'], {
-        output,
-        keyLineMatched: null,
-      }),
+      validRed(run(output, 1), 'tests/export.test.ts', ['the invoices export as Markdown']),
     ).toBe(true)
   })
 
-  test('a test named through describe.each or a template is found again in the output', () => {
+  test('a test named through describe.each or a template is found again among the failures', () => {
     const code = [
       "describe.each(['csv', 'md'])('exports %s', (kind) => {",
       '  it(`writes ${kind}`, () => {})',
@@ -323,22 +346,51 @@ describe('A valid red', () => {
     const names = addedTestNames({ insertion: 'new_file', code, patch: null })
     const output =
       ' FAIL  tests/export.test.ts > exports md > writes md\nAssertionError: expected 1 to be 2'
+    expect(validRed(run(output, 1), 'tests/export.test.ts', names)).toBe(true)
+  })
+
+  test('a passing test printed beside a failing one is not the red', () => {
+    const output = [
+      ' ✓ tests/export.test.ts > the invoices export as Markdown 2ms',
+      ' × tests/export.test.ts > one is one 3ms',
+      'AssertionError: it was broken already',
+    ].join('\n')
     expect(
-      validRed(run(output, 1), 'tests/export.test.ts', names, { output, keyLineMatched: null }),
+      validRed(run(output, 1), 'tests/export.test.ts', ['the invoices export as Markdown']),
+    ).toBe(false)
+  })
+
+  test('a name is matched whole: "exports" is not the failing "exports as CSV"', () => {
+    const output = ' × exports as CSV 3ms\nAssertionError: the CSV uses commas'
+    expect(validRed(run(output, 1), 'tests/export.test.ts', ['exports'])).toBe(false)
+    expect(validRed(run(output, 1), 'tests/export.test.ts', ['exports as CSV'])).toBe(true)
+  })
+
+  test('a name made of a placeholder alone matches nothing', () => {
+    const output = ' × md 3ms\nAssertionError: expected 1 to be 2'
+    expect(validRed(run(output, 1), 'tests/export.test.ts', ['${kind}'])).toBe(false)
+  })
+
+  test('the scenario’s failing test above a long stack is found in the whole output', () => {
+    const output = [
+      ' × tests/export.test.ts > the invoices export as Markdown 3ms',
+      'AssertionError: expected false to be true',
+      ...Array.from(
+        { length: 300 },
+        (_, at) => `    at frame${String(at)} (/work/acme/node_modules/x.js:1:1)`,
+      ),
+    ].join('\n')
+    expect(
+      validRed(run(output, 1), 'tests/export.test.ts', ['the invoices export as Markdown']),
     ).toBe(true)
   })
 
-  test('with no file named, the key line decides when no test name is found', () => {
+  test('with no file named and no test name among the failures, the key line decides; the exit code alone does not', () => {
     const output = 'AssertionError: the CSV uses commas'
     const path = 'tests/export.test.mjs'
-    expect(
-      validRed(run(output, 1), path, ['exports as CSV'], { output, keyLineMatched: true }),
-    ).toBe(true)
-    expect(
-      validRed(run(output, 1), path, ['exports as CSV'], { output, keyLineMatched: null }),
-    ).toBe(false)
-    // Nothing to tell it by: the exit code decides.
-    expect(validRed(run(output, 1), path, [], { output, keyLineMatched: null })).toBe(true)
+    expect(validRed(run(output, 1), path, ['exports as CSV'], true)).toBe(true)
+    expect(validRed(run(output, 1), path, ['exports as CSV'], null)).toBe(false)
+    expect(validRed(run(output, 1), path, ['exports as CSV'], false)).toBe(false)
   })
 
   test('the tests a proof adds are named from its new file, or from the lines its patch adds', () => {
@@ -357,6 +409,16 @@ describe('A valid red', () => {
           "@@ -1 +1,2 @@\n test('one is one', () => {})\n+test('the invoices export as Markdown', () => {})\n",
       }),
     ).toEqual(['the invoices export as Markdown'])
+  })
+
+  test('test.each and it.each name their tests too', () => {
+    expect(
+      addedTestNames({
+        insertion: 'new_file',
+        code: "test.each([['csv', 1], ['md', 2]])('exports %s', (kind) => {})\nit.each`\n  a\n`('reads $a', () => {})\n",
+        patch: null,
+      }),
+    ).toEqual(['exports %s', 'reads $a'])
   })
 
   test('a scenario got past its red once recorded, set aside as not reproducible, or green since', () => {
