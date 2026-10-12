@@ -1,21 +1,21 @@
 /**
  * The `builder` role (#141): the main session of Building, which builds the frozen Spec in the
  * mission's Workspace task by task. Its instructions are the ticket's, its brief the Building as it
- * stands now: the ready set, every task, the Workspace and the rule about commits. A field with
- * nothing in it is left out; the checks (#143), the running services (#148), the sub-agents and the
+ * stands now: the ready set, every task, the Workspace, the running services (#148) and the rule
+ * about commits. A field with nothing in it is left out; the checks (#143), the sub-agents and the
  * attempts left (#41, #145) join the brief with the tickets that bring them.
  *
  * Apart from the Builder's service, so the role registry imports nothing that imports the
  * sessions back.
  */
 
-import { missionKey } from '@hemera/core/domain'
-import { eq } from 'drizzle-orm'
+import { LIVE_RUN_STATES, missionKey } from '@hemera/core/domain'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect, Option } from 'effect'
 
 import type { BriefField, RoleEntry, SessionOwner } from '../sessions/roles.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { missions } from '../storage/schema.ts'
+import { commandRuns, missions } from '../storage/schema.ts'
 import { type TaskNow, attemptsIn, bases, causeSaid, latestBuildingIn, tasksIn } from './tasks.ts'
 
 /** The Builder's layer of the instructions, as the ticket writes it. */
@@ -68,6 +68,13 @@ journal_add, note_add, now_set; helper_launch, helper_read.
   a delivery says another task's command rewrote a file you hold, read it again before writing.
 - After a restart you may read "indeterminate result: the command may have run". Check the real
   state (files, database, output) before running it again.
+
+## Changes made outside Hemera
+The user may change files in the Workspace themselves. Hemera tells you which ones. Never overwrite
+them: read the file again, keep what the user changed, and build on it. Say in the Journal what you
+did with it. A write refused because the file changed since you read it is an answer: read it,
+then write. If a command you ran overwrote such a change, Hemera tells you and keeps their version:
+restore what they meant.
 
 ## When you must ask
 - A task is impossible as written, or the code contradicts the Spec: task_blocked (impossible),
@@ -141,6 +148,30 @@ const taskLine = (
 export const COMMITS_SAID =
   'You do not commit, push, merge, rebase, tag or switch branches: the decision on every command you run refuses them for an agent of a mission.'
 
+/** The services running in the Workspace, one per line with its address; null for none. */
+const runningServicesSaid = (workspaceId: string | null) =>
+  Effect.gen(function* () {
+    if (workspaceId === null) return null
+    const database = yield* Database
+    const rows = yield* database
+      .select({ name: commandRuns.name, state: commandRuns.state, url: commandRuns.url })
+      .from(commandRuns)
+      .where(
+        and(
+          eq(commandRuns.workspaceId, workspaceId),
+          eq(commandRuns.type, 'serve'),
+          inArray(commandRuns.state, [...LIVE_RUN_STATES]),
+        ),
+      )
+      .orderBy(asc(commandRuns.startedAt))
+      .pipe(Effect.mapError(refusedWhile('reading the services')))
+    return rows.length === 0
+      ? null
+      : rows
+          .map((row) => `- ${row.name}: ${row.state}${row.url === null ? '' : `, ${row.url}`}`)
+          .join('\n')
+  })
+
 const builderBriefOf = (owner: SessionOwner) =>
   Effect.gen(function* () {
     if (owner.kind !== 'mission') return []
@@ -171,6 +202,7 @@ const builderBriefOf = (owner: SessionOwner) =>
           )
           .join('\n'),
       },
+      { label: 'Running services', text: yield* runningServicesSaid(building.workspaceId) },
       { label: 'Commits', text: COMMITS_SAID },
     ]
     return fields

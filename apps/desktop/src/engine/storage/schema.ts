@@ -290,6 +290,33 @@ export const projectCommands = sqliteTable(
 )
 
 /**
+ * A Project's checks (#143): a catalogue command or a free line, exactly one of the two, run where
+ * and when the Project says, judged by its exit code or by a number its output shows. A check of a
+ * command leaves the Project with that command.
+ */
+export const projectChecks = sqliteTable(
+  'project_checks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'cascade' }),
+    line: text('line'),
+    where: text('where').notNull(),
+    repository: text('repository'),
+    when: text('when').notNull(),
+    expectPattern: text('expect_pattern'),
+    expectMinimum: real('expect_minimum'),
+    files: text('files'),
+    rank: integer('rank').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [unique('check_name_once_in_project').on(table.projectId, table.name)],
+)
+
+/**
  * A Project's "never" list: the commands always refused to its agents, in the order they were
  * listed. `entry` is the JSON of a `NeverEntry`: a program with its leading arguments, or a
  * catalogue command by its id. Read live by every call, never copied into a mission.
@@ -1914,7 +1941,9 @@ export const freezes = sqliteTable(
 /**
  * The files of a main checkout that were dirty when the Spec was frozen (CT-23): by repository and
  * path, how they differed, and the sha256 of their content (none for a deleted file). `withheld`
- * says why the content was not kept (a sensitive place such as a `.env`, a binary file, a link).
+ * says why the content was not kept, in the snapshot service's words. `tree` is the snapshot of
+ * the repository the Freeze took (#208), where the content is read back; null for a Freeze from
+ * before it.
  */
 export const freezeFiles = sqliteTable(
   'freeze_files',
@@ -1927,15 +1956,10 @@ export const freezeFiles = sqliteTable(
     status: text('status').notNull(),
     sha256: text('sha256'),
     withheld: text('withheld'),
+    tree: text('tree'),
   },
   (table) => [primaryKey({ columns: [table.freezeId, table.repository, table.path] })],
 )
-
-/** The contents the Freeze's snapshots kept, masked, once each by their sha256 (B2's stand-in). */
-export const snapshotContents = sqliteTable('snapshot_contents', {
-  sha256: text('sha256').primaryKey(),
-  content: text('content').$type<Masked<string>>().notNull(),
-})
 
 /**
  * A mission's dependency on another mission of its Project (#92): proposed by the Planner with its
@@ -2509,6 +2533,11 @@ export const buildingUnattributed = sqliteTable(
     /** The attempt whose interval saw it change. */
     attemptId: text('attempt_id'),
     seenAt: text('seen_at').notNull(),
+    /**
+     * What the detector of changes outside Hemera (#148) made of it: the outside change it is,
+     * `hemera` when one of Hemera's writers explained it, null until a compare saw it.
+     */
+    reconciled: text('reconciled'),
   },
   (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
 )
@@ -2551,8 +2580,41 @@ export const buildingCheckResults = sqliteTable(
     outputTail: text('output_tail').$type<Masked<string>>().notNull(),
     runId: text('run_id'),
     at: text('at').notNull(),
+    /** The line as it ran, `{files}` filled (#143); null for a result kept by #142's port alone. */
+    line: text('line').$type<Masked<string>>(),
+    exitCode: integer('exit_code'),
+    /** The number its `expect` read. */
+    value: real('value'),
+    /**
+     * The trees it ran on (#140), `[{ repository, tree }]` in JSON: its repository's, or every
+     * repository's at the Workspace root. What tells a final check that is no longer up to date.
+     */
+    trees: text('trees'),
+    /** The whole output kept as the mission's evidence, for a final check. */
+    evidenceId: text('evidence_id'),
   },
   (table) => [index('building_check_results_of_attempt').on(table.attemptId)],
+)
+
+/**
+ * A check launched and not yet judged (#143): written as its process launches, removed with its
+ * result. One a stopped engine left is run again at the next start, or, on an exclusive resource,
+ * never run blindly again.
+ */
+export const buildingCheckRuns = sqliteTable(
+  'building_check_runs',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildingAttempts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    place: text('place').notNull(),
+    /** Its run, once the run service answered it. */
+    runId: text('run_id'),
+    commandId: text('command_id'),
+    startedAt: text('started_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.name, table.place] })],
 )
 
 /** The files a running task holds, from its targets: one holder per file of a Building. */
@@ -2666,3 +2728,96 @@ export const queuedResults = sqliteTable('queued_results', {
   queuedAt: text('queued_at').notNull(),
   deliveredAt: text('delivered_at'),
 })
+
+/**
+ * What the detector of changes outside Hemera (#148) expects of a repository of a Building: the
+ * last tree it can explain, and when the compare that took it began.
+ */
+export const outsideWatches = sqliteTable(
+  'outside_watches',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    expectedTree: text('expected_tree').notNull(),
+    comparedAt: text('compared_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository] })],
+)
+
+/**
+ * A file changed outside Hemera (#148, CT-22): where, when, the trees it was found between, the
+ * fingerprints of its sides (their contents captured by #140, a sensitive one withheld), and the
+ * command that overwrote it, if one did.
+ */
+export const outsideChanges = sqliteTable(
+  'outside_changes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    oldPath: text('old_path'),
+    status: text('status').notNull(),
+    detectedAt: text('detected_at').notNull(),
+    expectedTree: text('expected_tree').notNull(),
+    foundTree: text('found_tree').notNull(),
+    /** The fingerprint of each side, null for the side the file does not have. */
+    beforeSha: text('before_sha'),
+    afterSha: text('after_sha'),
+    /** Why a side's content was not kept ("content withheld: .env"), null when it was. */
+    withheld: text('withheld'),
+    overwrittenBy: text('overwritten_by').$type<Masked<string>>(),
+    overwrittenRun: text('overwritten_run'),
+    overwrittenSession: text('overwritten_session'),
+    overwrittenTask: text('overwritten_task'),
+    overwrittenAt: text('overwritten_at'),
+  },
+  (table) => [
+    index('outside_changes_of_mission').on(table.missionId),
+    index('outside_changes_of_file').on(table.buildingId, table.repository, table.path),
+  ],
+)
+
+/**
+ * The base of a repository moving during a Building (#148): from and to which commit, the files
+ * the move changed and those among them a task targets (JSON). Information only.
+ */
+export const baseMoves = sqliteTable(
+  'base_moves',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    fromCommit: text('from_commit').notNull(),
+    toCommit: text('to_commit').notNull(),
+    files: text('files').notNull(),
+    targeted: text('targeted').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('base_moves_of_building').on(table.buildingId, table.repository)],
+)
+
+/** A stopped service the user dismissed from a mission's list (#148). */
+export const dismissedServices = sqliteTable(
+  'dismissed_services',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.runId] })],
+)

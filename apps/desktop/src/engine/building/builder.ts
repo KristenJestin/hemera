@@ -74,6 +74,7 @@ import {
 import {
   buildingActivity,
   buildingAttempts,
+  buildingCheckRuns,
   buildingClaims,
   buildingDecisions,
   buildingLaunches,
@@ -88,12 +89,15 @@ import type { GuardedCall } from '../tools/ports.ts'
 import { mutate } from '../transaction.ts'
 import type { ProjectServices } from '../repositories.ts'
 import { type Preparations, getWorkspace } from '../workspaces.ts'
+import { checkResultsIn } from './attempts.ts'
 import { readyLine, readySaid } from './builder-role.ts'
 import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
+import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
+import { OutsideChanges } from './outside.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
 import {
   attemptFiles,
@@ -179,6 +183,7 @@ type Needs =
   | AutomationGate
   | Preparations
   | ProjectServices
+  | OutsideChanges
 
 const NO_MISSION = refusal('refused: this session works for no mission')
 const NO_BUILDING = refusal('refused: the mission has no Building under way')
@@ -249,7 +254,16 @@ const answerOf = (need: Need): string | null => {
  * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
  */
 export type BuilderHold = (
-  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
+  at:
+    | 'starting'
+    | 'finishing'
+    | 'judging'
+    | 'locked'
+    | 'committing'
+    | 'cutting'
+    | 'writing'
+    | 'requirements'
+    | 'resuming',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -306,6 +320,81 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
           Effect.forkIn(layerScope),
           Effect.asVoid,
+        )
+      // One requirement's checks at a time: two tasks done together never run them twice.
+      const requirementTurn = Semaphore.makeUnsafe(1)
+      /**
+       * The checks of each requirement named whose every task is done, run once (#143): a red opens
+       * an attempt on it for the Builder. A requirement with an attempt already is left to it. Only
+       * when the mission's copy has requirement checks; null names every requirement of the plan.
+       */
+      const requirementChecks = (building: BuildingRow, named: ReadonlyArray<string> | null) =>
+        Effect.gen(function* () {
+          const copy = yield* validationSettingsOf(building.missionId)
+          if (copy === null) return
+          if (!checksOf(copy.sections).checks.some((one) => one.when === 'requirement')) return
+          const database = yield* Database
+          const tasks = yield* tasksIn(database, building.id)
+          const requirements = named ?? [...new Set(tasks.flatMap((one) => one.requirements))]
+          for (const requirement of requirements) {
+            // A replaced task is covered by the tasks that replace it.
+            const covering = tasks.filter(
+              (one) => one.requirements.includes(requirement) && one.replacedBy.length === 0,
+            )
+            if (!covering.every((one) => one.state === 'done')) continue
+            yield* hold('requirements')
+            yield* Semaphore.withPermits(
+              requirementTurn,
+              1,
+            )(
+              Effect.gen(function* () {
+                const judged = (yield* attemptsIn(database, building.id)).some(
+                  (one) => one.scope === 'requirement' && one.subject === requirement,
+                )
+                if (!judged) yield* loop.judgeScope(building.missionId, 'requirement', requirement)
+              }),
+            )
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            said(`a requirement's checks did not run: ${String(cause)}`),
+          ),
+        )
+      /** The requirements of a task just done, their checks run in the background. */
+      const requirementsDone = (building: BuildingRow, requirements: ReadonlyArray<string>) =>
+        requirementChecks(building, requirements).pipe(
+          provided,
+          Effect.forkIn(layerScope),
+          Effect.asVoid,
+        )
+      /**
+       * The scope attempts a stop cut in the middle of their judgement, judged again: an open one
+       * that is the scope's first, or that has a check result or a check running. An open one a red
+       * opened waits for the Builder instead. The end's only once its port was called: until then,
+       * the call made again at the start judges it.
+       */
+      const cutScopes = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          for (const attempt of yield* attemptsIn(database, building.id)) {
+            if (attempt.taskId !== null || attempt.endedAt !== null) continue
+            if (attempt.scope !== 'requirement' && attempt.scope !== 'end') continue
+            if (attempt.scope === 'end' && building.endCalledAt === null) continue
+            const begun =
+              attempt.number === 1 ||
+              (yield* checkResultsIn(database, attempt.id)).length > 0 ||
+              (yield* database
+                .select({ name: buildingCheckRuns.name })
+                .from(buildingCheckRuns)
+                .where(eq(buildingCheckRuns.attemptId, attempt.id))
+                .pipe(Effect.mapError(refusedWhile('reading the checks left running')))).length > 0
+            if (!begun) continue
+            yield* loop.judgeScope(building.missionId, attempt.scope, attempt.subject)
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            said(`a scope cut by a stop was not judged again: ${String(cause)}`),
+          ),
         )
       takeCut = (action) =>
         loop.cut(action).pipe(
@@ -597,6 +686,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (done === null) return { judgement, said: null }
+          const requirements =
+            taskIn(yield* tasksIn(yield* Database, building.id), taskId)?.requirements ?? []
+          // The last task's requirements are judged before the end, never after its checks.
+          if (done) yield* requirementChecks(building, requirements)
+          else yield* requirementsDone(building, requirements)
           yield* commitsLeft(building)
           if (done) yield* ended(building)
           return { judgement, said: null }
@@ -1202,6 +1296,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
+      /** The repository a gate write lands in, compared before it (#148). */
+      const compareBefore = (file: { readonly missionId: string; readonly path: string }) =>
+        Effect.gen(function* () {
+          const building = yield* activeBuildingIn(yield* Database, file.missionId)
+          const located = building === null ? null : fileOf(building, file.path)
+          if (located === null) return
+          yield* OutsideChanges.use((outside) =>
+            outside.compare(file.missionId, located.repository),
+          )
+        }).pipe(Effect.catch((refused) => said(`a write was not compared: ${refused.message}`)))
+
       const answering =
         <A extends ToolArguments<'build_read'> | object>(
           work: (grant: Grant, args: A) => Effect.Effect<ToolAnswer, unknown, Needs>,
@@ -1235,11 +1340,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.as(said(`a command was not watched: ${String(cause)}`), null),
                 ),
               ),
-            // Whatever ends the write, interrupted or dead included, ends its hold.
+            // Whatever ends the write, interrupted or dead included, ends its hold. What the
+            // user changed there is recorded before an agent writes (#148).
             holding: (file, write) =>
               Effect.suspend(() => {
                 const sink: WriteInProgress[] = []
-                return loop.beginHold(file, sink).pipe(
+                return compareBefore(file).pipe(
+                  Effect.andThen(hold('writing')),
+                  Effect.andThen(loop.beginHold(file, sink)),
                   provided,
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
                   Effect.ensuring(
@@ -1252,6 +1360,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           },
           judgeScope: (missionId, scope, subject) =>
             loop.judgeScope(missionId, scope, subject).pipe(provided, Effect.orDie),
+          checkRun: (missionId, name, repositories) =>
+            loop.checkRun(missionId, name, repositories).pipe(provided, Effect.orDie),
         }),
       )
 
@@ -1543,11 +1653,16 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }),
           )
+          // Requirement checks a stop cut or never let start, before a task judged now starts
+          // others: a scope judged here is never one this start just opened.
+          yield* cutScopes(building)
+          yield* requirementChecks(building, null)
           for (const taskId of checking) {
             const attempts = yield* attemptsIn(yield* Database, building.id)
             const last = attempts.findLast((one) => one.taskId === taskId)
             yield* judge(building, taskId, last?.id ?? '')
           }
+          yield* hold('resuming')
           if (building.tasksDoneAt !== null && building.endCalledAt === null) yield* ended(building)
           // A stop between a task's done and its commit: the commit is made now.
           yield* commitsLeft(building)

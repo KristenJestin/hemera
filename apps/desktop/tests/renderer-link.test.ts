@@ -11,7 +11,9 @@ import {
   EngineGone,
   fromMessagePort,
   makeServerProtocol,
+  WindowCoreRpcs,
   WindowRpcs,
+  EngineApartRpcs,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -24,7 +26,7 @@ import {
   NeedTarget,
   OpenTarget,
 } from '@hemera/ipc'
-import { Deferred, Effect, Stream } from 'effect'
+import { Deferred, Effect, Layer, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -460,7 +462,7 @@ const main = async (engine: 'answers' | 'gone') => {
   let logsShown = 0
   const written: PreferencesChange[] = []
   const { port1: windowPort, port2: mainPort } = new MessageChannel()
-  const handlers = WindowRpcs.toLayer({
+  const core = WindowCoreRpcs.toLayer({
     'engine.status': () =>
       engine === 'answers' ? Effect.succeed(status) : Effect.fail(new EngineGone()),
     'engine.statusChanges': () =>
@@ -510,6 +512,20 @@ const main = async (engine: 'answers' | 'gone') => {
     'projects.changes': () =>
       Stream.concat(Stream.make({ ...acme, name: 'Acme Corp', version: 2 }), Stream.never),
   })
+  const handlers = Layer.mergeAll(
+    core,
+    EngineApartRpcs.toLayer({
+      'mission.outsideChanges': unused,
+      'mission.outsideContents': unused,
+      'mission.services': unused,
+      'mission.serviceStart': unused,
+      'mission.serviceStop': unused,
+      'mission.serviceRestart': unused,
+      'mission.serviceDismiss': unused,
+      'mission.focused': unused,
+      'mission.changed': () => Stream.die('the window’s link is not asked for a mission here'),
+    }),
+  )
   const program = Effect.gen(function* () {
     const server = yield* makeServerProtocol
     server.accept(fromMessagePort(mainPort))

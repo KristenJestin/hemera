@@ -143,8 +143,12 @@ interface Seen {
   readonly killedTrees: number[]
 }
 
-/** The supervisor over the real machine, a sink and a spy on the tree kills, on `data`. */
-function supervised(seen: Seen) {
+/**
+ * The supervisor over the real machine, a sink and a spy on the tree kills, on `data`. With
+ * `killLandsAfter`, a tree kill answers at once and only lands that many milliseconds later: a
+ * `taskkill` that returns before the process has exited.
+ */
+function supervised(seen: Seen, killLandsAfter?: number) {
   const host = Layer.effect(
     HostProcesses,
     Effect.gen(function* () {
@@ -154,7 +158,11 @@ function supervised(seen: Seen) {
         killTree: (pid: number, grouped: boolean) =>
           Effect.andThen(
             Effect.sync(() => seen.killedTrees.push(pid)),
-            real.killTree(pid, grouped),
+            killLandsAfter === undefined
+              ? real.killTree(pid, grouped)
+              : Effect.sync(() => {
+                  setTimeout(() => Effect.runFork(real.killTree(pid, grouped)), killLandsAfter)
+                }),
           ),
       }
     }),
@@ -430,6 +438,39 @@ describe('The registry outlives a crash', () => {
     ])
     // The agents' orphans are the session supervisor's to end: left in the registry for it.
     expect(orphans.remaining.map((one) => one.id)).toEqual(['session'])
+  })
+  test('an orphan is said ended only once it is gone, even when the kill answers before it exits', async () => {
+    const seen = freshSeen()
+    const left = spawn(process.execPath, [script(STAYS_UP)], {
+      detached: !onWindows,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    strays.push(left)
+    const pid = left.pid ?? -1
+
+    const [orphans, aliveWhenSaid, said] = await supervised(
+      seen,
+      300,
+    )(
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        yield* registry.add({
+          id: 'left',
+          pid,
+          program: process.execPath,
+          args: left.spawnargs.slice(1),
+          owner: { kind: 'run', id: 'run-left' },
+          engine: 'crashed',
+        })
+        const ended = yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('run'))
+        return [ended, alive(pid), [...seen.sink]] as const
+      }),
+    )
+
+    expect(orphans.map((one) => one.ended)).toEqual([true])
+    expect(said).toEqual([expect.stringContaining(`(${String(pid)})`)])
+    expect(aliveWhenSaid).toBe(false)
   })
 })
 

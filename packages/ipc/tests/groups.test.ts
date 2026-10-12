@@ -1,7 +1,7 @@
 import { MessageChannel } from 'node:worker_threads'
 
 import { type AgentProvider, DecisionFields, MissionOwner, maskText } from '@hemera/core/domain'
-import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -14,6 +14,8 @@ import {
   closedAs,
   DatabaseOpen,
   DEFAULT_PREFERENCES,
+  EngineApartRpcs,
+  EngineCoreRpcs,
   EngineGone,
   EngineRpcs,
   EngineStart,
@@ -414,23 +416,36 @@ const engineLink = Effect.gen(function* () {
   server.accept(fromMessagePort(enginePort))
   yield* RpcServer.make(EngineRpcs, { disableFatalDefects: true }).pipe(
     Effect.provide(
-      EngineRpcs.toLayer({
-        'engine.status': () => Effect.succeed(status),
-        'engine.statusChanges': () => Stream.concat(Stream.make(status), Stream.never),
-        'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
-        'preferences.write': () => Effect.void,
-        'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
-        'diagnostics.retention': () =>
-          Effect.succeed({ folder: '/data', maxAgeDays: 30, maxTotalMegabytes: 500 }),
-        'profile.backup': ({ folder }) => Effect.succeed(folder),
-        'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
-        ...projectHandlers,
-        ...workspaceHandlers,
-        ...commandHandlers,
-        ...missionHandlers,
-        ...memoryHandlers,
-        ...agentHandlers,
-      }),
+      Layer.mergeAll(
+        EngineCoreRpcs.toLayer({
+          'engine.status': () => Effect.succeed(status),
+          'engine.statusChanges': () => Stream.concat(Stream.make(status), Stream.never),
+          'preferences.read': () => Effect.succeed(DEFAULT_PREFERENCES),
+          'preferences.write': () => Effect.void,
+          'profile.backups': () => Effect.succeed({ count: 0, latest: null }),
+          'diagnostics.retention': () =>
+            Effect.succeed({ folder: '/data', maxAgeDays: 30, maxTotalMegabytes: 500 }),
+          'profile.backup': ({ folder }) => Effect.succeed(folder),
+          'profile.restore': () => Effect.fail(new RestoreRefused({ sentence: 'Not this one.' })),
+          ...projectHandlers,
+          ...workspaceHandlers,
+          ...commandHandlers,
+          ...missionHandlers,
+          ...memoryHandlers,
+          ...agentHandlers,
+        }),
+        EngineApartRpcs.toLayer({
+          'mission.outsideChanges': unused,
+          'mission.outsideContents': unused,
+          'mission.services': unused,
+          'mission.serviceStart': unused,
+          'mission.serviceStop': unused,
+          'mission.serviceRestart': unused,
+          'mission.serviceDismiss': unused,
+          'mission.focused': unused,
+          'mission.changed': () => Stream.die('not asked of this engine'),
+        }),
+      ),
     ),
     Effect.provideService(RpcServer.Protocol, server.protocol),
     Effect.forkScoped,

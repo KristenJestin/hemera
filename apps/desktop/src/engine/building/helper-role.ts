@@ -52,6 +52,7 @@ helper_launch and helper_read at depth 1 only; helper_result.
   of its output. Fix it in the same task, then task_finished again. After the third red, Hemera
   asks the user; answer what you propose with need_propose when asked.
 - A write refused because another task holds the file: leave the file, say so in your result.
+- The user may change files in the Workspace themselves. Hemera tells you which ones.
 - A launch refused by the cap or the budget is an answer: do the work yourself.
 - A call held for approval has not happened: go on with what does not depend on it.
 

@@ -107,11 +107,14 @@ export const PLAN = [
 
 /**
  * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
- * runs on the Project before the launch, for what the launch must already see.
+ * runs on the Project before the launch, for what the launch must already see; `impact` is the
+ * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks.
  */
 export const launched = <E = never, R = never>(
   work: string,
   before: (projectId: string) => Effect.Effect<void, E, R> = () => Effect.void,
+  impact = 'The impact.',
+  plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
 ) =>
   Effect.gen(function* () {
     const { project, main } = yield* acmeAt(work)
@@ -120,7 +123,7 @@ export const launched = <E = never, R = never>(
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {
         section,
-        content: `The ${section}.`,
+        content: section === 'impact' ? impact : `The ${section}.`,
         base_version: 0,
       })
     }
@@ -132,7 +135,7 @@ export const launched = <E = never, R = never>(
     })
     yield* call(grantId, 'mission_describe', { title: 'Invoices exports', type: 'feature' })
     for (const id of ['R1.S1', 'R1.S2', 'R1.S3']) yield* call(grantId, 'proof_write', byHand(id))
-    yield* call(grantId, 'tasks_write', { tasks: PLAN, base_version: 0 })
+    yield* call(grantId, 'tasks_write', { tasks: plan, base_version: 0 })
     yield* call(grantId, 'model_recommend', {
       agent: 'codex',
       model: 'gpt-large',
