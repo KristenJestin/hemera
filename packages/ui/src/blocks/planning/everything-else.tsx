@@ -25,7 +25,8 @@ const setAside = ({ state }: Question): boolean =>
  * What no longer waits, one quiet line each, every one folded: the questions answered (and how
  * many the Planner still takes in), the cold read's last pass — what it settled, or why it
  * stopped, and another pass to run —, the Probes that ended, the dependencies, and the vision,
- * which the user may give at any time.
+ * which the user may give at any time. Its lines start where For you's do, in its frame: the
+ * frame's room in from the rail.
  */
 export function EverythingElse({ data, mentionables, handlers }: EverythingElseProps): ReactNode {
   const answered = data.questions.filter((question) => question.state === 'answered')
@@ -40,7 +41,7 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
   const dependencies = data.dependencies.filter((dependency) => dependency.state !== 'rejected')
   const proposed = dependencies.filter((dependency) => dependency.state === 'proposed')
   return (
-    <section aria-label="Everything else" className="flex flex-col">
+    <section aria-label="Everything else" className="flex flex-col px-2">
       {answered.length + aside.length > 0 && (
         <Fold
           glyph={<IconCheck size="sm" />}
@@ -100,7 +101,8 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
               </ul>
             )}
             {!data.frozen && (
-              <div className="px-4 pt-1 pl-10">
+              // The link's own room puts its words about under the chips and the findings' words.
+              <div className="px-4 pt-1 pl-8">
                 <SendButton variant="link" size="sm" onSend={handlers.onRunColdRead}>
                   Run another cold read
                 </SendButton>

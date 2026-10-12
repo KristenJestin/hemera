@@ -66,6 +66,15 @@ const forYou = (canvasElement: HTMLElement) =>
   within(within(canvasElement).getByRole('region', { name: 'For you' }))
 const rest = (canvasElement: HTMLElement) =>
   within(within(canvasElement).getByRole('region', { name: 'Everything else' }))
+/** Where a region's first line starts: the left edge of its first mark, a chevron or a check. */
+const leadOf = (canvasElement: HTMLElement, name: string): number =>
+  within(canvasElement)
+    .getByRole('region', { name })
+    .querySelector(':scope button[aria-expanded], :scope p')
+    ?.firstElementChild?.getBoundingClientRect().left ?? Number.NaN
+/** Whether the rest's folded lines start on the same left edge as For you's own. */
+const alignedWithForYou = (canvasElement: HTMLElement): boolean =>
+  Math.abs(leadOf(canvasElement, 'Everything else') - leadOf(canvasElement, 'For you')) <= 1
 /** The ids of the questions a list holds, in its order: its own items, not their options'. */
 const questionIds = (list: HTMLElement): string[] =>
   [...list.querySelectorAll(':scope > li')].map((item) => item.textContent?.slice(0, 2) ?? '')
@@ -174,6 +183,7 @@ export const QuestionsWaiting: Story = {
     await expect(rest(canvasElement).getByRole('button', { name: /Answered/ })).toHaveTextContent(
       '2',
     )
+    await expect(alignedWithForYou(canvasElement)).toBe(true)
   },
 }
 
@@ -617,6 +627,7 @@ export const ReadyToFreeze: Story = {
   play: async ({ canvasElement, args }) => {
     await expect(card(canvasElement).getByRole('img', { name: 'Done' })).toBeVisible()
     await expect(forYou(canvasElement).getByText('Only Freeze is left')).toBeVisible()
+    await expect(alignedWithForYou(canvasElement)).toBe(true)
     const freeze = page(canvasElement).getByRole('button', { name: 'Freeze' })
     await expect(freeze).toBeEnabled()
     await userEvent.click(freeze)

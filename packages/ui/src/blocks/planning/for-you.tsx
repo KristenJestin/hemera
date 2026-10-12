@@ -267,7 +267,7 @@ export interface ForYouProps {
  * settle, each kind one line until the user opens it — but the questions, which stand open
  * because answering them is the work of the page. The Planner's triage and a change of the
  * ticket, rare and urgent, stand whole above them. "Nothing waits for you" when nothing does,
- * "Only Freeze is left" when only Freeze is.
+ * "Only Freeze is left" when only Freeze is, a line that starts where a framed line would.
  */
 export function ForYou({
   attention,
@@ -302,7 +302,7 @@ export function ForYou({
         <TicketCard ticket={data.ticket} onSeen={handlers.onSeenTicketChange} />
       )}
       {empty && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <p className="flex min-h-control-md items-center gap-2 px-6 py-1.5 text-sm text-muted-foreground">
           <IconCheck size="sm" />
           {attention.ready ? 'Only Freeze is left' : 'Nothing waits for you'}
         </p>
