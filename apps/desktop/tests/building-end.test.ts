@@ -24,7 +24,7 @@ import {
   toolsOf,
 } from '@hemera/core/domain'
 import { and, asc, eq } from 'drizzle-orm'
-import { Effect, Layer, Predicate, type Schema } from 'effect'
+import { Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -33,9 +33,11 @@ import { autoReviewOf } from '../src/engine/building/review-store.ts'
 import { buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
 import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
+import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
+import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
 import {
   MEMORY_TOOLS,
   ROLES_REGISTERED,
@@ -301,6 +303,19 @@ const reviewing = (missionId: string) =>
     LONG,
   )
 
+/** Every line of the mission's Journal, the first first. */
+const journalOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const lines: string[] = []
+    let before: number | null = null
+    for (;;) {
+      const page = yield* Memory.use((memory) => memory.journal(missionId, before))
+      lines.unshift(...page.lines.map((line) => line.text).toReversed())
+      if (page.before === null || page.lines.length === 0) return lines
+      before = page.before
+    }
+  })
+
 /** The types of the mission's events, in their order. */
 const typesOf = (missionId: string) =>
   Effect.gen(function* () {
@@ -343,37 +358,58 @@ describe('The end sequence', () => {
       const seen = await run(({ profile }) =>
         within(
           profile,
-          Effect.gen(function* () {
-            const { mission } = yield* launched(work, withReadme)
-            const builder = yield* builderOf(mission.id)
-            yield* builtAll(builder.grantId)
-            yield* documented(world, mission.id)
-            yield* reviewed(world, mission.id, 'spec-reviewer')
-            const now = Memory.use((memory) => memory.now(mission.id))
-            yield* until(
-              Effect.map(now, (state) => state.end.length > 0),
-              LONG,
-            )
-            const reviewingNow = yield* now
-            yield* reviewed(world, mission.id, 'code-reviewer', [
-              warning('README.md', 'Say how to export the invoices as Markdown.'),
-            ])
-            yield* specialAvailable(mission.id, 'RV1')
-            const specialNow = yield* now
-            yield* specialDone(builder.grantId, 'RV1', 'README.md', 'Acme api, as Markdown\n')
-            yield* inReview(mission.id)
-            return {
-              reviewingNow,
-              specialNow,
-              endedNow: yield* now,
-              types: yield* typesOf(mission.id),
-              view: yield* buildingNow(mission.id),
-              builder: yield* sessionsIn(SESSION_STATES, {
-                kind: 'mission',
-                missionId: mission.id,
-              }),
-            }
-          }),
+          Effect.scoped(
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              const committed = yield* DomainEvents.use((events) => events.subscribe)
+              const told = yield* noticesOf(REGISTRY, committed).pipe(
+                Stream.filter((one) => Predicate.isTagged(one, 'NoticeRaised')),
+                Stream.map((one) => (Predicate.isTagged(one, 'NoticeRaised') ? one.notice : null)),
+                Stream.filter(
+                  (one) => one?.kind === 'building-finished' || one?.kind === 'review-waiting',
+                ),
+                Stream.take(2),
+                Stream.runCollect,
+                Effect.forkChild,
+              )
+              yield* builtAll(builder.grantId)
+              yield* documented(world, mission.id)
+              yield* reviewed(world, mission.id, 'spec-reviewer')
+              const now = Memory.use((memory) => memory.now(mission.id))
+              yield* until(
+                Effect.map(now, (state) => state.end.length > 0),
+                LONG,
+              )
+              const reviewingNow = yield* now
+              yield* reviewed(world, mission.id, 'code-reviewer', [
+                warning('README.md', 'Say how to export the invoices as Markdown.'),
+              ])
+              yield* specialAvailable(mission.id, 'RV1')
+              const specialNow = yield* now
+              yield* specialDone(builder.grantId, 'RV1', 'README.md', 'Acme api, as Markdown\n')
+              yield* inReview(mission.id)
+              return {
+                reviewingNow,
+                specialNow,
+                endedNow: yield* now,
+                notices: yield* Fiber.join(told),
+                // The Journal projects the events a moment after they are written.
+                journal: yield* until(
+                  Effect.map(journalOf(mission.id), (lines) =>
+                    lines.some((line) => line.startsWith('Building ended')),
+                  ),
+                  LONG,
+                ).pipe(Effect.andThen(journalOf(mission.id))),
+                types: yield* typesOf(mission.id),
+                view: yield* buildingNow(mission.id),
+                builder: yield* sessionsIn(SESSION_STATES, {
+                  kind: 'mission',
+                  missionId: mission.id,
+                }),
+              }
+            }),
+          ),
         ),
       )
       const steps = seen.types.filter((type) =>
@@ -411,6 +447,33 @@ describe('The end sequence', () => {
       expect(seen.reviewingNow.end).toEqual(['Automatic review: 1 of 2 reviewers done'])
       expect(seen.specialNow.end).toEqual(['Special tasks: RV1'])
       expect(seen.endedNow.end).toEqual([])
+      // The end tells: the build finished, and the mission waits for its Review.
+      expect([...seen.notices].map((one) => [one?.kind, one?.missionKey, one?.what])).toEqual([
+        ['review-waiting', 'ACME-1', 'it waits for your Review'],
+        ['building-finished', 'ACME-1', 'its Building finished'],
+      ])
+      expect(
+        REGISTRY.kinds
+          .filter((one) => one.id === 'building-finished' || one.id === 'review-waiting')
+          .map((one) => [one.id, one.byDefault, one.sound]),
+      ).toEqual([
+        ['building-finished', true, 'done'],
+        ['review-waiting', false, null],
+      ])
+      // Each step of the end is a line of the Journal.
+      expect(seen.journal).toEqual(
+        expect.arrayContaining([
+          'The end of Building started: documentation, final checks, then the automatic review.',
+          'The final checks: none ran.',
+          'The checkpoint of the automatic review is taken.',
+          'The Spec reviewer started its pass.',
+          'The Code reviewer started its pass.',
+          'The Spec reviewer reported no finding.',
+          'The Code reviewer reported 1 warning.',
+          'RV1, a special task from finding 1 of the Code reviewer: Say how to export the invoices as Markdown.',
+          'Building ended: the mission moves to Review; 1 file(s) changed after the automatic review.',
+        ]),
+      )
       expect(seen.view).toMatchObject({ state: 'ended', phase: 'ended' })
       expect(seen.view.endedAt).not.toBeNull()
       // The Builder's session is stopped at the exit.
