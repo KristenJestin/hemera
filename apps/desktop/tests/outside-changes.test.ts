@@ -234,9 +234,10 @@ const comparedAfterEnd = (missionId: string) =>
  * The user's index as if `path` had been checked out, the index written and the file rewritten at
  * the same size all in one second, a minute ago: its entry keeps the old content under the file's
  * present times, and the index's own time is that second, so Git reads the entry as racy and looks
- * at the content. Whenever a compare copies the index, it is in a later second.
+ * at the content. Whenever a compare copies the index, it is in a later second. The index is
+ * written `late` seconds into that second; what its time holds below the second is answered.
  */
-const inOneSecond = (repository: string, path: string) => {
+const inOneSecond = (repository: string, path: string, late = 0) => {
   const target = join(repository, path)
   const then = Math.floor(Date.now() / 1000) - 60
   utimesSync(target, then, then)
@@ -256,7 +257,8 @@ const inOneSecond = (repository: string, path: string) => {
   for (const [slot, value] of times.entries()) bytes.writeUInt32BE(Number(value), at + slot * 4)
   const body = bytes.subarray(0, bytes.length - 20)
   writeFileSync(index, Buffer.concat([body, createHash('sha1').update(body).digest()]))
-  utimesSync(index, then, then)
+  utimesSync(index, then + late, then + late)
+  return statSync(index, { bigint: true }).mtimeNs % second
 }
 
 const compare = (missionId: string) =>
@@ -607,9 +609,9 @@ describe('Races and restarts', () => {
     expect(seen).toEqual(['api/mine.md'])
   })
 
-  test('a file I rewrite at the same size in the second its Workspace was checked out is detected', async () => {
-    const { run } = engine()
-    const seen = await run(({ profile }) =>
+  /** `README.md` rewritten at the same size in one second with the index, then compared. */
+  const sameSize = (late: number) =>
+    engine().run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -618,15 +620,25 @@ describe('Races and restarts', () => {
           const api = join(session.folder, 'api')
           // "Acme api" and "mine too" are nine bytes each.
           writeFileSync(join(api, 'README.md'), 'mine too\n')
-          inOneSecond(api, 'README.md')
+          const fraction = inOneSecond(api, 'README.md', late)
           // Git, on the user's own index, sees it changed.
           expect(git(api, 'ls-files', '--modified')).toBe('README.md')
           yield* compare(mission.id)
-          return yield* recorded(mission.id)
+          return { fraction, rows: yield* recorded(mission.id) }
         }),
       ),
     )
-    expect(seen).toEqual(['api/README.md'])
+
+  test('a file I rewrite at the same size in the second its Workspace was checked out is detected', async () => {
+    const seen = await sameSize(0)
+    expect(seen.rows).toEqual(['api/README.md'])
+  })
+
+  test('a file I rewrite at the same size in the second its Workspace was checked out is detected when the index was written at the very end of that second', async () => {
+    const seen = await sameSize(0.9999)
+    // The filesystem kept the fraction: the copy's time is never rounded up to the next second.
+    expect(seen.fraction).toBeGreaterThan(0n)
+    expect(seen.rows).toEqual(['api/README.md'])
   })
 
   test('after a restart, a change made while Hemera was stopped is detected once, and one detected before is not reported again', async () => {
