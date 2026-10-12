@@ -212,7 +212,20 @@ describe('Each role has exactly its tools', () => {
         'spec_read',
       ],
     ],
-    ['documenter', ['fs_edit', 'fs_list', 'fs_read', 'fs_write', 'now_set', 'search']],
+    [
+      'documenter',
+      [
+        'build_read',
+        'docs_report',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'now_set',
+        'search',
+        'spec_read',
+      ],
+    ],
     ['spec-reviewer', ['search']],
     ['code-reviewer', ['fs_read', 'search']],
     [

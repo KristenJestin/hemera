@@ -41,6 +41,7 @@ import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { checkResultsOf, conflictsIn, unattributedIn } from './attempts.ts'
+import { passViewOf, passesIn } from './documenter-store.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
 import { Secrets } from '../secrets.ts'
@@ -665,6 +666,7 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         .filter((one) => one.taskId === null)
         .map((one) => attemptViewOf(one, extras)),
       unattributed: yield* unattributedIn(reader, building.id),
+      documenter: (yield* passesIn(reader, building.id)).map(passViewOf),
       summary: building.summary,
     }
     return view

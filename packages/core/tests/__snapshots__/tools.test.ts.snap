@@ -3088,6 +3088,57 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Report your pass once: the documentation files you changed and why, or why nothing needed to change. Then end your turn.",
+      "properties": {
+        "changed": {
+          "description": "Every documentation file you changed in this pass, once each.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "path": {
+                "description": "The file, relative to that repository.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "repository": {
+                "description": "The repository of the file, as your brief names it; \`.\` for the Workspace root.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+              "why": {
+                "description": "What you changed in it, and why the code needed it.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "repository",
+              "path",
+              "why",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "no_change_reason": {
+          "description": "When you changed nothing: why this change needs no documentation, specific to it (never "nothing to document").",
+          "maxLength": 2000,
+          "type": "string",
+        },
+      },
+      "required": [
+        "changed",
+      ],
+      "type": "object",
+    },
+    "name": "docs_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

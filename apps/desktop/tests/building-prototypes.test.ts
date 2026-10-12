@@ -108,6 +108,7 @@ const frozenWith = (judged: ReadonlyArray<Judged>) =>
     () => Effect.void,
     'The impact.',
     undefined,
+    undefined,
     (mission, planner) =>
       Effect.gen(function* () {
         for (const [at, verdict] of judged.entries()) {

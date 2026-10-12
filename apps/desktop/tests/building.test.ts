@@ -576,6 +576,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
       'catalogue',
       'checks',
       'commits',
+      'doc-recipes',
       'resources',
     ])
     expect(seen.after).toEqual(seen.copy)

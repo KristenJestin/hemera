@@ -98,6 +98,7 @@ import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import { BuildDesk } from '../building/desk.ts'
 import { HelperDesk } from '../building/helper-desk.ts'
+import { DocsDesk } from '../building/docs-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -214,6 +215,7 @@ export type GateServices =
   | ProbeDesk
   | BuildDesk
   | HelperDesk
+  | DocsDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -393,6 +395,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.ticket_event_report.input)(raw)
     case 'prelaunch_report':
       return decoder(tool, TOOLS.prelaunch_report.input)(raw)
+    case 'docs_report':
+      return decoder(tool, TOOLS.docs_report.input)(raw)
     case 'build_read':
       return decoder(tool, TOOLS.build_read.input)(raw)
     case 'task_start':
@@ -904,6 +908,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* prototypeReadTool(grant, call.args, home)
             case 'helper_result':
               return yield* HelperDesk.use((desk) => desk.result(grant, call.args))
+            case 'docs_report':
+              return yield* DocsDesk.use((desk) => desk.report(grant, call.args))
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

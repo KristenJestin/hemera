@@ -45,6 +45,7 @@ import { BuildingRpcs } from './building.ts'
 import { HelpersRpcs } from './helpers.ts'
 import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
+import { DocRecipesRpcs } from './docs.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -186,8 +187,8 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs)
 
 /**
- * Everything the engine serves: what main asks, and the Project's checks (#143), served apart until
- * their screen (#150) forwards them. One more group in one set of handlers is more than TypeScript
- * instantiates (TS2589): their handlers are a layer of their own.
+ * Everything the engine serves: what main asks, and the Project's checks (#143) and doc recipes
+ * (#146), served apart until their screen (#150, #152) forwards them. One more group in one set of
+ * handlers is more than TypeScript instantiates (TS2589): their handlers are layers of their own.
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ChecksRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(ChecksRpcs, DocRecipesRpcs)

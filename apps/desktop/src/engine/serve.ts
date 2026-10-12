@@ -9,6 +9,7 @@
 import {
   ChatRefused,
   ChecksRpcs,
+  DocRecipesRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -121,6 +122,14 @@ import {
   removeCheck,
   saveCheck,
 } from './project-checks.ts'
+import {
+  acceptDocRecipes,
+  listDocRecipes,
+  moveDocRecipe,
+  proposedDocRecipes,
+  removeDocRecipe,
+  saveDocRecipe,
+} from './doc-recipes.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
@@ -844,7 +853,7 @@ export const engineHandlers = (
         observedStream('mission.changed', log),
       ),
   })
-  return Layer.mergeAll(core, apart, checksHandlers(profile, log))
+  return Layer.mergeAll(core, apart, checksHandlers(profile, log), docRecipesHandlers(profile, log))
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineServedRpcs`). */
@@ -862,5 +871,24 @@ const checksHandlers = (profile: StartedProfile, log: Log) => {
       use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
     'checks.move': ({ projectId, id, rank }) =>
       use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
+  })
+}
+
+/** The Project's doc recipes (#146), a layer of their own (see `EngineServedRpcs`). */
+const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return DocRecipesRpcs.toLayer({
+    'docRecipes.list': ({ projectId }) =>
+      use(listDocRecipes(projectId)).pipe(observed('docRecipes.list', log)),
+    'docRecipes.propose': ({ projectId, asked }) =>
+      use(proposedDocRecipes(projectId, asked)).pipe(observed('docRecipes.propose', log)),
+    'docRecipes.accept': ({ projectId, proposals }) =>
+      use(acceptDocRecipes(projectId, proposals)).pipe(observed('docRecipes.accept', log)),
+    'docRecipes.save': ({ projectId, id, recipe }) =>
+      use(saveDocRecipe(projectId, id, recipe)).pipe(observed('docRecipes.save', log)),
+    'docRecipes.remove': ({ projectId, id }) =>
+      use(removeDocRecipe(projectId, id)).pipe(observed('docRecipes.remove', log)),
+    'docRecipes.move': ({ projectId, id, rank }) =>
+      use(moveDocRecipe(projectId, id, rank)).pipe(observed('docRecipes.move', log)),
   })
 }
