@@ -25,6 +25,8 @@ import {
 } from '@hemera/ui'
 import {
   IconAdjustments,
+  IconBook2,
+  IconChecklist,
   IconDatabase,
   IconFileText,
   IconGauge,
@@ -122,6 +124,8 @@ const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'instructions', label: 'Instructions', icon: <IconFileText size="sm" /> },
   { id: 'tickets', label: 'Tickets and Specs', icon: <IconPlug size="sm" /> },
   { id: 'resources', label: 'Exclusive resources', icon: <IconDatabase size="sm" /> },
+  { id: 'checks', label: 'Checks', icon: <IconChecklist size="sm" /> },
+  { id: 'documentation', label: 'Documentation', icon: <IconBook2 size="sm" /> },
 ]
 
 /** The section an entry of the list names, or null when the page has none of that name. */

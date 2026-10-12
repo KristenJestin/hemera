@@ -92,6 +92,12 @@ describe('The ready set is every task whose dependencies are done', () => {
     expect(promotable(done)).toEqual(['T22'])
   })
 
+  test('a task covering S3 does not become available before S3’s red: the others do', () => {
+    const covering = [task('T1'), task('T3', { scenarios: ['R1.S3'] })]
+    expect(promotable(covering, new Set(['R1.S3']))).toEqual(['T1'])
+    expect(promotable(covering, new Set())).toEqual(['T1', 'T3'])
+  })
+
   test('the ready set is the available tasks, in the order of the plan', () => {
     const now = [
       task('T1', { state: 'in_progress' }),

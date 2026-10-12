@@ -73,6 +73,7 @@ describe('The role registry', () => {
         'task_blocked',
         'report_need',
         'need_propose',
+        'proof_run',
         'build_summary',
         'helper_launch',
         'helper_result',
@@ -105,7 +106,7 @@ describe('A role that does not read the Memory has no Memory tool (CT-06)', () =
 
   test('a role registered as not reading the Memory while its tools write or read it fails', () => {
     expect(memoryContractBroken([shaped('builder', false)])).toEqual([
-      'builder does not read the Memory but has memory_read, now_set, journal_add, note_add, notes_condense, evidence_add, task_start, task_finished, task_blocked, report_need, need_propose, build_summary, helper_launch',
+      'builder does not read the Memory but has memory_read, now_set, journal_add, note_add, notes_condense, evidence_add, task_start, task_finished, task_blocked, report_need, need_propose, proof_run, build_summary, helper_launch',
     ])
   })
 })

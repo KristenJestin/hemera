@@ -103,41 +103,64 @@ function lineProblem(line: string): string | null {
   return Result.isFailure(template) ? template.failure.message : null
 }
 
+/** The field of the settings a check's refusal is said under; null for the check as a whole. */
+export const CHECK_FIELDS = ['name', 'line', 'pattern', 'minimum', 'files'] as const
+export const CheckField = Schema.Literals(CHECK_FIELDS)
+export type CheckField = typeof CheckField.Type
+
+/** Why a check cannot be saved: the sentence the settings show, and the field it is said under. */
+export interface CheckRefusal {
+  readonly field: CheckField | null
+  readonly sentence: string
+}
+
+const refusedAt = (field: CheckField | null, sentence: string | null): CheckRefusal | null =>
+  sentence === null ? null : { field, sentence }
+
 /**
- * Why a check cannot be saved, as the sentence the settings show, or null when it can be. `taken`
+ * Why a check cannot be saved, and where the settings say it, or null when it can be. `taken`
  * are the names of the Project's other checks: two checks never share one.
  */
-export function checkProblem(draft: CheckDraft, taken: ReadonlyArray<string>): string | null {
+export function checkRefusal(draft: CheckDraft, taken: ReadonlyArray<string>): CheckRefusal | null {
   const name = draft.name.trim()
-  if (name === '') return 'Give the check a name.'
-  if (taken.includes(name)) return `A check named “${name}” already exists.`
+  if (name === '') return refusedAt('name', 'Give the check a name.')
+  if (taken.includes(name)) return refusedAt('name', `A check named “${name}” already exists.`)
   const line = draft.line?.trim() ?? ''
   if (draft.commandId !== null && line !== '') {
-    return 'A check runs a command of the catalogue or a line, not both.'
+    return refusedAt(null, 'A check runs a command of the catalogue or a line, not both.')
   }
   if (draft.commandId === null && line === '') {
-    return 'Choose a command of the catalogue or write a line to run.'
+    return refusedAt('line', 'Choose a command of the catalogue or write a line to run.')
   }
   if (draft.where === 'repository' && draft.repository === null) {
-    return 'Choose the repository the check runs in.'
+    return refusedAt(null, 'Choose the repository the check runs in.')
   }
   if (draft.where !== 'repository' && draft.repository !== null) {
-    return 'Only a check that runs in one repository names a repository.'
+    return refusedAt(null, 'Only a check that runs in one repository names a repository.')
   }
   if (draft.expect !== null) {
     const problem = patternProblem(draft.expect.pattern)
-    if (problem !== null) return problem
-    if (!Number.isFinite(draft.expect.minimum)) return 'The minimum must be a number.'
+    if (problem !== null) return refusedAt('pattern', problem)
+    if (!Number.isFinite(draft.expect.minimum))
+      return refusedAt('minimum', 'The minimum must be a number.')
   }
   if (draft.files !== null) {
     const problem = filterProblem(draft.files)
-    if (problem !== null) return problem
+    if (problem !== null) return refusedAt('files', problem)
   }
   if (line === '') return null
   if (line.includes(FILES_PLACEHOLDER) && draft.files === null) {
-    return 'Set the files filter {files} is filled with, as in **/*.test.ts, or take {files} out of the line.'
+    return refusedAt(
+      'files',
+      'Set the files filter {files} is filled with, as in **/*.test.ts, or take {files} out of the line.',
+    )
   }
-  return lineProblem(line)
+  return refusedAt('line', lineProblem(line))
+}
+
+/** Why a check cannot be saved, as the sentence the settings show, or null when it can be. */
+export function checkProblem(draft: CheckDraft, taken: ReadonlyArray<string>): string | null {
+  return checkRefusal(draft, taken)?.sentence ?? null
 }
 
 /** The command types a check is proposed from, and when and where each runs by default. */

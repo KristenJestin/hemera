@@ -4,7 +4,7 @@
  * refused carries the sentence the settings show.
  */
 
-import { CheckDraft, ProjectCheck } from '@hemera/core/domain'
+import { CheckDraft, ProjectCheck, CheckField } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
@@ -12,11 +12,15 @@ import { EngineGone } from './gone.ts'
 import { StorageFailed } from './profile.ts'
 import { UnknownProject } from './projects.ts'
 
-export { CheckDraft, ProjectCheck }
+export { CheckDraft, CheckField, ProjectCheck }
 
-/** A check the settings cannot save, and the sentence they show. */
+/**
+ * A check the settings cannot save, the sentence they show, and the field they show it under when
+ * it concerns one.
+ */
 export class CheckRefused extends Schema.TaggedError<CheckRefused>()('CheckRefused', {
   reason: Schema.String,
+  field: Schema.optionalKey(Schema.NullOr(CheckField)),
 }) {
   override get message(): string {
     return this.reason

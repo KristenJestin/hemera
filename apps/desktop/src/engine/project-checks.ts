@@ -3,7 +3,7 @@
  * catalogue's check commands (only proposed: nothing is saved until the user accepts them), a check
  * written, removed or moved.
  *
- * Saving checks the whole check first (`checkProblem`), then what only the Project knows: a
+ * Saving checks the whole check first (`checkRefusal`), then what only the Project knows: a
  * command of its catalogue, a repository it declares. A refusal carries the sentence the settings
  * show. A running mission never reads these rows: it reads the copy taken at its launch (CT-34).
  */
@@ -15,7 +15,7 @@ import {
   type CheckWhen,
   type CheckWhere,
   type ProjectCheck,
-  checkProblem,
+  checkRefusal,
   proposeChecks,
 } from '@hemera/core/domain'
 import { CheckRefused, type Project, UnknownProjectCheck } from '@hemera/ipc'
@@ -110,8 +110,10 @@ export const proposedChecks = (projectId: string, asked: boolean) =>
 /** Why a check cannot be written beside the Project's others, or nothing. */
 const refusal = (project: Project, draft: CheckDraft, taken: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const problem = checkProblem(draft, taken)
-    if (problem !== null) return yield* new CheckRefused({ reason: problem })
+    const problem = checkRefusal(draft, taken)
+    if (problem !== null) {
+      return yield* new CheckRefused({ reason: problem.sentence, field: problem.field })
+    }
     if (
       draft.repository !== null &&
       !project.repositories.some((one) => one.path === draft.repository)

@@ -52,6 +52,7 @@ import {
 } from '../storage/database.ts'
 import { fileContents, missions, snapshotChanges, snapshotFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { recordTreeIn } from './proof-store.ts'
 
 /** The folder of the data folder that holds the snapshot stores, one per Project. */
 export const SNAPSHOTS_FOLDER = 'snapshots'
@@ -727,6 +728,8 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
 
       const take = (repository: RepositoryPlace, owner: SnapshotOwner) =>
         Effect.gen(function* () {
+          // When it began: a snapshot that ends after a later one never makes its tree current.
+          const takenAt = new Date().toISOString()
           const store = yield* storeOf(owner.missionId)
           const objects = yield* objectsOf(repository.folder)
           const index = text(
@@ -816,6 +819,17 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           yield* run(store, ['update-ref', refOf(owner, repository.name), tree], 'read', {
             env: alternate,
           })
+          // The Workspace's current tree (#144, CT-38); a Freeze's is of the main checkout.
+          if (owner.kind !== 'freeze') {
+            yield* written(
+              mutate('recording the current tree', (transaction) =>
+                Effect.map(
+                  recordTreeIn(transaction, owner.missionId, repository.name, tree, takenAt),
+                  (stale) => ({ result: undefined, events: stale }),
+                ),
+              ),
+            )
+          }
           return tree
         }).pipe(
           Effect.mapError(failure(repository, ownerText(owner))),

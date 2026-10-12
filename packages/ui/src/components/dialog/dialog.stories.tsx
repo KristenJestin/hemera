@@ -5,6 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { Button } from '../button/button.tsx'
 import { Checkbox } from '../checkbox/checkbox.tsx'
 import { Input } from '../field/field.tsx'
+import { entered } from '../../overlay-play.ts'
 import { Dialog, DialogClose, type DialogProps } from './dialog.tsx'
 
 const ACTIONS = (
@@ -241,5 +242,28 @@ export const Focused: Story = {
     }
     await closed()
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/**
+ * A dialog still entering is not read: held as Base UI holds it for its first frame, `entered`
+ * waits for the frame to end where a bare `toBeVisible()` fails. A runner that is loaded paints
+ * that frame late, so the same play passes alone and fails under load unless it waits.
+ */
+export const ReadOnceEntered: Story = {
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement, 'Remove')
+    dialog.setAttribute('data-starting-style', '')
+    dialog.style.opacity = '0'
+    expect(dialog).not.toBeVisible()
+    let entering = true
+    setTimeout(() => {
+      entering = false
+      dialog.removeAttribute('data-starting-style')
+      dialog.style.removeProperty('opacity')
+    }, 150)
+    await entered(dialog)
+    expect(entering).toBe(false)
+    expect(dialog).toBeVisible()
   },
 }
