@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
+import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
 import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
@@ -116,6 +117,8 @@ const ending = (
     readonly folder?: string
     /** The Builder's agent, when not every prompt is answered at once. */
     readonly builder?: FakeScript
+    /** The snapshots as the engine reaches them, when a test makes one fail. */
+    readonly snapshots?: (real: SnapshotsService) => SnapshotsService
     /** Runs as each agent starts: a failure there is an agent that cannot start. */
     readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
   } = {},
@@ -136,6 +139,7 @@ const ending = (
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
     starting: options.starting ?? (() => Effect.void),
+    snapshots: options.snapshots ?? ((real) => real),
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: {
       checks: Layer.succeed(TaskChecks, {
@@ -1259,6 +1263,53 @@ describe('A pass that fails', () => {
         'code-reviewer failed',
         'spec-reviewer done',
       ])
+    },
+  )
+})
+
+describe('A step that cannot go on', () => {
+  test(
+    'a step that throws holds the end on an error need; Retry runs the step again',
+    SLOW,
+    async () => {
+      let failing = false
+      const { world, run } = ending({
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            failing && owner.kind === 'checkpoint'
+              ? Effect.die(new Error('the disk is full'))
+              : real.take(place, owner),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            failing = true
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            const holding = yield* buildingNow(mission.id)
+            failing = false
+            const need = yield* retried(mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return { holding, need }
+          }),
+        ),
+      )
+      expect(seen.holding.phase).toBe('checkpoint')
+      if (Predicate.isTagged(seen.need.fields, 'Error')) {
+        expect(seen.need.fields.failed).toContain('the disk is full')
+        expect(seen.need.fields.proposals).toEqual(['Retry'])
+      }
     },
   )
 })

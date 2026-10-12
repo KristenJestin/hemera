@@ -858,6 +858,18 @@ export const buildingEndLayer = (log: Log) => {
 
       // --- the driver -----------------------------------------------------------------------------
 
+      /** A step that threw: the user is asked, and Retry runs it again. */
+      const stepFailed = (buildingId: string, cause: Cause.Cause<unknown>) =>
+        Effect.gen(function* () {
+          const why = Cause.pretty(cause).split('\n')[0] ?? ''
+          const building = yield* buildingRow(buildingId)
+          if (building?.state !== 'active') return yield* said(`a step did not run: ${why}`)
+          yield* raise(building, `A step of the end did not run (${building.phase}): ${why}`)
+        }).pipe(
+          provided,
+          Effect.catchCause((again) => said(`a step did not run, nor its need: ${String(again)}`)),
+        )
+
       /** Runs the end's steps as far as they go now. */
       const advance = (buildingId: string) =>
         Effect.gen(function* () {
@@ -889,9 +901,7 @@ export const buildingEndLayer = (log: Log) => {
           const once: Effect.Effect<void> = advance(buildingId).pipe(
             provided,
             Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : said(`a step did not run: ${Cause.pretty(cause).split('\n')[0] ?? ''}`),
+              Cause.hasInterruptsOnly(cause) ? Effect.void : stepFailed(buildingId, cause),
             ),
             Effect.andThen(
               Effect.suspend(() => {
