@@ -1,6 +1,6 @@
 /**
  * The Planning page as the window feeds it: the engine's Spec, waves, inputs, discussions, Probes,
- * cold reads, dependencies and ticket changes in the words the page draws, and the follower that
+ * Prototypers, cold reads, dependencies and ticket changes in the words the page draws, and the follower that
  * reads them, keeps them up to date and sends the user's gestures. Plain values and functions over
  * the link, no React: the hook that holds them is `use-planning.ts`, and the page that draws them
  * is the design system's.
@@ -11,6 +11,7 @@ import {
   ROLES,
   TICKET_EVENT_SAID,
   type InputState,
+  type PrototypeVerdict,
   type ProofSeen,
 } from '@hemera/core/domain'
 import type {
@@ -19,6 +20,8 @@ import type {
   Discussion as EngineDiscussion,
   DiscussionItem,
   FreezeReadiness,
+  HelperChip,
+  HelperDetail,
   MissionDependencies,
   Now,
   PlanningInput,
@@ -428,6 +431,13 @@ export interface PlanningView {
   readonly mentionables: ReadonlyArray<Mentionable>
   /** The report of each Probe opened: null while it is read. */
   readonly reports: ReadonlyMap<string, Planning.ProbeDetail | null>
+  /**
+   * The mission's Prototypers (#222), the first launched first: each one's chip, as the engine
+   * gives it, until the Planning design (#193) places them.
+   */
+  readonly prototypes: ReadonlyArray<HelperChip>
+  /** The result of each Prototyper opened: null while it is read. */
+  readonly prototypeResults: ReadonlyMap<string, HelperDetail | null>
 }
 
 export const LOADING_PLANNING: PlanningView = {
@@ -436,6 +446,8 @@ export const LOADING_PLANNING: PlanningView = {
   declaredComplete: false,
   mentionables: [],
   reports: new Map(),
+  prototypes: [],
+  prototypeResults: new Map(),
 }
 
 /**
@@ -459,6 +471,16 @@ export interface PlanningFollowing {
   readonly seenTicketChange: (eventId: string) => Promise<void>
   /** Reads a Probe's report, for its view. */
   readonly openProbe: (probeId: string) => void
+  /** Asks for a prototype: the Planner is handed it and launches the Prototyper (#222). */
+  readonly askPrototype: (question: string) => Promise<void>
+  /** The user's verdict on a Prototyper's result, with what they say of it. */
+  readonly judgePrototype: (
+    helperId: string,
+    verdict: PrototypeVerdict,
+    note: string | null,
+  ) => Promise<void>
+  /** Reads a Prototyper's result, for its view. */
+  readonly openPrototype: (helperId: string) => void
   /** The first message on an item opens its discussion; the next ones are said in it. */
   readonly say: (item: DiscussionItem, text: string) => Promise<void>
   /** Closes the item's discussion on the proposal the user read. */
@@ -490,6 +512,10 @@ export type PlanningLink = Pick<
   | 'closeDiscussion'
   | 'onProbes'
   | 'probe'
+  | 'onPrototypes'
+  | 'helper'
+  | 'askPrototype'
+  | 'judgePrototype'
   | 'onColdReads'
   | 'coldReadAgain'
   | 'dismissFinding'
@@ -546,6 +572,8 @@ export function followPlanning(
   let refused: string | undefined
   let markedOnce = false
   let reports: ReadonlyMap<string, Planning.ProbeDetail | null> = new Map()
+  let prototypes: ReadonlyArray<HelperChip> = []
+  let prototypeResults: ReadonlyMap<string, HelperDetail | null> = new Map()
   let mentionables: ReadonlyArray<Mentionable> = []
   const living = new Map<string, string>()
   const asked = new Set<string>()
@@ -577,6 +605,8 @@ export function followPlanning(
       refused,
       mentionables,
       reports,
+      prototypes,
+      prototypeResults,
     })
   }
 
@@ -691,6 +721,18 @@ export function followPlanning(
         },
         failed,
       ),
+      link.onPrototypes(
+        missionId,
+        (heard) => {
+          prototypes = heard
+          // A result open while its Prototyper moves is read again.
+          for (const id of prototypeResults.keys()) {
+            if (prototypes.some((one) => one.id === id)) readPrototype(id)
+          }
+          emit()
+        },
+        failed,
+      ),
       link.onColdReads(
         missionId,
         (heard) => {
@@ -725,6 +767,19 @@ export function followPlanning(
     link.probe(probeId).then(
       (detail) => {
         reports = new Map([...reports, [probeId, probeDetailOf(detail)]])
+        emit()
+      },
+      (failure: Error) => {
+        refused = failure.message
+        emit()
+      },
+    )
+  }
+
+  function readPrototype(helperId: string): void {
+    link.helper(helperId).then(
+      (detail) => {
+        prototypeResults = new Map([...prototypeResults, [helperId, detail]])
         emit()
       },
       (failure: Error) => {
@@ -803,6 +858,17 @@ export function followPlanning(
       if (!reports.has(probeId)) reports = new Map([...reports, [probeId, null]])
       emit()
       readReport(probeId)
+    },
+    askPrototype: (question) =>
+      gesture('prototype', () => link.askPrototype(missionId, question), true),
+    judgePrototype: (helperId, verdict, note) =>
+      gesture(`prototype ${helperId}`, () => link.judgePrototype(helperId, verdict, note)),
+    openPrototype: (helperId) => {
+      if (!prototypeResults.has(helperId)) {
+        prototypeResults = new Map([...prototypeResults, [helperId, null]])
+      }
+      emit()
+      readPrototype(helperId)
     },
     say: (item, text) => {
       const open = discussionOn(item)

@@ -92,6 +92,8 @@ describe('Each role has exactly its tools', () => {
         'discussion_reply',
         'fs_list',
         'fs_read',
+        'helper_launch',
+        'helper_read',
         'input_integrated',
         'journal_add',
         'living_spec_read',
