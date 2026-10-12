@@ -12,6 +12,8 @@ import { Legend } from '../tooltip/legend.tsx'
  * - `todo` · a dotted ring, quiet: nothing has started.
  * - `running` · an arc of the ring, turning, in the running tone.
  * - `done` · the ring closes and a ✓ draws itself in it; `failed`, a ✕.
+ * - `unverified` · the ✓ drawn in the dotted ring: done, but no check has proven it yet. The ring
+ *   closes around the ✓ once one does, so verifying a task is the ring closing.
  * - `waiting` · the ring closes around a dot that waits for the user, a ring leaving it on the
  *   beat of the theme's `ping`.
  * - `blocked` · the ring closes around a bar: the way is shut.
@@ -26,6 +28,7 @@ export type MarkState =
   | 'todo'
   | 'running'
   | 'done'
+  | 'unverified'
   | 'failed'
   | 'waiting'
   | 'blocked'
@@ -37,6 +40,7 @@ export const MARK_LEGENDS: Record<MarkState, string> = {
   todo: 'To do',
   running: 'Running',
   done: 'Done',
+  unverified: 'Done, not verified',
   failed: 'Failed',
   waiting: 'Waiting for you',
   blocked: 'Blocked',
@@ -48,6 +52,7 @@ const TONES: Record<MarkState, string> = {
   todo: 'relative inline-flex shrink-0 text-muted-foreground',
   running: 'relative inline-flex shrink-0 text-info',
   done: 'relative inline-flex shrink-0 text-success',
+  unverified: 'relative inline-flex shrink-0 text-success',
   failed: 'relative inline-flex shrink-0 text-destructive',
   waiting: 'relative inline-flex shrink-0 text-warning',
   blocked: 'relative inline-flex shrink-0 text-destructive',
@@ -88,7 +93,9 @@ const ARC = 0.28
 
 /** How much of the ring each pose closes. */
 function ringOf(state: MarkState): number {
-  if (state === 'todo' || state === 'skipped' || state === 'idle') return 0
+  if (state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified') {
+    return 0
+  }
   if (state === 'running') return ARC
   return 1
 }
@@ -110,7 +117,8 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const beat = useTransition(pinging)
-  const dashed = state === 'todo' || state === 'skipped' || state === 'idle'
+  const dashed =
+    state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified'
   const ring = ringOf(state)
   const waiting = state === 'waiting'
   const mark = (
@@ -159,7 +167,7 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
             d="M6.6 10.3l2.3 2.3l4.5 -4.7"
             data-figure="check"
             initial={false}
-            animate={drawn(state === 'done')}
+            animate={drawn(state === 'done' || state === 'unverified')}
             transition={drawing}
           />
           <motion.path
