@@ -16,6 +16,7 @@ import {
   WindowCoreRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  DiffRpcs,
   DocRecipesRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
@@ -944,5 +945,27 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         ),
       'docRecipes.move': (request) =>
         engine['docRecipes.move'](request).pipe(closedAs(gone), observed('docRecipes.move', log)),
+    }),
+    // The live diff of a mission (#249), a layer of its own.
+    DiffRpcs.toLayer({
+      'diff.live': (request) =>
+        engine['diff.live'](request).pipe(closedAs(gone), observed('diff.live', log)),
+      'diff.file': (request) =>
+        engine['diff.file'](request).pipe(closedAs(gone), observed('diff.file', log)),
+      'diff.atCheckpoint': (request) =>
+        engine['diff.atCheckpoint'](request).pipe(
+          closedAs(gone),
+          observed('diff.atCheckpoint', log),
+        ),
+      'diff.fileAtCheckpoint': (request) =>
+        engine['diff.fileAtCheckpoint'](request).pipe(
+          closedAs(gone),
+          observed('diff.fileAtCheckpoint', log),
+        ),
+      'diff.changes': (request) =>
+        engine['diff.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('diff.changes', log),
+        ),
     }),
   )
