@@ -434,6 +434,304 @@ describe('A valid red', () => {
   })
 })
 
+/** Mocha 10.8, its own words: the scenario's test failed, numbered `1)`. */
+const MOCHA_SCENARIO_FAILS = `
+
+  exports
+    ✔ one is one
+    1) the invoices export as Markdown
+
+
+  1 passing (5ms)
+  1 failing
+
+  1) exports
+       the invoices export as Markdown:
+
+      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'' !== '| total |'
+
+      + expected - actual
+
+      +| total |
+      
+      at Context.<anonymous> (tests/export.test.cjs:4:56)
+      at process.processImmediate (node:internal/timers:504:21)
+`
+
+/** Mocha, the other way round: a test that was there fails, the scenario's passes. */
+const MOCHA_OTHER_FAILS = MOCHA_SCENARIO_FAILS.replace(
+  '    ✔ one is one\n    1) the invoices export as Markdown',
+  '    1) one is one\n    ✔ the invoices export as Markdown',
+).replace(
+  '  1) exports\n       the invoices export as Markdown:',
+  '  1) exports\n       one is one:',
+)
+
+/** pytest 9.1, its own words: a test that was there fails, the one the proof adds passes. */
+const PYTEST_OTHER_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 2 items
+
+tests/test_export.py F.                                                  [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+========================= 1 failed, 1 passed in 0.02s ==========================
+`
+
+/** The same file, the test the proof adds failing too. */
+const PYTEST_BOTH_FAIL = `============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 2 items
+
+tests/test_export.py FF                                                  [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:6: AssertionError
+____________________________ test_exports_markdown _____________________________
+
+    def test_exports_markdown():
+>       assert to_markdown([]) == "| total |"
+E       AssertionError: assert '' == '| total |'
+E         
+E         - | total |
+
+tests/test_export.py:10: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_export.py::test_exports_markdown - AssertionError: assert '...
+============================== 2 failed in 0.01s ===============================
+`
+
+/** go test, Go 1.23, its own words: the scenario's test failed. */
+const GO_SCENARIO_FAILS = `--- FAIL: TestExportMarkdown (0.00s)
+    export_test.go:13: got "", want "| total |"
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+/** cargo test, its own words: the scenario's test failed. */
+const CARGO_SCENARIO_FAILS = `   Compiling acme v0.1.0 (/work/acme/api)
+    Finished \`test\` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/lib.rs (target/debug/deps/acme-d5b7551ab0e24432)
+
+running 2 tests
+test tests::one_is_one ... ok
+test tests::exports_markdown ... FAILED
+
+failures:
+
+---- tests::exports_markdown stdout ----
+
+thread 'tests::exports_markdown' (1292006) panicked at src/lib.rs:12:9:
+assertion \`left == right\` failed
+  left: ""
+ right: "| total |"
+note: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace
+
+
+failures:
+    tests::exports_markdown
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass \`--lib\`
+`
+
+/** jest 30.2, its own words: the scenario's test failed. */
+const JEST_SCENARIO_FAILS = `FAIL ./tests/export.test.js
+  exports
+    ✓ one is one (2 ms)
+    ✕ the invoices export as Markdown (3 ms)
+
+  ● exports › the invoices export as Markdown
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "| total |"
+    Received: ""
+
+      at Object.toBe (tests/export.test.js:4:60)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+`
+
+/** node --test, its spec reporter: the scenario's test failed. */
+const NODE_SPEC_SCENARIO_FAILS = `▶ exports
+  ✔ one is one (0.547321ms)
+  ✖ the invoices export as Markdown (0.9739ms)
+✖ exports (2.334899ms)
+ℹ tests 2
+ℹ pass 1
+ℹ fail 1
+
+✖ failing tests:
+
+test at tests/export.test.mjs:5:3
+✖ the invoices export as Markdown (0.9739ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  '' !== '| total |'
+`
+
+const SCENARIO = ['the invoices export as Markdown']
+
+describe('A red read from the words of each runner', () => {
+  test('a passing test whose name contains FAIL, beside an unrelated failure, is not a red', () => {
+    const output = [
+      ' ✓ tests/export.test.ts > shows FAIL when the export breaks 2ms',
+      ' × tests/export.test.ts > one is one 3ms',
+      'AssertionError: it was broken already',
+    ].join('\n')
+    const names = ['shows FAIL when the export breaks']
+    expect(validRed(run(output, 1), 'tests/export.test.ts', names)).toBe(false)
+  })
+
+  test('a FAILED to load log line ending with the scenario’s name is not a red', () => {
+    for (const log of [
+      'FAILED to load: the invoices export as Markdown',
+      '[fixtures] FAILED to load: the invoices export as Markdown',
+    ]) {
+      const output = [log, ' × tests/export.test.ts > one is one 3ms', 'AssertionError: no'].join(
+        '\n',
+      )
+      expect(validRed(run(output, 1), 'tests/export.test.ts', SCENARIO)).toBe(false)
+    }
+  })
+
+  test('a log line holding a runner’s mark in its middle is not a failing line', () => {
+    const output = [
+      'stdout | the export ● the invoices export as Markdown',
+      'note: × the invoices export as Markdown',
+      'see 1) the invoices export as Markdown',
+      'log: test the invoices export as Markdown ... FAILED',
+      ' × tests/export.test.ts > one is one 3ms',
+      'AssertionError: no',
+    ].join('\n')
+    expect(run(output, 1).failingLines).toEqual([' × tests/export.test.ts > one is one 3ms'])
+  })
+
+  test('mocha’s numbered failure is a red, by name', () => {
+    const path = 'tests/export.test.cjs'
+    expect(validRed(run(MOCHA_SCENARIO_FAILS, 1, path), path, SCENARIO)).toBe(true)
+  })
+
+  test('mocha’s numbered failure of another test is not the scenario’s red', () => {
+    const path = 'tests/export.test.cjs'
+    expect(validRed(run(MOCHA_OTHER_FAILS, 1, path), path, SCENARIO)).toBe(false)
+  })
+
+  test('a pytest addition into a file whose older test already fails, the new test passing, is not a red', () => {
+    const path = 'tests/test_export.py'
+    const names = addedTestNames({
+      insertion: 'addition',
+      code: 'def test_one_is_one():\n    assert 1 == 2\n\n\ndef test_exports_markdown():\n    assert to_markdown([]) == "| total |"\n',
+      patch:
+        '@@ -5,0 +7,4 @@\n+\n+\n+def test_exports_markdown():\n+    assert to_markdown([]) == "| total |"\n',
+    })
+    expect(names).toEqual(['test_exports_markdown'])
+    expect(validRed(run(PYTEST_OTHER_FAILS, 1, path), path, names)).toBe(false)
+    expect(validRed(run(PYTEST_BOTH_FAIL, 1, path), path, names)).toBe(true)
+  })
+
+  test('a Go func TestX failing is a red, by name', () => {
+    const path = 'export_test.go'
+    const names = addedTestNames({
+      insertion: 'new_file',
+      code: 'package acme\n\nimport "testing"\n\nfunc TestExportMarkdown(t *testing.T) {\n\tif got := ToMarkdown(); got != "| total |" {\n\t\tt.Errorf("got %q", got)\n\t}\n}\n',
+      patch: null,
+    })
+    expect(names).toEqual(['TestExportMarkdown'])
+    expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, names)).toBe(true)
+    expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, ['TestImportCsv'])).toBe(false)
+  })
+
+  test('a Rust #[test] fn x failing is a red, by name', () => {
+    const path = 'src/lib.rs'
+    const names = addedTestNames({
+      insertion: 'addition',
+      code: '',
+      patch:
+        '@@ -8,0 +9,5 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
+    })
+    expect(names).toEqual(['exports_markdown'])
+    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, names)).toBe(true)
+    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, ['one_is_one'])).toBe(false)
+  })
+
+  test('jest’s and node:test’s marks are read, by name', () => {
+    const jest = 'tests/export.test.js'
+    expect(validRed(run(JEST_SCENARIO_FAILS, 1, jest), jest, SCENARIO)).toBe(true)
+    expect(validRed(run(JEST_SCENARIO_FAILS, 1, jest), jest, ['one is one'])).toBe(false)
+    const node = 'tests/export.test.mjs'
+    expect(validRed(run(NODE_SPEC_SCENARIO_FAILS, 1, node), node, SCENARIO)).toBe(true)
+    expect(validRed(run(NODE_SPEC_SCENARIO_FAILS, 1, node), node, ['one is one'])).toBe(false)
+  })
+
+  test('a mark coloured by the runner is read once its colours are removed', () => {
+    const output =
+      '\u001b[31m FAIL \u001b[39m tests/export.test.ts > the invoices export as Markdown\nAssertionError: no'
+    expect(validRed(run(output, 1), 'tests/export.test.ts', SCENARIO)).toBe(true)
+  })
+
+  test('Python, Go and Rust tests are named in their usual shapes, and only tests', () => {
+    const code = [
+      'class TestExport:',
+      '    def test_writes_csv(self):',
+      '        pass',
+      'async def test_reads_back():',
+      '    pass',
+      'def helper():',
+      '    pass',
+      'func TestMain(m *testing.M) {}',
+      'func TestImportCsv(t *testing.T) {}',
+      '#[tokio::test]',
+      '#[should_panic]',
+      'async fn exports_async() {}',
+      'fn not_a_test() {}',
+    ].join('\n')
+    expect(addedTestNames({ insertion: 'new_file', code, patch: null })).toEqual([
+      'test_writes_csv',
+      'test_reads_back',
+      'TestImportCsv',
+      'exports_async',
+    ])
+  })
+
+  test('a proof that adds named Python, Go or Rust tests is never a red on its exit code alone', () => {
+    const output = 'AssertionError: something else broke'
+    for (const [path, code] of [
+      ['tests/test_export.py', 'def test_exports_markdown():\n    assert False\n'],
+      ['export_test.go', 'func TestExportMarkdown(t *testing.T) {\n\tt.Fatal("no")\n}\n'],
+      ['src/lib.rs', '#[test]\nfn exports_markdown() {\n    assert!(false);\n}\n'],
+    ] as const) {
+      const names = addedTestNames({ insertion: 'new_file', code, patch: null })
+      expect(names.length).toBe(1)
+      expect(validRed(run(output, 1, path), path, names)).toBe(false)
+    }
+  })
+})
+
 describe('The key line observed in Planning', () => {
   test('colours, paths, durations, addresses and numbers are masked', () => {
     expect(
