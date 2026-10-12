@@ -234,6 +234,12 @@ const bktServes = (
 /** A Data Center project key, which its SSH and HTTPS remotes write in lower case. */
 const projectKey = (owner: string): string => owner.toUpperCase()
 
+/**
+ * A plain word between single quotes: a shell expands a leading `~` (a Data Center personal
+ * project, `~KRIS`) to a home folder, and a plain word holds no quote to close early.
+ */
+const quoted = (word: string): string => `'${word}'`
+
 /** A host, with its port at most: nothing a shell would read as more than a word. */
 const SAFE_HOST = /^[A-Za-z0-9.-]+(:\d+)?$/
 
@@ -252,11 +258,11 @@ const contextLine = (
   if (!SAFE_HOST.test(host) || !SAFE_HOST.test(key)) return null
   const named = owner !== null && SAFE_WORD.test(owner) ? owner : null
   const name = named === null ? hostName(host) : `${named.toLowerCase()}-${hostName(host)}`
-  const line = `bkt context create ${name} --host ${key}`
+  const line = `bkt context create ${quoted(name)} --host ${key}`
   if (named === null) return line
   return forge === 'bitbucket-cloud'
-    ? `${line} --workspace ${named}`
-    : `${line} --project ${projectKey(named)}`
+    ? `${line} --workspace ${quoted(named)}`
+    : `${line} --project ${quoted(projectKey(named))}`
 }
 
 /** The CLI a forge is reached through, or none. */

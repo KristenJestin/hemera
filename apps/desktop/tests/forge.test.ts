@@ -949,7 +949,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['api']).toMatchObject({
       state: 'signed-out',
-      fix: 'bkt context create acme-team-bitbucket.org --host api.bitbucket.org --workspace acme-team',
+      fix: "bkt context create 'acme-team-bitbucket.org' --host api.bitbucket.org --workspace 'acme-team'",
     })
   })
 
@@ -965,7 +965,23 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['dc']).toMatchObject({
       state: 'signed-out',
-      fix: 'bkt context create proj-git.acme.test --host git.acme.test:7990 --project PROJ',
+      fix: "bkt context create 'proj-git.acme.test' --host git.acme.test:7990 --project 'PROJ'",
+    })
+  })
+
+  test('a Data Center personal project is quoted: a shell would expand its tilde', async () => {
+    const fake = fakeForge(bktReady([{ base: DC, kind: 'dc' }], []))
+    const statuses = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flatMap(forge, (port) =>
+          port.setForced(projectId, repository('dc'), 'bitbucket-datacenter', 'git.acme.test'),
+        ),
+      { dc: 'ssh://git@git.acme.test:7999/~kris/r.git' },
+    )
+    expect(byPath(statuses)['dc']).toMatchObject({
+      state: 'signed-out',
+      fix: "bkt context create '~kris-git.acme.test' --host git.acme.test:7990 --project '~KRIS'",
     })
   })
 
@@ -982,7 +998,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['api']).toMatchObject({
       state: 'signed-out',
-      fix: 'bkt context create bitbucket.org --host api.bitbucket.org',
+      fix: "bkt context create 'bitbucket.org' --host api.bitbucket.org",
     })
   })
 
@@ -1002,7 +1018,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
       )
       expect(byPath(statuses)['api']).toMatchObject({
         state: 'signed-out',
-        fix: 'bkt context create acme-team-bitbucket.org --host api.bitbucket.org --workspace acme-team',
+        fix: "bkt context create 'acme-team-bitbucket.org' --host api.bitbucket.org --workspace 'acme-team'",
       })
     },
   )
