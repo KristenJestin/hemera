@@ -33,7 +33,12 @@ import {
   sessionsIn,
 } from '../src/engine/sessions/store.ts'
 import { Database, DatabaseError } from '../src/engine/storage/database.ts'
-import { HostProcesses, ORPHAN_EXIT_MS, hostProcessesLayer } from '../src/engine/supervisor.ts'
+import {
+  HostProcesses,
+  ORPHAN_EXIT_MS,
+  TASKKILL_MS,
+  hostProcessesLayer,
+} from '../src/engine/supervisor.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
 import {
   domainEvents,
@@ -54,6 +59,7 @@ import {
   HELPER,
   REVIEWER,
   SILENCE,
+  UNTIL_MS,
   acmeIn,
   agentsFound,
   held,
@@ -936,11 +942,12 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       within(
         profile,
         Effect.gen(function* () {
-          // The orphan is ended first: its tree killed, then seen gone, which the engine waits on
-          // for as long as `ORPHAN_EXIT_MS` (`taskkill` answers before the process has exited).
+          // The orphan is ended first. The engine reaches its rebuild (an ordinary wait), kills the
+          // tree, which on Windows `taskkill` may take as long as `TASKKILL_MS` to ask, then waits
+          // for the pid to be gone for as long as `ORPHAN_EXIT_MS`: the wait covers the three.
           yield* until(
             Effect.sync(() => said.some((line) => line.includes('orphan agent process'))),
-            ORPHAN_EXIT_MS,
+            UNTIL_MS + TASKKILL_MS + ORPHAN_EXIT_MS,
           )
           // The sessions the stopped engine left are replaced, then their successors settle.
           yield* until(

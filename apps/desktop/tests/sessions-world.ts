@@ -217,8 +217,11 @@ export const acmeIn = (work: string) =>
     return { project, mission, main, owner: { kind: 'mission' as const, missionId: mission.id } }
   })
 
-/** Waits, on the real clock, until a check holds; fails after `boundMillis`, five seconds. */
-export const until = <E, R>(check: Effect.Effect<boolean, E, R>, boundMillis = 5_000) =>
+/** How long `until` waits unless told: five seconds. */
+export const UNTIL_MS = 5_000
+
+/** Waits, on the real clock, until a check holds; fails after `boundMillis`, `UNTIL_MS`. */
+export const until = <E, R>(check: Effect.Effect<boolean, E, R>, boundMillis = UNTIL_MS) =>
   Effect.gen(function* () {
     for (let tries = 0; tries < boundMillis / 20; tries += 1) {
       if (yield* check) return
