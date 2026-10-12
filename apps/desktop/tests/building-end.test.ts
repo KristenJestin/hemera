@@ -350,10 +350,10 @@ describe('The end sequence', () => {
             yield* documented(world, mission.id)
             yield* reviewed(world, mission.id, 'spec-reviewer')
             yield* reviewed(world, mission.id, 'code-reviewer', [
-              warning('invoices.ts', 'Name the CSV export after the invoices it exports.'),
+              warning('README.md', 'Say how to export the invoices as Markdown.'),
             ])
             yield* specialAvailable(mission.id, 'RV1')
-            yield* specialDone(builder.grantId, 'RV1', 'invoices.ts', 'export const rows = []\n')
+            yield* specialDone(builder.grantId, 'RV1', 'README.md', 'Acme api, as Markdown\n')
             yield* inReview(mission.id)
             return {
               types: yield* typesOf(mission.id),
@@ -529,7 +529,7 @@ describe('The reviewers', () => {
               sessions.replace(first.session.id, 'the test replaced it'),
             )
             yield* until(
-              Effect.sync(() => world.agents.length > before),
+              Effect.sync(() => (world.agents[before]?.answers.prompts.length ?? 0) > 0),
               LONG,
             )
             const successor = text(world.agents[before]?.answers.prompts[0] ?? [])
@@ -640,6 +640,13 @@ describe('The findings and their fate', () => {
               key: 'spec-right',
             })
             yield* specialAvailable(mission.id, 'RV1')
+            // The ready set reaches the Builder once the task is available.
+            yield* until(
+              Effect.map(toBuilder(mission.id, builder.session.lineage), (told) =>
+                told.join('\n').includes('RV1'),
+              ),
+              LONG,
+            )
             const toldAfter = yield* toBuilder(mission.id, builder.session.lineage)
             yield* specialDone(
               builder.grantId,
@@ -647,6 +654,7 @@ describe('The findings and their fate', () => {
               'invoices.ts',
               'export const header = true\n',
             )
+            yield* documented(world, mission.id, 2)
             yield* inReview(mission.id)
             return { waiting, toldBefore, toldAfter, review: yield* autoReviewOf(mission.id) }
           }),
@@ -766,6 +774,7 @@ describe('The findings and their fate', () => {
           ])
           yield* specialAvailable(mission.id, 'RV1')
           yield* specialDone(builder.grantId, 'RV1', 'invoices.ts', 'export const header = true\n')
+          yield* documented(world, mission.id, 2)
           yield* inReview(mission.id)
           yield* Effect.sleep('500 millis')
           const sessions = yield* sessionsIn(SESSION_STATES, {
@@ -924,7 +933,7 @@ describe('What the review saw, and what changed after it', () => {
       ),
     )
     expect(seen.runs.map((one) => one.phase)).toContain('rerun')
-    expect(seen.refreshed.at(-1)?.payload).toMatchObject({ proofs: ['R1.S2'] })
+    expect(JSON.parse(seen.refreshed.at(-1)?.payload ?? '{}')).toMatchObject({ proofs: ['R1.S2'] })
     expect(seen.types.indexOf('building.proofs_refreshed')).toBeLessThan(
       seen.types.indexOf('building.ended'),
     )
