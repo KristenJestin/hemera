@@ -110,6 +110,11 @@ export function MissionPage({
   const sheets = viewsOf(views, mission)
   const Page = pageOf(pages, line.stage)
   const rows = needRowsOfMission(mission, project?.name ?? 'Project', now)
+  const answering = needHandlersOf(mission, {
+    answer: actions.answer,
+    recheck: actions.recheck,
+    openSettings: actions.openSettings,
+  })
   const ticketUrl = line.ticket?.url ?? null
   const draw = (parts: StageFrame): ReactNode => {
     const all = [...sheets, ...(parts.views ?? [])]
@@ -125,6 +130,7 @@ export function MissionPage({
         frozen={frozenOf(line)}
         type={line.type}
         ball={line.ball}
+        ballFace={parts.ballFace}
         now={parts.now}
         onNow={parts.onNow}
         nowChip={parts.nowChip}
@@ -148,13 +154,9 @@ export function MissionPage({
         notice={notice ?? parts.notice}
         needs={
           <MissionFrameNeeds
-            rows={rows}
+            rows={parts.needs ?? rows}
             projects={project === null ? undefined : [project.name]}
-            on={needHandlersOf(mission, {
-              answer: actions.answer,
-              recheck: actions.recheck,
-              openSettings: actions.openSettings,
-            })}
+            on={answering}
           />
         }
         base={parts.base}
@@ -179,6 +181,7 @@ export function MissionPage({
         refused,
         freeze,
         freezing,
+        needs: { rows, on: answering },
         frame: draw,
       })
 }

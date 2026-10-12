@@ -314,6 +314,7 @@ interface CastMission {
   action?: string
   /** Done and Cancelled cannot be cancelled. */
   cancel: boolean
+  /** The needs above the page; on Planning they are the page's own, under For you. */
   needs?: readonly [string, string][]
 }
 
@@ -328,10 +329,6 @@ const CAST = {
     ticket: 'acme/shop#47',
     action: 'Freeze',
     cancel: true,
-    needs: [
-      ['q1', 'Who may read the audit log?'],
-      ['q2', 'How long is the log kept?'],
-    ],
   },
   'ACME-16': {
     title: 'Labels in French and English',
@@ -351,6 +348,10 @@ const CAST = {
     ball: 'blocked',
     marks: [{ kind: 'blocked', cause: 'shared database · ACME-15' }],
     cancel: true,
+    needs: [
+      ['q1', 'Who may run the migration on the shared database?'],
+      ['q2', 'Which sequence do the old invoices keep?'],
+    ],
   },
   'ACME-12': {
     title: MISSION.title,
@@ -445,8 +446,8 @@ function stageViews(withSpec: boolean): readonly MissionView[] {
   ]
 }
 
-/** The needs of ACME-14 as Needs you's rows: a decision each. */
-function needRows(needs: readonly [string, string][]): readonly NeedRow[] {
+/** The needs of a mission as Needs you's rows: a decision each. */
+function needRows(missionKey: string, needs: readonly [string, string][]): readonly NeedRow[] {
   return needs.map(([id, title]) => ({
     id,
     project: ACME.name,
@@ -456,7 +457,7 @@ function needRows(needs: readonly [string, string][]): readonly NeedRow[] {
         options: [{ label: 'Admins only' }, { label: 'Every member' }],
       },
       title,
-      missionKey: 'ACME-14',
+      missionKey,
       when: 'yesterday',
     },
   }))
@@ -530,7 +531,7 @@ export function MissionStageFixture({
         needs={
           found.needs === undefined ? undefined : (
             <MissionFrameNeeds
-              rows={needRows(found.needs)}
+              rows={needRows(missionKey, found.needs)}
               projects={[ACME.name]}
               on={() => ({ onChoose: () => {} })}
             />

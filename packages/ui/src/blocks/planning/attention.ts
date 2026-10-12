@@ -1,17 +1,18 @@
 import type { FaceState } from '../../components/face/states.ts'
 import {
+  type PlanningFacts,
   type PlanningStep,
   freezeOf,
   planningNow,
   planningSteps,
   tally,
-} from '../../blocks/planning/planning-progress.ts'
-import type { Finding, PlanningData, Question } from '../../blocks/planning/planning-types.ts'
-import type { AttentionMoment } from './fixtures.ts'
+} from './planning-progress.ts'
+import type { Finding, PlanningData, PlanningNeed } from './planning-types.ts'
 
 /**
  * What the Planning page tells at a glance, read from the facts alone: what happens now (the
- * face and one line), where Planning stands (its step under way), and how much waits for the user.
+ * face and one line), where Planning stands (its step under way), and how much waits for the
+ * user. The face follows the order of `docs/technical/planning-attention.md`.
  */
 export interface Attention {
   face: FaceState
@@ -19,15 +20,15 @@ export interface Attention {
   now: string
   /** Where Planning stands: the step under way and how far it is. */
   progress: { step: string; detail: string }
-  /** How many things wait for the user: permissions, questions to answer, findings to settle. */
+  /** How many things wait for the user: needs, questions to answer, findings to settle. */
   waiting: number
   /** Whether nothing is left but Freeze. */
   ready: boolean
 }
 
-/** The questions, one list in the order they were asked: the page draws no waves. */
-export function questionsOf(data: PlanningData): Question[] {
-  return data.waves.flatMap((wave) => wave.questions)
+/** What the page knows at one moment, with the mission's needs that wait. */
+export interface AttentionFacts extends PlanningFacts {
+  needs: readonly PlanningNeed[]
 }
 
 /** The findings of the last pass still to settle. */
@@ -55,8 +56,8 @@ const running = (data: PlanningData): boolean =>
  * waits for the user — a permission, a question or a finding — then what runs, then done once
  * only Freeze is left; asleep when nothing runs and nothing waits.
  */
-function faceOf(moment: AttentionMoment, ready: boolean): FaceState {
-  const { data, planner, permissions } = moment
+function faceOf(facts: AttentionFacts, ready: boolean): FaceState {
+  const { data, planner, needs } = facts
   const { open, waiting, pending } = tally(data)
   if (data.frozen) return 'done'
   if (planner.state === 'failed') return 'error'
@@ -67,7 +68,7 @@ function faceOf(moment: AttentionMoment, ready: boolean): FaceState {
     if (pending.length > 0) return 'thinking'
     return 'reading'
   }
-  if (permissions.length > 0) return 'permission'
+  if (needs.length > 0) return permissionsOnly(needs) ? 'permission' : 'question'
   if (open.length > 0 || findingsToSettle(data).length > 0) return 'question'
   if (data.passes.at(-1)?.state === 'failed') return 'error'
   if (coldReadReading(data)) return 'reading'
@@ -78,9 +79,13 @@ function faceOf(moment: AttentionMoment, ready: boolean): FaceState {
   return 'asleep'
 }
 
-/** Who waits on a permission, in words: "Probe #1 and Probe #2". */
-function askers(moment: AttentionMoment): string {
-  const who = [...new Set(moment.permissions.map((permission) => permission.who))]
+/** Whether every need that waits is a permission, as they mostly are while planning. */
+const permissionsOnly = (needs: readonly PlanningNeed[]): boolean =>
+  needs.every((need) => need.need.ask.kind === 'permission')
+
+/** Who waits on the user, in words: "Probe #1 and Probe #2". */
+function askers(needs: readonly PlanningNeed[]): string {
+  const who = [...new Set(needs.map((need) => need.who))]
   return who.length === 1
     ? (who[0] ?? '')
     : `${who.slice(0, -1).join(', ')} and ${who.at(-1) ?? ''}`
@@ -93,20 +98,21 @@ function progressOf(steps: readonly PlanningStep[]): Attention['progress'] {
   return { step: shown?.title ?? '', detail: shown?.detail ?? '' }
 }
 
-export function attentionOf(moment: AttentionMoment): Attention {
-  const { data, planner, permissions } = moment
+/** What the page tells at a glance, from what it knows. */
+export function attentionOf(facts: AttentionFacts): Attention {
+  const { data, planner, needs } = facts
   const { open } = tally(data)
-  const freeze = freezeOf(moment)
-  const ready = freeze.shown && freeze.reasons.length === 0 && permissions.length === 0
-  const line = planningNow(moment)
-  const asked = permissions.length > 0 && planner.state !== 'working'
+  const freeze = freezeOf(facts)
+  const ready = freeze.shown && freeze.reasons.length === 0 && needs.length === 0
+  const line = planningNow(facts)
+  const asked = needs.length > 0 && planner.state !== 'working' && !data.frozen
   return {
-    face: faceOf(moment, ready),
+    face: faceOf(facts, ready),
     now: asked
-      ? `${askers(moment)} ${permissions.length === 1 ? 'waits' : 'wait'} for your permission`
+      ? `${askers(needs)} ${needs.length === 1 ? 'waits' : 'wait'} for your ${permissionsOnly(needs) ? 'permission' : 'answer'}`
       : line.text,
-    progress: progressOf(planningSteps(moment)),
-    waiting: permissions.length + open.length + findingsToSettle(data).length,
+    progress: progressOf(planningSteps(facts)),
+    waiting: needs.length + open.length + findingsToSettle(data).length,
     ready,
   }
 }

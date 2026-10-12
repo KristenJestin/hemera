@@ -40,7 +40,7 @@ export const Starting: Story = {
 
 /** Questions wait: the step is the user's, and a press leads to the first one. */
 export const QuestionsWaiting: Story = {
-  args: { steps: planningSteps(moments.wave()) },
+  args: { steps: planningSteps(moments.asked()) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const answers = canvas.getByRole('listitem', { name: /Your answers/ })
