@@ -11,9 +11,15 @@
  * turns are held open unless a test wants it silent.
  */
 
-import { realpathSync } from 'node:fs'
+import { realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-import { type DocRecipeDraft, SESSION_STATES } from '@hemera/core/domain'
+import {
+  DEFAULT_BASE_BRANCH,
+  type DocRecipeDraft,
+  ROOT_REPOSITORY,
+  SESSION_STATES,
+} from '@hemera/core/domain'
 import { Effect, Fiber, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -30,8 +36,10 @@ import { listEvidence, readEvidence } from '../src/engine/memory/evidence.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
-import { QUIET, READING, call, eventsOf, grantOf } from './building-world.ts'
-import { builderOf, buildingNow, launched } from './builder-world.ts'
+import { createProject } from '../src/engine/projects.ts'
+import { INVOICES, QUIET, READING, call, eventsOf, grantOf } from './building-world.ts'
+import { PLAN, builderOf, buildingNow, launched } from './builder-world.ts'
+import { git, repository } from './repositories.ts'
 import { held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -548,5 +556,283 @@ describe('The recipes the documenter reads', () => {
     expect(seen.readmeWrite.ok).toBe(true)
     expect(seen.docsWrite.ok).toBe(false)
     expect(seen.contractWrite.ok).toBe(false)
+  })
+})
+
+/** A Project of one repository at the root of its main checkout, as Acme's api is. */
+const soloAt = (at: string) =>
+  Effect.gen(function* () {
+    const main = repository(join(at, 'solo'), DEFAULT_BASE_BRANCH)
+    writeFileSync(join(main, 'invoices.ts'), INVOICES)
+    writeFileSync(join(main, 'README.md'), 'Solo\n')
+    git(main, 'add', '.')
+    git(main, 'commit', '-q', '-m', 'invoices')
+    const project = yield* createProject({
+      name: 'solo',
+      mainCheckout: main,
+      repositories: [ROOT_REPOSITORY],
+    })
+    return { project, main }
+  })
+
+/** The plan, its targets in the root repository. */
+const SOLO_PLAN = PLAN.map((task) =>
+  Object.assign({}, task, {
+    targets: task.targets.map((target) =>
+      Object.assign({}, target, { repository: ROOT_REPOSITORY }),
+    ),
+  }),
+)
+
+/** The README of the Workspace root. */
+const ROOT_README: DocRecipeDraft = { ...README, repository: ROOT_REPOSITORY }
+
+describe('Where the documenter may write', () => {
+  test('a Workspace reached through a symlinked parent: a write to a file no recipe names is refused, a recipe file accepted', async () => {
+    const real = data
+    data = join(temporaryFolder('documenter-link'), 'profile')
+    symlinkSync(real, data, 'junction')
+    const { world, run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withRecipes(README))
+          const building = yield* buildingNow(mission.id)
+          yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(world, mission.id, 1)
+          const code = yield* callTool(documenter.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: 'export const markdown = false\n',
+          })
+          yield* call(documenter.grantId, 'fs_read', { repository: 'api', path: 'README.md' })
+          const docs = yield* callTool(documenter.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'README.md',
+            content: 'Acme api\n\nExport the invoices.\n',
+          })
+          return { folder: documenter.session.folder, code, docs }
+        }),
+      ),
+    )
+    expect(seen.folder.startsWith(data)).toBe(true)
+    expect(seen.code.ok).toBe(false)
+    expect(seen.code.text).toContain('is not documentation named by this Project’s doc recipes.')
+    expect(seen.docs.ok).toBe(true)
+  })
+
+  test('a single-repository Project: README.md is written and reported', async () => {
+    const { world, run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            withRecipes(ROOT_README),
+            'The impact.',
+            SOLO_PLAN,
+            soloAt,
+          )
+          const building = yield* buildingNow(mission.id)
+          const fiber = yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(world, mission.id, 1)
+          yield* call(documenter.grantId, 'fs_read', { path: 'README.md' })
+          const docs = yield* callTool(documenter.grantId, 'fs_write', {
+            path: 'README.md',
+            content: 'Solo\n\nExport the invoices.\n',
+          })
+          const report = yield* callTool(documenter.grantId, 'docs_report', {
+            changed: [{ repository: ROOT_REPOSITORY, path: 'README.md', why: 'The exports.' }],
+          })
+          return { brief: documenter.brief, docs, report, outcome: yield* Fiber.join(fiber) }
+        }),
+      ),
+    )
+    expect(seen.brief).toContain('- the Workspace root: README.md: ')
+    expect(seen.docs.ok).toBe(true)
+    expect(seen.report.ok).toBe(true)
+    expect(Result.isSuccess(seen.outcome) ? seen.outcome.success : null).toEqual({
+      outcome: 'documented',
+      changed: [{ repository: ROOT_REPOSITORY, path: 'README.md', why: 'The exports.' }],
+    })
+  })
+
+  test('a root recipe in a Workspace of several repositories: its file is written and reported', async () => {
+    const { world, run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withRecipes(ROOT_README))
+          const building = yield* buildingNow(mission.id)
+          const fiber = yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(world, mission.id, 1)
+          const code = yield* callTool(documenter.grantId, 'fs_write', {
+            path: 'NOTES.md',
+            content: 'Notes\n',
+          })
+          const docs = yield* callTool(documenter.grantId, 'fs_write', {
+            path: 'README.md',
+            content: 'Acme\n\nThe api exports the invoices.\n',
+          })
+          const report = yield* callTool(documenter.grantId, 'docs_report', {
+            changed: [{ repository: ROOT_REPOSITORY, path: 'README.md', why: 'The exports.' }],
+          })
+          return { code, docs, report, outcome: yield* Fiber.join(fiber) }
+        }),
+      ),
+    )
+    expect(seen.code.ok).toBe(false)
+    expect(seen.docs.ok).toBe(true)
+    expect(seen.report.ok).toBe(true)
+    expect(Result.isSuccess(seen.outcome) ? seen.outcome.success : null).toEqual({
+      outcome: 'documented',
+      changed: [{ repository: ROOT_REPOSITORY, path: 'README.md', why: 'The exports.' }],
+    })
+  })
+
+  test('a write after the report is refused', async () => {
+    const { world, run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withRecipes(README))
+          const building = yield* buildingNow(mission.id)
+          yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(world, mission.id, 1)
+          yield* call(documenter.grantId, 'docs_report', { changed: [], no_change_reason: REASON })
+          yield* call(documenter.grantId, 'fs_read', { repository: 'api', path: 'README.md' })
+          return yield* callTool(documenter.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'README.md',
+            content: 'Acme api, later\n',
+          })
+        }),
+      ),
+    )
+    expect(seen.ok).toBe(false)
+    expect(seen.text).toContain('your pass has ended')
+  })
+})
+
+describe('The report names what the pass changed', () => {
+  test('a no-change report is refused when the pass changed files; a file listed twice is kept once', async () => {
+    const { world, run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withRecipes(README))
+          const building = yield* buildingNow(mission.id)
+          const fiber = yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(world, mission.id, 1)
+          yield* call(documenter.grantId, 'fs_read', { repository: 'api', path: 'README.md' })
+          yield* call(documenter.grantId, 'fs_write', {
+            repository: 'api',
+            path: 'README.md',
+            content: 'Acme api\n\nExport the invoices.\n',
+          })
+          const nothing = yield* callTool(documenter.grantId, 'docs_report', {
+            changed: [],
+            no_change_reason: REASON,
+          })
+          const twice = yield* callTool(documenter.grantId, 'docs_report', {
+            changed: [
+              { repository: 'api', path: 'README.md', why: 'The exports are new.' },
+              { repository: 'api', path: 'README.md', why: 'Said again.' },
+            ],
+          })
+          return { nothing, twice, outcome: yield* Fiber.join(fiber) }
+        }),
+      ),
+    )
+    expect(seen.nothing.ok).toBe(false)
+    expect(seen.nothing.text).toContain('api/README.md changed in this pass')
+    expect(seen.twice.ok).toBe(true)
+    expect(Result.isSuccess(seen.outcome) ? seen.outcome.success : null).toEqual({
+      outcome: 'documented',
+      changed: [{ repository: 'api', path: 'README.md', why: 'The exports are new.' }],
+    })
+  })
+})
+
+describe('A pass whose caller or engine stops', () => {
+  test('a caller that stops waiting while the pass waits for a slot fails the pass, and it leaves the queue', async () => {
+    const { run } = documenting()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work, withRecipes(README))
+          const builder = yield* builderOf(mission.id)
+          const limits = yield* projectLimits(project.id)
+          yield* setProjectLimits(project.id, { ...limits, cap: 1 })
+          yield* Sessions.use((sessions) =>
+            sessions.open({
+              owner: { kind: 'mission', missionId: mission.id },
+              role: 'helper',
+              folder: builder.session.folder,
+              requestedBy: 'agent',
+            }),
+          )
+          const building = yield* buildingNow(mission.id)
+          const fiber = yield* pass(building.buildingId, { kind: 'full' })
+          const now = Memory.use((memory) => memory.now(mission.id))
+          yield* until(Effect.map(now, (state) => state.slotWait !== null))
+          yield* Fiber.interrupt(fiber)
+          return { after: yield* now, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.after.slotWait).toBeNull()
+    expect(seen.view.documenter[0]).toMatchObject({
+      state: 'failed',
+      failure: 'its caller stopped waiting',
+    })
+  })
+
+  test('a pass running when Hemera stopped fails at the next start, and its session ends', async () => {
+    const first = documenting()
+    const before = await first.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withRecipes(README))
+          const building = yield* buildingNow(mission.id)
+          yield* pass(building.buildingId, { kind: 'full' })
+          const documenter = yield* documenterOf(first.world, mission.id, 1)
+          return { missionId: mission.id, lineage: documenter.session.lineage }
+        }),
+      ),
+    )
+    const seen = await documenting().run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const failed = Effect.map(
+            buildingNow(before.missionId),
+            (view) => view.documenter[0]?.state === 'failed',
+          )
+          yield* until(failed)
+          const live = Effect.map(
+            sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+              kind: 'mission',
+              missionId: before.missionId,
+            }),
+            (rows) => rows.some((row) => row.lineage === before.lineage),
+          )
+          yield* until(Effect.map(live, (still) => !still))
+          return { view: yield* buildingNow(before.missionId), live: yield* live }
+        }),
+      ),
+    )
+    expect(seen.view.documenter[0]).toMatchObject({
+      state: 'failed',
+      failure: 'Hemera stopped during the pass',
+    })
+    expect(seen.live).toBe(false)
   })
 })

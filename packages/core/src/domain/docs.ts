@@ -15,6 +15,7 @@
 import { Schema } from 'effect'
 
 import { globMatcher } from './checks.ts'
+import { ROOT_REPOSITORY } from './project.ts'
 
 /** When a recipe applies: always, or when the Spec's Impact names one of its words. */
 export const DOC_RECIPE_APPLIES = ['always', 'when_impact_names'] as const
@@ -22,11 +23,12 @@ export const DocRecipeApplies = Schema.Literals(DOC_RECIPE_APPLIES)
 export type DocRecipeApplies = typeof DocRecipeApplies.Type
 
 /**
- * A recipe as the settings write it: its repository by path (null for the Workspace root), the
- * file or pattern inside it, what the files are for, and when it applies.
+ * A recipe as the settings write it: its repository by path (`.` for the Workspace root, which is
+ * the repository of a single-repository Project), the file or pattern inside it, what the files
+ * are for, and when it applies.
  */
 export const DocRecipeDraft = Schema.Struct({
-  repository: Schema.NullOr(Schema.String),
+  repository: Schema.String,
   path: Schema.String,
   purpose: Schema.String,
   applies: DocRecipeApplies,
@@ -74,7 +76,7 @@ export function docRecipeProblem(draft: DocRecipeDraft): string | null {
     return 'Write the file or the pattern the recipe names, as in README.md or docs/**/*.md.'
   }
   if (insidePath(path) === null) {
-    const where = draft.repository === null ? 'the Workspace root' : 'its repository'
+    const where = draft.repository === ROOT_REPOSITORY ? 'the Workspace root' : 'its repository'
     return `${path} leaves ${where}: name a file inside it.`
   }
   if (draft.purpose.trim() === '') return 'Say in one sentence what the files are for.'
@@ -104,9 +106,9 @@ export function recipeApplies(
     )
 }
 
-/** A file of the Workspace: its repository by path (null for the Workspace root), its path there. */
+/** A file of the Workspace: its repository by path (`.` for the Workspace root), its path there. */
 export interface DocFile {
-  readonly repository: string | null
+  readonly repository: string
   readonly path: string
 }
 
@@ -125,7 +127,7 @@ export function recipesCover(
 
 /** What a repository of the main checkout holds, as the proposals read it: its files' paths. */
 export interface DocListing {
-  readonly repository: string | null
+  readonly repository: string
   readonly files: ReadonlyArray<string>
 }
 
@@ -143,7 +145,7 @@ const CONTRACT =
  */
 export function proposeDocRecipes(listings: ReadonlyArray<DocListing>): DocRecipeDraft[] {
   return listings.flatMap((listing) => {
-    const name = listing.repository ?? 'Workspace root'
+    const name = listing.repository === ROOT_REPOSITORY ? 'project' : listing.repository
     const readme = listing.files.find((file) => /^readme\.md$/i.test(file))
     const docs = listing.files.some((file) => file.startsWith('docs/'))
     const contracts = listing.files.filter((file) => CONTRACT.test(file)).toSorted()

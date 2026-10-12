@@ -10,7 +10,7 @@ import { Option } from 'effect'
 import { type BuildingRow, bases } from './tasks.ts'
 
 /** A folder as the file tools resolve paths: its real path, or as written when it is gone. */
-const realFolder = (folder: string): string => {
+export const realFolder = (folder: string): string => {
   try {
     return realpathSync.native(folder)
   } catch {

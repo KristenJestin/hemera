@@ -317,7 +317,7 @@ export const projectChecks = sqliteTable(
 )
 
 /**
- * A Project's doc recipes (#146): a file or a pattern inside one repository (by path; null for the
+ * A Project's doc recipes (#146): a file or a pattern inside one repository (by path; `.` for the
  * Workspace root) that the documenter keeps in line with the code, what the files are for, and
  * whether it applies always or only when the Spec's Impact names one of its words (JSON).
  */
@@ -326,7 +326,7 @@ export const projectDocRecipes = sqliteTable('project_doc_recipes', {
   projectId: text('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
-  repository: text('repository'),
+  repository: text('repository').notNull(),
   path: text('path').notNull(),
   purpose: text('purpose').notNull(),
   applies: text('applies').notNull(),

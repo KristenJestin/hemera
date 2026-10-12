@@ -10,7 +10,7 @@
  * the documenter's service, so the role registry imports nothing that imports the sessions back.
  */
 
-import { missionKey } from '@hemera/core/domain'
+import { ROOT_REPOSITORY, missionKey } from '@hemera/core/domain'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
@@ -55,8 +55,8 @@ One docs_report, then end. "No change" is accepted only with a reason specific t
 - Write the Spec's or Hemera's own vocabulary into the Project's documentation.`
 
 /** Where a recipe's files are, as the brief names them. */
-const placeSaid = (repository: string | null): string =>
-  repository === null ? 'the Workspace root' : repository
+const placeSaid = (repository: string): string =>
+  repository === ROOT_REPOSITORY ? 'the Workspace root' : repository
 
 /** The brief of a documenter's session, from its pass. */
 const documenterBriefOf = (owner: SessionOwner, session: BriefedSession) =>
@@ -77,7 +77,10 @@ const documenterBriefOf = (owner: SessionOwner, session: BriefedSession) =>
       .pipe(Effect.mapError(refusedWhile('reading the Building')))
     if (mission === undefined || building === undefined) return []
     const delta = pass.mode === 'delta'
-    const files = filesOfPass(pass).map((one) => `- ${one.repository}/${one.path} (${one.status})`)
+    const files = filesOfPass(pass).map(
+      (one) =>
+        `- ${one.repository === ROOT_REPOSITORY ? '' : `${one.repository}/`}${one.path} (${one.status})`,
+    )
     const recipes = (yield* applicableRecipes(pass.missionId)).map(
       (one) => `- ${placeSaid(one.repository)}: ${one.path}: ${one.purpose}`,
     )

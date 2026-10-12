@@ -35,7 +35,7 @@ describe('A doc recipe is refused with its sentence', () => {
     expect(docRecipeProblem(recipe({ path: '/etc/README.md' }))).toBe(
       '/etc/README.md leaves its repository: name a file inside it.',
     )
-    expect(docRecipeProblem(recipe({ repository: null, path: 'C:\\notes.md' }))).toBe(
+    expect(docRecipeProblem(recipe({ repository: '.', path: 'C:\\notes.md' }))).toBe(
       'C:\\notes.md leaves the Workspace root: name a file inside it.',
     )
   })
@@ -87,19 +87,19 @@ describe('The applicable recipes name the files the documenter may write', () =>
   const recipes = [
     recipe(),
     recipe({ path: 'docs/**/*.md' }),
-    recipe({ repository: null, path: 'CHANGELOG.md' }),
+    recipe({ repository: '.', path: 'CHANGELOG.md' }),
   ]
 
   test('a file a recipe names, by path or by pattern, is covered', () => {
     expect(recipesCover(recipes, { repository: 'api', path: 'README.md' })).toBe(true)
     expect(recipesCover(recipes, { repository: 'api', path: 'docs/guide/export.md' })).toBe(true)
-    expect(recipesCover(recipes, { repository: null, path: 'CHANGELOG.md' })).toBe(true)
+    expect(recipesCover(recipes, { repository: '.', path: 'CHANGELOG.md' })).toBe(true)
   })
 
   test('a file no recipe names is not covered', () => {
     expect(recipesCover(recipes, { repository: 'api', path: 'export.ts' })).toBe(false)
     expect(recipesCover(recipes, { repository: 'web', path: 'README.md' })).toBe(false)
-    expect(recipesCover(recipes, { repository: null, path: 'api/README.md' })).toBe(false)
+    expect(recipesCover(recipes, { repository: '.', path: 'api/README.md' })).toBe(false)
   })
 })
 

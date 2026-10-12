@@ -12,7 +12,8 @@
  *   the pass's outcome once the pass ends: the files documented, the reason nothing changed, or
  *   why it failed, which the caller records.
  * - **The guard.** Its `fs_write` and `fs_edit` are refused outside the files the applicable
- *   recipes of the mission's copy name. Its writes are attributed to its attempt (the loop).
+ *   recipes of the mission's copy name, wherever a file cannot be placed in the Workspace, and
+ *   once its pass ended. Its writes are attributed to its attempt (the loop).
  * - **The report.** `docs_report` names the files changed in this pass (each checked against the
  *   pass's snapshots) with why, or a reason specific to the change; it is kept as evidence and
  *   journalled, the attempt ends with its files, and the session ends.
@@ -24,11 +25,14 @@
  *   is gone with the engine, and decides again from the Building.
  */
 
-import { posix, relative, sep } from 'node:path'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import {
   DOCUMENTATION,
   type DocFile,
+  ROOT_REPOSITORY,
   type ToolArguments,
   noChangeReasonProblem,
   recipesCover,
@@ -77,6 +81,7 @@ import { mutate } from '../transaction.ts'
 import { type Preparations, getWorkspace } from '../workspaces.ts'
 import { attributedIn, writesIn } from './attempts.ts'
 import { DocsDesk } from './docs-desk.ts'
+import { fileOf, inRepository, realFolder } from './place.ts'
 import {
   type PassFile,
   type PassRow,
@@ -167,11 +172,20 @@ const LIVE = ['starting', 'working', 'idle', 'stuck'] as const
 
 const readString = Schema.decodeUnknownOption(Schema.String)
 
-const fileSaid = (file: { readonly repository: string; readonly path: string }): string =>
-  `${file.repository}/${file.path}`
+const fileSaid = (file: DocFile): string =>
+  file.repository === ROOT_REPOSITORY ? file.path : `${file.repository}/${file.path}`
 
-const said = (cause: unknown): string =>
-  cause instanceof Error && cause.message !== '' ? cause.message : String(cause)
+/** A cause in one line. */
+const said = (cause: Cause.Cause<unknown>): string => Cause.pretty(cause).split('\n')[0] ?? ''
+
+/** A file's content as a digest, or null when it does not exist. */
+const digestOf = (file: string): string | null => {
+  try {
+    return createHash('sha256').update(readFileSync(file)).digest('hex')
+  } catch {
+    return null
+  }
+}
 
 type Needs =
   | Database
@@ -212,6 +226,11 @@ export const documenterLayer = (settings: DocumenterSettings) =>
       const lock = yield* Semaphore.make(1)
       /** What each pass's caller waits on, by pass. */
       const outcomes = new Map<string, Deferred.Deferred<DocumenterOutcome>>()
+      /**
+       * The files of the Workspace root outside every repository each pass wrote, with their
+       * digest before its first write: no snapshot holds them, so the report reads them here.
+       */
+      const rootBefore = new Map<string, Map<string, string | null>>()
 
       const passEvent = (
         row: PassRow,
@@ -247,14 +266,16 @@ export const documenterLayer = (settings: DocumenterSettings) =>
         Effect.gen(function* () {
           const waiting = outcomes.get(passId)
           outcomes.delete(passId)
+          rootBefore.delete(passId)
           if (waiting !== undefined) yield* Deferred.succeed(waiting, outcome)
         })
 
       /** Its session ended once its turn is over, and its slot freed. */
       const leave = (lineage: string, reason: string) =>
         Effect.gen(function* () {
-          yield* sessions.end(lineage, reason)
-          yield* cap.release(lineage)
+          yield* sessions
+            .end(lineage, reason)
+            .pipe(Effect.ensuring(cap.release(lineage).pipe(Effect.ignore)))
         })
 
       /** A pass waiting or running fails: its attempt ends, the Journal and its caller are told. */
@@ -429,7 +450,7 @@ export const documenterLayer = (settings: DocumenterSettings) =>
           )
           const outcome = yield* Deferred.make<DocumenterOutcome>()
           outcomes.set(recorded.id, outcome)
-          yield* Effect.gen(function* () {
+          const starting = Effect.gen(function* () {
             const database = yield* Database
             const [mission] = yield* database
               .select({ projectId: missions.projectId })
@@ -483,17 +504,19 @@ export const documenterLayer = (settings: DocumenterSettings) =>
             if (Result.isFailure(opened)) {
               const why = Predicate.isTagged(opened.failure, 'SessionRefused')
                 ? opened.failure.reason
-                : said(opened.failure)
+                : opened.failure.message
               yield* fail(recorded.id, `the documenter did not start: ${why}`)
             }
           }).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.interrupt
-                : fail(recorded.id, `the documenter did not start: ${said(Cause.squash(cause))}`),
+                : fail(recorded.id, `the documenter did not start: ${said(cause)}`),
             ),
           )
-          return yield* Deferred.await(outcome).pipe(
+          // A caller that stops, while the pass waits for a slot, opens its session or runs, fails
+          // it: its slot and its session go with it.
+          return yield* Effect.andThen(starting, Deferred.await(outcome)).pipe(
             Effect.onInterrupt(() =>
               failGoing(recorded.id, 'its caller stopped waiting').pipe(Effect.ignore),
             ),
@@ -608,36 +631,64 @@ export const documenterLayer = (settings: DocumenterSettings) =>
           }
           const building = yield* buildingRow(found.buildingId)
           if (building === null) return refusal('refused: the Building is gone')
-          const listed = args.changed.map((one) => ({
-            repository: one.repository.trim(),
-            path: one.path.trim().replaceAll('\\', '/'),
-            why: one.why.trim(),
-          }))
+          // A file listed twice is kept once, with its first why.
+          const listed: ReportedFile[] = []
+          for (const one of args.changed) {
+            const file = {
+              repository: one.repository.trim().replace(/^\.\/$/, '') || ROOT_REPOSITORY,
+              path: one.path.trim().replaceAll('\\', '/'),
+              why: one.why.trim(),
+            }
+            if (listed.some((kept) => fileSaid(kept) === fileSaid(file))) continue
+            listed.push(file)
+          }
           const reason = args.no_change_reason?.trim() ?? ''
           if (listed.length === 0) {
             const problem = noChangeReasonProblem(args.no_change_reason)
             if (problem !== null) return refusal(`refused: ${problem}`)
           }
           const pass = yield* changedInPass(building, found)
-          for (const file of listed) {
-            const changed = pass.changed.some(
-              (one) =>
-                one.base.repository === file.repository &&
-                one.files.some((each) => each.path === file.path),
+          // The Workspace root's own files, when it is no repository: their digests, then and now.
+          const rootChanged = [...(rootBefore.get(found.id) ?? new Map<string, string | null>())]
+            .filter(
+              ([path, before]) => digestOf(join(realFolder(grant.place.root), path)) !== before,
             )
+            .map(([path]) => ({ repository: ROOT_REPOSITORY, path }))
+          for (const file of listed) {
+            const changed =
+              pass.changed.some(
+                (one) =>
+                  one.base.repository === file.repository &&
+                  one.files.some((each) => each.path === file.path),
+              ) || rootChanged.some((one) => fileSaid(one) === fileSaid(file))
             if (!changed) return refusal(`refused: ${fileSaid(file)} did not change in this pass`)
           }
           // The attempt's diff: the files written under its name that changed in the pass.
           const own = yield* attributedIn(database, found.attemptId)
-          const files: AttemptFile[] = []
-          for (const one of pass.changed) {
-            const mine = one.files.filter((file) =>
+          const owned = pass.changed.map((one) => ({
+            ...one,
+            mine: one.files.filter((file) =>
               own.some(
                 (write) =>
                   write.repository === one.base.repository &&
                   (write.path === file.path || write.path === file.oldPath),
               ),
+            ),
+          }))
+          const written = [
+            ...owned.flatMap((one) =>
+              one.mine.map((file) => ({ repository: one.base.repository, path: file.path })),
+            ),
+            ...rootChanged,
+          ]
+          if (listed.length === 0 && written.length > 0) {
+            return refusal(
+              `refused: ${written.map(fileSaid).join(', ')} changed in this pass: name each file you changed in changed, with why`,
             )
+          }
+          const files: AttemptFile[] = []
+          for (const one of owned) {
+            const mine = one.mine
             if (mine.length === 0) continue
             yield* Snapshots.use((snapshots) =>
               snapshots.capture(building.missionId, placeOf(one.base), one.from, one.to, mine),
@@ -737,18 +788,15 @@ export const documenterLayer = (settings: DocumenterSettings) =>
           ),
         )
 
-      /** Where a path of the Workspace is: its repository's, or the Workspace root's. */
-      const docFileOf = (building: BuildingRow, root: string, resolved: string): DocFile | null => {
-        const inside = relative(root, resolved).split(sep).join('/')
-        if (inside === '' || inside.startsWith('..') || posix.isAbsolute(inside)) return null
-        const base = basesOf(building)
-          .toSorted((a, b) => b.repository.length - a.repository.length)
-          .find((one) => one.repository !== '' && inside.startsWith(`${one.repository}/`))
-        return base === undefined
-          ? { repository: null, path: inside }
-          : { repository: base.repository, path: inside.slice(base.repository.length + 1) }
-      }
+      /**
+       * Where a resolved path is: a repository of the Building, or the Workspace root (both as
+       * real folders); null outside the Workspace.
+       */
+      const docFileOf = (building: BuildingRow, root: string, resolved: string): DocFile | null =>
+        fileOf(building, resolved) ??
+        inRepository([{ repository: ROOT_REPOSITORY, folder: realFolder(root) }], resolved)
 
+      // A write it cannot place, or a pass that is not running, is refused: never let through.
       const guard = (call: GuardedCall) =>
         Effect.gen(function* () {
           if (call.path === null) return null
@@ -756,17 +804,28 @@ export const documenterLayer = (settings: DocumenterSettings) =>
           const session = yield* getSession(call.session.sessionId)
           const row = yield* passOfLineage(database, session.lineage)
           const building = row === null ? null : yield* buildingRow(row.buildingId)
-          const inside = relative(call.session.place.root, call.path.resolved).split(sep).join('/')
-          const refused = `refused: ${inside} is not documentation named by this Project’s doc recipes.`
-          if (row === null || building === null) return refused
-          const file = docFileOf(building, call.session.place.root, call.path.resolved)
-          if (file === null) return null
+          const file =
+            building === null
+              ? null
+              : docFileOf(building, call.session.place.root, call.path.resolved)
+          const refused = `refused: ${file === null ? call.path.named : fileSaid(file)} is not documentation named by this Project’s doc recipes.`
+          if (row === null || building === null || file === null) return refused
+          if (row.state !== 'running') return 'refused: your pass has ended; end your turn.'
           const recipes = yield* applicableRecipes(row.missionId)
-          return recipesCover(recipes, file) ? null : refused
+          if (!recipesCover(recipes, file)) return refused
+          if (
+            file.repository === ROOT_REPOSITORY &&
+            !basesOf(building).some((one) => one.repository === ROOT_REPOSITORY)
+          ) {
+            const before = rootBefore.get(row.id) ?? new Map<string, string | null>()
+            if (!before.has(file.path)) before.set(file.path, digestOf(call.path.resolved))
+            rootBefore.set(row.id, before)
+          }
+          return null
         }).pipe(
           provided,
           Effect.catchCause((cause) =>
-            Effect.succeed(`refused: the documentation guard failed: ${said(Cause.squash(cause))}`),
+            Effect.succeed(`refused: the documentation guard failed: ${said(cause)}`),
           ),
         )
 

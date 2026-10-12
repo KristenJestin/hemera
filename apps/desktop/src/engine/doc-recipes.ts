@@ -18,6 +18,7 @@ import {
   type DocRecipeApplies,
   type DocRecipeDraft,
   docRecipeProblem,
+  ROOT_REPOSITORY,
   proposeDocRecipes,
 } from '@hemera/core/domain'
 import { DocRecipeRefused, type Project, UnknownDocRecipe } from '@hemera/ipc'
@@ -136,8 +137,9 @@ const refusal = (project: Project, draft: DocRecipeDraft) =>
   Effect.gen(function* () {
     const problem = docRecipeProblem(draft)
     if (problem !== null) return yield* new DocRecipeRefused({ reason: problem })
+    // The Workspace root is always there, a repository of the Project or not.
     if (
-      draft.repository !== null &&
+      draft.repository !== ROOT_REPOSITORY &&
       !project.repositories.some((one) => one.path === draft.repository)
     ) {
       return yield* new DocRecipeRefused({
