@@ -797,6 +797,13 @@ const TaskFinished = Schema.Struct({
     'Say a task you run is finished, once you verified it yourself. Hemera takes its end state and judges it: never call it to see what the checks say.',
 })
 
+const ProofRun = Schema.Struct({
+  scenario: Bounded(40, 'The scenario whose proof to run (`R1.S2`).'),
+}).annotate({
+  description:
+    "Run a scenario's proof as Hemera runs it, and read how it ended: during the red phase it records the red; once the tasks covering it are done it judges its green; before that it only says where it stands. Refused for a scenario verified by hand, and before its test is in place.",
+})
+
 const NeedOption = Bounded(MAX_REQUESTED_OPTION, 'One option, in a few words.')
 
 const NeedOptions = Schema.Array(NeedOption).check(
@@ -1449,6 +1456,14 @@ export const TOOLS = {
     input: NeedPropose,
     label: { label: 'Propose a way on', mark: 'need-propose', doing: 'Proposing what to try' },
   }),
+  proof_run: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ProofRun,
+    label: { label: 'Run a proof', mark: 'proof-run', doing: 'Running a proof' },
+  }),
   build_summary: tool({
     roles: ['builder'],
     gate: 'workflow',
@@ -1576,6 +1591,7 @@ export const TOOL_NAMES = [
   'task_blocked',
   'report_need',
   'need_propose',
+  'proof_run',
   'build_summary',
   'helper_launch',
   'helper_read',

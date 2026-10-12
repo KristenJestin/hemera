@@ -2871,6 +2871,25 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Run a scenario's proof as Hemera runs it, and read how it ended: during the red phase it records the red; once the tasks covering it are done it judges its green; before that it only says where it stands. Refused for a scenario verified by hand, and before its test is in place.",
+      "properties": {
+        "scenario": {
+          "description": "The scenario whose proof to run (\`R1.S2\`).",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "scenario",
+      ],
+      "type": "object",
+    },
+    "name": "proof_run",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Write the final summary of the build, once Hemera says every task is done.",
       "properties": {
         "text": {
