@@ -178,12 +178,24 @@ function linesOf(stream: Readable, read: (line: string) => void, done?: () => vo
   })
 }
 
-/** `taskkill` on the tree of a pid; it answers once the kill was asked. */
+/**
+ * How long `taskkill` may take to ask for a tree's end. Whoever kills waits for the kill to
+ * answer (the start's orphan sweep, before any session is rebuilt): a `taskkill` that hung would
+ * hold them for ever. Past it, the pid is watched as after any kill, and said alive if it is.
+ */
+export const TASKKILL_MS = 5_000
+
+/** `taskkill` on the tree of a pid; it answers once the kill was asked, or `TASKKILL_MS` passed. */
 const taskkill = (pid: number) =>
   Effect.callback<void>((resume) => {
-    execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {
-      resume(Effect.void)
-    })
+    execFile(
+      'taskkill',
+      ['/PID', String(pid), '/T', '/F'],
+      { windowsHide: true, timeout: TASKKILL_MS },
+      () => {
+        resume(Effect.void)
+      },
+    )
   })
 
 /** How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow. */
