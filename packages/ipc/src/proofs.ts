@@ -36,6 +36,19 @@ export const ProofsView = Schema.Struct({
     Schema.Struct({ ...ScenarioProofView.fields, runs: Schema.Array(ProofRunView) }),
   ),
   finalChecks: Schema.Array(FinalCheckFreshness),
+  /**
+   * The writes made before a scenario's red was recorded, out of the proofs' files: what the
+   * reviewers see as "written before the red", with the scenarios still waiting for theirs then.
+   */
+  writtenBeforeRed: Schema.Array(
+    Schema.Struct({
+      repository: Schema.String,
+      path: Schema.String,
+      task: Schema.NullOr(Schema.String),
+      scenarios: Schema.Array(Schema.String),
+      at: Schema.String,
+    }),
+  ),
 })
 export type ProofsView = typeof ProofsView.Type
 

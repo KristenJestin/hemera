@@ -305,6 +305,8 @@ export const BuildingTaskView = Schema.Struct({
   runner: Schema.NullOr(Schema.String),
   /** Why it is blocked, in words: the need, or the task it depends on. */
   blockedBy: Schema.NullOr(Schema.String),
+  /** Why a task otherwise ready waits (#144): "waits for the red of R1.S3"; null when it does not. */
+  waiting: Schema.NullOr(Schema.String),
   skippedReason: Schema.NullOr(Schema.String),
   replacedBy: Schema.Array(Schema.String),
   /** The decision that brought it, for a task of an amendment. */
