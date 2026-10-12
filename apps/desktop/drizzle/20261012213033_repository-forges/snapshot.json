@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "da6ba7d1-2f8b-4848-9703-396ad25d6d1b",
-  "prevIds": ["e5464b83-04be-445a-8e0b-809eeb36f250"],
+  "id": "1b7061d2-ae1d-40ee-9a85-8690db2a1aba",
+  "prevIds": ["aaa282f8-89fd-4506-8392-1be76d1857f8"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -313,6 +313,10 @@
       "entityType": "tables"
     },
     {
+      "name": "proof_runs",
+      "entityType": "tables"
+    },
+    {
       "name": "proposed_answers",
       "entityType": "tables"
     },
@@ -337,6 +341,10 @@
       "entityType": "tables"
     },
     {
+      "name": "repository_trees",
+      "entityType": "tables"
+    },
+    {
       "name": "resource_claims",
       "entityType": "tables"
     },
@@ -346,6 +354,10 @@
     },
     {
       "name": "runner_leases",
+      "entityType": "tables"
+    },
+    {
+      "name": "scenario_proofs",
       "entityType": "tables"
     },
     {
@@ -466,6 +478,10 @@
     },
     {
       "name": "workspaces",
+      "entityType": "tables"
+    },
+    {
+      "name": "writes_before_red",
       "entityType": "tables"
     },
     {
@@ -8356,6 +8372,196 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scenario",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "phase",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "test_path",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "test_sha256",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "exit_code",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "classification",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failing_test",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "assertion",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key_line_matched",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "output_tail",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evidence_id",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "test_evidence_id",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trees",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "proof_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
       "table": "proposed_answers"
     },
     {
@@ -8880,6 +9086,46 @@
     },
     {
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "repository_trees"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "repository_trees"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tree",
+      "entityType": "columns",
+      "table": "repository_trees"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "taken_at",
+      "entityType": "columns",
+      "table": "repository_trees"
+    },
+    {
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -9147,6 +9393,156 @@
       "name": "updated_at",
       "entityType": "columns",
       "table": "runner_leases"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scenario",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requirement",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rank",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mode",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "red_run_id",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "green_run_id",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "held_run_id",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "need_id",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "judged_by",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "judged_at",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "note",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trees",
+      "entityType": "columns",
+      "table": "scenario_proofs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "scenario_proofs"
     },
     {
       "type": "text",
@@ -11879,6 +12275,86 @@
       "table": "workspaces"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scenarios",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
       "columns": ["mission_id"],
       "tableTo": "missions",
       "columnsTo": ["id"],
@@ -12886,6 +13362,28 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_proof_runs_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "proof_runs"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_proof_runs_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "proof_runs"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_proposed_answers_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "proposed_answers"
@@ -12952,6 +13450,17 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_repository_trees_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "repository_trees"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_resource_claims_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "resource_claims"
@@ -12977,6 +13486,17 @@
       "name": "fk_resource_claims_workspace_id_workspaces_id_fk",
       "entityType": "fks",
       "table": "resource_claims"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_scenario_proofs_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "scenario_proofs"
     },
     {
       "columns": ["project_id"],
@@ -13309,6 +13829,17 @@
       "table": "workspaces"
     },
     {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_writes_before_red_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "writes_before_red"
+    },
+    {
       "columns": ["mission_id", "question_id", "version"],
       "nameExplicit": false,
       "name": "answers_pk",
@@ -13442,11 +13973,25 @@
       "table": "questions"
     },
     {
+      "columns": ["mission_id", "repository"],
+      "nameExplicit": false,
+      "name": "repository_trees_pk",
+      "entityType": "pks",
+      "table": "repository_trees"
+    },
+    {
       "columns": ["level", "scope_id", "role"],
       "nameExplicit": false,
       "name": "role_models_pk",
       "entityType": "pks",
       "table": "role_models"
+    },
+    {
+      "columns": ["building_id", "scenario"],
+      "nameExplicit": false,
+      "name": "scenario_proofs_pk",
+      "entityType": "pks",
+      "table": "scenario_proofs"
     },
     {
       "columns": ["mission_id", "repository", "from_tree", "to_tree", "path"],
@@ -13913,6 +14458,13 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "proof_runs_pk",
+      "table": "proof_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "proposed_answers_pk",
       "table": "proposed_answers",
       "entityType": "pks"
@@ -14097,6 +14649,13 @@
       "nameExplicit": false,
       "name": "workspaces_pk",
       "table": "workspaces",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "writes_before_red_pk",
+      "table": "writes_before_red",
       "entityType": "pks"
     },
     {
@@ -14974,6 +15533,24 @@
     {
       "columns": [
         {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "scenario",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "proof_runs_of_scenario",
+      "entityType": "indexes",
+      "table": "proof_runs"
+    },
+    {
+      "columns": [
+        {
           "value": "mission_id",
           "isExpression": false
         },
@@ -15290,6 +15867,20 @@
       "name": "calls_by_session",
       "entityType": "indexes",
       "table": "tool_calls"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "writes_before_red_of_building",
+      "entityType": "indexes",
+      "table": "writes_before_red"
     },
     {
       "columns": ["mission_id", "number"],

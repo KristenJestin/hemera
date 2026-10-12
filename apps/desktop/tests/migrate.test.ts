@@ -209,6 +209,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'project_repositories',
       'projection_cursors',
       'projects',
+      'proof_runs',
+      'proof_runs_of_scenario',
       'proposed_answers',
       'proposed_answers_of_question',
       'question_drafts',
@@ -219,6 +221,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'queued_deliveries',
       'queued_results',
       'repository_forges',
+      'repository_trees',
       'requests_by_need',
       'requests_by_state',
       'resource_claims',
@@ -227,6 +230,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'role_models',
       'runner_leases',
       'runs_by_place',
+      'scenario_proofs',
       'session_deliveries',
       'session_files',
       'session_needs',
@@ -269,6 +273,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'workspace_repositories',
       'workspace_steps',
       'workspaces',
+      'writes_before_red',
+      'writes_before_red_of_building',
     ])
     expect(await on(data, typesOf)).toEqual([
       'profile.created',
