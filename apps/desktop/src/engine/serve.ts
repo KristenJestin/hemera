@@ -11,6 +11,7 @@ import {
   ChecksRpcs,
   DocRecipesRpcs,
   EngineApartRpcs,
+  ForgeRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
   type EngineStatus,
@@ -31,6 +32,7 @@ import {
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
+import { ForgePort } from './forges/port.ts'
 import {
   dismissService,
   missionServices,
@@ -847,13 +849,25 @@ export const engineHandlers = (
     'mission.serviceDismiss': ({ missionId, runId }) =>
       use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
     'mission.focused': () =>
-      use(OutsideChanges.use((outside) => outside.focused)).pipe(observed('mission.focused', log)),
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.focused),
+          // The forge CLIs not ready are checked again when the window regains the focus (#253).
+          ForgePort.use((forge) => forge.focused),
+        ),
+      ).pipe(observed('mission.focused', log)),
     'mission.changed': () =>
       follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
         observedStream('mission.changed', log),
       ),
   })
-  return Layer.mergeAll(core, apart, checksHandlers(profile, log), docRecipesHandlers(profile, log))
+  return Layer.mergeAll(
+    core,
+    apart,
+    checksHandlers(profile, log),
+    docRecipesHandlers(profile, log),
+    forgeHandlers(profile, log),
+  )
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineSettingsRpcs`). */
@@ -890,5 +904,26 @@ const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
       use(removeDocRecipe(projectId, id)).pipe(observed('docRecipes.remove', log)),
     'docRecipes.move': ({ projectId, id, rank }) =>
       use(moveDocRecipe(projectId, id, rank)).pipe(observed('docRecipes.move', log)),
+  })
+}
+
+/** The forge of each repository (#253), a layer of its own (see `EngineForgeRpcs`). */
+const forgeHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return ForgeRpcs.toLayer({
+    'forge.status': ({ projectId }) =>
+      use(ForgePort.use((forge) => forge.status(projectId))).pipe(observed('forge.status', log)),
+    'forge.checkAgain': ({ projectId, repositoryId }) =>
+      use(ForgePort.use((forge) => forge.checkAgain(projectId, repositoryId))).pipe(
+        observed('forge.checkAgain', log),
+      ),
+    'forge.setForced': ({ projectId, repositoryId, forge: forced, host }) =>
+      use(ForgePort.use((forge) => forge.setForced(projectId, repositoryId, forced, host))).pipe(
+        observed('forge.setForced', log),
+      ),
+    'forge.changes': ({ projectId }) =>
+      follow(Stream.unwrap(ForgePort.useSync((forge) => forge.changes(projectId)))).pipe(
+        observedStream('forge.changes', log),
+      ),
   })
 }

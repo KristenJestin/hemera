@@ -54,9 +54,12 @@ export interface ExitObservation {
   readonly when: string
 }
 
-/** What owns a supervised root: a run of a command, an agent's session, or a `gh` call (#95). */
+/**
+ * What owns a supervised root: a run of a command, an agent's session, a `gh` call of the ticket
+ * providers (#95), or a forge CLI's call (#253).
+ */
 export interface ProcessOwner {
-  readonly kind: 'run' | 'session' | 'tickets'
+  readonly kind: 'run' | 'session' | 'tickets' | 'forge'
   readonly id: string
 }
 

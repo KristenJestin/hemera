@@ -45,6 +45,7 @@ export const TABLE_CLASSES = {
   domain_events: 'permanent',
   projects: 'state',
   project_repositories: 'state',
+  repository_forges: 'state',
   workspaces: 'state',
   workspace_repositories: 'state',
   project_preparation_steps: 'state',

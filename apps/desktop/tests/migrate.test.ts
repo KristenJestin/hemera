@@ -217,6 +217,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'queued_by_owner',
       'queued_deliveries',
       'queued_results',
+      'repository_forges',
       'requests_by_need',
       'requests_by_state',
       'resource_claims',

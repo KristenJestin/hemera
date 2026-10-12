@@ -142,6 +142,8 @@ import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
+import { FORGE_NEEDS, type ForgePort, forgePort } from './forges/port.ts'
+import { type ForgeRunner, type ForgeSettings, forgeRunnerLayer } from './forges/runner.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
 import { type TicketProviders, ticketProvidersLayer, ticketSearchLayer } from './tickets/search.ts'
@@ -263,6 +265,8 @@ export interface ProfileParts {
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** Where the forge CLIs are found, in which environment, and their limits (#253); this machine's otherwise. */
+  readonly forge?: ForgeSettings | undefined
   /**
    * Where a launched mission's Building starts (#139), how a finished task is judged and where the
    * end of the tasks goes (#141): the Builder, no check and `building.tasks_done` otherwise.
@@ -350,6 +354,8 @@ export type EngineServices =
   | TesterFindings
   | TicketSearch
   | GhCli
+  | ForgeRunner
+  | ForgePort
   | JiraLink
   | PlannerWake
   | SpecBoard
@@ -495,6 +501,8 @@ export const startProfile = (
     const postLayer = Layer.succeedContext(postContext)
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
+    // The forge port, and where its needs' Retry goes (#253).
+    const forge = forgePort()
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
@@ -520,6 +528,7 @@ export const startProfile = (
         [PERMISSION_REQUESTS, requestsHandler],
         [RESOURCE_NEEDS, resources.handler],
         [TICKET_WRITES, ticketWritesNeeds],
+        [FORGE_NEEDS, forge.handler],
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
         ...(parts.missions?.owners ?? []),
@@ -680,9 +689,11 @@ export const startProfile = (
       ),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
+      Layer.provideMerge(forge.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
       Layer.provideMerge(parts.ticketProviders ?? ticketProvidersLayer),
+      Layer.provideMerge(forgeRunnerLayer(parts.forge)),
       Layer.provideMerge(ghCliLayer(parts.gh)),
       Layer.provideMerge(jiraLinkLayer(parts.jira)),
       Layer.provideMerge(runsRecipeRunnerLayer),
@@ -814,6 +825,8 @@ export const startProfile = (
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
     // A `gh` call a stopped engine left (#95) is ended: none outlives the call that started it.
     yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('tickets')))
+    // So is a forge CLI's call (#253).
+    yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('forge')))
     // The reservations a stop left: those whose mission is no longer in Building are released.
     yield* run(ExclusiveResources.use((reservations) => reservations.atStart)).pipe(
       Effect.tap((released) =>

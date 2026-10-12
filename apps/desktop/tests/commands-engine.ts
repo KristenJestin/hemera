@@ -29,6 +29,9 @@ const FAST = { readinessEveryMillis: 50, readinessForMillis: 10_000, graceMillis
  */
 export const NO_GH = { path: '' }
 
+/** No forge CLI at all (#253): an empty PATH, and nothing else of the machine's environment. */
+export const NO_FORGE = { env: { PATH: '' } }
+
 /** What a program of these suites is handed: the Profile, and the engine's diagnostic lines. */
 export interface Started {
   readonly profile: StartedProfile
@@ -53,6 +56,7 @@ export function commandsEngine(
     | 'tickets'
     | 'probes'
     | 'gh'
+    | 'forge'
     | 'jira'
     | 'snapshots'
     | 'ticketProviders'
@@ -76,6 +80,7 @@ export function commandsEngine(
               runs: FAST,
               ...parts,
               gh: parts.gh ?? NO_GH,
+              forge: parts.forge ?? NO_FORGE,
             },
             (line) => lines.push(line),
           )

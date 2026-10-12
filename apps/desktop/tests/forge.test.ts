@@ -1,0 +1,642 @@
+/**
+ * The forge port over `gh` and `bkt` (#253): the CLI's state per repository from its own status,
+ * each with its fixing command; an operation that waits on a signed-out CLI behind one Project
+ * need, resumed by "Check again"; one runner that refuses an unregistered command shape before
+ * spawning, never asks for a token and never reads a CLI's configuration; failures verbatim and
+ * masked; timeouts as such; and the network writes registered exactly as CT-50 lists them.
+ *
+ * The CLIs are fakes first and alone on a `PATH` of their own (`fake-forge.ts`); no test runs a
+ * real `gh` or `bkt`, and none reaches a forge.
+ */
+
+import { mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { ProjectOwner } from '@hemera/core/domain'
+import { ForgeError, ForgeRefused, type ForgeRepositoryStatus, ForgeTimeout } from '@hemera/ipc'
+import { Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import { readEvents } from '../src/engine/journal.ts'
+import type { EngineServices } from '../src/engine/profile.ts'
+import { listNeeds, retryNeed } from '../src/engine/needs.ts'
+import { ForgePort } from '../src/engine/forges/port.ts'
+import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
+import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
+import { createProject } from '../src/engine/projects.ts'
+import { listActions } from '../src/engine/tools/actions.ts'
+import { commandsEngine } from './commands-engine.ts'
+import {
+  type FakeForge,
+  type FakeRule,
+  WATCHED_ENV,
+  bktReady,
+  fakeForge,
+  ghReady,
+  ghSignedOut,
+} from './fake-forge.ts'
+import { git } from './repositories.ts'
+import { removeFolders, temporaryFolder } from './storage.ts'
+
+let data: string
+let work: string
+beforeEach(() => {
+  data = realpathSync.native(temporaryFolder('forge'))
+  work = realpathSync.native(temporaryFolder('forge-work'))
+})
+afterEach(removeFolders)
+
+/** A main checkout with a repository per remote URL, each named by its key. */
+const checkout = (remotes: Readonly<Record<string, string>>) => {
+  const main = join(work, 'atlas')
+  for (const [path, url] of Object.entries(remotes)) {
+    const folder = join(main, path)
+    mkdirSync(folder, { recursive: true })
+    git(folder, 'init', '-q', '-b', 'main')
+    git(folder, 'commit', '-q', '--allow-empty', '-m', 'base')
+    git(folder, 'remote', 'add', 'origin', url)
+  }
+  return main
+}
+
+const REMOTES = {
+  shop: 'git@github.com:acme/shop.git',
+  api: 'https://bitbucket.org/acme-team/api.git',
+}
+
+/** The engine over these fakes, with Atlas made of the repositories given; limits shortened. */
+const withForge = <A, E>(
+  fake: FakeForge,
+  program: (atlas: {
+    readonly projectId: string
+    readonly repository: (path: string) => string
+  }) => Effect.Effect<A, E, EngineServices>,
+  remotes: Readonly<Record<string, string>> = REMOTES,
+  limits = { read: 2_000, write: 4_000 },
+) => {
+  const main = checkout(remotes)
+  return commandsEngine(data, { forge: { env: fake.env, limits } })(({ profile }) =>
+    profile.use(
+      Effect.gen(function* () {
+        const project = yield* createProject({
+          name: 'Atlas',
+          mainCheckout: main,
+          repositories: Object.keys(remotes),
+        })
+        const repository = (path: string) => {
+          const found = project.repositories.find((one) => one.path === path)
+          if (found === undefined) throw new Error(`no repository ${path}`)
+          return found.id
+        }
+        return yield* program({ projectId: project.id, repository })
+      }),
+    ),
+  )
+}
+
+const byPath = (statuses: ReadonlyArray<ForgeRepositoryStatus>) =>
+  Object.fromEntries(statuses.map((status) => [status.path, status]))
+
+const forge = Effect.gen(function* () {
+  return yield* ForgePort
+})
+const runner = Effect.gen(function* () {
+  return yield* ForgeRunner
+})
+
+describe('Ready, missing, signed-out and unreachable come from the fake CLI, each with its fix', () => {
+  test('gh and bkt signed in are ready, with their versions, CRLF and all', async () => {
+    const fake = fakeForge([...ghReady(), ...bktReady()])
+    const statuses = await withForge(fake, ({ projectId }) =>
+      Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+    )
+    expect(byPath(statuses)).toEqual({
+      shop: {
+        repositoryId: expect.any(String),
+        path: 'shop',
+        forge: 'github',
+        host: 'github.com',
+        owner: 'acme',
+        slug: 'shop',
+        forced: false,
+        cli: 'gh',
+        version: '2.100.0',
+        state: 'ready',
+        fix: null,
+        detail: null,
+      },
+      api: {
+        repositoryId: expect.any(String),
+        path: 'api',
+        forge: 'bitbucket-cloud',
+        host: 'bitbucket.org',
+        owner: 'acme-team',
+        slug: 'api',
+        forced: false,
+        cli: 'bkt',
+        version: '0.26.0',
+        state: 'ready',
+        fix: null,
+        detail: null,
+      },
+    })
+  })
+
+  test('a CLI absent from the PATH is missing, with the install line for the OS', async () => {
+    const fake = fakeForge([], [])
+    const statuses = byPath(
+      await withForge(fake, ({ projectId }) =>
+        Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      ),
+    )
+    expect(statuses['shop']).toMatchObject({ state: 'missing', version: null })
+    expect(statuses['api']).toMatchObject({ state: 'missing', version: null })
+    const gh = statuses['shop']?.fix ?? ''
+    const bkt = statuses['api']?.fix ?? ''
+    if (process.platform === 'win32') {
+      expect(gh).toBe('winget install --id GitHub.cli')
+      expect(bkt).toBe('winget install AvivSinai.Bitbucket-CLI')
+    } else if (process.platform === 'darwin') {
+      expect(gh).toBe('brew install gh')
+      expect(bkt).toBe('brew install bitbucket-cli')
+    } else {
+      expect(['sudo pacman -S github-cli', 'sudo apt install gh']).toContain(gh)
+      expect(bkt).toBe('brew install bitbucket-cli')
+    }
+  })
+
+  test('no account for the host is signed-out, with the login command for that host', async () => {
+    const fake = fakeForge([
+      ...ghSignedOut(),
+      { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\n' },
+      { cli: 'bkt', when: ['auth', 'status'], stdout: '{"hosts":[],"contexts":[]}\n' },
+    ])
+    const statuses = byPath(
+      await withForge(fake, ({ projectId }) =>
+        Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      ),
+    )
+    expect(statuses['shop']).toMatchObject({
+      state: 'signed-out',
+      fix: 'gh auth login --hostname github.com',
+    })
+    expect(statuses['api']).toMatchObject({
+      state: 'signed-out',
+      fix: 'bkt auth login https://bitbucket.org --kind cloud --web',
+    })
+  })
+
+  test('Bitbucket Data Center signed out gives the login with its host', async () => {
+    const fake = fakeForge(bktReady([{ key: 'bitbucket.org', kind: 'cloud' }]))
+    const statuses = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flatMap(forge, (port) =>
+          port.setForced(projectId, repository('dc'), 'bitbucket-datacenter', 'git.acme.test'),
+        ),
+      { dc: 'ssh://git@git.acme.test:7999/proj/dc.git' },
+    )
+    expect(byPath(statuses)['dc']).toMatchObject({
+      forge: 'bitbucket-datacenter',
+      host: 'git.acme.test',
+      forced: true,
+      state: 'signed-out',
+      fix: 'bkt auth login https://git.acme.test',
+    })
+  })
+
+  test('a check that cannot reach the forge is unreachable, with what the CLI said', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        stderr: 'error connecting to api.github.com\ncheck your internet connection\n',
+        code: 1,
+      },
+    ])
+    const statuses = byPath(
+      await withForge(
+        fake,
+        ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+        { shop: REMOTES.shop },
+      ),
+    )
+    expect(statuses['shop']).toMatchObject({
+      state: 'unreachable',
+      fix: null,
+      detail: 'error connecting to api.github.com\ncheck your internet connection',
+    })
+  })
+
+  test('a check cut at its limit is unreachable too', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      { cli: 'gh', when: ['auth', 'status'], hang: true },
+    ])
+    const statuses = byPath(
+      await withForge(
+        fake,
+        ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+        { shop: REMOTES.shop },
+        { read: 500, write: 1_000 },
+      ),
+    )
+    expect(statuses['shop']?.state).toBe('unreachable')
+  })
+
+  test('a repository whose forge is forced to none needs no CLI', async () => {
+    const fake = fakeForge([], [])
+    const statuses = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flatMap(forge, (port) =>
+          port.setForced(projectId, repository('shop'), 'none', null),
+        ),
+      { shop: REMOTES.shop },
+    )
+    expect(byPath(statuses)['shop']).toMatchObject({
+      forge: 'none',
+      forced: true,
+      cli: null,
+      state: 'not-needed',
+      fix: null,
+    })
+    expect(fake.calls()).toEqual([])
+  })
+})
+
+describe('An operation with the CLI signed out waits behind one Project need', () => {
+  test('two operations wait, one need is made; Check again after sign-in clears it and resumes them', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { logins, before, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const first = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const second = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const pending = listNeeds.pipe(
+            Effect.map((groups) => groups.flatMap((group) => group.needs)),
+          )
+          const waiting = yield* pending.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('50 millis'),
+              until: (needs) => needs.length > 0,
+            }),
+          )
+          // Both are still waiting, behind the same need.
+          yield* Effect.sleep('300 millis')
+          const pendingBefore = yield* pending
+          expect(first.pollUnsafe()).toBeUndefined()
+          expect(second.pollUnsafe()).toBeUndefined()
+          expect(waiting[0]?.owner).toEqual(ProjectOwner.make({ projectId }))
+          fake.answer(ghReady())
+          yield* port.checkAgain(projectId, null)
+          const joined = yield* Fiber.joinAll([first, second])
+          return { logins: joined, before: pendingBefore, after: yield* pending }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(logins).toEqual(['octo', 'octo'])
+    expect(before).toHaveLength(1)
+    expect(Predicate.isTagged(before[0]?.fields, 'Environment')).toBe(true)
+    expect(before[0]?.fields).toMatchObject({
+      action: expect.stringContaining('gh auth login --hostname github.com'),
+    })
+    expect(after).toEqual([])
+  })
+
+  test('Retry on the need is Check again', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const login = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const [need] = yield* listNeeds.pipe(
+            Effect.map((groups) => groups.flatMap((group) => group.needs)),
+            Effect.repeat({
+              schedule: Schedule.spaced('50 millis'),
+              until: (needs) => needs.length > 0,
+            }),
+          )
+          fake.answer(ghReady())
+          const retried = yield* retryNeed(need?.id ?? '')
+          expect(retried.state).toBe('withdrawn')
+          return yield* Fiber.join(waiting)
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(login).toBe('octo')
+  })
+})
+
+describe('The runner never asks for a token and never reads a CLI configuration', () => {
+  test('no auth token, no token variable, the user’s own configuration folder left as it is', async () => {
+    const fake = fakeForge([...ghReady(), ...bktReady()])
+    await withForge(fake, ({ projectId, repository }) =>
+      Effect.gen(function* () {
+        const port = yield* forge
+        yield* port.checkAgain(projectId, null)
+        yield* port.currentUser(repository('shop'))
+        yield* port.currentUser(repository('api'))
+      }),
+    )
+    const calls = fake.calls()
+    expect(calls.length).toBeGreaterThan(0)
+    for (const call of calls) {
+      expect(call.args.join(' ')).not.toMatch(/\btoken\b/)
+      for (const name of WATCHED_ENV.filter((one) => one.endsWith('TOKEN'))) {
+        expect(call.env[name]).toBeNull()
+      }
+      expect(call.env['GH_CONFIG_DIR']).toBe(fake.userConfig)
+      expect(call.env['BKT_CONFIG_DIR']).toBeNull()
+    }
+  })
+
+  test('no forge source reads a CLI’s configuration, its keyring, or asks for its token', () => {
+    const folder = join(import.meta.dirname, '../src/engine/forges')
+    for (const file of readdirSync(folder)) {
+      const source = readFileSync(join(folder, file), 'utf8')
+      expect(source, file).not.toMatch(/node:fs|hosts\.yml|keytar|keyring\.|'token'/)
+    }
+  })
+})
+
+describe('A command shape not registered is refused before spawning', () => {
+  test.each([
+    [['auth', 'token']],
+    [['api', '--hostname', 'github.com', 'user', '--method', 'POST']],
+    [['repo', 'delete', 'acme/shop', '--yes']],
+    [['pr', 'comment', '7', '--body', 'hello']],
+  ])('gh %j', async (args) => {
+    const fake = fakeForge(ghReady())
+    const refused = await withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flip(
+          Effect.flatMap(runner, (forgeRunner) =>
+            forgeRunner.run({ cli: 'gh', forge: 'github', host: 'github.com', projectId, args }),
+          ),
+        ),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls()).toEqual([])
+  })
+})
+
+describe('The registered write shapes equal CT-50’s list', () => {
+  test('every network write is the push, a pull request operation, or an action on the remote', () => {
+    // CT-50, written out here rather than imported: a write shape added outside it fails this test.
+    const CT_50 = [
+      'git:push',
+      'gh:pr.create',
+      'gh:pr.edit',
+      'gh:pr.attach',
+      'gh:pr.merge',
+      'gh:workflow.run',
+      'gh:run.rerun',
+      'gh:deployment.approve',
+      'bkt:pr.create',
+      'bkt:pr.edit',
+      'bkt:pr.merge',
+      'bkt:pipeline.run',
+    ]
+    const writes = COMMAND_SHAPES.filter((shape) => shape.class === 'network-write').map(
+      (shape) => `${shape.cli}:${shape.operation}`,
+    )
+    expect([...new Set(writes)].toSorted()).toEqual(CT_50.toSorted())
+  })
+
+  test('a write is recorded with its intent and its outcome', async () => {
+    const fake = fakeForge([
+      ...ghReady(),
+      { cli: 'gh', when: ['workflow', 'run'], stdout: 'Created workflow_dispatch event\n' },
+    ])
+    const actions = await withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.gen(function* () {
+          const forgeRunner = yield* ForgeRunner
+          yield* forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId,
+            args: ['workflow', 'run', 'release.yml', '--repo', 'acme/shop', '--ref', 'main'],
+          })
+          return yield* listActions()
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(actions.map((action) => [action.kind, action.state])).toEqual([
+      ['forge.workflow.run', 'done'],
+    ])
+  })
+})
+
+describe('A failure shows stderr verbatim with a ghp_ value masked', () => {
+  test('ForgeError carries the forge’s message as it is, the token masked', async () => {
+    const token = `ghp_${'a1B2c3D4e5'.repeat(4)}`
+    const fake = fakeForge([
+      ...ghReady().filter((rule) => !rule.when.includes('user')),
+      {
+        cli: 'gh',
+        when: ['api', 'user'],
+        stderr: `HTTP 401: Bad credentials (https://api.github.com/user)\nthe token ${token} was refused\n`,
+        code: 1,
+      } satisfies FakeRule,
+    ])
+    const failure = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(Effect.flatMap(forge, (port) => port.currentUser(repository('shop')))),
+      { shop: REMOTES.shop },
+    )
+    expect(failure).toBeInstanceOf(ForgeError)
+    expect(failure).toMatchObject({
+      forge: 'github',
+      host: 'github.com',
+      exitCode: 1,
+      message: 'HTTP 401: Bad credentials (https://api.github.com/user)\nthe token ••• was refused',
+    })
+    expect(JSON.stringify(failure)).not.toContain(token)
+  })
+})
+
+describe('A timeout gives ForgeTimeout, not a success', () => {
+  test('a read cut at its limit', async () => {
+    const fake = fakeForge([
+      ...ghReady().filter((rule) => !rule.when.includes('user')),
+      { cli: 'gh', when: ['api', 'user'], hang: true },
+    ])
+    const failure = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(Effect.flatMap(forge, (port) => port.currentUser(repository('shop')))),
+      { shop: REMOTES.shop },
+      { read: 1_000, write: 2_000 },
+    )
+    expect(failure).toBeInstanceOf(ForgeTimeout)
+    expect(failure).toMatchObject({ seconds: 1 })
+  })
+})
+
+describe('Capabilities follow the forge, its host and the CLI version', () => {
+  test('GitHub on github.com at 2.100.0 attaches; Bitbucket Cloud runs pipelines but approves nothing', async () => {
+    const fake = fakeForge([...ghReady(), ...bktReady()])
+    const [github, cloud] = await withForge(fake, ({ repository }) =>
+      Effect.flatMap(forge, (port) =>
+        Effect.all([port.capabilities(repository('shop')), port.capabilities(repository('api'))]),
+      ),
+    )
+    expect(github).toEqual({
+      runWorkflow: true,
+      rerun: true,
+      approveManualStep: true,
+      attachImage: true,
+      readBuildStatuses: true,
+      cliVersion: '2.100.0',
+    })
+    expect(cloud).toEqual({
+      runWorkflow: true,
+      rerun: true,
+      approveManualStep: false,
+      attachImage: false,
+      readBuildStatuses: true,
+      cliVersion: '0.26.0',
+    })
+  })
+
+  test('no attach below gh 2.99.0, nor on an Enterprise Server', async () => {
+    const fake = fakeForge([
+      ...ghReady('github.com', '2.98.1'),
+      ...ghReady('git.acme.test', '2.98.1'),
+    ])
+    const [old, server] = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(projectId, repository('ghes'), 'github', 'git.acme.test')
+          return yield* Effect.all([
+            port.capabilities(repository('shop')),
+            port.capabilities(repository('ghes')),
+          ])
+        }),
+      { shop: REMOTES.shop, ghes: 'https://git.acme.test/acme/ghes.git' },
+    )
+    expect(old.attachImage).toBe(false)
+    expect(server.attachImage).toBe(false)
+    expect(server.runWorkflow).toBe(true)
+  })
+
+  test('Bitbucket Data Center reads build statuses only', async () => {
+    const fake = fakeForge(bktReady([{ key: 'git.acme.test', kind: 'dc' }]))
+    const capabilities = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(
+            projectId,
+            repository('dc'),
+            'bitbucket-datacenter',
+            'git.acme.test',
+          )
+          return yield* port.capabilities(repository('dc'))
+        }),
+      { dc: 'ssh://git@git.acme.test:7999/proj/dc.git' },
+    )
+    expect(capabilities).toEqual({
+      runWorkflow: false,
+      rerun: false,
+      approveManualStep: false,
+      attachImage: false,
+      readBuildStatuses: true,
+      cliVersion: '0.26.0',
+    })
+  })
+})
+
+describe('Forcing a forge is stored and told', () => {
+  test('forge.forced and forge.cli_state_changed are written, and the forcing survives a restart', async () => {
+    const fake = fakeForge(bktReady([{ key: 'git.acme.test', kind: 'dc' }]))
+    const main = checkout({ dc: 'ssh://git@git.acme.test:7999/proj/dc.git' })
+    const engine = commandsEngine(data, { forge: { env: fake.env } })
+    const { projectId, repositoryId, types } = await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['dc'],
+          })
+          const only = project.repositories[0]?.id ?? ''
+          const port = yield* forge
+          yield* port.checkAgain(project.id, null)
+          yield* port.setForced(project.id, only, 'bitbucket-datacenter', 'git.acme.test')
+          const { events } = yield* readEvents({})
+          return {
+            projectId: project.id,
+            repositoryId: only,
+            types: events
+              .filter((event) => event.type.startsWith('forge.'))
+              .map((event) => event.type),
+          }
+        }),
+      ),
+    )
+    expect(types).toEqual(['forge.cli_state_changed', 'forge.forced', 'forge.cli_state_changed'])
+    const [after] = await engine(({ profile }) =>
+      profile.use(Effect.flatMap(forge, (port) => port.status(projectId))),
+    )
+    expect(after).toMatchObject({
+      repositoryId,
+      forge: 'bitbucket-datacenter',
+      forced: true,
+      state: 'ready',
+    })
+  })
+
+  test('forge.changes tells the Project’s states after a forcing', async () => {
+    const fake = fakeForge(ghReady())
+    const told = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.checkAgain(projectId, null)
+          const following = yield* Effect.forkChild(
+            port.changes(projectId).pipe(Stream.take(2), Stream.runCollect),
+          )
+          yield* Effect.sleep('100 millis')
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          return yield* Fiber.join(following)
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(told.map((states) => states.map((one) => [one.forge, one.state]))).toEqual([
+      [['github', 'ready']],
+      [['none', 'not-needed']],
+    ])
+  })
+
+  test('Data Center forced without a host is refused', async () => {
+    const fake = fakeForge([], [])
+    const refused = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flip(
+          Effect.flatMap(forge, (port) =>
+            port.setForced(projectId, repository('shop'), 'bitbucket-datacenter', null),
+          ),
+        ),
+      { shop: 'https://git.acme.test/scm/proj/shop.git' },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+  })
+})

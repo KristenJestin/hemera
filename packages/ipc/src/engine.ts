@@ -46,6 +46,7 @@ import { HelpersRpcs } from './helpers.ts'
 import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
+import { ForgeRpcs } from './forge.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -191,4 +192,11 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
  */
 export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 
-export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs, EngineSettingsRpcs)
+/** The forge of each repository (#253), a layer of its own in the engine and in main (TS2589). */
+export const EngineForgeRpcs = ForgeRpcs
+
+export const EngineMainRpcs = EngineMainCoreRpcs.merge(
+  EngineApartRpcs,
+  EngineSettingsRpcs,
+  EngineForgeRpcs,
+)
