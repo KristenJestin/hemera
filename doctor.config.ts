@@ -23,6 +23,11 @@ export default {
         files: ['src/components/dialog/dialog.tsx'],
         rules: ['react-doctor/no-layout-property-animation'],
       },
+      // The blocks and runs of a fixed text: where each stands, and its words, are its identity.
+      {
+        files: ['src/blocks/planning/prose.tsx'],
+        rules: ['react-doctor/no-array-index-as-key'],
+      },
     ],
   },
 } satisfies ReactDoctorConfig

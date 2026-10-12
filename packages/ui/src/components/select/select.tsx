@@ -151,6 +151,7 @@ export function Select<Value extends string>({
               page, and a list of options with no name is a list a screen reader cannot place. */}
           <BaseSelect.Popup aria-label={label} className={POPUP}>
             {groups.map((group, index) => (
+              // react-doctor-disable-next-line no-array-index-as-key -- a group with no name has only its place to tell it apart
               <Section key={group.label === '' ? index : group.label} group={group} />
             ))}
           </BaseSelect.Popup>
