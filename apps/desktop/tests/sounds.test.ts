@@ -4,7 +4,7 @@
  * Nothing here plays one: the player is a port.
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -26,6 +26,7 @@ import {
   soundsFolderOf,
   wavDurationSeconds,
 } from '../src/main/sounds.ts'
+import { removeWithRetries } from './storage.ts'
 
 const shipped = join(import.meta.dirname, '..', SOUNDS_FOLDER)
 
@@ -217,7 +218,7 @@ describe('The volume of the sounds', () => {
         Math.ceil(Math.max(...before.map(Math.abs)) * 0.25),
       )
     } finally {
-      rmSync(folder, { recursive: true, force: true })
+      removeWithRetries(folder)
     }
   })
 
