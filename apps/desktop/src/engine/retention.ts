@@ -92,7 +92,6 @@ export const TABLE_CLASSES = {
   discussion_messages: 'permanent',
   freezes: 'permanent',
   freeze_files: 'permanent',
-  snapshot_contents: 'permanent',
   mission_dependencies: 'permanent',
   spec_relies_on: 'permanent',
   effectful_actions: 'permanent',
@@ -135,6 +134,10 @@ export const TABLE_CLASSES = {
   building_unattributed: 'permanent',
   building_conflicts: 'permanent',
   building_check_results: 'permanent',
+  outside_watches: 'state',
+  outside_changes: 'permanent',
+  base_moves: 'permanent',
+  dismissed_services: 'permanent',
   helpers: 'permanent',
   // A result waits here only until its parent's lineage takes it.
   queued_results: 'state',

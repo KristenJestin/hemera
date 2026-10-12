@@ -4,7 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { Input } from '../../components/field/field.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Tabs } from '../../components/tabs/tabs.tsx'
-import { IconChevronRight } from '../../icons.ts'
+import { IconChevronRight, IconHandStop } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CommandType, typeIcon } from './command-types.tsx'
 import { TemplateMenu } from './parts.tsx'
@@ -36,6 +36,8 @@ export interface CatalogueChoice {
   name: string
   type: CommandType
   line: string
+  /** Whether the catalogue marks it to ask before running: said under it once chosen. */
+  askBeforeRunning?: boolean | undefined
 }
 
 export interface CommandLineFieldProps {
@@ -77,6 +79,8 @@ const DISCLOSURE_CHEVRON = 'flex chevron-motion aria-expanded:rotate-90'
 const LABEL = 'text-sm font-medium'
 
 const QUIET = 'truncate font-mono text-xs text-muted-foreground'
+
+const ASKS = 'flex items-center gap-1.5 text-xs text-muted-foreground'
 
 /** A line that may hold the names Hemera fills: the braces at its end offer them. */
 function LineInput({
@@ -219,6 +223,12 @@ export function CommandLineField({
                   }))}
                 />
                 {chosen !== undefined && <span className={QUIET}>{chosen.line}</span>}
+                {chosen?.askBeforeRunning === true && (
+                  <span className={ASKS}>
+                    <IconHandStop size="sm" aria-hidden="true" />
+                    Asks before running
+                  </span>
+                )}
               </div>
             ),
           },
