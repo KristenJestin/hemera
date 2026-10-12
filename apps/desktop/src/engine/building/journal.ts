@@ -367,6 +367,22 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     ),
   ],
   [
+    'building.proofs_unproven',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The end waits on ${stringsOf(payload, 'scenarios').join(', ')}, which nothing moves any more: the user is asked.`,
+    ),
+  ],
+  [
+    'building.not_proven',
+    lineOf(
+      byUser,
+      (payload) =>
+        `The user ended the Building without proving ${stringsOf(payload, 'scenarios').join(', ')}.`,
+    ),
+  ],
+  [
     'building.scenario_green',
     lineOf(byHemera, (payload) => `${stringOf(payload, 'scenario')} is proven: its test passed.`),
   ],

@@ -677,19 +677,31 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 Effect.as({ result: undefined, events: [] }),
               ),
           )
+          const left = yield* proofs.notProven(building)
           yield* deliver(
             building,
             'done',
-            'Every task of the plan is done or skipped. Write the final summary with build_summary.',
+            [
+              'Every task of the plan is done or skipped.',
+              left.length === 0
+                ? null
+                : `The user ended without proving ${listed(left)}: say so in the summary.`,
+              'Write the final summary with build_summary.',
+            ]
+              .filter((part) => part !== null)
+              .join(' '),
           )
         })
 
       // One end called at a time: a green and a task done together never call it twice.
       const endTurn = Semaphore.makeUnsafe(1)
+      /** What each Building's end was last said to wait on: said again only when it changes. */
+      const endWaits = new Map<string, string>()
       /**
        * The end called once every task is done and every automated proof is green (or stale, which
-       * the end runs again, or not reproducible); while one is not, the end waits and the Builder
-       * is told which proof keeps it (#144).
+       * the end runs again, or not reproducible, or ended without by the user); while one is not,
+       * the end waits and the Builder is told which proof keeps it, once for each set it waits on
+       * (#144). When only scenarios nothing moves any more keep it, the user is asked instead.
        */
       const endIfReady = (building: BuildingRow) =>
         Semaphore.withPermits(
@@ -701,6 +713,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (row?.id !== building.id || row.tasksDoneAt === null || row.endCalledAt !== null)
               return
             const red = yield* proofs.unproven(row)
+            if (red.length > 0) {
+              // The end never waits on a scenario nothing moves any more: the user is asked.
+              if (yield* proofs.unprovenAsked(row)) return
+              const stuck = yield* proofs.stuckOf(row, red)
+              if (stuck.length === red.length) {
+                endWaits.delete(row.id)
+                yield* proofs.askUnproven(row, stuck)
+                return
+              }
+            }
+            const waits = red.join('\u0000')
+            if (red.length > 0 && endWaits.get(row.id) === waits) return
+            endWaits.set(row.id, waits)
             if (red.length > 0) {
               yield* deliver(
                 row,
@@ -1438,16 +1463,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
           attribution: {
-            // A write before a red is kept for the reviewers; once it settles, a failed green runs
-            // again (#144).
+            // A write before a red is kept for the reviewers (#144).
             written: (file) => (transaction) =>
               loop.attribution
                 .written(file)(transaction)
-                .pipe(
-                  Effect.andThen(proofs.writtenIn(transaction, file)),
-                  // Out of the transaction: nothing run in it may touch the Workspace.
-                  Effect.andThen(Effect.sync(() => Queue.offerUnsafe(settled, file.missionId))),
-                ),
+                .pipe(Effect.andThen(proofs.writtenIn(transaction, file))),
             command: (asked) =>
               loop.attribution.command(asked).pipe(
                 provided,
@@ -1465,6 +1485,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.andThen(loop.beginHold(file, sink)),
                   provided,
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
+                  // Once the write and its outcome are kept, out of their transaction: a failed
+                  // green runs again on what it left (#144).
+                  Effect.tap(() => Effect.sync(() => Queue.offerUnsafe(settled, file.missionId))),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),

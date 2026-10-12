@@ -1357,7 +1357,8 @@ export const buildingLoop = (parts: LoopParts) => {
    * could not be merged, a proof still red once its tasks are done. An attempt on that scenario's
    * proof keeps it, and the Builder is handed it; the third counted red is an error need on that
    * scope, and while it waits nothing more is opened or asked. A failed green's attempt stays open
-   * until the scenario is green: the next failure closes it red and opens the next one.
+   * until the scenario is green, on the trees of every repository at its failure (`opened`): the
+   * next failure closes it red and opens the next one.
    */
   const proofRed = (
     building: BuildingRow,
@@ -1369,7 +1370,7 @@ export const buildingLoop = (parts: LoopParts) => {
       readonly runId: string | null
     },
     next: string,
-    open = false,
+    opened: string | null = null,
   ) =>
     Effect.gen(function* () {
       const database = yield* Database
@@ -1424,11 +1425,11 @@ export const buildingLoop = (parts: LoopParts) => {
               number,
               runner: builder ?? 'builder',
               epoch: 0,
-              starts: '[]',
+              starts: opened ?? '[]',
               startedAt: at,
-              endedAt: open ? null : at,
-              outcome: open ? null : 'red',
-              verdict: open ? null : 'red',
+              endedAt: opened === null ? at : null,
+              outcome: opened === null ? 'red' : null,
+              verdict: opened === null ? 'red' : null,
               outside: '[]',
             })
             .pipe(Effect.mapError(refusedWhile('opening the attempt')))
