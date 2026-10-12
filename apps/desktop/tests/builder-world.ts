@@ -18,6 +18,7 @@ import { checkMission } from '../src/engine/building/check.ts'
 import { launchMission } from '../src/engine/building/launch.ts'
 import type { BuilderHold, BuildingEnd, TaskVerdict } from '../src/engine/building/builder.ts'
 import { buildingOf } from '../src/engine/building/builder.ts'
+import type { TaskChecks } from '../src/engine/building/checks.ts'
 import { freezeMission } from '../src/engine/planning/freeze.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
@@ -43,6 +44,7 @@ export const builderEngine = (
   work: string,
   building: {
     readonly verdict?: Layer.Layer<TaskVerdict>
+    readonly checks?: Layer.Layer<TaskChecks>
     readonly end?: Layer.Layer<BuildingEnd>
     readonly hold?: BuilderHold
   } = {},

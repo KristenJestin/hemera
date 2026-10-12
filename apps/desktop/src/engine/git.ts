@@ -369,6 +369,15 @@ export interface GitService {
    * the paths it touches, and each file it creates, deletes, renames or copies.
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
+  /**
+   * Commits only the paths given, with the user's own identity and configuration, and answers the
+   * commit (#142): every other change of the working tree and of the index is left as it is.
+   */
+  readonly commitPaths: (
+    folder: string,
+    paths: ReadonlyArray<string>,
+    message: string,
+  ) => Effect.Effect<string, GitRefusal>
 }
 
 /** A file that differs between two commits. */
@@ -599,6 +608,12 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
     worktreeRemove: (folder, path) =>
       run(folder, ['worktree', 'remove', path], 'work').pipe(Effect.asVoid),
     worktreePrune: (folder) => run(folder, ['worktree', 'prune'], 'work').pipe(Effect.asVoid),
+    commitPaths: (folder, paths, message) =>
+      Effect.gen(function* () {
+        yield* run(folder, ['add', '--all', '--', ...paths], 'work')
+        yield* run(folder, ['commit', '--quiet', '--only', '-m', message, '--', ...paths], 'work')
+        return (yield* run(folder, ['rev-parse', 'HEAD'], 'read')).trim()
+      }),
     worktreeDetach: (folder, path, commit) =>
       run(folder, ['worktree', 'add', '--quiet', '--detach', path, commit], 'work').pipe(
         Effect.asVoid,

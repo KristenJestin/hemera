@@ -44,10 +44,10 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
-  noCheckVerdict,
   tasksDoneEnd,
 } from './building/builder.ts'
-import { buildDeskLayer, claimGuards } from './building/desk.ts'
+import { type TaskChecks, checksVerdict, noTaskChecks } from './building/checks.ts'
+import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -257,6 +257,8 @@ export interface ProfileParts {
     | {
         readonly start?: Layer.Layer<BuildingStart>
         readonly verdict?: Layer.Layer<TaskVerdict>
+        /** The checks a finished attempt is judged on (#142's port, #143's checks): none. */
+        readonly checks?: Layer.Layer<TaskChecks>
         readonly end?: Layer.Layer<BuildingEnd>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold
@@ -336,6 +338,7 @@ export type EngineServices =
   | SpecBoard
   | ExclusiveResources
   | LivingSpec
+  | BuildDesk
   | ProbeDesk
   | FileSnapshots
   | Snapshots
@@ -544,6 +547,9 @@ export const startProfile = (
       setup: setupDeskLayer,
       guards:
         parts.tools?.guards ?? claimGuards.pipe(Layer.provide(Layer.succeedContext(buildContext))),
+      attribution:
+        parts.tools?.attribution ??
+        deskAttribution.pipe(Layer.provide(Layer.succeedContext(buildContext))),
     }
     // A suite's role stands in for a registered role of the same id, in its place.
     const suiteRoles = parts.sessions?.roles ?? []
@@ -569,10 +575,10 @@ export const startProfile = (
               builder.layer.pipe(
                 Layer.provide(
                   Layer.mergeAll(
-                    parts.building?.verdict ?? noCheckVerdict,
+                    parts.building?.verdict ?? checksVerdict,
                     parts.building?.end ?? tasksDoneEnd,
                     snapshots,
-                  ),
+                  ).pipe(Layer.provideMerge(parts.building?.checks ?? noTaskChecks)),
                 ),
               ),
           ),
@@ -632,7 +638,9 @@ export const startProfile = (
         ),
       ),
       Layer.provideMerge(
-        (parts.actionRules ?? resourceActionRules(log)).pipe(Layer.provideMerge(profileLayers)),
+        (parts.actionRules ?? resourceActionRules(log, builder.cut)).pipe(
+          Layer.provideMerge(profileLayers),
+        ),
       ),
     )
     const opened = yield* Layer.build(layers).pipe(
@@ -697,23 +705,9 @@ export const startProfile = (
       clearStagedRestore(dataFolder)
     }
 
-    const pending = yield* run(pendingRestore).pipe(Effect.orDie)
-    if (pending === null) {
-      yield* gate.open
-    } else {
-      yield* publish('running')
-      log('reconciling the restored Profile; automations wait until it ends')
-      yield* run(reconcile(pending, log)).pipe(
-        Effect.matchEffect({
-          onFailure: () => publish('failed'),
-          onSuccess: () => Effect.andThen(gate.open, publish('none')),
-        }),
-        Effect.forkScoped,
-      )
-    }
-
     // An action a stopped engine left without an outcome is perhaps done: it becomes indeterminate,
-    // and what its post-condition finds is written, before anything acts.
+    // and what its post-condition finds is written, before anything acts:
+    // before the automation gate opens, so a Building's resume finds it settled (#142).
     yield* run(settleLeftActions).pipe(
       Effect.tap((left) =>
         left.length === 0
@@ -730,6 +724,21 @@ export const startProfile = (
         ),
       ),
     )
+
+    const pending = yield* run(pendingRestore).pipe(Effect.orDie)
+    if (pending === null) {
+      yield* gate.open
+    } else {
+      yield* publish('running')
+      log('reconciling the restored Profile; automations wait until it ends')
+      yield* run(reconcile(pending, log)).pipe(
+        Effect.matchEffect({
+          onFailure: () => publish('failed'),
+          onSuccess: () => Effect.andThen(gate.open, publish('none')),
+        }),
+        Effect.forkScoped,
+      )
+    }
 
     // What a stopped engine left running is ended and marked interrupted before anything starts;
     // what is still going when this engine ends is written stopped.

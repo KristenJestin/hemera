@@ -702,6 +702,8 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['building.read'](request).pipe(closedAs(gone), observed('building.read', log)),
     'building.task': (request) =>
       engine['building.task'](request).pipe(closedAs(gone), observed('building.task', log)),
+    'building.attempt': (request) =>
+      engine['building.attempt'](request).pipe(closedAs(gone), observed('building.attempt', log)),
     'building.tasksChanged': (request) =>
       engine['building.tasksChanged'](request).pipe(
         streamClosedAs(gone),

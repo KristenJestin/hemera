@@ -21,7 +21,12 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import type { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
-import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import { effectfulActions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { fingerprintFile } from './read.ts'
@@ -149,28 +154,38 @@ export const beginAction = (
     return id
   })
 
-/** Writes the outcome of an action whose intent is `started`. */
-const settle = (id: string, state: 'done' | 'failed', outcome: string) =>
+/** What else an outcome's transaction writes: a write's attribution to its task (#142). */
+export type WithOutcome = (transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>
+
+/** Writes the outcome of an action whose intent is `started`, and what goes with it. */
+const settle = (
+  id: string,
+  state: 'done' | 'failed',
+  outcome: string,
+  also: WithOutcome = () => Effect.void,
+) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const masked: Masked<string> = secrets.mask(outcome)
     yield* mutate('recording the outcome of an action', (transaction) =>
-      transaction
-        .update(effectfulActions)
-        .set({ state, outcome: masked, endedAt: now() })
-        .where(and(eq(effectfulActions.id, id), eq(effectfulActions.state, 'started')))
-        .returning({ kind: effectfulActions.kind })
-        .pipe(
-          Effect.mapError(refusedWhile('recording the outcome of an action')),
-          Effect.map((rows) => ({
-            result: undefined,
-            events: rows.map((row) => actionEvent(`action.${state}`, id, row.kind)),
-          })),
-        ),
+      Effect.gen(function* () {
+        const rows = yield* transaction
+          .update(effectfulActions)
+          .set({ state, outcome: masked, endedAt: now() })
+          .where(and(eq(effectfulActions.id, id), eq(effectfulActions.state, 'started')))
+          .returning({ kind: effectfulActions.kind })
+          .pipe(Effect.mapError(refusedWhile('recording the outcome of an action')))
+        if (rows.length > 0) yield* also(transaction)
+        return {
+          result: undefined,
+          events: rows.map((row) => actionEvent(`action.${state}`, id, row.kind)),
+        }
+      }),
     )
   })
 
-export const actionDone = (id: string, result: string) => settle(id, 'done', result)
+export const actionDone = (id: string, result: string, also?: WithOutcome) =>
+  settle(id, 'done', result, also)
 export const actionFailed = (id: string, reason: string) => settle(id, 'failed', reason)
 
 type ActionRow = typeof effectfulActions.$inferSelect
@@ -308,7 +323,11 @@ export class EffectfulActions extends Context.Service<
       owner: ActionOwner,
       details: Schema.JsonObject,
     ) => Effect.Effect<string, DatabaseError>
-    readonly done: (id: string, result: string) => Effect.Effect<void, DatabaseError>
+    readonly done: (
+      id: string,
+      result: string,
+      also?: WithOutcome,
+    ) => Effect.Effect<void, DatabaseError>
     readonly failed: (id: string, reason: string) => Effect.Effect<void, DatabaseError>
   }
 >()('EffectfulActions') {}
@@ -317,7 +336,7 @@ export const effectfulActionsLayer = Layer.effect(
   EffectfulActions,
   Effect.map(Effect.context<Database | DomainEvents | Secrets>(), (context) => ({
     begin: (kind, owner, details) => Effect.provide(beginAction(kind, owner, details), context),
-    done: (id, result) => Effect.provide(actionDone(id, result), context),
+    done: (id, result, also) => Effect.provide(actionDone(id, result, also), context),
     failed: (id, reason) => Effect.provide(actionFailed(id, reason), context),
   })),
 )

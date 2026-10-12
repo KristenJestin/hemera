@@ -27,7 +27,12 @@ import {
   chooseBuilderModel,
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
-import { buildingOf, buildingTaskChanges, buildingTaskOf } from './building/tasks.ts'
+import {
+  buildingAttemptOf,
+  buildingOf,
+  buildingTaskChanges,
+  buildingTaskOf,
+} from './building/tasks.ts'
 import type { StartedProfile } from './profile.ts'
 import {
   addRepository,
@@ -757,6 +762,8 @@ export const engineHandlers = (
       use(buildingOf(missionId)).pipe(observed('building.read', log)),
     'building.task': ({ missionId, taskId }) =>
       use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
+    'building.attempt': ({ missionId, attemptId }) =>
+      use(buildingAttemptOf(missionId, attemptId)).pipe(observed('building.attempt', log)),
     'building.tasksChanged': ({ missionId }) =>
       follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),

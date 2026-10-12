@@ -982,6 +982,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (now - driver.lastSign < limit) continue
           // A silent command that just ended is as recent a sign as the agent's own.
           if (now - (yield* commandSign(driver.session.id, now)) < limit) continue
+          // So is a write or a command waiting for another task's write lock (#142).
+          if (yield* post.lockWaiting(driver.session.id)) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
           // Told to whoever follows the session's role (a Probe's chip, #89).

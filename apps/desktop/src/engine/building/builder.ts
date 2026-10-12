@@ -20,8 +20,6 @@
  *   one the resume block. Cancel ends the Building as cancelled; the work stays.
  */
 
-import { realpathSync } from 'node:fs'
-
 import {
   type Amendment,
   DecisionFields,
@@ -61,6 +59,8 @@ import {
 } from '../needs.ts'
 import { basesAt, liveIn, placeOf, planRows, targetProblem } from '../planning/plan.ts'
 import { Secrets } from '../secrets.ts'
+import type { Git } from '../git.ts'
+import type { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
 import { assignWorkIn } from '../sessions/leases.ts'
 import { type RoleSession, getSession, sessionsIn } from '../sessions/store.ts'
@@ -81,16 +81,21 @@ import {
   missions,
 } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
+import type { EffectfulAction } from '../tools/actions.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
 import type { GuardedCall } from '../tools/ports.ts'
 import { mutate } from '../transaction.ts'
 import type { ProjectServices } from '../repositories.ts'
 import { type Preparations, getWorkspace } from '../workspaces.ts'
 import { readyLine, readySaid } from './builder-role.ts'
+import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
+import { writeLocks } from './locks.ts'
+import { buildingLoop, fileOf, runningOf } from './loop.ts'
 import { BuildingStart } from './launch.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
 import {
+  attemptFiles,
   type BuildingBase,
   type BuildingRow,
   NeedCause,
@@ -122,31 +127,9 @@ import {
 } from './tasks.ts'
 
 export { BuildingStart } from './launch.ts'
+export { TaskVerdict, noCheckVerdict, type TaskJudgement, type VerdictAsked } from './checks.ts'
 export { buildingOf } from './tasks.ts'
-
-/** What a verdict is asked about: one finished attempt of a task. */
-export interface VerdictAsked {
-  readonly missionId: string
-  readonly buildingId: string
-  readonly taskId: string
-  readonly attemptId: string
-}
-
-/** What the verdict says: verified, done without a check, or still being judged. */
-export type TaskJudgement = 'verified' | 'not-verified' | 'pending'
-
-/**
- * Where a finished task is judged: #142 fills it with attribution and the verdict loop. Until
- * then, no check: the task is done, not verified.
- */
-export class TaskVerdict extends Context.Service<
-  TaskVerdict,
-  { readonly judge: (asked: VerdictAsked) => Effect.Effect<TaskJudgement> }
->()('TaskVerdict') {}
-
-export const noCheckVerdict = Layer.succeed(TaskVerdict, {
-  judge: () => Effect.succeed('not-verified' as const),
-})
+export { inRepository } from './loop.ts'
 
 /**
  * Where a Building goes once every task of its effective plan is done or skipped, called once:
@@ -187,6 +170,9 @@ type Needs =
   | Sessions
   | Snapshots
   | TaskVerdict
+  | TaskChecks
+  | Git
+  | SessionPost
   | BuildingEnd
   | BuildDesk
   | AutomationGate
@@ -218,41 +204,6 @@ const notAvailableSaid = (task: TaskNow): string => {
 
 const listed = (ids: ReadonlyArray<string>): string =>
   ids.length <= 1 ? (ids[0] ?? '') : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1) ?? ''}`
-
-/**
- * A path of a repository of the Workspace, or null when it is in none. Both sides are real paths;
- * on Windows the case of their letters does not tell two paths apart.
- */
-export const inRepository = (
-  repositories: ReadonlyArray<{ readonly repository: string; readonly folder: string }>,
-  resolved: string,
-  platform: NodeJS.Platform = process.platform,
-): { readonly repository: string; readonly path: string } | null => {
-  const separator = platform === 'win32' ? '\\' : '/'
-  const folded = (path: string) => (platform === 'win32' ? path.toLowerCase() : path)
-  const at = folded(resolved)
-  const found = repositories
-    .toSorted((a, b) => b.folder.length - a.folder.length)
-    .find((one) => at.startsWith(`${folded(one.folder)}${separator}`))
-  return found === undefined
-    ? null
-    : {
-        repository: found.repository,
-        path: resolved
-          .slice(found.folder.length + 1)
-          .split(separator)
-          .join('/'),
-      }
-}
-
-/** A folder as the file tools resolve paths: its real path, or as written when it is gone. */
-const realFolder = (folder: string): string => {
-  try {
-    return realpathSync.native(folder)
-  } catch {
-    return folder
-  }
-}
 
 /**
  * Why a need cannot hold these tasks: one done or skipped is over, one being checked waits for its
@@ -308,6 +259,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
     // An environment need holds until the user's Retry says it is fixed.
     recheck: (_need, retried) => Effect.succeed(!retried),
   }
+  let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
+  /** A command a stop cut in the middle, taken by the Building when its mission builds (#142). */
+  const cut = (action: EffectfulAction) =>
+    takeCut === null ? Effect.succeed(false) : takeCut(action)
   const layer = Layer.effect(
     BuildingStart,
     Effect.gen(function* () {
@@ -318,6 +273,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       const lock = yield* Semaphore.make(1)
       /** The interval this engine counts for each active Building, by its id. */
       const counting = new Map<string, string>()
+      // Attempts, attribution and the verdict loop (#142).
+      const loop = buildingLoop({
+        needs: BUILDER_NEEDS,
+        locks: writeLocks(),
+        said,
+        hold,
+        deliver: (building, target, kind, body) => deliverTo(building, target, kind, body),
+      })
+      takeCut = (action) =>
+        loop.cut(action).pipe(
+          provided,
+          Effect.catchCause((cause) =>
+            Effect.as(said(`a command cut by a stop was not handed over: ${String(cause)}`), false),
+          ),
+        )
 
       const missionRowOf = (missionId: string) =>
         Effect.gen(function* () {
@@ -559,7 +529,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           (active) => active?.id === building.id,
         )
 
-      /** A finished task judged: done once the verdict says so, then what that lets on. */
+      /**
+       * A finished task judged: done once the verdict says so, then what that lets on; a red one
+       * opens its next attempt, or at the third stops it (#142). Answers the verdict and, for a
+       * red, what its runner is told.
+       */
       const judge = (building: BuildingRow, taskId: string, attemptId: string) =>
         Effect.gen(function* () {
           const judgement = yield* TaskVerdict.use((port) =>
@@ -570,19 +544,23 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               attemptId,
             }),
           )
-          if (judgement === 'pending') return judgement
+          if (judgement === 'pending') return { judgement, said: null }
+          if (judgement === 'red') {
+            return { judgement, said: yield* loop.redTask(building, taskId, attemptId) }
+          }
           yield* hold('judging')
           const done = yield* mutate('judging a task', (transaction) =>
             Effect.gen(function* () {
-              if (!(yield* stillActive(transaction, building))) return { result: false, events: [] }
+              if (!(yield* stillActive(transaction, building))) return { result: null, events: [] }
               const task = taskIn(yield* tasksIn(transaction, building.id), taskId)
-              if (task?.state !== 'checking') return { result: false, events: [] }
+              if (task?.state !== 'checking') return { result: null, events: [] }
               const verified = judgement === 'verified'
               yield* moveIn(transaction, building.id, task, 'done', { verified })
               const settledNow = yield* settleIn(transaction, building)
               return {
                 result: settledNow.done,
                 events: [
+                  ...(verified ? [loop.greenEvent(building.missionId, taskId)] : []),
                   buildingEvent(building.missionId, 'building.task_done', {
                     task: taskId,
                     verified,
@@ -592,8 +570,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }),
           )
+          if (done === null) return { judgement, said: null }
+          yield* loop.commitTask(building, taskId)
           if (done) yield* ended(building)
-          return judgement
+          return { judgement, said: null }
         })
 
       const read = (grant: Grant, args: ToolArguments<'build_read'>) =>
@@ -612,10 +592,18 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               [
                 planLine(task),
                 task.runner === null ? null : `Runner: ${task.runner}.`,
-                ...own.map(
-                  (one) =>
-                    `Attempt ${String(one.number)}: ${one.endedAt === null ? 'open' : (one.outcome ?? 'ended')}${one.summary === null ? '' : ` — ${one.summary}`}${one.outside === '[]' ? '' : `; changed outside its targets: ${one.outside}`}`,
-                ),
+                ...own.map((one) => {
+                  const files = Option.getOrElse(attemptFiles.read(one.files), () => [])
+                  return [
+                    `Attempt ${String(one.number)}: ${one.endedAt === null ? 'open' : (one.outcome ?? 'ended')}`,
+                    one.verdict === null ? '' : `, ${one.verdict.replace('_', ' ')}`,
+                    one.summary === null ? '' : ` — ${one.summary}`,
+                    files.length === 0
+                      ? ''
+                      : `; wrote ${files.map((file) => `${file.repository}/${file.path}`).join(', ')}`,
+                    one.outside === '[]' ? '' : `; changed outside its targets: ${one.outside}`,
+                  ].join('')
+                }),
               ]
                 .filter((line) => line !== null)
                 .join('\n'),
@@ -802,6 +790,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const attemptId = attempt?.id ?? crypto.randomUUID()
           const ends = yield* Effect.result(snapshotOf(building, attemptId, 'end'))
           if (Result.isFailure(ends)) return yield* snapshotRefused(building, ends.failure, 'end')
+          // The attempt's diff is what was written under its name, never its whole interval.
+          const found = yield* Effect.result(
+            attempt === null
+              ? Effect.succeed({ files: [], nobody: [] })
+              : loop.attemptFilesOf(building, task, attempt, ends.success),
+          )
+          if (Result.isFailure(found)) {
+            if (!Predicate.isTagged(found.failure, 'SnapshotFailed')) {
+              return yield* Effect.fail(found.failure)
+            }
+            return yield* snapshotRefused(building, found.failure, 'end')
+          }
+          const files = found.success
           const secrets = yield* Secrets
           yield* hold('finishing')
           const written = yield* mutate('finishing a task', (transaction) =>
@@ -829,6 +830,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 })
                 .where(eq(buildingAttempts.id, attemptId))
                 .pipe(Effect.mapError(refusedWhile('ending the attempt')))
+              yield* loop.keepFilesIn(transaction, building, attemptId, files)
               yield* transaction
                 .delete(buildingClaims)
                 .where(
@@ -855,7 +857,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (written !== null) return written
-          const judgement = yield* judge(building, task.id, attemptId)
+          const { judgement, said: red } = yield* judge(building, task.id, attemptId)
+          if (red !== null) return answered(red)
           return answered(
             judgement === 'pending'
               ? `${task.id} is being checked: Hemera tells you the verdict.`
@@ -1110,7 +1113,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       /**
        * A write of a mission's session: refused when another running task holds the file, naming
-       * it; recorded in the writer's open attempts when it is outside their targets.
+       * it; recorded in the writer's open attempts when it is outside their targets; held while
+       * another task's command holds the write lock there, then let on with what it waited for.
        */
       const claim = (call: GuardedCall) =>
         Effect.gen(function* () {
@@ -1119,13 +1123,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null) return null
-          const file = inRepository(
-            basesOf(building).map((base) => ({
-              repository: base.repository,
-              folder: realFolder(base.folder),
-            })),
-            call.path.resolved,
-          )
+          const file = fileOf(building, call.path.resolved)
           if (file === null) return null
           const writer = yield* getSession(call.session.sessionId)
           const named = `${file.repository}/${file.path}`
@@ -1137,15 +1135,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             const title = taskIn(tasks, held.taskId)?.title ?? ''
             return `refused: ${named} is held by ${held.taskId} (${title}), which runs now: leave it, or wait for ${held.taskId}.`
           }
-          const running = tasks.filter(
-            (task) => task.state === 'in_progress' && task.runner === writer.lineage,
-          )
+          const running = runningOf(tasks, writer.lineage)
           const targeted = running.some((task) =>
             task.targets.some(
               (one) => one.repository === file.repository && one.path === file.path,
             ),
           )
-          if (running.length === 0 || targeted) return null
+          const waited = () => loop.waitForLock(building, writer.id, writer.lineage, tasks, file)
+          if (running.length === 0 || targeted) return yield* waited()
           yield* mutate('recording a write outside the targets', (transaction) =>
             Effect.gen(function* () {
               for (const task of running) {
@@ -1161,7 +1158,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               return { result: undefined, events: [] }
             }),
           )
-          return null
+          return yield* waited()
         }).pipe(
           provided,
           // A claim that cannot be checked refuses the write rather than let it through.
@@ -1194,12 +1191,46 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           finished: answering(finished),
           blocked: answering(blocked),
           need: answering(need),
+          propose: answering(loop.propose),
           summary: answering(summary),
           claim,
+          attribution: {
+            written: (file) => (transaction) => loop.attribution.written(file)(transaction),
+            command: (asked) =>
+              loop.attribution.command(asked).pipe(
+                provided,
+                Effect.catchCause((cause) =>
+                  Effect.as(said(`a command was not watched: ${String(cause)}`), null),
+                ),
+              ),
+          },
+          judgeScope: (missionId, scope, subject) =>
+            loop.judgeScope(missionId, scope, subject).pipe(provided, Effect.orDie),
         }),
       )
 
       // ---- What the Builder is told.
+
+      /** A delivery to a lineage of the mission, or to its Builder, kept until it is taken. */
+      function deliverTo(
+        building: BuildingRow,
+        target: { readonly lineage: string } | { readonly role: string },
+        kind: string,
+        body: string,
+      ) {
+        return Sessions.use((sessions) =>
+          sessions.deliver({
+            owner: { kind: 'mission', missionId: building.missionId },
+            target,
+            kind,
+            body,
+          }),
+        ).pipe(
+          Effect.asVoid,
+          Effect.catchTag('DeliveryKindRefused', (refused) => said(refused.message)),
+          provided,
+        )
+      }
 
       /** A delivery to the mission's Builder, kept until a Builder takes it. */
       function deliver(building: BuildingRow, kind: string, body: string) {
@@ -1282,10 +1313,15 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             })
             .where(eq(buildingDecisions.id, decision.id))
             .pipe(Effect.mapError(refusedWhile('keeping the answer')))
+          // After three reds, the answer is the next attempt's direction: the count restarts.
+          if (decision.kind === 'error')
+            yield* loop.answeredErrorIn(transaction, building, decision)
           yield* unblockIn(transaction, building, answeredNeed.id)
           const settledNow = yield* settleIn(transaction, building)
           return [
             buildingEvent(building.missionId, 'building.decision', {
+              kind: decision.kind,
+              runner: decision.proposer,
               question: decision.question,
               answer: secrets.mask(answer ?? ''),
               amendment:
@@ -1366,6 +1402,22 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null || payload === undefined) return
+          const runner = Option.getOrNull(readString(payload['runner']))
+          if (payload['kind'] === 'error') {
+            const tasks = Array.isArray(payload['tasks']) ? payload['tasks'].map(String) : []
+            yield* deliverTo(
+              building,
+              runner === null ? { role: 'builder' } : { lineage: runner },
+              'answer',
+              [
+                `The user answered your three reds${tasks.length === 0 ? '' : ` on ${listed(tasks)}`}: ${String(payload['answer'] ?? '')}`,
+                tasks.length === 0
+                  ? 'Take it as the direction of your next attempt.'
+                  : `Take it as the direction of the next attempt: start ${listed(tasks)} again with task_start.`,
+              ].join('\n'),
+            )
+            return
+          }
           const amendment = Option.getOrNull(readString(payload['amendment']))
           yield* deliver(
             building,
@@ -1420,6 +1472,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       // checking, says it resumed, and has its Builder.
       const resume = Effect.gen(function* () {
         for (const building of yield* activeBuildings) {
+          // What a stop cut in the middle, before anything acts again (CT-09).
+          yield* loop
+            .restarted(building)
+            .pipe(
+              Effect.catchCause((cause) =>
+                said(`the actions a stop left were not handed over: ${String(cause)}`),
+              ),
+            )
           const checking = yield* mutate('resuming the Building', (transaction) =>
             Effect.gen(function* () {
               yield* countIn(transaction, building.id)
@@ -1497,5 +1557,5 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       }
     }),
   )
-  return { layer, handler }
+  return { layer, handler, cut }
 }
