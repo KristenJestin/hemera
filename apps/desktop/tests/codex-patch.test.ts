@@ -300,3 +300,76 @@ describe('A bare Codex offers only hemera_* tools', () => {
     }
   })
 })
+
+describe('A judge session of Codex has no tool at all', () => {
+  test('no environment, no dynamic tool, and a tool call refused without reaching any server', async () => {
+    const folder = temporaryFolder('codex-patch-judge')
+    const log = join(folder, 'app-server.jsonl')
+    const judging = codex.judgeOptions({ agentDirectory: folder, instructions: 'Rate it.' })
+    const adapter = spawn(process.execPath, [ADAPTER_ENTRY], {
+      cwd: ROOT,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: {
+        ...process.env,
+        ...judging.env,
+        CODEX_PATH: fakeCodex(folder),
+        FAKE_APP_SERVER_LOG: log,
+      },
+    })
+    const output = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        adapter.stdout.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)))
+        adapter.stdout.on('end', () => controller.close())
+      },
+    })
+    try {
+      const connection = new ClientSideConnection(
+        () => ({
+          sessionUpdate: async () => undefined,
+          requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        }),
+        ndJsonStream(Writable.toWeb(adapter.stdin), output),
+      )
+      await connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+      const session = await connection.newSession({
+        cwd: folder,
+        mcpServers: [...judging.mcpServers],
+        // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+        _meta: { ...judging.meta },
+      })
+      await connection.prompt({
+        sessionId: session.sessionId,
+        prompt: [{ type: 'text', text: 'Rate this action.' }],
+      })
+
+      const lines = readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => Schema.decodeUnknownSync(Logged)(line))
+      const started = Schema.decodeUnknownSync(ThreadStart)(
+        lines.find((one) => one.method === 'thread/start')?.params,
+      )
+      expect(judging.mcpServers).toEqual([])
+      expect(started.environments).toEqual([])
+      expect(started.dynamicTools).toEqual([])
+      expect(started.config.mcp_servers).toEqual({ user_server: { enabled: false } })
+      expect(started.config.features.shell_tool).toBe(false)
+      expect(
+        lines
+          .filter((one) => one.method === 'turn/start')
+          .map((one) => Schema.decodeUnknownSync(TurnStart)(one.params).environments),
+      ).toEqual([[]])
+      // The fake Codex calls a Hemera tool anyway: the patch refuses it, with no server to ask.
+      expect(
+        Schema.decodeUnknownSync(ToolAnswer)(lines.find((one) => one.id === 'call')?.result),
+      ).toEqual({
+        success: false,
+        contentItems: [{ type: 'inputText', text: 'No such tool: hemera_fs_read' }],
+      })
+    } finally {
+      const ended = new Promise((resolve) => adapter.once('exit', resolve))
+      adapter.kill()
+      await ended
+    }
+  })
+})

@@ -24,7 +24,7 @@ import { type PlaceContext, placesNamed } from './places.ts'
  * no other level and no setting.
  */
 export const PERMISSION_POLICY = {
-  policyVersion: 1,
+  policyVersion: 2,
   level: 'normal',
   alwaysAskRisk: 2.5,
   askRisk: 1.5,

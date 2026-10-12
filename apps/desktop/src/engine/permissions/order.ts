@@ -172,7 +172,7 @@ interface Decision {
   /** The grant that allowed it. */
   readonly grantId: string | null
   /** How it was settled: by the rules, a grant, the judge now or reused, or asked for want of one. */
-  readonly settled: 'rules' | 'grant' | 'jev' | 'reused' | 'asked'
+  readonly settled: 'rules' | 'grant' | 'jev' | 'agent' | 'reused' | 'asked'
   /** The judge's rating, when one rated it. */
   readonly judged: Judged | null
   /** Why the judge failed, as a safe category, when it did. */
@@ -492,7 +492,11 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               : [
                   `judge=${rating.judge} model=${rating.model} risk=${String(rating.scores.risk)} approval=${String(rating.scores.approval)} userRequested=${String(rating.scores.userRequested)}`,
                 ]),
-            ...(decision.roundTripMs === null ? [] : [`jev=${String(decision.roundTripMs)}ms`]),
+            ...(decision.roundTripMs === null
+              ? []
+              : [
+                  `${decision.settled === 'agent' || (decision.failure?.startsWith('agent ') ?? false) ? 'agent' : 'jev'}=${String(decision.roundTripMs)}ms`,
+                ]),
             ...(decision.failure === null ? [] : [`failure=${decision.failure}`]),
             `settled=${decision.settled} in ${String(latencyMs)}ms`,
           ]

@@ -11,7 +11,8 @@
  * environment on any thread or turn (no shell, no `apply_patch`, no image viewer), Hemera's MCP
  * tools handed to Codex as dynamic tools `hemera_<tool>` and forwarded to Hemera's server as
  * `tools/call` with the bearer token and the call id, the user's MCP servers and skills disabled,
- * no title thread. `CODEX_CONFIG` turns off the rest.
+ * no title thread. `CODEX_CONFIG` turns off the rest. Its judge session is the patch's with no
+ * tool server: no environment and no tool at all.
  */
 
 import { join } from 'node:path'
@@ -19,7 +20,7 @@ import { join } from 'node:path'
 import { Qualified } from '@hemera/ipc'
 
 import type { AgentAdapter } from '../adapter.ts'
-import { HEMERA_SERVER, hemeraServer } from '../bare.ts'
+import { HEMERA_SERVER, firstOffered, hemeraServer } from '../bare.ts'
 
 /** The method Codex announces whether or not the machine is signed in. */
 const ALWAYS_OFFERED = 'api-key'
@@ -85,4 +86,12 @@ export const codex: AgentAdapter = {
     env: { CODEX_CONFIG: JSON.stringify(BARE_CONFIG) },
     systemPromptAs: 'embedded-resource',
   }),
+  // The patch's judge session: no environment, no dynamic tool, no MCP server.
+  judgeOptions: () => ({
+    mcpServers: [],
+    meta: { hemera: { bare: true, toolServer: null } },
+    env: { CODEX_CONFIG: JSON.stringify(BARE_CONFIG) },
+    systemPromptAs: 'embedded-resource',
+  }),
+  judgeModel: (offered) => firstOffered(offered, [/nano/i, /mini/i]),
 }
