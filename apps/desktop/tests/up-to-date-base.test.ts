@@ -146,11 +146,12 @@ describe('Offline, the last tracking ref known is used, with the date of the las
       git(folder, 'update-ref', `refs/remotes/origin/${DEFAULT_BASE_BRANCH}`, 'HEAD')
     })
 
-    const started = Date.now()
     const base = await run(upToDateBase(id)).finally(() => server.close())
 
-    expect(Date.now() - started).toBeLessThan(10_000)
+    // A fetch waiting on a prompt would only end at the read limit, and say so; Git's own refusal
+    // does not. The answer is the same on a slow runner, where a stopwatch would not be.
     expect(freshness(base)).toBe('not fetched since never')
+    expect(base.freshness).toMatchObject({ reason: expect.not.stringContaining('did not answer') })
     expect(base.commit).toBe(git(api, 'rev-parse', 'HEAD'))
   })
 

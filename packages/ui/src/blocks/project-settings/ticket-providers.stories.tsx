@@ -357,7 +357,8 @@ export const BothProviders: Story = {
     await expect(list).toHaveTextContent('acme/api, acme/web')
     await expect(list).toHaveTextContent('SHOP')
     await userEvent.click(within(list).getByRole('button', { name: /github\.com/ }))
-    await expect(await body().findByRole('dialog', { name: 'GitHub · github.com' })).toBeVisible()
+    const dialog = await body().findByRole('dialog', { name: 'GitHub · github.com' })
+    await waitFor(() => expect(dialog).toBeVisible())
     await expect(args.onCheckAgain).not.toHaveBeenCalled()
   },
 }

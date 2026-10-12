@@ -192,7 +192,8 @@ export const ReadThenAnswered: Story = {
   render: (args) => {
     const [answered, setAnswered] = useState(false)
     useEffect(() => {
-      const timer = setTimeout(() => setAnswered(true), 50)
+      // As soon as the field is drawn: the answer lands before anything has settled.
+      const timer = setTimeout(() => setAnswered(true), 0)
       return () => clearTimeout(timer)
     }, [])
     return answered ? (
@@ -212,6 +213,15 @@ export const ReadThenAnswered: Story = {
     await expect(canvas.getByRole('combobox', { name: 'Spec language' })).toHaveTextContent(
       'English',
     )
+    // A select that stops being disabled fades from half to full opacity, and Motion starts that
+    // on the frame after the commit, not in it. The accessibility check runs as soon as the play
+    // ends and reads the colour at that moment: half-faded, the text fails the contrast rule.
+    // The play ends on the settled controls.
+    await waitFor(() => {
+      for (const name of ['Where Specs live', 'Spec language']) {
+        expect(getComputedStyle(canvas.getByRole('combobox', { name })).opacity).toBe('1')
+      }
+    })
   },
 }
 
