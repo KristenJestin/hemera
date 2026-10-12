@@ -176,6 +176,7 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
                 ),
         ),
         Effect.ignore,
+        Effect.andThen(watch === null ? Effect.void : watch.ended),
         Effect.ensuring(watch === null ? Effect.void : watch.finish(run.id)),
         Effect.forkIn(call.scope),
       )

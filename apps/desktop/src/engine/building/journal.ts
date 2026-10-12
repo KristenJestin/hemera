@@ -246,6 +246,48 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
         `${stringOf(payload, 'task')} committed in ${stringOf(payload, 'repository')}: ${stringOf(payload, 'commit').slice(0, 12)}.`,
     ),
   ],
+  [
+    'mission.changed_outside',
+    lineOf(
+      byHemera,
+      (payload) => `Changed outside Hemera: ${stringsOf(payload, 'files').join(', ')}`,
+    ),
+  ],
+  [
+    'mission.overwritten_by_command',
+    lineOf(byHemera, (payload) => {
+      const task = stringOf(payload, 'task')
+      return `\`${stringOf(payload, 'command')}\`${task === '' ? '' : ` of ${task}`} overwrote a change made outside Hemera to ${stringOf(payload, 'file')}; the user’s version is kept.`
+    }),
+  ],
+  [
+    'building.base_moved',
+    lineOf(byHemera, (payload) => {
+      const targeted = stringsOf(payload, 'targeted')
+      return `The base of ${stringOf(payload, 'repository')} moved: ${String(numberOf(payload, 'files'))} file(s) changed, ${targeted.length === 0 ? 'none of them a target' : `${targeted.join(', ')} among the targets`}.`
+    }),
+  ],
+  [
+    'service.started',
+    lineOf(
+      byUser,
+      (payload) => `The user started the service \`${stringOf(payload, 'command')}\`.`,
+    ),
+  ],
+  [
+    'service.stopped',
+    lineOf(
+      byUser,
+      (payload) => `The user stopped the service \`${stringOf(payload, 'command')}\`.`,
+    ),
+  ],
+  [
+    'service.restarted',
+    lineOf(
+      byUser,
+      (payload) => `The user restarted the service \`${stringOf(payload, 'command')}\`.`,
+    ),
+  ],
   ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],
   ['building.tasks_done', lineOf(byHemera, () => 'Every task of the plan is done or skipped.')],
 ])
