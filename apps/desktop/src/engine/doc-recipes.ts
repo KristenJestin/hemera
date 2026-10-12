@@ -3,7 +3,7 @@
  * what each repository of the main checkout holds (only proposed: nothing is saved until the user
  * accepts them), a recipe written, removed or moved.
  *
- * Saving checks the whole recipe first (`docRecipeProblem`), then what only the Project knows: a
+ * Saving checks the whole recipe first (`docRecipeRefusal`), then what only the Project knows: a
  * repository it declares. A refusal carries the sentence the settings show. A running mission never
  * reads these rows: it reads the copy taken at its launch (CT-34).
  */
@@ -17,7 +17,7 @@ import {
   type DocRecipe,
   type DocRecipeApplies,
   type DocRecipeDraft,
-  docRecipeProblem,
+  docRecipeRefusal,
   ROOT_REPOSITORY,
   proposeDocRecipes,
 } from '@hemera/core/domain'
@@ -135,8 +135,10 @@ export const proposedDocRecipes = (projectId: string, asked: boolean) =>
 /** Why a recipe cannot be written in the Project, or nothing. */
 const refusal = (project: Project, draft: DocRecipeDraft) =>
   Effect.gen(function* () {
-    const problem = docRecipeProblem(draft)
-    if (problem !== null) return yield* new DocRecipeRefused({ reason: problem })
+    const problem = docRecipeRefusal(draft)
+    if (problem !== null) {
+      return yield* new DocRecipeRefused({ reason: problem.sentence, field: problem.field })
+    }
     // The Workspace root is always there, a repository of the Project or not.
     if (
       draft.repository !== ROOT_REPOSITORY &&

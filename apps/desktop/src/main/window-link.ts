@@ -15,6 +15,8 @@ import {
   streamClosedAs,
   WindowCoreRpcs,
   EngineApartRpcs,
+  ChecksRpcs,
+  DocRecipesRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -904,5 +906,43 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           streamClosedAs(gone),
           observedStream('mission.changed', log),
         ),
+    }),
+    // The Project's checks (#143) and doc recipes (#146), each a layer of its own.
+    ChecksRpcs.toLayer({
+      'checks.list': (request) =>
+        engine['checks.list'](request).pipe(closedAs(gone), observed('checks.list', log)),
+      'checks.propose': (request) =>
+        engine['checks.propose'](request).pipe(closedAs(gone), observed('checks.propose', log)),
+      'checks.accept': (request) =>
+        engine['checks.accept'](request).pipe(closedAs(gone), observed('checks.accept', log)),
+      'checks.save': (request) =>
+        engine['checks.save'](request).pipe(closedAs(gone), observed('checks.save', log)),
+      'checks.remove': (request) =>
+        engine['checks.remove'](request).pipe(closedAs(gone), observed('checks.remove', log)),
+      'checks.move': (request) =>
+        engine['checks.move'](request).pipe(closedAs(gone), observed('checks.move', log)),
+    }),
+    DocRecipesRpcs.toLayer({
+      'docRecipes.list': (request) =>
+        engine['docRecipes.list'](request).pipe(closedAs(gone), observed('docRecipes.list', log)),
+      'docRecipes.propose': (request) =>
+        engine['docRecipes.propose'](request).pipe(
+          closedAs(gone),
+          observed('docRecipes.propose', log),
+        ),
+      'docRecipes.accept': (request) =>
+        engine['docRecipes.accept'](request).pipe(
+          closedAs(gone),
+          observed('docRecipes.accept', log),
+        ),
+      'docRecipes.save': (request) =>
+        engine['docRecipes.save'](request).pipe(closedAs(gone), observed('docRecipes.save', log)),
+      'docRecipes.remove': (request) =>
+        engine['docRecipes.remove'](request).pipe(
+          closedAs(gone),
+          observed('docRecipes.remove', log),
+        ),
+      'docRecipes.move': (request) =>
+        engine['docRecipes.move'](request).pipe(closedAs(gone), observed('docRecipes.move', log)),
     }),
   )
