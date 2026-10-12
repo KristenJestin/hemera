@@ -192,7 +192,8 @@ export const ReadThenAnswered: Story = {
   render: (args) => {
     const [answered, setAnswered] = useState(false)
     useEffect(() => {
-      const timer = setTimeout(() => setAnswered(true), 50)
+      // As soon as the field is drawn: the answer lands before anything has settled.
+      const timer = setTimeout(() => setAnswered(true), 0)
       return () => clearTimeout(timer)
     }, [])
     return answered ? (
