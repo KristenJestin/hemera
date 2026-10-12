@@ -321,15 +321,20 @@ describe('The update runs with a time limit and an output cap', () => {
   test.skipIf(process.platform === 'win32')(
     'an update past its time limit is stopped',
     async () => {
-      const path = script(`console.log('started'); setTimeout(() => console.log('done'), 10000)`)
+      // The limit runs from the spawn, so it must outlast the child's start-up, or 'started' is never
+      // printed: 2 s is over a hundred times a Node start (about 20 ms), enough for a loaded runner.
+      // The child would run for a minute, so a bound far under it proves it was stopped.
+      const path = script(`console.log('started'); setTimeout(() => console.log('done'), 60000)`)
       const started = Date.now()
       const output = await Effect.runPromise(
         AgentUpdater.use((updater) => updater.run([path])).pipe(
-          Effect.provide(updaterLayer(process.env, 'linux', { timeoutMs: 300, outputChars: 1000 })),
+          Effect.provide(
+            updaterLayer(process.env, 'linux', { timeoutMs: 2_000, outputChars: 1000 }),
+          ),
         ),
       )
       expect(output).toBe('started')
-      expect(Date.now() - started).toBeLessThan(5_000)
+      expect(Date.now() - started).toBeLessThan(20_000)
     },
   )
 })
