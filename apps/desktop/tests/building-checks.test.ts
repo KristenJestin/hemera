@@ -1072,4 +1072,42 @@ describe('A cancel in the middle of the checks', () => {
     expect(seen.results).toEqual([])
     expect(seen.reds).toEqual([])
   })
+  test('Cancel during the end’s checks: judgeScope answers pending, never a result #147 could take as harmless', async () => {
+    const release = join(scripts, 'release-end-cancel')
+    const seen = await checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, (projectId) =>
+            saveCheck(
+              projectId,
+              null,
+              check('build', checkLine('build.log', 0, '-', { release }), { when: 'end' }),
+            ),
+          )
+          yield* builderOf(mission.id)
+          const judging = yield* Effect.forkChild(
+            BuildDesk.use((desk) => desk.judgeScope(mission.id, 'end', null)),
+          )
+          const database = yield* Database
+          const running = Effect.map(
+            database.select({ state: commandRuns.state }).from(commandRuns),
+            (rows) => rows.map((row) => row.state),
+          )
+          yield* until(Effect.map(running, (states) => states.includes('running')))
+          yield* moveMission(mission.id, 'cancel', 'user')
+          return {
+            answer: yield* Fiber.join(judging),
+            outcomes: yield* database
+              .select({ outcome: buildingAttempts.outcome, endedAt: buildingAttempts.endedAt })
+              .from(buildingAttempts),
+          }
+        }),
+      ),
+    )
+    writeFileSync(release, '')
+    expect(seen.answer).toBe('pending')
+    // The end's attempt is left as it was: no verdict, not ended.
+    expect(seen.outcomes).toEqual([{ outcome: null, endedAt: null }])
+  })
 })

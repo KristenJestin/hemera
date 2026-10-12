@@ -36,13 +36,14 @@ export interface BuildWork {
   readonly attribution: WriteAttribution['Service']
   /**
    * The checks of a requirement or of the end asked through `TaskChecks` (#143, #147): a red opens
-   * an attempt on that scope, handed to the Builder, without changing any task's state.
+   * an attempt on that scope, handed to the Builder, without changing any task's state. Pending
+   * when the user cancelled the mission while they ran: there is no verdict.
    */
   readonly judgeScope: (
     missionId: string,
     scope: 'requirement' | 'end',
     subject: string | null,
-  ) => Effect.Effect<AttemptResult>
+  ) => Effect.Effect<AttemptResult | 'pending'>
   /**
    * A check's run in the mission's Building (#143), on the write locks of its repositories: null
    * when the mission has no active Building.
