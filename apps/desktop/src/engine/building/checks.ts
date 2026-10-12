@@ -87,7 +87,11 @@ export class TaskChecks extends Context.Service<
 export const noTaskChecks = Layer.succeed(TaskChecks, { run: () => Effect.succeed([]) })
 
 /** Asks the checks about an attempt and keeps what they said on it; answers the results. */
-export const checkAttempt = (asked: Omit<ChecksAsked, 'files'>) =>
+export const checkAttempt = (
+  asked: Omit<ChecksAsked, 'files'>,
+  /** The files to judge when they are not the attempt's own: a scope's, its tasks'. */
+  given?: ChecksAsked['files'],
+) =>
   Effect.gen(function* () {
     const database = yield* Database
     // An attempt judged before a restart is not judged twice: its verdict and results stand.
@@ -100,10 +104,12 @@ export const checkAttempt = (asked: Omit<ChecksAsked, 'files'>) =>
     if (known !== undefined) {
       return { verdict: known, results: yield* checkResultsIn(database, asked.attemptId) }
     }
-    const files = (yield* attributedIn(database, asked.attemptId)).map((one) => ({
-      repository: one.repository,
-      path: one.path,
-    }))
+    const files =
+      given ??
+      (yield* attributedIn(database, asked.attemptId)).map((one) => ({
+        repository: one.repository,
+        path: one.path,
+      }))
     const results = yield* TaskChecks.use((checks) => checks.run({ ...asked, files }))
     const verdict = attemptResult(results.map((one) => one.verdict))
     const secrets = yield* Secrets

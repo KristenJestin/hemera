@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "2987d5b8-ec85-447f-b9fc-8c61064877cc",
+  "id": "574db79b-a98a-4007-a929-2733e1a607d4",
   "prevIds": ["76b107db-0540-4a4a-bf34-6b0ed16500ab"],
   "ddl": [
     {
@@ -1481,6 +1481,26 @@
       "default": null,
       "generated": null,
       "name": "proposer",
+      "entityType": "columns",
+      "table": "building_decisions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "building_decisions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "subject",
       "entityType": "columns",
       "table": "building_decisions"
     },

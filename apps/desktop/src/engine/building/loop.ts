@@ -74,7 +74,7 @@ import {
   recordWriteIn,
   writesIn,
 } from './attempts.ts'
-import { TaskChecks, checkAttempt } from './checks.ts'
+import { checkAttempt } from './checks.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { type ChangedFile, Snapshots } from './snapshots.ts'
 import {
@@ -760,6 +760,8 @@ export const buildingLoop = (parts: LoopParts) => {
       readonly question: string
       readonly options: ReadonlyArray<string>
       readonly proposer: string | null
+      /** The scope whose reds the need stops, for a scope's error need; null otherwise. */
+      readonly scope: { readonly scope: string; readonly subject: string | null } | null
     },
   ) =>
     Effect.gen(function* () {
@@ -781,6 +783,8 @@ export const buildingLoop = (parts: LoopParts) => {
           requestedBy: 'hemera',
           requestedAt: now(),
           proposer: asked.proposer,
+          scope: asked.scope?.scope ?? null,
+          subject: asked.scope?.subject ?? null,
         })
         .pipe(Effect.mapError(refusedWhile('keeping the decision')))
       const blocked = yield* blockIn(
@@ -889,6 +893,7 @@ export const buildingLoop = (parts: LoopParts) => {
               question,
               options: [],
               proposer: runner.lineage,
+              scope: null,
             })
             const settledNow = yield* settleIn(transaction, building)
             return {
@@ -1038,69 +1043,91 @@ export const buildingLoop = (parts: LoopParts) => {
       const all = (yield* attemptsIn(database, building.id)).filter(
         (one) => one.taskId === null && one.scope === scope && one.subject === subject,
       )
-      const open = all.findLast((one) => one.endedAt === null) ?? null
+      // While the user is asked about this scope's three reds, nothing more is opened or asked.
+      const [asking] = yield* database
+        .select({ id: buildingDecisions.id })
+        .from(buildingDecisions)
+        .where(
+          and(
+            eq(buildingDecisions.buildingId, building.id),
+            eq(buildingDecisions.kind, 'error'),
+            eq(buildingDecisions.state, 'pending'),
+            eq(buildingDecisions.scope, scope),
+            subject === null
+              ? isNull(buildingDecisions.subject)
+              : eq(buildingDecisions.subject, subject),
+          ),
+        )
+        .pipe(Effect.mapError(refusedWhile('reading the decisions')))
+      if (asking !== undefined) return 'red' satisfies AttemptResult
       const tasks = yield* tasksIn(database, building.id)
       const covering = tasks.filter(
         (task) => scope === 'end' || (subject !== null && task.requirements.includes(subject)),
       )
-      let verdict: AttemptResult
-      let results: ReadonlyArray<{
-        readonly name: string
-        readonly place: string
-        readonly verdict: string
-        readonly detail: string
-        readonly outputTail: string
-      }>
-      if (open !== null) {
-        const judged = yield* checkAttempt({
-          missionId,
-          buildingId: building.id,
-          scope,
-          subject,
-          attemptId: open.id,
-        })
-        verdict = judged.verdict
-        results = judged.results
-        yield* mutate('ending a scope attempt', (transaction) =>
-          transaction
-            .update(buildingAttempts)
-            .set({ endedAt: now(), outcome: verdict })
-            .where(eq(buildingAttempts.id, open.id))
-            .pipe(
-              Effect.mapError(refusedWhile('ending the attempt')),
-              Effect.as({ result: undefined, events: [] }),
-            ),
+      const files: Array<{ repository: string; path: string }> = []
+      for (const attempt of (yield* attemptsIn(database, building.id)).filter((one) =>
+        covering.some((task) => task.id === one.taskId),
+      )) {
+        files.push(
+          ...(yield* attributedIn(database, attempt.id)).map((one) => ({
+            repository: one.repository,
+            path: one.path,
+          })),
         )
-      } else {
-        const files: Array<{ repository: string; path: string }> = []
-        for (const attempt of (yield* attemptsIn(database, building.id)).filter((one) =>
-          covering.some((task) => task.id === one.taskId),
-        )) {
-          files.push(
-            ...(yield* attributedIn(database, attempt.id)).map((one) => ({
-              repository: one.repository,
-              path: one.path,
-            })),
-          )
-        }
-        const ran = yield* TaskChecks.use((checks) =>
-          checks.run({ missionId, buildingId: building.id, scope, subject, attemptId: '', files }),
-        )
-        results = ran
-        verdict = ran.some((one) => one.verdict === 'red')
-          ? 'red'
-          : ran.some((one) => one.verdict === 'green')
-            ? 'green'
-            : 'not_verified'
       }
+      const builder = yield* builderLineage(missionId)
+      // Each judgement is on an attempt of the scope, the first one included, so every red keeps
+      // its results: the one open for the Builder, or one opened for this judgement.
+      const open =
+        all.findLast((one) => one.endedAt === null) ??
+        (yield* mutate('opening a scope attempt', (transaction) =>
+          Effect.gen(function* () {
+            const row = {
+              id: crypto.randomUUID(),
+              buildingId: building.id,
+              taskId: null,
+              scope,
+              subject,
+              number: all.length + 1,
+              runner: builder ?? 'builder',
+              epoch: 0,
+              starts: '[]',
+              startedAt: now(),
+              outside: '[]',
+            }
+            const [inserted] = yield* transaction
+              .insert(buildingAttempts)
+              .values(row)
+              .returning()
+              .pipe(Effect.mapError(refusedWhile('opening the attempt')))
+            return { result: inserted, events: [] }
+          }),
+        ))
+      if (open === undefined) return 'not_verified' satisfies AttemptResult
+      const judged = yield* checkAttempt(
+        { missionId, buildingId: building.id, scope, subject, attemptId: open.id },
+        files,
+      )
+      const verdict = judged.verdict
+      const results = judged.results
+      yield* mutate('ending a scope attempt', (transaction) =>
+        transaction
+          .update(buildingAttempts)
+          .set({ endedAt: now(), outcome: verdict })
+          .where(eq(buildingAttempts.id, open.id))
+          .pipe(
+            Effect.mapError(refusedWhile('ending the attempt')),
+            Effect.as({ result: undefined, events: [] }),
+          ),
+      )
       if (verdict !== 'red') return verdict
       const label = scope === 'end' ? 'The end of the Building' : `${subject ?? ''}'s checks`
-      // The red that opened the first attempt counts, then each attempt judged red.
-      const judgedRed = all.filter(
-        (one) => one.counted && (one.verdict === 'red' || one.id === open?.id),
-      )
-      const reds = judgedRed.length + 1
-      const builder = yield* builderLineage(missionId)
+      // Every counted attempt judged red, this one included.
+      const judgedRed = [
+        ...all.filter((one) => one.counted && one.verdict === 'red' && one.id !== open.id),
+        open,
+      ]
+      const reds = judgedRed.length
       const target = builder === null ? { role: 'builder' } : { lineage: builder }
       const first = results.find((one) => one.verdict === 'red')
       if (reds >= REDS_BEFORE_A_NEED) {
@@ -1120,6 +1147,7 @@ export const buildingLoop = (parts: LoopParts) => {
               question,
               options: [],
               proposer: builder,
+              scope: { scope, subject },
             })
             return {
               result: made.needId,
@@ -1162,7 +1190,7 @@ export const buildingLoop = (parts: LoopParts) => {
           (tree) => ({ repository: base.repository, tree }),
         ),
       )
-      const number = all.length + 1
+      const number = Math.max(all.length, open.number) + 1
       yield* mutate('opening a scope attempt', (transaction) =>
         Effect.gen(function* () {
           yield* transaction
@@ -1259,7 +1287,11 @@ export const buildingLoop = (parts: LoopParts) => {
   const answeredErrorIn = (
     transaction: EngineTransaction,
     building: BuildingRow,
-    decision: { readonly tasks: string; readonly question: string },
+    decision: {
+      readonly tasks: string
+      readonly scope: string | null
+      readonly subject: string | null
+    },
   ) =>
     Effect.gen(function* () {
       const tasks = Option.getOrElse(
@@ -1268,17 +1300,24 @@ export const buildingLoop = (parts: LoopParts) => {
         ),
         () => [],
       )
+      // A task's reds, or the reds of the one scope the need stopped: never another scope's.
+      const which =
+        tasks.length > 0
+          ? inArray(buildingAttempts.taskId, [...tasks])
+          : decision.scope === null
+            ? null
+            : and(
+                isNull(buildingAttempts.taskId),
+                eq(buildingAttempts.scope, decision.scope),
+                decision.subject === null
+                  ? isNull(buildingAttempts.subject)
+                  : eq(buildingAttempts.subject, decision.subject),
+              )
+      if (which === null) return
       yield* transaction
         .update(buildingAttempts)
         .set({ counted: false })
-        .where(
-          tasks.length === 0
-            ? and(eq(buildingAttempts.buildingId, building.id), isNull(buildingAttempts.taskId))
-            : and(
-                eq(buildingAttempts.buildingId, building.id),
-                inArray(buildingAttempts.taskId, [...tasks]),
-              ),
-        )
+        .where(and(eq(buildingAttempts.buildingId, building.id), which))
         .pipe(Effect.mapError(refusedWhile('counting the reds again')))
     })
 
@@ -1470,6 +1509,7 @@ export const buildingLoop = (parts: LoopParts) => {
               question,
               options: ['it ran', 'it did not run'],
               proposer: null,
+              scope: null,
             })
             return { result: undefined, events: [event, ...made.events] }
           }),

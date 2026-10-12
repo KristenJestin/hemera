@@ -56,6 +56,8 @@ ALTER TABLE `building_attempts` ADD `verdict` text;--> statement-breakpoint
 ALTER TABLE `building_attempts` ADD `counted` integer DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE `building_attempts` ADD `files` text DEFAULT '[]' NOT NULL;--> statement-breakpoint
 ALTER TABLE `building_decisions` ADD `proposer` text;--> statement-breakpoint
+ALTER TABLE `building_decisions` ADD `scope` text;--> statement-breakpoint
+ALTER TABLE `building_decisions` ADD `subject` text;--> statement-breakpoint
 CREATE INDEX `attempt_writes_of_attempt` ON `attempt_writes` (`attempt_id`);--> statement-breakpoint
 CREATE INDEX `attempt_writes_of_building` ON `attempt_writes` (`building_id`,`repository`,`path`);--> statement-breakpoint
 CREATE INDEX `building_check_results_of_attempt` ON `building_check_results` (`attempt_id`);--> statement-breakpoint

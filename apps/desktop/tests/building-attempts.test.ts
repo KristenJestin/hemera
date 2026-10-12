@@ -690,7 +690,7 @@ describe('The verdict loop', () => {
     expect(seen.reds).toHaveLength(1)
   })
 
-  test('a red at requirement scope opens an attempt on that scope for the Builder and changes no task state', async () => {
+  test('a red at requirement scope keeps its attempt, opens the next on that scope for the Builder, and changes no task state', async () => {
     const checks = checksSaying((asked) => (asked.scope === 'requirement' ? [red('e2e', '')] : []))
     const { run } = builderEngine(data, work, { checks })
     const seen = await run(({ profile }) =>
@@ -716,9 +716,12 @@ describe('The verdict loop', () => {
     expect(seen.after.tasks.map((task) => task.state)).toEqual(
       seen.before.tasks.map((task) => task.state),
     )
+    // The first red keeps its own attempt and results; the next one is open for the Builder.
     expect(seen.after.scopes).toMatchObject([
-      { scope: 'requirement', subject: 'R1', number: 1, verdict: null },
+      { scope: 'requirement', subject: 'R1', number: 1, verdict: 'red' },
+      { scope: 'requirement', subject: 'R1', number: 2, verdict: null },
     ])
+    expect(seen.after.scopes[0]?.checks[0]).toMatchObject({ name: 'e2e', verdict: 'red' })
     expect(seen.delivered[0]?.body).toContain('e2e')
     expect(seen.delivered[0]?.body).toContain('the Workspace root')
   })
@@ -842,6 +845,89 @@ describe('Three reds become an error need', () => {
       ),
     )
     expect(refused).toBe('refused: this need is not an error need you were asked to fill.')
+  })
+})
+
+describe('Three reds on a scope', () => {
+  /** The error needs of a mission that wait for the user. */
+  const errorNeedsOf = (missionId: string) =>
+    Effect.map(getMission(missionId), (mission) =>
+      mission.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+    )
+
+  test('the third red of a requirement’s checks gives one error need carrying the three failures', async () => {
+    const checks = checksSaying((asked) => (asked.scope === 'requirement' ? [red('e2e', '')] : []))
+    const { run } = builderEngine(data, work, { checks })
+    const needs = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          yield* builderOf(mission.id)
+          for (let at = 0; at < 3; at += 1) {
+            yield* BuildDesk.use((desk) => desk.judgeScope(mission.id, 'requirement', 'R1'))
+          }
+          return yield* errorNeedsOf(mission.id)
+        }),
+      ),
+    )
+    expect(needs).toHaveLength(1)
+    const fields = needs[0]?.fields
+    if (!Predicate.isTagged(fields, 'Error')) return expect.unreachable()
+    expect(fields.attempts).toHaveLength(3)
+    expect(fields.attempts.every((one) => one.output.includes('FAIL test 50'))).toBe(true)
+  })
+
+  test('while a scope’s error need waits for the user, another red asks nothing more', async () => {
+    const checks = checksSaying((asked) => (asked.scope === 'requirement' ? [red('e2e', '')] : []))
+    const { run } = builderEngine(data, work, { checks })
+    const needs = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          yield* builderOf(mission.id)
+          for (let at = 0; at < 5; at += 1) {
+            yield* BuildDesk.use((desk) => desk.judgeScope(mission.id, 'requirement', 'R1'))
+          }
+          return yield* errorNeedsOf(mission.id)
+        }),
+      ),
+    )
+    expect(needs).toHaveLength(1)
+  })
+
+  test('answering one scope’s error need restarts only that scope’s count of reds', async () => {
+    const checks = checksSaying(() => [red('e2e', '')])
+    const { run } = builderEngine(data, work, { checks })
+    const needs = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          yield* builderOf(mission.id)
+          const judge = (scope: 'requirement' | 'end', subject: string | null) =>
+            BuildDesk.use((desk) => desk.judgeScope(mission.id, scope, subject))
+          for (let at = 0; at < 3; at += 1) yield* judge('requirement', 'R1')
+          yield* judge('end', null)
+          yield* judge('end', null)
+          const [asked] = yield* errorNeedsOf(mission.id)
+          yield* answerNeed({
+            id: asked?.id ?? '',
+            answer: WrittenAnswer.make({ text: 'Run the e2e suite against a fresh database.' }),
+            key: 'answer-r1',
+          })
+          // The end's third red still counts its first two.
+          yield* judge('end', null)
+          return yield* errorNeedsOf(mission.id)
+        }),
+      ),
+    )
+    // Only the end's need waits now: R1's was answered.
+    expect(needs).toHaveLength(1)
+    const fields = needs[0]?.fields
+    if (!Predicate.isTagged(fields, 'Error')) return expect.unreachable()
+    expect(fields.failed).toBe('The end of the Building: three red attempts')
   })
 })
 

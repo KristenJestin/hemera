@@ -2594,6 +2594,9 @@ export const buildingDecisions = sqliteTable(
     answeredAt: text('answered_at'),
     /** For an error need (#142): the lineage asked to fill its proposal with `need_propose`. */
     proposer: text('proposer'),
+    /** For a scope's error need (#142): the scope and its subject whose reds it stops. */
+    scope: text('scope'),
+    subject: text('subject'),
   },
   (table) => [uniqueIndex('building_decision_of_need').on(table.needId)],
 )
