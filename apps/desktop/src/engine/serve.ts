@@ -9,6 +9,7 @@
 import {
   ChatRefused,
   ChecksRpcs,
+  DocRecipesRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -121,6 +122,14 @@ import {
   removeCheck,
   saveCheck,
 } from './project-checks.ts'
+import {
+  acceptDocRecipes,
+  listDocRecipes,
+  moveDocRecipe,
+  proposedDocRecipes,
+  removeDocRecipe,
+  saveDocRecipe,
+} from './doc-recipes.ts'
 import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
@@ -736,18 +745,6 @@ export const engineHandlers = (
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
-    // The helpers (#145), as their chips show them; no stop. The one write is the user's verdict
-    // on a Prototyper's result, in Planning (#222).
-    'helpers.list': ({ missionId }) =>
-      use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
-    'helpers.read': ({ helperId, thread }) =>
-      use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
-    'helpers.judge': ({ helperId, verdict, note }) =>
-      use(judgePrototype(helperId, verdict, note)).pipe(observed('helpers.judge', log)),
-    'helpers.changed': ({ missionId }) =>
-      follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
-    'helpers.prototypesChanged': ({ missionId }) =>
-      follow(prototypeChanges(missionId)).pipe(observedStream('helpers.prototypesChanged', log)),
     // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
     'discussions.list': ({ missionId }) =>
       use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),
@@ -813,8 +810,21 @@ export const engineHandlers = (
       follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),
   }).pipe(Layer.provide(listed))
-  // The mission's changes outside Hemera and its services (#148), as a layer of their own.
+  // The mission's changes outside Hemera and its services (#148), and the helpers, as a layer of
+  // their own.
   const apart = EngineApartRpcs.toLayer({
+    // The helpers (#145), as their chips show them; no stop. The one write is the user's verdict
+    // on a Prototyper's result, in Planning (#222).
+    'helpers.list': ({ missionId }) =>
+      use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
+    'helpers.read': ({ helperId, thread }) =>
+      use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
+    'helpers.judge': ({ helperId, verdict, note }) =>
+      use(judgePrototype(helperId, verdict, note)).pipe(observed('helpers.judge', log)),
+    'helpers.changed': ({ missionId }) =>
+      follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
+    'helpers.prototypesChanged': ({ missionId }) =>
+      follow(prototypeChanges(missionId)).pipe(observedStream('helpers.prototypesChanged', log)),
     'mission.outsideChanges': ({ missionId }) =>
       use(
         Effect.andThen(
@@ -843,7 +853,7 @@ export const engineHandlers = (
         observedStream('mission.changed', log),
       ),
   })
-  return Layer.mergeAll(core, apart, checksHandlers(profile, log))
+  return Layer.mergeAll(core, apart, checksHandlers(profile, log), docRecipesHandlers(profile, log))
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineServedRpcs`). */
@@ -861,5 +871,24 @@ const checksHandlers = (profile: StartedProfile, log: Log) => {
       use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
     'checks.move': ({ projectId, id, rank }) =>
       use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
+  })
+}
+
+/** The Project's doc recipes (#146), a layer of their own (see `EngineServedRpcs`). */
+const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return DocRecipesRpcs.toLayer({
+    'docRecipes.list': ({ projectId }) =>
+      use(listDocRecipes(projectId)).pipe(observed('docRecipes.list', log)),
+    'docRecipes.propose': ({ projectId, asked }) =>
+      use(proposedDocRecipes(projectId, asked)).pipe(observed('docRecipes.propose', log)),
+    'docRecipes.accept': ({ projectId, proposals }) =>
+      use(acceptDocRecipes(projectId, proposals)).pipe(observed('docRecipes.accept', log)),
+    'docRecipes.save': ({ projectId, id, recipe }) =>
+      use(saveDocRecipe(projectId, id, recipe)).pipe(observed('docRecipes.save', log)),
+    'docRecipes.remove': ({ projectId, id }) =>
+      use(removeDocRecipe(projectId, id)).pipe(observed('docRecipes.remove', log)),
+    'docRecipes.move': ({ projectId, id, rank }) =>
+      use(moveDocRecipe(projectId, id, rank)).pipe(observed('docRecipes.move', log)),
   })
 }

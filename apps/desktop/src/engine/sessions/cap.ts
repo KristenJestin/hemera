@@ -26,6 +26,10 @@ export interface SlotAsked {
   readonly lineage: string
   readonly missionId: string | null
   readonly requestedBy: RequestedBy
+  /** The phase as Now names it while it waits (`Documentation`); unnamed otherwise. */
+  readonly phase?: string | undefined
+  /** What a phase does once it is queued, before it waits (#146: the Journal says so). */
+  readonly queued?: Effect.Effect<void> | undefined
 }
 
 export class Cap extends Context.Service<
@@ -112,7 +116,10 @@ export const capLayer = Layer.effect(
         }
         for (const waiting of queue) {
           if (waiting.asked.missionId === null) continue
-          yield* post.slotWait(waiting.asked.missionId, slotWaitSentence(slots.size, cap))
+          yield* post.slotWait(
+            waiting.asked.missionId,
+            slotWaitSentence(slots.size, cap, waiting.asked.phase),
+          )
         }
       })
 
@@ -147,6 +154,7 @@ export const capLayer = Layer.effect(
           if (!('granted' in decided)) return decided
           const granted = decided.granted
           const queue = queueOf(asked.projectId)
+          if (asked.queued !== undefined) yield* asked.queued
           yield* Deferred.await(granted).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
@@ -172,8 +180,9 @@ export const capLayer = Layer.effect(
             queue.some((one) => one.asked.lineage === lineage),
           )
           if (found === undefined) return null
-          const [projectId] = found
-          return slotWaitSentence(holding(projectId).size, yield* capOf(projectId))
+          const [projectId, queue] = found
+          const phase = queue.find((one) => one.asked.lineage === lineage)?.asked.phase
+          return slotWaitSentence(holding(projectId).size, yield* capOf(projectId), phase)
         }),
       holds: (lineage) =>
         Effect.sync(

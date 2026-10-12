@@ -26,6 +26,7 @@ import {
   DecisionFields,
   EnvironmentFields,
   ErrorFields,
+  DOCUMENTATION,
   MissionOwner,
   REDS_BEFORE_A_NEED,
   type ToolArguments,
@@ -76,6 +77,7 @@ import {
   writesIn,
 } from './attempts.ts'
 import { checkAttempt } from './checks.ts'
+import { documentationAttemptIn } from './documenter-store.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { OutsideChanges } from './outside.ts'
 import { fileOf } from './place.ts'
@@ -257,13 +259,16 @@ export const buildingLoop = (parts: LoopParts) => {
       const lineage = yield* lineageIn(transaction, file.sessionId)
       if (lineage === null) return
       const task = taskOfFile(runningOf(yield* tasksIn(transaction, building.id), lineage), located)
-      if (task === null) return
-      const attempt = yield* openAttemptIn(transaction, building.id, task.id)
-      if (attempt === null) return
+      // A documenter's write is its pass's, on the `end` attempt named "documentation" (#146).
+      const attemptId =
+        task === null
+          ? yield* documentationAttemptIn(transaction, building.id, lineage)
+          : ((yield* openAttemptIn(transaction, building.id, task.id))?.id ?? null)
+      if (attemptId === null) return
       yield* recordWriteIn(transaction, {
         buildingId: building.id,
-        attemptId: attempt.id,
-        taskId: task.id,
+        attemptId,
+        taskId: task?.id ?? null,
         sessionId: file.sessionId,
         repository: located.repository,
         path: located.path,
@@ -1167,8 +1172,11 @@ export const buildingLoop = (parts: LoopParts) => {
         (task) => scope === 'end' || (subject !== null && task.requirements.includes(subject)),
       )
       const files: Array<{ repository: string; path: string }> = []
-      for (const attempt of (yield* attemptsIn(database, building.id)).filter((one) =>
-        covering.some((task) => task.id === one.taskId),
+      // The end's checks see the documenter's files too (#146): they run after it.
+      for (const attempt of (yield* attemptsIn(database, building.id)).filter(
+        (one) =>
+          covering.some((task) => task.id === one.taskId) ||
+          (scope === 'end' && one.subject === DOCUMENTATION),
       )) {
         files.push(
           ...(yield* attributedIn(database, attempt.id)).map((one) => ({

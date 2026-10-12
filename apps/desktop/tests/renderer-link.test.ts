@@ -330,12 +330,6 @@ const noProjects = {
   'building.task': unused,
   'building.attempt': unused,
   'building.tasksChanged': () => Stream.die('the window’s link is not asked for the Building here'),
-  'helpers.list': unused,
-  'helpers.read': unused,
-  'helpers.judge': unused,
-  'helpers.changed': () => Stream.die('the window’s link is not asked for the helpers here'),
-  'helpers.prototypesChanged': () =>
-    Stream.die('the window’s link is not asked for the Prototypers here'),
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,
@@ -524,6 +518,12 @@ const main = async (engine: 'answers' | 'gone') => {
       'mission.serviceDismiss': unused,
       'mission.focused': unused,
       'mission.changed': () => Stream.die('the window’s link is not asked for a mission here'),
+      'helpers.list': unused,
+      'helpers.read': unused,
+      'helpers.judge': unused,
+      'helpers.changed': () => Stream.die('the window’s link is not asked for the helpers here'),
+      'helpers.prototypesChanged': () =>
+        Stream.die('the window’s link is not asked for the Prototypers here'),
     }),
   )
   const program = Effect.gen(function* () {

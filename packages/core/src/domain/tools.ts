@@ -35,6 +35,7 @@ import { ModelRecommend, ProofWrite, TasksWrite } from './proofs.ts'
 import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
+import { DocsReport } from './docs.ts'
 import { TaskAmendment } from './build-tasks.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
@@ -1072,7 +1073,16 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch', 'builder', 'helper', 'prototyper'],
+    roles: [
+      'planner',
+      'cold-read',
+      'ticket-event',
+      'prelaunch',
+      'builder',
+      'helper',
+      'prototyper',
+      'documenter',
+    ],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1392,7 +1402,7 @@ export const TOOLS = {
     },
   }),
   build_read: tool({
-    roles: ['builder', 'helper'],
+    roles: ['builder', 'helper', 'documenter'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1473,6 +1483,18 @@ export const TOOLS = {
       label: 'Hand back the result',
       mark: 'helper-result',
       doing: 'Handing back its result',
+    },
+  }),
+  docs_report: tool({
+    roles: ['documenter'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: DocsReport,
+    label: {
+      label: 'Report the documentation',
+      mark: 'docs-report',
+      doing: 'Reporting the documentation',
     },
   }),
   hemera_report: tool({
@@ -1558,6 +1580,7 @@ export const TOOL_NAMES = [
   'helper_launch',
   'helper_read',
   'helper_result',
+  'docs_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

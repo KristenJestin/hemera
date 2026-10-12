@@ -63,6 +63,7 @@ describe('The role registry', () => {
         'tasks_write',
         'model_recommend',
         'discussion_reply',
+        'docs_report',
         'discussion_propose_decision',
         'cold_read_fixed',
         'dependency_propose',
