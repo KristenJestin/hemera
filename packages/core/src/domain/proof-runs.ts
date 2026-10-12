@@ -239,25 +239,57 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
 const posix = (path: string): string => path.replaceAll('\\', '/')
 
 /**
- * Whether a run is a valid red (CT-35): an assertion that failed in the scenario's own test, which
- * the report names by its file and, when the proof's code names its tests, by its name. Another
- * test of the same file failing is not the scenario's red, nor is a report that names no file. A
- * proof that is a command with no test file is red by its exit code.
+ * A test's declared name as a pattern: what `%s`, `$name` or `${…}` stand for (`describe.each`, a
+ * template literal) matches any words.
+ */
+const namePattern = (name: string): RegExp =>
+  new RegExp(
+    name
+      .split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
+      .map((part, at) => (at % 2 === 1 ? '.+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      .join(''),
+  )
+
+const named = (text: string, names: ReadonlyArray<string>): boolean =>
+  names.some((name) => namePattern(name).test(text))
+
+/**
+ * Whether a run is a valid red (CT-35): an assertion that failed in the scenario's own test. A
+ * report that names the files tells it by its file and, when the proof's code names its tests, by
+ * its name: another test of the same file failing is not the scenario's red. Without a file named
+ * (no report, or JUnit's `classname` only), a test the proof adds named in the failures or the
+ * output makes it; failing that, the key line decides, and with neither to tell it by, the exit
+ * code. A proof that is a command with no test file is red by its exit code.
  */
 export const validRed = (
   run: ProofRunClass,
   testPath: string | null,
   testNames: ReadonlyArray<string> = [],
+  seen: { readonly output: string; readonly keyLineMatched: boolean | null } = {
+    output: '',
+    keyLineMatched: null,
+  },
 ): boolean => {
   if (run.classification !== 'assertion_failed') return false
   if (testPath === null) return true
-  return run.failures.some(
-    (one) =>
-      one.assertion &&
-      one.file !== null &&
-      posix(one.file).endsWith(posix(testPath)) &&
-      (testNames.length === 0 || testNames.includes(one.test)),
+  const located = run.failures.filter((one) => one.file !== null)
+  if (located.length > 0) {
+    return located.some(
+      (one) =>
+        one.assertion &&
+        posix(one.file ?? '').endsWith(posix(testPath)) &&
+        (testNames.length === 0 || named(one.test, testNames)),
+    )
+  }
+  if (testNames.length === 0) return true
+  const failing = run.failures.filter((one) => one.assertion).map((one) => one.test)
+  if (
+    failing.length > 0
+      ? failing.some((one) => named(one, testNames))
+      : named(seen.output, testNames)
   )
+    return true
+  return seen.keyLineMatched === true
 }
 
 /** The name a test is declared with, as `test('…'` or `it("…"` declares it. */

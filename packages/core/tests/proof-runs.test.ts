@@ -268,12 +268,68 @@ describe('A valid red', () => {
     expect(validRed(run(TAP_BOTH_FAIL, 1), 'tests/export.test.mjs', scenario)).toBe(true)
   })
 
-  test('a report that names no file is not a valid red for a scenario’s test', () => {
-    const nowhere = TAP_ASSERTION.replace(/\n  location: [^\n]*/, '')
-    expect(validRed(run(nowhere, 1), 'tests/export.test.mjs')).toBe(false)
-    expect(validRed(run('AssertionError: the CSV uses commas', 1), 'tests/export.test.mjs')).toBe(
-      false,
-    )
+  test('a red from plain vitest output, with no report, is valid when the scenario’s test is named in it', () => {
+    const output = [
+      ' FAIL  tests/export.test.ts > exports > the invoices export as Markdown',
+      'AssertionError: expected false to be true // Object.is equality',
+      ' Test Files  1 failed (1)',
+    ].join('\n')
+    const names = ['the invoices export as Markdown']
+    expect(
+      validRed(run(output, 1), 'tests/export.test.ts', names, { output, keyLineMatched: null }),
+    ).toBe(true)
+    const other = output.replace('the invoices export as Markdown', 'one is one')
+    expect(
+      validRed(run(other, 1), 'tests/export.test.ts', names, {
+        output: other,
+        keyLineMatched: null,
+      }),
+    ).toBe(false)
+  })
+
+  test('a JUnit report that names the file only in its classname is a valid red by the test’s name', () => {
+    const output = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="1" failures="1">
+  <testsuite name="tests/export.test.ts" tests="1" failures="1">
+    <testcase classname="tests/export.test.ts" name="exports &gt; the invoices export as Markdown">
+      <failure message="expected false to be true" type="AssertionError">AssertionError: expected false to be true</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+    expect(
+      validRed(run(output, 1), 'tests/export.test.ts', ['the invoices export as Markdown'], {
+        output,
+        keyLineMatched: null,
+      }),
+    ).toBe(true)
+  })
+
+  test('a test named through describe.each or a template is found again in the output', () => {
+    const code = [
+      "describe.each(['csv', 'md'])('exports %s', (kind) => {",
+      '  it(`writes ${kind}`, () => {})',
+      '})',
+    ].join('\n')
+    const names = addedTestNames({ insertion: 'new_file', code, patch: null })
+    const output =
+      ' FAIL  tests/export.test.ts > exports md > writes md\nAssertionError: expected 1 to be 2'
+    expect(
+      validRed(run(output, 1), 'tests/export.test.ts', names, { output, keyLineMatched: null }),
+    ).toBe(true)
+  })
+
+  test('with no file named, the key line decides when no test name is found', () => {
+    const output = 'AssertionError: the CSV uses commas'
+    const path = 'tests/export.test.mjs'
+    expect(
+      validRed(run(output, 1), path, ['exports as CSV'], { output, keyLineMatched: true }),
+    ).toBe(true)
+    expect(
+      validRed(run(output, 1), path, ['exports as CSV'], { output, keyLineMatched: null }),
+    ).toBe(false)
+    // Nothing to tell it by: the exit code decides.
+    expect(validRed(run(output, 1), path, [], { output, keyLineMatched: null })).toBe(true)
   })
 
   test('the tests a proof adds are named from its new file, or from the lines its patch adds', () => {
