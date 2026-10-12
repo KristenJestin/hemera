@@ -23,12 +23,13 @@ import type {
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { Planning, answerStepOf, planningSteps } from '@hemera/ui'
+import { Planning, answerStepOf, planningSteps, type NeedRow } from '@hemera/ui'
 
 import {
   followPlanning,
   planningDataOf,
   planningHeadOf,
+  planningNeedOf,
   plannerOf,
   probeOf,
   type PlanningLink,
@@ -278,7 +279,7 @@ describe('The Spec in the page’s words', () => {
       }),
       NOW,
     )
-    expect(data.waves[0]?.questions[0]?.answers[0]?.inputState).toBe('integrated')
+    expect(data.questions[0]?.answers[0]?.inputState).toBe('integrated')
     expect(data.visions[0]?.inputState).toBe('delivered')
     expect(data.ticket).toEqual({
       key: 'acme/shop#41',
@@ -292,6 +293,20 @@ describe('The Spec in the page’s words', () => {
         },
       ],
     })
+  })
+
+  test('the questions are one list in the order they were asked, whatever their wave', () => {
+    const data = planningDataOf(
+      read({
+        waves: [
+          { number: 1, askedAt: AT, questions: [question({ id: 'Q1' }), question({ id: 'Q2' })] },
+          { number: 2, askedAt: AT, questions: [question({ id: 'Q3' })] },
+        ],
+      }),
+      NOW,
+    )
+    expect(data.questions.map((one) => one.id)).toEqual(['Q1', 'Q2', 'Q3'])
+    expect(data).not.toHaveProperty('waves')
   })
 
   test('only the answers proposed from the ticket that still wait are offered', () => {
@@ -319,7 +334,7 @@ describe('The Spec in the page’s words', () => {
         ],
       },
     ]
-    expect(planningDataOf(read({ waves }), NOW).waves[0]?.questions[0]?.proposals).toEqual([
+    expect(planningDataOf(read({ waves }), NOW).questions[0]?.proposals).toEqual([
       { id: 'pa1', author: 'Sam', comment: 'Only the owner, please.', text: 'Only its owner' },
     ])
   })
@@ -588,7 +603,7 @@ describe('A question’s dot', () => {
       read({ waves: [{ number: 1, askedAt: AT, questions: [one] }], inputs }),
       NOW,
     )
-    const shown = data.waves[0]?.questions[0]
+    const shown = data.questions[0]
     if (shown === undefined) throw new Error('no question drawn')
     return answerStepOf(shown)
   }
@@ -624,7 +639,7 @@ describe('Where Planning stands, from the engine', () => {
   test('a section is settled only once no open question touches it', () => {
     const openOf = (questions: Question[]) =>
       Planning.openBySection(
-        planningDataOf(read({ waves: [{ number: 1, askedAt: AT, questions }] }), NOW).waves,
+        planningDataOf(read({ waves: [{ number: 1, askedAt: AT, questions }] }), NOW).questions,
       ).get('decisions') ?? 0
     expect(
       openOf([question({ section: 'decisions' }), question({ id: 'Q2', section: 'decisions' })]),
@@ -1009,7 +1024,7 @@ describe('Following a mission’s Planning', () => {
       await flush()
       expect(live.last().data).toEqual(fresh.last().data)
       expect(planningHeadOf(live.last(), null)).toEqual(planningHeadOf(fresh.last(), null))
-      expect(live.last().data?.waves[0]?.questions[0]?.answers.at(-1)?.inputState).toBe(state)
+      expect(live.last().data?.questions[0]?.answers.at(-1)?.inputState).toBe(state)
     }
   })
 
@@ -1166,5 +1181,35 @@ describe('Following a mission’s Planning', () => {
     played.following.retry()
     expect(played.last().error).toBeUndefined()
     expect(played.subscriptions()).toBe(2)
+  })
+})
+
+describe('The mission’s needs on the Planning page', () => {
+  const row = (role: string | undefined): NeedRow => ({
+    id: 'n1',
+    project: 'Acme',
+    need: {
+      ask: {
+        kind: 'permission',
+        command: 'pnpm --filter api test notes-export',
+        hemeraReason: 'Tests of api write to a database: the setting asks first.',
+        choices: ['allow-once', 'deny'],
+      },
+      title: 'Run the export test',
+      when: '2 min',
+      role,
+    },
+  })
+
+  test('say who asks by the role that asked, and may be discussed while planning', () => {
+    const shown = planningNeedOf(row('probe'))
+    expect(shown.id).toBe('n1')
+    expect(shown.who).toBe('Probe')
+    expect(shown.need.planning).toBe(true)
+    expect(planningNeedOf(row('cold-read')).who).toBe('Cold read')
+  })
+
+  test('a need Hemera raised itself is Hemera’s', () => {
+    expect(planningNeedOf(row(undefined)).who).toBe('Hemera')
   })
 })
