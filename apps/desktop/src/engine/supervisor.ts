@@ -449,7 +449,7 @@ export class ProcessSupervisor extends Context.Service<
     /**
      * The roots of `kind` a previous engine left: each still alive and still the same program is
      * ended as a tree; every one is forgotten, but one alive whose program the system could not
-     * say, which is kept for the next start.
+     * say, or that its kill did not end, which is kept for the next start.
      */
     readonly endOrphans: (kind: ProcessOwner['kind']) => Effect.Effect<ReadonlyArray<Orphan>>
   }
@@ -699,11 +699,16 @@ export const processSupervisorLayer = Layer.effect(
             yield* host.killTree(root.pid, host.platform !== 'win32')
             // Said ended only once the system says the pid is gone, not when the kill was asked.
             gone = yield* goneWithin(root.pid)
-            yield* sink.write(
-              gone
-                ? `ended ${which}`
-                : `could not end ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed`,
-            )
+            // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
+            // forgotten either, so that the next start kills it again.
+            if (!gone) {
+              yield* sink.write(
+                `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
+              )
+              orphans.push({ root, ended: false })
+              continue
+            }
+            yield* sink.write(`ended ${which}`)
           }
           yield* registry.remove(root.id)
           orphans.push({ root, ended: gone })
