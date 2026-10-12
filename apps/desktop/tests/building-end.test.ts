@@ -1,0 +1,1050 @@
+/**
+ * The end of a Building (#147): once every task is done, one sequence runs the documenter, the
+ * final checks, a checkpoint of the result, the two reviewers (one pass each, read-only, on the
+ * checkpoint), the special tasks born from their findings, the documenter's delta and the proofs
+ * made fresh again, then moves the mission to Review on its own.
+ *
+ * On the engine as it starts, with the fake agent of #32 as every agent and the test driving the
+ * Builder's, the documenter's and both reviewers' tools through their grants; Acme's real
+ * repositories in temporary folders as the Workspace. The cold read reads, the Builder answers
+ * every prompt and does nothing else; every agent after them holds its turn open until the test
+ * lets it go, once it reported. The checks are a fake `TaskChecks`: none unless a test says.
+ */
+
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+import {
+  ChosenAnswer,
+  type DocRecipeDraft,
+  SESSION_STATES,
+  SPEC_IS_RIGHT,
+  START_AGAIN,
+  TOOLS,
+  toolsOf,
+} from '@hemera/core/domain'
+import { and, asc, eq } from 'drizzle-orm'
+import { Effect, Layer, Predicate, type Schema } from 'effect'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import type { FakeScript } from '../src/engine/agents/fake.ts'
+import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
+import { autoReviewOf } from '../src/engine/building/review-store.ts'
+import { buildingPartOf } from '../src/engine/building/tasks.ts'
+import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
+import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
+import { Memory } from '../src/engine/memory/index.ts'
+import { getMission } from '../src/engine/missions.ts'
+import { answerNeed } from '../src/engine/needs.ts'
+import {
+  MEMORY_TOOLS,
+  ROLES_REGISTERED,
+  memoryContractBroken,
+  roleNamed,
+} from '../src/engine/sessions/roles.ts'
+import { Sessions } from '../src/engine/sessions/service.ts'
+import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import {
+  checkpoints,
+  documenterPasses,
+  domainEvents,
+  proofRuns,
+  reviewPasses,
+  sessionDeliveries,
+} from '../src/engine/storage/schema.ts'
+import { QUIET, READING, call, eventsOf, grantOf, says } from './building-world.ts'
+import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
+import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
+import { removeFolders, temporaryFolder } from './storage.ts'
+
+let data: string
+let work: string
+
+beforeEach(() => {
+  data = realpathSync.native(temporaryFolder('building-end'))
+  work = realpathSync.native(temporaryFolder('building-end-work'))
+})
+afterEach(removeFolders)
+
+/** How long a step of the end may take on a slow runner: never a measure of speed. */
+const LONG = 30_000
+
+/** A whole end runs many steps, each bounded by `LONG`. */
+const SLOW = { timeout: 180_000 }
+
+/** What the checks of a scope say: none unless a test says. */
+type ChecksOf = (asked: {
+  readonly scope: string
+  readonly subject: string | null
+}) => ReadonlyArray<CheckResult>
+
+const RED: CheckResult = {
+  name: 'unit tests',
+  place: 'api',
+  verdict: 'red',
+  detail: 'exit code 1',
+  outputTail: 'FAIL the header row',
+  runId: null,
+}
+
+interface Agents {
+  readonly agents: ReadonlyArray<{
+    answers: { prompts: ReadonlyArray<ReadonlyArray<{ type: string; text?: string }>> }
+  }>
+}
+
+/** The engine's world, and how a test lets a held agent's turn end. */
+interface Ending extends Agents {
+  readonly release: (index: number) => void
+}
+
+/**
+ * The engine over `dataFolder`. With `resumed`, no cold read and no Builder start first: every
+ * agent holds its turn (an engine started again on a Building already under way).
+ */
+const ending = (
+  options: {
+    readonly checks?: ChecksOf
+    readonly resumed?: boolean
+    readonly folder?: string
+  } = {},
+) => {
+  const holds = new Map<number, ReturnType<typeof held>>()
+  const holdOf = (index: number) => {
+    const found = holds.get(index) ?? held()
+    holds.set(index, found)
+    return found
+  }
+  const working = (index: number): FakeScript => ({
+    steps: [says('Working.')],
+    between: () => holdOf(index).promise,
+  })
+  const first: ReadonlyArray<FakeScript> = options.resumed === true ? [] : [READING, QUIET]
+  const checks = options.checks ?? (() => [])
+  const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
+    roles: [HELPER],
+    tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    building: {
+      checks: Layer.succeed(TaskChecks, { run: (asked) => Effect.succeed(checks(asked)) }),
+    },
+  })
+  const world: Ending = {
+    agents: engine.world.agents,
+    release: (index) => holdOf(index).release(),
+  }
+  return {
+    world,
+    run: <A, E>(program: Parameters<typeof engine.run<A, E>>[0]) =>
+      engine.run(program).finally(() => {
+        for (const one of holds.values()) one.release()
+      }),
+  }
+}
+
+const README: DocRecipeDraft = {
+  repository: 'api',
+  path: 'README.md',
+  purpose: 'What the api is, and how to export the invoices.',
+  applies: 'always',
+  words: [],
+}
+
+/** A launch whose Project documents its README. */
+const withReadme = (projectId: string) => Effect.asVoid(acceptDocRecipes(projectId, [README]))
+
+/** The Builder runs every task of the plan to its end: T1 writes `invoices.ts`, T2 `export.ts`. */
+const builtAll = (grantId: string, exported = 'export const markdown = true\n') =>
+  Effect.gen(function* () {
+    for (const task of ['T1', 'T2', 'T4', 'T3']) {
+      const started = yield* call(grantId, 'task_start', { task })
+      if (started.startsWith('refused')) return yield* Effect.die(new Error(started))
+      if (task === 'T1') {
+        yield* call(grantId, 'fs_read', { repository: 'api', path: 'invoices.ts' })
+        yield* call(grantId, 'fs_write', {
+          repository: 'api',
+          path: 'invoices.ts',
+          content: 'export const invoices = ["csv"]\n',
+        })
+      }
+      if (task === 'T2') {
+        yield* call(grantId, 'fs_write', {
+          repository: 'api',
+          path: 'export.ts',
+          content: exported,
+        })
+      }
+      yield* call(grantId, 'task_finished', { task, summary: `${task} built.` })
+    }
+  })
+
+const HEADINGS = {
+  documenter: '## Documenter · ',
+  'spec-reviewer': '## Spec reviewer · ',
+  'code-reviewer': '## Code reviewer · ',
+}
+
+/**
+ * The `count`-th agent of a role in the mission once it read its brief: its session, its brief,
+ * its index among the agents, and a grant to drive it.
+ */
+const agentOf = (world: Agents, missionId: string, role: keyof typeof HEADINGS, count = 1) =>
+  Effect.gen(function* () {
+    const heading = HEADINGS[role]
+    const indexes = () =>
+      world.agents.flatMap((agent, index) =>
+        text(agent.answers.prompts[0] ?? []).includes(heading) ? [index] : [],
+      )
+    yield* until(
+      Effect.sync(() => indexes().length >= count),
+      LONG,
+    )
+    const index = indexes()[count - 1] ?? -1
+    const opened = Effect.map(sessionsIn(SESSION_STATES, { kind: 'mission', missionId }), (rows) =>
+      rows
+        .filter((row) => row.role === role)
+        .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    )
+    yield* until(
+      Effect.map(opened, (rows) => rows.length >= count),
+      LONG,
+    )
+    const session = (yield* opened).at(-1)
+    if (session === undefined) return yield* Effect.die(new Error(`no ${role}`))
+    return {
+      session,
+      index,
+      brief: text(world.agents[index]?.answers.prompts[0] ?? []),
+      grantId: yield* grantOf(session.id),
+    }
+  })
+
+const NO_DOC = 'The exports change no behaviour the README describes to its readers.'
+
+/** The `count`-th documenter reports that nothing needed to change, and its turn ends. */
+const documented = (world: Ending, missionId: string, count = 1) =>
+  Effect.gen(function* () {
+    const documenter = yield* agentOf(world, missionId, 'documenter', count)
+    const answer = yield* callTool(documenter.grantId, 'docs_report', {
+      changed: [],
+      no_change_reason: NO_DOC,
+    })
+    if (!answer.ok) return yield* Effect.die(new Error(answer.text))
+    world.release(documenter.index)
+    return documenter
+  })
+
+/** A reviewer reports its pass, and its turn ends. */
+const reviewed = (
+  world: Ending,
+  missionId: string,
+  role: 'spec-reviewer' | 'code-reviewer',
+  findings: ReadonlyArray<Schema.JsonObject> = [],
+) =>
+  Effect.gen(function* () {
+    const reviewer = yield* agentOf(world, missionId, role)
+    const answer = yield* callTool(reviewer.grantId, 'review_report', { findings: [...findings] })
+    if (!answer.ok) return yield* Effect.die(new Error(answer.text))
+    world.release(reviewer.index)
+    return reviewer
+  })
+
+/** A finding that goes the Spec's way, on a file of `api`. */
+const warning = (path: string, words: string): Schema.JsonObject => ({
+  severity: 'warning',
+  repository: 'api',
+  path,
+  text: words,
+  contradicts_spec: false,
+  evidence: `Read ${path} at the checkpoint.`,
+})
+
+/** The Builder runs a special task to its end, writing `path` of `api` when one is given. */
+const specialDone = (grantId: string, task: string, path: string | null, content = 'fixed\n') =>
+  Effect.gen(function* () {
+    const started = yield* call(grantId, 'task_start', { task })
+    if (started.startsWith('refused')) return yield* Effect.die(new Error(started))
+    if (path !== null) {
+      yield* call(grantId, 'fs_read', { repository: 'api', path })
+      yield* call(grantId, 'fs_write', { repository: 'api', path, content })
+    }
+    return yield* call(grantId, 'task_finished', { task, summary: `${task} done.` })
+  })
+
+/** Waits until the mission reached Review. */
+const inReview = (missionId: string) =>
+  until(
+    Effect.map(getMission(missionId), (mission) => mission.stage === 'review'),
+    LONG,
+  )
+
+/** Waits until a special task is available to the Builder. */
+const specialAvailable = (missionId: string, task: string) =>
+  until(
+    Effect.map(buildingNow(missionId), (view) =>
+      view.tasks.some((one) => one.id === task && one.state === 'available'),
+    ),
+    LONG,
+  )
+
+/** Waits until both reviewers run. */
+const reviewing = (missionId: string) =>
+  until(
+    Effect.map(
+      autoReviewOf(missionId),
+      (review) =>
+        review !== null &&
+        review.passes.length === 2 &&
+        review.passes.every((one) => one.state === 'running'),
+    ),
+    LONG,
+  )
+
+/** The types of the mission's events, in their order. */
+const typesOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return (yield* database
+      .select({ type: domainEvents.type })
+      .from(domainEvents)
+      .where(eq(domainEvents.entityId, missionId))
+      .orderBy(asc(domainEvents.sequence))).map((row) => row.type)
+  })
+
+/** What was delivered to the mission's Builder, by role or by its lineage. */
+const toBuilder = (missionId: string, lineage: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return (yield* database
+      .select()
+      .from(sessionDeliveries)
+      .where(eq(sessionDeliveries.ownerId, missionId)))
+      .filter((row) => row.targetRole === 'builder' || row.targetLineage === lineage)
+      .map((row) => `${row.kind}: ${row.body}`)
+  })
+
+/** A file of the Workspace's `api`, written as the user would, outside every agent. */
+const writtenInWorkspace = (folder: string, path: string, content: string) => {
+  mkdirSync(dirname(join(folder, path)), { recursive: true })
+  writeFileSync(join(folder, path), content)
+}
+
+/** The Workspace's `api` folder. */
+const apiOf = (missionId: string) =>
+  Effect.map(buildingNow(missionId), (view) => view.repositories[0]?.folder ?? '')
+
+describe('The end sequence', () => {
+  test(
+    'every task done runs, in order: documenter, final checks, checkpoint, both reviewers, special tasks, refresh, Review; the stage moves to Review on its own with building.ended',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('invoices.ts', 'Name the CSV export after the invoices it exports.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            yield* specialDone(builder.grantId, 'RV1', 'invoices.ts', 'export const rows = []\n')
+            yield* inReview(mission.id)
+            return {
+              types: yield* typesOf(mission.id),
+              view: yield* buildingNow(mission.id),
+              builder: yield* sessionsIn(SESSION_STATES, {
+                kind: 'mission',
+                missionId: mission.id,
+              }),
+            }
+          }),
+        ),
+      )
+      const steps = seen.types.filter((type) =>
+        [
+          'building.end_started',
+          'building.documenter_started',
+          'building.final_checks',
+          'review.checkpoint_taken',
+          'review.pass_started',
+          'review.special_task',
+          'building.proofs_refreshed',
+          'mission.moved',
+          'building.ended',
+        ].includes(type),
+      )
+      expect(steps.filter((type) => type !== 'mission.moved')).toEqual([
+        'building.end_started',
+        'building.documenter_started',
+        'building.final_checks',
+        'review.checkpoint_taken',
+        'review.pass_started',
+        'review.pass_started',
+        'review.special_task',
+        'building.proofs_refreshed',
+        'building.ended',
+      ])
+      // The special task is done before the refresh, and the move to Review comes last.
+      expect(seen.types.lastIndexOf('building.task_done')).toBeLessThan(
+        seen.types.indexOf('building.proofs_refreshed'),
+      )
+      expect(seen.types.lastIndexOf('mission.moved')).toBeGreaterThan(
+        seen.types.indexOf('building.proofs_refreshed'),
+      )
+      expect(seen.view).toMatchObject({ state: 'ended', phase: 'ended' })
+      expect(seen.view.endedAt).not.toBeNull()
+      // The Builder's session is stopped at the exit.
+      const builders = seen.builder.filter((one) => one.role === 'builder')
+      expect(builders.every((one) => one.state === 'ended')).toBe(true)
+    },
+  )
+
+  test(
+    'the full end driven from the last green runs to Review: the refresh it calls never waits on the turn that greened',
+    SLOW,
+    async () => {
+      const markdown = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { existsSync, readFileSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', () => {",
+        "  const file = new URL('../export.ts', import.meta.url)",
+        "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+        '})',
+        '',
+      ].join('\n')
+      const proofs = () => ({
+        'R1.S2': {
+          mode: 'automated',
+          actions: ['Run the test'],
+          starting_data: 'None.',
+          expected: 'The assertion of the test holds.',
+          test: {
+            repository: 'api',
+            path: 'tests/export.test.mjs',
+            code: markdown,
+            insertion: 'new_file',
+            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+          },
+          seen_today: false,
+        },
+      })
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              proofs,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            // T2 writes an export the proof does not accept: the end waits for its green.
+            yield* builtAll(builder.grantId, 'export const toCsv = () => ""\n')
+            const waited = (yield* buildingNow(mission.id)).phase
+            // The last write turns the proof green, which calls the end from inside its turn.
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const toMarkdown = () => ""\n',
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return { waited, types: yield* typesOf(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.waited).toBe('tasks')
+      expect(seen.types.indexOf('building.scenario_green')).toBeLessThan(
+        seen.types.indexOf('building.end_started'),
+      )
+      expect(seen.types).toContain('building.proofs_refreshed')
+      expect(seen.types.at(-1)).not.toBe('building.end_started')
+      expect(seen.types).toContain('building.ended')
+    },
+  )
+})
+
+/** Waits until a scenario's proof is in a state, as the Building page reads it. */
+const proofState = (missionId: string, scenario: string, state: string) =>
+  until(
+    Effect.map(buildingNow(missionId), (view) =>
+      view.requirements
+        .flatMap((one) => one.scenarios)
+        .some((one) => one.scenario === scenario && one.state === state),
+    ),
+    LONG,
+  )
+
+describe('The reviewers', () => {
+  test(
+    'the reviewers’ sessions hold no write, command or Memory tool; their brief has no Journal; a replaced reviewer gets the same brief plus the restart sentence',
+    SLOW,
+    async () => {
+      for (const id of ['spec-reviewer', 'code-reviewer'] as const) {
+        const entry = roleNamed(ROLES_REGISTERED, id)
+        expect(entry, id).toMatchObject({ readsMemory: false, writes: false, countsInCap: true })
+        const tools = toolsOf(id)
+        expect(
+          tools.filter((name) => MEMORY_TOOLS.includes(name)),
+          id,
+        ).toEqual([])
+        expect(
+          tools.filter((name) => TOOLS[name].effect === 'writes' || TOOLS[name].effect === 'runs'),
+          id,
+        ).toEqual([])
+      }
+      expect(memoryContractBroken(ROLES_REGISTERED)).toEqual([])
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* call(builder.grantId, 'journal_add', {
+              text: 'The CSV export keeps the header.',
+            })
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const first = yield* agentOf(world, mission.id, 'code-reviewer')
+            yield* reviewing(mission.id)
+            const before = world.agents.length
+            yield* Sessions.use((sessions) =>
+              sessions.replace(first.session.id, 'the test replaced it'),
+            )
+            yield* until(
+              Effect.sync(() => world.agents.length > before),
+              LONG,
+            )
+            const successor = text(world.agents[before]?.answers.prompts[0] ?? [])
+            return { mission, first, successor }
+          }),
+        ),
+      )
+      expect(seen.first.brief).toContain(`## Code reviewer · ${seen.mission.key} · Building`)
+      expect(seen.first.brief).toContain('Checkpoint: ')
+      expect(seen.first.brief).not.toContain('The CSV export keeps the header.')
+      expect(seen.first.brief).not.toMatch(/Journal|## Now|## Notes/)
+      expect(seen.successor).toContain(seen.first.brief.trim())
+      expect(seen.successor).toContain('[hemera:resume]')
+      expect(seen.successor).toContain(START_AGAIN)
+    },
+  )
+
+  test(
+    'checkpoint_read reads the checkpoint, not a later write in the Workspace; a .env shows "content withheld"',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, 'src/x.ts', 'export const x = "at the checkpoint"\n')
+            writtenInWorkspace(api, '.env', 'TOKEN=at-the-checkpoint\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            // Written after the checkpoint: the reviewer never sees it.
+            writtenInWorkspace(api, 'src/x.ts', 'export const x = "later"\n')
+            return {
+              list: yield* call(reviewer.grantId, 'checkpoint_read', {}),
+              file: yield* call(reviewer.grantId, 'checkpoint_read', {
+                repository: 'api',
+                path: 'src/x.ts',
+              }),
+              secret: yield* call(reviewer.grantId, 'checkpoint_read', {
+                repository: 'api',
+                path: '.env',
+              }),
+              read: yield* call(reviewer.grantId, 'fs_read', {
+                repository: 'api',
+                path: 'src/x.ts',
+              }),
+              folder: reviewer.session.folder,
+              api,
+            }
+          }),
+        ),
+      )
+      expect(seen.list).toContain('src/x.ts')
+      expect(seen.list).toContain('.env')
+      expect(seen.file).toContain('at the checkpoint')
+      expect(seen.file).not.toContain('later')
+      expect(seen.secret).toContain('content withheld: .env')
+      expect(seen.secret).not.toContain('TOKEN=')
+      expect(seen.read).toContain('at the checkpoint')
+      expect(seen.read).not.toContain('later')
+      expect(seen.folder).not.toBe(dirname(seen.api))
+    },
+  )
+})
+
+describe('The findings and their fate', () => {
+  test(
+    'a contradicting finding becomes a decision need and never reaches the Builder; "the Spec is right" makes a special task; Review waits for the answer',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer', [
+              {
+                severity: 'blocking',
+                requirement: 'R1',
+                repository: 'api',
+                path: 'invoices.ts',
+                text: 'The CSV has no header row, which the scenario R1.S1 asks for.',
+                contradicts_spec: true,
+                evidence: 'R1.S1: as CSV, it works; invoices.ts writes no header.',
+              },
+            ])
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            // Long enough for anything on its way to the Builder or to Review to arrive.
+            yield* Effect.sleep('1 second')
+            const waiting = yield* getMission(mission.id)
+            const toldBefore = yield* toBuilder(mission.id, builder.session.lineage)
+            const need = waiting.needs[0]
+            yield* answerNeed({
+              id: need?.id ?? '',
+              answer: ChosenAnswer.make({ option: SPEC_IS_RIGHT }),
+              key: 'spec-right',
+            })
+            yield* specialAvailable(mission.id, 'RV1')
+            const toldAfter = yield* toBuilder(mission.id, builder.session.lineage)
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'invoices.ts',
+              'export const header = true\n',
+            )
+            yield* inReview(mission.id)
+            return { waiting, toldBefore, toldAfter, review: yield* autoReviewOf(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.waiting.stage).toBe('building')
+      const fields = seen.waiting.needs[0]?.fields
+      expect(Predicate.isTagged(fields, 'Decision')).toBe(true)
+      if (Predicate.isTagged(fields, 'Decision')) {
+        expect(fields.question).toContain('The CSV has no header row')
+        expect(fields.options).toEqual([
+          'The Spec is right: make the code follow it',
+          'The result is right: record it as a decision',
+          'Dismiss',
+        ])
+      }
+      expect(seen.toldBefore.join('\n')).not.toContain('header row')
+      expect(seen.toldAfter.join('\n')).toContain('RV1')
+      const finding = seen.review?.findings[0]
+      expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1', contradictsSpec: true })
+    },
+  )
+
+  test(
+    'two agreeing findings become RV1 and RV2, absent from the Spec’s tasks, delivered to the Builder, judged by checks; one red three times gives an error need; with no check, RV2 is done, not verified; neither counts in proven requirements; the percentage shows them apart',
+    SLOW,
+    async () => {
+      const { world, run } = ending({
+        checks: ({ scope, subject }) => (scope === 'task' && subject === 'RV1' ? [RED] : []),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('invoices.ts', 'Write the header row of the CSV.'),
+              warning('README.md', 'Say how to export as Markdown.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV2')
+            const told = yield* toBuilder(mission.id, builder.session.lineage)
+            const plan = yield* buildingPartOf(mission.id)
+            const rv2 = yield* specialDone(
+              builder.grantId,
+              'RV2',
+              'README.md',
+              'Acme api, as Markdown\n',
+            )
+            // A red attempt stays the runner's: it fixes and finishes again, twice.
+            const reds = [
+              yield* specialDone(
+                builder.grantId,
+                'RV1',
+                'invoices.ts',
+                'export const header = 1\n',
+              ),
+            ]
+            for (const _ of [2, 3]) {
+              reds.push(
+                yield* call(builder.grantId, 'task_finished', { task: 'RV1', summary: 'Again.' }),
+              )
+            }
+            yield* taskIn(mission.id, 'RV1', 'blocked')
+            return {
+              told,
+              plan,
+              rv2,
+              reds,
+              view: yield* buildingNow(mission.id),
+              mission: yield* getMission(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.told.join('\n')).toMatch(/RV1/)
+      expect(seen.told.join('\n')).toMatch(/RV2/)
+      // spec_read's effective plan keeps the Spec's tasks; the special tasks are listed apart.
+      const [tasksPart, specialPart] = (seen.plan ?? '').split('## Special tasks')
+      expect(tasksPart).not.toContain('RV1')
+      expect(specialPart).toContain('RV1')
+      expect(specialPart).toContain('RV2')
+      expect(seen.rv2).toMatch(/RV2 is done, not verified/)
+      expect(seen.reds.at(-1)).toMatch(/red for the third time/)
+      const rv1 = seen.view.tasks.find((one) => one.id === 'RV1')
+      expect(rv1).toMatchObject({
+        origin: 'review',
+        state: 'blocked',
+        scenarios: [],
+        requirements: [],
+      })
+      expect(seen.mission.needs.some((need) => Predicate.isTagged(need.fields, 'Error'))).toBe(true)
+      expect(seen.mission.stage).toBe('building')
+      expect(seen.view.counts).toMatchObject({ tasksDone: 4, tasks: 4 })
+      expect(seen.view.special).toEqual({ done: 1, total: 2 })
+      expect(seen.view.requirements.map((one) => one.id)).toEqual(['R1'])
+      expect(seen.view.percent).toBe(83)
+    },
+  )
+
+  test('no second review runs after the special tasks', SLOW, async () => {
+    const { world, run } = ending()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          yield* builtAll(builder.grantId)
+          yield* documented(world, mission.id)
+          yield* reviewed(world, mission.id, 'spec-reviewer')
+          yield* reviewed(world, mission.id, 'code-reviewer', [
+            warning('invoices.ts', 'Write the header row of the CSV.'),
+          ])
+          yield* specialAvailable(mission.id, 'RV1')
+          yield* specialDone(builder.grantId, 'RV1', 'invoices.ts', 'export const header = true\n')
+          yield* inReview(mission.id)
+          yield* Effect.sleep('500 millis')
+          const sessions = yield* sessionsIn(SESSION_STATES, {
+            kind: 'mission',
+            missionId: mission.id,
+          })
+          return {
+            passes: yield* Database.use((database) => database.select().from(reviewPasses)),
+            reviewers: sessions.filter((one) => one.role.endsWith('-reviewer')),
+            started: yield* eventsOf(mission.id, 'review.pass_started'),
+          }
+        }),
+      ),
+    )
+    expect(seen.passes).toHaveLength(2)
+    expect(seen.reviewers).toHaveLength(2)
+    expect(seen.started).toHaveLength(2)
+  })
+})
+
+/** A mission whose RV1 changes `path` of `api`, a file at the checkpoint, to Review. */
+const throughSpecial = (world: Ending, path: string, delta: boolean) =>
+  Effect.gen(function* () {
+    const { mission } = yield* launched(work, withReadme)
+    const builder = yield* builderOf(mission.id)
+    const api = yield* apiOf(mission.id)
+    writtenInWorkspace(api, 'src/x.ts', 'export const x = 1\n')
+    yield* builtAll(builder.grantId)
+    yield* documented(world, mission.id)
+    yield* reviewed(world, mission.id, 'spec-reviewer')
+    yield* reviewed(world, mission.id, 'code-reviewer', [warning(path, `Fix ${path}.`)])
+    yield* specialAvailable(mission.id, 'RV1')
+    yield* specialDone(builder.grantId, 'RV1', path, 'export const x = 2\n')
+    if (delta) yield* documented(world, mission.id, 2)
+    yield* inReview(mission.id)
+    const database = yield* Database
+    return {
+      mission,
+      passes: yield* database.select().from(documenterPasses).orderBy(asc(documenterPasses.number)),
+      deltas: yield* eventsOf(mission.id, 'building.documenter_delta'),
+      review: yield* autoReviewOf(mission.id),
+    }
+  })
+
+describe('The documenter’s delta', () => {
+  test(
+    'RV1 changing src/x.ts outside the doc recipes triggers one documenter delta; a change only in README.md does not',
+    SLOW,
+    async () => {
+      const outside = ending()
+      const seen = await outside.run(({ profile }) =>
+        within(profile, throughSpecial(outside.world, 'src/x.ts', true)),
+      )
+      expect(seen.passes.map((one) => one.mode)).toEqual(['full', 'delta'])
+      expect(JSON.parse(seen.passes[1]?.files ?? '[]')).toEqual([
+        { repository: 'api', path: 'src/x.ts', status: 'A' },
+      ])
+      expect(seen.deltas).toHaveLength(1)
+
+      data = realpathSync.native(temporaryFolder('building-end-readme'))
+      work = realpathSync.native(temporaryFolder('building-end-readme-work'))
+      const inRecipe = ending()
+      const only = await inRecipe.run(({ profile }) =>
+        within(profile, throughSpecial(inRecipe.world, 'README.md', false)),
+      )
+      expect(only.passes.map((one) => one.mode)).toEqual(['full'])
+      expect(only.deltas).toHaveLength(0)
+    },
+  )
+})
+
+describe('What the review saw, and what changed after it', () => {
+  test('review_changed_after lists src/x.ts, attributed to RV1', SLOW, async () => {
+    const { world, run } = ending()
+    const seen = await run(({ profile }) =>
+      within(profile, throughSpecial(world, 'src/x.ts', true)),
+    )
+    expect(seen.review?.changedAfter).toContainEqual(
+      expect.objectContaining({ repository: 'api', path: 'src/x.ts', status: 'M', by: 'RV1' }),
+    )
+    expect(seen.review?.checkpoint?.files.map((one) => `${one.repository}/${one.path}`)).toContain(
+      'api/src/x.ts',
+    )
+  })
+
+  test('a proof made stale by RV1 is re-run before Review', SLOW, async () => {
+    const exported = [
+      "import { test } from 'node:test'",
+      "import assert from 'node:assert/strict'",
+      "import { existsSync } from 'node:fs'",
+      '',
+      "test('the scenario holds', () => {",
+      "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
+      '})',
+      '',
+    ].join('\n')
+    const proofs = () => ({
+      'R1.S2': {
+        mode: 'automated',
+        actions: ['Run the test'],
+        starting_data: 'None.',
+        expected: 'The assertion of the test holds.',
+        test: {
+          repository: 'api',
+          path: 'tests/export.test.mjs',
+          code: exported,
+          insertion: 'new_file',
+          command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+        },
+        seen_today: false,
+      },
+    })
+    const { world, run } = ending()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            withReadme,
+            undefined,
+            PLAN,
+            undefined,
+            undefined,
+            proofs,
+          )
+          const builder = yield* builderOf(mission.id)
+          yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+          yield* builtAll(builder.grantId)
+          yield* documented(world, mission.id)
+          yield* reviewed(world, mission.id, 'spec-reviewer')
+          yield* reviewed(world, mission.id, 'code-reviewer', [
+            warning('export.ts', 'Export a function, not a flag.'),
+          ])
+          yield* specialAvailable(mission.id, 'RV1')
+          yield* specialDone(
+            builder.grantId,
+            'RV1',
+            'export.ts',
+            'export const toMarkdown = () => ""\n',
+          )
+          yield* documented(world, mission.id, 2)
+          yield* inReview(mission.id)
+          const database = yield* Database
+          return {
+            runs: yield* database
+              .select()
+              .from(proofRuns)
+              .where(and(eq(proofRuns.missionId, mission.id), eq(proofRuns.scenario, 'R1.S2')))
+              .orderBy(asc(proofRuns.at)),
+            refreshed: yield* eventsOf(mission.id, 'building.proofs_refreshed'),
+            types: yield* typesOf(mission.id),
+            view: yield* buildingNow(mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.runs.map((one) => one.phase)).toContain('rerun')
+    expect(seen.refreshed.at(-1)?.payload).toMatchObject({ proofs: ['R1.S2'] })
+    expect(seen.types.indexOf('building.proofs_refreshed')).toBeLessThan(
+      seen.types.indexOf('building.ended'),
+    )
+    const proof = seen.view.requirements
+      .flatMap((one) => one.scenarios)
+      .find((one) => one.scenario === 'R1.S2')
+    expect(proof).toMatchObject({ state: 'green', upToDate: true })
+  })
+})
+
+describe('The reviewers count in the cap', () => {
+  test('with three sub-agents running, the reviewers wait for slots', SLOW, async () => {
+    const { world, run } = ending()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          const limits = yield* projectLimits(project.id)
+          yield* setProjectLimits(project.id, { ...limits, cap: 4 })
+          yield* builtAll(builder.grantId)
+          const documenter = yield* agentOf(world, mission.id, 'documenter')
+          const owner = { kind: 'mission' as const, missionId: mission.id }
+          const helpers: RoleSession[] = []
+          for (const _ of [1, 2, 3]) {
+            helpers.push(
+              yield* Sessions.use((sessions) =>
+                sessions.open({
+                  owner,
+                  role: 'helper',
+                  folder: builder.session.folder,
+                  requestedBy: 'agent',
+                }),
+              ),
+            )
+          }
+          yield* setProjectLimits(project.id, { ...limits, cap: 3 })
+          const answer = yield* callTool(documenter.grantId, 'docs_report', {
+            changed: [],
+            no_change_reason: NO_DOC,
+          })
+          if (!answer.ok) return yield* Effect.die(new Error(answer.text))
+          world.release(documenter.index)
+          const now = Memory.use((memory) => memory.now(mission.id))
+          yield* until(
+            Effect.map(now, (state) => state.slotWait !== null),
+            LONG,
+          )
+          const waiting = yield* now
+          const passes = (yield* autoReviewOf(mission.id))?.passes ?? []
+          yield* Sessions.use((sessions) => sessions.end(helpers[0]?.lineage ?? '', 'done'))
+          const passesNow = Effect.map(autoReviewOf(mission.id), (review) => review?.passes ?? [])
+          yield* until(
+            Effect.map(passesNow, (rows) => rows.some((row) => row.state === 'running')),
+            LONG,
+          )
+          const one = yield* passesNow
+          yield* Sessions.use((sessions) => sessions.end(helpers[1]?.lineage ?? '', 'done'))
+          yield* reviewing(mission.id)
+          return {
+            waiting,
+            passes,
+            one,
+            waited: yield* eventsOf(mission.id, 'review.pass_waiting'),
+          }
+        }),
+      ),
+    )
+    expect(seen.waiting.slotWait).toBe(
+      'Automatic review waits for a free agent slot (3 of 3 in use)',
+    )
+    expect(seen.passes.map((one) => one.state)).toEqual(['waiting', 'waiting'])
+    expect(seen.one.map((one) => one.state).toSorted()).toEqual(['running', 'waiting'])
+    expect(seen.waited).toHaveLength(2)
+  })
+})
+
+describe('A restart in the middle of the end', () => {
+  test('a restart in the middle of the sequence resumes at its step', SLOW, async () => {
+    const before = ending()
+    const left = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          yield* builtAll(builder.grantId)
+          yield* documented(before.world, mission.id)
+          yield* reviewing(mission.id)
+          return mission
+        }),
+      ),
+    )
+    const after = ending({ resumed: true })
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const spec = yield* reviewed(after.world, left.id, 'spec-reviewer')
+          yield* reviewed(after.world, left.id, 'code-reviewer')
+          yield* inReview(left.id)
+          const database = yield* Database
+          return {
+            spec,
+            documenter: yield* database.select().from(documenterPasses),
+            checkpoints: yield* database.select().from(checkpoints),
+            passes: yield* database.select().from(reviewPasses),
+            types: yield* typesOf(left.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.spec.brief).toContain('[hemera:resume]')
+    expect(seen.spec.brief).toContain(START_AGAIN)
+    expect(seen.documenter).toHaveLength(1)
+    expect(seen.checkpoints.filter((one) => one.kind === 'review')).toHaveLength(1)
+    expect(seen.passes).toHaveLength(2)
+    expect(seen.passes.every((one) => one.state === 'done')).toBe(true)
+    expect(seen.types.filter((type) => type === 'building.end_started')).toHaveLength(1)
+    expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
+  })
+})
