@@ -30,7 +30,7 @@ import { posix } from 'node:path'
 
 import { ChangedOutsideMark, LIVE_RUN_STATES } from '@hemera/core/domain'
 import { type OutsideContents, type OutsideRepository, UnknownOutsideChange } from '@hemera/ipc'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or } from 'drizzle-orm'
 import { Context, Effect, Layer, Option, PubSub, Schema, Semaphore, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
@@ -186,14 +186,25 @@ export const outsideChangesLayer = (log: Log, settings: Partial<OutsideSettings>
       const touched = (missionId: string) => Effect.asVoid(PubSub.publish(changed, missionId))
 
       /** One compare at a time per repository of a Building; one base read per mission. */
-      const turns = new Map<string, Semaphore.Semaphore>()
-      const turnOf = (key: string) => {
-        const found = turns.get(key)
-        if (found !== undefined) return found
-        const made = Semaphore.makeUnsafe(1)
-        turns.set(key, made)
-        return made
-      }
+      const turns = new Map<string, { readonly turn: Semaphore.Semaphore; waiting: number }>()
+      /** Runs `effect` in the turn of `key`; the turn is forgotten once nobody holds or awaits it. */
+      const inTurn =
+        (key: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              const found = turns.get(key) ?? { turn: Semaphore.makeUnsafe(1), waiting: 0 }
+              found.waiting += 1
+              turns.set(key, found)
+              return found
+            }),
+            (found) => Semaphore.withPermits(found.turn, 1)(effect),
+            (found) =>
+              Effect.sync(() => {
+                found.waiting -= 1
+                if (found.waiting === 0) turns.delete(key)
+              }),
+          )
 
       /** The Building whose Workspace is watched: the mission's latest, in Building or Review. */
       const watchedOf = (missionId: string) =>
@@ -222,7 +233,13 @@ export const outsideChangesLayer = (log: Log, settings: Partial<OutsideSettings>
                 eq(effectfulActions.ownerKind, 'mission'),
                 eq(effectfulActions.ownerId, building.missionId),
                 inArray(effectfulActions.kind, ['file.write', 'command.run']),
-                or(isNull(effectfulActions.endedAt), gte(effectfulActions.endedAt, since)),
+                // A command still running, or ended since. One an engine left without an outcome
+                // (`indeterminate`) runs no more and explains nothing: it would blind its repository.
+                or(
+                  and(isNull(effectfulActions.endedAt), eq(effectfulActions.state, 'started')),
+                  // Ended at the compare's start: that compare ran without it.
+                  gt(effectfulActions.endedAt, since),
+                ),
               ),
             )
             .pipe(Effect.mapError(refusedWhile('reading what Hemera wrote')))
@@ -524,10 +541,9 @@ export const outsideChangesLayer = (log: Log, settings: Partial<OutsideSettings>
           if (building === null) return
           for (const base of basesOf(building)) {
             if (repository !== null && base.repository !== repository) continue
-            yield* Semaphore.withPermits(
-              turnOf(`${building.id}\u0000${base.repository}`),
-              1,
-            )(compareOne(building, base)).pipe(
+            yield* inTurn(`${building.id}\u0000${base.repository}`)(
+              compareOne(building, base),
+            ).pipe(
               Effect.catchCause((cause) =>
                 said(`${missionId}/${base.repository} was not compared: ${String(cause)}`),
               ),
@@ -699,10 +715,7 @@ export const outsideChangesLayer = (log: Log, settings: Partial<OutsideSettings>
         )
 
       const readBases = (missionId: string) =>
-        Semaphore.withPermits(
-          turnOf(`bases\u0000${missionId}`),
-          1,
-        )(
+        inTurn(`bases\u0000${missionId}`)(
           Effect.gen(function* () {
             const database = yield* Database
             const building = yield* activeBuildingIn(database, missionId)

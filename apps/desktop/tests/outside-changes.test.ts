@@ -43,6 +43,7 @@ import {
   commandRuns,
   effectfulActions,
   outsideChanges,
+  outsideWatches,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
 import { call, eventsOf, grantOf, pushedOnRemote } from './building-world.ts'
@@ -195,15 +196,27 @@ const recorded = (missionId: string) =>
     return rows.map((row) => `${row.repository}/${row.path}`).toSorted()
   })
 
-/** Whether every command a mission's sessions ran has its end recorded. */
-const commandsEnded = (missionId: string) =>
+/** Whether every command of the mission ended and the Workspace was compared after its end. */
+const comparedAfterEnd = (missionId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
-    const rows = yield* database
-      .select({ state: effectfulActions.state })
+    const ends = yield* database
+      .select({ endedAt: effectfulActions.endedAt })
       .from(effectfulActions)
       .where(and(eq(effectfulActions.ownerId, missionId), eq(effectfulActions.kind, 'command.run')))
-    return rows.every((row) => row.state !== 'started')
+    const [building] = yield* database
+      .select({ id: buildings.id })
+      .from(buildings)
+      .where(eq(buildings.missionId, missionId))
+    const watches = yield* database
+      .select({ comparedAt: outsideWatches.comparedAt })
+      .from(outsideWatches)
+      .where(eq(outsideWatches.buildingId, building?.id ?? ''))
+    return ends.every(
+      (end) =>
+        end.endedAt !== null &&
+        watches.some((watch) => end.endedAt !== null && watch.comparedAt >= end.endedAt),
+    )
   })
 
 const compare = (missionId: string) =>
@@ -376,9 +389,8 @@ describe('A change made outside Hemera is detected (CT-22)', () => {
           yield* compare(mission.id)
           writeFileSync(release, '')
           yield* Fiber.join(formatting)
-          // The bound ends once Hemera recorded the command's end.
-          yield* until(commandsEnded(mission.id))
-          yield* compare(mission.id)
+          // The bound ends once Hemera recorded the command's end, and compared after it.
+          yield* until(comparedAfterEnd(mission.id))
           const during = yield* recorded(mission.id)
           // Once it ended, the same act is the user's again.
           writeFileSync(join(session.folder, 'api', 'mine.md'), 'mine, after\n')
@@ -502,7 +514,10 @@ describe('Races and restarts', () => {
     expect(seen.rows).toEqual([])
   })
 
-  test('a writing command that writes and ends while a compare takes its snapshot is never reported as outside', async () => {
+  // Not a test of the order of the writers and the snapshot: a launch compares its repositories
+  // first, one compare at a time, so a command is running when a compare starts or starts after
+  // it, and either order sees it. The gate write's race above is the one the order decides.
+  test('a writing command running when a compare starts, which writes and ends during its snapshot, explains what it wrote', async () => {
     const release = join(scripts, 'release-generate')
     const holding = Deferred.makeUnsafe<void>()
     const go = Deferred.makeUnsafe<void>()
@@ -580,6 +595,43 @@ describe('Races and restarts', () => {
     )
     expect(first.rows).toEqual(['api/invoices.ts'])
     expect(seen).toEqual(['api/README.md', 'api/invoices.ts'])
+  })
+  test('a writing command cut by a restart no longer explains the changes made in its repository afterwards', async () => {
+    const release = join(scripts, 'release-never')
+    const before = engine()
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* launched(work)
+          // No globs: the whole repository is its to write while it runs.
+          const format = yield* apiCommand(project.id, 'format', ['README.md=formatted'], {
+            release,
+          })
+          const { session, grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* Effect.forkChild(
+            call(grantId, 'commands_run', { command: format.id, timeout: 60 }),
+          )
+          yield* until(runningOf(format.id))
+          // The engine stops while the command runs: its action is left without an outcome.
+          return { mission, folder: session.folder }
+        }),
+      ),
+    )
+    const after = engine()
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* compare(first.mission.id)
+          writeFileSync(join(first.folder, 'api', 'mine.md'), 'mine after the restart\n')
+          yield* compare(first.mission.id)
+          return yield* recorded(first.mission.id)
+        }),
+      ),
+    )
+    expect(seen).toContain('api/mine.md')
   })
 })
 

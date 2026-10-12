@@ -474,6 +474,16 @@ export const buildingLoop = (parts: LoopParts) => {
               },
         finish,
         settled: Deferred.await(done),
+        // Until its end is written the command explains what changes in its repositories: the
+        // compare after its outcome ends that window (#148).
+        ended: Effect.suspend(() =>
+          Effect.forEach(
+            before ?? [],
+            ({ base }) =>
+              OutsideChanges.use((outside) => outside.compare(building.missionId, base.repository)),
+            { discard: true },
+          ),
+        ).pipe(Effect.provide(context)),
       }
       return watch
     })

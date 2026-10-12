@@ -268,6 +268,8 @@ export interface CommandWatch {
   readonly finish: (runId: string | null) => Effect.Effect<void>
   /** Waits until `finish` attributed what the run changed. */
   readonly settled: Effect.Effect<void>
+  /** Once the run's outcome is written: the Workspace is compared again without it (#148). */
+  readonly ended: Effect.Effect<void>
 }
 
 /** A file a mission's session is about to write. */
