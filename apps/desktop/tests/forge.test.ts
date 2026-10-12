@@ -1087,4 +1087,33 @@ describe('Waiters wake on a change of state, not of its detail', () => {
     const checks = fake.calls().filter((call) => call.args[0] === 'auth').length
     expect(checks).toBeLessThanOrEqual(4)
   })
+
+  test('a waiter on a forge whose state flips each check is not woken by its own check', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        alternate: [
+          'You are not logged into any GitHub hosts.\n',
+          'error connecting to api.github.com\n',
+        ],
+        code: 1,
+      },
+    ])
+    await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiter = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* Effect.sleep('2 seconds')
+          expect(waiter.pollUnsafe()).toBeUndefined()
+          yield* Fiber.interrupt(waiter)
+        }),
+      { shop: REMOTES.shop },
+    )
+    const checks = fake.calls().filter((call) => call.args[0] === 'auth').length
+    expect(checks).toBeLessThanOrEqual(2)
+  })
 })

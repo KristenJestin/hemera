@@ -23,6 +23,8 @@ export interface FakeRule {
   readonly stdout?: string
   /** `{call}` in it is replaced by the call's number. */
   readonly stderr?: string
+  /** Standard errors answered in turn, one per call with these same arguments, over `stderr`. */
+  readonly alternate?: ReadonlyArray<string>
   readonly code?: number
   /** Never answers: the call is cut at its limit. */
   readonly hang?: boolean
@@ -62,9 +64,14 @@ module.exports = (cli, args) => {
   }
   if (rule.hang) { setInterval(() => {}, 1000); return }
   // \`{call}\` is this call's number, for an answer that differs each time.
-  const call = String(readFileSync(process.env.FAKE_FORGE_LOG, 'utf8').split('\\n').length - 1)
+  const logged = readFileSync(process.env.FAKE_FORGE_LOG, 'utf8').split('\\n').filter(Boolean)
+  const call = String(logged.length)
+  const same = logged.filter((line) => JSON.parse(line).args.join(' ') === args.join(' ')).length
+  const stderr = rule.alternate === undefined
+    ? (rule.stderr ?? '')
+    : rule.alternate[(same - 1) % rule.alternate.length]
   process.stdout.write((rule.stdout ?? '').replaceAll('{call}', call))
-  process.stderr.write((rule.stderr ?? '').replaceAll('{call}', call))
+  process.stderr.write(stderr.replaceAll('{call}', call))
   process.exitCode = rule.code ?? 0
 }
 `

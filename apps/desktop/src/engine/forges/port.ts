@@ -801,7 +801,10 @@ export const forgePort = () => {
        * Waits until anything changes for the repository: its state is no longer the one waited on
        * (ready, forced elsewhere), or an event names it (removed, forced). The loop then looks again.
        * Only the state, the CLI, the host and the forge count: a detail that differs at each check
-       * (an unreachable forge's message) would have waiters wake each other forever.
+       * (an unreachable forge's message) would have waiters wake each other forever. A state change
+       * is read from the states alone, which this follows from the waiter's own check on: the event
+       * that check wrote would wake it at once, and a forge flipping between two states would be
+       * checked back to back.
        */
       const changed = (
         repositoryId: string,
@@ -824,7 +827,10 @@ export const forgePort = () => {
             Stream.runDrain,
           ),
           events.pipe(
-            Stream.filter((event) => event.entityId === repositoryId),
+            Stream.filter(
+              (event) =>
+                event.entityId === repositoryId && event.type !== 'forge.cli_state_changed',
+            ),
             Stream.take(1),
             Stream.runDrain,
           ),
