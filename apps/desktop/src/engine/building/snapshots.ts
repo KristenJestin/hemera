@@ -32,6 +32,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -1112,10 +1114,18 @@ function regularFile(path: string): boolean {
   }
 }
 
-/** The user's index copied to where the snapshot writes, or nothing when there is none yet. */
+/**
+ * The user's index copied to where the snapshot writes, or nothing when there is none yet. Git
+ * trusts an entry's stat only when it is older than the index (its racy check), so the copy must
+ * never be newer than the index, or a file rewritten at the same size in the second the index was
+ * written would read as unchanged. Its times are the index's floored to the second: older or equal
+ * whatever precision Git compares, where a `Date` rounds to the millisecond and can be newer.
+ */
 function copyIndex(from: string, to: string): void {
   try {
+    const { atimeNs, mtimeNs } = statSync(from, { bigint: true })
     copyFileSync(from, to)
+    utimesSync(to, Number(atimeNs / 1_000_000_000n), Number(mtimeNs / 1_000_000_000n))
   } catch (failure) {
     if (Predicate.hasProperty(failure, 'code') && failure.code === 'ENOENT') return
     throw failure
