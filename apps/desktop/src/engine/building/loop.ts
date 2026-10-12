@@ -119,7 +119,7 @@ export interface LoopParts {
   readonly locks: WriteLocks
   readonly said: (line: string) => Effect.Effect<void>
   readonly hold: (
-    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
+    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'mid-commit' | 'cutting',
   ) => Effect.Effect<void>
   /** A delivery to a lineage of the mission, or to its Builder. */
   readonly deliver: (
@@ -183,9 +183,9 @@ const ActionDetails = Schema.Struct({
 const readDetails = Schema.decodeUnknownOption(Schema.fromJsonString(ActionDetails))
 const readParsed = Schema.decodeUnknownOption(ActionDetails)
 /** The repository a `git.commit` intent was for. */
-const readCommitted = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ repository: Schema.String })),
-)
+const CommittedIn = Schema.Struct({ repository: Schema.String })
+const readCommitted = Schema.decodeUnknownOption(Schema.fromJsonString(CommittedIn))
+const readCommittedParsed = Schema.decodeUnknownOption(CommittedIn)
 
 export const buildingLoop = (parts: LoopParts) => {
   const { locks, said, hold, deliver } = parts
@@ -1474,12 +1474,20 @@ export const buildingLoop = (parts: LoopParts) => {
     })
 
   /**
-   * A command an engine stop cut in the middle, handed over once by the start (`handleIndeterminate`):
-   * the Building's when its mission builds and it is not a reservation's reset. Answers whether
-   * the Building took it.
+   * An action an engine stop cut in the middle, handed over once by the start (`handleIndeterminate`):
+   * a task's commit, or a command of the Building's when its mission builds and it is not a
+   * reservation's reset. Answers whether the Building took it.
    */
   const cut = (action: EffectfulAction) =>
     Effect.gen(function* () {
+      if (action.kind === 'git.commit' && action.owner.kind === 'mission') {
+        const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
+        const committed = Option.getOrNull(readCommittedParsed(action.details))
+        if (building === null || action.owner.taskId === null || committed === null) return false
+        yield* hold('cutting')
+        yield* commitCut(building, action.owner.taskId, committed.repository)
+        return true
+      }
       if (action.kind !== 'command.run' || action.owner.kind !== 'mission') return false
       const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
       const details = Option.getOrNull(readParsed(action.details))
@@ -1636,6 +1644,38 @@ export const buildingLoop = (parts: LoopParts) => {
   // ---- Commits per task.
 
   /**
+   * A task's commit an engine stop cut in the middle: never made again (it may well have been
+   * made), so the user is asked once to check the repository's log.
+   */
+  const commitCut = (building: BuildingRow, taskId: string, repository: string) =>
+    Effect.gen(function* () {
+      const { owner } = yield* ownerOf(building, taskId)
+      const missing = `${taskId}'s commit in ${repository} was cut by a restart: it may or may not have been made`
+      const write = yield* createNeedIn(
+        parts.needs,
+        owner,
+        EnvironmentFields.make({
+          missing,
+          action: `Run git log in ${repository}: if ${taskId} is not committed there, commit it yourself. Then confirm.`,
+          settingsSection: null,
+        }),
+      )
+      yield* mutate('saying a task’s commit was cut', (transaction) =>
+        Effect.map(
+          hemeraNeedIn(transaction, building, write, {
+            kind: 'indeterminate',
+            tasks: [],
+            question: missing,
+            options: [],
+            proposer: null,
+            scope: null,
+          }),
+          (made) => ({ result: undefined, events: made.events }),
+        ),
+      )
+    })
+
+  /**
    * The repositories a task has its commit in: a `git.commit` of it there done, or perhaps done.
    * One that failed, or never began, is committed again.
    */
@@ -1753,6 +1793,7 @@ export const buildingLoop = (parts: LoopParts) => {
           { kind: 'mission', missionId: building.missionId, taskId: task.id },
           { repository: base.repository, paths: [...paths], message },
         )
+        yield* hold('mid-commit')
         const committed = yield* Git.use((git) =>
           git.commitPaths(base.folder, paths, message),
         ).pipe(Effect.result)

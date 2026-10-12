@@ -1571,6 +1571,58 @@ describe('Commits per task', () => {
     expect(seen.log).toBe('ACME-1 T1: Export as CSV')
   })
 
+  test('a stop during a task’s commit says it once: one need names the task, the repository and what to check', async () => {
+    const hold: BuilderHold = (at) => (at === 'mid-commit' ? Effect.never : Effect.void)
+    const before = builderEngine(data, work, { hold })
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          yield* Effect.forkChild(call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }))
+          // The commit's intent is written, its `git commit` not yet run: the stop cuts it there.
+          yield* until(
+            Effect.map(
+              (yield* Database)
+                .select({ state: effectfulActions.state })
+                .from(effectfulActions)
+                .where(eq(effectfulActions.kind, 'git.commit')),
+              (rows) => rows.some((row) => row.state === 'started'),
+            ),
+          )
+          return { mission, api, head }
+        }),
+      ),
+    )
+    const after = builderEngine(data, work)
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const environments = () =>
+            Effect.map(getMission(first.mission.id), (one) =>
+              one.needs.flatMap((need) =>
+                Predicate.isTagged(need.fields, 'Environment') ? [need.fields] : [],
+              ),
+            )
+          yield* until(Effect.map(environments(), (rows) => rows.length > 0))
+          // Long enough for a retry of the commit, if one wrongly happened.
+          yield* Effect.sleep('500 millis')
+          return {
+            needs: yield* environments(),
+            log: git(first.api, 'log', '--format=%s', `${first.head}..HEAD`),
+          }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('')
+    expect(seen.needs).toHaveLength(1)
+    const [need] = seen.needs
+    expect(need?.missing).toContain('T1')
+    expect(need?.missing).toContain('api')
+    expect(need?.action).toContain('git log')
+  })
+
   test('with a “one commit per task” copy, a done task is committed with only its files and the user’s identity', async () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) => within(profile, builtWith(true)))
