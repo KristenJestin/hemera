@@ -170,9 +170,8 @@ import { coldReadsLayer } from './planning/cold-reads.ts'
 import { agentOffersLayer, agentOffersServed } from './planning/offers.ts'
 import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
-import { type FileSnapshots, databaseSnapshots } from './planning/snapshots.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
-import { type Snapshots, snapshotsLayer } from './building/snapshots.ts'
+import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -250,8 +249,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
-  /** What the Freeze keeps of the dirty files (#92); the database's stand-in otherwise. */
-  readonly snapshots?: Layer.Layer<FileSnapshots, never, Secrets>
+  /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
+  readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
   /**
@@ -346,7 +345,6 @@ export type EngineServices =
   | BuildDesk
   | ProbeDesk
   | ProbeSteps
-  | FileSnapshots
   | Snapshots
   | BuildingStart
   | Checkpoints
@@ -483,8 +481,16 @@ export const startProfile = (
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
     const builder = builderLayer(log, parts.building?.hold)
-    // One store of the snapshots, for the checkpoints and the Builder alike (#140).
-    const snapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
+    // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
+    const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
+    const wrapped = parts.snapshots
+    const snapshots =
+      wrapped === undefined
+        ? machineSnapshots
+        : Layer.effect(
+            Snapshots,
+            Snapshots.use((real) => Effect.succeed(wrapped(real))),
+          ).pipe(Layer.provide(machineSnapshots))
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -607,7 +613,6 @@ export const startProfile = (
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
-      parts.snapshots ?? databaseSnapshots,
       checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),

@@ -92,7 +92,6 @@ export const TABLE_CLASSES = {
   discussion_messages: 'permanent',
   freezes: 'permanent',
   freeze_files: 'permanent',
-  snapshot_contents: 'permanent',
   mission_dependencies: 'permanent',
   spec_relies_on: 'permanent',
   effectful_actions: 'permanent',

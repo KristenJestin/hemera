@@ -65,9 +65,15 @@ import {
   Stream,
 } from 'effect'
 
+import {
+  type Captured,
+  type RepositoryPlace,
+  Snapshots,
+  keepCaptured,
+} from '../building/snapshots.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
-import { Git } from '../git.ts'
+import { type DirtyFile, Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn, runStops } from '../missions.ts'
@@ -100,7 +106,6 @@ import { writeFrozenBases } from './freeze-store.ts'
 import { type Outdated, markOutdatedIn } from './outdated.ts'
 import { atBaseFailures, placeOf } from './plan.ts'
 import { ProbeDesk } from './probe-desk.ts'
-import { type Captured, FileSnapshots } from './snapshots.ts'
 import { driftIn, missionRow, specIn, writeSpecFile } from './store.ts'
 import { PlannerWake } from './wake.ts'
 
@@ -287,11 +292,65 @@ const clearOutdatedIn = (transaction: EngineTransaction, missionId: string) =>
 /** The stoppers the Freeze owes, in their order: the Probes wiped, then the session tree. */
 const FREEZE_STOPS = ['probes', 'sessions'] as const
 
-/** One repository's dirty files, as the Freeze read them. */
-interface DirtyKept {
+/** One dirty file as the Freeze keeps it: how it differed, and its side in the snapshot. */
+interface FrozenFileRow {
   readonly repository: string
+  readonly path: string
+  readonly status: DirtyFile['status']
+  readonly sha256: string | null
+  readonly withheld: string | null
+  readonly tree: string
+}
+
+/** One repository's dirty files, as the snapshot service read them, nothing written yet. */
+interface DirtyKept {
+  readonly files: ReadonlyArray<FrozenFileRow>
   readonly captured: Captured
 }
+
+/**
+ * A repository's dirty files through the snapshot service (#208): its working tree taken under
+ * the Freeze's ref, the files changed since its HEAD listed and their contents read, written by
+ * the Freeze's transaction alone. A dirty file Git lists by its folder (a repository inside the
+ * checkout) is the entry of that folder; a file whose change the tree does not hold (a submodule
+ * changed inside) is read from the tree as it stands.
+ */
+const dirtyKept = (
+  missionId: string,
+  freezeId: string,
+  place: RepositoryPlace,
+  dirty: ReadonlyArray<DirtyFile>,
+) =>
+  Effect.gen(function* () {
+    const snapshots = yield* Snapshots
+    const head = Option.getOrNull(yield* Git.use((git) => git.commitOf(place.folder, 'HEAD')))
+    const tree = yield* snapshots.take(place, { kind: 'freeze', missionId, freezeId })
+    const changes = yield* snapshots.changed(missionId, place, head, tree)
+    const captured = yield* snapshots.collect(missionId, place, head, tree, changes)
+    const sides = new Map(
+      captured.files.flatMap((file) => (file.after === null ? [] : [[file.path, file.after]])),
+    )
+    const files = yield* Effect.forEach(dirty, (file) =>
+      Effect.gen(function* () {
+        const path = file.path.endsWith('/') ? file.path.slice(0, -1) : file.path
+        const side =
+          file.status === 'deleted'
+            ? null
+            : (sides.get(path) ?? (yield* snapshots.read(missionId, place, tree, path)))
+        const row: FrozenFileRow = {
+          repository: place.name,
+          path: file.path,
+          status: file.status,
+          sha256: side?.sha256 ?? null,
+          withheld: side?.withheld ?? null,
+          tree,
+        }
+        return row
+      }),
+    )
+    const kept: DirtyKept = { files, captured }
+    return kept
+  })
 
 /** A `[hemera:freeze-refused]` stored for the Planner, to hand over once committed. */
 interface Told {
@@ -364,7 +423,8 @@ export const freezeMission = (missionId: string, specVersion: number) =>
         false,
         new Map(bases.map((base) => [base.repository, base.commit])),
       )
-      // The dirty files of the main checkout, kept (CT-23).
+      // The dirty files of the main checkout, kept through the snapshot service (CT-23, #208).
+      const freezeId = crypto.randomUUID()
       const dirty: DirtyKept[] = []
       for (const repository of repositories) {
         const folder = `${place.main}/${repository.path}`
@@ -376,12 +436,28 @@ export const freezeMission = (missionId: string, specVersion: number) =>
           continue
         }
         if (files.success.length === 0) continue
-        // Read only: what is kept of them is written with the Freeze, never for a refused one.
-        const captured = yield* FileSnapshots.use((kept) =>
-          kept.capture({ name: repository.path, folder }, files.success),
+        // Taken into Hemera's store only: the copy is written with the Freeze, never for a refused
+        // one.
+        const kept = yield* dirtyKept(
+          missionId,
+          freezeId,
+          { name: repository.path, folder },
+          files.success,
+        ).pipe(
+          Effect.map((one): DirtyKept | string => one),
+          Effect.catchTags({
+            GitFailed: (failure) => Effect.succeed(failure.message),
+            GitMissing: (failure) => Effect.succeed(failure.message),
+            GitCut: (failure) => Effect.succeed(failure.message),
+            SnapshotFailed: (failure) => Effect.succeed(failure.message),
+            SnapshotUnavailable: (failure) => Effect.succeed(failure.message),
+          }),
         )
-        problems.push(...captured.problems)
-        dirty.push({ repository: repository.path, captured })
+        if (Predicate.isString(kept)) {
+          problems.push(`The dirty files of ${repository.path} could not be kept: ${kept}`)
+          continue
+        }
+        dirty.push(kept)
       }
       const outcome = yield* mutate('freezing the Spec', (transaction) =>
         Effect.gen(function* () {
@@ -423,11 +499,10 @@ export const freezeMission = (missionId: string, specVersion: number) =>
             )
           }
           const at = now()
-          const id = crypto.randomUUID()
           yield* transaction
             .insert(freezes)
             .values({
-              id,
+              id: freezeId,
               missionId,
               cycle: mission.planningCycle,
               specVersion: version,
@@ -435,23 +510,9 @@ export const freezeMission = (missionId: string, specVersion: number) =>
               frozenAt: at,
             })
             .pipe(Effect.mapError(refusedWhile('keeping the Freeze')))
-          const files = dirty.flatMap((one) =>
-            one.captured.snapshots.map((snapshot) => ({
-              freezeId: id,
-              repository: one.repository,
-              path: snapshot.path,
-              status: snapshot.status,
-              sha256: snapshot.sha256,
-              withheld: snapshot.withheld,
-            })),
-          )
+          const files = dirty.flatMap((one) => one.files.map((file) => ({ freezeId, ...file })))
           if (files.length > 0) {
-            yield* FileSnapshots.use((kept) =>
-              kept.keepIn(
-                transaction,
-                dirty.map((one) => one.captured),
-              ),
-            )
+            for (const one of dirty) yield* keepCaptured(transaction, one.captured)
             yield* transaction
               .insert(freezeFiles)
               .values(files)
