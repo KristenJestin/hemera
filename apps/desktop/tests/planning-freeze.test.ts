@@ -31,9 +31,15 @@ import { Effect, Fiber, Layer, Predicate, Result, type Schema, Stream } from 'ef
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
+import {
+  type RepositoryPlace,
+  SNAPSHOTS_FOLDER,
+  type SnapshotOwner,
+  type SnapshotsService,
+  Snapshots,
+} from '../src/engine/building/snapshots.ts'
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
-import type { DirtyFile } from '../src/engine/git.ts'
 import { createMission, getMission, moveMission } from '../src/engine/missions.ts'
 import { createNeed, getNeed, needService } from '../src/engine/needs.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
@@ -56,23 +62,18 @@ import { markDelivered } from '../src/engine/planning/inputs.ts'
 import { ProbeCleanup, ProbeWipeFailed } from '../src/engine/planning/probe-desk.ts'
 import { probeRowsOf } from '../src/engine/planning/probe-store.ts'
 import { PLANNER_TEMPLATE } from '../src/engine/planning/role.ts'
-import {
-  FileSnapshots,
-  type SnapshotRepository,
-  databaseSnapshots,
-} from '../src/engine/planning/snapshots.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { openSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   domainEvents,
+  fileContents,
   freezeFiles,
   freezes,
   missionStops,
   missions,
   sessionDeliveries,
-  snapshotContents,
   specs,
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
@@ -555,7 +556,7 @@ describe('Freeze, the user’s gesture', () => {
             older,
             after: yield* getMission(mission.id),
             frozen: yield* eventsOf(mission.id, 'planning.frozen'),
-            contents: yield* database.select().from(snapshotContents),
+            contents: yield* database.select().from(fileContents),
           }
         }),
       ),
@@ -670,7 +671,7 @@ describe('Freeze, the user’s gesture', () => {
             .select()
             .from(freezes)
             .where(eq(freezes.missionId, mission.id))
-          const contents = yield* database.select().from(snapshotContents)
+          const contents = yield* database.select().from(fileContents)
           return {
             frozen,
             fetched,
@@ -701,7 +702,7 @@ describe('Freeze, the user’s gesture', () => {
       a.path < b.path ? -1 : 1,
     )
     expect(files.map((one) => [one.repository, one.path, one.status, one.withheld])).toEqual([
-      ['api', '.env', 'untracked', 'content withheld: a sensitive place'],
+      ['api', '.env', 'untracked', 'content withheld: .env'],
       ['api', 'README.md', 'deleted', null],
       ['api', 'export.ts', 'untracked', null],
       ['api', 'invoices.ts', 'modified', null],
@@ -710,7 +711,7 @@ describe('Freeze, the user’s gesture', () => {
     expect(env?.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(files.find((one) => one.path === 'README.md')?.sha256).toBeNull()
     // The content of the change is kept; the `.env`'s never.
-    const kept = seen.contents.map((one) => one.content)
+    const kept = seen.contents.map((one) => one.bytes.toString('utf8'))
     expect(kept).toContain('export const invoices = [1]\n')
     expect(kept).toContain('export const csv = () => ""\n')
     expect(kept.some((one) => one.includes('DATABASE_PASSWORD'))).toBe(false)
@@ -723,6 +724,42 @@ describe('Freeze, the user’s gesture', () => {
     expect(seen.stops).toEqual([])
     // Nothing reached Building, and no agent was started for the Freeze itself.
     expect(world.agents).toHaveLength(2)
+  })
+
+  test('a Frozen mission’s dirty file is read back from the snapshot service, from its store and from the database alike', async () => {
+    const { run } = freezing()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main, api } = yield* acme()
+          const { mission, grantId } = yield* plannedIn(project.id, main)
+          const version = yield* settledSpec(mission.id, grantId)
+          writeFileSync(join(api, 'invoices.ts'), 'export const invoices = [1]\n')
+          yield* freezeMission(mission.id, version)
+          const database = yield* Database
+          const [file] = yield* database
+            .select()
+            .from(freezeFiles)
+            .where(eq(freezeFiles.path, 'invoices.ts'))
+          const tree = file?.tree ?? ''
+          const place = { name: 'api', folder: api }
+          const read = () =>
+            Snapshots.use((snapshots) => snapshots.read(mission.id, place, tree, 'invoices.ts'))
+          const fromStore = yield* read()
+          // The store gone, the copy the Freeze kept answers the same.
+          rmSync(join(data, SNAPSHOTS_FOLDER), { recursive: true, force: true })
+          const fromDatabase = yield* read()
+          return { file, fromStore, fromDatabase }
+        }),
+      ),
+    )
+    expect(seen.file?.tree).toMatch(/^[0-9a-f]{40}$/)
+    const contentOf = (side: typeof seen.fromStore) =>
+      side?.content === null || side === null ? null : Buffer.from(side.content).toString('utf8')
+    expect(contentOf(seen.fromStore)).toBe('export const invoices = [1]\n')
+    expect(contentOf(seen.fromDatabase)).toBe('export const invoices = [1]\n')
+    expect(seen.fromDatabase?.sha256).toBe(seen.file?.sha256)
   })
 
   test('a repository inside the checkout and a submodule changed inside are kept as their path, their content withheld', async () => {
@@ -756,7 +793,7 @@ describe('Freeze, the user’s gesture', () => {
       )
       expect(files.map((one) => [one.repository, one.path, one.status, one.withheld])).toEqual([
         ['api', 'shared', 'modified', 'content withheld: a submodule'],
-        ['api', 'vendor/', 'untracked', 'content withheld: a repository'],
+        ['api', 'vendor/', 'untracked', 'content withheld: a submodule'],
       ])
     }
   })
@@ -781,14 +818,14 @@ describe('Freeze, the user’s gesture', () => {
             return {
               outcome,
               after: yield* getMission(mission.id),
-              contents: yield* database.select().from(snapshotContents),
+              contents: yield* database.select().from(fileContents),
             }
           }),
         ),
       )
       const reasons = refusedWith(seen.outcome)
       expect(reasons).toHaveLength(1)
-      expect(reasons?.[0]).toMatch(/^The dirty file api\/locked\.ts could not be read \(EACCES\)/)
+      expect(reasons?.[0]).toMatch(/^The dirty files of api could not be kept: .*locked\.ts/s)
       expect(seen.after.stage).toBe('planning')
       expect(seen.contents).toEqual([])
     },
@@ -1500,28 +1537,22 @@ describe('What runs at once', () => {
   })
 
   /**
-   * A Freeze held as it reads the dirty files, after its fetch and before its transaction: what the
-   * test runs meanwhile lands first; what it runs after the release, after.
+   * A Freeze held as it takes the snapshot of the dirty files, after its fetch and before its
+   * transaction: what the test runs meanwhile lands first; what it runs after the release, after.
    */
   const heldFreeze = () => {
     const gate = { reached: false, ...held() }
-    const snapshots = Layer.effect(
-      FileSnapshots,
-      Effect.gen(function* () {
-        const real = yield* FileSnapshots
-        return {
-          ...real,
-          capture: (read: SnapshotRepository, files: ReadonlyArray<DirtyFile>) =>
-            Effect.andThen(
-              Effect.promise(() => {
-                gate.reached = true
-                return gate.promise
-              }),
-              real.capture(read, files),
-            ),
-        }
-      }),
-    ).pipe(Layer.provide(databaseSnapshots))
+    const snapshots = (real: SnapshotsService): SnapshotsService => ({
+      ...real,
+      take: (place: RepositoryPlace, owner: SnapshotOwner) =>
+        Effect.andThen(
+          Effect.promise(() => {
+            gate.reached = true
+            return gate.promise
+          }),
+          real.take(place, owner),
+        ),
+    })
     /** The Freeze forked and held; the checkout dirty, so its files are read. */
     const start = (api: string, missionId: string, version: number) =>
       Effect.gen(function* () {

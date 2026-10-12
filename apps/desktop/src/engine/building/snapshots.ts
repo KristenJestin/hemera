@@ -1,5 +1,6 @@
 /**
- * The invisible snapshots of a Building (#140, CT-01), and the copy of what they hold.
+ * The invisible snapshots of a Building (#140, CT-01) and of a Freeze's main checkout (#208), and
+ * the copy of what they hold.
  *
  * A snapshot is a Git tree and nothing more, written into Hemera's own object store: one bare
  * repository per Project, `<data folder>/snapshots/<project-id>.git`. The working tree is added
@@ -80,6 +81,7 @@ export type SnapshotOwner =
       readonly runId: string
       readonly side: 'before' | 'after'
     }
+  | { readonly kind: 'freeze'; readonly missionId: string; readonly freezeId: string }
   /** The last tree the detector of changes outside Hemera compared (#148). */
   | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
 
@@ -259,6 +261,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/buildings/${owner.buildingId}/base/${leaf}`
     case 'run':
       return `${mission}/runs/${owner.runId}/${owner.side}/${leaf}`
+    case 'freeze':
+      return `${mission}/freezes/${owner.freezeId}/${leaf}`
     case 'outside':
       return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
   }
@@ -275,6 +279,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the base of Building ${owner.buildingId}`
     case 'run':
       return `run ${owner.runId} ${owner.side}`
+    case 'freeze':
+      return `the Freeze ${owner.freezeId}`
     case 'outside':
       return `the Workspace compared for Building ${owner.buildingId}`
   }

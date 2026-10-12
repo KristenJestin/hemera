@@ -120,7 +120,7 @@ export const sessionsEngine = (
     readonly probes?: ProfileParts['probes']
     /** The fake `gh` of the ticket suites (#95). */
     readonly gh?: GhSettings
-    /** What the Freeze keeps of the dirty files, when a suite holds it (#92). */
+    /** The snapshot service wrapped, when a suite holds the Freeze's snapshot (#92, #208). */
     readonly snapshots?: ProfileParts['snapshots']
     /** The fake trackers of the ticket sync's suites, and its schedule (#97). */
     readonly ticketProviders?: ProfileParts['ticketProviders']
