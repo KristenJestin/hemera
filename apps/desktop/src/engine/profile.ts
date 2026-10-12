@@ -46,11 +46,14 @@ import {
   builderLayer,
   tasksDoneEnd,
 } from './building/builder.ts'
-import { type TaskChecks, checksVerdict, noTaskChecks } from './building/checks.ts'
-import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
+import { type TaskChecks, checksVerdict } from './building/checks.ts'
+import { projectTaskChecks } from './building/run-checks.ts'
+import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
+import { docsDeskLayer } from './building/docs-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
+import { type Documenter, documenterLayer } from './building/documenter.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -254,6 +257,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
+  /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
+  readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
@@ -266,7 +271,7 @@ export interface ProfileParts {
     | {
         readonly start?: Layer.Layer<BuildingStart>
         readonly verdict?: Layer.Layer<TaskVerdict>
-        /** The checks a finished attempt is judged on (#142's port, #143's checks): none. */
+        /** The checks a finished attempt is judged on (#142's port): the Project's (#143). */
         readonly checks?: Layer.Layer<TaskChecks>
         readonly end?: Layer.Layer<BuildingEnd>
         /** Where a suite holds the Builder between a check and its transaction. */
@@ -319,6 +324,7 @@ const RECHECK_EVERY = '5 minutes'
  * missions.
  */
 export type EngineServices =
+  | Documenter
   | WorkspaceServices
   | RunServices
   | MissionServices
@@ -447,6 +453,8 @@ export const startProfile = (
     const buildContext = yield* Layer.build(buildDeskLayer)
     // Where the gate reaches the helpers' tools, served by the helpers' service (#145).
     const helperContext = yield* Layer.build(helperDeskLayer)
+    // Where the gate reaches the documenter's report and its write guard (#146).
+    const docsContext = yield* Layer.build(docsDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -461,6 +469,7 @@ export const startProfile = (
       Layer.succeedContext(offersContext),
       Layer.succeedContext(buildContext),
       Layer.succeedContext(helperContext),
+      Layer.succeedContext(docsContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -581,7 +590,10 @@ export const startProfile = (
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
       setup: setupDeskLayer,
       guards:
-        parts.tools?.guards ?? claimGuards.pipe(Layer.provide(Layer.succeedContext(buildContext))),
+        parts.tools?.guards ??
+        buildingGuards.pipe(
+          Layer.provide(Layer.succeedContext(Context.merge(buildContext, docsContext))),
+        ),
       attribution:
         parts.tools?.attribution ??
         deskAttribution.pipe(Layer.provide(Layer.succeedContext(buildContext))),
@@ -604,7 +616,8 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
-        helpersLayer({ log }),
+        helpersLayer({ log, hold: parts.helpers?.hold }),
+        documenterLayer({ log }).pipe(Layer.provide(snapshots)),
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??
@@ -615,7 +628,11 @@ export const startProfile = (
                     parts.building?.end ?? tasksDoneEnd,
                     snapshots,
                     outside,
-                  ).pipe(Layer.provideMerge(parts.building?.checks ?? noTaskChecks)),
+                  ).pipe(
+                    Layer.provideMerge(
+                      parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                    ),
+                  ),
                 ),
               ),
           ),

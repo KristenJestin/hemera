@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,10 +15,11 @@ import {
   observedStream,
   openDiagnosticLog,
 } from '../src/main/diagnostic.ts'
+import { removeWithRetries } from './storage.ts'
 
 const folders: string[] = []
 afterEach(() => {
-  for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true })
+  for (const folder of folders.splice(0)) removeWithRetries(folder)
 })
 
 describe('The diagnostic log', () => {

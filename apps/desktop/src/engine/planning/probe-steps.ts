@@ -1,16 +1,18 @@
 /**
- * What each running Probe is doing (#206): the title of its session's latest tool call, as its
- * thread writes it. It is kept in memory only, never in the database: it says what a Probe does
- * now, and a restart, which relaunches a running Probe, starts it over with no step.
+ * What each running Probe is doing (#206), and each running helper (#222): the title of its
+ * session's latest tool call, as its thread writes it. It is kept in memory only, never in the
+ * database: it says what a Probe does now, and a restart, which relaunches a running Probe, starts
+ * it over with no step.
  *
- * The Probes write it as their sessions act; the chips read it, and follow its changes beside the
- * mission's events.
+ * The Probes and the helpers write it as their sessions act, under their own ids; the chips read
+ * it, and follow its changes beside the mission's events.
  */
 
 import { Context, Effect, Layer, PubSub, Stream } from 'effect'
 import type { Scope } from 'effect'
 
 export interface SteppedProbe {
+  /** The Probe's id, or the helper's. */
   readonly probeId: string
   readonly missionId: string
 }

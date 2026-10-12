@@ -49,6 +49,9 @@ describe('The cap and the budget', () => {
       '3 sub-agents already run in this Project (the cap is 3); do the work yourself or wait',
     )
     expect(slotWaitSentence(3, 3)).toBe('waiting for a free slot (3 of 3 in use)')
+    expect(slotWaitSentence(3, 3, 'Documentation')).toBe(
+      'Documentation waits for a free agent slot (3 of 3 in use)',
+    )
     expect(budgetSpentSentence('launches', 8, 8)).toBe(
       'the launches of this mission are spent (8 of 8)',
     )

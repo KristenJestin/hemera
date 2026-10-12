@@ -86,12 +86,12 @@ restore what they meant.
 - The environment fails (a VPN, a vault, a quota, a missing service), or a step only the user can
   do (a migration on a shared database, a key in a vault): report_need, naming the tasks it holds.
 
-## Helpers and the Prototyper
+## Helpers
 - Independent tasks may go to helpers: helper_launch with the task. The helper becomes the task's
   runner; its reds come back to it. Two tasks never write the same file: Hemera holds each running
   task's files.
-- To try an approach before choosing it, launch the Prototyper with your question. It works in its
-  own folder; nothing it writes enters the Workspace. Take what you want under your own tasks.
+- The Prototyper is not yours: an interface or an approach was tried in Planning and judged by the
+  user before the Freeze. Build what the frozen Spec says.
 - A launch refused by the cap or the budget is an answer: do the work yourself.
 - [hemera:result] brings a helper's result. Read it before you rely on it: a helper's word is not
   a verification.

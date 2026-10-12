@@ -41,6 +41,7 @@ import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { checkResultsOf, conflictsIn, unattributedIn } from './attempts.ts'
+import { passViewOf, passesIn } from './documenter-store.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
 import { Secrets } from '../secrets.ts'
@@ -528,6 +529,15 @@ const attemptViewOf = (row: AttemptRow, extras: AttemptExtras): BuildingAttemptV
       detail: one.detail,
       outputTail: one.outputTail,
       runId: one.runId,
+      line: one.line,
+      exitCode: one.exitCode,
+      value: one.value,
+      trees: one.trees === null ? [] : Option.getOrElse(trees.read(one.trees), () => []),
+      evidenceId: one.evidenceId,
+      // An intermediate check stays quiet unless red; the end's are the final checks (#143).
+      shown:
+        row.scope === 'end' ? 'final' : one.verdict === 'red' ? 'stands-out' : ('quiet' as const),
+      at: one.at,
     })),
   // A conflict is on both tasks: the attempt of the command's task, and the one that held it.
   conflicts: extras.conflicts
@@ -656,6 +666,7 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         .filter((one) => one.taskId === null)
         .map((one) => attemptViewOf(one, extras)),
       unattributed: yield* unattributedIn(reader, building.id),
+      documenter: (yield* passesIn(reader, building.id)).map(passViewOf),
       summary: building.summary,
     }
     return view

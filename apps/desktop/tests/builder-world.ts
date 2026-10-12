@@ -10,7 +10,7 @@
  */
 
 import { SPEC_SECTIONS } from '@hemera/core/domain'
-import type { BuildingTaskView, BuildingView } from '@hemera/ipc'
+import type { BuildingTaskView, BuildingView, Project } from '@hemera/ipc'
 import { Effect, type Layer } from 'effect'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -105,22 +105,36 @@ export const PLAN = [
   },
 ]
 
+/** A Project made in `work` for a launch, with its main checkout. */
+type ProjectAt = (
+  work: string,
+) => Effect.Effect<
+  { readonly project: Project; readonly main: string },
+  Effect.Error<ReturnType<typeof acmeAt>>,
+  Effect.Services<ReturnType<typeof acmeAt>>
+>
+
 /**
  * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
- * runs on the Project before the launch, for what the launch must already see.
+ * runs on the Project before the launch, for what the launch must already see; `impact` is the
+ * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks;
+ * `at` the Project, Acme's by default.
  */
 export const launched = <E = never, R = never>(
   work: string,
   before: (projectId: string) => Effect.Effect<void, E, R> = () => Effect.void,
+  impact = 'The impact.',
+  plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
+  at: ProjectAt = acmeAt,
 ) =>
   Effect.gen(function* () {
-    const { project, main } = yield* acmeAt(work)
+    const { project, main } = yield* at(work)
     yield* before(project.id)
     const { mission, grantId } = yield* plannedIn(project.id, main)
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {
         section,
-        content: `The ${section}.`,
+        content: section === 'impact' ? impact : `The ${section}.`,
         base_version: 0,
       })
     }
@@ -132,7 +146,7 @@ export const launched = <E = never, R = never>(
     })
     yield* call(grantId, 'mission_describe', { title: 'Invoices exports', type: 'feature' })
     for (const id of ['R1.S1', 'R1.S2', 'R1.S3']) yield* call(grantId, 'proof_write', byHand(id))
-    yield* call(grantId, 'tasks_write', { tasks: PLAN, base_version: 0 })
+    yield* call(grantId, 'tasks_write', { tasks: plan, base_version: 0 })
     yield* call(grantId, 'model_recommend', {
       agent: 'codex',
       model: 'gpt-large',

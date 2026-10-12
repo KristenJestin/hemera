@@ -1,16 +1,19 @@
 /**
- * The helpers of a mission's Building (#145), as the Building page reads them (#151): each one's
- * chip (a letter avatar with a stable colour, its name, its state dot, whether it is stuck), one
- * helper whole (its brief and its result; its hidden thread only for the developer settings), and
- * the chips again at each change. There is no stop and no write: the system is autonomous.
+ * The helpers of a mission's Building (#145), as the Building page reads them (#151), and its
+ * Prototypers, Planning's, as the Planning page does (#222): each one's chip (a letter avatar with a stable colour, its name,
+ * its state dot, whether it is stuck, its step), one helper whole (its brief and its result; its
+ * hidden thread only for the developer settings), and the chips again at each change. There is no
+ * stop: the system is autonomous. The one write is the user's verdict on a Prototyper's result,
+ * before the Freeze.
  */
 
-import { AvatarTone, HelperPlace, HelperState } from '@hemera/core/domain'
+import { AvatarTone, HelperPlace, HelperState, PrototypeVerdict } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
 import { EngineGone } from './gone.ts'
 import { UnknownMission } from './missions.ts'
+import { PlanningRefused } from './planning.ts'
 import { StorageFailed } from './profile.ts'
 
 /** A helper as its chip shows it. */
@@ -35,6 +38,10 @@ export const HelperChip = Schema.Struct({
   state: HelperState,
   /** Its session gave no sign in a turn for the stuck bound (#40) and has not since. */
   stuck: Schema.Boolean,
+  /** While it runs, the title of its latest tool call (#206); null before its first, and once it ended. */
+  step: Schema.NullOr(Schema.String),
+  /** A Prototyper's result as the user judged it, or null until they do (#222). */
+  verdict: Schema.NullOr(PrototypeVerdict),
   startedAt: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
 })
@@ -58,6 +65,9 @@ export const HelperDetail = Schema.Struct({
   result: Schema.NullOr(Schema.String),
   /** Why it failed, in words, or null. */
   failure: Schema.NullOr(Schema.String),
+  /** What the user said with their verdict, or null. */
+  verdictNote: Schema.NullOr(Schema.String),
+  judgedAt: Schema.NullOr(Schema.String),
   /** Its sessions' hidden thread, oldest first: only when asked, from the developer settings. */
   thread: Schema.NullOr(Schema.Array(HelperThreadLine)),
 })
@@ -79,7 +89,7 @@ const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Erro
 const ofMission = { missionId: Schema.String }
 
 export const HelpersRpcs = RpcGroup.make(
-  /** A mission's helpers, the first launched first. */
+  /** A mission's Building helpers, the first launched first: its Prototypers are Planning's. */
   Rpc.make('helpers.list', {
     payload: ofMission,
     success: Schema.Array(HelperChip),
@@ -91,8 +101,29 @@ export const HelpersRpcs = RpcGroup.make(
     success: HelperDetail,
     error: failing(...always, UnknownHelper),
   }),
-  /** The mission's helpers now, then again at each change of one of them. */
+  /**
+   * The user's verdict on a Prototyper's result (#222), in Planning, once it handed it back; given
+   * again, the latest stands. Refused for a free helper, a Prototyper still running or failed, and
+   * outside Planning.
+   */
+  Rpc.make('helpers.judge', {
+    payload: {
+      helperId: Schema.String,
+      verdict: PrototypeVerdict,
+      note: Schema.NullOr(Schema.String),
+    },
+    success: Schema.Void,
+    error: failing(...always, UnknownHelper, PlanningRefused),
+  }),
+  /** The mission's Building helpers now, then again at each change of one of them. */
   Rpc.make('helpers.changed', {
+    payload: ofMission,
+    success: Schema.Array(HelperChip),
+    error: failing(...always, UnknownMission),
+    stream: true,
+  }),
+  /** The mission's Prototypers now, then again at each change of one of them (#222). */
+  Rpc.make('helpers.prototypesChanged', {
     payload: ofMission,
     success: Schema.Array(HelperChip),
     error: failing(...always, UnknownMission),

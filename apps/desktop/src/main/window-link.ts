@@ -445,6 +445,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           closedAs(gone),
           observed('planning.keepAfterTriage', log),
         ),
+      'planning.askPrototype': (request) =>
+        engine['planning.askPrototype'](request).pipe(
+          closedAs(gone),
+          observed('planning.askPrototype', log),
+        ),
       'planning.changed': (request) =>
         engine['planning.changed'](request).pipe(
           streamClosedAs(gone),
@@ -572,15 +577,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['probes.changed'](request).pipe(
           streamClosedAs(gone),
           observedStream('probes.changed', log),
-        ),
-      'helpers.list': (request) =>
-        engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
-      'helpers.read': (request) =>
-        engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
-      'helpers.changed': (request) =>
-        engine['helpers.changed'](request).pipe(
-          streamClosedAs(gone),
-          observedStream('helpers.changed', log),
         ),
       'discussions.list': (request) =>
         engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
@@ -850,8 +846,25 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       'application.chooseFolder': () =>
         application.chooseFolder.pipe(observed('application.chooseFolder', log)),
     }),
-    // The mission's changes outside Hemera and its services (#148), as a layer of their own.
+    // The mission's changes outside Hemera and its services (#148), and the helpers, as a layer of
+    // their own.
     EngineApartRpcs.toLayer({
+      'helpers.list': (request) =>
+        engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
+      'helpers.read': (request) =>
+        engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
+      'helpers.changed': (request) =>
+        engine['helpers.changed'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('helpers.changed', log),
+        ),
+      'helpers.judge': (request) =>
+        engine['helpers.judge'](request).pipe(closedAs(gone), observed('helpers.judge', log)),
+      'helpers.prototypesChanged': (request) =>
+        engine['helpers.prototypesChanged'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('helpers.prototypesChanged', log),
+        ),
       'mission.outsideChanges': (request) =>
         engine['mission.outsideChanges'](request).pipe(
           closedAs(gone),

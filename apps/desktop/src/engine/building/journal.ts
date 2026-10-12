@@ -1,6 +1,6 @@
 /**
  * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
- * (#141) with its attempts and their verdicts (#142): each the projection of the domain event written in the same transaction as what it
+ * (#141) with its attempts and their verdicts (#142) and its checks (#143): each the projection of the domain event written in the same transaction as what it
  * records.
  */
 
@@ -46,6 +46,13 @@ const lineOf =
 
 const byHemera = (): MemoryAuthor => HEMERA
 const byUser = (): MemoryAuthor => USER
+
+/** What the documenter changed, each file with why. */
+const documentedSaid = (payload: EventPayload): string => {
+  const whys = stringsOf(payload, 'whys')
+  const files = stringsOf(payload, 'files').map((file, at) => `${file} (${whys[at] ?? ''})`)
+  return `The documenter updated ${files.join(', ')}.`
+}
 
 /** What an attempt is on: a task, or a requirement's or the end's checks. */
 const subjectOf = (payload: EventPayload): string => {
@@ -247,6 +254,32 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     ),
   ],
   [
+    'building.checks_ran',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Checks ${stringOf(payload, 'when')}: ${stringOf(payload, 'verdict').replace('_', ' ')}.`,
+    ),
+  ],
+  [
+    'building.check_red',
+    lineOf(byHemera, (payload) => {
+      const place = stringOf(payload, 'place')
+      return `${stringOf(payload, 'check')} is red in ${place === '' ? 'the Workspace root' : place}.`
+    }),
+  ],
+  [
+    'building.check_waiting',
+    lineOf(byHemera, (payload) => {
+      const waiting = stringOf(payload, 'waiting')
+      return `${stringOf(payload, 'check')} waits for ${waiting === 'permission' ? 'your permission' : waiting}.`
+    }),
+  ],
+  [
+    'building.final_checks',
+    lineOf(byHemera, (payload) => `Final checks: ${stringsOf(payload, 'checks').join(', ')}.`),
+  ],
+  [
     'mission.changed_outside',
     lineOf(
       byHemera,
@@ -290,4 +323,36 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
   ],
   ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],
   ['building.tasks_done', lineOf(byHemera, () => 'Every task of the plan is done or skipped.')],
+  [
+    'building.documenter_waiting',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Documentation, pass ${String(numberOf(payload, 'pass'))}, waits for a free agent slot.`,
+    ),
+  ],
+  [
+    'building.documenter_started',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The documenter started its ${stringOf(payload, 'mode')} pass ${String(numberOf(payload, 'pass'))}.`,
+    ),
+  ],
+  ['building.documented', lineOf(agentOrHemera, documentedSaid)],
+  [
+    'building.no_doc_change',
+    lineOf(
+      agentOrHemera,
+      (payload) => `The documentation needs no change: ${stringOf(payload, 'reason')}`,
+    ),
+  ],
+  [
+    'building.documenter_failed',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Documentation, pass ${String(numberOf(payload, 'pass'))}, failed: ${stringOf(payload, 'why')}.`,
+    ),
+  ],
 ])

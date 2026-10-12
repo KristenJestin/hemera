@@ -26,6 +26,7 @@ import {
   DecisionFields,
   EnvironmentFields,
   ErrorFields,
+  DOCUMENTATION,
   MissionOwner,
   REDS_BEFORE_A_NEED,
   type ToolArguments,
@@ -76,6 +77,7 @@ import {
   writesIn,
 } from './attempts.ts'
 import { checkAttempt } from './checks.ts'
+import { documentationAttemptIn } from './documenter-store.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { OutsideChanges } from './outside.ts'
 import { fileOf } from './place.ts'
@@ -119,7 +121,7 @@ export interface LoopParts {
   readonly locks: WriteLocks
   readonly said: (line: string) => Effect.Effect<void>
   readonly hold: (
-    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
+    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'mid-commit' | 'cutting',
   ) => Effect.Effect<void>
   /** A delivery to a lineage of the mission, or to its Builder. */
   readonly deliver: (
@@ -183,9 +185,9 @@ const ActionDetails = Schema.Struct({
 const readDetails = Schema.decodeUnknownOption(Schema.fromJsonString(ActionDetails))
 const readParsed = Schema.decodeUnknownOption(ActionDetails)
 /** The repository a `git.commit` intent was for. */
-const readCommitted = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ repository: Schema.String })),
-)
+const CommittedIn = Schema.Struct({ repository: Schema.String })
+const readCommitted = Schema.decodeUnknownOption(Schema.fromJsonString(CommittedIn))
+const readCommittedParsed = Schema.decodeUnknownOption(CommittedIn)
 
 export const buildingLoop = (parts: LoopParts) => {
   const { locks, said, hold, deliver } = parts
@@ -257,13 +259,16 @@ export const buildingLoop = (parts: LoopParts) => {
       const lineage = yield* lineageIn(transaction, file.sessionId)
       if (lineage === null) return
       const task = taskOfFile(runningOf(yield* tasksIn(transaction, building.id), lineage), located)
-      if (task === null) return
-      const attempt = yield* openAttemptIn(transaction, building.id, task.id)
-      if (attempt === null) return
+      // A documenter's write is its pass's, on the `end` attempt named "documentation" (#146).
+      const attemptId =
+        task === null
+          ? yield* documentationAttemptIn(transaction, building.id, lineage)
+          : ((yield* openAttemptIn(transaction, building.id, task.id))?.id ?? null)
+      if (attemptId === null) return
       yield* recordWriteIn(transaction, {
         buildingId: building.id,
-        attemptId: attempt.id,
-        taskId: task.id,
+        attemptId,
+        taskId: task?.id ?? null,
         sessionId: file.sessionId,
         repository: located.repository,
         path: located.path,
@@ -489,6 +494,76 @@ export const buildingLoop = (parts: LoopParts) => {
     })
 
   /**
+   * A check's run (#143): Hemera's, no task's. Right before it launches it takes the write locks of
+   * its repositories, waiting for every task's writing command and file write there, then the
+   * snapshot of each: the trees it ran on. Once it ends, what it changed is the Building's.
+   */
+  const checkRun = (missionId: string, name: string, repositories: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const building = yield* activeBuildingIn(yield* Database, missionId)
+      if (building === null) return null
+      const places = basesOf(building).filter((one) => repositories.includes(one.repository))
+      const watchId = crypto.randomUUID()
+      const context = yield* Effect.context<
+        Database | DomainEvents | Secrets | Snapshots | SessionPost | OutsideChanges
+      >()
+      // A check that overwrites a change the user made outside Hemera is the Builder's to hear of.
+      const told = { id: '', lineage: (yield* builderLineage(missionId)) ?? '' }
+      const taken: WriteLock[] = []
+      let before: ReadonlyArray<{ readonly base: BuildingBase; readonly tree: string }> | null =
+        null
+      const letGo = Effect.suspend(() => locks.release(taken.splice(0)))
+      const launch = Effect.gen(function* () {
+        yield* locks.take(
+          building.id,
+          null,
+          name,
+          places.map((one) => one.repository),
+          null,
+          taken,
+        )
+        const snapshots = yield* Snapshots
+        const trees = yield* Effect.result(
+          Effect.forEach(places, (base) =>
+            Effect.map(
+              snapshots.take(placeOfBase(base), {
+                kind: 'run',
+                missionId,
+                runId: watchId,
+                side: 'before',
+              }),
+              (tree) => ({ base, tree }),
+            ),
+          ),
+        )
+        if (Result.isFailure(trees)) {
+          yield* snapshots.failed(missionId, trees.failure)
+          return yield* new LaunchWithdrawn({
+            reason: `the snapshot before it could not be taken: ${trees.failure.message}`,
+          })
+        }
+        before = trees.success
+        return trees.success.map((one) => ({ repository: one.base.repository, tree: one.tree }))
+      }).pipe(
+        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : letGo)),
+        Effect.provide(context),
+      )
+      const finish = (runId: string | null) =>
+        Effect.suspend(() =>
+          runId === null || before === null
+            ? Effect.void
+            : afterCommand(building, null, told, name, null, watchId, runId, before),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            said(`a check's changes were not recorded: ${String(cause)}`),
+          ),
+          Effect.ensuring(letGo),
+          Effect.provide(context),
+        )
+      return { launch, finish }
+    })
+
+  /**
    * The hold of a file tool write of a mission's session, begun once no other task's command
    * holds its file and put into `sink`: no command starts there until `endHold`. Answers what it
    * waited for, or null.
@@ -519,7 +594,7 @@ export const buildingLoop = (parts: LoopParts) => {
   const afterCommand = (
     building: BuildingRow,
     task: TaskNow | null,
-    session: RoleSession,
+    session: Pick<RoleSession, 'id' | 'lineage'>,
     name: string,
     globs: ReadonlyArray<string> | null,
     watchId: string,
@@ -1097,8 +1172,11 @@ export const buildingLoop = (parts: LoopParts) => {
         (task) => scope === 'end' || (subject !== null && task.requirements.includes(subject)),
       )
       const files: Array<{ repository: string; path: string }> = []
-      for (const attempt of (yield* attemptsIn(database, building.id)).filter((one) =>
-        covering.some((task) => task.id === one.taskId),
+      // The end's checks see the documenter's files too (#146): they run after it.
+      for (const attempt of (yield* attemptsIn(database, building.id)).filter(
+        (one) =>
+          covering.some((task) => task.id === one.taskId) ||
+          (scope === 'end' && one.subject === DOCUMENTATION),
       )) {
         files.push(
           ...(yield* attributedIn(database, attempt.id)).map((one) => ({
@@ -1141,6 +1219,8 @@ export const buildingLoop = (parts: LoopParts) => {
         files,
       )
       const verdict = judged.verdict
+      // Cancelled while its checks ran: the attempt stays as it was, and no result is said.
+      if (verdict === null) return 'pending' as const
       const results = judged.results
       yield* mutate('ending a scope attempt', (transaction) =>
         transaction
@@ -1402,12 +1482,20 @@ export const buildingLoop = (parts: LoopParts) => {
     })
 
   /**
-   * A command an engine stop cut in the middle, handed over once by the start (`handleIndeterminate`):
-   * the Building's when its mission builds and it is not a reservation's reset. Answers whether
-   * the Building took it.
+   * An action an engine stop cut in the middle, handed over once by the start (`handleIndeterminate`):
+   * a task's commit, or a command of the Building's when its mission builds and it is not a
+   * reservation's reset. Answers whether the Building took it.
    */
   const cut = (action: EffectfulAction) =>
     Effect.gen(function* () {
+      if (action.kind === 'git.commit' && action.owner.kind === 'mission') {
+        const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
+        const committed = Option.getOrNull(readCommittedParsed(action.details))
+        if (building === null || action.owner.taskId === null || committed === null) return false
+        yield* hold('cutting')
+        yield* commitCut(building, action.owner.taskId, committed.repository)
+        return true
+      }
       if (action.kind !== 'command.run' || action.owner.kind !== 'mission') return false
       const building = yield* activeBuildingIn(yield* Database, action.owner.missionId)
       const details = Option.getOrNull(readParsed(action.details))
@@ -1564,6 +1652,38 @@ export const buildingLoop = (parts: LoopParts) => {
   // ---- Commits per task.
 
   /**
+   * A task's commit an engine stop cut in the middle: never made again (it may well have been
+   * made), so the user is asked once to check the repository's log.
+   */
+  const commitCut = (building: BuildingRow, taskId: string, repository: string) =>
+    Effect.gen(function* () {
+      const { owner } = yield* ownerOf(building, taskId)
+      const missing = `${taskId}'s commit in ${repository} was cut by a restart: it may or may not have been made`
+      const write = yield* createNeedIn(
+        parts.needs,
+        owner,
+        EnvironmentFields.make({
+          missing,
+          action: `Run git log in ${repository}: if ${taskId} is not committed there, commit it yourself. Then confirm.`,
+          settingsSection: null,
+        }),
+      )
+      yield* mutate('saying a task’s commit was cut', (transaction) =>
+        Effect.map(
+          hemeraNeedIn(transaction, building, write, {
+            kind: 'indeterminate',
+            tasks: [],
+            question: missing,
+            options: [],
+            proposer: null,
+            scope: null,
+          }),
+          (made) => ({ result: undefined, events: made.events }),
+        ),
+      )
+    })
+
+  /**
    * The repositories a task has its commit in: a `git.commit` of it there done, or perhaps done.
    * One that failed, or never began, is committed again.
    */
@@ -1681,6 +1801,7 @@ export const buildingLoop = (parts: LoopParts) => {
           { kind: 'mission', missionId: building.missionId, taskId: task.id },
           { repository: base.repository, paths: [...paths], message },
         )
+        yield* hold('mid-commit')
         const committed = yield* Git.use((git) =>
           git.commitPaths(base.folder, paths, message),
         ).pipe(Effect.result)
@@ -1727,8 +1848,12 @@ export const buildingLoop = (parts: LoopParts) => {
     onBranch: string | null,
   ) =>
     Effect.gen(function* () {
-      const [asking] = yield* (yield* Database)
-        .select({ id: buildingDecisions.id })
+      const missing =
+        branch === null
+          ? `${repository} has no branch for this Building (it was taken on a detached HEAD): Hemera did not commit ${taskId}`
+          : `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
+      const asking = yield* (yield* Database)
+        .select({ question: buildingDecisions.question })
         .from(buildingDecisions)
         .where(
           and(
@@ -1738,11 +1863,10 @@ export const buildingLoop = (parts: LoopParts) => {
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the decisions')))
-      if (asking !== undefined) return
-      const missing =
-        branch === null
-          ? `${repository} has no branch for this Building (it was taken on a detached HEAD): Hemera did not commit ${taskId}`
-          : `${repository} is on ${onBranch ?? 'a detached HEAD'}, not on ${branch}: Hemera did not commit ${taskId}`
+      // A branch to switch back to is asked once for the Building; a commit left to the user is
+      // said for each task, since the pending need names only the one it was raised for.
+      if (branch === null ? asking.some((one) => one.question === missing) : asking.length > 0)
+        return
       const write = yield* createNeedIn(
         parts.needs,
         owner,
@@ -1772,6 +1896,7 @@ export const buildingLoop = (parts: LoopParts) => {
 
   return {
     attribution: { written, command },
+    checkRun,
     beginHold,
     endHold: locks.endWrite,
     waitForLock,

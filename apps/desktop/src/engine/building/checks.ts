@@ -1,11 +1,12 @@
 /**
  * Where a Building's attempts are judged (#142): the `TaskChecks` port, which #143 fills with the
- * checks themselves, and the verdict of a finished task on it. Until #143, no check answers: a
- * finished task is done, not verified.
+ * Project's checks (`run-checks.ts`), and the verdict of a finished task on it. A finished task
+ * with no check is done, not verified.
  *
  * A check is asked about one attempt on a scope (a task, a requirement's checks, the end) with the
  * files attributed to it (CT-02), and answers one result per check and place. Its results are kept
- * on the attempt; any red makes the attempt red, else any green green, else not verified.
+ * on the attempt, each as soon as it is known; any red makes the attempt red, else any green
+ * green, else not verified.
  */
 
 import {
@@ -16,12 +17,12 @@ import {
   attemptResult,
 } from '@hemera/core/domain'
 import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
 
 import type { DomainEvents } from '../domain-events.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { buildingAttempts, buildingCheckResults } from '../storage/schema.ts'
+import { buildingAttempts, buildingCheckResults, missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn, checkResultsIn } from './attempts.ts'
 
@@ -76,7 +77,52 @@ export interface CheckResult {
   readonly outputTail: string
   /** Its run, for the full output. */
   readonly runId: string | null
+  /** The line as it ran, `{files}` filled (#143). */
+  readonly line?: string | null
+  readonly exitCode?: number | null
+  /** The number its `expect` read. */
+  readonly value?: number | null
+  /** The trees it ran on (#140). */
+  readonly trees?: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
+  /** The whole output kept as the mission's evidence, for a final check. */
+  readonly evidenceId?: string | null
 }
+
+const encodeTrees = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ repository: Schema.String, tree: Schema.String })),
+  ),
+)
+
+/** Keeps one check's result on its attempt, masked, as soon as it is known. */
+export const keepCheckResult = (attemptId: string, result: CheckResult) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets
+    yield* mutate('keeping a check', (transaction) =>
+      transaction
+        .insert(buildingCheckResults)
+        .values({
+          id: crypto.randomUUID(),
+          attemptId,
+          name: secrets.mask(result.name),
+          place: result.place,
+          verdict: result.verdict,
+          detail: secrets.mask(result.detail),
+          outputTail: secrets.mask(result.outputTail),
+          runId: result.runId,
+          at: new Date().toISOString(),
+          line: result.line == null ? null : secrets.mask(result.line),
+          exitCode: result.exitCode ?? null,
+          value: result.value ?? null,
+          trees: result.trees === undefined ? null : encodeTrees(result.trees),
+          evidenceId: result.evidenceId ?? null,
+        })
+        .pipe(
+          Effect.mapError(refusedWhile('keeping a check')),
+          Effect.as({ result: undefined, events: [] }),
+        ),
+    )
+  })
 
 export class TaskChecks extends Context.Service<
   TaskChecks,
@@ -87,6 +133,22 @@ export class TaskChecks extends Context.Service<
 export const noTaskChecks = Layer.succeed(TaskChecks, { run: () => Effect.succeed([]) })
 
 /** Asks the checks about an attempt and keeps what they said on it; answers the results. */
+/** Whether the user cancelled the mission: a check it stopped then is no verdict. */
+export const missionCancelled = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [mission] = yield* database
+      .select({ stage: missions.stage })
+      .from(missions)
+      .where(eq(missions.id, missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission')))
+    return mission?.stage === 'cancelled'
+  })
+
+/**
+ * Judges an attempt on its checks and keeps the verdict; a null verdict when the user cancelled
+ * the mission while they ran, nothing kept then.
+ */
 export const checkAttempt = (
   asked: Omit<ChecksAsked, 'files'>,
   /** The files to judge when they are not the attempt's own: a scope's, its tasks'. */
@@ -110,35 +172,30 @@ export const checkAttempt = (
         repository: one.repository,
         path: one.path,
       }))
-    const results = yield* TaskChecks.use((checks) => checks.run({ ...asked, files }))
+    yield* TaskChecks.use((checks) => checks.run({ ...asked, files })).pipe(
+      Effect.flatMap((answered) =>
+        Effect.gen(function* () {
+          // A port that keeps its results as they come (#143) has kept them already.
+          const kept = yield* checkResultsIn(database, asked.attemptId)
+          for (const result of answered) {
+            if (kept.some((one) => one.name === result.name && one.place === result.place)) continue
+            yield* keepCheckResult(asked.attemptId, result)
+          }
+        }),
+      ),
+    )
+    if (yield* missionCancelled(asked.missionId)) return { verdict: null, results: [] }
+    const results = yield* checkResultsIn(database, asked.attemptId)
     const verdict = attemptResult(results.map((one) => one.verdict))
-    const secrets = yield* Secrets
-    const at = new Date().toISOString()
-    yield* mutate('keeping the checks of an attempt', (transaction) =>
-      Effect.gen(function* () {
-        for (const result of results) {
-          yield* transaction
-            .insert(buildingCheckResults)
-            .values({
-              id: crypto.randomUUID(),
-              attemptId: asked.attemptId,
-              name: secrets.mask(result.name),
-              place: result.place,
-              verdict: result.verdict,
-              detail: secrets.mask(result.detail),
-              outputTail: secrets.mask(result.outputTail),
-              runId: result.runId,
-              at,
-            })
-            .pipe(Effect.mapError(refusedWhile('keeping a check')))
-        }
-        yield* transaction
-          .update(buildingAttempts)
-          .set({ verdict })
-          .where(eq(buildingAttempts.id, asked.attemptId))
-          .pipe(Effect.mapError(refusedWhile('keeping the verdict')))
-        return { result: undefined, events: [] }
-      }),
+    yield* mutate('keeping the verdict of an attempt', (transaction) =>
+      transaction
+        .update(buildingAttempts)
+        .set({ verdict })
+        .where(eq(buildingAttempts.id, asked.attemptId))
+        .pipe(
+          Effect.mapError(refusedWhile('keeping the verdict')),
+          Effect.as({ result: undefined, events: [] }),
+        ),
     )
     return { verdict, results }
   })
@@ -157,7 +214,7 @@ export const checksVerdict = Layer.effect(
           subject: asked.taskId,
           attemptId: asked.attemptId,
         }).pipe(
-          Effect.map(({ verdict }) => JUDGED[verdict]),
+          Effect.map(({ verdict }) => (verdict === null ? 'pending' : JUDGED[verdict])),
           Effect.provide(context),
           Effect.orDie,
         ),
