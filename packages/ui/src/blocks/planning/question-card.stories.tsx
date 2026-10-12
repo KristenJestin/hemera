@@ -329,6 +329,7 @@ export const AnsweringByKeyboard: Story = {
 
 /** In the user's own words, through the mention field that unfolds under the options. */
 export const OwnWords: Story = {
+  loaders: EDITOR_LOADED,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const own = canvas.getByRole('button', { name: 'In my own words' })
@@ -489,6 +490,7 @@ export const ProposedFromTicket: Story = {
 
 /** Edit: the proposed answer in the field, to change before it is accepted. */
 export const ProposedEdited: Story = {
+  loaders: EDITOR_LOADED,
   args: { question: PROPOSED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
