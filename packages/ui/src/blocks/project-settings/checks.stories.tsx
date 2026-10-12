@@ -10,7 +10,6 @@ import {
 } from '../../surfaces/project-settings/project-settings.tsx'
 import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
 import {
-  type CheckArrangement,
   type CheckDraft,
   CheckForm,
   ChecksSection,
@@ -37,7 +36,6 @@ interface PageProps {
   checks: readonly SettingsCheck[] | null
   proposals?: readonly SettingsCheck[] | undefined
   error?: string | undefined
-  arrangement?: CheckArrangement | undefined
   form?: Open | undefined
   /** Why every save is refused, in words, as one meeting a newer version is. */
   refused?: string | undefined
@@ -155,7 +153,6 @@ function Page(props: PageProps): ReactNode {
           checks={checks}
           proposals={proposals}
           error={props.error}
-          arrangement={props.arrangement}
           onOpen={(id) => open({ kind: 'edit', id })}
           onAdd={() => open({ kind: 'new' })}
           onAccept={(id) => accept([id])}
@@ -228,6 +225,12 @@ export const Filled: Story = {
       'e2e, from the catalogue, pnpm --filter web e2e --project chromium, in web, asks before running',
     )
     expect(canvas.getByText(/keep the checks they were launched with/)).toBeVisible()
+    // A moment's head is set apart from its lines by a darker ground.
+    const head = canvas.getByRole('heading', { name: 'After each task' })
+    const line = within(moment(canvasElement, 'After each task')).getAllByRole('listitem')[0]
+    const ground = getComputedStyle(head).backgroundColor
+    expect(ground).not.toBe('rgba(0, 0, 0, 0)')
+    expect(ground).not.toBe(line === undefined ? '' : getComputedStyle(line).backgroundColor)
   },
 }
 
@@ -600,31 +603,5 @@ export const ReducedMotion: Story = {
     expect(within(moment(canvasElement, 'After each task')).getAllByRole('listitem')).toHaveLength(
       1,
     )
-  },
-}
-
-/**
- * The alternative, not recommended: one list in the order the checks are kept, the moment as a
- * column. It reads like the catalogue, but the order in which things happen has to be read off a
- * column rather than seen.
- */
-export const OneList: Story = {
-  args: { arrangement: 'list' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const list = canvas.getByRole('list', { name: 'Checks' })
-    expect(within(list).getAllByRole('listitem')).toHaveLength(7)
-    expect(canvas.queryByRole('list', { name: 'After each task' })).toBeNull()
-  },
-}
-
-/** The alternative with proposals: they stand under the kept checks, in the same columns. */
-export const OneListProposed: Story = {
-  args: { arrangement: 'list', checks: [], proposals: PROPOSED_CHECKS },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    expect(
-      within(canvas.getByRole('list', { name: 'Proposed checks' })).getAllByRole('listitem'),
-    ).toHaveLength(6)
   },
 }

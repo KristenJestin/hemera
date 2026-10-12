@@ -68,9 +68,6 @@ export interface SettingsCheck {
   files: string | null
 }
 
-/** How the section lays its checks out: under their moments, or one list (the alternative). */
-export type CheckArrangement = 'moments' | 'list'
-
 export const MOMENTS: readonly CheckWhen[] = ['task', 'requirement', 'end']
 
 export const MOMENT_WORDS: Record<CheckWhen, string> = {
@@ -92,13 +89,12 @@ export function lineOf(check: Pick<SettingsCheck, 'command' | 'line'>): string {
 }
 
 /** Everything a line shows, in words, for a screen reader. */
-export function wordsOf(check: SettingsCheck, moment: boolean): string {
+export function wordsOf(check: SettingsCheck): string {
   return [
     check.name,
     check.command === null ? null : 'from the catalogue',
     lineOf(check),
     check.where === 'changed' ? 'in each changed repository' : `in ${whereOf(check)}`,
-    moment ? MOMENT_WORDS[check.when].toLowerCase() : null,
     check.expect === null ? null : `expects a number of at least ${check.expect.minimum}`,
     check.files === null ? null : `only on the files matching ${check.files}`,
     check.command?.askBeforeRunning === true ? 'asks before running' : null,
@@ -123,7 +119,9 @@ const HEAD = 'flex h-control-sm min-w-0 items-center gap-1 border-b border-borde
 
 const HEAD_CELLS = 'flex min-w-0 flex-1 items-center gap-3 pr-4 pl-1 text-xs text-muted-foreground'
 
-const MOMENT = 'flex h-control-sm items-center border-b border-border px-4 text-xs font-medium'
+/** A moment's head: on the frame's own darker ground, so it stands apart from the lines under it. */
+const MOMENT =
+  'flex h-control-sm items-center border-b border-border bg-surface-rim px-4 text-xs font-medium'
 
 const ITEM = 'overflow-hidden border-b border-border bg-surface-body last:border-b-0'
 
@@ -135,9 +133,6 @@ const NAME = 'min-w-0 flex-1 truncate font-medium md:w-settings-name md:flex-non
 const LINE = 'hidden min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground md:block'
 
 const WHERE =
-  'hidden w-settings-name min-w-0 shrink-0 truncate text-xs text-muted-foreground md:block'
-
-const WHEN =
   'hidden w-settings-name min-w-0 shrink-0 truncate text-xs text-muted-foreground md:block'
 
 const EXPECT = 'hidden w-16 shrink-0 text-xs text-muted-foreground tabular-nums md:block'
@@ -161,13 +156,7 @@ function sourceIcon(check: Pick<SettingsCheck, 'command'>): ReactNode {
 }
 
 /** The cells of a line after its handle, the same for a check and a proposal. */
-function Cells({
-  check,
-  arrangement,
-}: {
-  check: SettingsCheck
-  arrangement: CheckArrangement
-}): ReactNode {
+function Cells({ check }: { check: SettingsCheck }): ReactNode {
   return (
     <>
       <span className={GLYPH} aria-hidden="true">
@@ -178,7 +167,6 @@ function Cells({
       <span className={cn(WHERE, check.where === 'repository' && 'font-mono')}>
         {whereOf(check)}
       </span>
-      {arrangement === 'list' && <span className={WHEN}>{MOMENT_WORDS[check.when]}</span>}
       <span className={EXPECT}>{check.expect === null ? '' : `≥ ${check.expect.minimum}`}</span>
       <span className={ROOM} data-column="files">
         {check.files !== null && (
@@ -200,7 +188,6 @@ function Cells({
 
 export interface CheckRowProps {
   check: SettingsCheck
-  arrangement: CheckArrangement
   /** Whether it is the first or the last of the checks it moves among. */
   first: boolean
   last: boolean
@@ -210,20 +197,13 @@ export interface CheckRowProps {
 }
 
 /** One check: its handle, and the line that opens it. */
-export function CheckRow({
-  check,
-  arrangement,
-  first,
-  last,
-  onOpen,
-  onMove,
-}: CheckRowProps): ReactNode {
+export function CheckRow({ check, first, last, onOpen, onMove }: CheckRowProps): ReactNode {
   const controls = useDragControls()
   const travel = useTransition(arrival)
   const folding = useTransition(fold)
   // A check grows in and folds out on `fold`, and makes room for another on `arrival`.
   const moving = { ...folding, layout: travel }
-  const among = arrangement === 'moments' ? MOMENT_WORDS[check.when].toLowerCase() : 'checks'
+  const among = MOMENT_WORDS[check.when].toLowerCase()
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     if (event.key === 'ArrowUp' && !first) {
       event.preventDefault()
@@ -258,13 +238,8 @@ export function CheckRow({
         >
           <IconGripVertical size="sm" />
         </button>
-        <button
-          type="button"
-          className={OPEN}
-          aria-label={wordsOf(check, arrangement === 'list')}
-          onClick={onOpen}
-        >
-          <Cells check={check} arrangement={arrangement} />
+        <button type="button" className={OPEN} aria-label={wordsOf(check)} onClick={onOpen}>
+          <Cells check={check} />
           <span className={AFTER} aria-hidden="true">
             <span className={CHEVRON}>
               <IconChevronRight size="sm" />
@@ -279,11 +254,9 @@ export function CheckRow({
 /** A check Hemera proposes: the same line, quiet, not kept, and Accept at its end. */
 export function ProposedCheckRow({
   check,
-  arrangement,
   onAccept,
 }: {
   check: SettingsCheck
-  arrangement: CheckArrangement
   onAccept: () => void
 }): ReactNode {
   const folding = useTransition(fold)
@@ -299,9 +272,9 @@ export function ProposedCheckRow({
       <div className={ROW}>
         <span className={NO_HANDLE} />
         <div className={cn(CELLS, QUIET)}>
-          <span className="sr-only">Proposed: {wordsOf(check, arrangement === 'list')}</span>
+          <span className="sr-only">Proposed: {wordsOf(check)}</span>
           <span className="contents" aria-hidden="true">
-            <Cells check={check} arrangement={arrangement} />
+            <Cells check={check} />
           </span>
           <span className={AFTER}>
             <Button
@@ -354,7 +327,7 @@ export function CheckRowSkeleton(): ReactNode {
 }
 
 /** The head of the columns: the words of the text columns, the marks named by their legends. */
-function ColumnsHead({ arrangement }: { arrangement: CheckArrangement }): ReactNode {
+function ColumnsHead(): ReactNode {
   return (
     <div className={HEAD}>
       <span className={NO_HANDLE} />
@@ -363,7 +336,6 @@ function ColumnsHead({ arrangement }: { arrangement: CheckArrangement }): ReactN
         <span className={NAME}>Name</span>
         <span className={LINE}>Line</span>
         <span className={WHERE}>Runs in</span>
-        {arrangement === 'list' && <span className={WHEN}>When</span>}
         <span className={EXPECT}>Expects</span>
         <span className={ROOM}>
           <Legend label="Runs only on the files the task wrote that match a pattern">
@@ -390,7 +362,6 @@ function Checks({
   label,
   checks,
   proposals,
-  arrangement,
   onOpen,
   onMove,
   onReorder,
@@ -399,7 +370,6 @@ function Checks({
   label: string
   checks: readonly SettingsCheck[]
   proposals: readonly SettingsCheck[]
-  arrangement: CheckArrangement
   onOpen: (id: string) => void
   onMove: (id: string, by: -1 | 1) => void
   onReorder: (ids: string[]) => void
@@ -430,7 +400,6 @@ function Checks({
                 <CheckRow
                   key={check.id}
                   check={check}
-                  arrangement={arrangement}
                   first={index === 0}
                   last={index === checks.length - 1}
                   onOpen={() => onOpen(check.id)}
@@ -444,7 +413,7 @@ function Checks({
       {proposals.length > 0 && (
         <motion.ul
           key="proposed"
-          aria-label={`Proposed ${arrangement === 'list' ? 'checks' : label.toLowerCase()}`}
+          aria-label={`Proposed ${label.toLowerCase()}`}
           className="flex flex-col overflow-hidden border-t border-border first:border-t-0"
           initial={collapse}
           animate={expand}
@@ -456,7 +425,6 @@ function Checks({
               <ProposedCheckRow
                 key={proposal.id}
                 check={proposal}
-                arrangement={arrangement}
                 onAccept={() => onAccept(proposal.id)}
               />
             ))}
@@ -474,8 +442,6 @@ export interface ChecksSectionProps {
   proposals?: readonly SettingsCheck[] | undefined
   /** Why the checks could not be read, in words. */
   error?: string | undefined
-  /** The exploration's two layouts; the one not chosen is removed with its stories. */
-  arrangement?: CheckArrangement | undefined
   onOpen: (id: string) => void
   onAdd: () => void
   /** Every check, by id, in its new order. */
@@ -488,7 +454,6 @@ export function ChecksSection({
   checks,
   proposals = [],
   error,
-  arrangement = 'moments',
   onOpen,
   onAdd,
   onReorder,
@@ -514,19 +479,16 @@ export function ChecksSection({
     next.splice(from + by, 0, id)
     onReorder(merge(among, next))
   }
-  /** The whole order, the checks of one list put back in their new order where they stood. */
+  /** The whole order, the checks of one moment put back in their new order where they stood. */
   const merge = (among: readonly string[], next: readonly string[]): string[] => {
     let at = 0
     return ids.map((id) => (among.includes(id) ? (next[at++] ?? id) : id))
   }
-  const lists =
-    arrangement === 'list'
-      ? [{ label: 'Checks', checks: kept, proposals }]
-      : MOMENTS.map((moment) => ({
-          label: MOMENT_WORDS[moment],
-          checks: kept.filter((check) => check.when === moment),
-          proposals: proposals.filter((check) => check.when === moment),
-        }))
+  const lists = MOMENTS.map((moment) => ({
+    label: MOMENT_WORDS[moment],
+    checks: kept.filter((check) => check.when === moment),
+    proposals: proposals.filter((check) => check.when === moment),
+  }))
   return (
     <Section label="Checks">
       <SectionHead
@@ -557,7 +519,7 @@ export function ChecksSection({
             />
           ) : (
             <>
-              <ColumnsHead arrangement={arrangement} />
+              <ColumnsHead />
               {loading ? (
                 <ul aria-label="Checks" aria-busy="true" className="flex flex-col">
                   <CheckRowSkeleton />
@@ -580,12 +542,11 @@ export function ChecksSection({
                           exit={collapse}
                           transition={folding}
                         >
-                          {arrangement === 'moments' && <h3 className={MOMENT}>{list.label}</h3>}
+                          <h3 className={MOMENT}>{list.label}</h3>
                           <Checks
                             label={list.label}
                             checks={list.checks}
                             proposals={list.proposals}
-                            arrangement={arrangement}
                             onOpen={onOpen}
                             onMove={(id, by) => move(among, id, by)}
                             onReorder={(next) => onReorder(merge(among, next))}
