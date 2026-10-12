@@ -26,6 +26,7 @@ import {
   until,
 } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
+import { held } from './sessions-world.ts'
 import { atlas, atlasOnDisk, opened } from './workspace-engine.ts'
 
 let data: string
@@ -181,7 +182,11 @@ describe('An "at open" command marked "ask before running"', () => {
     )
 
   test('asks through a Project-level permission need, Allow once and Deny only, and does not run before Allow', async () => {
-    const outcome = await commandsEngine(data)(({ profile }) =>
+    // The engine is held once the process is started, before the run says it is running: the
+    // child writes its pid first, as it may on a loaded machine. Let go at the latest at the end.
+    const launched = held()
+    const runs = { hold: () => Effect.promise(() => launched.promise) }
+    const outcome = await commandsEngine(data, { runs })(({ profile }) =>
       Effect.gen(function* () {
         const project = yield* profile.use(Effect.flatMap(atlas(main), asking))
         yield* profile.windowShown
@@ -199,7 +204,7 @@ describe('An "at open" command marked "ask before running"', () => {
         )
         yield* until(Effect.sync(pidsWritten), (written) => written.length === 1)
         return { project, need, before, after: yield* profile.use(mainRuns(project)) }
-      }),
+      }).pipe(Effect.ensuring(Effect.sync(launched.release))),
     )
     expect(outcome.need.owner).toEqual(ProjectOwner.make({ projectId: outcome.project.id }))
     expect(outcome.need.choices).toEqual(['allow-once', 'deny'])
