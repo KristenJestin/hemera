@@ -63,6 +63,7 @@ const settingsWith = (
   })),
   sounds: SOUNDS.map((sound) => ({ sound, label: sound, on: !(off.sounds ?? []).includes(sound) })),
   style: 'hemera',
+  volume: 50,
   styles: [],
 })
 

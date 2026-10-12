@@ -106,6 +106,7 @@ import {
   type Sound,
   type SoundPreview,
   type SoundStyle,
+  type SoundVolume,
   type TesterFinding,
   type UpToDateBase,
   type Wave,
@@ -477,7 +478,12 @@ export interface Link {
   readonly setNotificationKind: (id: string, on: boolean) => Promise<NotificationSettings>
   readonly setNotificationSound: (sound: Sound, on: boolean) => Promise<NotificationSettings>
   readonly setSoundStyle: (style: SoundStyle) => Promise<NotificationSettings>
-  readonly previewSound: (style: SoundStyle, sound: Sound) => Promise<SoundPreview>
+  readonly setSoundVolume: (volume: SoundVolume) => Promise<NotificationSettings>
+  readonly previewSound: (
+    style: SoundStyle,
+    sound: Sound,
+    volume: SoundVolume,
+  ) => Promise<SoundPreview>
   readonly backups: () => Promise<AutomaticBackups>
   /** Backs the profile up into a folder; answers where. */
   readonly backUp: (folder: string) => Promise<string>
@@ -851,8 +857,9 @@ export function linkOver(port: Port): Link {
     setNotificationSound: (sound, on) =>
       call((ready) => ready['notifications.setSound']({ sound, on })),
     setSoundStyle: (style) => call((ready) => ready['notifications.setStyle']({ style })),
-    previewSound: (style, sound) =>
-      call((ready) => ready['notifications.preview']({ style, sound })),
+    setSoundVolume: (volume) => call((ready) => ready['notifications.setVolume']({ volume })),
+    previewSound: (style, sound, volume) =>
+      call((ready) => ready['notifications.preview']({ style, sound, volume })),
     backups: () => call((ready) => ready['profile.backups']()),
     backUp: (folder) => call((ready) => ready['profile.backup']({ folder })),
     restoreProfile: (folder) => call((ready) => ready['profile.restore']({ folder })),

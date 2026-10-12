@@ -103,7 +103,7 @@ describe('Hemera Auto', () => {
 })
 
 describe('Notifications & sounds', () => {
-  test('one switch per kind and per sound, and the styles', () => {
+  test('one switch per kind and per sound, the styles and the volume', () => {
     const settings: NotificationSettings = {
       kinds: [
         {
@@ -116,12 +116,14 @@ describe('Notifications & sounds', () => {
       ],
       sounds: [{ sound: 'needs-you', label: 'Something needs you', on: false }],
       style: 'soft',
+      volume: 35,
       styles: [{ style: 'soft', label: 'Soft' }],
     }
     expect(notificationsOf(settings)).toEqual({
       events: [{ id: 'need', label: 'A need waits for you', on: true }],
       sounds: [{ id: 'needs-you', label: 'Something needs you', on: false }],
       style: 'soft',
+      volume: 35,
       styles: [{ id: 'soft', label: 'Soft' }],
     })
   })

@@ -4,10 +4,11 @@
  * Nothing here plays one: the player is a port.
  */
 
-import { readdirSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { DEFAULT_SOUND_STYLE, SOUND_STYLES, SOUNDS } from '@hemera/ipc'
+import { DEFAULT_SOUND_STYLE, DEFAULT_SOUND_VOLUME, SOUND_STYLES, SOUNDS } from '@hemera/ipc'
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -16,8 +17,11 @@ import {
   SOUNDS_FOLDER,
   playersOf,
   playSound,
+  gainOf,
   playStyle,
   previewSound,
+  quieterFile,
+  quietWav,
   soundFile,
   soundsFolderOf,
   wavDurationSeconds,
@@ -114,8 +118,8 @@ describe('Played by the system’s own player', () => {
       return Promise.resolve('played')
     }
     const play = playStyle('linux', '/s', player, (file) => !file.includes('mechanical'))
-    expect(await play('glass', 'done')).toBe(true)
-    expect(await play('mechanical', 'error')).toBe(true)
+    expect(await play('glass', 'done', 100)).toBe(true)
+    expect(await play('mechanical', 'error', 100)).toBe(true)
     expect(files).toEqual([join('/s', 'glass', 'done.wav'), join('/s', 'hemera', 'error.wav')])
   })
 
@@ -129,9 +133,9 @@ describe('A preview plays one sound of one style once, through the same player',
     const played: string[][] = []
     const preview = previewSound({
       doNotDisturb: Effect.succeed(doNotDisturb),
-      play: (style, sound) =>
+      play: (style, sound, volume) =>
         Effect.sync(() => {
-          played.push([style, sound])
+          played.push([style, sound, String(volume)])
           return heard
         }),
     })
@@ -140,24 +144,126 @@ describe('A preview plays one sound of one style once, through the same player',
 
   test('the chosen style’s sound, once', async () => {
     const { played, preview } = previewing('off')
-    expect(await Effect.runPromise(preview('zen', 'needs-you'))).toBe('played')
-    expect(played).toEqual([['zen', 'needs-you']])
+    expect(await Effect.runPromise(preview('zen', 'needs-you', 30))).toBe('played')
+    expect(played).toEqual([['zen', 'needs-you', '30']])
   })
 
   test('Do Not Disturb on: nothing is heard, and the window is told why', async () => {
     const { played, preview } = previewing('on')
-    expect(await Effect.runPromise(preview('zen', 'error'))).toBe('do-not-disturb')
+    expect(await Effect.runPromise(preview('zen', 'error', 30))).toBe('do-not-disturb')
     expect(played).toEqual([])
   })
 
   test('Do Not Disturb unreadable: the window has the focus, so the preview is heard', async () => {
     const { played, preview } = previewing('unknown')
-    expect(await Effect.runPromise(preview('glass', 'done'))).toBe('played')
-    expect(played).toEqual([['glass', 'done']])
+    expect(await Effect.runPromise(preview('glass', 'done', 30))).toBe('played')
+    expect(played).toEqual([['glass', 'done', '30']])
   })
 
   test('no player on the machine: the window is told so', async () => {
     const { preview } = previewing('off', false)
-    expect(await Effect.runPromise(preview('glass', 'done'))).toBe('no-player')
+    expect(await Effect.runPromise(preview('glass', 'done', 30))).toBe('no-player')
+  })
+})
+
+/** A mono 16-bit WAV of the samples given, with the header the shipped files have. */
+const wavOf = (samples: readonly number[]): Buffer => {
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0, 'ascii')
+  header.writeUInt32LE(36 + samples.length * 2, 4)
+  header.write('WAVEfmt ', 8, 'ascii')
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(8000, 24)
+  header.writeUInt32LE(16000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36, 'ascii')
+  header.writeUInt32LE(samples.length * 2, 40)
+  const body = Buffer.alloc(samples.length * 2)
+  samples.forEach((sample, at) => body.writeInt16LE(sample, at * 2))
+  return Buffer.concat([header, body])
+}
+
+const samplesOf = (wav: Buffer): number[] =>
+  Array.from({ length: (wav.length - 44) / 2 }, (_, at) => wav.readInt16LE(44 + at * 2))
+
+describe('The volume of the sounds', () => {
+  test('half of the slider is a quarter of the amplitude, full is the file as it is', () => {
+    expect(DEFAULT_SOUND_VOLUME).toBe(50)
+    expect(gainOf(100)).toBe(1)
+    expect(gainOf(50)).toBe(0.25)
+    expect(gainOf(0)).toBe(0)
+  })
+
+  test('a quieter copy keeps the header and scales every sample', () => {
+    const wav = wavOf([0, 1000, -1000, 32767, -32768])
+    const quiet = quietWav(wav, 50)
+    expect(quiet.subarray(0, 44)).toEqual(wav.subarray(0, 44))
+    expect(samplesOf(quiet)).toEqual([0, 250, -250, 8192, -8192])
+  })
+
+  test('a copy of a shipped sound is written in the folder given, at the volume', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-volume-'))
+    try {
+      const original = join(shipped, DEFAULT_SOUND_STYLE, 'done.wav')
+      const copy = quieterFile(folder)(original, 50)
+      expect(copy.startsWith(folder)).toBe(true)
+      const before = samplesOf(readFileSync(original))
+      const after = samplesOf(readFileSync(copy))
+      expect(after).toHaveLength(before.length)
+      expect(Math.max(...after.map(Math.abs))).toBeLessThanOrEqual(
+        Math.ceil(Math.max(...before.map(Math.abs)) * 0.25),
+      )
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('at full volume the player gets the file itself', async () => {
+    const files: string[] = []
+    const player: Player = (_, args) => {
+      files.push(args.at(-1) ?? '')
+      return Promise.resolve('played')
+    }
+    const play = playStyle(
+      'linux',
+      '/s',
+      player,
+      () => true,
+      (file, volume) => `${file}@${volume}`,
+    )
+    expect(await play('glass', 'done', 100)).toBe(true)
+    expect(files).toEqual([join('/s', 'glass', 'done.wav')])
+  })
+
+  test('below full the player gets a copy at the volume kept', async () => {
+    const files: string[] = []
+    const player: Player = (_, args) => {
+      files.push(args.at(-1) ?? '')
+      return Promise.resolve('played')
+    }
+    const play = playStyle(
+      'linux',
+      '/s',
+      player,
+      () => true,
+      (file, volume) => `${file}@${volume}`,
+    )
+    expect(await play('glass', 'done', 35)).toBe(true)
+    expect(files).toEqual([`${join('/s', 'glass', 'done.wav')}@35`])
+  })
+
+  test('at zero nothing is played, and nothing fails', async () => {
+    const player: Player = () => Promise.reject(new Error('a player was run'))
+    const play = playStyle(
+      'linux',
+      '/s',
+      player,
+      () => true,
+      () => '/never',
+    )
+    expect(await play('glass', 'done', 0)).toBe(true)
   })
 })
