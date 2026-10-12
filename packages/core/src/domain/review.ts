@@ -130,9 +130,9 @@ export function findingProblem(
   return null
 }
 
-/** The first line of a text, cut to a title's length. */
+/** The first line of a text, its final period dropped, cut to a title's length. */
 const titleOf = (text: string): string => {
-  const line = text.trim().split('\n')[0] ?? ''
+  const line = (text.trim().split('\n')[0] ?? '').trim().replace(/(?<!\.)\.$/, '')
   return line.length <= 120 ? line : `${line.slice(0, 119)}…`
 }
 

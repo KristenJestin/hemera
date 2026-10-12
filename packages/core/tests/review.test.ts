@@ -46,10 +46,10 @@ describe('A finding of review_report', () => {
 })
 
 describe('A special task written from a finding', () => {
-  test('RV1, RV2… with a title from the finding’s first line and its whole text as the result', () => {
+  test('RV1, RV2… with a title from the finding’s first line, its final period dropped, and its whole text as the result', () => {
     expect([specialTaskId(1), specialTaskId(2)]).toEqual(['RV1', 'RV2'])
     expect(specialTaskOf({ text: 'Keep the header row.\nThe export drops it.' })).toEqual({
-      title: 'Keep the header row.',
+      title: 'Keep the header row',
       result:
         "The automatic review's finding is addressed: Keep the header row.\nThe export drops it.",
     })
