@@ -36,6 +36,7 @@ import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
 import { TaskAmendment } from './build-tasks.ts'
+import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
 import { Delta, SPEC_SECTIONS, SpecSectionName, TriageKind } from './spec.ts'
@@ -50,6 +51,7 @@ export const ROLES = [
   'prelaunch',
   'builder',
   'helper',
+  'prototyper',
   'documenter',
   'spec-reviewer',
   'code-reviewer',
@@ -69,6 +71,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   prelaunch: 'the pre-launch Planner',
   builder: 'the Builder',
   helper: 'a helper',
+  prototyper: 'the Prototyper',
   documenter: 'the documenter',
   'spec-reviewer': 'the Spec reviewer',
   'code-reviewer': 'the code reviewer',
@@ -101,6 +104,8 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   prelaunch: { kind: 'main-checkout', readOnly: true },
   builder: { kind: 'workspace', readOnly: false },
   helper: { kind: 'workspace', readOnly: false },
+  // Its throwaway folder of the mission (#145): its own, as a Probe's worktree is.
+  prototyper: { kind: 'own-worktree', readOnly: false },
   documenter: { kind: 'workspace', readOnly: false },
   'spec-reviewer': { kind: 'workspace', readOnly: true },
   'code-reviewer': { kind: 'workspace', readOnly: true },
@@ -875,12 +880,20 @@ const READERS: ReadonlyArray<Role> = [
   'prelaunch',
   'builder',
   'helper',
+  'prototyper',
   'documenter',
   'chat',
   'setup',
   'living-spec',
 ]
-const WRITERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'documenter', 'chat']
+const WRITERS: ReadonlyArray<Role> = [
+  'probe',
+  'builder',
+  'helper',
+  'prototyper',
+  'documenter',
+  'chat',
+]
 const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
 
 /** Every tool of Hemera's, by its name as the agent asks for it. */
@@ -934,7 +947,7 @@ export const TOOLS = {
     label: { label: 'List commands', mark: 'list-commands', doing: 'Listing the commands' },
   }),
   commands_run: tool({
-    roles: ['planner', ...RUNNERS],
+    roles: ['planner', ...RUNNERS, 'prototyper'],
     gate: 'judged',
     effect: 'runs',
     path: null,
@@ -942,7 +955,7 @@ export const TOOLS = {
     label: { label: 'Run command', mark: 'run-command', doing: 'Running a command' },
   }),
   commands_output: tool({
-    roles: ['planner', ...RUNNERS],
+    roles: ['planner', ...RUNNERS, 'prototyper'],
     gate: 'local',
     effect: 'reads',
     path: null,
@@ -954,7 +967,7 @@ export const TOOLS = {
     },
   }),
   commands_stop: tool({
-    roles: RUNNERS,
+    roles: [...RUNNERS, 'prototyper'],
     gate: 'workflow',
     effect: 'runs',
     path: null,
@@ -986,7 +999,7 @@ export const TOOLS = {
     label: { label: 'Add to the Journal', mark: 'journal-add', doing: 'Writing in the Journal' },
   }),
   note_add: tool({
-    roles: ['planner', 'probe', 'builder', 'helper'],
+    roles: ['planner', 'probe', 'builder', 'helper', 'prototyper'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1042,7 +1055,7 @@ export const TOOLS = {
     label: { label: 'Propose a setup', mark: 'setup-propose', doing: 'Proposing a setup' },
   }),
   spec_read: tool({
-    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch', 'builder'],
+    roles: ['planner', 'cold-read', 'ticket-event', 'prelaunch', 'builder', 'helper', 'prototyper'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1409,6 +1422,34 @@ export const TOOLS = {
     input: BuildSummary,
     label: { label: 'Build summary', mark: 'build-summary', doing: 'Writing the summary' },
   }),
+  helper_launch: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: HelperLaunch,
+    label: { label: 'Launch a helper', mark: 'helper-launch', doing: 'Launching a helper' },
+  }),
+  helper_read: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: HelperRead,
+    label: { label: 'Read a helper', mark: 'helper-read', doing: 'Reading a helper' },
+  }),
+  helper_result: tool({
+    roles: ['helper', 'prototyper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: HelperResult,
+    label: {
+      label: 'Hand back the result',
+      mark: 'helper-result',
+      doing: 'Handing back its result',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1488,6 +1529,9 @@ export const TOOL_NAMES = [
   'task_blocked',
   'report_need',
   'build_summary',
+  'helper_launch',
+  'helper_read',
+  'helper_result',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
