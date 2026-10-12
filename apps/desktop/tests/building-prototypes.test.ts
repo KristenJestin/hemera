@@ -10,10 +10,11 @@
  * on state, never on time.
  */
 
-import { readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { TOOLS, toolsOf } from '@hemera/core/domain'
+import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -23,7 +24,7 @@ import { getMission } from '../src/engine/missions.ts'
 import { judgePrototype } from '../src/engine/planning/prototypes.ts'
 import { sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { permissionRequests } from '../src/engine/storage/schema.ts'
+import { helpers, permissionRequests } from '../src/engine/storage/schema.ts'
 import { QUIET, READING, call, grantOf } from './building-world.ts'
 import { builderOf, launched } from './builder-world.ts'
 import { held, sessionsEngine, text, until, within } from './sessions-world.ts'
@@ -389,8 +390,79 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
       ok: false,
       text: 'refused: H7 is not a prototype frozen with the Spec: the frozen ones are H1',
     })
-    expect(seen.missing.ok).toBe(false)
-    expect(seen.missing.text).toContain('absent.html')
+    expect(seen.missing).toMatchObject({
+      ok: false,
+      refused: true,
+      text: 'refused: absent.html is not a file H1 kept: it kept list-1.html',
+    })
+  })
+
+  test('a file in the folder that the prototype did not keep is refused', async () => {
+    const { run } = prototyping(1)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* frozenWith(['validated'])
+          const builder = yield* builderOf(mission.id)
+          const folder = (yield* helperRowsOf(mission.id))[0]?.folder ?? ''
+          writeFileSync(join(folder, 'scratch.txt'), 'left behind\n')
+          const read = yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H1',
+            path: 'scratch.txt',
+          })
+          const kept = yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H1',
+            path: './list-1.html',
+          })
+          return { read, kept }
+        }),
+      ),
+    )
+    expect(seen.read).toMatchObject({
+      ok: false,
+      refused: true,
+      text: 'refused: scratch.txt is not a file H1 kept: it kept list-1.html',
+    })
+    expect(seen.read.text).not.toContain('left behind')
+    // The same kept file, spelled another way, is still the kept file.
+    expect(seen.kept.ok).toBe(true)
+  })
+
+  test('a frozen prototype whose folder or helper is gone says its files are no longer there', async () => {
+    const { run } = prototyping(2)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* frozenWith(['validated', 'validated'])
+          const builder = yield* builderOf(mission.id)
+          const rows = yield* helperRowsOf(mission.id)
+          rmSync(rows[0]?.folder ?? '', { recursive: true, force: true })
+          const database = yield* Database
+          yield* database.delete(helpers).where(eq(helpers.id, rows[1]?.id ?? ''))
+          const folderGone = yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H1',
+            path: 'list-1.html',
+          })
+          const rowGone = yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H2',
+            path: 'list-2.html',
+          })
+          return { folderGone, rowGone }
+        }),
+      ),
+    )
+    for (const [answer, label] of [
+      [seen.folderGone, 'H1'],
+      [seen.rowGone, 'H2'],
+    ] as const) {
+      expect(answer).toMatchObject({
+        ok: false,
+        refused: true,
+        text: `refused: the files of ${label} are no longer there`,
+      })
+    }
   })
 
   test('the Builder and its helpers hold the tool as a read; the Planner and the Prototyper do not', () => {

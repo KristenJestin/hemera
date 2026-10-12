@@ -12,6 +12,8 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
+import { relative, sep } from 'node:path'
 
 import {
   PROTOTYPE_RESULT_NOTE,
@@ -121,17 +123,26 @@ export const prototypeReadTool = (
     const number = helperNumberOf(args.prototype)
     const found =
       number === null ? undefined : frozen.find((one) => one.helper === helperLabel(number))
-    if (found?.folder === null || found === undefined) {
+    if (found === undefined) {
       const known = frozen.map((one) => one.helper).join(', ')
       return refusal(
         `refused: ${args.prototype} is not a prototype frozen with the Spec: ${known === '' ? 'there is none' : `the frozen ones are ${known}`}`,
       )
     }
+    const gone = refusal(`refused: the files of ${found.helper} are no longer there`)
+    // Its helper's row, or its folder, left since the Freeze.
+    if (found.folder === null || !existsSync(found.folder)) return gone
     const folder = found.folder
     const resolved = yield* Effect.promise(() => resolvePath(folder, folder, args.path, home))
     if (!resolved.inside || !resolved.certain) {
+      return refusal(`refused: ${args.path} is not inside the folder of ${found.helper}`)
+    }
+    // Only what it kept: the rest of its folder is whatever it left behind.
+    const real = yield* Effect.promise(() => realpath(folder))
+    const named = relative(real, resolved.path).split(sep).join('/')
+    if (!found.files.includes(named)) {
       return refusal(
-        `refused: ${args.path} is not inside the folder of ${found.helper}: only the files it kept can be read`,
+        `refused: ${args.path} is not a file ${found.helper} kept: ${found.files.length === 0 ? 'it kept none' : `it kept ${found.files.join(', ')}`}`,
       )
     }
     const page = yield* attempt(() =>
@@ -153,7 +164,8 @@ export const prototypeReadTool = (
 export const prototypeWriteRefusal = (missionId: string, path: string) =>
   Effect.gen(function* () {
     const rows = (yield* helperRowsOf(missionId)).filter((row) => row.place === 'prototype')
-    const real = (folder: string): string => (existsSync(folder) ? realpathSync(folder) : folder)
+    const real = (folder: string): string =>
+      existsSync(folder) ? realpathSync.native(folder) : folder
     const inside = rows.find(
       (row) => containedIn(row.folder, path) || containedIn(real(row.folder), path),
     )
