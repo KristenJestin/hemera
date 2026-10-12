@@ -493,7 +493,7 @@ export const LocalMarkAsDelivered: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Mark as delivered' }))
     const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
     await expect(dialog.getByRole('heading', { name: 'Mark ACME-12 as delivered?' })).toBeVisible()
-    await expect(dialog.getAllByText(/into main, here/).length).toBe(5)
+    await expect(dialog.getAllByText(/into develop, here/).length).toBe(5)
     await userEvent.click(dialog.getByRole('button', { name: 'Mark as delivered' }))
     await expect(args.onShip).toHaveBeenCalled()
   },

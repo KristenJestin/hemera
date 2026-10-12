@@ -978,5 +978,5 @@ export const FULL_PREVIEW: ShipPreview = {
 export const LOCAL_PREVIEW: ShipPreview = {
   ...PREVIEW,
   ci: [],
-  local: { merges: REPOSITORIES.map((repository) => ({ repository, into: 'main' })) },
+  local: { merges: REPOSITORIES.map((repository) => ({ repository, into: 'develop' })) },
 }

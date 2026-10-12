@@ -79,7 +79,7 @@ export const LocalStampOnly: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark as delivered' }))
     const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
-    await expect(dialog.queryByText(/into main, here/)).toBeNull()
+    await expect(dialog.queryByText(/into develop, here/)).toBeNull()
     await expect(dialog.getByText(/Nothing is merged/)).toBeVisible()
   },
 }
