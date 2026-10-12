@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
-import { buildingPartOf } from '../src/engine/building/tasks.ts'
+import { attemptsIn, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
 import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
@@ -77,11 +77,11 @@ const LONG = 30_000
 /** A whole end runs many steps, each bounded by `LONG`. */
 const SLOW = { timeout: 180_000 }
 
-/** What the checks of a scope say: none unless a test says. */
+/** What the checks of a scope say: none unless a test says; null for checks that never end. */
 type ChecksOf = (asked: {
   readonly scope: string
   readonly subject: string | null
-}) => ReadonlyArray<CheckResult>
+}) => ReadonlyArray<CheckResult> | null
 
 const RED: CheckResult = {
   name: 'unit tests',
@@ -91,6 +91,8 @@ const RED: CheckResult = {
   outputTail: 'FAIL the header row',
   runId: null,
 }
+
+const GREEN: CheckResult = { ...RED, verdict: 'green', detail: 'exit code 0', outputTail: '' }
 
 interface Agents {
   readonly agents: ReadonlyArray<{
@@ -112,6 +114,8 @@ const ending = (
     readonly checks?: ChecksOf
     readonly resumed?: boolean
     readonly folder?: string
+    /** The Builder's agent, when not every prompt is answered at once. */
+    readonly builder?: FakeScript
     /** Runs as each agent starts: a failure there is an agent that cannot start. */
     readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
   } = {},
@@ -126,14 +130,20 @@ const ending = (
     steps: [says('Working.')],
     between: () => holdOf(index).promise,
   })
-  const first: ReadonlyArray<FakeScript> = options.resumed === true ? [] : [READING, QUIET]
+  const first: ReadonlyArray<FakeScript> =
+    options.resumed === true ? [] : [READING, options.builder ?? QUIET]
   const checks = options.checks ?? (() => [])
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
     starting: options.starting ?? (() => Effect.void),
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: {
-      checks: Layer.succeed(TaskChecks, { run: (asked) => Effect.succeed(checks(asked)) }),
+      checks: Layer.succeed(TaskChecks, {
+        run: (asked) => {
+          const said = checks(asked)
+          return said === null ? Effect.never : Effect.succeed(said)
+        },
+      }),
     },
   })
   const world: Ending = {
@@ -1116,6 +1126,16 @@ describe('The reviewers count in the cap', () => {
   })
 })
 
+/** The verdicts of the end's attempts at the final checks, in their order; null while open. */
+const endAttempts = (missionId: string) =>
+  Effect.gen(function* () {
+    const view = yield* buildingNow(missionId)
+    return (yield* attemptsIn(yield* Database, view.buildingId))
+      .filter((one) => one.taskId === null && one.scope === 'end' && one.subject === null)
+      .toSorted((a, b) => a.number - b.number)
+      .map((one) => one.verdict)
+  })
+
 /** Waits until the mission has a pending error need, and answers it Retry. */
 const retried = (missionId: string) =>
   Effect.gen(function* () {
@@ -1328,4 +1348,119 @@ describe('A restart in the middle of the end', () => {
     ])
     expect(seen.mission.needs).toEqual([])
   })
+
+  test(
+    'a restart while a red of the final checks waits for the Builder counts no red until its turn ends',
+    SLOW,
+    async () => {
+      let fixed = false
+      const checks: ChecksOf = ({ scope }) => {
+        if (scope !== 'end') return []
+        return fixed ? [GREEN] : [RED]
+      }
+      let holding = false
+      const turn = held()
+      const before = ending({
+        checks,
+        builder: {
+          steps: [says('Read.')],
+          between: () => (holding ? turn.promise : Promise.resolve()),
+        },
+      })
+      const left = await before
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              yield* builtAll(builder.grantId)
+              yield* agentOf(before.world, mission.id, 'documenter')
+              // The Builder's turns from now on hold: the one the red starts is not over.
+              holding = true
+              yield* documented(before.world, mission.id)
+              yield* until(
+                Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+                LONG,
+              )
+              yield* Effect.sleep('500 millis')
+              return mission
+            }),
+          ),
+        )
+        .finally(() => turn.release())
+      const after = ending({ checks, resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* until(
+              Effect.sync(() => after.world.agents.length > 0),
+              LONG,
+            )
+            // Long enough for a judgement at the start to have run.
+            yield* Effect.sleep('1 second')
+            const waited = yield* endAttempts(left.id)
+            fixed = true
+            for (const index of after.world.agents.keys()) after.world.release(index)
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            return { waited, judged: yield* endAttempts(left.id) }
+          }),
+        ),
+      )
+      expect(seen.waited).toEqual(['red', null])
+      expect(seen.judged).toEqual(['red', 'green'])
+    },
+  )
+
+  test(
+    'a restart after the Builder’s turn ended, while the final checks ran again, judges them once',
+    SLOW,
+    async () => {
+      let ends = 0
+      const before = ending({
+        checks: ({ scope }) => {
+          if (scope !== 'end') return []
+          ends += 1
+          return ends === 1 ? [RED] : null
+        },
+      })
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            // The Builder's turn after the red ended: the checks run again, and never end.
+            yield* until(
+              Effect.sync(() => ends >= 2),
+              LONG,
+            )
+            return mission
+          }),
+        ),
+      )
+      const after = ending({
+        resumed: true,
+        checks: ({ scope }) => (scope === 'end' ? [GREEN] : []),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            return { judged: yield* endAttempts(left.id), mission: yield* getMission(left.id) }
+          }),
+        ),
+      )
+      expect(seen.judged).toEqual(['red', 'green'])
+      expect(seen.mission.needs).toEqual([])
+    },
+  )
 })

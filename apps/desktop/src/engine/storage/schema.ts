@@ -2416,6 +2416,11 @@ export const buildings = sqliteTable(
     summary: text('summary').$type<Masked<string>>(),
     /** The checkpoint the automatic review read (#147); null before its end took it. */
     reviewCheckpointId: text('review_checkpoint_id'),
+    /**
+     * When the Builder last ended a turn during the end (#147): a red of the final checks waits
+     * for a turn ended after the attempt it opened, across a restart.
+     */
+    builderTurnedAt: text('builder_turned_at'),
   },
   (table) => [
     uniqueIndex('building_active_of_mission')

@@ -58,6 +58,7 @@ import { Database, type EngineTransaction, refusedWhile } from '../storage/datab
 import {
   attemptWrites,
   buildingAttempts,
+  buildingCheckRuns,
   buildingDecisions,
   buildingTasks,
   buildings,
@@ -70,6 +71,7 @@ import {
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { BuildingEnd } from './builder.ts'
+import { checkResultsIn } from './attempts.ts'
 import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
@@ -89,6 +91,7 @@ import {
   type BuildingBase,
   type BuildingRow,
   activeBuildingIn,
+  attemptsIn,
   bases,
   buildingEvent,
   now,
@@ -241,9 +244,9 @@ export const buildingEndLayer = (log: Log) => {
       const running = new Map<string, boolean>()
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
-      /** The Buildings whose end waits on a red the Builder fixes: judged again after its turn. */
+      /** The Buildings whose refresh waits on an automated proof: driven again after a turn. */
       const awaitingBuilder = new Set<string>()
-      /** The Buildings whose Builder ended a turn while their end waited on it. */
+      /** The Buildings whose Builder ended a turn while their refresh waited on it. */
       const builderTurned = new Set<string>()
       /** The Buildings whose proofs this engine refreshed. */
       const refreshed = new Set<string>()
@@ -408,14 +411,42 @@ export const buildingEndLayer = (log: Log) => {
           )
         })
 
-      /** Whether a red of the end waits on the Builder: judged again only after its turn ends. */
-      const waitsOnBuilder = (buildingId: string) => {
+      /** Whether the refresh still waits on the Builder for a proof: until its next turn ends. */
+      const proofWaitsOnBuilder = (buildingId: string) => {
         if (!awaitingBuilder.has(buildingId)) return false
         if (!builderTurned.has(buildingId)) return true
         awaitingBuilder.delete(buildingId)
         builderTurned.delete(buildingId)
         return false
       }
+
+      /**
+       * Whether a red of the final checks waits on the Builder, from what is stored, so a restart
+       * neither judges its fix early nor waits for a turn that already ended: the attempt the red
+       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder
+       * ended since it opened.
+       */
+      const waitsOnBuilder = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const open = (yield* attemptsIn(database, building.id)).findLast(
+            (one) =>
+              one.taskId === null &&
+              one.scope === 'end' &&
+              one.subject === null &&
+              one.endedAt === null,
+          )
+          if (open === undefined || open.number === 1) return false
+          if ((yield* checkResultsIn(database, open.id)).length > 0) return false
+          const checking = yield* database
+            .select({ name: buildingCheckRuns.name })
+            .from(buildingCheckRuns)
+            .where(eq(buildingCheckRuns.attemptId, open.id))
+            .pipe(Effect.mapError(refusedWhile('reading the checks running')))
+          if (checking.length > 0) return false
+          const turned = (yield* buildingRow(building.id))?.builderTurnedAt ?? null
+          return turned === null || turned < open.startedAt
+        })
 
       /** Whether the last result of a final check is red. */
       const checksRed = (building: BuildingRow) =>
@@ -447,13 +478,14 @@ export const buildingEndLayer = (log: Log) => {
               return yield* moveOn(building, 'final_checks')
             }
             case 'final_checks': {
-              if (waitsOnBuilder(building.id)) return false
+              if (yield* waitsOnBuilder(building)) return false
               const verdict = yield* BuildDesk.use((desk) =>
                 desk.judgeScope(missionId, 'end', null),
               )
               if (verdict === 'pending') return false
               if (verdict === 'red') {
-                awaitingBuilder.add(building.id)
+                // A red hands an attempt to the Builder; the third asks the user, and says so.
+                if (!(yield* waitsOnBuilder(building))) return false
                 yield* mutate('saying the final checks are red', () =>
                   Effect.succeed({
                     result: undefined,
@@ -608,18 +640,24 @@ export const buildingEndLayer = (log: Log) => {
               if (!refreshed.has(building.id)) {
                 refreshed.add(building.id)
                 yield* BuildDesk.use((desk) => desk.refreshProofs(missionId))
-              } else if (!waitsOnBuilder(building.id) && (yield* checksRed(building))) {
+              } else if (
+                !proofWaitsOnBuilder(building.id) &&
+                !(yield* waitsOnBuilder(building)) &&
+                (yield* checksRed(building))
+              ) {
                 yield* BuildDesk.use((desk) => desk.judgeScope(missionId, 'end', null))
               }
-              if (awaitingBuilder.has(building.id)) return false
+              if (awaitingBuilder.has(building.id) || (yield* waitsOnBuilder(building)))
+                return false
               const unproven = (yield* scenarioProofsIn(database, building.id)).some(
                 (row) =>
                   modeOf(row) === 'automated' && !PROVEN.some((state) => state === stateOf(row)),
               )
-              if (unproven || (yield* checksRed(building))) {
+              if (unproven) {
                 awaitingBuilder.add(building.id)
                 return false
               }
+              if (yield* checksRed(building)) return false
               if ((yield* getMission(missionId)).needs.length > 0) return false
               yield* exit(building)
               return false
@@ -970,8 +1008,19 @@ export const buildingEndLayer = (log: Log) => {
             const session = yield* getSession(turn.sessionId)
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
-            if (building === null || !awaitingBuilder.has(building.id)) return
-            builderTurned.add(building.id)
+            if (building === null || endPhaseOf(building.phase) === null) return
+            // Kept, so a red the Builder fixes is judged after this turn even across a restart.
+            yield* mutate('keeping the end of the Builder’s turn', (transaction) =>
+              transaction
+                .update(buildings)
+                .set({ builderTurnedAt: now() })
+                .where(eq(buildings.id, building.id))
+                .pipe(
+                  Effect.mapError(refusedWhile('keeping the end of the Builder’s turn')),
+                  Effect.as({ result: undefined, events: [] }),
+                ),
+            )
+            if (awaitingBuilder.has(building.id)) builderTurned.add(building.id)
             yield* drive(building.id)
           }).pipe(
             provided,

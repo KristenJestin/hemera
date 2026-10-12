@@ -51,6 +51,7 @@ CREATE TABLE `review_passes` (
 );
 --> statement-breakpoint
 ALTER TABLE `buildings` ADD `review_checkpoint_id` text;--> statement-breakpoint
+ALTER TABLE `buildings` ADD `builder_turned_at` text;--> statement-breakpoint
 CREATE INDEX `review_findings_of_building` ON `review_findings` (`building_id`,`number`);--> statement-breakpoint
 CREATE INDEX `review_passes_of_building` ON `review_passes` (`building_id`,`reviewer`);--> statement-breakpoint
 CREATE UNIQUE INDEX `review_pass_of_lineage` ON `review_passes` (`lineage`);
