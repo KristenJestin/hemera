@@ -2,7 +2,7 @@ CREATE TABLE `building_check_runs` (
 	`attempt_id` text NOT NULL,
 	`name` text NOT NULL,
 	`place` text NOT NULL,
-	`run_id` text NOT NULL,
+	`run_id` text,
 	`command_id` text,
 	`started_at` text NOT NULL,
 	CONSTRAINT `building_check_runs_pk` PRIMARY KEY(`attempt_id`, `name`, `place`),
@@ -31,5 +31,5 @@ CREATE TABLE `project_checks` (
 ALTER TABLE `building_check_results` ADD `line` text;--> statement-breakpoint
 ALTER TABLE `building_check_results` ADD `exit_code` integer;--> statement-breakpoint
 ALTER TABLE `building_check_results` ADD `value` real;--> statement-breakpoint
-ALTER TABLE `building_check_results` ADD `tree` text;--> statement-breakpoint
+ALTER TABLE `building_check_results` ADD `trees` text;--> statement-breakpoint
 ALTER TABLE `building_check_results` ADD `evidence_id` text;

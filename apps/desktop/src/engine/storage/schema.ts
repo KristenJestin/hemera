@@ -2580,8 +2580,11 @@ export const buildingCheckResults = sqliteTable(
     exitCode: integer('exit_code'),
     /** The number its `expect` read. */
     value: real('value'),
-    /** The tree of the repository it ran on (#140), for telling when a final check is stale. */
-    tree: text('tree'),
+    /**
+     * The trees it ran on (#140), `[{ repository, tree }]` in JSON: its repository's, or every
+     * repository's at the Workspace root. What tells a final check that is no longer up to date.
+     */
+    trees: text('trees'),
     /** The whole output kept as the mission's evidence, for a final check. */
     evidenceId: text('evidence_id'),
   },
@@ -2601,7 +2604,8 @@ export const buildingCheckRuns = sqliteTable(
       .references(() => buildingAttempts.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     place: text('place').notNull(),
-    runId: text('run_id').notNull(),
+    /** Its run, once the run service answered it. */
+    runId: text('run_id'),
     commandId: text('command_id'),
     startedAt: text('started_at').notNull(),
   },

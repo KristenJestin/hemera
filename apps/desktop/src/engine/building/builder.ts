@@ -1252,6 +1252,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           },
           judgeScope: (missionId, scope, subject) =>
             loop.judgeScope(missionId, scope, subject).pipe(provided, Effect.orDie),
+          checkRun: (missionId, name, repositories) =>
+            loop.checkRun(missionId, name, repositories).pipe(provided, Effect.orDie),
         }),
       )
 

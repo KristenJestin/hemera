@@ -8,6 +8,7 @@
 import type { AttemptResult, ToolArguments } from '@hemera/core/domain'
 import { Context, Deferred, Effect, Layer } from 'effect'
 
+import type { LaunchWithdrawn } from '../runs.ts'
 import type { Grant } from '../tools/access.ts'
 import type { ToolAnswer } from '../tools/files.ts'
 import { GateGuards, type Guard, type GuardedCall, WriteAttribution } from '../tools/ports.ts'
@@ -42,6 +43,26 @@ export interface BuildWork {
     scope: 'requirement' | 'end',
     subject: string | null,
   ) => Effect.Effect<AttemptResult>
+  /**
+   * A check's run in the mission's Building (#143), on the write locks of its repositories: null
+   * when the mission has no active Building.
+   */
+  readonly checkRun: (
+    missionId: string,
+    name: string,
+    repositories: ReadonlyArray<string>,
+  ) => Effect.Effect<CheckRunWatch | null>
+}
+
+/** A check's run watched: its locks and trees taken right before its launch, let go at its end. */
+export interface CheckRunWatch {
+  /** Takes the locks, then the trees it runs on; a snapshot that fails withdraws the launch. */
+  readonly launch: Effect.Effect<
+    ReadonlyArray<{ readonly repository: string; readonly tree: string }>,
+    LaunchWithdrawn
+  >
+  /** Records what the run changed (the Building's), then lets the locks go. */
+  readonly finish: (runId: string | null) => Effect.Effect<void>
 }
 
 export class BuildDesk extends Context.Service<
@@ -80,6 +101,8 @@ export const buildDeskLayer = Layer.effect(
       },
       judgeScope: (missionId, scope, subject) =>
         Effect.flatMap(work, (one) => one.judgeScope(missionId, scope, subject)),
+      checkRun: (missionId, name, repositories) =>
+        Effect.flatMap(work, (one) => one.checkRun(missionId, name, repositories)),
       serve: (one) => Effect.asVoid(Deferred.succeed(served, one)),
     }
   }),

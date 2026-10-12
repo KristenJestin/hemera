@@ -169,7 +169,11 @@ export const EngineMainRpcs = EngineRpcs.merge(
   NoticeFeedRpcs,
   JevKeyRpcs,
   JiraTokenEngineRpcs,
-  // The Project's checks (#143): served to main only until their screen (#150). One more group
-  // in the window's handlers is more than TypeScript instantiates (TS2589).
-  ChecksRpcs,
 )
+
+/**
+ * Everything the engine serves: what main asks, and the Project's checks (#143), served apart until
+ * their screen (#150) forwards them. One more group in one set of handlers is more than TypeScript
+ * instantiates (TS2589): their handlers are a layer of their own.
+ */
+export const EngineServedRpcs = EngineMainRpcs.merge(ChecksRpcs)

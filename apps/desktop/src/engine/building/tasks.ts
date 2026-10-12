@@ -531,7 +531,7 @@ const attemptViewOf = (row: AttemptRow, extras: AttemptExtras): BuildingAttemptV
       line: one.line,
       exitCode: one.exitCode,
       value: one.value,
-      tree: one.tree,
+      trees: one.trees === null ? [] : Option.getOrElse(trees.read(one.trees), () => []),
       evidenceId: one.evidenceId,
       // An intermediate check stays quiet unless red; the end's are the final checks (#143).
       shown:

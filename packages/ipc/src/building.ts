@@ -234,8 +234,8 @@ export const AttemptCheckView = Schema.Struct({
   exitCode: Schema.NullOr(Schema.Number),
   /** The number its expected result read. */
   value: Schema.NullOr(Schema.Number),
-  /** The tree of the repository it ran on (#140). */
-  tree: Schema.NullOr(Schema.String),
+  /** The trees it ran on (#140): its repository's, or each one's at the Workspace root. */
+  trees: Schema.Array(BuildingTree),
   /** The whole output, kept as the mission's evidence, for a final check. */
   evidenceId: Schema.NullOr(Schema.String),
   /**

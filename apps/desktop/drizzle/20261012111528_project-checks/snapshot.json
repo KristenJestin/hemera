@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "69c613d5-2be7-409f-8e97-5092d31c086d",
+  "id": "db460dde-3f43-4e56-a85e-652b6ce07d94",
   "prevIds": ["632418b5-965a-461f-abf3-7fcbbfe691cd"],
   "ddl": [
     {
@@ -1236,7 +1236,7 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "tree",
+      "name": "trees",
       "entityType": "columns",
       "table": "building_check_results"
     },
@@ -1282,7 +1282,7 @@
     },
     {
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,

@@ -574,6 +574,7 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
     // The safety rules are never copied: they always apply in their current version.
     expect(Object.keys(seen.copy?.sections ?? {}).sort()).toEqual([
       'catalogue',
+      'checks',
       'commits',
       'resources',
     ])

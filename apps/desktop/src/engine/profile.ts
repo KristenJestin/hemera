@@ -46,7 +46,8 @@ import {
   builderLayer,
   tasksDoneEnd,
 } from './building/builder.ts'
-import { type TaskChecks, checksVerdict, noTaskChecks } from './building/checks.ts'
+import { type TaskChecks, checksVerdict } from './building/checks.ts'
+import { projectTaskChecks } from './building/run-checks.ts'
 import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
@@ -262,7 +263,7 @@ export interface ProfileParts {
     | {
         readonly start?: Layer.Layer<BuildingStart>
         readonly verdict?: Layer.Layer<TaskVerdict>
-        /** The checks a finished attempt is judged on (#142's port, #143's checks): none. */
+        /** The checks a finished attempt is judged on (#142's port): the Project's (#143). */
         readonly checks?: Layer.Layer<TaskChecks>
         readonly end?: Layer.Layer<BuildingEnd>
         /** Where a suite holds the Builder between a check and its transaction. */
@@ -597,7 +598,11 @@ export const startProfile = (
                     parts.building?.verdict ?? checksVerdict,
                     parts.building?.end ?? tasksDoneEnd,
                     snapshots,
-                  ).pipe(Layer.provideMerge(parts.building?.checks ?? noTaskChecks)),
+                  ).pipe(
+                    Layer.provideMerge(
+                      parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                    ),
+                  ),
                 ),
               ),
           ),
