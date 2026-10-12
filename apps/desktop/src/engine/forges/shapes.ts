@@ -30,7 +30,7 @@ export interface FlagRule {
   readonly value: boolean
   readonly pattern?: RegExp
   readonly required: boolean
-  /** Of the flags sharing this name, exactly one must be there. */
+  /** Of the flags in this group, exactly one must be there. */
   readonly oneOf?: string
 }
 
@@ -93,15 +93,15 @@ const GH_REPO: readonly [string, FlagRule] = [
   valueFlag(true, new RegExp(String.raw`^[A-Za-z0-9.-]+(:\d+)?/${NAME}/${NAME}$`)),
 ]
 /** The bkt context a command goes through: the one of the repository's host. */
-const BKT_CONTEXT: readonly [string, FlagRule] = ['--context', valueFlag(true)]
+const BKT_CONTEXT: readonly [string, FlagRule] = ['--context', valueFlag(true, SAFE_WORD)]
 /**
  * Where a bkt command acts: its context, its workspace (Cloud) or project (Data Center), one of the
  * two, and its repository.
  */
 const BKT_PLACE: ReadonlyArray<readonly [string, FlagRule]> = [
   BKT_CONTEXT,
-  ['--workspace', { value: true, required: false, oneOf: 'place' }],
-  ['--project', { value: true, required: false, oneOf: 'place' }],
+  ['--workspace', { value: true, pattern: SAFE_WORD, required: false, oneOf: 'place' }],
+  ['--project', { value: true, pattern: SAFE_WORD, required: false, oneOf: 'place' }],
   ['--repo', valueFlag(true)],
 ]
 
@@ -236,7 +236,7 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     ['pipeline', 'run'],
     [
       BKT_CONTEXT,
-      ['--workspace', valueFlag(true)],
+      ['--workspace', valueFlag(true, SAFE_WORD)],
       ['--repo', valueFlag(true)],
       ['--ref', valueFlag(true)],
       ['--selector-type', valueFlag()],

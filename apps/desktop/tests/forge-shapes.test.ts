@@ -226,6 +226,24 @@ describe('A write names its forge: the bkt context, the gh host', () => {
     ).toBeNull()
   })
 
+  test('a bkt context, workspace or project is one plain word, never empty nor a flag', () => {
+    const place = (context: string, flag: string, value: string) => [
+      ...BKT_CREATE,
+      '--context',
+      context,
+      flag,
+      value,
+      '--repo',
+      'shop',
+    ]
+    expect(shapeOf('bkt', place('oss', '--project', '~someone'))?.operation).toBe('pr.create')
+    for (const bad of ['', '-x', '--workspace', 'a b', '$(sh)', 'a|b', 'a\nb']) {
+      expect(shapeOf('bkt', place(bad, '--workspace', 'acme-team')), `context ${bad}`).toBeNull()
+      expect(shapeOf('bkt', place('oss', '--workspace', bad)), `workspace ${bad}`).toBeNull()
+      expect(shapeOf('bkt', place('oss', '--project', bad)), `project ${bad}`).toBeNull()
+    }
+  })
+
   test('a gh write names its repository with its host: never a bare owner/repo', () => {
     expect(shapeOf('gh', ['pr', 'merge', '7', '--repo', 'acme/shop', '--squash'])).toBeNull()
     expect(
