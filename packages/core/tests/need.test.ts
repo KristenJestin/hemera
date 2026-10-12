@@ -47,14 +47,18 @@ describe('An answer fits the need it answers', () => {
     expect(refused(fittingAnswer(DECISION, MISSION, written('  ')))).toBe(true)
   })
 
-  test('an error takes one of its proposals only', () => {
+  test('an error takes one of its proposals, or a direction of the user’s own in words (#142)', () => {
     const error = ErrorFields.make({
       failed: 'the migration test',
       attempts: [],
       proposals: ['Skip the test', 'Stop the task'],
     })
     expect(Result.isSuccess(fittingAnswer(error, MISSION, chosen('Skip the test')))).toBe(true)
-    expect(refused(fittingAnswer(error, MISSION, written('try again')))).toBe(true)
+    expect(refused(fittingAnswer(error, MISSION, chosen('Something else')))).toBe(true)
+    expect(Result.isSuccess(fittingAnswer(error, MISSION, written('try the other driver')))).toBe(
+      true,
+    )
+    expect(refused(fittingAnswer(error, MISSION, written('  ')))).toBe(true)
   })
 
   test('an environment need is retried, never answered', () => {

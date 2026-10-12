@@ -17,8 +17,12 @@ import {
   type Role,
   type ToolName,
 } from '@hemera/core/domain'
+import type { Command } from '@hemera/ipc'
 import { Context, Effect, Layer } from 'effect'
 import type { Schema } from 'effect'
+
+import type { LaunchWithdrawn } from '../runs.ts'
+import type { DatabaseError, EngineTransaction } from '../storage/database.ts'
 
 import type { Grant, GrantAsked } from './access.ts'
 import type { ToolAnswer } from './files.ts'
@@ -161,8 +165,16 @@ export interface GuardedCall {
   readonly path: JudgedPath | null
 }
 
-/** A mandatory guard of the roles: a refusal reason, or null to let the call on. */
-export type Guard = (call: GuardedCall) => Effect.Effect<string | null>
+/** What a guard that let a call on after waiting tells its session, beside the call's answer. */
+export interface GuardNote {
+  readonly note: string
+}
+
+/**
+ * A mandatory guard of the roles: a refusal reason, null to let the call on, or a note when it
+ * let it on after a wait (a command's write lock, #142).
+ */
+export type Guard = (call: GuardedCall) => Effect.Effect<string | GuardNote | null>
 
 /** The guards later tickets register, in their order: file claims, command write locks. */
 export class GateGuards extends Context.Service<GateGuards, ReadonlyArray<Guard>>()('GateGuards') {}
@@ -210,4 +222,87 @@ export const noSetupDesk = Layer.succeed(SetupDesk, {
   propose: () => Effect.succeed(NO_SETUP),
   heard: () => Effect.void,
   passed: () => Effect.void,
+})
+
+/** A file a session of a mission wrote with a file tool, as its outcome is recorded. */
+export interface WrittenFile {
+  readonly sessionId: string
+  readonly missionId: string
+  /** Resolved and absolute. */
+  readonly path: string
+  readonly fingerprint: string
+  /** The intent of the write (CT-09). */
+  readonly actionId: string
+}
+
+/** What `commands_run` tells the Building of a command a session of a mission runs. */
+export interface CommandAsked {
+  readonly sessionId: string
+  readonly missionId: string
+  readonly command: Command | null
+  /** The line as it runs: the command's, or the free line. */
+  readonly line: string
+  /** For a free line, the folder it runs in under the place. */
+  readonly folder: string | null
+}
+
+/**
+ * A writing command the Building watches. Nothing is held until `launch`, which runs right before
+ * its process launches, once its reservation and its permission no longer hold it: it takes the
+ * write lock (waiting for another task's, said in `note`) and the snapshots before. `finish`
+ * takes those after, attributes what it changed and releases the lock: once, when the run ends (null when it never ran). A call that stops waiting does not finish it: the
+ * run keeps its lock until it really ends.
+ */
+export interface CommandWatch {
+  /** What its launch waited for, once it waited; null otherwise. */
+  readonly note: () => string | null
+  /** The task the command belongs to, or null when its session runs none. */
+  readonly taskId: string | null
+  /**
+   * Takes the lock and the snapshots before; whatever ends it early lets the lock go. Fails when
+   * its call already ended or a snapshot could not be taken: the run must not launch unwatched.
+   */
+  readonly launch: Effect.Effect<void, LaunchWithdrawn>
+  /** What the run's intent keeps for a restart to attribute it: the trees before, its globs. */
+  readonly recorded: () => Schema.JsonObject
+  readonly finish: (runId: string | null) => Effect.Effect<void>
+  /** Waits until `finish` attributed what the run changed. */
+  readonly settled: Effect.Effect<void>
+}
+
+/** A file a mission's session is about to write. */
+export interface WritingFile {
+  readonly sessionId: string
+  readonly missionId: string
+  /** Resolved and absolute. */
+  readonly path: string
+}
+
+/**
+ * Where the writes of a mission's sessions are attributed to their task (#142, CT-02): a file
+ * tool's in the transaction of its outcome, a command's from the snapshots before and after it.
+ * The Builder fills it; nothing is attributed otherwise.
+ */
+export class WriteAttribution extends Context.Service<
+  WriteAttribution,
+  {
+    readonly written: (
+      file: WrittenFile,
+    ) => (transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>
+    readonly command: (asked: CommandAsked) => Effect.Effect<CommandWatch | null>
+    /**
+     * A file tool write, done once no other task's command holds its file and holding it while
+     * it is written: answers what it answered, and what it waited for, or null.
+     */
+    readonly holding: <A, E, R>(
+      file: WritingFile,
+      write: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<{ readonly result: A; readonly waited: string | null }, E, R>
+  }
+>()('WriteAttribution') {}
+
+export const noWriteAttribution = Layer.succeed(WriteAttribution, {
+  written: () => () => Effect.void,
+  command: () => Effect.succeed(null),
+  holding: (_file, write) => Effect.map(write, (result) => ({ result, waited: null })),
 })

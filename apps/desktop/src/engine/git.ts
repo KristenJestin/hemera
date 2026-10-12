@@ -20,7 +20,7 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -369,6 +369,17 @@ export interface GitService {
    * the paths it touches, and each file it creates, deletes, renames or copies.
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
+  /**
+   * Commits only these paths, each as the worktree has it, with the user's own identity and
+   * configuration (#142): every other change of the working tree and of the index is left as it
+   * is, and a path neither on disk nor tracked is left out. Answers the commit, or null when
+   * nothing was left to commit.
+   */
+  readonly commitPaths: (
+    folder: string,
+    paths: ReadonlyArray<string>,
+    message: string,
+  ) => Effect.Effect<string | null, GitRefusal>
 }
 
 /** A file that differs between two commits. */
@@ -599,6 +610,20 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
     worktreeRemove: (folder, path) =>
       run(folder, ['worktree', 'remove', path], 'work').pipe(Effect.asVoid),
     worktreePrune: (folder) => run(folder, ['worktree', 'prune'], 'work').pipe(Effect.asVoid),
+    commitPaths: (folder, paths, message) =>
+      Effect.gen(function* () {
+        const tracked = (yield* run(folder, ['ls-files', '-z', '--', ...paths], 'read'))
+          .split('\u0000')
+          .filter((one) => one !== '')
+        // A file written then removed again was never tracked: Git refuses a path it cannot see.
+        const kept = paths.filter(
+          (path) => tracked.includes(path) || existsSync(join(folder, path)),
+        )
+        if (kept.length === 0) return null
+        yield* run(folder, ['add', '--all', '--', ...kept], 'work')
+        yield* run(folder, ['commit', '--quiet', '--only', '-m', message, '--', ...kept], 'work')
+        return (yield* run(folder, ['rev-parse', 'HEAD'], 'read')).trim()
+      }),
     worktreeDetach: (folder, path, commit) =>
       run(folder, ['worktree', 'add', '--quiet', '--detach', path, commit], 'work').pipe(
         Effect.asVoid,
