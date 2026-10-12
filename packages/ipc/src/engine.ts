@@ -160,14 +160,13 @@ export const EngineCoreRpcs = RpcGroup.make(
   DependenciesRpcs,
   HomeRpcs,
   BuildingRpcs,
-  HelpersRpcs,
 )
 
 /**
  * The groups whose handlers are a layer of their own beside the others': one `toLayer` over every
  * call of the engine goes past the depth TypeScript instantiates.
  */
-export const EngineApartRpcs = MissionRpcs
+export const EngineApartRpcs = MissionRpcs.merge(HelpersRpcs)
 
 export const EngineRpcs = EngineCoreRpcs.merge(EngineApartRpcs)
 
