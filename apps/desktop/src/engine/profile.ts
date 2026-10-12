@@ -48,10 +48,12 @@ import {
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
 import { projectTaskChecks } from './building/run-checks.ts'
-import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
+import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
+import { docsDeskLayer } from './building/docs-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { helpersLayer } from './building/helpers.ts'
+import { type Documenter, documenterLayer } from './building/documenter.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -320,6 +322,7 @@ const RECHECK_EVERY = '5 minutes'
  * missions.
  */
 export type EngineServices =
+  | Documenter
   | WorkspaceServices
   | RunServices
   | MissionServices
@@ -447,6 +450,8 @@ export const startProfile = (
     const buildContext = yield* Layer.build(buildDeskLayer)
     // Where the gate reaches the helpers' tools, served by the helpers' service (#145).
     const helperContext = yield* Layer.build(helperDeskLayer)
+    // Where the gate reaches the documenter's report and its write guard (#146).
+    const docsContext = yield* Layer.build(docsDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -461,6 +466,7 @@ export const startProfile = (
       Layer.succeedContext(offersContext),
       Layer.succeedContext(buildContext),
       Layer.succeedContext(helperContext),
+      Layer.succeedContext(docsContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -581,7 +587,10 @@ export const startProfile = (
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
       setup: setupDeskLayer,
       guards:
-        parts.tools?.guards ?? claimGuards.pipe(Layer.provide(Layer.succeedContext(buildContext))),
+        parts.tools?.guards ??
+        buildingGuards.pipe(
+          Layer.provide(Layer.succeedContext(Context.merge(buildContext, docsContext))),
+        ),
       attribution:
         parts.tools?.attribution ??
         deskAttribution.pipe(Layer.provide(Layer.succeedContext(buildContext))),
@@ -605,6 +614,7 @@ export const startProfile = (
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
         helpersLayer({ log }),
+        documenterLayer({ log }).pipe(Layer.provide(snapshots)),
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??

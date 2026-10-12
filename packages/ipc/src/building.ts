@@ -344,6 +344,31 @@ export const BuildingRepository = Schema.Struct({
   baseCommit: Schema.String,
 })
 
+/**
+ * A pass of the documenter (#146): `full`, or `delta` on the files the special tasks changed; the
+ * files its brief handed it, its `end` attempt named "documentation", and its report once given
+ * (the files changed and why, or the reason nothing changed, kept as evidence) or why it failed.
+ */
+export const DocumenterPassView = Schema.Struct({
+  id: Schema.String,
+  number: Schema.Number,
+  mode: Schema.Literals(['full', 'delta']),
+  state: Schema.Literals(['waiting_for_slot', 'running', 'reported', 'failed']),
+  files: Schema.Array(
+    Schema.Struct({ repository: Schema.String, path: Schema.String, status: Schema.String }),
+  ),
+  attemptId: Schema.String,
+  changed: Schema.Array(
+    Schema.Struct({ repository: Schema.String, path: Schema.String, why: Schema.String }),
+  ),
+  noChangeReason: Schema.NullOr(Schema.String),
+  evidenceId: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+})
+export type DocumenterPassView = typeof DocumenterPassView.Type
+
 /** A Building as its page reads it: the head, the plan, the decisions, the phase. */
 export const BuildingView = Schema.Struct({
   missionId: Schema.String,
@@ -372,6 +397,8 @@ export const BuildingView = Schema.Struct({
   scopes: Schema.Array(BuildingAttemptView),
   /** The files changed with no known author: the Building's, never a task's (CT-02). */
   unattributed: Schema.Array(Schema.Struct({ repository: Schema.String, path: Schema.String })),
+  /** The documenter's passes, in their order (#146). */
+  documenter: Schema.Array(DocumenterPassView),
   summary: Schema.NullOr(Schema.String),
 })
 export type BuildingView = typeof BuildingView.Type

@@ -22,6 +22,7 @@
 
 import {
   type Amendment,
+  DOCUMENTATION,
   DecisionFields,
   EnvironmentFields,
   MissionOwner,
@@ -380,6 +381,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (attempt.taskId !== null || attempt.endedAt !== null) continue
             if (attempt.scope !== 'requirement' && attempt.scope !== 'end') continue
             if (attempt.scope === 'end' && building.endCalledAt === null) continue
+            // The documenter's attempt is its pass's, never judged (#146).
+            if (attempt.subject === DOCUMENTATION) continue
             const begun =
               attempt.number === 1 ||
               (yield* checkResultsIn(database, attempt.id)).length > 0 ||
