@@ -167,6 +167,7 @@ export const probeOf = (one: ProbeChip): Planning.Probe => ({
   scenario: one.scenario,
   state: probeStateOf(one),
   stuck: one.stuck,
+  step: one.step ?? undefined,
   startedAt: Date.parse(one.startedAt),
   endedAt: one.endedAt === null ? null : Date.parse(one.endedAt),
   outcome: one.outcome,

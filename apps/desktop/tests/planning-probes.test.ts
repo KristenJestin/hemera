@@ -66,6 +66,7 @@ import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
+import { threadOf } from '../src/engine/sessions/thread.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   agentSessions,
@@ -1970,5 +1971,233 @@ describe('What the Planner and the Planning page read', () => {
       }),
     ])
     expect(Option.isNone(Option.fromNullishOr(seen.chips[0]?.endedAt ?? null))).toBe(false)
+  })
+})
+
+const calls = (id: string, title: string, status?: 'completed'): FakeStep => ({
+  does: 'calls',
+  call: status === undefined ? { id, title } : { id, title, status },
+})
+
+/** A turn held before each of its steps until the test lets it take the next, or frees it. */
+const paced = () => {
+  let reached = 0
+  let free = false
+  let waiting: (() => void) | null = null
+  const next = () => {
+    const go = waiting
+    waiting = null
+    go?.()
+  }
+  return {
+    between: () => {
+      reached += 1
+      return free ? Promise.resolve() : new Promise<void>((resolve) => (waiting = resolve))
+    },
+    /** The step it is held before, counting from one. */
+    reached: (step: number) => Effect.sync(() => reached >= step),
+    next,
+    free: () => {
+      free = true
+      next()
+    },
+  }
+}
+
+const stepOf = (missionId: string, number: number) =>
+  Effect.map(
+    listProbes(missionId),
+    (chips) => chips.find((chip) => chip.number === number)?.step ?? null,
+  )
+
+const stepIs = (missionId: string, number: number, step: string) =>
+  until(Effect.map(stepOf(missionId, number), (seen) => seen === step))
+
+describe('A running Probe’s step (#206)', () => {
+  test('a Probe’s step follows its latest call, on its chip as it changes', async () => {
+    const pace = paced()
+    const { run } = probing(() => ({
+      turns: [
+        [
+          calls('toolu_read', 'Read api/importer.ts'),
+          calls('toolu_run', 'Run node tests/import-accents.test.ts'),
+          uses('toolu_report', 'probe_report', reported()),
+        ],
+      ],
+      steps: [says('Done.')],
+      between: pace.between,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          const subscribed = yield* Deferred.make<void>()
+          const changes = yield* probeChanges(mission.id).pipe(
+            Stream.tap(() => Deferred.succeed(subscribed, undefined)),
+            Stream.takeUntil((chips) => chips[0]?.state === 'done'),
+            Stream.runCollect,
+            Effect.forkChild,
+          )
+          yield* Deferred.await(subscribed)
+          yield* launch(grantId, 'does the importer keep accents?')
+          yield* until(pace.reached(1))
+          pace.next()
+          yield* until(pace.reached(2))
+          yield* stepIs(mission.id, 1, 'Read api/importer.ts')
+          pace.next()
+          yield* until(pace.reached(3))
+          yield* stepIs(mission.id, 1, 'Run node tests/import-accents.test.ts')
+          const detail = yield* readProbe((yield* rowsOf(mission.id))[0]?.id ?? '')
+          pace.free()
+          yield* probeIn(mission.id, 1, ['done'])
+          return { detail, changes: yield* Fiber.join(changes) }
+        }),
+      ),
+    )
+    expect(seen.detail.step).toBe('Run node tests/import-accents.test.ts')
+    const steps = [...seen.changes].map((chips) => chips[0]?.step ?? null)
+    expect(steps).toContain('Read api/importer.ts')
+    expect(steps.indexOf('Run node tests/import-accents.test.ts')).toBeGreaterThan(
+      steps.indexOf('Read api/importer.ts'),
+    )
+  })
+
+  test('a running Probe that has not called a tool yet shows no step', async () => {
+    const pace = paced()
+    const { run } = probing(() => ({
+      turns: [
+        [
+          calls('toolu_read', 'Read api/importer.ts'),
+          uses('toolu_report', 'probe_report', reported()),
+        ],
+      ],
+      steps: [says('Done.')],
+      between: pace.between,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          yield* launch(grantId, 'does the importer keep accents?')
+          const row = yield* probeIn(mission.id, 1, ['running'])
+          // Held before its first step: its agent has its brief and has done nothing yet.
+          yield* until(pace.reached(1))
+          const chips = yield* listProbes(mission.id)
+          const detail = yield* readProbe(row.id)
+          pace.free()
+          yield* probeIn(mission.id, 1, ['done'])
+          return { chips, detail }
+        }),
+      ),
+    )
+    expect(seen.chips[0]?.state).toBe('running')
+    expect(seen.chips[0]?.step).toBeNull()
+    expect(seen.detail.step).toBeNull()
+  })
+
+  test('an ended Probe keeps no step, even for a call made after its report', async () => {
+    const pace = paced()
+    const { run } = probing(() => ({
+      turns: [
+        [
+          calls('toolu_read', 'Read api/importer.ts'),
+          uses('toolu_report', 'probe_report', reported()),
+          calls('toolu_after', 'List the worktree', 'completed'),
+          says('Done.'),
+        ],
+      ],
+      between: pace.between,
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          yield* launch(grantId, 'does the importer keep accents?')
+          yield* until(pace.reached(1))
+          pace.next()
+          yield* until(pace.reached(2))
+          yield* stepIs(mission.id, 1, 'Read api/importer.ts')
+          pace.next()
+          const row = yield* probeIn(mission.id, 1, ['done'])
+          // Its call after the report is heard: its session's thread has it.
+          yield* until(pace.reached(3))
+          pace.next()
+          yield* until(pace.reached(4))
+          const [session] = yield* sessionsOfLineage(row.lineage)
+          yield* until(
+            Effect.map(threadOf(session?.id ?? ''), (lines) =>
+              lines.some((line) => line.text.startsWith('List the worktree')),
+            ),
+          )
+          const chips = yield* listProbes(mission.id)
+          const detail = yield* readProbe(row.id)
+          pace.free()
+          return { chips, detail }
+        }),
+      ),
+    )
+    expect(seen.chips[0]?.state).toBe('done')
+    expect(seen.chips[0]?.step).toBeNull()
+    expect(seen.detail.step).toBeNull()
+  })
+
+  test('two Probes keep their own steps', async () => {
+    const paces = [paced(), paced()]
+    const { run } = probing((index) => ({
+      turns: [
+        [
+          ...(index === 0
+            ? [calls('toolu_left_1', 'Read left.ts'), calls('toolu_left_2', 'Run left.test.ts')]
+            : [calls('toolu_right_1', 'Read right.ts')]),
+          uses('toolu_report', 'probe_report', reported()),
+        ],
+      ],
+      steps: [says('Done.')],
+      between: paces[index]?.between ?? (() => Promise.resolve()),
+    }))
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          yield* launch(grantId, 'left?')
+          yield* launch(grantId, 'right?')
+          const [left, right] = paces
+          if (left === undefined || right === undefined) return yield* Effect.die('no pace')
+          // Each held before its report: the left one after two calls, the right one after one.
+          yield* until(left.reached(1))
+          left.next()
+          yield* until(left.reached(2))
+          left.next()
+          yield* until(left.reached(3))
+          yield* until(right.reached(1))
+          right.next()
+          yield* until(right.reached(2))
+          const wanted = ['Read right.ts', 'Run left.test.ts']
+          yield* until(
+            Effect.map(listProbes(mission.id), (chips) =>
+              wanted.every((step) => chips.some((chip) => chip.step === step)),
+            ),
+          )
+          const chips = yield* listProbes(mission.id)
+          left.free()
+          right.free()
+          yield* probeIn(mission.id, 1, ['done'])
+          yield* probeIn(mission.id, 2, ['done'])
+          return { chips }
+        }),
+      ),
+    )
+    expect(seen.chips.map((chip) => chip.step).toSorted()).toEqual([
+      'Read right.ts',
+      'Run left.test.ts',
+    ])
   })
 })
