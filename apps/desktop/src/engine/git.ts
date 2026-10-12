@@ -370,12 +370,10 @@ export interface GitService {
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
   /**
-   * Commits only the paths given, with the user's own identity and configuration, and answers the
-   * commit (#142): every other change of the working tree and of the index is left as it is.
-   */
-  /**
-   * Commits only these paths, each as the worktree has it: a path neither on disk nor tracked
-   * is left out. Answers the commit, or null when nothing was left to commit.
+   * Commits only these paths, each as the worktree has it, with the user's own identity and
+   * configuration (#142): every other change of the working tree and of the index is left as it
+   * is, and a path neither on disk nor tracked is left out. Answers the commit, or null when
+   * nothing was left to commit.
    */
   readonly commitPaths: (
     folder: string,
