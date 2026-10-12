@@ -86,7 +86,13 @@ const LINE =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md border border-border bg-surface-rim pr-1 pl-3 font-mono text-xs'
 
 /** The command that fixes a provider, as the user runs it in their own terminal, and Copy. */
-function FixCommand({ line, onCopy }: { line: string; onCopy: (line: string) => void }): ReactNode {
+export function FixCommand({
+  line,
+  onCopy,
+}: {
+  line: string
+  onCopy: (line: string) => void
+}): ReactNode {
   return (
     <div className={LINE}>
       <span className="min-w-0 flex-1 truncate">{line}</span>
