@@ -75,6 +75,7 @@ import {
   identify,
 } from './identity.ts'
 import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
+import { SAFE_WORD } from './shapes.ts'
 
 /** The service the forge's needs belong to. */
 export const FORGE_NEEDS = needService('forge')
@@ -231,17 +232,29 @@ const bktServes = (
 /** A Data Center project key, which its SSH and HTTPS remotes write in lower case. */
 const projectKey = (owner: string): string => owner.toUpperCase()
 
+/** A host, with its port at most: nothing a shell would read as more than a word. */
+const SAFE_HOST = /^[A-Za-z0-9.-]+(:\d+)?$/
+
 /**
  * The bkt context to make when bkt is signed in on the repository's host but has no context for
- * it: named after the workspace or project and the host, on bkt's key for the host.
+ * it: named after the workspace or project and the host, on bkt's key for the host. The user
+ * copies it into a shell, and the owner comes from a remote's URL: a part that is not a plain word
+ * is left out (the owner), or no line is given at all (the host).
  */
-const contextLine = (forge: ForgeName, host: string, key: string, owner: string | null): string => {
-  const name = owner === null ? hostName(host) : `${owner.toLowerCase()}-${hostName(host)}`
+const contextLine = (
+  forge: ForgeName,
+  host: string,
+  key: string,
+  owner: string | null,
+): string | null => {
+  if (!SAFE_HOST.test(host) || !SAFE_HOST.test(key)) return null
+  const named = owner !== null && SAFE_WORD.test(owner) ? owner : null
+  const name = named === null ? hostName(host) : `${named.toLowerCase()}-${hostName(host)}`
   const line = `bkt context create ${name} --host ${key}`
-  if (owner === null) return line
+  if (named === null) return line
   return forge === 'bitbucket-cloud'
-    ? `${line} --workspace ${owner}`
-    : `${line} --project ${projectKey(owner)}`
+    ? `${line} --workspace ${named}`
+    : `${line} --project ${projectKey(named)}`
 }
 
 /** The CLI a forge is reached through, or none. */

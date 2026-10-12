@@ -74,6 +74,12 @@ const shape = (
 const read = (cli: ForgeCli, operation: string, words: ReadonlyArray<string>) =>
   shape(cli, 'read', operation, words)
 
+/**
+ * A workspace, a project key or a bkt context: one plain word, never a flag (`~` opens a Data
+ * Center personal project).
+ */
+export const SAFE_WORD = /^(?!-)[A-Za-z0-9._~-]+$/
+
 const NUMBER: readonly [string, RegExp] = ['<number>', /^\d+$/]
 /** One owner or repository name: never `.` or `..`, which would walk out of the path. */
 const NAME = String.raw`(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`

