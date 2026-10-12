@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "2eb26b64-27b0-421c-b37e-2858f447534d",
-  "prevIds": ["632418b5-965a-461f-abf3-7fcbbfe691cd"],
+  "id": "f9f2fd67-e76f-4b1d-b9eb-fd46b87fd313",
+  "prevIds": ["605b78ba-22ba-472e-9e8a-3ffb76fd47a6"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -21,6 +21,10 @@
       "entityType": "tables"
     },
     {
+      "name": "base_moves",
+      "entityType": "tables"
+    },
+    {
       "name": "building_activity",
       "entityType": "tables"
     },
@@ -30,6 +34,10 @@
     },
     {
       "name": "building_check_results",
+      "entityType": "tables"
+    },
+    {
+      "name": "building_check_runs",
       "entityType": "tables"
     },
     {
@@ -98,6 +106,10 @@
     },
     {
       "name": "discussions",
+      "entityType": "tables"
+    },
+    {
+      "name": "dismissed_services",
       "entityType": "tables"
     },
     {
@@ -225,6 +237,14 @@
       "entityType": "tables"
     },
     {
+      "name": "outside_changes",
+      "entityType": "tables"
+    },
+    {
+      "name": "outside_watches",
+      "entityType": "tables"
+    },
+    {
       "name": "permission_requests",
       "entityType": "tables"
     },
@@ -250,6 +270,10 @@
     },
     {
       "name": "profile",
+      "entityType": "tables"
+    },
+    {
+      "name": "project_checks",
       "entityType": "tables"
     },
     {
@@ -334,10 +358,6 @@
     },
     {
       "name": "snapshot_changes",
-      "entityType": "tables"
-    },
-    {
-      "name": "snapshot_contents",
       "entityType": "tables"
     },
     {
@@ -894,6 +914,96 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "from_commit",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "to_commit",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "files",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "targeted",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1191,6 +1301,116 @@
       "name": "at",
       "entityType": "columns",
       "table": "building_check_results"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "building_check_results"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "exit_code",
+      "entityType": "columns",
+      "table": "building_check_results"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value",
+      "entityType": "columns",
+      "table": "building_check_results"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trees",
+      "entityType": "columns",
+      "table": "building_check_results"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evidence_id",
+      "entityType": "columns",
+      "table": "building_check_results"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "building_check_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "building_check_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "place",
+      "entityType": "columns",
+      "table": "building_check_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "building_check_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "command_id",
+      "entityType": "columns",
+      "table": "building_check_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "building_check_runs"
     },
     {
       "type": "text",
@@ -1889,6 +2109,16 @@
       "default": null,
       "generated": null,
       "name": "seen_at",
+      "entityType": "columns",
+      "table": "building_unattributed"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reconciled",
       "entityType": "columns",
       "table": "building_unattributed"
     },
@@ -3173,6 +3403,36 @@
       "table": "discussions"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
       "type": "integer",
       "notNull": false,
       "autoincrement": true,
@@ -3609,6 +3869,16 @@
       "default": null,
       "generated": null,
       "name": "withheld",
+      "entityType": "columns",
+      "table": "freeze_files"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tree",
       "entityType": "columns",
       "table": "freeze_files"
     },
@@ -5930,6 +6200,226 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "old_path",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "detected_at",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_tree",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "found_tree",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "before_sha",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "after_sha",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "withheld",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_by",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_run",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_session",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_task",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_at",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_tree",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "compared_at",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
       "table": "permission_requests"
     },
     {
@@ -6841,6 +7331,136 @@
       "name": "last_opened_at",
       "entityType": "columns",
       "table": "profile"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "command_id",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "where",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "when",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expect_pattern",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expect_minimum",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "files",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rank",
+      "entityType": "columns",
+      "table": "project_checks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "project_checks"
     },
     {
       "type": "text",
@@ -8781,26 +9401,6 @@
       "name": "removed",
       "entityType": "columns",
       "table": "snapshot_changes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "sha256",
-      "entityType": "columns",
-      "table": "snapshot_contents"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "content",
-      "entityType": "columns",
-      "table": "snapshot_contents"
     },
     {
       "type": "text",
@@ -10965,6 +11565,28 @@
       "table": "attempt_writes"
     },
     {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_base_moves_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "base_moves"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_base_moves_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "base_moves"
+    },
+    {
       "columns": ["building_id"],
       "tableTo": "buildings",
       "columnsTo": ["id"],
@@ -10996,6 +11618,17 @@
       "name": "fk_building_check_results_attempt_id_building_attempts_id_fk",
       "entityType": "fks",
       "table": "building_check_results"
+    },
+    {
+      "columns": ["attempt_id"],
+      "tableTo": "building_attempts",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_building_check_runs_attempt_id_building_attempts_id_fk",
+      "entityType": "fks",
+      "table": "building_check_runs"
     },
     {
       "columns": ["building_id"],
@@ -11238,6 +11871,17 @@
       "name": "fk_discussions_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "discussions"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_dismissed_services_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "dismissed_services"
     },
     {
       "columns": ["project_id"],
@@ -11658,6 +12302,39 @@
       "table": "needs"
     },
     {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_changes_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "outside_changes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_changes_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "outside_changes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_watches_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "outside_watches"
+    },
+    {
       "columns": ["project_id"],
       "tableTo": "projects",
       "columnsTo": ["id"],
@@ -11733,6 +12410,28 @@
       "name": "fk_probes_workspace_id_workspaces_id_fk",
       "entityType": "fks",
       "table": "probes"
+    },
+    {
+      "columns": ["project_id"],
+      "tableTo": "projects",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_project_checks_project_id_projects_id_fk",
+      "entityType": "fks",
+      "table": "project_checks"
+    },
+    {
+      "columns": ["command_id"],
+      "tableTo": "project_commands",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_project_checks_command_id_project_commands_id_fk",
+      "entityType": "fks",
+      "table": "project_checks"
     },
     {
       "columns": ["project_id"],
@@ -12233,6 +12932,13 @@
       "table": "building_activity"
     },
     {
+      "columns": ["attempt_id", "name", "place"],
+      "nameExplicit": false,
+      "name": "building_check_runs_pk",
+      "entityType": "pks",
+      "table": "building_check_runs"
+    },
+    {
       "columns": ["building_id", "repository", "path"],
       "nameExplicit": false,
       "name": "building_claims_pk",
@@ -12275,6 +12981,13 @@
       "table": "cold_read_findings"
     },
     {
+      "columns": ["mission_id", "run_id"],
+      "nameExplicit": false,
+      "name": "dismissed_services_pk",
+      "entityType": "pks",
+      "table": "dismissed_services"
+    },
+    {
       "columns": ["resource_id", "command_id"],
       "nameExplicit": false,
       "name": "exclusive_resource_commands_pk",
@@ -12308,6 +13021,13 @@
       "name": "model_marks_pk",
       "entityType": "pks",
       "table": "model_marks"
+    },
+    {
+      "columns": ["building_id", "repository"],
+      "nameExplicit": false,
+      "name": "outside_watches_pk",
+      "entityType": "pks",
+      "table": "outside_watches"
     },
     {
       "columns": ["mission_id", "id"],
@@ -12419,6 +13139,13 @@
       "nameExplicit": false,
       "name": "attempt_writes_pk",
       "table": "attempt_writes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "base_moves_pk",
+      "table": "base_moves",
       "entityType": "pks"
     },
     {
@@ -12683,6 +13410,13 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "outside_changes_pk",
+      "table": "outside_changes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "permission_requests_pk",
       "table": "permission_requests",
       "entityType": "pks"
@@ -12713,6 +13447,13 @@
       "nameExplicit": false,
       "name": "profile_pk",
       "table": "profile",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "project_checks_pk",
+      "table": "project_checks",
       "entityType": "pks"
     },
     {
@@ -12832,13 +13573,6 @@
       "nameExplicit": false,
       "name": "setup_cards_pk",
       "table": "setup_cards",
-      "entityType": "pks"
-    },
-    {
-      "columns": ["sha256"],
-      "nameExplicit": false,
-      "name": "snapshot_contents_pk",
-      "table": "snapshot_contents",
       "entityType": "pks"
     },
     {
@@ -12995,6 +13729,24 @@
       "name": "attempt_writes_of_building",
       "entityType": "indexes",
       "table": "attempt_writes"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "repository",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "base_moves_of_building",
+      "entityType": "indexes",
+      "table": "base_moves"
     },
     {
       "columns": [
@@ -13629,6 +14381,42 @@
     {
       "columns": [
         {
+          "value": "mission_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "outside_changes_of_mission",
+      "entityType": "indexes",
+      "table": "outside_changes"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "repository",
+          "isExpression": false
+        },
+        {
+          "value": "path",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "outside_changes_of_file",
+      "entityType": "indexes",
+      "table": "outside_changes"
+    },
+    {
+      "columns": [
+        {
           "value": "state",
           "isExpression": false
         }
@@ -14146,6 +14934,13 @@
       "name": "probe_number_in_mission",
       "entityType": "uniques",
       "table": "probes"
+    },
+    {
+      "columns": ["project_id", "name"],
+      "nameExplicit": true,
+      "name": "check_name_once_in_project",
+      "entityType": "uniques",
+      "table": "project_checks"
     },
     {
       "columns": ["project_id", "name"],
