@@ -168,6 +168,10 @@ describe('Data Center: wiki markup becomes Markdown', () => {
     )
   })
 
+  test('an empty heading is a heading marker with no text, not the words h1.', () => {
+    expect(wikiToMarkdown('h1. ')).toBe('# ')
+  })
+
   test('nested lists, ordered and not', () => {
     expect(wikiToMarkdown('* Export\n*# as Markdown\n*# as HTML\n* Import\n- Other')).toBe(
       '- Export\n  1. as Markdown\n  1. as HTML\n- Import\n- Other',
@@ -312,7 +316,8 @@ describe('The converters never throw and keep every text', () => {
         .map(([t, u]) => ({ wiki: `[${t}|https://acme.test/${u}]`, words: [t, u] })),
       plain.map((w) => ({ wiki: `{code}\n${w}\n{code}`, words: [w] })),
       fc.string({ maxLength: 30 }).map((noise) => ({ wiki: noise, words: [] })),
-      plain.map((w) => ({ wiki: w, words: [w] })),
+      // A bare line that opens with a heading marker is a heading: its marker is not a word.
+      plain.filter((w) => !/^h[1-6]\.\s/.test(w)).map((w) => ({ wiki: w, words: [w] })),
     )
     fc.assert(
       fc.property(fc.array(line, { maxLength: 12 }), (lines) => {
