@@ -249,7 +249,7 @@ const answerOf = (need: Need): string | null => {
  * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
  */
 export type BuilderHold = (
-  at: 'starting' | 'finishing' | 'judging' | 'locked',
+  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -279,6 +279,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
     BuildingStart,
     Effect.gen(function* () {
       const context = yield* Effect.context<Needs>()
+      const layerScope = yield* Effect.scope
       const provided = <A, E, R extends Needs>(effect: Effect.Effect<A, E, R>) =>
         Effect.provide(effect, context)
       const said = (line: string) => Effect.sync(() => log(`building: ${line}`))
@@ -293,6 +294,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         hold,
         deliver: (building, target, kind, body) => deliverTo(building, target, kind, body),
       })
+      /**
+       * The commits left made in the background: a commit may wait for its task's own commands,
+       * and never holds back the call that finished the task.
+       */
+      const commitsLeft = (building: BuildingRow) =>
+        loop.commitLeft(building).pipe(
+          provided,
+          Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
+          Effect.forkIn(layerScope),
+          Effect.asVoid,
+        )
       takeCut = (action) =>
         loop.cut(action).pipe(
           provided,
@@ -583,7 +595,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (done === null) return { judgement, said: null }
-          yield* loop.commitTask(building, taskId)
+          yield* commitsLeft(building)
           if (done) yield* ended(building)
           return { judgement, said: null }
         })
@@ -1522,6 +1534,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             yield* judge(building, taskId, last?.id ?? '')
           }
           if (building.tasksDoneAt !== null && building.endCalledAt === null) yield* ended(building)
+          // A stop between a task's done and its commit: the commit is made now.
+          yield* commitsLeft(building)
           yield* ensureBuilder(building)
         }
       })

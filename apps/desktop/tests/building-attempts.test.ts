@@ -10,7 +10,7 @@
  * in temporary folders as the Workspace, and small Node scripts as the catalogue's commands.
  */
 
-import { existsSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
@@ -1155,6 +1155,172 @@ describe('Commits per task', () => {
         status: git(api, 'status', '--porcelain'),
       }
     })
+
+  /** A Building whose copy commits per task, its Builder on T1, and api set to the user's identity. */
+  const committing = (
+    more: { readonly before?: (projectId: string) => Effect.Effect<void> } = {},
+  ) =>
+    Effect.gen(function* () {
+      const { project, mission } = yield* launched(work, more.before)
+      yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
+      const { session, grantId } = yield* builderOf(mission.id)
+      const api = join(session.folder, 'api')
+      git(api, 'config', 'user.name', 'Ada Lovelace')
+      git(api, 'config', 'user.email', 'ada@example.com')
+      git(api, 'config', 'commit.gpgsign', 'false')
+      const head = git(api, 'rev-parse', 'HEAD')
+      yield* call(grantId, 'task_start', { task: 'T1' })
+      yield* call(grantId, 'fs_read', { repository: 'api', path: 'invoices.ts' })
+      yield* call(grantId, 'fs_write', {
+        repository: 'api',
+        path: 'invoices.ts',
+        content: 'export const invoices = ["csv"]\n',
+      })
+      return { project, mission, session, grantId, api, head }
+    })
+
+  const committed = (missionId: string) =>
+    until(Effect.map(eventsOf(missionId, 'building.commit'), (rows) => rows.length > 0))
+
+  test('a file the task wrote and then removed is left out, and the rest is committed', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          yield* call(grantId, 'fs_write', { repository: 'api', path: 'gone.ts', content: 'x\n' })
+          rmSync(join(api, 'gone.ts'))
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* committed(mission.id)
+          return {
+            log: git(api, 'log', '--format=%s', `${head}..HEAD`),
+            files: git(api, 'show', '--name-only', '--format=', 'HEAD'),
+          }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+    expect(seen.files).toBe('invoices.ts')
+  })
+
+  test('a file a task’s command renamed is committed with its old path’s removal', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission, grantId, api } = yield* committing()
+          const mover = join(scripts, 'mover.mjs')
+          writeFileSync(
+            mover,
+            "import { renameSync } from 'node:fs'\nrenameSync(process.argv[2], process.argv[3])\n",
+          )
+          const apiRepository = (yield* getProject(project.id)).repositories.find(
+            (one) => one.path === 'api',
+          )
+          const move = yield* saveCommand({
+            projectId: project.id,
+            id: null,
+            command: draft('move', nodeLine(mover, 'README.md', 'DOCS.md'), {
+              repositoryId: apiRepository?.id ?? null,
+            }),
+          })
+          yield* call(grantId, 'commands_run', { command: move.id, timeout: 60 })
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* committed(mission.id)
+          return {
+            files: git(api, 'show', '--name-status', '--no-renames', '--format=', 'HEAD'),
+            status: git(api, 'status', '--porcelain'),
+          }
+        }),
+      ),
+    )
+    expect(seen.files).toContain('A\tDOCS.md')
+    expect(seen.files).toContain('D\tREADME.md')
+    expect(seen.status).not.toContain('README.md')
+  })
+
+  test('a repository switched off its branch is not committed on: Hemera asks the user instead', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          git(api, 'checkout', '-q', '-b', 'elsewhere')
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* taskIn(mission.id, 'T1', 'done')
+          yield* until(
+            Effect.map(getMission(mission.id), (one) =>
+              one.needs.some((need) => Predicate.isTagged(need.fields, 'Environment')),
+            ),
+          )
+          return {
+            log: git(api, 'log', '--format=%s', `${head}..HEAD`),
+            commits: yield* eventsOf(mission.id, 'building.commit'),
+            needs: (yield* getMission(mission.id)).needs.map((need) => need.fields),
+          }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('')
+    expect(seen.commits).toEqual([])
+    const asked = seen.needs.find((fields) => Predicate.isTagged(fields, 'Environment'))
+    if (!Predicate.isTagged(asked, 'Environment')) return expect.unreachable()
+    expect(asked.missing).toContain('elsewhere')
+  })
+
+  test('a task whose own command still runs is committed only once that command has ended', async () => {
+    const release = join(scripts, 'release-late')
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission, grantId, api } = yield* committing()
+          const late = yield* apiCommand(project.id, 'late', ['invoices.ts=late'], { release })
+          yield* call(grantId, 'commands_run', { command: late.id, timeout: 1 })
+          yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
+          yield* taskIn(mission.id, 'T1', 'done')
+          yield* Effect.sleep('500 millis')
+          const early = yield* eventsOf(mission.id, 'building.commit')
+          writeFileSync(release, '')
+          yield* committed(mission.id)
+          return { early, content: git(api, 'show', 'HEAD:invoices.ts') }
+        }),
+      ),
+    )
+    expect(seen.early).toEqual([])
+    expect(seen.content).toBe('late')
+  })
+
+  test('a stop between a task’s done and its commit commits it at the next start', async () => {
+    const hold: BuilderHold = (at) => (at === 'committing' ? Effect.never : Effect.void)
+    const before = builderEngine(data, work, { hold })
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* committing()
+          yield* Effect.forkChild(call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }))
+          yield* taskIn(mission.id, 'T1', 'done')
+          return { mission, api, head }
+        }),
+      ),
+    )
+    const after = builderEngine(data, work)
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* committed(first.mission.id)
+          return { log: git(first.api, 'log', '--format=%s', `${first.head}..HEAD`) }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+  })
 
   test('with a “one commit per task” copy, a done task is committed with only its files and the user’s identity', async () => {
     const { run } = builderEngine(data, work)
