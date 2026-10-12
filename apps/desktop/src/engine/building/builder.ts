@@ -94,6 +94,7 @@ import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
 import { BuildingStart } from './launch.ts'
+import { OutsideChanges } from './outside.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
 import {
   attemptFiles,
@@ -179,6 +180,7 @@ type Needs =
   | AutomationGate
   | Preparations
   | ProjectServices
+  | OutsideChanges
 
 const NO_MISSION = refusal('refused: this session works for no mission')
 const NO_BUILDING = refusal('refused: the mission has no Building under way')
@@ -249,7 +251,7 @@ const answerOf = (need: Need): string | null => {
  * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
  */
 export type BuilderHold = (
-  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting',
+  at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'cutting' | 'writing',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -1202,6 +1204,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
+      /** The repository a gate write lands in, compared before it (#148). */
+      const compareBefore = (file: { readonly missionId: string; readonly path: string }) =>
+        Effect.gen(function* () {
+          const building = yield* activeBuildingIn(yield* Database, file.missionId)
+          const located = building === null ? null : fileOf(building, file.path)
+          if (located === null) return
+          yield* OutsideChanges.use((outside) =>
+            outside.compare(file.missionId, located.repository),
+          )
+        }).pipe(Effect.catch((refused) => said(`a write was not compared: ${refused.message}`)))
+
       const answering =
         <A extends ToolArguments<'build_read'> | object>(
           work: (grant: Grant, args: A) => Effect.Effect<ToolAnswer, unknown, Needs>,
@@ -1235,11 +1248,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.as(said(`a command was not watched: ${String(cause)}`), null),
                 ),
               ),
-            // Whatever ends the write, interrupted or dead included, ends its hold.
+            // Whatever ends the write, interrupted or dead included, ends its hold. What the
+            // user changed there is recorded before an agent writes (#148).
             holding: (file, write) =>
               Effect.suspend(() => {
                 const sink: WriteInProgress[] = []
-                return loop.beginHold(file, sink).pipe(
+                return compareBefore(file).pipe(
+                  Effect.andThen(hold('writing')),
+                  Effect.andThen(loop.beginHold(file, sink)),
                   provided,
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
                   Effect.ensuring(
