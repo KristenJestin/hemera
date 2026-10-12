@@ -73,6 +73,7 @@ import {
 import {
   IconAdjustments,
   IconBan,
+  IconBook2,
   IconChecklist,
   IconDatabase,
   IconFileText,
@@ -127,7 +128,7 @@ export const LATER_SECTIONS: readonly SettingsSection[] = [
   { id: 'tickets', label: 'Tickets and Specs', icon: <IconStack2 size="sm" /> },
   { id: 'resources', label: 'Exclusive resources', icon: <IconDatabase size="sm" /> },
   { id: 'checks', label: 'Checks', icon: <IconChecklist size="sm" /> },
-  { id: 'documentation', label: 'Documentation recipes', icon: <IconStack2 size="sm" /> },
+  { id: 'documentation', label: 'Documentation', icon: <IconBook2 size="sm" /> },
   { id: 'delivery', label: 'Delivery rules', icon: <IconSettings size="sm" /> },
 ]
 
