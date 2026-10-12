@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "574db79b-a98a-4007-a929-2733e1a607d4",
+  "id": "2ea25324-8f0b-4a9e-a470-5d58dc89d0c6",
   "prevIds": ["76b107db-0540-4a4a-bf34-6b0ed16500ab"],
   "ddl": [
     {
@@ -17,10 +17,6 @@
       "entityType": "tables"
     },
     {
-      "name": "attempt_writes",
-      "entityType": "tables"
-    },
-    {
       "name": "building_activity",
       "entityType": "tables"
     },
@@ -29,15 +25,7 @@
       "entityType": "tables"
     },
     {
-      "name": "building_check_results",
-      "entityType": "tables"
-    },
-    {
       "name": "building_claims",
-      "entityType": "tables"
-    },
-    {
-      "name": "building_conflicts",
       "entityType": "tables"
     },
     {
@@ -50,10 +38,6 @@
     },
     {
       "name": "building_tasks",
-      "entityType": "tables"
-    },
-    {
-      "name": "building_unattributed",
       "entityType": "tables"
     },
     {
@@ -130,6 +114,10 @@
     },
     {
       "name": "freezes",
+      "entityType": "tables"
+    },
+    {
+      "name": "helpers",
       "entityType": "tables"
     },
     {
@@ -286,6 +274,10 @@
     },
     {
       "name": "queued_deliveries",
+      "entityType": "tables"
+    },
+    {
+      "name": "queued_results",
       "entityType": "tables"
     },
     {
@@ -766,126 +758,6 @@
     },
     {
       "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "building_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "attempt_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "task_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "session_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "repository",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "path",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "kind",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "run_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "action_id",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "fingerprint",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "at",
-      "entityType": "columns",
-      "table": "attempt_writes"
-    },
-    {
-      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1048,146 +920,6 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'task'",
-      "generated": null,
-      "name": "scope",
-      "entityType": "columns",
-      "table": "building_attempts"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "subject",
-      "entityType": "columns",
-      "table": "building_attempts"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "verdict",
-      "entityType": "columns",
-      "table": "building_attempts"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "true",
-      "generated": null,
-      "name": "counted",
-      "entityType": "columns",
-      "table": "building_attempts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'[]'",
-      "generated": null,
-      "name": "files",
-      "entityType": "columns",
-      "table": "building_attempts"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "attempt_id",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "name",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "place",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "verdict",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "detail",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "output_tail",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "run_id",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "at",
-      "entityType": "columns",
-      "table": "building_check_results"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "building_id",
@@ -1233,96 +965,6 @@
       "name": "runner",
       "entityType": "columns",
       "table": "building_claims"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "building_id",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "repository",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "path",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "run_id",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "command",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "by_task",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "held_by",
-      "entityType": "columns",
-      "table": "building_conflicts"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "at",
-      "entityType": "columns",
-      "table": "building_conflicts"
     },
     {
       "type": "text",
@@ -1471,36 +1113,6 @@
       "default": null,
       "generated": null,
       "name": "answered_at",
-      "entityType": "columns",
-      "table": "building_decisions"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "proposer",
-      "entityType": "columns",
-      "table": "building_decisions"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "scope",
-      "entityType": "columns",
-      "table": "building_decisions"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "subject",
       "entityType": "columns",
       "table": "building_decisions"
     },
@@ -1833,56 +1445,6 @@
       "name": "changes",
       "entityType": "columns",
       "table": "building_tasks"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "building_id",
-      "entityType": "columns",
-      "table": "building_unattributed"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "repository",
-      "entityType": "columns",
-      "table": "building_unattributed"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "path",
-      "entityType": "columns",
-      "table": "building_unattributed"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "attempt_id",
-      "entityType": "columns",
-      "table": "building_unattributed"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "seen_at",
-      "entityType": "columns",
-      "table": "building_unattributed"
     },
     {
       "type": "text",
@@ -3663,6 +3225,196 @@
       "name": "frozen_at",
       "entityType": "columns",
       "table": "freezes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "number",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_lineage",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lineage",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "depth",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "definition",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "writes",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "place",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "folder",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tools",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "brief",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "stuck",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "helpers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_at",
+      "entityType": "columns",
+      "table": "helpers"
     },
     {
       "type": "text",
@@ -7630,6 +7382,66 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "helper_id",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_lineage",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "body",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "queued_at",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivered_at",
+      "entityType": "columns",
+      "table": "queued_results"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "id",
       "entityType": "columns",
       "table": "resource_claims"
@@ -10662,17 +10474,6 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
-      "name": "fk_attempt_writes_building_id_buildings_id_fk",
-      "entityType": "fks",
-      "table": "attempt_writes"
-    },
-    {
-      "columns": ["building_id"],
-      "tableTo": "buildings",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
       "name": "fk_building_activity_building_id_buildings_id_fk",
       "entityType": "fks",
       "table": "building_activity"
@@ -10689,17 +10490,6 @@
       "table": "building_attempts"
     },
     {
-      "columns": ["attempt_id"],
-      "tableTo": "building_attempts",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_building_check_results_attempt_id_building_attempts_id_fk",
-      "entityType": "fks",
-      "table": "building_check_results"
-    },
-    {
       "columns": ["building_id"],
       "tableTo": "buildings",
       "columnsTo": ["id"],
@@ -10709,17 +10499,6 @@
       "name": "fk_building_claims_building_id_buildings_id_fk",
       "entityType": "fks",
       "table": "building_claims"
-    },
-    {
-      "columns": ["building_id"],
-      "tableTo": "buildings",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_building_conflicts_building_id_buildings_id_fk",
-      "entityType": "fks",
-      "table": "building_conflicts"
     },
     {
       "columns": ["building_id"],
@@ -10775,17 +10554,6 @@
       "name": "fk_building_tasks_building_id_buildings_id_fk",
       "entityType": "fks",
       "table": "building_tasks"
-    },
-    {
-      "columns": ["building_id"],
-      "tableTo": "buildings",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_building_unattributed_building_id_buildings_id_fk",
-      "entityType": "fks",
-      "table": "building_unattributed"
     },
     {
       "columns": ["mission_id"],
@@ -11028,6 +10796,17 @@
       "name": "fk_freezes_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "freezes"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_helpers_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "helpers"
     },
     {
       "columns": ["provider_id"],
@@ -11525,6 +11304,28 @@
       "table": "questions"
     },
     {
+      "columns": ["helper_id"],
+      "tableTo": "helpers",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_queued_results_helper_id_helpers_id_fk",
+      "entityType": "fks",
+      "table": "queued_results"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_queued_results_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "queued_results"
+    },
+    {
       "columns": ["mission_id"],
       "tableTo": "missions",
       "columnsTo": ["id"],
@@ -11916,13 +11717,6 @@
       "table": "building_tasks"
     },
     {
-      "columns": ["building_id", "repository", "path"],
-      "nameExplicit": false,
-      "name": "building_unattributed_pk",
-      "entityType": "pks",
-      "table": "building_unattributed"
-    },
-    {
       "columns": ["checkpoint_id", "repository", "path"],
       "nameExplicit": false,
       "name": "checkpoint_files_pk",
@@ -12086,29 +11880,8 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
-      "name": "attempt_writes_pk",
-      "table": "attempt_writes",
-      "entityType": "pks"
-    },
-    {
-      "columns": ["id"],
-      "nameExplicit": false,
       "name": "building_attempts_pk",
       "table": "building_attempts",
-      "entityType": "pks"
-    },
-    {
-      "columns": ["id"],
-      "nameExplicit": false,
-      "name": "building_check_results_pk",
-      "table": "building_check_results",
-      "entityType": "pks"
-    },
-    {
-      "columns": ["id"],
-      "nameExplicit": false,
-      "name": "building_conflicts_pk",
-      "table": "building_conflicts",
       "entityType": "pks"
     },
     {
@@ -12221,6 +11994,13 @@
       "nameExplicit": false,
       "name": "freezes_pk",
       "table": "freezes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "helpers_pk",
+      "table": "helpers",
       "entityType": "pks"
     },
     {
@@ -12441,6 +12221,13 @@
       "entityType": "pks"
     },
     {
+      "columns": ["helper_id"],
+      "nameExplicit": false,
+      "name": "queued_results_pk",
+      "table": "queued_results",
+      "entityType": "pks"
+    },
+    {
       "columns": ["id"],
       "nameExplicit": false,
       "name": "resource_claims_pk",
@@ -12618,42 +12405,6 @@
     {
       "columns": [
         {
-          "value": "attempt_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "attempt_writes_of_attempt",
-      "entityType": "indexes",
-      "table": "attempt_writes"
-    },
-    {
-      "columns": [
-        {
-          "value": "building_id",
-          "isExpression": false
-        },
-        {
-          "value": "repository",
-          "isExpression": false
-        },
-        {
-          "value": "path",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "attempt_writes_of_building",
-      "entityType": "indexes",
-      "table": "attempt_writes"
-    },
-    {
-      "columns": [
-        {
           "value": "building_id",
           "isExpression": false
         },
@@ -12668,34 +12419,6 @@
       "name": "building_attempts_of_task",
       "entityType": "indexes",
       "table": "building_attempts"
-    },
-    {
-      "columns": [
-        {
-          "value": "attempt_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "building_check_results_of_attempt",
-      "entityType": "indexes",
-      "table": "building_check_results"
-    },
-    {
-      "columns": [
-        {
-          "value": "building_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "building_conflicts_of_building",
-      "entityType": "indexes",
-      "table": "building_conflicts"
     },
     {
       "columns": [
@@ -13014,6 +12737,20 @@
       "name": "freeze_once_per_cycle",
       "entityType": "indexes",
       "table": "freezes"
+    },
+    {
+      "columns": [
+        {
+          "value": "lineage",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "helper_of_lineage",
+      "entityType": "indexes",
+      "table": "helpers"
     },
     {
       "columns": [
@@ -13724,6 +13461,13 @@
       "name": "resource_once_in_project",
       "entityType": "uniques",
       "table": "exclusive_resources"
+    },
+    {
+      "columns": ["mission_id", "number"],
+      "nameExplicit": true,
+      "name": "helper_number_in_mission",
+      "entityType": "uniques",
+      "table": "helpers"
     },
     {
       "columns": ["mission_id", "number"],

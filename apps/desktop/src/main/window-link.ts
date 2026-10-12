@@ -552,6 +552,15 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('probes.changed', log),
       ),
+    'helpers.list': (request) =>
+      engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
+    'helpers.read': (request) =>
+      engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
+    'helpers.changed': (request) =>
+      engine['helpers.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('helpers.changed', log),
+      ),
     'discussions.list': (request) =>
       engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
     'discussions.read': (request) =>

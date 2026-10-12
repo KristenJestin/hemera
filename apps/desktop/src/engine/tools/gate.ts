@@ -27,6 +27,7 @@ import { join } from 'node:path'
 
 import {
   MASK,
+  HELPER_DEPTH,
   type Masked,
   ROLE_NAMES,
   ROLE_PLACES,
@@ -96,6 +97,7 @@ import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import { BuildDesk } from '../building/desk.ts'
+import { HelperDesk } from '../building/helper-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -210,6 +212,7 @@ export type GateServices =
   | ProfileHome
   | ProbeDesk
   | BuildDesk
+  | HelperDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -403,6 +406,12 @@ const decodeCall = (
       return decoder(tool, TOOLS.need_propose.input)(raw)
     case 'build_summary':
       return decoder(tool, TOOLS.build_summary.input)(raw)
+    case 'helper_launch':
+      return decoder(tool, TOOLS.helper_launch.input)(raw)
+    case 'helper_read':
+      return decoder(tool, TOOLS.helper_read.input)(raw)
+    case 'helper_result':
+      return decoder(tool, TOOLS.helper_result.input)(raw)
     case 'hemera_report':
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
@@ -413,8 +422,9 @@ const decodeCall = (
 /** The repository a call names, and the path its paths start from; a refusal when it has none. */
 const baseOf = (grant: Grant, repository: string | undefined) =>
   Effect.gen(function* () {
-    const root = grant.place.root
-    if (repository === undefined) return Result.succeed(root)
+    if (repository === undefined) return Result.succeed(grant.place.root)
+    // A place that reads a Workspace beside its own folder finds the repositories there (#145).
+    const root = grant.place.readable ?? grant.place.root
     const wanted = repository.replace(/^\.\//, '').replace(/[\\/]+$/, '') || ROOT_REPOSITORY
     const project = yield* getProject(grant.projectId)
     const found = project.repositories.find((one) => one.path === wanted)
@@ -592,9 +602,13 @@ export const toolGateLayer = (settings: GateSettings) =>
             projectId: grant.projectId,
             missionId: grant.missionId,
             place: grant.place,
+            helper: grant.helper,
           }
           const role = ROLE_NAMES[grant.role]
-          // 2. The tool is one of the session's.
+          // 2. The tool is one of the session's; a helper's helper launches none (#145).
+          if (tool === 'helper_launch' && (grant.helper?.depth ?? 0) >= HELPER_DEPTH) {
+            return refused(refusal('refused: a helper of a helper cannot launch helpers'))
+          }
           const admission = admitTool(grant.role, grant.tools, tool)
           const name = TOOL_NAMES.find((one) => one === tool)
           if (!admission.admitted || name === undefined) {
@@ -639,6 +653,19 @@ export const toolGateLayer = (settings: GateSettings) =>
           const readOnly = ROLE_PLACES[grant.role].readOnly || grant.place.readOnly
           if (readOnly && entry.effect === 'writes') {
             return refused(refusal(`refused: ${role} does not write files`))
+          }
+          // A folder of its own beside a Workspace it reads (the Prototyper, #145): it writes in its
+          // own folder only, never in the Workspace.
+          if (
+            grant.place.readable !== undefined &&
+            entry.effect === 'writes' &&
+            (path === null || !path.inside || !path.certain)
+          ) {
+            return refused(
+              refusal(
+                `refused: ${role} writes only in its own folder, ${grant.place.root}: the Workspace is read-only to it`,
+              ),
+            )
           }
           if (readOnly && entry.effect === 'runs') {
             if (call.tool !== 'commands_run') {
@@ -866,6 +893,12 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* BuildDesk.use((desk) => desk.propose(grant, call.args))
             case 'build_summary':
               return yield* BuildDesk.use((desk) => desk.summary(grant, call.args))
+            case 'helper_launch':
+              return yield* HelperDesk.use((desk) => desk.launch(grant, call.args))
+            case 'helper_read':
+              return yield* HelperDesk.use((desk) => desk.read(grant, call.args))
+            case 'helper_result':
+              return yield* HelperDesk.use((desk) => desk.result(grant, call.args))
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':

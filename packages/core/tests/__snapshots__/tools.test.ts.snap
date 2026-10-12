@@ -2890,6 +2890,161 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Launch a helper: a sub-agent that does one piece of work and hands back its result. Hemera answers at once with its id; keep working. Its result arrives as [hemera:result]. Refused above the Project’s cap of sub-agents or the mission’s launch budget: do the work yourself then.",
+      "properties": {
+        "brief": {
+          "description": "The work to do, whole: the helper reads nothing else of your conversation. For the Prototyper, the question to answer.",
+          "maxLength": 8000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "helper": {
+          "description": "A defined helper, by its id (\`prototyper\`). Leave it out for a free helper that does what your brief says.",
+          "maxLength": 60,
+          "minLength": 1,
+          "type": "string",
+        },
+        "task": {
+          "description": "A task of the plan the helper carries to task_finished: it becomes its runner, and its files become the helper’s.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "tools": {
+          "description": "For a free helper: the tools it holds, a subset of yours. Yours unless said.",
+          "items": {
+            "description": "A tool of yours, by its name.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "writes": {
+          "description": "For a free helper: whether it may write files. False unless said.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "brief",
+      ],
+      "type": "object",
+    },
+    "name": "helper_launch",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Where one of your helpers stands: its state, whether it is stuck, its last line, and its result once it is done.",
+      "properties": {
+        "helper": {
+          "description": "The helper, by its id as helper_launch answered it (\`H2\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "helper",
+      ],
+      "type": "object",
+    },
+    "name": "helper_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "End your work with your result. A helper: summary, changed, checked, left. The Prototyper: tried, works, does_not_work, files. Call it once: your session ends with it.",
+      "properties": {
+        "changed": {
+          "description": "Every file you changed; empty when none.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "path": {
+                "description": "The path, relative to that repository.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "repository": {
+                "description": "The repository, by its path as the Project names it (\`api\`).",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "repository",
+              "path",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "checked": {
+          "description": "What you checked and how; never a check you did not run.",
+          "items": {
+            "description": "One check: what you ran and what it showed.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "does_not_work": {
+          "description": "What does not work, and why.",
+          "items": {
+            "description": "One thing that does not work, and what it did.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "files": {
+          "description": "The files of your folder that show the answer: they become evidence.",
+          "items": {
+            "description": "A file of your folder, by its path relative to it.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "left": {
+          "description": "What is left; empty when nothing is.",
+          "items": {
+            "description": "One thing left to do.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "summary": {
+          "description": "What you did, in a few sentences.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "tried": {
+          "description": "The approach you tried, in a few sentences.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "works": {
+          "description": "What works; only what you ran.",
+          "items": {
+            "description": "One thing that works, as you saw it run.",
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "type": "object",
+    },
+    "name": "helper_result",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

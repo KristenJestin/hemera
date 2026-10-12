@@ -310,8 +310,11 @@ describe('The Builder has the tools of Building, and none that pushes, merges or
     )
   })
 
-  test('no tool of its role pushes, merges or launches', () => {
-    expect(toolsOf('builder').filter((name) => /push|merge|launch/.test(name))).toEqual([])
+  test('no tool of its role pushes, merges or launches anything but a helper', () => {
+    // `helper_launch` (#145) starts a helper of the Building, never a Building nor a mission.
+    expect(toolsOf('builder').filter((name) => /push|merge|launch/.test(name))).toEqual([
+      'helper_launch',
+    ])
   })
 
   test('a helper runs a task, and neither asks for a need nor writes the summary', () => {

@@ -2600,3 +2600,61 @@ export const buildingDecisions = sqliteTable(
   },
   (table) => [uniqueIndex('building_decision_of_need').on(table.needId)],
 )
+
+/**
+ * The helpers of a Building (#145): child sessions the Builder, or a helper at depth 1, launched.
+ * `number` makes its id (`H2`) within the mission; `parentLineage` is the session that launched it;
+ * `definition` the defined helper it runs, or null for a free one; `taskId` the task it is tied to,
+ * or null. `place` is `workspace` or `prototype`, `folder` where it works. `tools` (JSON) are the
+ * tools its parent chose for a free one, or null for its role's. `state` runs `running` → `done`
+ * or `failed`; `stuck` is set while its session is silent in a turn; `result` is its validated
+ * result (JSON).
+ */
+export const helpers = sqliteTable(
+  'helpers',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    parentLineage: text('parent_lineage').notNull(),
+    lineage: text('lineage').notNull(),
+    depth: integer('depth').notNull(),
+    definition: text('definition'),
+    taskId: text('task_id'),
+    writes: integer('writes', { mode: 'boolean' }).notNull(),
+    place: text('place').notNull(),
+    folder: text('folder').notNull(),
+    tools: text('tools'),
+    brief: text('brief').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    stuck: integer('stuck', { mode: 'boolean' }).notNull(),
+    result: text('result').$type<Masked<string>>(),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    unique('helper_number_in_mission').on(table.missionId, table.number),
+    uniqueIndex('helper_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * A helper's result queued for its parent (#145): written in the transaction that ends the helper,
+ * so that a quit loses none, and marked delivered in the transaction that hands it to the parent's
+ * lineage as a delivery.
+ */
+export const queuedResults = sqliteTable('queued_results', {
+  helperId: text('helper_id')
+    .primaryKey()
+    .references(() => helpers.id, { onDelete: 'cascade' }),
+  missionId: text('mission_id')
+    .notNull()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  parentLineage: text('parent_lineage').notNull(),
+  body: text('body').$type<Masked<string>>().notNull(),
+  queuedAt: text('queued_at').notNull(),
+  deliveredAt: text('delivered_at'),
+})
