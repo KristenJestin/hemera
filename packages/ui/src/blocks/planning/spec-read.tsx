@@ -5,7 +5,7 @@ import { type ReactNode, useState } from 'react'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Loading } from '../../components/loading/loading.tsx'
 import { IconCheck, IconListNumbers, IconTestPipe } from '../../icons.ts'
-import { collapse, expand, fold, useTransition } from '../../motion.ts'
+import { collapse, expand, fold, useScrollTo, useTransition } from '../../motion.ts'
 import { ChangedMark, DeltaMark, SectionMark } from './planning-marks.tsx'
 import type {
   Proof,
@@ -286,7 +286,10 @@ export function SpecRead({
             )}
             data-changed={marked ? '' : undefined}
           >
-            <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+            <h2
+              tabIndex={-1}
+              className="flex items-center gap-2 rounded-sm text-base font-semibold tracking-tight outline-none focus-ring"
+            >
               <SectionMark state={entry.state} open={open.get(entry.name)} />
               {entry.title}
               {marked && <ChangedMark />}
@@ -333,8 +336,16 @@ export function SectionsNav({
   'sections' | 'requirementsState' | 'changes' | 'tasks' | 'open'
 >): ReactNode {
   const changed = changedSet(changes)
+  const scrollTo = useScrollTo()
   const go = (name: string): void => {
-    document.getElementById(sectionAnchor(name))?.scrollIntoView({ block: 'start' })
+    const section = document.getElementById(sectionAnchor(name))
+    if (section === null) return
+    // The heading of a section, or the button that opens the tasks: focused where it stands, then
+    // the Spec is brought to it.
+    section
+      .querySelector<HTMLElement>(':scope > h2, :scope > button')
+      ?.focus({ preventScroll: true })
+    scrollTo(section)
   }
   return (
     <nav aria-label="Spec sections" className="flex flex-col gap-3">

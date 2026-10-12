@@ -219,6 +219,18 @@ export const AnsweringBringsTheNext: Story = {
   },
 }
 
+/** A click on a section in the page's list brings the Spec to it, and its heading takes the focus. */
+export const SectionClickedInTheList: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = page(canvasElement)
+    const nav = within(canvas.getByRole('navigation', { name: 'Spec sections' }))
+    const migration = canvas.getByRole('region', { name: 'Migration plan' })
+    await userEvent.click(nav.getByRole('button', { name: /Migration plan/ }))
+    await expect(within(migration).getByRole('heading', { name: /Migration plan/ })).toHaveFocus()
+    await expect(inView(migration)).toBe(true)
+  },
+}
+
 /** Q5 answered and sent: folded at once to its line, "Sent" beside its dot. */
 export const AnswerSent: Story = {
   args: { moment: 'answerReceived' },
