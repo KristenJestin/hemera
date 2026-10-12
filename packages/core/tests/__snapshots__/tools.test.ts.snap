@@ -2954,6 +2954,49 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Read one page of a file a prototype kept, frozen with the Spec, by bytes: at most 262144 bytes, with its line numbers. Only inside that prototype's folder; nothing of it can be written.",
+      "properties": {
+        "path": {
+          "description": "The file, relative to the prototype's folder, as the brief lists it.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "prototype": {
+          "description": "The frozen prototype, by its id as the brief names it (\`H1\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "range": {
+          "additionalProperties": true,
+          "description": "The page to read, by bytes.",
+          "properties": {
+            "length": {
+              "description": "How many bytes at most; 262144 without it.",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "offset": {
+              "description": "The byte to start at; 0 without it.",
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "required": [
+        "prototype",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "prototype_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "End your work with your result. A helper: summary, changed, checked, left. The Prototyper: tried, works, does_not_work, files. Call it once: your session ends with it.",
       "properties": {
         "changed": {
