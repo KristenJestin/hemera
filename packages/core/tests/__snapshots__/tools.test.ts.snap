@@ -2809,6 +2809,68 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Fill what is proposed on an error need Hemera asked you to fill after three reds on a task: the options, the one you recommend and why. Refused for any other need.",
+      "properties": {
+        "need": {
+          "description": "The error need you were asked to fill, by its id.",
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string",
+        },
+        "options": {
+          "description": "What you propose to do next, each a different assumption.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "detail": {
+                "description": "What this option changes, and what it assumes.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "label": {
+                "description": "One option, in a few words.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "label",
+              "detail",
+            ],
+            "type": "object",
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "type": "array",
+        },
+        "reason": {
+          "description": "Why you recommend it.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "recommended": {
+          "description": "The label of the option you recommend.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "need",
+        "options",
+        "recommended",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "need_propose",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Write the final summary of the build, once Hemera says every task is done.",
       "properties": {
         "text": {
