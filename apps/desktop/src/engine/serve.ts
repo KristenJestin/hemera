@@ -856,7 +856,7 @@ export const engineHandlers = (
   return Layer.mergeAll(core, apart, checksHandlers(profile, log), docRecipesHandlers(profile, log))
 }
 
-/** The Project's checks (#143), a layer of their own (see `EngineServedRpcs`). */
+/** The Project's checks (#143), a layer of their own (see `EngineSettingsRpcs`). */
 const checksHandlers = (profile: StartedProfile, log: Log) => {
   const { use } = profile
   return ChecksRpcs.toLayer({
@@ -874,7 +874,7 @@ const checksHandlers = (profile: StartedProfile, log: Log) => {
   })
 }
 
-/** The Project's doc recipes (#146), a layer of their own (see `EngineServedRpcs`). */
+/** The Project's doc recipes (#146), a layer of their own (see `EngineSettingsRpcs`). */
 const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
   const { use } = profile
   return DocRecipesRpcs.toLayer({

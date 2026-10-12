@@ -267,6 +267,23 @@ export {
   type SettingsRun,
 } from './blocks/project-settings/services.tsx'
 export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
+export {
+  CheckForm,
+  ChecksSection,
+  NEW_CHECK,
+  type CheckDraft,
+  type CheckRefusals,
+  type SettingsCheck,
+} from './blocks/project-settings/checks.tsx'
+export {
+  DocRecipeForm,
+  DocRecipesSection,
+  NEW_DOC_RECIPE,
+  recipeName,
+  type DocRecipeDraft,
+  type DocRecipeRefusals,
+  type SettingsDocRecipe,
+} from './blocks/project-settings/doc-recipes.tsx'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
   MARK_ICONS,

@@ -12,7 +12,7 @@
 import {
   AgentsPortHandover,
   closedAs,
-  EngineServedRpcs,
+  EngineMainRpcs,
   EngineStart,
   fromMessagePortMain,
   HostRpcs,
@@ -118,7 +118,7 @@ const engine = (
       log,
     )
 
-    yield* RpcServer.make(EngineServedRpcs, { disableFatalDefects: true }).pipe(
+    yield* RpcServer.make(EngineMainRpcs, { disableFatalDefects: true }).pipe(
       // Under the suite, the window lists the suite's agents, as its sessions find them.
       Effect.provide(engineHandlers(start, profile, log, suite?.agents)),
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),

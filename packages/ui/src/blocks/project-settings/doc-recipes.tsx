@@ -434,6 +434,7 @@ export const NEW_DOC_RECIPE: DocRecipeDraft = { place: '.', path: '', purpose: '
 /** What the engine refuses of a draft, in its words, at the field each concerns. */
 export interface DocRecipeRefusals {
   path?: string | undefined
+  purpose?: string | undefined
   words?: string | undefined
 }
 
@@ -488,6 +489,7 @@ export function DocRecipeForm({
         rows={2}
         value={draft.purpose}
         placeholder="How to install and run"
+        error={refusals.purpose}
         onValueChange={(purpose) => set({ purpose })}
       />
       <div className="flex flex-col gap-1">

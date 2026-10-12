@@ -4,7 +4,7 @@
  * or moved. A recipe refused carries the sentence the settings show.
  */
 
-import { DocRecipe, DocRecipeDraft } from '@hemera/core/domain'
+import { DocRecipe, DocRecipeDraft, DocRecipeField } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
@@ -12,11 +12,15 @@ import { EngineGone } from './gone.ts'
 import { StorageFailed } from './profile.ts'
 import { UnknownProject } from './projects.ts'
 
-export { DocRecipe, DocRecipeDraft }
+export { DocRecipe, DocRecipeDraft, DocRecipeField }
 
-/** A recipe the settings cannot save, and the sentence they show. */
+/**
+ * A recipe the settings cannot save, the sentence they show, and the field they show it under when
+ * it concerns one.
+ */
 export class DocRecipeRefused extends Schema.TaggedError<DocRecipeRefused>()('DocRecipeRefused', {
   reason: Schema.String,
+  field: Schema.optionalKey(DocRecipeField),
 }) {
   override get message(): string {
     return this.reason
