@@ -240,6 +240,7 @@ function useLineChecks(
     for (const line of wanted.split('\n')) {
       if (line === '' || asked.current.has(line)) continue
       asked.current.add(line)
+      // react-doctor-disable-next-line no-pass-data-to-parent -- a request to the engine, whose answer comes back into this hook
       check(line).then(
         (problem) => setChecked((before) => new Map(before).set(line, problem)),
         () => asked.current.delete(line),
