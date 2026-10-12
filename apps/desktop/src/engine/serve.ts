@@ -9,6 +9,7 @@
 import {
   ChatRefused,
   ChecksRpcs,
+  DiffRpcs,
   DocRecipesRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
@@ -31,6 +32,7 @@ import {
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
+import { Diffs } from './review/diffs.ts'
 import {
   dismissService,
   missionServices,
@@ -847,13 +849,24 @@ export const engineHandlers = (
     'mission.serviceDismiss': ({ missionId, runId }) =>
       use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
     'mission.focused': () =>
-      use(OutsideChanges.use((outside) => outside.focused)).pipe(observed('mission.focused', log)),
+      use(
+        Effect.andThen(
+          OutsideChanges.use((outside) => outside.focused),
+          Diffs.use((diffs) => diffs.focused),
+        ),
+      ).pipe(observed('mission.focused', log)),
     'mission.changed': () =>
       follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
         observedStream('mission.changed', log),
       ),
   })
-  return Layer.mergeAll(core, apart, checksHandlers(profile, log), docRecipesHandlers(profile, log))
+  return Layer.mergeAll(
+    core,
+    apart,
+    checksHandlers(profile, log),
+    docRecipesHandlers(profile, log),
+    diffHandlers(profile, log),
+  )
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineSettingsRpcs`). */
@@ -890,5 +903,30 @@ const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
       use(removeDocRecipe(projectId, id)).pipe(observed('docRecipes.remove', log)),
     'docRecipes.move': ({ projectId, id, rank }) =>
       use(moveDocRecipe(projectId, id, rank)).pipe(observed('docRecipes.move', log)),
+  })
+}
+
+/** The live diff of a mission (#249), a layer of its own (see `EngineReviewRpcs`). */
+const diffHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return DiffRpcs.toLayer({
+    'diff.live': ({ missionId }) =>
+      use(Diffs.use((diffs) => diffs.live(missionId))).pipe(observed('diff.live', log)),
+    'diff.file': ({ missionId, repository, path, force }) =>
+      use(Diffs.use((diffs) => diffs.file(missionId, repository, path, force ?? false))).pipe(
+        observed('diff.file', log),
+      ),
+    'diff.atCheckpoint': ({ checkpointId }) =>
+      use(Diffs.use((diffs) => diffs.atCheckpoint(checkpointId))).pipe(
+        observed('diff.atCheckpoint', log),
+      ),
+    'diff.fileAtCheckpoint': ({ checkpointId, repository, path }) =>
+      use(Diffs.use((diffs) => diffs.fileAtCheckpoint(checkpointId, repository, path))).pipe(
+        observed('diff.fileAtCheckpoint', log),
+      ),
+    'diff.changes': ({ missionId }) =>
+      follow(Stream.unwrap(Diffs.useSync((diffs) => diffs.changes(missionId)))).pipe(
+        observedStream('diff.changes', log),
+      ),
   })
 }
