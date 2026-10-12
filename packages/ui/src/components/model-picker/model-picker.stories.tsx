@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { entered, findOpen } from '../../overlay-play.ts'
 import {
   AGENTS,
   AGENTS_FAILED,
@@ -75,7 +76,7 @@ export const Marks: Story = {
 export const Open: Story = {
   args: { open: true, value: { agent: 'claude', model: 'opus', effort: 'max' } },
   play: async () => {
-    await expect(await body().findByRole('option', { name: /Opus/, selected: true })).toBeVisible()
+    await expect(await findOpen(body(), 'option', { name: /Opus/, selected: true })).toBeVisible()
     const effort = body().getByRole('radiogroup', { name: 'Effort' })
     await expect(within(effort).getByRole('radio', { name: 'Max' })).toBeChecked()
     await expect(
@@ -165,7 +166,7 @@ export const NoModel: Story = {
     value: { agent: 'claude', model: 'sonnet' },
   },
   play: async () => {
-    await expect(await body().findByText('No model to choose yet')).toBeVisible()
+    await expect(await entered(await body().findByText('No model to choose yet'))).toBeVisible()
     await expect(body().queryByText(/No model matches/)).toBeNull()
   },
 }
@@ -174,7 +175,7 @@ export const NoModel: Story = {
 export const NoMatch: Story = {
   args: { open: true },
   play: async () => {
-    const search = await body().findByRole('combobox', { name: 'Search models' })
+    const search = await findOpen(body(), 'combobox', { name: 'Search models' })
     await userEvent.type(search, 'zzz')
     await expect(body().getByText('No model matches “zzz”')).toBeVisible()
   },

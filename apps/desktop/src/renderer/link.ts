@@ -66,6 +66,10 @@ import {
   type BranchPrefixEdit,
   type Command,
   type CommandSave,
+  type CheckDraft,
+  type DocRecipe,
+  type DocRecipeDraft,
+  type ProjectCheck,
   type EngineStatus,
   type EnvironmentReport,
   type LineCheck,
@@ -194,6 +198,48 @@ export interface Link {
   readonly removeCommand: (projectId: string, id: string) => Promise<void>
   /** What saving a line would refuse, as it is typed. */
   readonly checkLine: (line: string) => Promise<LineCheck>
+  /** The Project's checks, in their order. */
+  readonly checks: (projectId: string) => Promise<ReadonlyArray<ProjectCheck>>
+  /** The checks proposed from the catalogue, never saved: none once the Project has some. */
+  readonly proposeChecks: (projectId: string) => Promise<ReadonlyArray<CheckDraft>>
+  /** Saves the proposals accepted, all at once; answers every check. */
+  readonly acceptChecks: (
+    projectId: string,
+    proposals: ReadonlyArray<CheckDraft>,
+  ) => Promise<ReadonlyArray<ProjectCheck>>
+  /** Writes a check, a new one when `id` is null; rejects with `CheckRefused` and its field. */
+  readonly saveCheck: (
+    projectId: string,
+    id: string | null,
+    check: CheckDraft,
+  ) => Promise<ProjectCheck>
+  readonly removeCheck: (projectId: string, id: string) => Promise<void>
+  /** Moves a check to its 0-based place in the list; answers the list. */
+  readonly moveCheck: (
+    projectId: string,
+    id: string,
+    rank: number,
+  ) => Promise<ReadonlyArray<ProjectCheck>>
+  /** The Project's doc recipes, in their order. */
+  readonly docRecipes: (projectId: string) => Promise<ReadonlyArray<DocRecipe>>
+  /** The recipes proposed from the main checkout, never saved: none once the Project has some. */
+  readonly proposeDocRecipes: (projectId: string) => Promise<ReadonlyArray<DocRecipeDraft>>
+  readonly acceptDocRecipes: (
+    projectId: string,
+    proposals: ReadonlyArray<DocRecipeDraft>,
+  ) => Promise<ReadonlyArray<DocRecipe>>
+  /** Writes a recipe, a new one when `id` is null; rejects with `DocRecipeRefused` and its field. */
+  readonly saveDocRecipe: (
+    projectId: string,
+    id: string | null,
+    recipe: DocRecipeDraft,
+  ) => Promise<DocRecipe>
+  readonly removeDocRecipe: (projectId: string, id: string) => Promise<void>
+  readonly moveDocRecipe: (
+    projectId: string,
+    id: string,
+    rank: number,
+  ) => Promise<ReadonlyArray<DocRecipe>>
   /** The runs of the Project's main checkout, the newest first. */
   readonly runs: (projectId: string) => Promise<ReadonlyArray<Run>>
   readonly startRun: (start: RunStart) => Promise<Run>
@@ -662,6 +708,27 @@ export function linkOver(port: Port): Link {
     saveCommand: (save) => call((ready) => ready['catalogue.save'](save)),
     removeCommand: (projectId, id) => call((ready) => ready['catalogue.remove']({ projectId, id })),
     checkLine: (line) => call((ready) => ready['catalogue.checkLine']({ line })),
+    checks: (projectId) => call((ready) => ready['checks.list']({ projectId })),
+    proposeChecks: (projectId) =>
+      call((ready) => ready['checks.propose']({ projectId, asked: false })),
+    acceptChecks: (projectId, proposals) =>
+      call((ready) => ready['checks.accept']({ projectId, proposals })),
+    saveCheck: (projectId, id, check) =>
+      call((ready) => ready['checks.save']({ projectId, id, check })),
+    removeCheck: (projectId, id) => call((ready) => ready['checks.remove']({ projectId, id })),
+    moveCheck: (projectId, id, rank) =>
+      call((ready) => ready['checks.move']({ projectId, id, rank })),
+    docRecipes: (projectId) => call((ready) => ready['docRecipes.list']({ projectId })),
+    proposeDocRecipes: (projectId) =>
+      call((ready) => ready['docRecipes.propose']({ projectId, asked: false })),
+    acceptDocRecipes: (projectId, proposals) =>
+      call((ready) => ready['docRecipes.accept']({ projectId, proposals })),
+    saveDocRecipe: (projectId, id, recipe) =>
+      call((ready) => ready['docRecipes.save']({ projectId, id, recipe })),
+    removeDocRecipe: (projectId, id) =>
+      call((ready) => ready['docRecipes.remove']({ projectId, id })),
+    moveDocRecipe: (projectId, id, rank) =>
+      call((ready) => ready['docRecipes.move']({ projectId, id, rank })),
     runs: (projectId) => call((ready) => ready['runs.list']({ projectId, workspaceId: null })),
     startRun: (start) => call((ready) => ready['runs.start'](start)),
     stopRun: (id) => call((ready) => ready['runs.stop']({ id })),

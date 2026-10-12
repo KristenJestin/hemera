@@ -3,6 +3,8 @@ import {
   MissionFrameDifference,
   type MissionStage,
   type MissionView,
+  type NeedRow,
+  type NeedsYouListProps,
   type ViewWidth,
 } from '@hemera/ui'
 import { IconRefresh } from '@hemera/ui/icons'
@@ -28,6 +30,10 @@ export interface StageFrame {
   actionNote?: ReactNode
   /** Why a gesture of the page did not go through, in words. */
   notice?: string | undefined
+  /** The needs drawn above the base: all of the mission's unless the page lists them itself. */
+  needs?: readonly NeedRow[] | undefined
+  /** Whether the head draws the ball as the face; not when the page draws the face itself. */
+  ballFace?: boolean | undefined
 }
 
 /** What a stage's page is handed: the mission, and the way to open a view over it. */
@@ -49,6 +55,8 @@ export interface StagePageProps {
   freeze: () => void
   /** Whether a Freeze is on its way: Freeze then works and is not sent again. */
   freezing: boolean
+  /** The mission's needs that wait, and what answers each. */
+  needs: { rows: readonly NeedRow[]; on: NeedsYouListProps['on'] }
   /** Draws the mission's frame around what the page gives it. */
   frame: (parts: StageFrame) => ReactNode
 }

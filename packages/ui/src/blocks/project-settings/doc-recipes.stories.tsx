@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist, IconFileText } from '../../icons.ts'
 import {
   ProjectSettings,
@@ -242,7 +243,7 @@ export const NoRecipe: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { name: 'No recipe yet' })).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Add a recipe' }))
-    expect(await body().findByRole('dialog', { name: 'Add a recipe' })).toBeVisible()
+    expect(await findOpen(body(), 'dialog', { name: 'Add a recipe' })).toBeVisible()
   },
 }
 
@@ -336,6 +337,17 @@ export const NoWordRefused: Story = {
     const dialog = await body().findByRole('dialog', { name: 'Add a recipe' })
     expect(within(dialog).getByRole('textbox', { name: 'Words' })).toHaveAccessibleDescription(
       /Name at least one word the Impact may hold\./,
+    )
+  },
+}
+
+/** Files named and nothing said of what they are for: said under the purpose. */
+export const PurposeRefused: Story = {
+  args: { form: { kind: 'new', draft: { ...NEW_DOC_RECIPE, path: 'CHANGELOG.md' } } },
+  play: async () => {
+    const dialog = await body().findByRole('dialog', { name: 'Add a recipe' })
+    expect(within(dialog).getByRole('textbox', { name: 'Purpose' })).toHaveAccessibleDescription(
+      /Say in one sentence what the files are for\./,
     )
   },
 }

@@ -5,7 +5,7 @@
  * rail, the head's Now line with where a press on it leads, and what stands before Freeze.
  */
 
-import { type ColdReadPass, type PlanningData, type Question, unsettled } from './planning-types.ts'
+import { type ColdReadPass, type PlanningData, unsettled } from './planning-types.ts'
 
 /** The Planner's session, as the engine knows it. */
 export interface Planner {
@@ -71,11 +71,9 @@ const SECTIONS = 8
 const plural = (count: number, one: string, many: string): string =>
   `${String(count)} ${count === 1 ? one : many}`
 
-const questionsOf = (data: PlanningData): Question[] => data.waves.flatMap((wave) => wave.questions)
-
 /** The questions as the steps count them: to answer, waiting on someone, on their way, answered. */
 export function tally(data: PlanningData) {
-  const questions = questionsOf(data)
+  const { questions } = data
   return {
     open: questions.filter((question) => question.state === 'open'),
     waiting: questions.filter((question) => question.state === 'waiting'),
@@ -176,7 +174,7 @@ function specState({ data, planner }: PlanningFacts): StepState {
 /** The answers: the user's while one is to answer, the Planner's while one is taken in. */
 function questionsState({ data }: PlanningFacts): StepState {
   const { open, waiting, pending } = tally(data)
-  if (data.waves.length === 0) return 'todo'
+  if (data.questions.length === 0) return 'todo'
   if (open.length > 0) return 'waiting'
   if (pending.length > 0) return 'running'
   if (waiting.length > 0) return 'waiting'

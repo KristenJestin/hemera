@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist } from '../../icons.ts'
 import {
   ProjectSettings,
@@ -297,7 +298,7 @@ export const NoCheck: Story = {
     expect(canvas.getByRole('heading', { name: 'No check yet' })).toBeVisible()
     expect(canvas.getByText(/done, not verified/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Add a check' }))
-    expect(await body().findByRole('dialog', { name: 'Add a check' })).toBeVisible()
+    expect(await findOpen(body(), 'dialog', { name: 'Add a check' })).toBeVisible()
   },
 }
 
@@ -344,7 +345,7 @@ export const AddACheck: Story = {
 export const AsksBeforeRunning: Story = {
   args: { form: { kind: 'edit', id: 'e2e' } },
   play: async () => {
-    const dialog = await body().findByRole('dialog', { name: 'e2e' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'e2e' })
     expect(within(dialog).getByText('Asks before running')).toBeVisible()
   },
 }

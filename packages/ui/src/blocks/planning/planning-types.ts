@@ -7,6 +7,7 @@
  */
 
 import type { MissionStage } from '../mission/vocabulary.ts'
+import type { NeedRow } from '../need/needs-you-list.tsx'
 
 /** A section is empty, written, or being written while the Planner writes it. */
 export type SectionState = 'empty' | 'written' | 'being_written'
@@ -96,7 +97,6 @@ export interface ProposedAnswer {
 
 export interface Question {
   id: string
-  wave: number
   text: string
   why: string
   options: readonly QuestionOption[]
@@ -118,12 +118,6 @@ export interface Question {
   drafts: readonly { text: string; at: string }[]
   /** The answers proposed from the ticket that still wait for the user. */
   proposals: readonly ProposedAnswer[]
-}
-
-export interface Wave {
-  number: number
-  askedAt: string
-  questions: readonly Question[]
 }
 
 export interface DiscussionMessage {
@@ -278,6 +272,17 @@ export interface TicketChange {
   inputState: InputState
 }
 
+/**
+ * A need of the mission, as the Planning page lists it under For you — most often a permission an
+ * agent waits on: who asks, and the need's card without its handlers.
+ */
+export interface PlanningNeed {
+  id: string
+  /** Who asks, as the page names it: `Probe #2`, `Planner`, `Hemera`. */
+  who: string
+  need: NeedRow['need']
+}
+
 /** The Planning page whole, at one moment. */
 export interface PlanningData {
   frozen: boolean
@@ -287,7 +292,8 @@ export interface PlanningData {
   requirementsState: SectionState
   requirements: readonly Requirement[]
   tasks: readonly Task[]
-  waves: readonly Wave[]
+  /** The questions, one list in the order they were asked. */
+  questions: readonly Question[]
   discussions: readonly Discussion[]
   probes: readonly Probe[]
   passes: readonly ColdReadPass[]
@@ -334,10 +340,8 @@ export interface DiscussionHandlers {
 }
 
 /** The questions that still wait for the user or for someone. */
-export function waiting(waves: readonly Wave[]): Question[] {
-  return waves.flatMap((wave) =>
-    wave.questions.filter((question) => question.state === 'open' || question.state === 'waiting'),
-  )
+export function waiting(questions: readonly Question[]): Question[] {
+  return questions.filter((question) => question.state === 'open' || question.state === 'waiting')
 }
 
 /** The latest answer of a question, the one that counts. */
@@ -355,9 +359,9 @@ export function unsettled(question: Question): boolean {
 export const sectionOfItem = (item: string): string => (/^R\d/.test(item) ? 'requirements' : item)
 
 /** How many questions may still change each section, by the section's name. */
-export function openBySection(waves: readonly Wave[]): ReadonlyMap<string, number> {
+export function openBySection(questions: readonly Question[]): ReadonlyMap<string, number> {
   const counts = new Map<string, number>()
-  for (const question of waves.flatMap((wave) => wave.questions)) {
+  for (const question of questions) {
     if (question.section !== null && unsettled(question)) {
       const name = sectionOfItem(question.section)
       counts.set(name, (counts.get(name) ?? 0) + 1)

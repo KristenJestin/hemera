@@ -172,12 +172,11 @@ export * from './blocks/mission/mission-row.tsx'
 export * from './blocks/mission/stage-card.tsx'
 export * from './surfaces/living-spec/living-spec-types.ts'
 export * from './surfaces/living-spec/living-spec-page.tsx'
-/** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Wave`. */
+/** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Probe`. */
 export * as Planning from './blocks/planning/planning-types.ts'
 export {
   PlanningPage,
   discussionViewId,
-  focusTarget,
   probeViewId,
   type PlanningPageProps,
 } from './surfaces/planning/planning-page.tsx'
@@ -268,6 +267,23 @@ export {
   type SettingsRun,
 } from './blocks/project-settings/services.tsx'
 export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
+export {
+  CheckForm,
+  ChecksSection,
+  NEW_CHECK,
+  type CheckDraft,
+  type CheckRefusals,
+  type SettingsCheck,
+} from './blocks/project-settings/checks.tsx'
+export {
+  DocRecipeForm,
+  DocRecipesSection,
+  NEW_DOC_RECIPE,
+  recipeName,
+  type DocRecipeDraft,
+  type DocRecipeRefusals,
+  type SettingsDocRecipe,
+} from './blocks/project-settings/doc-recipes.tsx'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
   MARK_ICONS,
