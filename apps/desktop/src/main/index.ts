@@ -217,6 +217,18 @@ const run = Effect.gen(function* () {
   nativeTheme.on('updated', () => {
     for (const window of BrowserWindow.getAllWindows()) repaint(window)
   })
+  // The window regains the focus: the missions' Workspaces are compared and their bases read
+  // again, so a change made in an editor meanwhile is known when the user looks (#148).
+  const focused = engine.client['mission.focused']().pipe(
+    Effect.catch((failure) =>
+      Effect.sync(() =>
+        log(`the engine was not told the window has the focus: ${failure.message}`),
+      ),
+    ),
+  )
+  app.on('browser-window-focus', () => {
+    Effect.runFork(focused)
+  })
   // Only now may what waits for the window run: the commands run at each opening.
   yield* engine.client['engine.windowShown']().pipe(
     Effect.catch((failure) =>

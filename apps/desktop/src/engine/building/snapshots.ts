@@ -80,6 +80,8 @@ export type SnapshotOwner =
       readonly runId: string
       readonly side: 'before' | 'after'
     }
+  /** The last tree the detector of changes outside Hemera compared (#148). */
+  | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -257,6 +259,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/buildings/${owner.buildingId}/base/${leaf}`
     case 'run':
       return `${mission}/runs/${owner.runId}/${owner.side}/${leaf}`
+    case 'outside':
+      return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
   }
 }
 
@@ -271,6 +275,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the base of Building ${owner.buildingId}`
     case 'run':
       return `run ${owner.runId} ${owner.side}`
+    case 'outside':
+      return `the Workspace compared for Building ${owner.buildingId}`
   }
 }
 
