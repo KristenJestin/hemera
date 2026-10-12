@@ -7,20 +7,21 @@
  * function that reads the Project's current value and the Schema it is encoded with. This version
  * registers the catalogue lines the Spec's proofs name (#7), the exclusive resources (#88), the
  * check model with the exact catalogue lines its checks use (#143), and the "who commits" rule,
- * which reads "Hemera does not commit during Building" until its owner registers the rule itself.
- * The doc recipes (#146) come with theirs.
+ * which reads "Hemera does not commit during Building" until its owner registers the rule itself,
+ * and the doc recipes the documenter reads (#146).
  * The safety rules (the "never" list, the sensitive places, "ask before running") are never copied:
  * they always apply in their current version (#36, #37).
  */
 
 import { createHash } from 'node:crypto'
 
-import { ProjectCheck } from '@hemera/core/domain'
+import { DocRecipe, ProjectCheck } from '@hemera/core/domain'
 import { CommandDraft, ExclusiveResource, type Spec } from '@hemera/ipc'
 import { desc, eq } from 'drizzle-orm'
 import { Effect, Option, Schema } from 'effect'
 
 import { listCommands } from '../catalogue.ts'
+import { listDocRecipes } from '../doc-recipes.ts'
 import { listChecks } from '../project-checks.ts'
 import { getProject } from '../projects.ts'
 import { listResources } from '../resources/declarations.ts'
@@ -144,6 +145,20 @@ const CHECKS: ValidationSection = {
 export const checksOf = (sections: Sections): ChecksCopy =>
   Option.getOrElse(readChecks(sections[CHECKS.id]), () => ({ checks: [], lines: [] }))
 
+const RecipesJson = Schema.toCodecJson(Schema.Array(DocRecipe))
+const encodeRecipes = Schema.encodeSync(RecipesJson)
+const readRecipes = Schema.decodeUnknownOption(RecipesJson)
+
+/** The Project's doc recipes (#146), as the documenter reads them. */
+const DOC_RECIPES: ValidationSection = {
+  id: 'doc-recipes',
+  read: ({ projectId }) => Effect.map(listDocRecipes(projectId), encodeRecipes),
+}
+
+/** The reader of the doc recipes' section: none in a copy taken before it existed. */
+export const docRecipesOf = (sections: Sections): ReadonlyArray<DocRecipe> =>
+  Option.getOrElse(readRecipes(sections[DOC_RECIPES.id]), () => [])
+
 const encodeResources = Schema.encodeSync(Schema.toCodecJson(Schema.Array(ExclusiveResource)))
 
 /** The Project's exclusive resources as declared (#88). */
@@ -187,6 +202,7 @@ export const VALIDATION_SECTIONS: ReadonlyArray<ValidationSection> = [
   CATALOGUE,
   RESOURCES,
   CHECKS,
+  DOC_RECIPES,
   COMMITS,
 ]
 

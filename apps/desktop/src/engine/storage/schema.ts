@@ -317,6 +317,25 @@ export const projectChecks = sqliteTable(
 )
 
 /**
+ * A Project's doc recipes (#146): a file or a pattern inside one repository (by path; null for the
+ * Workspace root) that the documenter keeps in line with the code, what the files are for, and
+ * whether it applies always or only when the Spec's Impact names one of its words (JSON).
+ */
+export const projectDocRecipes = sqliteTable('project_doc_recipes', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  repository: text('repository'),
+  path: text('path').notNull(),
+  purpose: text('purpose').notNull(),
+  applies: text('applies').notNull(),
+  words: text('words').notNull(),
+  rank: integer('rank').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+/**
  * A Project's "never" list: the commands always refused to its agents, in the order they were
  * listed. `entry` is the JSON of a `NeverEntry`: a program with its leading arguments, or a
  * catalogue command by its id. Read live by every call, never copied into a mission.
@@ -2501,7 +2520,8 @@ export const attemptWrites = sqliteTable(
       .notNull()
       .references(() => buildings.id, { onDelete: 'cascade' }),
     attemptId: text('attempt_id').notNull(),
-    taskId: text('task_id').notNull(),
+    /** Null for a write of no task: the documenter's (#146). */
+    taskId: text('task_id'),
     sessionId: text('session_id').notNull(),
     repository: text('repository').notNull(),
     path: text('path').notNull(),
@@ -2612,6 +2632,41 @@ export const buildingCheckRuns = sqliteTable(
     startedAt: text('started_at').notNull(),
   },
   (table) => [primaryKey({ columns: [table.attemptId, table.name, table.place] })],
+)
+
+/**
+ * A pass of the documenter in a Building (#146): `full`, or `delta` on the files it was handed
+ * (JSON), its lineage and the `end` attempt its writes are attributed to; it waits for a slot,
+ * runs, then is reported (the files changed and why, or the reason nothing changed, kept as
+ * evidence) or failed with why.
+ */
+export const documenterPasses = sqliteTable(
+  'documenter_passes',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    missionId: text('mission_id').notNull(),
+    number: integer('number').notNull(),
+    mode: text('mode').notNull(),
+    files: text('files').notNull(),
+    state: text('state').notNull(),
+    lineage: text('lineage').notNull(),
+    attemptId: text('attempt_id').notNull(),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull().default(false),
+    /** The files the report names, with why (JSON); null before a report. */
+    changed: text('changed').$type<Masked<string>>(),
+    noChangeReason: text('no_change_reason').$type<Masked<string>>(),
+    evidenceId: text('evidence_id'),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    unique('documenter_pass_number_in_building').on(table.buildingId, table.number),
+    uniqueIndex('documenter_pass_of_lineage').on(table.lineage),
+  ],
 )
 
 /** The files a running task holds, from its targets: one holder per file of a Building. */
