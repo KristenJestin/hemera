@@ -46,6 +46,7 @@ import { HelpersRpcs } from './helpers.ts'
 import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
+import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
@@ -192,7 +193,14 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
  */
 export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 
-export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs, EngineSettingsRpcs)
+/** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
+export const EngineReviewRpcs = DiffRpcs
+
+export const EngineMainRpcs = EngineMainCoreRpcs.merge(
+  EngineApartRpcs,
+  EngineSettingsRpcs,
+  EngineReviewRpcs,
+)
 
 /**
  * Everything the engine serves: what main asks, and the proofs (#144), served apart until their
