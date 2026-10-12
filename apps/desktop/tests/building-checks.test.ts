@@ -516,6 +516,49 @@ describe('A check on an exclusive resource', () => {
   })
 })
 
+describe('A requirement’s checks', () => {
+  test('a requirement’s checks run once every task covering it is done, not before, and once', async () => {
+    const seen = await checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, (projectId) =>
+            Effect.asVoid(
+              saveCheck(
+                projectId,
+                null,
+                check('unit', checkLine('unit.log', 0), { when: 'requirement' }),
+              ),
+            ),
+          )
+          const { grantId } = yield* builderOf(mission.id)
+          // T3 waits for T1 and T2: the order in which every task of R1 gets done.
+          const ranBefore: number[] = []
+          for (const task of ['T1', 'T2', 'T4', 'T3']) {
+            ranBefore.push(ranIn('unit.log').length)
+            yield* call(grantId, 'task_start', { task })
+            yield* call(grantId, 'task_finished', { task, summary: 'Done.' })
+          }
+          yield* until(
+            Effect.map(buildingNow(mission.id), (view) =>
+              view.scopes.some((one) => one.verdict !== null),
+            ),
+          )
+          return { ranBefore, view: yield* buildingNow(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.ranBefore).toEqual([0, 0, 0, 0])
+    expect(seen.view.scopes.map((one) => [one.scope, one.subject, one.verdict])).toEqual([
+      ['requirement', 'R1', 'green'],
+    ])
+    expect(checksOf(seen.view.scopes[0])).toEqual([
+      { name: 'unit', place: '', verdict: 'green', detail: '' },
+    ])
+    expect(ranIn('unit.log')).toHaveLength(1)
+  })
+})
+
 describe('The final checks', () => {
   test('a final check records its tree, keeps its whole output as evidence, and is said in the journal', async () => {
     const seen = await checksEngine(data).run(({ profile }) =>

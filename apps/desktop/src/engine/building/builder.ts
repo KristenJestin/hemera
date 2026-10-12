@@ -93,6 +93,7 @@ import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
+import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
 import { Snapshots, type SnapshotFailed } from './snapshots.ts'
 import {
@@ -304,6 +305,45 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         loop.commitLeft(building).pipe(
           provided,
           Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
+          Effect.forkIn(layerScope),
+          Effect.asVoid,
+        )
+      // One requirement's checks at a time: two tasks done together never run them twice.
+      const requirementTurn = Semaphore.makeUnsafe(1)
+      /**
+       * A requirement whose every task is done has its checks run once (#143), in the background:
+       * a red opens an attempt on it for the Builder. Only when the mission's copy has some.
+       */
+      const requirementsDone = (building: BuildingRow, taskId: string) =>
+        Effect.gen(function* () {
+          const copy = yield* validationSettingsOf(building.missionId)
+          if (copy === null) return
+          if (!checksOf(copy.sections).checks.some((one) => one.when === 'requirement')) return
+          const database = yield* Database
+          const tasks = yield* tasksIn(database, building.id)
+          for (const requirement of tasks.find((one) => one.id === taskId)?.requirements ?? []) {
+            // A replaced task is covered by the tasks that replace it.
+            const covering = tasks.filter(
+              (one) => one.requirements.includes(requirement) && one.replacedBy.length === 0,
+            )
+            if (!covering.every((one) => one.state === 'done')) continue
+            yield* Semaphore.withPermits(
+              requirementTurn,
+              1,
+            )(
+              Effect.gen(function* () {
+                const judged = (yield* attemptsIn(database, building.id)).some(
+                  (one) => one.scope === 'requirement' && one.subject === requirement,
+                )
+                if (!judged) yield* loop.judgeScope(building.missionId, 'requirement', requirement)
+              }),
+            )
+          }
+        }).pipe(
+          provided,
+          Effect.catchCause((cause) =>
+            said(`a requirement's checks did not run: ${String(cause)}`),
+          ),
           Effect.forkIn(layerScope),
           Effect.asVoid,
         )
@@ -597,6 +637,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (done === null) return { judgement, said: null }
+          yield* requirementsDone(building, taskId)
           yield* commitsLeft(building)
           if (done) yield* ended(building)
           return { judgement, said: null }
