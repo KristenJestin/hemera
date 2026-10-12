@@ -75,6 +75,11 @@ export interface MissionFrameProps {
   type: 'feature' | 'bug' | 'maintenance'
   ball: Ball
   /**
+   * Whether an agent at work is Hemera's face rather than the running arc: left out, it is; a page
+   * that shows the face itself turns it off, so that the face is drawn once.
+   */
+  ballFace?: boolean | undefined
+  /**
    * What the stage's main agent does now, in words (its Now line), or a turn that ended without a
    * word said in words; the ball's legend when left out.
    */
@@ -160,6 +165,7 @@ export function MissionFrame({
   frozen,
   type,
   ball,
+  ballFace = true,
   now,
   onNow,
   nowChip,
@@ -193,7 +199,7 @@ export function MissionFrame({
           <StageTrack stage={stage} round={round} frozen={frozen} />
           <div className={META}>
             <span className={META_ITEM}>
-              <BallMark ball={ball} legend face />
+              <BallMark ball={ball} legend face={ballFace} />
               {now !== undefined && onNow !== undefined ? (
                 <button type="button" className={NOW_LINE} data-now="" onClick={onNow}>
                   <span className="truncate">{now}</span>
