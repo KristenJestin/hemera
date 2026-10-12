@@ -28,6 +28,8 @@ export const ProbeChip = Schema.Struct({
   state: ProbeState,
   /** Its session gave no sign in a turn for the stuck bound (#40) and has not since. */
   stuck: Schema.Boolean,
+  /** While it runs, the title of its latest tool call (#206); null before its first, and once it ended. */
+  step: Schema.NullOr(Schema.String),
   startedAt: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
   outcome: Schema.NullOr(ProbeOutcome),
