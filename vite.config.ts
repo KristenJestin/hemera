@@ -86,6 +86,8 @@ export default defineConfig({
     ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED, '**/*.md'],
   },
   test: {
+    // The watchdog ends a stories run that stops finishing files, and names the file it waits on.
+    reporters: ['default', './tools/stories-watchdog.ts'],
     projects: [
       {
         test: {
