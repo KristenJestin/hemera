@@ -861,12 +861,11 @@ const mergeIn = (
         base: join(scratch, 'base'),
         theirs: join(scratch, 'theirs'),
       }
-      // A checkout with CRLF lines (Git for Windows' autocrlf) against blobs with LF lines: merged
-      // with LF lines, then given back the checkout's CRLF.
-      const crlf = ours.includes('\r\n')
-      writeFileSync(sides.ours, crlf ? ours.replaceAll('\r\n', '\n') : ours)
-      writeFileSync(sides.base, base)
-      writeFileSync(sides.theirs, theirs)
+      // Line endings differ between a checkout and its blobs (Git for Windows' autocrlf, a file
+      // committed with CRLF): the three sides are merged with LF lines, then given the checkout's.
+      writeFileSync(sides.ours, lf(ours))
+      writeFileSync(sides.base, lf(base))
+      writeFileSync(sides.theirs, lf(theirs))
       // Git answers the number of conflicts as its exit code: the merge is read from the file.
       const clean = yield* run(
         scratch,
@@ -887,11 +886,32 @@ const mergeIn = (
         Effect.as(true),
         Effect.catchTag('GitFailed', () => Effect.succeed(false)),
       )
-      const read = readFileSync(sides.ours, 'utf8')
-      const merged = crlf ? read.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n') : read
+      const merged = withEndingsOf(ours, readFileSync(sides.ours, 'utf8'))
       return { base, ours, theirs, merged, clean: clean && !merged.includes('<<<<<<< workspace') }
     }),
   )
+
+const lf = (text: string) => text.replaceAll('\r\n', '\n')
+
+/**
+ * Merged lines given back the endings of the Workspace's file: a line it holds keeps its ending (a
+ * repeated line, that of its last occurrence), any other line takes the ending of the line above.
+ */
+function withEndingsOf(ours: string, merged: string): string {
+  if (!ours.includes('\r\n')) return merged
+  const held = ours.split('\n').slice(0, -1)
+  const endings = new Map(
+    held.map((line) => (line.endsWith('\r') ? [line.slice(0, -1), '\r\n'] : [line, '\n'])),
+  )
+  let above = held[0]?.endsWith('\r') === true ? '\r\n' : '\n'
+  const lines = merged.split('\n')
+  const last = lines.pop() ?? ''
+  const ended = lines.map((line) => {
+    above = endings.get(line) ?? above
+    return `${line}${above}`
+  })
+  return `${ended.join('')}${last}`
+}
 
 /** A patch written to a scratch file for the time of a use, then removed. */
 const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>

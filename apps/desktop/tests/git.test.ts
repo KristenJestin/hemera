@@ -706,4 +706,38 @@ describe('A proof’s addition is merged three ways (#144)', () => {
     expect(merged.clean).toBe(true)
     expect(merged.merged).toBe('one\r\ntwo\r\nthree\r\n')
   })
+
+  /** A file committed as `stored` (autocrlf off, on any OS), the patch that makes it `changed`, merged into `ours`. */
+  const mergedInto = (stored: string, changed: string, ours: string) => {
+    const api = repository(join(folder, 'api'))
+    git(api, 'config', 'core.autocrlf', 'false')
+    writeFileSync(join(api, 'tests.mjs'), stored)
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'tests')
+    const commit = git(api, 'rev-parse', 'HEAD').trim()
+    writeFileSync(join(api, 'tests.mjs'), changed)
+    // Untrimmed: the last line of a CRLF patch ends on its CR.
+    const patch = execFileSync('git', ['diff', '--', 'tests.mjs'], { cwd: api, encoding: 'utf8' })
+    git(api, 'checkout', '-q', '--', 'tests.mjs')
+    return asked(Git.use((one) => one.mergeAddition(api, commit, 'tests.mjs', patch, ours)))
+  }
+
+  test('a file committed with CRLF lines merges an addition cleanly, and keeps its CRLF', async () => {
+    const merged = await mergedInto('one\r\ntwo\r\n', 'one\r\ntwo\r\nthree\r\n', 'one\r\ntwo\r\n')
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe('one\r\ntwo\r\nthree\r\n')
+  })
+
+  test('a file with mixed line endings keeps each line’s ending, and a new line takes the one above it', async () => {
+    const mixed = 'one\r\ntwo\nthree\r\n'
+    const merged = await mergedInto(mixed, `${mixed}four\r\n`, mixed)
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe('one\r\ntwo\nthree\r\nfour\r\n')
+  })
+
+  test('a file with LF lines stays LF', async () => {
+    const merged = await mergedInto('one\ntwo\n', 'one\ntwo\nthree\n', 'one\ntwo\n')
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe('one\ntwo\nthree\n')
+  })
 })
