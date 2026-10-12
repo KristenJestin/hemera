@@ -23,12 +23,15 @@ Everything else is history: one click away, folded.
 The Spec keeps the middle, its sections the left. The rail reads top to bottom as the three
 questions above, in an order that never changes:
 
-- **The Planning card: what happens.** Hemera's face, in the expression of what happens; one
-  line that says it (the Planner's own line while it works, then the facts); what the Planner does
-  next; the chips of what runs (the cold read, the Probes); the four steps, one line each, with
-  their count at the end. Nothing in the card leads elsewhere: what waits is right under it.
+- **The stage card: what happens.** Hemera's face, in the expression of what happens; one line
+  that says what happens or what waits (the Planner's own line while it works, then the facts:
+  "5 questions wait for your answer"); the progress line under it, the step under way and how far
+  it is ("The Spec · 4 of 8 sections written"); the chips of what runs (the cold read, the
+  Probes). Nothing in the card leads elsewhere: what waits is right under it. The card is the
+  design system's `StageCard` (`Blocks/Mission/Stage card`), the same on Ready and Building.
 - **For you: what waits.** One line per kind, the agents blocked first: the permissions, the
-  questions, the findings to settle. A line unfolds to one line per item; an item unfolds to the
+  questions, the findings to settle. The questions are one list that grows, in the order they
+  were asked, newest last: no wave, no grouping and no count by wave. A line unfolds to one line per item; an item unfolds to the
   whole of it (a permission to its need card, a finding to its paragraph and Dismiss). The
   questions stand open, because answering them is the work of the page: one question whole, the
   others one line each. Nothing waits: "Nothing waits for you"; only Freeze left: "Only Freeze is
@@ -41,7 +44,7 @@ nothing grows unless they open it. A cold read of seven paragraphs is one line u
 
 ### The header
 
-The Now line leaves the header: it is the Planning card's line now, plain text, never a button.
+The Now line leaves the header: it is the stage card's line now, plain text, never a button.
 The header keeps who has the ball as a status mark and its word, never the face, so the face is
 drawn once on the page (`MissionFrame`'s `ballFace`).
 
@@ -79,16 +82,15 @@ they just pressed an option of the answered question. Nothing measures the page 
 scroll. The story `Answering keeps the view` checks the answered question does not move by a
 pixel and the next one is in view with the focus.
 
-## The alternative: "Next first" (`Explorations/Planning/Next first`)
+## The alternative, dropped
 
-Same card, same folded rest; in place of For you, only the next thing stands whole (the first
-permission, else the first question, else the first finding) and what follows it is counted on
-one line ("Then: 4 questions"). Calmer, but the user cannot see what waits behind the first thing
-nor choose the order; a permission blocks every question behind it. Not recommended.
+"Next first" showed only the next thing whole and counted the rest on one line. Calmer, but the
+user could not see what waits behind the first thing nor choose the order. The maintainer chose
+"For you"; its stories are removed.
 
 ## Decisions taken by default
 
-- The four steps are status only, no longer buttons: For you, right under them, holds what they
+- The four steps give way to the progress line: For you, right under the card, holds what they
   led to.
 - Dependencies, the triage answer and a ticket's change follow the same rule (a proposed
   dependency or the triage is one For you line, a change of the ticket too); they are not drawn in

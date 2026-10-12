@@ -17,7 +17,7 @@ import {
 } from '../../surfaces/planning/planning-fixtures.ts'
 
 /**
- * ACME-12, "Export notes as Markdown", at a real size: eight questions in two waves, a cold read
+ * ACME-12, "Export notes as Markdown", at a real size: eight questions, a cold read
  * of seven findings of a paragraph each, two Probes, five permission requests, and a Spec half
  * written. Each moment of the journey the page must make readable is one function.
  */
@@ -131,7 +131,7 @@ const Q3 = question({
 
 const Q4 = question({
   id: 'Q4',
-  wave: 2,
+  wave: 1,
   text: 'Who may export a shared note?',
   why: 'A shared note can be read by people outside its workspace; an export is a copy that leaves Acme.',
   options: [
@@ -151,7 +151,7 @@ const Q4 = question({
 
 const Q5 = question({
   id: 'Q5',
-  wave: 2,
+  wave: 1,
   text: 'What is the file called when the note has no title?',
   why: 'A file needs a name; about one note in twenty has no title today.',
   options: [
@@ -169,7 +169,7 @@ const Q5 = question({
 
 const Q6 = question({
   id: 'Q6',
-  wave: 2,
+  wave: 1,
   text: 'From how many notes does an export run in the background?',
   why: 'Below it, the file comes in the same request; above it, a job writes an archive and says when it is ready.',
   options: [
@@ -185,7 +185,7 @@ const Q6 = question({
 
 const Q7 = question({
   id: 'Q7',
-  wave: 2,
+  wave: 1,
   text: 'Are the dates written in the reader’s time zone or in UTC?',
   why: 'The front matter keeps created and updated dates; a wiki shows them as they are written.',
   options: [
@@ -199,7 +199,7 @@ const Q7 = question({
 
 const Q8 = question({
   id: 'Q8',
-  wave: 2,
+  wave: 1,
   text: 'Do tags go in the front matter, or as a line at the end of the body?',
   why: 'Some wikis read tags from the front matter, others from #words in the text.',
   options: [
@@ -222,12 +222,12 @@ const answered = (q: Question, given: AnswerVersion): Question => ({
   answers: [given],
 })
 
-/** The waves the questions were asked in, the first first: at 10:12 and at 10:40. */
-function waves(questions: readonly Question[]): Wave[] {
-  return [
-    { number: 1, askedAt: '10:12', questions: questions.filter((q) => q.wave === 1) },
-    { number: 2, askedAt: '10:40', questions: questions.filter((q) => q.wave === 2) },
-  ].filter((wave) => wave.questions.length > 0)
+/**
+ * The questions as the page sees them: one list that grows, in the order they were asked. The
+ * data still carries waves until the build drops them; the page draws none.
+ */
+function asked(questions: readonly Question[]): Wave[] {
+  return [{ number: 1, askedAt: '10:12', questions }]
 }
 
 /** Half of the Spec: Why, Goals and Impact written, Requirements being written, the rest empty. */
@@ -452,12 +452,12 @@ const HALF_WRITTEN: Partial<PlanningData> = {
   requirements: REQUIREMENTS.slice(0, 2),
 }
 
-/** Eight questions asked in two waves: two answered, one waits on someone, five wait for the user. */
+/** Eight questions asked: two answered, one waits on someone, five wait for the user. */
 export function questionsWaiting(): AttentionMoment {
   return moment({
     ...HALF_WRITTEN,
     requirementsState: 'written',
-    waves: waves([
+    waves: asked([
       answered(Q1, answer('A', 'integrated', '10:20')),
       answered(Q2, answer('B', 'integrated', '10:21')),
       Q3,
@@ -478,7 +478,7 @@ export function takingAnswers(): AttentionMoment {
       requirementsState: 'written',
       requirements: REQUIREMENTS,
       tasks: TASKS,
-      waves: waves([
+      waves: asked([
         answered(Q1, answer('A', 'integrated', '10:20')),
         answered(Q2, answer('B', 'integrated', '10:21')),
         answered(Q3, answer('A', 'integrated', '10:51')),
@@ -495,7 +495,7 @@ export function takingAnswers(): AttentionMoment {
 }
 
 const ALL_SETTLED = (): Wave[] =>
-  waves(
+  asked(
     [Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8].map((q) =>
       answered(q, answer(q.recommended, 'integrated', '10:52')),
     ),
@@ -527,12 +527,12 @@ export function coldReadFindings(): AttentionMoment {
   )
 }
 
-/** Two Probes run on the half-written Spec and wait on five permissions; wave 1 is answered. */
+/** Two Probes run on the half-written Spec and wait on five permissions; the first three questions are answered. */
 export function probesWithPermissions(): AttentionMoment {
   return moment(
     {
       ...HALF_WRITTEN,
-      waves: waves([
+      waves: asked([
         answered(Q1, answer('A', 'integrated', '10:20')),
         answered(Q2, answer('B', 'integrated', '10:21')),
         answered(Q3, answer('A', 'integrated', '10:22')),

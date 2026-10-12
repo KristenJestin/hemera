@@ -3,22 +3,16 @@ import { type ReactNode, useState } from 'react'
 import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
 import { freezeOf, planningNow } from '../../blocks/planning/planning-progress.ts'
 import { type Finding, type Question, openBySection } from '../../blocks/planning/planning-types.ts'
-import { QuestionCard } from '../../blocks/planning/question-card.tsx'
 import { SectionsNav, SpecRead } from '../../blocks/planning/spec-read.tsx'
-import { NeedCard, type PermissionChoice } from '../../blocks/need/need-card.tsx'
+import type { PermissionChoice } from '../../blocks/need/need-card.tsx'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
-import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { MissionFrame } from '../../surfaces/mission/mission-frame.tsx'
-import { type Attention, attentionOf, findingsToSettle } from './attention.ts'
+import { attentionOf } from './attention.ts'
 import { type AttentionMoment, MOMENTS, type MomentName } from './fixtures.ts'
 import { EverythingElse, ForYou, PlanningCard, type RailHandlers } from './rail.tsx'
 
-/** How the rail lays out what waits: everything summarised, or the next thing alone. */
-export type RailLayout = 'for-you' | 'next-first'
-
 export interface PlanningExplorationProps extends RailHandlers {
   moment: MomentName
-  layout: RailLayout
   onFreeze: () => void
 }
 
@@ -70,95 +64,13 @@ const MIDDLE = 'flex min-w-0 flex-1 flex-col gap-6'
 const RAIL = 'flex w-view-narrow min-w-0 shrink-0 flex-col gap-6'
 
 /**
- * The alternative: only the next thing for the user stands whole — the first permission, else the
- * first question to answer, else the first finding — and what follows it is counted on one line.
- */
-function NextFirst({
-  attention,
-  moment,
-  handlers,
-}: {
-  attention: Attention
-  moment: AttentionMoment
-  handlers: RailHandlers
-}): ReactNode {
-  const { data, permissions } = moment
-  const open = data.waves
-    .flatMap((wave) => wave.questions)
-    .filter((question) => question.state === 'open')
-  const findings = findingsToSettle(data)
-  const permission = permissions[0]
-  const question = open[0]
-  const finding = findings[0]
-  // What follows the thing shown, by kind: the one shown is not counted again.
-  const first =
-    permission !== undefined ? 'permission' : question !== undefined ? 'question' : 'finding'
-  const left = (count: number, kind: typeof first, words: string): string[] => {
-    const rest = count - (kind === first ? 1 : 0)
-    return rest > 0 ? [`${String(rest)} ${words}`] : []
-  }
-  const then = [
-    ...left(permissions.length, 'permission', 'permissions'),
-    ...left(open.length, 'question', 'questions'),
-    ...left(findings.length, 'finding', 'findings'),
-  ]
-  return (
-    <section aria-label="Next for you" className="flex flex-col gap-3">
-      <SectionHead title="Next for you" count={attention.waiting} calls />
-      {permission !== undefined ? (
-        <NeedCard
-          key={permission.id}
-          ask={{
-            kind: 'permission',
-            command: permission.command,
-            agentReason: permission.agentReason,
-            hemeraReason: permission.hemeraReason,
-            choices: ['allow-once', 'allow-for-mission', 'deny'],
-          }}
-          title={`${permission.who} asks to run a command`}
-          when={permission.when}
-          role="Probe"
-          planning
-          onPermission={(choice) => handlers.onPermission(permission.id, choice)}
-        />
-      ) : question !== undefined ? (
-        <div className="rounded-xl border border-border">
-          <QuestionCard
-            key={question.id}
-            question={question}
-            discussed={false}
-            mentionables={MENTIONABLES}
-            onAnswer={handlers.onAnswer}
-            onWaitOnSomeone={handlers.onWaitOnSomeone}
-            onCopyDraft={handlers.onCopyDraft}
-            onAcceptProposed={handlers.onAcceptProposed}
-            onDismissProposed={handlers.onDismissProposed}
-            onDiscuss={handlers.onDiscuss}
-          />
-        </div>
-      ) : finding !== undefined ? (
-        <p className="rounded-xl border border-border px-4 py-3 text-sm break-words">
-          {finding.text}
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {attention.ready ? 'Only Freeze is left' : 'Nothing waits for you'}
-        </p>
-      )}
-      {then.length > 0 && <p className="text-sm text-muted-foreground">Then: {then.join(' · ')}</p>}
-    </section>
-  )
-}
-
-/**
  * The Planning page of ACME-12 as #193 proposes it, in its mission frame: the header without a Now
- * line (it is in the Planning card now), the Spec in the middle with its sections down the left,
+ * line (it is in the stage card now), the Spec in the middle with its sections down the left,
  * and the rail — what happens, what waits for the user, and the rest folded. The story's engine
  * takes the answers, the permissions and the dismissals.
  */
 export function PlanningExploration({
   moment,
-  layout,
   onFreeze,
   ...handlers
 }: PlanningExplorationProps): ReactNode {
@@ -222,18 +134,14 @@ export function PlanningExploration({
           </section>
           <aside aria-label="What calls for you" className={RAIL}>
             <PlanningCard attention={attention} data={data} onOpenProbe={handlers.onOpenProbe} />
-            {layout === 'for-you' ? (
-              <ForYou
-                key={moment}
-                attention={attention}
-                permissions={shown.permissions}
-                data={data}
-                mentionables={MENTIONABLES}
-                handlers={engine}
-              />
-            ) : (
-              <NextFirst attention={attention} moment={shown} handlers={engine} />
-            )}
+            <ForYou
+              key={moment}
+              attention={attention}
+              permissions={shown.permissions}
+              data={data}
+              mentionables={MENTIONABLES}
+              handlers={engine}
+            />
             <EverythingElse data={data} mentionables={MENTIONABLES} handlers={engine} />
           </aside>
         </div>

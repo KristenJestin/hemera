@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { DependenciesCard, VisionCard } from '../../blocks/planning/planning-cards.tsx'
 import { SeverityMark } from '../../blocks/planning/planning-marks.tsx'
-import { type StepState, targetId } from '../../blocks/planning/planning-progress.ts'
+import { targetId } from '../../blocks/planning/planning-progress.ts'
 import type {
   Finding,
   PlanningData,
@@ -15,12 +15,11 @@ import { ProbeChip } from '../../blocks/planning/probes.tsx'
 import { QuestionCard } from '../../blocks/planning/question-card.tsx'
 import { SendButton } from '../../blocks/planning/sending.tsx'
 import { NeedCard, type PermissionChoice } from '../../blocks/need/need-card.tsx'
-import { Face } from '../../components/face/face.tsx'
-import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
+import { StageCard } from '../../blocks/mission/stage-card.tsx'
+import { Frame } from '../../components/frame/frame.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
 import {
   IconCheck,
   IconChevronRight,
@@ -28,32 +27,23 @@ import {
   IconEye,
   IconHelpCircle,
   IconLink,
-  IconListCheck,
   IconMessages,
   IconShieldLock,
   IconTestPipe,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { type Attention, findingsToSettle } from './attention.ts'
+import { type Attention, findingsToSettle, questionsOf } from './attention.ts'
 import type { PermissionAsk } from './fixtures.ts'
 
 /**
- * The pieces of the Planning page's rail as #193 proposes it: the Planning card that says what
- * happens (the face, one line, what runs, the four steps), the For you band that lists what waits
+ * The pieces of the Planning page's rail as #193 proposes it: the stage card that says what
+ * happens (the face, one line, where Planning stands, what runs), the For you band that lists what waits
  * for the user — one line per kind, unfolded on demand — and the rest, one quiet line each.
  */
 
 /** Everything the rail can do: the page's own handlers, and a permission answered. */
 export interface RailHandlers extends PlanningHandlers {
   onPermission: (id: string, choice: PermissionChoice) => void
-}
-
-const STEP_MARK: Record<StepState, MarkState> = {
-  todo: 'todo',
-  running: 'running',
-  waiting: 'waiting',
-  done: 'done',
-  failed: 'failed',
 }
 
 /** A line that opens what it summarises: the whole width, its chevron turning as it opens. */
@@ -125,10 +115,8 @@ export interface PlanningCardProps {
 }
 
 /**
- * Where Planning stands and what happens now, at the top of the rail: Hemera's face, which takes
- * the expression of what happens and holds still in it; the one line that says it, with what the
- * Planner does next while it works; the chips of what runs; and the four steps, one line each.
- * Nothing in it leads elsewhere: what waits for the user is right under it.
+ * Planning's stage card, at the top of the rail: the face, the line that says what happens or
+ * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes.
  */
 export function PlanningCard({ attention, data, onOpenProbe }: PlanningCardProps): ReactNode {
   const pass = data.passes.at(-1)
@@ -138,74 +126,38 @@ export function PlanningCard({ attention, data, onOpenProbe }: PlanningCardProps
     (probe) => probe.state === 'running' || probe.state === 'preparing',
   )
   return (
-    <section aria-label="Planning" className="rounded-xl">
-      <Frame header={<FrameHeader icon={<IconListCheck size="md" />} title="Planning" />}>
-        <div className="flex min-w-0 items-start gap-3 px-4 py-3">
-          <Face state={attention.face} size="md" legend />
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <p role="status" className="text-sm font-medium break-words">
-              {attention.now}
-            </p>
-            {attention.next !== null && (
-              <p className="text-xs break-words text-muted-foreground">
-                Next: {attention.next.charAt(0).toLowerCase() + attention.next.slice(1)}
-              </p>
+    <StageCard
+      stage="Planning"
+      face={attention.face}
+      line={attention.now}
+      progress={attention.progress}
+      running={
+        reading || probes.length > 0 ? (
+          <>
+            {reading && (
+              <LiveChip
+                name={`Cold read ${pass.label}`}
+                icon={<IconEye size="sm" />}
+                state="running"
+                startedAt={pass.startedAt}
+                endedAt={null}
+                glance={{
+                  kind: 'helper',
+                  type: 'Cold read',
+                  step:
+                    pass.state === 'waiting_for_slot'
+                      ? 'Waits for a free agent'
+                      : 'A fresh reader goes through the Spec',
+                }}
+              />
             )}
-            {(reading || probes.length > 0) && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {reading && (
-                  <LiveChip
-                    name={`Cold read ${pass.label}`}
-                    icon={<IconEye size="sm" />}
-                    state="running"
-                    startedAt={pass.startedAt}
-                    endedAt={null}
-                    glance={{
-                      kind: 'helper',
-                      type: 'Cold read',
-                      step:
-                        pass.state === 'waiting_for_slot'
-                          ? 'Waits for a free agent'
-                          : 'A fresh reader goes through the Spec',
-                    }}
-                  />
-                )}
-                {probes.map((probe) => (
-                  <ProbeChip key={probe.id} probe={probe} onOpen={onOpenProbe} />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        <ol
-          aria-label="Where Planning stands"
-          className="flex flex-col border-t border-border py-1"
-        >
-          {attention.steps.map((step) => (
-            <li
-              key={step.id}
-              aria-label={step.title}
-              className="flex min-h-control-sm min-w-0 items-center gap-2.5 px-4"
-            >
-              <StatusMark state={STEP_MARK[step.state]} size="sm" legend />
-              <span
-                className={cn(
-                  'shrink-0 text-sm',
-                  step.state === 'todo' ? 'text-muted-foreground' : 'font-medium',
-                )}
-              >
-                {step.title}
-              </span>
-              {(step.state !== 'todo' || step.id === 'spec') && step.detail !== null && (
-                <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
-                  {step.detail}
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-      </Frame>
-    </section>
+            {probes.map((probe) => (
+              <ProbeChip key={probe.id} probe={probe} onOpen={onOpenProbe} />
+            ))}
+          </>
+        ) : undefined
+      }
+    />
   )
 }
 
@@ -242,7 +194,7 @@ export interface QuestionsProps {
  * right under it with the focus: what the user looked at stays where it was, and nothing scrolls.
  */
 export function QuestionsToAnswer({ data, mentionables, handlers }: QuestionsProps): ReactNode {
-  const all = data.waves.flatMap((wave) => wave.questions)
+  const all = questionsOf(data)
   const byId = new Map(all.map((question) => [question.id, question]))
   // The questions listed are those that waited when the page was drawn: one answered stays in place.
   const [listed] = useState(() =>
@@ -428,7 +380,7 @@ const plural = (count: number, one: string, many: string): string =>
 
 /** What waits for the user, in words: "5 to answer · 1 waits on someone". */
 function questionsDetail(data: PlanningData): string {
-  const all = data.waves.flatMap((wave) => wave.questions)
+  const all = questionsOf(data)
   const open = all.filter((question) => question.state === 'open').length
   const waiting = all.filter((question) => question.state === 'waiting').length
   return [
@@ -458,9 +410,9 @@ export function ForYou({
   questionsOpen = true,
 }: ForYouProps): ReactNode {
   const findings = findingsToSettle(data)
-  const asked = data.waves
-    .flatMap((wave) => wave.questions)
-    .some((question) => question.state === 'open' || question.state === 'waiting')
+  const asked = questionsOf(data).some(
+    (question) => question.state === 'open' || question.state === 'waiting',
+  )
   const pass = data.passes.at(-1)
   const empty = permissions.length === 0 && !asked && findings.length === 0
   return (
@@ -543,9 +495,7 @@ export interface EverythingElseProps {
  * give at any time.
  */
 export function EverythingElse({ data, mentionables, handlers }: EverythingElseProps): ReactNode {
-  const answered = data.waves
-    .flatMap((wave) => wave.questions)
-    .filter((question) => question.state === 'answered')
+  const answered = questionsOf(data).filter((question) => question.state === 'answered')
   const taking = answered.filter((question) => question.answers.at(-1)?.inputState !== 'integrated')
   const pass = data.passes.at(-1)
   const settled =

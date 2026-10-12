@@ -7,9 +7,10 @@ import { PlanningExploration } from './screen.tsx'
  * #193, the recommended proposal: a Planning page that tells at a glance what waits for the user,
  * what happens now, and where the Spec stands. The Spec keeps the middle and its sections the
  * left; the header loses its Now line. The rail reads top to bottom as three questions: the
- * Planning card (what happens: Hemera's face in the expression of what happens, one line, the
- * chips of what runs, the four steps), For you (what waits: permissions, questions, findings, one
- * line per kind, the questions open one at a time), and the rest folded one quiet line each.
+ * stage card (what happens: Hemera's face in the expression of what happens, one line, where
+ * Planning stands, the chips of what runs), For you (what waits: permissions, questions,
+ * findings, one line per kind, the questions one list that grows, open one at a time), and the
+ * rest folded one quiet line each.
  */
 const meta = {
   title: 'Explorations/Planning/For you',
@@ -18,7 +19,6 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   args: {
     moment: 'questionsWaiting',
-    layout: 'for-you',
     onAnswer: fn(() => Promise.resolve()),
     onWaitOnSomeone: fn(() => Promise.resolve()),
     onCopyDraft: fn(),
@@ -64,7 +64,7 @@ const inView = (element: Element): boolean => {
 
 /**
  * The first minutes: the Planner reads before it writes. The face reads, the card says what it
- * reads and what it does next; nothing waits for the user, and nothing under the title looks
+ * reads and that no section is written yet; nothing waits for the user, and nothing under the title looks
  * like it leads anywhere.
  */
 export const ReadingAtTheStart: Story = {
@@ -73,7 +73,7 @@ export const ReadingAtTheStart: Story = {
     const planning = card(canvasElement)
     await expect(planning.getByRole('img', { name: 'Reading' })).toBeVisible()
     await expect(planning.getByRole('status')).toHaveTextContent(/^Reads the living spec/)
-    await expect(planning.getByText(/Next: write Why and Goals/)).toBeVisible()
+    await expect(planning.getByText('0 of 8 sections written')).toBeVisible()
     await expect(forYou(canvasElement).getByText('Nothing waits for you')).toBeVisible()
     await expect(
       within(canvasElement).queryByRole('button', { name: /Reads the living spec/ }),
@@ -82,15 +82,16 @@ export const ReadingAtTheStart: Story = {
 }
 
 /**
- * Eight questions in two waves: two answered, one waiting on someone, five to answer. The face
+ * Eight questions asked, one list: two answered, one waiting on someone, five to answer. The face
  * waits for an answer; the questions stand open, the first to answer whole and the others one
  * line each; the answered ones are one line under the rest.
  */
 export const QuestionsWaiting: Story = {
   play: async ({ canvasElement }) => {
-    await expect(
-      card(canvasElement).getByRole('img', { name: 'Waiting for your answer' }),
-    ).toBeVisible()
+    const planning = card(canvasElement)
+    await expect(planning.getByRole('img', { name: 'Waiting for your answer' })).toBeVisible()
+    await expect(planning.getByRole('status')).toHaveTextContent('5 questions wait for your answer')
+    await expect(planning.getByText('4 of 8 sections written')).toBeVisible()
     const waiting = forYou(canvasElement)
     await expect(waiting.getByRole('button', { name: /Questions/ })).toHaveTextContent(
       '5 to answer · 1 waits on someone',
@@ -204,7 +205,7 @@ export const FindingsUnfolded: Story = {
 }
 
 /**
- * Two Probes run and wait on five permissions. Their chips are in the Planning card, the face
+ * Two Probes run and wait on five permissions. Their chips are in the stage card, the face
  * waits for a permission, and the five are one line in For you.
  */
 export const ProbesWithPermissions: Story = {
@@ -242,8 +243,7 @@ export const PermissionAnswered: Story = {
 export const ReadyToFreeze: Story = {
   args: { moment: 'readyToFreeze' },
   play: async ({ canvasElement, args }) => {
-    // The face comes first in the card; the steps' marks say Done too.
-    await expect(card(canvasElement).getAllByRole('img')[0]).toHaveAccessibleName('Done')
+    await expect(card(canvasElement).getByRole('img', { name: 'Done' })).toBeVisible()
     await expect(forYou(canvasElement).getByText('Only Freeze is left')).toBeVisible()
     const freeze = within(canvasElement).getByRole('button', { name: 'Freeze' })
     await expect(freeze).toBeEnabled()

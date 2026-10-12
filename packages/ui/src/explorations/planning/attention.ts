@@ -6,24 +6,28 @@ import {
   planningSteps,
   tally,
 } from '../../blocks/planning/planning-progress.ts'
-import type { Finding, PlanningData } from '../../blocks/planning/planning-types.ts'
+import type { Finding, PlanningData, Question } from '../../blocks/planning/planning-types.ts'
 import type { AttentionMoment } from './fixtures.ts'
 
 /**
  * What the Planning page tells at a glance, read from the facts alone: what happens now (the
- * face and one line), where Planning stands (the four steps), and how much waits for the user.
+ * face and one line), where Planning stands (its step under way), and how much waits for the user.
  */
 export interface Attention {
   face: FaceState
   /** What happens now, in one line: the Planner's own line while it works. */
   now: string
-  /** What the Planner said it does next, while it works. */
-  next: string | null
-  steps: readonly PlanningStep[]
+  /** Where Planning stands: the step under way and how far it is. */
+  progress: { step: string; detail: string }
   /** How many things wait for the user: permissions, questions to answer, findings to settle. */
   waiting: number
   /** Whether nothing is left but Freeze. */
   ready: boolean
+}
+
+/** The questions, one list in the order they were asked: the page draws no waves. */
+export function questionsOf(data: PlanningData): Question[] {
+  return data.waves.flatMap((wave) => wave.questions)
 }
 
 /** The findings of the last pass still to settle. */
@@ -82,6 +86,13 @@ function askers(moment: AttentionMoment): string {
     : `${who.slice(0, -1).join(', ')} and ${who.at(-1) ?? ''}`
 }
 
+/** The step under way, with how far it is; the Spec's count when that step says nothing more. */
+function progressOf(steps: readonly PlanningStep[]): Attention['progress'] {
+  const current = steps.find((step) => step.state !== 'done' && step.detail !== null)
+  const shown = current ?? steps.find((step) => step.id === 'spec')
+  return { step: shown?.title ?? '', detail: shown?.detail ?? '' }
+}
+
 export function attentionOf(moment: AttentionMoment): Attention {
   const { data, planner, permissions } = moment
   const { open } = tally(data)
@@ -94,8 +105,7 @@ export function attentionOf(moment: AttentionMoment): Attention {
     now: asked
       ? `${askers(moment)} ${permissions.length === 1 ? 'waits' : 'wait'} for your permission`
       : line.text,
-    next: planner.state === 'working' ? planner.next : null,
-    steps: planningSteps(moment),
+    progress: progressOf(planningSteps(moment)),
     waiting: permissions.length + open.length + findingsToSettle(data).length,
     ready,
   }
