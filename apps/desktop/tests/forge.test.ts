@@ -1120,6 +1120,57 @@ describe('A repository whose remote names no repository on its forge', () => {
   })
 })
 
+describe('A repository its remote names with what a shape would refuse', () => {
+  const write = (
+    repositoryId: string,
+    args: (place: ReadonlyArray<string>) => ReadonlyArray<string>,
+  ) =>
+    Effect.flip(
+      Effect.flatMap(forge, (port) =>
+        port.operate(repositoryId, (target, run) => run(args(target.place))),
+      ),
+    )
+
+  test('a bkt owner that is no plain word: the write is refused, not a defect', async () => {
+    const fake = fakeForge(
+      bktReady([BKT_CLOUD], [{ name: 'oss', host: 'api.bitbucket.org', active: true }]),
+    )
+    const refused = await withForge(
+      fake,
+      ({ repository }) =>
+        write(repository('api'), (place) => [
+          'pr',
+          'create',
+          ...place,
+          '--source',
+          'feat/x',
+          '--target',
+          'main',
+          '--title',
+          'X',
+        ]),
+      { api: 'git@bitbucket.org:$(x)/r.git' },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+
+  test.each([
+    ['a space', 'https://github.com/ac me/shop.git'],
+    ['a percent-encoded space', 'https://github.com/ac%20me/shop.git'],
+  ])('a gh owner holding %s: the write is refused, not a defect', async (_case, remote) => {
+    const fake = fakeForge(ghReady())
+    const refused = await withForge(
+      fake,
+      ({ repository }) =>
+        write(repository('shop'), (place) => ['pr', 'merge', '7', ...place, '--squash']),
+      { shop: remote },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+})
+
 describe('Waiters wake on a change of state, not of its detail', () => {
   test('two waiters on an unreachable forge whose message changes each check: a bounded number of checks', async () => {
     const fake = fakeForge([

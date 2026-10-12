@@ -83,6 +83,8 @@ export const SAFE_WORD = /^(?!-)[A-Za-z0-9._~-]+$/
 const NUMBER: readonly [string, RegExp] = ['<number>', /^\d+$/]
 /** One owner or repository name: never `.` or `..`, which would walk out of the path. */
 const NAME = String.raw`(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
+/** A gh owner or repository name, as the shapes accept it. */
+export const GH_NAME = new RegExp(`^${NAME}$`)
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
