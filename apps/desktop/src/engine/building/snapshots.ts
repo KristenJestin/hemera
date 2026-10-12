@@ -85,6 +85,8 @@ export type SnapshotOwner =
   | { readonly kind: 'freeze'; readonly missionId: string; readonly freezeId: string }
   /** The last tree the detector of changes outside Hemera compared (#148). */
   | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
+  /** The tree a Building left its end with, compared with its review checkpoint (#147). */
+  | { readonly kind: 'review_exit'; readonly missionId: string; readonly buildingId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -210,6 +212,16 @@ export interface SnapshotsService {
     toTree: string,
     path?: string,
   ) => Effect.Effect<ReadonlyArray<FileDiff>, SnapshotUnavailable | DatabaseError>
+  /**
+   * Writes a tree of the store into an empty folder, as files to read (#147: the reviewers' copy
+   * of a checkpoint): a sensitive file is its stand-in there, as in the tree.
+   */
+  readonly materialize: (
+    missionId: string,
+    repository: RepositoryPlace,
+    tree: string,
+    folder: string,
+  ) => Effect.Effect<void, SnapshotFailed>
   /** The refs and the copied rows of a mission, per repository: for diagnosis. */
   readonly diagnose: (
     missionId: string,
@@ -266,6 +278,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/freezes/${owner.freezeId}/${leaf}`
     case 'outside':
       return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
+    case 'review_exit':
+      return `${mission}/buildings/${owner.buildingId}/review-exit/${leaf}`
   }
 }
 
@@ -284,6 +298,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the Freeze ${owner.freezeId}`
     case 'outside':
       return `the Workspace compared for Building ${owner.buildingId}`
+    case 'review_exit':
+      return `the end of Building ${owner.buildingId}`
   }
 }
 
@@ -885,10 +901,44 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
         )
       }
 
+      const materialize = (
+        missionId: string,
+        repository: RepositoryPlace,
+        tree: string,
+        folder: string,
+      ) =>
+        Effect.gen(function* () {
+          const store = yield* storeOf(missionId)
+          const borrowed = yield* borrowing(repository)
+          yield* Effect.acquireUseRelease(
+            Effect.try({
+              try: () => mkdtempSync(join(tmpdir(), 'hemera-materialize-')),
+              catch: (cause) => String(cause),
+            }),
+            (scratch) =>
+              Effect.gen(function* () {
+                const env = { ...borrowed, GIT_INDEX_FILE: join(scratch, 'index') }
+                yield* Effect.try({
+                  try: () => mkdirSync(folder, { recursive: true }),
+                  catch: String,
+                })
+                yield* run(store, ['read-tree', '--end-of-options', tree], 'work', { env })
+                yield* run(
+                  store,
+                  ['-c', 'core.bare=false', '--work-tree', folder, 'checkout-index', '-a', '-f'],
+                  'work',
+                  { env },
+                )
+              }),
+            (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
+          )
+        }).pipe(Effect.mapError(failure(repository, `a copy of ${tree}`)))
+
       const service: SnapshotsService = {
         take,
         changed,
         collect,
+        materialize,
         failed: recordFailure,
         capture: (missionId, repository, fromTree, toTree, files) =>
           Effect.gen(function* () {

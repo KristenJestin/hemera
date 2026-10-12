@@ -44,7 +44,6 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
-  tasksDoneEnd,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
 import { proofRunnerLayer } from './building/proof-runner.ts'
@@ -52,9 +51,12 @@ import { projectTaskChecks } from './building/run-checks.ts'
 import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
+import { reviewDeskLayer } from './building/review-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
+import { REVIEW_NEEDS, buildingEndLayer } from './building/end.ts'
+import { autoReviewLayer } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -456,6 +458,8 @@ export const startProfile = (
     const helperContext = yield* Layer.build(helperDeskLayer)
     // Where the gate reaches the documenter's report and its write guard (#146).
     const docsContext = yield* Layer.build(docsDeskLayer)
+    // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
+    const reviewContext = yield* Layer.build(reviewDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -471,6 +475,7 @@ export const startProfile = (
       Layer.succeedContext(buildContext),
       Layer.succeedContext(helperContext),
       Layer.succeedContext(docsContext),
+      Layer.succeedContext(reviewContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -500,6 +505,8 @@ export const startProfile = (
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
     const builder = builderLayer(log, parts.building?.hold)
+    // The end of a Building, and where the answers to the review's findings go (#147).
+    const ending = buildingEndLayer(log)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
     const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
     const wrapped = parts.snapshots
@@ -510,6 +517,12 @@ export const startProfile = (
             Snapshots,
             Snapshots.use((real) => Effect.succeed(wrapped(real))),
           ).pipe(Layer.provide(machineSnapshots))
+    // One store of the checkpoints, for the review at the end of a Building and the calls (#140).
+    const checkpointStore = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+      Layer.provideMerge(snapshots),
+    )
+    // One documenter, for its desk and the end of a Building alike (#146, #147).
+    const documenter = documenterLayer({ log }).pipe(Layer.provide(snapshots))
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
     const missionParts: Partial<MissionParts> = {
@@ -523,6 +536,7 @@ export const startProfile = (
         [TICKET_WRITES, ticketWritesNeeds],
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
+        [REVIEW_NEEDS, ending.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -618,7 +632,7 @@ export const startProfile = (
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
         helpersLayer({ log, hold: parts.helpers?.hold }),
-        documenterLayer({ log }).pipe(Layer.provide(snapshots)),
+        documenter,
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??
@@ -626,7 +640,16 @@ export const startProfile = (
                 Layer.provide(
                   Layer.mergeAll(
                     parts.building?.verdict ?? checksVerdict,
-                    parts.building?.end ?? tasksDoneEnd,
+                    parts.building?.end ??
+                      ending.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            documenter,
+                            autoReviewLayer({ log }).pipe(Layer.provide(checkpointStore)),
+                            checkpointStore,
+                          ),
+                        ),
+                      ),
                     snapshots,
                     outside,
                   ).pipe(
@@ -647,7 +670,7 @@ export const startProfile = (
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       outside,
-      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
+      checkpointStore,
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

@@ -573,6 +573,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 endedAt: null,
                 tasksDoneAt: null,
                 endCalledAt: null,
+                reviewCheckpointId: null,
                 summary: null,
               }
               yield* transaction
