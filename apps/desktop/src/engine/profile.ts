@@ -179,6 +179,7 @@ import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
+import { type Diffs, diffsLayer } from './review/diffs.ts'
 import {
   type OutsideChanges,
   type OutsideSettings,
@@ -367,6 +368,7 @@ export type EngineServices =
   | BuildingStart
   | OutsideChanges
   | Checkpoints
+  | Diffs
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -519,14 +521,14 @@ export const startProfile = (
             Snapshots,
             Snapshots.use((real) => Effect.succeed(wrapped(real))),
           ).pipe(Layer.provide(machineSnapshots))
-    // One store of the checkpoints, for the review at the end of a Building and the calls (#140).
-    const checkpointStore = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
-      Layer.provideMerge(snapshots),
-    )
     // One documenter, for its desk and the end of a Building alike (#146, #147).
     const documenter = documenterLayer({ log }).pipe(Layer.provide(snapshots))
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
+    // One store of the checkpoints: the review at the end of a Building, the live diff, the calls.
+    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+      Layer.provideMerge(snapshots),
+    )
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -648,8 +650,8 @@ export const startProfile = (
                         Layer.provide(
                           Layer.mergeAll(
                             documenter,
-                            autoReviewLayer({ log }).pipe(Layer.provide(checkpointStore)),
-                            checkpointStore,
+                            autoReviewLayer({ log }).pipe(Layer.provide(checkpoints)),
+                            checkpoints,
                           ),
                         ),
                       ),
@@ -673,7 +675,10 @@ export const startProfile = (
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       outside,
-      checkpointStore,
+      checkpoints,
+      diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
+        Layer.provide(Layer.mergeAll(checkpoints, outside)),
+      ),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

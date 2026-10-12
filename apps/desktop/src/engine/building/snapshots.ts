@@ -87,6 +87,8 @@ export type SnapshotOwner =
   | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
   /** The tree a Building left its end with, compared with its review checkpoint (#147). */
   | { readonly kind: 'review_exit'; readonly missionId: string; readonly buildingId: string }
+  /** The Workspace as the live diff last read it (#249). */
+  | { readonly kind: 'live'; readonly missionId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -280,6 +282,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
     case 'review_exit':
       return `${mission}/buildings/${owner.buildingId}/review-exit/${leaf}`
+    case 'live':
+      return `${mission}/live/${leaf}`
   }
 }
 
@@ -300,6 +304,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the Workspace compared for Building ${owner.buildingId}`
     case 'review_exit':
       return `the end of Building ${owner.buildingId}`
+    case 'live':
+      return 'the live diff'
   }
 }
 
