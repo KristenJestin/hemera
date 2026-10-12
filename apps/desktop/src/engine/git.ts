@@ -861,7 +861,10 @@ const mergeIn = (
         base: join(scratch, 'base'),
         theirs: join(scratch, 'theirs'),
       }
-      writeFileSync(sides.ours, ours)
+      // A checkout with CRLF lines (Git for Windows' autocrlf) against blobs with LF lines: merged
+      // with LF lines, then given back the checkout's CRLF.
+      const crlf = ours.includes('\r\n')
+      writeFileSync(sides.ours, crlf ? ours.replaceAll('\r\n', '\n') : ours)
       writeFileSync(sides.base, base)
       writeFileSync(sides.theirs, theirs)
       // Git answers the number of conflicts as its exit code: the merge is read from the file.
@@ -884,7 +887,8 @@ const mergeIn = (
         Effect.as(true),
         Effect.catchTag('GitFailed', () => Effect.succeed(false)),
       )
-      const merged = readFileSync(sides.ours, 'utf8')
+      const read = readFileSync(sides.ours, 'utf8')
+      const merged = crlf ? read.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n') : read
       return { base, ours, theirs, merged, clean: clean && !merged.includes('<<<<<<< workspace') }
     }),
   )

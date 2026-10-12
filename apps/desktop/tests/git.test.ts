@@ -688,3 +688,22 @@ describe('A file and a patch are checked at a commit, no checkout touched (#90)'
     expect(new Set(seen)).toEqual(new Set(['read']))
   })
 })
+
+describe('A proof’s addition is merged three ways (#144)', () => {
+  test('a checkout with CRLF lines merges an addition written with LF lines, and keeps its CRLF', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tests.mjs'), 'one\ntwo\n')
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'tests')
+    const commit = git(api, 'rev-parse', 'HEAD').trim()
+    writeFileSync(join(api, 'tests.mjs'), 'one\ntwo\nthree\n')
+    const patch = `${git(api, 'diff', '--', 'tests.mjs')}\n`
+    git(api, 'checkout', '-q', '--', 'tests.mjs')
+    // What Git for Windows checks out with core.autocrlf: the same lines, ending in CRLF.
+    const merged = await asked(
+      Git.use((one) => one.mergeAddition(api, commit, 'tests.mjs', patch, 'one\r\ntwo\r\n')),
+    )
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe('one\r\ntwo\r\nthree\r\n')
+  })
+})
