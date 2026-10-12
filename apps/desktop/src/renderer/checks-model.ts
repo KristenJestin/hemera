@@ -24,6 +24,8 @@ import type {
   SettingsDocRecipe,
 } from '@hemera/ui'
 
+import type { Proposal } from './settings-list.ts'
+
 /** A command of the catalogue as the check's field offers it, its mark with it. */
 function choiceOf(command: Command): CatalogueChoice {
   return {
@@ -70,12 +72,12 @@ export function settingsCheckOf(
   return shownCheck(check.id, check, catalogue)
 }
 
-/** What Hemera proposes, each with an id of its own until it is accepted. */
+/** What Hemera proposes, each under the id it was proposed with. */
 export function proposedChecksOf(
-  proposals: ReadonlyArray<EngineCheckDraft>,
+  proposals: ReadonlyArray<Proposal<EngineCheckDraft>>,
   catalogue: ReadonlyArray<Command>,
 ): SettingsCheck[] {
-  return proposals.map((one, index) => shownCheck(`proposed-${String(index)}`, one, catalogue))
+  return proposals.map((one) => shownCheck(one.id, one.draft, catalogue))
 }
 
 /** A check as its dialog holds it: its catalogue command by id. */
@@ -133,11 +135,11 @@ export function settingsDocRecipeOf(recipe: DocRecipe): SettingsDocRecipe {
   return shownRecipe(recipe.id, recipe)
 }
 
-/** What Hemera found in the main checkout, each with an id of its own until it is accepted. */
+/** What Hemera found in the main checkout, each under the id it was proposed with. */
 export function proposedDocRecipesOf(
-  proposals: ReadonlyArray<EngineDocRecipeDraft>,
+  proposals: ReadonlyArray<Proposal<EngineDocRecipeDraft>>,
 ): SettingsDocRecipe[] {
-  return proposals.map((one, index) => shownRecipe(`proposed-${String(index)}`, one))
+  return proposals.map((one) => shownRecipe(one.id, one.draft))
 }
 
 export function docRecipeFormOf({ id: _id, ...draft }: SettingsDocRecipe): DocRecipeDraft {
@@ -160,25 +162,4 @@ export function docRecipeRefusalsOf(failure: Error): Said<DocRecipeRefusals> {
     return { fields: { [failure.field]: failure.message }, foot: undefined }
   }
   return { fields: {}, foot: failure.message }
-}
-
-/**
- * The one move that turns an order into the next: the line taken out and the place it goes to,
- * or null when nothing moved.
- */
-export function moveOf(
-  before: ReadonlyArray<string>,
-  after: ReadonlyArray<string>,
-): { readonly id: string; readonly rank: number } | null {
-  const at = after.findIndex((id, index) => before[index] !== id)
-  if (at === -1) return null
-  const without = (ids: ReadonlyArray<string>, id: string) => ids.filter((one) => one !== id)
-  const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) =>
-    a.length === b.length && a.every((id, index) => b[index] === id)
-  // Moved up: the line now at `at` came from further down.
-  const raised = after[at] ?? ''
-  if (same(without(before, raised), without(after, raised))) return { id: raised, rank: at }
-  // Moved down: the line that stood at `at` went further down.
-  const lowered = before[at] ?? ''
-  return { id: lowered, rank: after.indexOf(lowered) }
 }

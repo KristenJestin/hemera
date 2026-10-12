@@ -218,6 +218,23 @@ describe('The checks of a Project, from the window', () => {
         expect(refused).toMatchObject({ field: 'pattern' })
       }),
     ))
+
+  test('a minimum that is not a number crosses the links and is refused at the minimum', () =>
+    run(
+      Effect.gen(function* () {
+        const window = yield* chain
+        const acme = yield* acmeOf(window)
+        const refused = yield* Effect.flip(
+          window['checks.save']({
+            projectId: acme.id,
+            id: null,
+            check: check({ expect: { pattern: 'Coverage: ([0-9.]+)%', minimum: Number.NaN } }),
+          }),
+        )
+        expect(refused).toBeInstanceOf(CheckRefused)
+        expect(refused).toMatchObject({ field: 'minimum' })
+      }),
+    ))
 })
 
 describe('The doc recipes of a Project, from the window', () => {

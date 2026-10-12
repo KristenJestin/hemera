@@ -21,7 +21,6 @@ import {
   docRecipeDraftOf,
   docRecipeFormOf,
   docRecipeRefusalsOf,
-  moveOf,
   proposedChecksOf,
   proposedDocRecipesOf,
   settingsCheckOf,
@@ -100,11 +99,9 @@ describe('A check, as its line shows it', () => {
     expect(checkChoicesOf(CATALOGUE).map((one) => one.name)).toEqual(['lint', 'e2e'])
   })
 
-  test('the proposals are lines of their own, each with an id the list can move', () => {
-    const proposed = proposedChecksOf(
-      [{ ...coverage, name: 'lint', commandId: 'c-lint', line: null, expect: null }],
-      CATALOGUE,
-    )
+  test('the proposals are lines of their own, each with the id it was proposed under', () => {
+    const lint = { ...coverage, name: 'lint', commandId: 'c-lint', line: null, expect: null }
+    const proposed = proposedChecksOf([{ id: 'proposed-0', draft: lint }], CATALOGUE)
     expect(proposed.map((one) => [one.id, one.name, one.command?.line])).toEqual([
       ['proposed-0', 'lint', 'pnpm lint'],
     ])
@@ -185,19 +182,15 @@ describe('A doc recipe, as its line shows it and its dialog writes it', () => {
     expect(named).toMatchObject({ applies: 'when_impact_names', words: ['API'] })
   })
 
-  test('the proposals get ids of their own', () => {
+  test('the proposals keep the ids they were proposed under', () => {
     const { id: _id, projectId: _project, rank: _rank, ...draft } = readme
-    expect(proposedDocRecipesOf([draft, draft]).map((one) => one.id)).toEqual([
+    const proposals = [
+      { id: 'proposed-0', draft },
+      { id: 'proposed-2', draft },
+    ]
+    expect(proposedDocRecipesOf(proposals).map((one) => one.id)).toEqual([
       'proposed-0',
-      'proposed-1',
+      'proposed-2',
     ])
-  })
-})
-
-describe('A reorder is one move', () => {
-  test('a line moved down or up is found with the place it goes to', () => {
-    expect(moveOf(['a', 'b', 'c', 'd'], ['b', 'c', 'a', 'd'])).toEqual({ id: 'a', rank: 2 })
-    expect(moveOf(['a', 'b', 'c', 'd'], ['a', 'd', 'b', 'c'])).toEqual({ id: 'd', rank: 1 })
-    expect(moveOf(['a', 'b'], ['a', 'b'])).toBeNull()
   })
 })
