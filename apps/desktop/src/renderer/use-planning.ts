@@ -49,6 +49,10 @@ export function usePlanning(
       keepPlanning: () => sent((current) => current.keepPlanning()),
       seenTicketChange: (eventId) => sent((current) => current.seenTicketChange(eventId)),
       openProbe: (probeId) => following.current?.openProbe(probeId),
+      askPrototype: (question) => sent((current) => current.askPrototype(question)),
+      judgePrototype: (helperId, verdict, note) =>
+        sent((current) => current.judgePrototype(helperId, verdict, note)),
+      openPrototype: (helperId) => following.current?.openPrototype(helperId),
       say: (item, text) => sent((current) => current.say(item, text)),
       accept: (item) => sent((current) => current.accept(item)),
       close: (item, decision) => sent((current) => current.close(item, decision)),

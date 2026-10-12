@@ -8,12 +8,13 @@
  *   completeness on the current version, what completeness finds now (a question open or waiting,
  *   an open discussion or a decision in transit, an input not integrated, a target or an insertion
  *   that no longer holds at the base), the cold read of this Planning (#91), a Probe prepared or
- *   running (#89), a dependency the user has not decided yet.
+ *   running (#89), a Prototyper running or whose result the user has not judged yet (#222), a
+ *   dependency the user has not decided yet.
  * - **Freeze.** Each repository's base commit by the rule of the up-to-date base (CT-24, one fetch
  *   each), the checks of #90 run again at those commits, and the dirty files of the main checkout
- *   kept (CT-23); then, in one transaction, the readiness again, the Spec frozen, the Freeze kept,
- *   Planning → Ready, the outdated marks cleared, the dependencies' marks set, and the stops owed
- *   written down. After it the Probes are wiped and the Planner tree stopped; a stop in between
+ *   kept (CT-23); then, in one transaction, the readiness again, the Spec frozen, the Freeze kept
+ *   with the Prototypers' results the user judged (#222), Planning → Ready, the outdated marks
+ *   cleared, the dependencies' marks set, and the stops owed written down. After it the Probes are wiped and the Planner tree stopped; a stop in between
  *   leaves the stops owed, which the next start runs before any session is rebuilt.
  * - **Return.** Ready → Planning, a new Planning cycle, the Spec unfrozen (a new version), the
  *   declaration cleared, the Freeze's stops still owed dropped, the ticket's changes found after the
@@ -96,10 +97,11 @@ import { coldReadFreshness, coldReadSettledIn } from './cold-read-store.ts'
 import { blockIn, dependenciesIn, liftEnded, unblockIn } from './dependencies.ts'
 import { pendingWithDiscussionsIn } from './discussion-store.ts'
 import { oneAtATime } from './discussions.ts'
-import { writeFrozenBases } from './freeze-store.ts'
+import { writeFrozenBases, writeFrozenPrototypes } from './freeze-store.ts'
 import { type Outdated, markOutdatedIn } from './outdated.ts'
 import { atBaseFailures, placeOf } from './plan.ts'
 import { ProbeDesk } from './probe-desk.ts'
+import { frozenPrototypesIn, prototypesUnsettledIn } from './prototypes.ts'
 import { type Captured, FileSnapshots } from './snapshots.ts'
 import { driftIn, missionRow, specIn, writeSpecFile } from './store.ts'
 import { PlannerWake } from './wake.ts'
@@ -179,6 +181,7 @@ const unsettledIn = (transaction: EngineTransaction, missionId: string, atBase: 
       ...failures.map((failure) => failure.sentence),
       ...(cold.ran ? cold.reasons : [NO_COLD_READ_YET]),
       ...(yield* probesUnsettledIn(transaction, missionId)),
+      ...(yield* prototypesUnsettledIn(transaction, missionId)),
       ...dependsOn
         .filter((one) => one.state === 'proposed')
         .map((one) => dependencyUndecidedSaid(key, one.dependsOnKey)),
@@ -432,6 +435,7 @@ export const freezeMission = (missionId: string, specVersion: number) =>
               cycle: mission.planningCycle,
               specVersion: version,
               bases: writeFrozenBases(bases),
+              prototypes: writeFrozenPrototypes(yield* frozenPrototypesIn(transaction, missionId)),
               frozenAt: at,
             })
             .pipe(Effect.mapError(refusedWhile('keeping the Freeze')))

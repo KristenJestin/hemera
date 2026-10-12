@@ -9,6 +9,7 @@ import type {
   ColdReadPass,
   Discussion,
   FreezeReadiness,
+  HelperChip,
   Mission,
   Now,
   PlanningInput,
@@ -460,6 +461,8 @@ const viewOf = (more: Partial<PlanningView> = {}): PlanningView => ({
   data: planningDataOf(read(), NOW),
   mentionables: [],
   reports: new Map(),
+  prototypes: [],
+  prototypeResults: new Map(),
   planner: { state: 'idle', doing: null, next: null, reason: null },
   declaredComplete: false,
   ...more,
@@ -689,6 +692,26 @@ const PROBE: ProbeChip = {
   outcome: 'reproduced',
 }
 
+const PROTOTYPER: HelperChip = {
+  id: 'h1',
+  missionId: 'm12',
+  number: 1,
+  label: 'H1',
+  name: 'Prototyper',
+  definition: 'prototyper',
+  icon: 'flask',
+  letter: 'P',
+  tone: 'build',
+  depth: 1,
+  task: null,
+  state: 'running',
+  stuck: false,
+  step: 'Write list.html',
+  verdict: null,
+  startedAt: AT,
+  endedAt: null,
+}
+
 const PASS: ColdReadPass = {
   id: 'c1',
   missionId: 'm12',
@@ -711,6 +734,7 @@ interface Listeners {
   spec: (heard: Spec) => void
   discussions: (heard: ReadonlyArray<Discussion>) => void
   probes: (heard: ReadonlyArray<ProbeChip>) => void
+  helpers: (heard: ReadonlyArray<HelperChip>) => void
   passes: (heard: ReadonlyArray<ColdReadPass>) => void
   end: (error: Error) => void
 }
@@ -722,6 +746,7 @@ const world = (played: Partial<PlanningLink> = {}) => {
     spec: () => undefined,
     discussions: () => undefined,
     probes: () => undefined,
+    helpers: () => undefined,
     passes: () => undefined,
     end: () => undefined,
   }
@@ -747,6 +772,10 @@ const world = (played: Partial<PlanningLink> = {}) => {
       listeners.probes = heard
       return () => undefined
     },
+    onHelpers: (_mission, heard) => {
+      listeners.helpers = heard
+      return () => undefined
+    },
     onColdReads: (_mission, heard) => {
       listeners.passes = heard
       return () => undefined
@@ -767,6 +796,25 @@ const world = (played: Partial<PlanningLink> = {}) => {
     acceptProposedAnswer: noted('acceptProposedAnswer', undefined),
     dismissProposedAnswer: noted('dismissProposedAnswer', undefined),
     keepAfterTriage: noted('keepAfterTriage', undefined),
+    askPrototype: noted('askPrototype', undefined),
+    judgePrototype: noted('judgePrototype', undefined),
+    helper: (helperId) => {
+      calls.push({ call: 'helper', args: [helperId] })
+      return Promise.resolve({
+        ...PROTOTYPER,
+        state: 'done',
+        step: null,
+        brief: 'Two columns?',
+        place: 'prototype',
+        folder: '',
+        writes: true,
+        result: 'Tried: two columns.',
+        failure: null,
+        verdictNote: null,
+        judgedAt: null,
+        thread: null,
+      })
+    },
     openDiscussion: (missionId, item, text) => {
       calls.push({ call: 'openDiscussion', args: [missionId, item.kind, item.id, text] })
       return Promise.resolve(DISCUSSION)
@@ -832,6 +880,44 @@ describe('A running Probe’s step (#206)', () => {
     const running: ProbeChip = { ...PROBE, state: 'running', endedAt: null, outcome: null }
     expect(probeOf({ ...running, step: 'Read api/importer.ts' }).step).toBe('Read api/importer.ts')
     expect(probeOf(running).step).toBeUndefined()
+  })
+})
+
+describe('The Prototyper on the Planning page (#222)', () => {
+  test('only the Prototypers among the mission’s helpers are on the page, with their step and verdict', async () => {
+    const played = world()
+    played.listeners.spec(spec())
+    played.listeners.helpers([
+      PROTOTYPER,
+      { ...PROTOTYPER, id: 'h2', label: 'H2', name: 'Helper', definition: null },
+    ])
+    await flush()
+    expect(played.last().prototypes).toEqual([PROTOTYPER])
+  })
+
+  test('asking for a prototype and judging one are sent to the engine', async () => {
+    const played = world()
+    played.listeners.spec(spec())
+    await flush()
+    await played.following.askPrototype('Show the list in two columns.')
+    await played.following.judgePrototype('h1', 'validated', 'Keep it.')
+    expect(played.named('askPrototype').map((one) => one.args)).toEqual([
+      ['m12', 'Show the list in two columns.'],
+    ])
+    expect(played.named('judgePrototype').map((one) => one.args)).toEqual([
+      ['h1', 'validated', 'Keep it.'],
+    ])
+  })
+
+  test('a Prototyper’s result is read when it is opened, and again when it moves', async () => {
+    const played = world()
+    played.following.openPrototype('h1')
+    expect(played.last().prototypeResults).toEqual(new Map([['h1', null]]))
+    await flush()
+    expect(played.last().prototypeResults.get('h1')?.result).toBe('Tried: two columns.')
+    played.listeners.helpers([PROTOTYPER])
+    await flush()
+    expect(played.named('helper')).toHaveLength(2)
   })
 })
 

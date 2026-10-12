@@ -674,6 +674,11 @@ const missionWorkHandlers = (engine: EngineClient, log: Log) =>
         closedAs(gone),
         observed('planning.keepAfterTriage', log),
       ),
+    'planning.askPrototype': (request) =>
+      engine['planning.askPrototype'](request).pipe(
+        closedAs(gone),
+        observed('planning.askPrototype', log),
+      ),
     'planning.changed': (request) =>
       engine['planning.changed'](request).pipe(
         streamClosedAs(gone),
@@ -753,6 +758,8 @@ const missionWorkHandlers = (engine: EngineClient, log: Log) =>
       engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
     'helpers.read': (request) =>
       engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
+    'helpers.judge': (request) =>
+      engine['helpers.judge'](request).pipe(closedAs(gone), observed('helpers.judge', log)),
     'helpers.changed': (request) =>
       engine['helpers.changed'](request).pipe(
         streamClosedAs(gone),

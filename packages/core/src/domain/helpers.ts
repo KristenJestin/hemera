@@ -1,8 +1,9 @@
 /**
- * The helpers of Building (#145): child sessions the Builder, or a helper at depth 1, launches
- * through Hemera's tools to hand them one piece of work. A free helper runs on the brief its parent
- * wrote; a defined helper (the Prototyper, `./helper-definitions.ts`) has its definition in one
- * place. A helper's result is the arguments of `helper_result`, read against its shape.
+ * The helpers (#145): child sessions launched through Hemera's tools to hand them one piece of
+ * work. A free helper runs on the brief its parent wrote, launched in Building by the Builder or a
+ * helper at depth 1; a defined helper (the Prototyper, `./helper-definitions.ts`) has its
+ * definition in one place, and the Prototyper is the Planner's, in Planning (#222). A helper's
+ * result is the arguments of `helper_result`, read against its shape.
  *
  * Here are the values a helper is made of, the tools' arguments, and the rules that need nothing
  * but those values: the tools a helper's session holds, its brief, and how its result reads.
@@ -26,7 +27,7 @@ export const HELPER_PLACES = ['workspace', 'prototype'] as const
 export const HelperPlace = Schema.Literals(HELPER_PLACES)
 export type HelperPlace = typeof HelperPlace.Type
 
-/** What a helper receives beside its role: the frozen Spec, the task it is tied to, the brief. */
+/** What a helper receives beside its role: the Spec, the task it is tied to, the brief. */
 export const HELPER_INPUTS = ['spec', 'task', 'brief'] as const
 export const HelperInput = Schema.Literals(HELPER_INPUTS)
 export type HelperInput = typeof HelperInput.Type
@@ -110,6 +111,46 @@ export const PrototyperResult = Schema.Struct({
   }),
 })
 export type PrototyperResult = typeof PrototyperResult.Type
+
+/**
+ * Why the Builder, or a helper of its, is refused the Prototyper (#222): trying an interface or an
+ * approach is Planning's, and the Builder builds what was validated.
+ */
+export const PROTOTYPER_BELONGS_TO_PLANNING =
+  'the Prototyper belongs to Planning: an interface or an approach is tried there, before the Freeze, and the Builder builds what was validated'
+
+/** Why the Planner is refused a free helper: it runs things through a Probe. */
+export const PLANNER_LAUNCHES_ONLY_PROTOTYPER =
+  'the Planner launches only the Prototyper; to run something, launch a Probe'
+
+/** The Planner's rule for the Prototyper, as its instructions say it (#222). */
+export const PLANNER_PROTOTYPE_RULE = `Launch the Prototyper (helper_launch with helper "prototyper" and the question in the brief)
+when the user asks for a prototype, in an answer or through [hemera:prototype], and on your own
+when the Spec changes the interface or rests on an approach nobody has run.`
+
+/**
+ * What the user says of a Prototyper's result, before the Freeze (#222): taken as it is, or set
+ * aside. The Freeze keeps every result judged, with its verdict.
+ */
+export const PROTOTYPE_VERDICTS = ['validated', 'set-aside'] as const
+export const PrototypeVerdict = Schema.Literals(PROTOTYPE_VERDICTS)
+export type PrototypeVerdict = typeof PrototypeVerdict.Type
+
+/** Why a Prototyper holds the Freeze, in words; null when it holds nothing. */
+export const prototypeUnsettled = (prototype: {
+  readonly label: string
+  readonly state: HelperState
+  readonly verdict: PrototypeVerdict | null
+  readonly question: string
+}): string | null => {
+  if (prototype.state === 'running') {
+    return `Prototyper ${prototype.label} runs: ${prototype.question}`
+  }
+  if (prototype.state === 'done' && prototype.verdict === null) {
+    return `Prototyper ${prototype.label} waits for your verdict: ${prototype.question}`
+  }
+  return null
+}
 
 const TaskNamed = Bounded(20, 'The task, by its id (`T4`).')
 
@@ -198,7 +239,7 @@ export const prototyperResultText = (result: PrototyperResult, kept: string): st
       ? 'Does not work: nothing.'
       : ['Does not work:', ...result.does_not_work.map((one) => `- ${one}`)].join('\n'),
     result.files.length === 0 ? 'Files: none.' : `Files, kept as evidence: ${kept}`,
-    'Nothing of it is in the Workspace: take what you want under your own tasks.',
+    'Nothing of it is in the main checkout. The user judges it before the Freeze, which keeps it with its verdict.',
   ].join('\n')
 
 /** What a helper's session is made of, for the tools it holds. */
@@ -252,6 +293,8 @@ export interface HelperBriefAsked {
     readonly scenarios: ReadonlyArray<string>
   } | null
   readonly spec: boolean
+  /** Whether the Spec it reads is frozen (Building), or still being planned (Planning). */
+  readonly frozen: boolean
   readonly writes: boolean
   /** Its place, in words: `the Workspace`, or its folder. */
   readonly place: string
@@ -270,7 +313,14 @@ export const helperBriefFields = (asked: HelperBriefAsked) => [
         ? null
         : `${asked.task.id} ${asked.task.title}: ${asked.task.result.replace(/\.$/, '')}; targets ${asked.task.targets.join(', ') || 'none'}; scenarios ${asked.task.scenarios.join(', ') || 'none'}`,
   },
-  { label: 'Spec', text: asked.spec ? 'spec_read (frozen)' : null },
+  {
+    label: 'Spec',
+    text: !asked.spec
+      ? null
+      : asked.frozen
+        ? 'spec_read (frozen)'
+        : 'spec_read (being planned: it may still change)',
+  },
   {
     label: 'Place',
     text: `You may write: ${asked.writes ? 'yes' : 'no'}; your place: ${asked.place}`,

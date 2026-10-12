@@ -1,6 +1,7 @@
 /**
  * The Freezes as the missions' read model shows them (#92): the last Freeze of a frozen mission,
- * with its base commits and the dirty files of its main checkout; and the lines the Freeze, the
+ * with its base commits, the dirty files of its main checkout and the Prototypers' results the
+ * user judged (#222); and the lines the Freeze, the
  * return to Planning, the dependencies and the outdated mark write in the Journal.
  */
 
@@ -9,6 +10,7 @@ import {
   AgentAuthor,
   FrozenBase,
   type FrozenFile,
+  FrozenPrototype,
   HemeraAuthor,
   type MemoryAuthor,
   type MissionFreeze,
@@ -26,6 +28,11 @@ const BasesJson = Schema.fromJsonString(Schema.Array(FrozenBase))
 const readBases = Schema.decodeUnknownOption(BasesJson)
 /** The base commits of a Freeze, as its row keeps them. */
 export const writeFrozenBases = Schema.encodeSync(BasesJson)
+
+const PrototypesJson = Schema.fromJsonString(Schema.Array(FrozenPrototype))
+const readPrototypes = Schema.decodeUnknownOption(PrototypesJson)
+/** The Prototypers' results judged by a Freeze, as its row keeps them (#222). */
+export const writeFrozenPrototypes = Schema.encodeSync(PrototypesJson)
 
 /** The last Freeze of each mission named, by mission; the caller keeps those still frozen. */
 export const freezesOf = (missionIds: ReadonlyArray<string>) =>
@@ -60,6 +67,7 @@ export const freezesOf = (missionIds: ReadonlyArray<string>) =>
         version: row.specVersion,
         frozenAt: row.frozenAt,
         bases: Option.getOrElse(readBases(row.bases), () => []),
+        prototypes: Option.getOrElse(readPrototypes(row.prototypes), () => []),
         dirtyFiles: files
           .filter((file) => file.freezeId === row.id)
           .map((file): FrozenFile => ({
