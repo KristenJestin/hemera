@@ -244,10 +244,6 @@ export const buildingEndLayer = (log: Log) => {
       const running = new Map<string, boolean>()
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
-      /** The Buildings whose refresh waits on an automated proof: driven again after a turn. */
-      const awaitingBuilder = new Set<string>()
-      /** The Buildings whose Builder ended a turn while their refresh waited on it. */
-      const builderTurned = new Set<string>()
       /** The Buildings whose proofs this engine refreshed. */
       const refreshed = new Set<string>()
 
@@ -411,15 +407,6 @@ export const buildingEndLayer = (log: Log) => {
             `The documenter's pass did not finish: ${pass.failure ?? 'no reason given'}.`,
           )
         })
-
-      /** Whether the refresh still waits on the Builder for a proof: until its next turn ends. */
-      const proofWaitsOnBuilder = (buildingId: string) => {
-        if (!awaitingBuilder.has(buildingId)) return false
-        if (!builderTurned.has(buildingId)) return true
-        awaitingBuilder.delete(buildingId)
-        builderTurned.delete(buildingId)
-        return false
-      }
 
       /**
        * Whether a red of the final checks waits on the Builder, from what is stored, so a restart
@@ -638,27 +625,16 @@ export const buildingEndLayer = (log: Log) => {
               return false
             }
             case 'refresh': {
-              if (!refreshed.has(building.id)) {
+              if (yield* waitsOnBuilder(building)) return false
+              if (!refreshed.has(building.id) || (yield* staleLeft(building))) {
                 refreshed.add(building.id)
                 yield* BuildDesk.use((desk) => desk.refreshProofs(missionId))
-              } else if (
-                !proofWaitsOnBuilder(building.id) &&
-                !(yield* waitsOnBuilder(building)) &&
-                (yield* checksRed(building))
-              ) {
+              } else if (yield* checksRed(building)) {
                 yield* BuildDesk.use((desk) => desk.judgeScope(missionId, 'end', null))
               }
-              if (awaitingBuilder.has(building.id) || (yield* waitsOnBuilder(building)))
-                return false
-              const unproven = (yield* scenarioProofsIn(database, building.id)).some(
-                (row) =>
-                  modeOf(row) === 'automated' && !PROVEN.some((state) => state === stateOf(row)),
-              )
-              if (unproven) {
-                awaitingBuilder.add(building.id)
-                return false
-              }
-              if (yield* checksRed(building)) return false
+              if (yield* waitsOnBuilder(building)) return false
+              // The proofs are waited on, never the Builder: their runs drive the end again.
+              if (yield* unsettled(building)) return false
               if ((yield* getMission(missionId)).needs.length > 0) return false
               yield* exit(building)
               return false
@@ -727,6 +703,28 @@ export const buildingEndLayer = (log: Log) => {
                 .pipe(Effect.mapError(refusedWhile('moving the end on')))
               return { result: true, events }
             }),
+          )
+        })
+
+      /**
+       * Whether something stale waits for no one: an automated proof made stale with no failed
+       * run waiting for its fix, or a final check that is not red but ran on an older tree.
+       */
+      const staleLeft = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const fixing = (yield* attemptsIn(database, building.id))
+            .filter((one) => one.scope === 'proof' && one.endedAt === null)
+            .map((one) => one.subject)
+          const proof = (yield* scenarioProofsIn(database, building.id)).some(
+            (row) =>
+              modeOf(row) === 'automated' &&
+              stateOf(row) === 'to_rerun' &&
+              !fixing.includes(row.scenario),
+          )
+          if (proof) return true
+          return (yield* finalChecksIn(database, building.missionId, building.id)).some(
+            (one) => one.verdict !== 'red' && !one.upToDate,
           )
         })
 
@@ -1057,7 +1055,6 @@ export const buildingEndLayer = (log: Log) => {
                   Effect.as({ result: undefined, events: [] }),
                 ),
             )
-            if (awaitingBuilder.has(building.id)) builderTurned.add(building.id)
             yield* drive(building.id)
           }).pipe(
             provided,

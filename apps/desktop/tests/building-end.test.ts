@@ -1131,6 +1131,105 @@ describe('The exit', () => {
   )
 })
 
+describe('The refresh', () => {
+  test(
+    'a proof red at the refresh is waited on, not the Builder: its green moves the end on with no turn of the Builder',
+    SLOW,
+    async () => {
+      const markdown = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { existsSync, readFileSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', () => {",
+        "  const file = new URL('../export.ts', import.meta.url)",
+        "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+        '})',
+        '',
+      ].join('\n')
+      const proofs = () => ({
+        'R1.S2': {
+          mode: 'automated',
+          actions: ['Run the test'],
+          starting_data: 'None.',
+          expected: 'The assertion of the test holds.',
+          test: {
+            repository: 'api',
+            path: 'tests/export.test.mjs',
+            code: markdown,
+            insertion: 'new_file',
+            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+          },
+          seen_today: false,
+        },
+      })
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              proofs,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 breaks what the proof reads: the refresh runs it again, red.
+            yield* specialDone(builder.grantId, 'RV1', 'export.ts', 'export const toCsv = 1\n')
+            yield* documented(world, mission.id, 2)
+            yield* until(
+              Effect.map(
+                eventsOf(mission.id, 'building.proofs_refreshed'),
+                (found) => found.length > 0,
+              ),
+              LONG,
+            )
+            // The rerun of the stale proof failed: it waits for its fix like a failed green.
+            yield* until(
+              Effect.map(
+                Database.use((database) =>
+                  database
+                    .select()
+                    .from(proofRuns)
+                    .where(and(eq(proofRuns.missionId, mission.id), eq(proofRuns.phase, 'rerun'))),
+                ),
+                (runs) => runs.length > 0,
+              ),
+              LONG,
+            )
+            // Long enough for every turn the red started to be over.
+            yield* Effect.sleep('1 second')
+            // The fix lands as a write, outside any turn: the proof runs again, green.
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const toMarkdown = () => ""\n',
+            })
+            yield* inReview(mission.id)
+            return yield* buildingNow(mission.id)
+          }),
+        ),
+      )
+      const proof = seen.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+})
+
 describe('The reviewers count in the cap', () => {
   test('with three sub-agents running, the reviewers wait for slots', SLOW, async () => {
     const { world, run } = ending()
