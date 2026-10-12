@@ -817,6 +817,13 @@ describe('The findings and their fate', () => {
               warning('README.md', 'Say how to export as Markdown.'),
             ])
             yield* specialAvailable(mission.id, 'RV2')
+            // The ready set is stored for the Builder a moment after the tasks are available.
+            yield* until(
+              Effect.map(toBuilder(mission.id, builder.session.lineage), (said) =>
+                ['RV1', 'RV2'].every((task) => said.join('\n').includes(task)),
+              ),
+              LONG,
+            )
             const told = yield* toBuilder(mission.id, builder.session.lineage)
             const plan = yield* buildingPartOf(mission.id)
             const rv2 = yield* specialDone(
