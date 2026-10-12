@@ -261,6 +261,7 @@ export type BuilderHold = (
     | 'judging'
     | 'locked'
     | 'committing'
+    | 'mid-commit'
     | 'cutting'
     | 'writing'
     | 'requirements'
