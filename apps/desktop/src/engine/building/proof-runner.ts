@@ -2,8 +2,8 @@
  * A scenario's proof run by Hemera (#144): the Proof block's command, through the run service, in
  * the mission's Workspace, Hemera its author and never an agent's session. It runs where its test
  * is (the test's repository), or at the Workspace root for a command with no test file; it takes
- * the write locks of those repositories and their trees right before it launches, as a check does
- * (#143). Once it ends it is classified (CT-35), compared with the key line Planning observed, and
+ * the write locks and the trees of the repositories it is asked to be fresh on (its test's and
+ * every one its tasks wrote) right before it launches, as a check does (#143). Once it ends it is classified (CT-35), compared with the key line Planning observed, and
  * recorded with its tree, the end of its output, and its whole output and test kept as evidence.
  */
 
@@ -43,6 +43,8 @@ export interface ProofAsked {
   readonly scenario: string
   readonly phase: ProofPhase
   readonly proof: Proof
+  /** The repositories whose trees the run is recorded on: a later change there makes it stale. */
+  readonly repositories: ReadonlyArray<string>
 }
 
 /** A proof run as it was recorded. */
@@ -105,7 +107,9 @@ const runProof = (asked: ProofAsked) =>
       Effect.orElseSucceed(() => null),
     )
     const folder = base === null ? '' : posixOf(relative(workspace.folder, base.folder))
-    const repositories = base === null ? bases.map((one) => one.repository) : [base.repository]
+    const repositories = bases
+      .map((one) => one.repository)
+      .filter((one) => asked.repositories.includes(one))
     const testFile = test === null || base === null ? null : join(base.folder, test.path)
     const testBytes = testFile !== null && existsSync(testFile) ? readFileSync(testFile) : null
     const watch = yield* BuildDesk.use((desk) =>

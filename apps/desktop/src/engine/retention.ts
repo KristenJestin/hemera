@@ -141,6 +141,7 @@ export const TABLE_CLASSES = {
   scenario_proofs: 'permanent',
   proof_runs: 'permanent',
   repository_trees: 'state',
+  writes_before_red: 'permanent',
   outside_watches: 'state',
   outside_changes: 'permanent',
   base_moves: 'permanent',

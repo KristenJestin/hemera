@@ -31,6 +31,7 @@ import {
   proofRuns,
   repositoryTrees,
   scenarioProofs,
+  writesBeforeRed,
 } from '../storage/schema.ts'
 
 type Reader = EngineTransaction | Database['Service']
@@ -50,6 +51,12 @@ export const readTrees = (text: string | null): ReadonlyArray<Tree> =>
   text === null ? [] : Option.getOrElse(Schema.decodeUnknownOption(Trees)(text), () => [])
 
 const now = (): string => new Date().toISOString()
+
+const readScenarios = (text: string): ReadonlyArray<string> =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(text),
+    () => [],
+  )
 
 export const stateOf = (row: { readonly state: string }): ScenarioProofState =>
   SCENARIO_PROOF_STATES.find((one) => one === row.state) ?? 'waiting_red'
@@ -264,9 +271,14 @@ export const scenarioViewIn = (reader: Reader, missionId: string, row: ScenarioP
     return scenarioViewOf(row, runs, yield* currentTreesIn(reader, missionId))
   })
 
-/** Every automated scenario of a requirement green and up to date: proven. */
+/**
+ * Every automated scenario of a requirement green and up to date: proven. One set aside as not
+ * reproducible does not count: the others prove it.
+ */
 const provenOf = (scenarios: ReadonlyArray<ScenarioProofView>): boolean => {
-  const automated = scenarios.filter((one) => one.mode === 'automated')
+  const automated = scenarios.filter(
+    (one) => one.mode === 'automated' && one.state !== 'not_reproducible',
+  )
   return automated.length > 0 && automated.every((one) => one.upToDate === true)
 }
 
@@ -342,6 +354,12 @@ export const proofsViewIn = (reader: Reader, missionId: string, buildingId: stri
     const runs = yield* proofRunsIn(reader, buildingId)
     const current = yield* currentTreesIn(reader, missionId)
     const checks = yield* finalChecksIn(reader, missionId, buildingId)
+    const early = yield* reader
+      .select()
+      .from(writesBeforeRed)
+      .where(eq(writesBeforeRed.buildingId, buildingId))
+      .orderBy(asc(writesBeforeRed.at))
+      .pipe(Effect.mapError(refusedWhile('reading the writes before the red')))
     const view: ProofsView = {
       missionId,
       scenarios: rows.map((row) => {
@@ -349,6 +367,13 @@ export const proofsViewIn = (reader: Reader, missionId: string, buildingId: stri
         return Object.assign(scenarioViewOf(row, own, current), { runs: own.map(runViewOf) })
       }),
       finalChecks: checks.map(({ trees: _trees, ...rest }) => rest),
+      writtenBeforeRed: early.map((one) => ({
+        repository: one.repository,
+        path: one.path,
+        task: one.taskId,
+        scenarios: readScenarios(one.scenarios),
+        at: one.at,
+      })),
     }
     return view
   })

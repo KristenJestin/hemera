@@ -15,17 +15,24 @@
  *   environment that kept it from running on an environment need with Retry; any other red goes
  *   back to the Builder as an attempt on that proof. A task starts only once every automated
  *   scenario it covers has its red recorded (or is not reproducible).
- * - **The green runs.** Once every task covering a scenario is done, its proof runs again: passed,
- *   the scenario is green on that tree; anything else is an attempt on its proof for the Builder.
- *   A requirement is proven once its automated scenarios are all green and up to date. A test whose
- *   sha256 changed between red and green is shown with both versions.
+ * - **The green runs.** Once every task covering a scenario is done (with none, every task of its
+ *   requirement), its proof runs again: passed, the scenario is green on the trees of every
+ *   repository its tasks wrote; anything else opens an attempt on its proof, open until it is
+ *   green, and the proof runs again once the Builder's next write settles, at its next task's end,
+ *   on `refresh` or `proof_run`. The end of the Building waits while an automated proof is not
+ *   green. A requirement is proven once its automated scenarios are all green and up to date. A
+ *   test whose sha256 changed between red and green is shown with both versions. A `proof_run`
+ *   before the tasks are done is for information, and judges nothing.
+ * - **Written before the red.** The Builder's writes out of the proofs' files while a scenario
+ *   still waits for its red are kept for the reviewers.
  * - **Freshness (CT-38).** A green proof whose repository moved since is `to_rerun`
  *   (`proof-store.ts`); `refresh` runs every stale proof and the stale final checks again, on the
  *   current tree; `touched` names those a repository's change touched.
  * - **By hand (CT-36).** A scenario verified by hand is to verify until the user validates or
  *   refuses it, on the trees of the moment; a later change there makes it to verify again.
- * - **Restart.** A recorded red stands; the reds not recorded are run again at the next start, and
- *   the greens of scenarios whose tasks were all done.
+ * - **Restart.** A recorded red stands; the reds not recorded are run again at the next start, a
+ *   conflict not handed over yet is handed over, and the greens due run (a green run recorded but
+ *   not judged is judged on its trees).
  */
 
 import {
@@ -36,11 +43,12 @@ import {
   type ProofClass,
   type ProofPhase,
   type ToolArguments,
+  addedTestNames,
   insertedFiles,
   validRed,
 } from '@hemera/core/domain'
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { Effect, Option, Result, Semaphore } from 'effect'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -61,14 +69,17 @@ import {
   scenarioProofs,
   specProofs,
   specScenarios,
+  writesBeforeRed,
 } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
+import type { WrittenFile } from '../tools/ports.ts'
 import { actionDone, beginAction } from '../tools/actions.ts'
 import { answered, refusal } from '../tools/files.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
-import type { Loop } from './loop.ts'
+import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
+import { fileOf } from './place.ts'
 import { type ProofRun, ProofRunner } from './proof-runner.ts'
 import {
   currentTreesIn,
@@ -90,6 +101,7 @@ import { Snapshots } from './snapshots.ts'
 import {
   type BuildingBase,
   type BuildingRow,
+  type TaskNow,
   activeBuildingIn,
   attemptsIn,
   bases,
@@ -130,6 +142,10 @@ export type ProofNeeds =
 /** What the proofs stand on, from the Builder that holds them. */
 export interface ProofParts {
   readonly needs: NeedService
+  /** Where a suite holds the proofs (`BuilderHold`). */
+  readonly hold: (at: 'greening' | 'handing') => Effect.Effect<void>
+  /** After a scenario turned green: the end called if it waited only for its proofs. */
+  readonly greened: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
   readonly said: (line: string) => Effect.Effect<void>
   readonly deliver: (
@@ -154,7 +170,9 @@ const notARed = (run: ProofRun): string => {
     case 'error_before_test':
       return `this red is not one: ${where} did not run (compilation, import, missing dependency or setup)`
     case 'assertion_failed':
-      return `this red is not one: the assertion that failed is in ${run.failingFile ?? 'another file'}, not in ${where}`
+      return run.failingFile === null
+        ? `this red is not one: the report names no file, so no assertion is known to have failed in ${where}`
+        : `this red is not one: the assertion that failed is not in the scenario's own test of ${where} (${run.failingTest ?? run.failingFile})`
     case 'environment':
       return 'the environment kept it from running'
     case 'passed':
@@ -281,9 +299,15 @@ export const proofsRead = (missionId: string) =>
 
 export const buildingProofs = (parts: ProofParts) => {
   const { loop, said, deliver } = parts
-  // One proof judged at a time: a state is read and moved without another run in between.
-  const turn = Semaphore.makeUnsafe(1)
-  const inTurn = <A, E, R>(effect: Effect.Effect<A, E, R>) => Semaphore.withPermits(turn, 1)(effect)
+  // One proof of a mission judged at a time: a state is read and moved without another run of
+  // the same mission in between.
+  const turns = new Map<string, Semaphore.Semaphore>()
+  const inTurn = <A, E, R>(missionId: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      const turn = turns.get(missionId) ?? Semaphore.makeUnsafe(1)
+      turns.set(missionId, turn)
+      return Semaphore.withPermits(turn, 1)(effect)
+    })
 
   /** The Proof block of a scenario, as the Spec keeps it, or null. */
   const proofOf = (missionId: string, scenario: string) =>
@@ -297,16 +321,90 @@ export const buildingProofs = (parts: ProofParts) => {
       return row === undefined ? null : Option.getOrNull(readProof(row.block))
     })
 
+  /** The repository and path of every file the mission's proofs insert. */
+  const proofFilesIn = (transaction: EngineTransaction, missionId: string) =>
+    Effect.map(
+      transaction
+        .select({ block: specProofs.block })
+        .from(specProofs)
+        .where(eq(specProofs.missionId, missionId))
+        .pipe(Effect.mapError(refusedWhile('reading the proofs'))),
+      (rows) =>
+        new Set(
+          rows.flatMap((row) =>
+            Option.match(readProof(row.block), {
+              onNone: () => [],
+              onSome: (proof) =>
+                insertedFiles(proof).map((file) => `${file.repository}\u0000${file.path}`),
+            }),
+          ),
+        ),
+    )
+
   /** The folder of a repository of the Workspace, or null. */
   const folderOf = (building: BuildingRow, repository: string) =>
     basesOf(building).find((one) => one.repository === repository)?.folder ?? null
 
-  /** Whether a proof's test is in the Workspace: always for a command with no test file. */
+  /**
+   * Whether a proof's test is in the Workspace: always for a command with no test file; for an
+   * addition, once the tests it adds are found in the file (a conflict integrated by hand).
+   */
   const inPlace = (building: BuildingRow, proof: Proof) => {
-    if (proof.test === undefined) return true
-    const folder = folderOf(building, proof.test.repository)
-    return folder !== null && existsSync(join(folder, proof.test.path))
+    const test = proof.test
+    if (test === undefined) return true
+    const folder = folderOf(building, test.repository)
+    const path = folder === null ? null : join(folder, test.path)
+    if (path === null || !existsSync(path)) return false
+    if (test.insertion !== 'addition') return true
+    const text = readFileSync(path, 'utf8')
+    const names = addedTestNames({
+      insertion: test.insertion,
+      code: test.code,
+      patch: test.patch ?? null,
+    })
+    const added =
+      names.length > 0
+        ? names
+        : (test.patch ?? '')
+            .split('\n')
+            .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+            .map((line) => line.slice(1).trim())
+            .filter((line) => line !== '')
+    return added.every((one) => text.includes(one))
   }
+
+  /**
+   * The repositories a scenario's proof is fresh on: its test's (every one for a command with no
+   * test file), and every repository the tasks covering it wrote.
+   */
+  const repositoriesOf = (building: BuildingRow, scenario: string, proof: Proof) =>
+    Effect.gen(function* () {
+      if (proof.test === undefined) return basesOf(building).map((one) => one.repository)
+      const database = yield* Database
+      const tasks = coveringOf(yield* tasksIn(database, building.id), scenario)
+      const found = new Set([proof.test.repository])
+      for (const attempt of yield* attemptsIn(database, building.id)) {
+        if (!tasks.some((task) => task.id === attempt.taskId)) continue
+        for (const file of yield* attributedIn(database, attempt.id)) found.add(file.repository)
+      }
+      return [...found]
+    })
+
+  /** A scenario's proof run, on the repositories it is fresh on. */
+  const runOf = (building: BuildingRow, scenario: string, phase: ProofPhase, proof: Proof) =>
+    Effect.gen(function* () {
+      const repositories = yield* repositoriesOf(building, scenario, proof)
+      return yield* ProofRunner.use((runner) =>
+        runner.run({
+          missionId: building.missionId,
+          buildingId: building.id,
+          scenario,
+          phase,
+          proof,
+          repositories,
+        }),
+      )
+    })
 
   // ---- The start.
 
@@ -436,6 +534,23 @@ export const buildingProofs = (parts: ProofParts) => {
         : ({ kind: 'write', path, content: text, status: 'M' } satisfies Placed)
     })
 
+  /** The files a proof inserts, each with what goes into it. */
+  const filesOf = (proof: Proof) =>
+    insertedFiles(proof).map((file, at) => {
+      const support =
+        file.field === 'test'
+          ? null
+          : (proof.support_files ?? [])[at - (proof.test === undefined ? 0 : 1)]
+      return {
+        repository: file.repository,
+        path: file.path,
+        insertion: file.insertion,
+        content: file.field === 'test' ? (proof.test?.code ?? null) : (support?.content ?? null),
+        patch: file.patch,
+        against: file.field === 'test' ? (proof.test?.against ?? null) : (support?.against ?? null),
+      }
+    })
+
   /** A file written by Hemera: its intent, the write, its outcome, so it is never the user's. */
   const writeFile = (building: BuildingRow, path: string, content: string) =>
     Effect.gen(function* () {
@@ -471,22 +586,7 @@ export const buildingProofs = (parts: ProofParts) => {
       for (const row of rows) {
         const proof = yield* proofOf(building.missionId, row.scenario)
         if (proof === null) continue
-        const files = insertedFiles(proof).map((file, at) => {
-          const support =
-            file.field === 'test'
-              ? null
-              : (proof.support_files ?? [])[at - (proof.test === undefined ? 0 : 1)]
-          return {
-            repository: file.repository,
-            path: file.path,
-            insertion: file.insertion,
-            content:
-              file.field === 'test' ? (proof.test?.code ?? null) : (support?.content ?? null),
-            patch: file.patch,
-            against:
-              file.field === 'test' ? (proof.test?.against ?? null) : (support?.against ?? null),
-          }
-        })
+        const files = filesOf(proof)
         const placed: Array<{ file: (typeof files)[number]; placed: Placed }> = []
         for (const file of files) placed.push({ file, placed: yield* placeFile(building, file) })
         const conflict = placed.find((one) => one.placed.kind === 'conflict')
@@ -549,28 +649,63 @@ export const buildingProofs = (parts: ProofParts) => {
           }
         }),
       )
-      for (const conflict of conflicts) {
-        const evidence = yield* putEvidence({
-          missionId: building.missionId,
-          content: { text: conflict.versions === '' ? conflict.said : conflict.versions },
-          name: `${conflict.scenario} · the test that did not merge`,
-          about: `proof ${conflict.scenario}`,
-          author: HemeraAuthor.make({}),
-        }).pipe(
-          Effect.map((item) => item.id),
-          Effect.orElseSucceed(() => null),
-        )
-        yield* loop.proofRed(
-          building,
-          conflict.scenario,
-          {
-            name: 'proof',
-            detail: `the test could not be written: ${conflict.said}${evidence === null ? '' : ` (evidence ${evidence})`}`,
-            outputTail: conflict.versions,
-            runId: null,
-          },
-          `Integrate the test by hand, exactly as the Spec gives it, then call proof_run(${conflict.scenario}).`,
-        )
+      if (conflicts.length > 0) yield* parts.hold('handing')
+      for (const conflict of conflicts) yield* handOver(building, conflict)
+    })
+
+  /** A proof that did not merge, handed to the Builder with its versions kept as evidence. */
+  const handOver = (
+    building: BuildingRow,
+    conflict: { readonly scenario: string; readonly said: string; readonly versions: string },
+  ) =>
+    Effect.gen(function* () {
+      const evidence = yield* putEvidence({
+        missionId: building.missionId,
+        content: { text: conflict.versions === '' ? conflict.said : conflict.versions },
+        name: `${conflict.scenario} · the test that did not merge`,
+        about: `proof ${conflict.scenario}`,
+        author: HemeraAuthor.make({}),
+      }).pipe(
+        Effect.map((item) => item.id),
+        Effect.orElseSucceed(() => null),
+      )
+      yield* loop.proofRed(
+        building,
+        conflict.scenario,
+        {
+          name: 'proof',
+          detail: `the test could not be written: ${conflict.said}${evidence === null ? '' : ` (evidence ${evidence})`}`,
+          outputTail: conflict.versions,
+          runId: null,
+        },
+        `Integrate the test by hand, exactly as the Spec gives it, then call proof_run(${conflict.scenario}).`,
+      )
+    })
+
+  /**
+   * At a start: each conflict the proofs' write found and a stop kept from being handed over (no
+   * attempt on its proof, its test still not in place) is handed to the Builder now.
+   */
+  const handOverLeft = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const attempts = yield* attemptsIn(database, building.id)
+      if (!attempts.some((one) => one.scope === 'proof' && one.subject === null)) return
+      for (const row of yield* scenarioProofsIn(database, building.id)) {
+        if (modeOf(row) !== 'automated' || stateOf(row) !== 'waiting_red') continue
+        if (attempts.some((one) => one.scope === 'proof' && one.subject === row.scenario)) continue
+        const proof = yield* proofOf(building.missionId, row.scenario)
+        if (proof === null || inPlace(building, proof)) continue
+        for (const file of filesOf(proof)) {
+          const placed = yield* placeFile(building, file)
+          if (placed.kind !== 'conflict') continue
+          yield* handOver(building, {
+            scenario: row.scenario,
+            said: placed.said,
+            versions: placed.versions,
+          })
+          break
+        }
       }
     })
 
@@ -692,7 +827,16 @@ export const buildingProofs = (parts: ProofParts) => {
           event: null,
         })
       }
-      if (validRed(run, proof.test?.path ?? null)) {
+      const test = proof.test
+      const names =
+        test === undefined
+          ? []
+          : addedTestNames({
+              insertion: test.insertion,
+              code: test.code,
+              patch: test.patch ?? null,
+            })
+      if (validRed(run, test?.path ?? null, names)) {
         if (run.keyLineMatched === false) {
           const question = [
             `${scenario}'s red is not the one Planning saw.`,
@@ -752,15 +896,7 @@ export const buildingProofs = (parts: ProofParts) => {
       if (row === null || stateOf(row) !== 'waiting_red') return null
       const proof = yield* proofOf(building.missionId, scenario)
       if (proof === null || !inPlace(building, proof)) return null
-      const run = yield* ProofRunner.use((runner) =>
-        runner.run({
-          missionId: building.missionId,
-          buildingId: building.id,
-          scenario,
-          phase: 'red',
-          proof,
-        }),
-      )
+      const run = yield* runOf(building, scenario, 'red', proof)
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
       yield* judgeRed(building, scenario, proof, run)
       return run
@@ -773,6 +909,7 @@ export const buildingProofs = (parts: ProofParts) => {
    */
   const redPhase = (building: BuildingRow) =>
     inTurn(
+      building.missionId,
       Effect.gen(function* () {
         const database = yield* Database
         const attempts = yield* attemptsIn(database, building.id)
@@ -801,55 +938,66 @@ export const buildingProofs = (parts: ProofParts) => {
 
   // ---- The green runs.
 
-  /** Whether every task covering a scenario is done. */
-  const tasksDoneFor = (tasks: Effect.Success<ReturnType<typeof tasksIn>>, scenario: string) => {
-    const covering = coveringOf(tasks, scenario).filter((task) => task.state !== 'skipped')
-    return covering.length > 0 && covering.every((task) => task.state === 'done')
+  /**
+   * Whether a scenario's green is due: every task covering it done; with none, every task of its
+   * requirement; with none either, every task of the plan.
+   */
+  const greenDue = (tasks: ReadonlyArray<TaskNow>, scenario: string, requirement: string) => {
+    const live = tasks.filter((task) => task.replacedBy.length === 0 && task.state !== 'skipped')
+    const covering = live.filter((task) => task.scenarios.includes(scenario))
+    const ofRequirement = live.filter((task) => task.requirements.includes(requirement))
+    const due = covering.length > 0 ? covering : ofRequirement.length > 0 ? ofRequirement : live
+    return due.every((task) => task.state === 'done')
   }
 
   /**
-   * A scenario's proof run once its tasks are done: green on its tree when it passes, an attempt
-   * on its proof for the Builder otherwise. A scenario set aside as not reproducible is run for
-   * information only.
+   * A green recorded from a run that passed, in one transaction: the scenario green on that run's
+   * trees, its open attempt closed green. When a repository moved since the run, it is `to_rerun`
+   * instead: a green is never recorded on a tree that is no longer the current one.
    */
-  const greenOf = (building: BuildingRow, scenario: string, phase: ProofPhase) =>
+  const recordGreen = (
+    building: BuildingRow,
+    scenario: string,
+    run: {
+      readonly id: string
+      readonly testPath: string | null
+      readonly testSha256: string | null
+      readonly testEvidenceId: string | null
+      readonly trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
+    },
+  ) =>
     Effect.gen(function* () {
-      const database = yield* Database
-      const proof = yield* proofOf(building.missionId, scenario)
-      if (proof === null) return null
-      const run = yield* ProofRunner.use((runner) =>
-        runner.run({
-          missionId: building.missionId,
-          buildingId: building.id,
-          scenario,
-          phase,
-          proof,
-        }),
-      )
-      const row = yield* scenarioProofIn(database, building.id, scenario)
-      if (row === null || stateOf(row) === 'not_reproducible') return run
-      if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
-      if (run.classification !== 'passed') {
-        yield* loop.proofRed(
-          building,
-          scenario,
-          {
-            name: 'proof',
-            detail: `${scenario}'s proof is not green: ${CLASS_SAID[run.classification]}`,
-            outputTail: run.outputTail,
-            runId: run.runId,
-          },
-          `Fix it in the tasks covering ${scenario}, never in its test, then call proof_run(${scenario}).`,
-        )
-        return run
-      }
-      const red = (yield* proofRunsIn(database, building.id)).find((one) => one.id === row.redRunId)
-      yield* mutate('recording a green', (transaction) =>
+      const green = yield* mutate('recording a green', (transaction) =>
         Effect.gen(function* () {
+          const row = yield* scenarioProofIn(transaction, building.id, scenario)
+          if (row === null) return { result: false, events: [] }
+          if (stateOf(row) !== 'red_recorded' && stateOf(row) !== 'to_rerun') {
+            return { result: false, events: [] }
+          }
+          if (!upToDate(run.trees, yield* currentTreesIn(transaction, building.missionId))) {
+            yield* setProofIn(transaction, building.id, scenario, { state: 'to_rerun' })
+            return { result: false, events: [] }
+          }
           yield* setProofIn(transaction, building.id, scenario, {
             state: 'green',
             greenRunId: run.id,
           })
+          yield* transaction
+            .update(buildingAttempts)
+            .set({ endedAt: now(), outcome: 'green', verdict: 'green' })
+            .where(
+              and(
+                eq(buildingAttempts.buildingId, building.id),
+                isNull(buildingAttempts.taskId),
+                eq(buildingAttempts.scope, 'proof'),
+                eq(buildingAttempts.subject, scenario),
+                isNull(buildingAttempts.endedAt),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('closing the attempt')))
+          const red = (yield* proofRunsIn(transaction, building.id)).find(
+            (one) => one.id === row.redRunId,
+          )
           const events: NewEvent[] = [
             buildingEvent(building.missionId, 'building.scenario_green', { scenario }),
           ]
@@ -877,35 +1025,176 @@ export const buildingProofs = (parts: ProofParts) => {
               }),
             )
           }
-          return { result: undefined, events }
+          return { result: true, events }
         }),
       )
+      if (green) yield* parts.greened(building)
+    })
+
+  /**
+   * A scenario's proof run once its tasks are done: green on its tree when it passes; otherwise an
+   * attempt on its proof, open until it is green, for the Builder. A scenario set aside as not
+   * reproducible is run for information only.
+   */
+  const greenOf = (building: BuildingRow, scenario: string, phase: ProofPhase) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const proof = yield* proofOf(building.missionId, scenario)
+      if (proof === null) return null
+      const run = yield* runOf(building, scenario, phase, proof)
+      const row = yield* scenarioProofIn(database, building.id, scenario)
+      if (row === null || stateOf(row) === 'not_reproducible') return run
+      if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
+      if (run.classification !== 'passed') {
+        yield* loop.proofRed(
+          building,
+          scenario,
+          {
+            name: 'proof',
+            detail: `${scenario}'s proof is not green: ${CLASS_SAID[run.classification]}`,
+            outputTail: run.outputTail,
+            runId: run.runId,
+          },
+          `Fix it in the tasks covering ${scenario}, never in its test: Hemera runs it again once your next write settles, at your next task_finished, or when you call proof_run(${scenario}).`,
+          true,
+        )
+        return run
+      }
+      yield* parts.hold('greening')
+      yield* recordGreen(building, scenario, run)
       return run
     })
 
   /**
-   * The greens due: each automated scenario whose tasks are all done and whose red is recorded (or
-   * which is not reproducible, run for information), never run green since. `named` narrows them to
-   * a task's scenarios.
+   * The greens due, keyed on each scenario's state and its last green run, never on whether one
+   * ran: an automated scenario whose red is recorded (or which is not reproducible, run for
+   * information) and whose tasks are done runs, unless its last green run was on the current
+   * trees. That run, passed, makes it green: a stop between a green run and its record.
    */
-  const greensDue = (building: BuildingRow, named: ReadonlyArray<string> | null) =>
+  const greensDue = (building: BuildingRow) =>
     inTurn(
+      building.missionId,
       Effect.gen(function* () {
         const database = yield* Database
         const tasks = yield* tasksIn(database, building.id)
         const runs = yield* proofRunsIn(database, building.id)
+        const current = yield* currentTreesIn(database, building.missionId)
         for (const row of yield* scenarioProofsIn(database, building.id)) {
-          if (named !== null && !named.includes(row.scenario)) continue
           const state = stateOf(row)
           if (modeOf(row) !== 'automated') continue
           if (state !== 'red_recorded' && state !== 'not_reproducible') continue
-          if (!tasksDoneFor(tasks, row.scenario)) continue
-          // Run once for these tasks: a red since goes through the Builder's proof_run.
-          if (runs.some((one) => one.scenario === row.scenario && one.phase === 'green')) continue
+          if (!greenDue(tasks, row.scenario, row.requirement)) continue
+          const last = runs.findLast(
+            (one) =>
+              one.scenario === row.scenario && (one.phase === 'green' || one.phase === 'rerun'),
+          )
+          const trees = readTrees(last?.trees ?? null)
+          if (last !== undefined && trees.length > 0 && upToDate(trees, current)) {
+            if (state === 'red_recorded' && last.classification === 'passed') {
+              yield* recordGreen(building, row.scenario, Object.assign({}, last, { trees }))
+            }
+            continue
+          }
           yield* greenOf(building, row.scenario, 'green')
         }
       }),
     )
+
+  /**
+   * The automated scenarios that keep the end waiting: any not green (nor stale, which the end
+   * runs again, nor set aside as not reproducible) once every task is done.
+   */
+  const unproven = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      return (yield* scenarioProofsIn(database, building.id))
+        .filter(
+          (row) =>
+            modeOf(row) === 'automated' &&
+            !['green', 'to_rerun', 'not_reproducible'].includes(stateOf(row)),
+        )
+        .map((row) => row.scenario)
+    })
+
+  /** Whether a scenario has the open attempt of a failed green. */
+  const failedGreens = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      return (yield* attemptsIn(database, building.id))
+        .filter((one) => one.scope === 'proof' && one.subject !== null && one.endedAt === null)
+        .map((one) => one.subject ?? '')
+    })
+
+  /** The missions whose Builder wrote and whose failed greens wait for that write to settle. */
+  const settling = new Set<string>()
+
+  /**
+   * A file tool write of the Builder settled: a failed green runs again on the trees it left. The
+   * writes of a moment are taken together, and nothing waits for it.
+   */
+  const afterWrite = (missionId: string) =>
+    Effect.suspend(() => {
+      if (settling.has(missionId)) return Effect.void
+      settling.add(missionId)
+      return parts.background(
+        Effect.gen(function* () {
+          yield* Effect.sleep('300 millis')
+          settling.delete(missionId)
+          const database = yield* Database
+          const building = yield* activeBuildingIn(database, missionId)
+          if (building === null || (yield* failedGreens(building)).length === 0) return
+          yield* snapshotNow(building, 'write')
+          yield* greensDue(building)
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
+          Effect.catchCause((cause) => said(`a failed green did not run again: ${String(cause)}`)),
+        ),
+      )
+    })
+
+  /**
+   * The Builder's write outside the proof files while some scenario still waits for its red, kept
+   * for the reviewers (in the transaction of its outcome).
+   */
+  const writtenIn = (transaction: EngineTransaction, file: WrittenFile) =>
+    Effect.gen(function* () {
+      const building = yield* activeBuildingIn(transaction, file.missionId)
+      if (building === null) return
+      const waiting = (yield* scenarioProofsIn(transaction, building.id))
+        .filter(
+          (row) =>
+            modeOf(row) === 'automated' &&
+            (stateOf(row) === 'waiting_red' || stateOf(row) === 'held'),
+        )
+        .map((row) => row.scenario)
+      if (waiting.length === 0) return
+      const located = fileOf(building, file.path)
+      if (located === null) return
+      if (
+        (yield* proofFilesIn(transaction, building.missionId)).has(
+          `${located.repository}\u0000${located.path}`,
+        )
+      )
+        return
+      const lineage = yield* lineageIn(transaction, file.sessionId)
+      const task =
+        lineage === null
+          ? null
+          : taskOfFile(runningOf(yield* tasksIn(transaction, building.id), lineage), located)
+      yield* transaction
+        .insert(writesBeforeRed)
+        .values({
+          id: crypto.randomUUID(),
+          buildingId: building.id,
+          repository: located.repository,
+          path: located.path,
+          taskId: task?.id ?? null,
+          sessionId: file.sessionId,
+          scenarios: JSON.stringify(waiting),
+          at: now(),
+        })
+        .pipe(Effect.mapError(refusedWhile('keeping a write before the red')))
+    })
 
   // ---- What the user answered.
 
@@ -1001,7 +1290,7 @@ export const buildingProofs = (parts: ProofParts) => {
         }),
       )
       yield* parts.background(
-        inTurn(redOf(building, scenario)).pipe(
+        inTurn(building.missionId, redOf(building, scenario)).pipe(
           Effect.asVoid,
           Effect.catchCause((cause) => said(`a red was not run again: ${String(cause)}`)),
         ),
@@ -1036,25 +1325,19 @@ export const buildingProofs = (parts: ProofParts) => {
       const proof = yield* proofOf(building.missionId, args.scenario)
       if (proof === null || !inPlace(building, proof)) {
         return refusal(
-          `refused: ${args.scenario}'s test is not in place yet: ${proof?.test === undefined ? '' : `${proof.test.repository}/${proof.test.path} is missing.`}`,
+          `refused: ${args.scenario}'s test is not in place yet${proof?.test === undefined ? '.' : `: ${proof.test.repository}/${proof.test.path} is missing, or does not hold the test yet.`}`,
         )
       }
       const state = stateOf(row)
       if (state === 'held') return refusal(`refused: ${args.scenario} waits for the user's answer.`)
+      // Before its tasks are done, a run is for information: it judges nothing.
       const run = yield* inTurn(
+        building.missionId,
         state === 'waiting_red'
           ? redOf(building, args.scenario)
-          : tasksDoneFor(tasks, args.scenario)
+          : greenDue(tasks, args.scenario, row.requirement)
             ? greenOf(building, args.scenario, 'green')
-            : ProofRunner.use((runner) =>
-                runner.run({
-                  missionId: building.missionId,
-                  buildingId: building.id,
-                  scenario: args.scenario,
-                  phase: 'green',
-                  proof,
-                }),
-              ),
+            : runOf(building, args.scenario, 'info', proof),
       )
       if (run === null) return refusal(`refused: ${args.scenario} no longer waits for its red.`)
       const after = yield* scenarioProofIn(database, building.id, args.scenario)
@@ -1080,11 +1363,18 @@ export const buildingProofs = (parts: ProofParts) => {
       if (building === null) return { proofs: [], checks: [] }
       yield* snapshotNow(building, 'refresh')
       const rerun: string[] = []
+      const failed = yield* failedGreens(building)
       yield* inTurn(
+        missionId,
         Effect.gen(function* () {
           for (const row of yield* scenarioProofsIn(database, building.id)) {
-            if (modeOf(row) !== 'automated' || stateOf(row) !== 'to_rerun') continue
-            yield* greenOf(building, row.scenario, 'rerun')
+            if (modeOf(row) !== 'automated') continue
+            // A stale green, and a failed green whose attempt is still open.
+            const state = stateOf(row)
+            if (state === 'to_rerun') yield* greenOf(building, row.scenario, 'rerun')
+            else if (state === 'red_recorded' && failed.includes(row.scenario))
+              yield* greenOf(building, row.scenario, 'green')
+            else continue
             rerun.push(row.scenario)
           }
         }),
@@ -1121,14 +1411,14 @@ export const buildingProofs = (parts: ProofParts) => {
       const proofs: string[] = []
       for (const row of yield* scenarioProofsIn(database, building.id)) {
         const state = stateOf(row)
-        if (state === 'to_rerun') {
-          proofs.push(row.scenario)
+        if (state !== 'green' && state !== 'to_rerun') continue
+        const run = runs.find((one) => one.id === row.greenRunId)
+        // A stale proof with no green run left to compare is touched wherever it is asked.
+        if (run === undefined) {
+          if (state === 'to_rerun') proofs.push(row.scenario)
           continue
         }
-        if (state !== 'green') continue
-        const run = runs.find((one) => one.id === row.greenRunId)
-        if (run !== undefined && !upToDate(readTrees(run.trees), current, repositories))
-          proofs.push(row.scenario)
+        if (!upToDate(readTrees(run.trees), current, repositories)) proofs.push(row.scenario)
       }
       const checks = (yield* finalChecksIn(database, missionId, building.id))
         .filter((one) => !upToDate(one.trees, current, repositories))
@@ -1142,10 +1432,11 @@ export const buildingProofs = (parts: ProofParts) => {
   const resumed = (building: BuildingRow) =>
     Effect.gen(function* () {
       yield* writeProofs(building).pipe(
+        Effect.andThen(handOverLeft(building)),
         Effect.catchCause((cause) => said(`the proofs were not written: ${String(cause)}`)),
       )
       yield* parts.background(
-        Effect.andThen(redPhase(building), greensDue(building, null)).pipe(
+        Effect.andThen(redPhase(building), greensDue(building)).pipe(
           Effect.catchCause((cause) => said(`the proofs did not resume: ${String(cause)}`)),
         ),
       )
@@ -1156,6 +1447,9 @@ export const buildingProofs = (parts: ProofParts) => {
     started,
     resumed,
     greensDue,
+    unproven,
+    writtenIn,
+    afterWrite,
     answeredIn,
     afterAnswer,
     retried,

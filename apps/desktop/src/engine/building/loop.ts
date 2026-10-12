@@ -146,7 +146,7 @@ export const runningOf = (tasks: ReadonlyArray<TaskNow>, lineage: string) =>
   tasks.filter((task) => task.state === 'in_progress' && task.runner === lineage)
 
 /** The task a write belongs to: the one whose targets hold the file, else the first. */
-const taskOfFile = (
+export const taskOfFile = (
   running: ReadonlyArray<TaskNow>,
   file: { readonly repository: string; readonly path: string },
 ) =>
@@ -156,7 +156,7 @@ const taskOfFile = (
   running[0] ??
   null
 
-const lineageIn = (reader: Reader, sessionId: string) =>
+export const lineageIn = (reader: Reader, sessionId: string) =>
   Effect.map(
     reader
       .select({ lineage: agentSessions.lineage })
@@ -1356,7 +1356,8 @@ export const buildingLoop = (parts: LoopParts) => {
    * A scenario's proof that is not what it should be (#144): a red that is not one, a test that
    * could not be merged, a proof still red once its tasks are done. An attempt on that scenario's
    * proof keeps it, and the Builder is handed it; the third counted red is an error need on that
-   * scope, and while it waits nothing more is opened or asked.
+   * scope, and while it waits nothing more is opened or asked. A failed green's attempt stays open
+   * until the scenario is green: the next failure closes it red and opens the next one.
    */
   const proofRed = (
     building: BuildingRow,
@@ -1368,13 +1369,17 @@ export const buildingLoop = (parts: LoopParts) => {
       readonly runId: string | null
     },
     next: string,
+    open = false,
   ) =>
     Effect.gen(function* () {
       const database = yield* Database
       const { missionId } = building
-      const all = (yield* attemptsIn(database, building.id)).filter(
-        (one) => one.taskId === null && one.scope === 'proof' && one.subject === scenario,
-      )
+      const all = (yield* attemptsIn(database, building.id))
+        .filter((one) => one.taskId === null && one.scope === 'proof' && one.subject === scenario)
+        // The open one of a failed green is closed red below, before the next opens.
+        .map((one) =>
+          one.endedAt === null ? Object.assign({}, one, { verdict: 'red', endedAt: now() }) : one,
+        )
       const [asking] = yield* database
         .select({ id: buildingDecisions.id })
         .from(buildingDecisions)
@@ -1396,6 +1401,19 @@ export const buildingLoop = (parts: LoopParts) => {
       yield* mutate('opening an attempt on a proof', (transaction) =>
         Effect.gen(function* () {
           yield* transaction
+            .update(buildingAttempts)
+            .set({ endedAt: at, outcome: 'red', verdict: 'red' })
+            .where(
+              and(
+                eq(buildingAttempts.buildingId, building.id),
+                isNull(buildingAttempts.taskId),
+                eq(buildingAttempts.scope, 'proof'),
+                eq(buildingAttempts.subject, scenario),
+                isNull(buildingAttempts.endedAt),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('closing the attempt')))
+          yield* transaction
             .insert(buildingAttempts)
             .values({
               id: attemptId,
@@ -1408,9 +1426,9 @@ export const buildingLoop = (parts: LoopParts) => {
               epoch: 0,
               starts: '[]',
               startedAt: at,
-              endedAt: at,
-              outcome: 'red',
-              verdict: 'red',
+              endedAt: open ? null : at,
+              outcome: open ? null : 'red',
+              verdict: open ? null : 'red',
               outside: '[]',
             })
             .pipe(Effect.mapError(refusedWhile('opening the attempt')))

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "05cb91a0-b34c-405f-9f9f-177eb29541b8",
+  "id": "aaa282f8-89fd-4506-8392-1be76d1857f8",
   "prevIds": ["e5464b83-04be-445a-8e0b-809eeb36f250"],
   "ddl": [
     {
@@ -470,6 +470,10 @@
     },
     {
       "name": "workspaces",
+      "entityType": "tables"
+    },
+    {
+      "name": "writes_before_red",
       "entityType": "tables"
     },
     {
@@ -12193,6 +12197,86 @@
       "table": "workspaces"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scenarios",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "writes_before_red"
+    },
+    {
       "columns": ["mission_id"],
       "tableTo": "missions",
       "columnsTo": ["id"],
@@ -13634,6 +13718,17 @@
       "table": "workspaces"
     },
     {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_writes_before_red_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "writes_before_red"
+    },
+    {
       "columns": ["mission_id", "question_id", "version"],
       "nameExplicit": false,
       "name": "answers_pk",
@@ -14429,6 +14524,13 @@
       "nameExplicit": false,
       "name": "workspaces_pk",
       "table": "workspaces",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "writes_before_red_pk",
+      "table": "writes_before_red",
       "entityType": "pks"
     },
     {
@@ -15640,6 +15742,20 @@
       "name": "calls_by_session",
       "entityType": "indexes",
       "table": "tool_calls"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "writes_before_red_of_building",
+      "entityType": "indexes",
+      "table": "writes_before_red"
     },
     {
       "columns": ["mission_id", "number"],

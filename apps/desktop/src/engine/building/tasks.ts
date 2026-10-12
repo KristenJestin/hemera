@@ -200,6 +200,18 @@ export const waitingRedIn = (reader: Reader, buildingId: string) =>
       ),
     )
 
+/** What a waiting task waits for among the reds not recorded yet (#144), or null. */
+export const waitsForRed = (
+  task: { readonly state: string; readonly scenarios: ReadonlyArray<string> },
+  reds: ReadonlySet<string>,
+): string | null => {
+  const own = task.state === 'waiting' ? task.scenarios.filter((one) => reds.has(one)) : []
+  if (own.length === 0) return null
+  const named =
+    own.length === 1 ? (own[0] ?? '') : `${own.slice(0, -1).join(', ')} and ${own.at(-1) ?? ''}`
+  return `waits for the red of ${named}`
+}
+
 /** The effective plan, in its order. */
 export const tasksIn = (reader: Reader, buildingId: string) =>
   reader
@@ -611,6 +623,7 @@ const taskViewOf = (
   task: TaskNow,
   attempts: ReadonlyArray<AttemptRow>,
   extras: AttemptExtras,
+  reds: ReadonlySet<string>,
 ): BuildingTaskView => ({
   id: task.id,
   title: task.title,
@@ -624,6 +637,7 @@ const taskViewOf = (
   verified: task.verified,
   runner: task.runner,
   blockedBy: task.blockedBy === null ? null : causeSaid(task.blockedBy),
+  waiting: waitsForRed(task, reds),
   skippedReason: task.skippedReason,
   replacedBy: task.replacedBy,
   decisionId: task.decisionId,
@@ -657,6 +671,7 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
   Effect.gen(function* () {
     const tasks = yield* tasksIn(reader, building.id)
     const attempts = yield* attemptsIn(reader, building.id)
+    const reds = yield* waitingRedIn(reader, building.id)
     const extras: AttemptExtras = {
       checks: yield* checkResultsOf(
         reader,
@@ -701,7 +716,7 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         baseCommit: base.commit,
       })),
       requirements: requirementViews,
-      tasks: tasks.map((task) => taskViewOf(task, attempts, extras)),
+      tasks: tasks.map((task) => taskViewOf(task, attempts, extras, reds)),
       decisions: (yield* decisionsIn(reader, building.id)).map(decisionViewOf),
       scopes: attempts
         // Hemera's writes of the proofs (#144) are its record, not an attempt anyone makes.

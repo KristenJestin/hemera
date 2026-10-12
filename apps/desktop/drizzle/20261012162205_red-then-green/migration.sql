@@ -51,4 +51,17 @@ CREATE TABLE `scenario_proofs` (
 	CONSTRAINT `fk_scenario_proofs_building_id_buildings_id_fk` FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
 );
 --> statement-breakpoint
-CREATE INDEX `proof_runs_of_scenario` ON `proof_runs` (`building_id`,`scenario`);
+CREATE TABLE `writes_before_red` (
+	`id` text PRIMARY KEY,
+	`building_id` text NOT NULL,
+	`repository` text NOT NULL,
+	`path` text NOT NULL,
+	`task_id` text,
+	`session_id` text NOT NULL,
+	`scenarios` text NOT NULL,
+	`at` text NOT NULL,
+	CONSTRAINT `fk_writes_before_red_building_id_buildings_id_fk` FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+);
+--> statement-breakpoint
+CREATE INDEX `proof_runs_of_scenario` ON `proof_runs` (`building_id`,`scenario`);--> statement-breakpoint
+CREATE INDEX `writes_before_red_of_building` ON `writes_before_red` (`building_id`);

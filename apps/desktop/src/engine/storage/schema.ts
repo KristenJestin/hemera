@@ -2758,6 +2758,28 @@ export const repositoryTrees = sqliteTable(
   (table) => [primaryKey({ columns: [table.missionId, table.repository] })],
 )
 
+/**
+ * A write of a mission's session made before the red of some automated scenario was recorded, out
+ * of every proof's files (#144): the reviewers see it as "written before the red". `scenarios` the
+ * scenarios still waiting for their red then (JSON).
+ */
+export const writesBeforeRed = sqliteTable(
+  'writes_before_red',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    taskId: text('task_id'),
+    sessionId: text('session_id').notNull(),
+    scenarios: text('scenarios').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('writes_before_red_of_building').on(table.buildingId)],
+)
+
 /** The files a running task holds, from its targets: one holder per file of a Building. */
 export const buildingClaims = sqliteTable(
   'building_claims',

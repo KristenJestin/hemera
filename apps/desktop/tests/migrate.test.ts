@@ -271,6 +271,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'workspace_repositories',
       'workspace_steps',
       'workspaces',
+      'writes_before_red',
+      'writes_before_red_of_building',
     ])
     expect(await on(data, typesOf)).toEqual([
       'profile.created',
