@@ -78,6 +78,15 @@ export interface AddProjectDialogProps {
 }
 
 /**
+ * Whether the setup is proposed: ticked by default where an agent can run it, the user's own
+ * choice once they have made one, and never where none can.
+ */
+export function settingUpOf(choice: boolean | null, setupOffer: SetupOffer | null): boolean {
+  if (setupOffer === null || setupOffer.unavailable !== undefined) return false
+  return choice ?? true
+}
+
+/**
  * Adding a Project in the window: the design's dialog, Hemera looking in the folder once the
  * typing settles (or at once when the picker gives one), what it found proposed, a repository
  * added by its path by hand, and the engine's refusal said where it concerns. The Project's mark
@@ -90,8 +99,9 @@ export function AddProjectDialog({
   setupOffer,
   onCreated,
 }: AddProjectDialogProps): ReactNode {
-  /** Whether the user chose to have an agent propose the rest of the setup. */
-  const [setUp, setSetUp] = useState(false)
+  /** Whether the user chose to have an agent propose the rest of the setup; null until they do. */
+  const [setUp, setSetUp] = useState<boolean | null>(null)
+  const settingUp = settingUpOf(setUp, setupOffer)
   const [folder, setFolder] = useState('')
   const [name, setName] = useState('')
   const [named, setNamed] = useState(false)
@@ -122,7 +132,7 @@ export function AddProjectDialog({
     setByHand('')
     setRefusal({})
     setCreating(false)
-    setSetUp(false)
+    setSetUp(null)
   }
 
   const look = (at: string): void => {
@@ -209,7 +219,7 @@ export function AddProjectDialog({
       refused={refusal.foot}
       creating={creating}
       setup={setupOffer ?? undefined}
-      setUp={setUp}
+      setUp={settingUp}
       onSetUp={setSetUp}
       onCreate={() => {
         if (creating) return
@@ -218,7 +228,7 @@ export function AddProjectDialog({
         setRefusal({})
         tools.create(newProjectOf(folder, name, asked)).then(
           (project) => {
-            const chosen = setUp && setupOffer !== null && setupOffer.unavailable === undefined
+            const chosen = settingUp
             reset()
             onOpenChange(false)
             onCreated(project, chosen)
