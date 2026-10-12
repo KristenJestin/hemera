@@ -55,11 +55,11 @@ beforeEach(() => {
 afterEach(removeFolders)
 
 /** The engine with the Builder of this version, its real checks, and every agent call allowed. */
-const checksEngine = (dataFolder: string, hold?: BuilderHold) =>
+const checksEngine = (dataFolder: string, hold: BuilderHold = () => Effect.void) =>
   sessionsEngine(dataFolder, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
-    ...(hold === undefined ? {} : { building: { hold } }),
+    building: { hold },
   })
 
 /**
