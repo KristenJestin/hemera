@@ -9,9 +9,10 @@ import { BuildingScreen } from './screen.tsx'
  * The Building page of #149, recommended: the spine of requirements in the middle, each with its
  * tasks and its proofs, and a rail that says top to bottom what happens — the stage card common to
  * every stage (the face, the line of what happens or waits, the progress line, the chips of what
- * runs: services, helpers, checks under way) — the services that do not run with their Start,
- * then one quiet line each for what no one needs to watch — the checks, the changes, the journal —
- * and the mission's own things. The needs stand above the page, one row each, unfolded on demand.
+ * runs: services, helpers, checks under way) — then one quiet line each for what no one needs to
+ * watch — the services, the checks, the changes, the journal — and the mission's own things. The
+ * services are put three ways for the maintainer to choose: `ServicesAsAFold` (recommended),
+ * `ServicesInTheCard`, `ServicesAsAList`. The needs stand above the page, one row each, unfolded on demand.
  */
 const meta = {
   title: 'Explorations/Building/Building',
@@ -59,7 +60,9 @@ export const Working: Story = {
       'aria-expanded',
       'false',
     )
-    await expect(canvas.getByRole('button', { name: 'Start storybook' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /^Services/ })).toHaveTextContent(
+      'api, web running · 2 to start',
+    )
   },
 }
 
@@ -95,10 +98,10 @@ export const JustLaunched: Story = {
     const card = within(cardOf(canvasElement))
     await expect(card.getByRole('status')).toHaveTextContent(/records each scenario’s red/)
     await expect(card.getByText('3 of 14 reds recorded')).toBeVisible()
-    // Nothing runs yet: the declared services are a Start each.
+    // Nothing runs yet: the services' line says how many wait to be started.
     await expect(
-      within(canvasElement).getByRole('button', { name: 'Start storybook' }),
-    ).toBeVisible()
+      within(canvasElement).getByRole('button', { name: /^Services/ }),
+    ).toHaveTextContent('2 to start')
   },
 }
 
@@ -155,19 +158,86 @@ export const BudgetSpent: Story = {
 }
 
 /**
- * Starting a service: each one the Project declares and that does not run is a Start beside the
- * chips; what the catalogue offers beyond them is one folded line, each with its command and Start.
+ * The services as one folded line among the rail's folds, recommended: "Services · api running · 2
+ * to start"; unfolded, one row per service — its mark, its address while it runs or its command,
+ * Stop or Start — and the catalogue's services last, behind their own folded line.
  */
+const playServicesAsAFold: Story['play'] = async ({ canvasElement, args }) => {
+  const canvas = within(canvasElement)
+  const line = canvas.getByRole('button', { name: /^Services/ })
+  await expect(line).toHaveTextContent('api running · 2 to start')
+  await expect(line).toHaveAttribute('aria-expanded', 'false')
+  await userEvent.click(line)
+  const rows = await waitFor(() => canvas.getByRole('list', { name: 'Services' }))
+  await expect(within(rows).getByText('http://localhost:3012')).toBeVisible()
+  await userEvent.click(within(rows).getByRole('button', { name: 'Stop api' }))
+  await expect(args.onService).toHaveBeenCalledWith('api', 'stop')
+  await userEvent.click(within(rows).getByRole('button', { name: 'Start worker' }))
+  await expect(args.onService).toHaveBeenCalledWith('worker', 'start')
+  await userEvent.click(canvas.getByRole('button', { name: /^From the catalogue/ }))
+  const offered = await waitFor(() => canvas.getByRole('list', { name: 'From the catalogue' }))
+  await expect(within(offered).getByText('docker compose up mailpit')).toBeVisible()
+  await userEvent.click(
+    within(offered).getByRole('button', { name: 'Start mailpit for this mission' }),
+  )
+  await expect(args.onService).toHaveBeenCalledWith('mailpit', 'start')
+}
+
+/** Starting a service: proposal 1, the services as one folded line, shown until one is chosen. */
 export const ServicesToStart: Story = {
+  args: { moment: 'services', services: 'fold' },
+  play: playServicesAsAFold,
+}
+
+/** Proposal 1, recommended: the services as one folded line among the rail's folds. */
+export const ServicesAsAFold: Story = {
+  args: { moment: 'services', services: 'fold' },
+  play: playServicesAsAFold,
+}
+
+/**
+ * Proposal 2: no block. The stopped services are quiet dashed chips after the stage card's running
+ * ones, a click starts one; Stop is in a running chip's glance, as everywhere. The catalogue stays
+ * one folded line among the rail's folds.
+ */
+export const ServicesInTheCard: Story = {
+  args: { moment: 'services', services: 'card' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Start storybook' }))
+    const card = within(cardOf(canvasElement))
+    await userEvent.click(card.getByRole('button', { name: 'Start storybook' }))
     await expect(args.onService).toHaveBeenCalledWith('storybook', 'start')
-    const catalogue = canvas.getByRole('button', { name: /^From the catalogue/ })
-    await expect(catalogue).toHaveAttribute('aria-expanded', 'false')
-    await userEvent.click(catalogue)
+    await expect(card.getByRole('button', { name: 'Start worker' })).toBeVisible()
+    await userEvent.click(card.getByRole('button', { name: /^api,/ }))
+    const glance = await waitFor(() => within(document.body).getByRole('dialog'))
+    await userEvent.click(within(glance).getByRole('button', { name: /Stop/ }))
+    await expect(args.onService).toHaveBeenCalledWith('api', 'stop')
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(canvas.getByRole('button', { name: /^From the catalogue/ }))
     const offered = await waitFor(() => canvas.getByRole('list', { name: 'From the catalogue' }))
-    await expect(within(offered).getByText('docker compose up mailpit')).toBeVisible()
+    await userEvent.click(
+      within(offered).getByRole('button', { name: 'Start mailpit for this mission' }),
+    )
+    await expect(args.onService).toHaveBeenCalledWith('mailpit', 'start')
+  },
+}
+
+/**
+ * Proposal 3: a block of its own under the stage card, titled "Services", every service listed
+ * with its state — the running ones with their address and Stop — and the catalogue folded last.
+ */
+export const ServicesAsAList: Story = {
+  args: { moment: 'services', services: 'list' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const block = within(canvas.getByRole('region', { name: 'Services' }))
+    await expect(block.getByText('http://localhost:3012')).toBeVisible()
+    await userEvent.click(block.getByRole('button', { name: 'Stop api' }))
+    await expect(args.onService).toHaveBeenCalledWith('api', 'stop')
+    await userEvent.click(block.getByRole('button', { name: 'Start storybook' }))
+    await expect(args.onService).toHaveBeenCalledWith('storybook', 'start')
+    await userEvent.click(block.getByRole('button', { name: /^From the catalogue/ }))
+    const offered = await waitFor(() => block.getByRole('list', { name: 'From the catalogue' }))
     await userEvent.click(
       within(offered).getByRole('button', { name: 'Start mailpit for this mission' }),
     )

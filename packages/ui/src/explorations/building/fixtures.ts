@@ -460,6 +460,7 @@ export const REFUSALS: readonly NeedRow[] = [
 /** The moment Building is in: one per state the stories show. */
 export type MomentName =
   | 'working'
+  | 'services'
   | 'starting'
   | 'needs'
   | 'refused'
@@ -497,6 +498,12 @@ const WORKING: BuildingMoment = {
 
 export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
   working: () => WORKING,
+  // One service running with its address, two declared and stopped, one more in the catalogue.
+  services: () => ({
+    ...WORKING,
+    services: SERVICES.slice(0, 1),
+    catalogue: CATALOGUE.slice(0, 1),
+  }),
   starting: () => ({
     ...WORKING,
     now: 'Builder records each scenario’s red before writing its code: 6 of 14.',
