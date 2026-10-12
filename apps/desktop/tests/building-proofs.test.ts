@@ -19,6 +19,7 @@ import { and, eq } from 'drizzle-orm'
 import { Deferred, Effect, Layer, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { BuildingEnd, type BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
@@ -44,7 +45,7 @@ import {
   scenarioProofs,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
-import { call, eventsOf } from './building-world.ts'
+import { QUIET, READING, call, eventsOf } from './building-world.ts'
 import { PLAN, builderAgents, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
@@ -67,12 +68,29 @@ const proofsEngine = (
   dataFolder: string,
   hold: BuilderHold = () => Effect.void,
   end?: Layer.Layer<BuildingEnd>,
+  agents: (index: number) => FakeScript = builderAgents,
 ) =>
-  sessionsEngine(dataFolder, builderAgents, {
+  sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: end === undefined ? { hold } : { hold, end },
   })
+
+/**
+ * A Builder still at work: once `busy` is called, the turn it is in or starts next stays open until
+ * the test ends, so it can always act on what it is told.
+ */
+const busyBuilder = () => {
+  let busy = false
+  const never = new Promise<void>(() => undefined)
+  return {
+    agents: (index: number): FakeScript =>
+      index === 0 ? READING : { ...QUIET, between: () => (busy ? never : Promise.resolve()) },
+    busy: Effect.sync(() => {
+      busy = true
+    }),
+  }
+}
 
 /** The mission launched with these Proof blocks (every other one by hand), and this plan. */
 const launchedWith = (
@@ -1161,7 +1179,8 @@ describe('A failed green', () => {
   })
 
   test('"the end waits" is said again only when what it waits for changes', async () => {
-    const seen = await proofsEngine(data).run(({ profile }) =>
+    const builder = busyBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -1177,6 +1196,7 @@ describe('A failed green', () => {
           yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
           yield* proofIn(mission.id, 'R1.S1', 'red_recorded')
           const { grantId } = yield* builderOf(mission.id)
+          yield* builder.busy
           yield* builds(grantId, 'T1', [['invoices.ts', 'export const invoices = [1]\n']])
           yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
           yield* builds(grantId, 'T4')
@@ -1432,8 +1452,60 @@ describe('The end never waits on a scenario nothing can move', () => {
     expect(seen.filter((one) => one.endedAt === null)).toEqual([])
   })
 
-  test('skipped tasks do not make a failed green stuck while a write can run it again', async () => {
+  test('a failed green its Builder no longer acts on is stuck: the user is asked, and can end without it', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // R1.S2's tasks skipped, its green judged against the requirement's tasks fails.
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const database = yield* Database
+          yield* database
+            .update(buildingTasks)
+            .set({ state: 'skipped' })
+            .where(eq(buildingTasks.id, 'T2'))
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* deliveredTo(mission.id, 'The end waits')
+          // Three reds, which the user answers; the Builder then ends its turn writing nothing.
+          yield* writes(grantId, 'export.ts', 'export const toCsv = () => "a"\n')
+          yield* until(
+            Effect.map(proofAttemptsOf('R1.S2'), (rows) => rows.length === 2),
+            20_000,
+          )
+          yield* writes(grantId, 'export.ts', 'export const toCsv = () => "b"\n')
+          const error = yield* needOf(mission.id, 'Error')
+          // What the third red set going has settled: only the answer judges the end again.
+          yield* Effect.sleep('1 second')
+          yield* answerNeed({
+            id: error.id,
+            answer: WrittenAnswer.make({ text: 'Export as Markdown, not CSV.' }),
+            key: 'e',
+          })
+          const needId = yield* unprovenNeed
+          yield* answerNeed({
+            id: needId,
+            answer: ChosenAnswer.make({ option: END_WITHOUT }),
+            key: 'b',
+          })
+          yield* until(endCalled(mission.id), 20_000)
+          return {
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+            open: (yield* proofAttemptsOf('R1.S2')).filter((one) => one.endedAt === null),
+          }
+        }),
+      ),
+    )
+    expect(seen.proof.state).toBe('not_proven')
+    expect(seen.open).toEqual([])
+  })
+
+  test('skipped tasks do not make a failed green stuck while a write can run it again', async () => {
+    const builder = busyBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -1445,6 +1517,7 @@ describe('The end never waits on a scenario nothing can move', () => {
             .set({ state: 'skipped' })
             .where(eq(buildingTasks.id, 'T2'))
           const { grantId } = yield* builderOf(mission.id)
+          yield* builder.busy
           yield* builds(grantId, 'T1')
           yield* builds(grantId, 'T4')
           yield* builds(grantId, 'T3')
@@ -1460,13 +1533,15 @@ describe('The end never waits on a scenario nothing can move', () => {
   })
 
   test('after the user answered three reds, the next red is not stuck: the Builder works on the answer', async () => {
-    const seen = await proofsEngine(data).run(({ profile }) =>
+    const builder = busyBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
           const { mission } = yield* launchedWith(markdownProof)
           yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
           const { grantId } = yield* builderOf(mission.id)
+          yield* builder.busy
           yield* builds(grantId, 'T1')
           yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
           yield* builds(grantId, 'T4')

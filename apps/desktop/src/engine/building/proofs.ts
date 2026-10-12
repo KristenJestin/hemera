@@ -136,9 +136,6 @@ const SETTLED: ReadonlyArray<ScenarioProofState> = [
   'not_proven',
 ]
 
-/** The reds after the user answered a proof's three reds before nothing moves it any more. */
-const REDS_AFTER_AN_ANSWER = 3
-
 /** The kinds of the decisions a proof asks: kept on the Building's decisions. */
 export const PROOF_KINDS = [
   'red_mismatch',
@@ -1203,10 +1200,11 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * Among the scenarios the end waits on, those nothing moves any more: no need of the user's
-   * holds them, no failed green is open on them (a write runs it again), and every task covering
-   * them was skipped, or three more reds came after the user answered their three reds.
+   * holds them, and either every task covering them was skipped, or the attempt open on them (a
+   * failed green, which a write runs again) is one the Builder no longer acts on: `quiet`, it ended
+   * its turn while the end waited, writing nothing since.
    */
-  const stuckOf = (building: BuildingRow, scenarios: ReadonlyArray<string>) =>
+  const stuckOf = (building: BuildingRow, scenarios: ReadonlyArray<string>, quiet: boolean) =>
     Effect.gen(function* () {
       const database = yield* Database
       const tasks = yield* tasksIn(database, building.id)
@@ -1219,18 +1217,9 @@ export const buildingProofs = (parts: ProofParts) => {
         const own = decisions.filter((one) => one.scope === 'proof' && one.subject === scenario)
         if (own.some((one) => one.state === 'pending')) return false
         const proof = attempts.filter((one) => one.scope === 'proof' && one.subject === scenario)
-        if (proof.some((one) => one.endedAt === null)) return false
+        if (proof.some((one) => one.endedAt === null)) return quiet
         const covering = coveringOf(tasks, scenario)
-        if (covering.length > 0 && covering.every((task) => task.state === 'skipped')) return true
-        const lastAnswer = own
-          .filter((one) => one.kind === 'error' && one.answeredAt !== null)
-          .map((one) => one.answeredAt ?? '')
-          .toSorted()
-          .at(-1)
-        return (
-          lastAnswer !== undefined &&
-          proof.filter((one) => one.startedAt > lastAnswer).length >= REDS_AFTER_AN_ANSWER
-        )
+        return covering.length > 0 && covering.every((task) => task.state === 'skipped')
       })
     })
 

@@ -355,6 +355,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       })
       /** The missions a Builder's write settled in, taken one by one outside its transaction. */
       const settled = yield* Queue.unbounded<string>()
+      /** Each mission's Builder writes, counted: a turn that ended with none since was quiet. */
+      const writesIn = new Map<string, number>()
+      /** The missions whose Builder ended a turn while the end waited, writing nothing since. */
+      const quiet = new Set<string>()
+      /** The count of writes each mission's turn was watched from: one watch for each count. */
+      const watching = new Map<string, number>()
+      /** What the Builder is told next it may act on: it is watched again from there. */
+      const awake = (missionId: string) => {
+        quiet.delete(missionId)
+        watching.delete(missionId)
+      }
       yield* Queue.take(settled).pipe(
         Effect.flatMap(proofs.afterWrite),
         Effect.forever,
@@ -713,7 +724,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (row?.id !== building.id || row.tasksDoneAt === null || row.endCalledAt !== null)
               return
             const red = yield* proofs.unproven(row)
-            const stuck = red.length === 0 ? [] : yield* proofs.stuckOf(row, red)
+            const stuck =
+              red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
             const allStuck = red.length > 0 && stuck.length === red.length
             // The end never waits on a scenario nothing moves any more: the user is asked, once;
             // asked about scenarios that moved since, the question is withdrawn.
@@ -728,19 +740,54 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               return
             }
             const waits = red.join('\u0000')
-            if (red.length > 0 && endWaits.get(row.id) === waits) return
-            endWaits.set(row.id, waits)
             if (red.length > 0) {
-              yield* deliver(
-                row,
-                'red',
-                `The end waits: ${listed(red.map((one) => `${one}'s proof`))} ${red.length === 1 ? 'is' : 'are'} not green.`,
-              )
+              if (endWaits.get(row.id) !== waits) {
+                endWaits.set(row.id, waits)
+                yield* deliver(
+                  row,
+                  'red',
+                  `The end waits: ${listed(red.map((one) => `${one}'s proof`))} ${red.length === 1 ? 'is' : 'are'} not green.`,
+                )
+              }
+              yield* watchQuiet(row)
               return
             }
+            endWaits.set(row.id, waits)
             yield* ended(row)
           }),
         )
+
+      /**
+       * While the end waits, the Builder's turn is watched: once it ended with no write since, the
+       * Builder no longer acts on what keeps the end, and the end is judged again (#144).
+       */
+      const watchQuiet = (row: BuildingRow): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const missionId = row.missionId
+          const count = writesIn.get(missionId) ?? 0
+          if (quiet.has(missionId) || watching.get(missionId) === count) return
+          watching.set(missionId, count)
+          yield* Effect.gen(function* () {
+            const owner = { kind: 'mission', missionId } as const
+            const builder = (yield* sessionsIn(
+              ['starting', 'working', 'idle', 'stuck'],
+              owner,
+            )).find((one) => one.role === 'builder')
+            if (builder !== undefined) {
+              yield* Sessions.use((sessions) => sessions.settled(builder.id))
+            }
+            if ((writesIn.get(missionId) ?? 0) !== count || watching.get(missionId) !== count)
+              return
+            quiet.add(missionId)
+            yield* endIfReady(row)
+          }).pipe(
+            provided,
+            Effect.catchCause((cause) =>
+              said(`the Builder's turn was not watched: ${String(cause)}`),
+            ),
+            Effect.forkIn(layerScope),
+          )
+        })
 
       /** Whether the Building is still the mission's active one: a Cancel may have ended it. */
       const stillActive = (transaction: EngineTransaction, building: BuildingRow) =>
@@ -1491,7 +1538,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
                   // Once the write and its outcome are kept, out of their transaction: a failed
                   // green runs again on what it left (#144).
-                  Effect.tap(() => Effect.sync(() => Queue.offerUnsafe(settled, file.missionId))),
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      writesIn.set(file.missionId, (writesIn.get(file.missionId) ?? 0) + 1)
+                      awake(file.missionId)
+                      Queue.offerUnsafe(settled, file.missionId)
+                    }),
+                  ),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
@@ -1770,6 +1823,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }
             if (event.type === 'building.decision') {
               yield* answerDelivery(event.entityId, payload)
+              // An answer is something the Builder acts on: its turns are watched from there.
+              awake(event.entityId)
               const kind = PROOF_KINDS.find((one) => one === payload['kind'])
               const subject = Option.getOrNull(readString(payload['subject']))
               if (kind !== undefined && subject !== null) {
@@ -1788,6 +1843,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   )
                 }
               }
+              // The end judged again once the Builder was told: its turn on the answer is watched.
+              const judged = yield* activeBuildingIn(yield* Database, event.entityId)
+              if (judged !== null) yield* endIfReady(judged)
             }
             if (
               (event.type === 'need.expired' || event.type === 'need.withdrawn') &&
