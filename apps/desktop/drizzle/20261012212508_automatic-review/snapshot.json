@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "55bf97ab-d83a-413b-afca-a8c0279ec347",
+  "id": "eac51bee-c914-4c22-a2c4-8f81c27d7b06",
   "prevIds": ["aaa282f8-89fd-4506-8392-1be76d1857f8"],
   "ddl": [
     {
@@ -13818,6 +13818,17 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_review_findings_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "review_findings"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_review_passes_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "review_passes"
@@ -16002,7 +16013,7 @@
           "isExpression": false
         }
       ],
-      "isUnique": false,
+      "isUnique": true,
       "where": null,
       "origin": "manual",
       "name": "review_findings_of_building",

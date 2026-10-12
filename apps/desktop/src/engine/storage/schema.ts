@@ -3038,7 +3038,9 @@ export const reviewFindings = sqliteTable(
     buildingId: text('building_id')
       .notNull()
       .references(() => buildings.id, { onDelete: 'cascade' }),
-    missionId: text('mission_id').notNull(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
     number: integer('number').notNull(),
     reviewer: text('reviewer').notNull(),
     severity: text('severity').notNull(),
@@ -3055,7 +3057,7 @@ export const reviewFindings = sqliteTable(
     answer: text('answer').$type<Masked<string>>(),
     taskId: text('task_id'),
   },
-  (table) => [index('review_findings_of_building').on(table.buildingId, table.number)],
+  (table) => [uniqueIndex('review_findings_of_building').on(table.buildingId, table.number)],
 )
 
 /**

@@ -31,7 +31,8 @@ CREATE TABLE `review_findings` (
 	`answer` text,
 	`task_id` text,
 	CONSTRAINT `fk_review_findings_pass_id_review_passes_id_fk` FOREIGN KEY (`pass_id`) REFERENCES `review_passes`(`id`) ON DELETE CASCADE,
-	CONSTRAINT `fk_review_findings_building_id_buildings_id_fk` FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+	CONSTRAINT `fk_review_findings_building_id_buildings_id_fk` FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_review_findings_mission_id_missions_id_fk` FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
 );
 --> statement-breakpoint
 CREATE TABLE `review_passes` (
@@ -52,6 +53,6 @@ CREATE TABLE `review_passes` (
 --> statement-breakpoint
 ALTER TABLE `buildings` ADD `review_checkpoint_id` text;--> statement-breakpoint
 ALTER TABLE `buildings` ADD `builder_turned_at` text;--> statement-breakpoint
-CREATE INDEX `review_findings_of_building` ON `review_findings` (`building_id`,`number`);--> statement-breakpoint
+CREATE UNIQUE INDEX `review_findings_of_building` ON `review_findings` (`building_id`,`number`);--> statement-breakpoint
 CREATE INDEX `review_passes_of_building` ON `review_passes` (`building_id`,`reviewer`);--> statement-breakpoint
 CREATE UNIQUE INDEX `review_pass_of_lineage` ON `review_passes` (`lineage`);
