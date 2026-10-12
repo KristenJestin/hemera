@@ -2503,6 +2503,11 @@ export const buildingUnattributed = sqliteTable(
     /** The attempt whose interval saw it change. */
     attemptId: text('attempt_id'),
     seenAt: text('seen_at').notNull(),
+    /**
+     * What the detector of changes outside Hemera (#148) made of it: the outside change it is,
+     * `hemera` when one of Hemera's writers explained it, null until a compare saw it.
+     */
+    reconciled: text('reconciled'),
   },
   (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
 )
@@ -2655,3 +2660,96 @@ export const queuedResults = sqliteTable('queued_results', {
   queuedAt: text('queued_at').notNull(),
   deliveredAt: text('delivered_at'),
 })
+
+/**
+ * What the detector of changes outside Hemera (#148) expects of a repository of a Building: the
+ * last tree it can explain, and when the compare that took it began.
+ */
+export const outsideWatches = sqliteTable(
+  'outside_watches',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    expectedTree: text('expected_tree').notNull(),
+    comparedAt: text('compared_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository] })],
+)
+
+/**
+ * A file changed outside Hemera (#148, CT-22): where, when, the trees it was found between, the
+ * fingerprints of its sides (their contents captured by #140, a sensitive one withheld), and the
+ * command that overwrote it, if one did.
+ */
+export const outsideChanges = sqliteTable(
+  'outside_changes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    oldPath: text('old_path'),
+    status: text('status').notNull(),
+    detectedAt: text('detected_at').notNull(),
+    expectedTree: text('expected_tree').notNull(),
+    foundTree: text('found_tree').notNull(),
+    /** The fingerprint of each side, null for the side the file does not have. */
+    beforeSha: text('before_sha'),
+    afterSha: text('after_sha'),
+    /** Why a side's content was not kept ("content withheld: .env"), null when it was. */
+    withheld: text('withheld'),
+    overwrittenBy: text('overwritten_by').$type<Masked<string>>(),
+    overwrittenRun: text('overwritten_run'),
+    overwrittenSession: text('overwritten_session'),
+    overwrittenTask: text('overwritten_task'),
+    overwrittenAt: text('overwritten_at'),
+  },
+  (table) => [
+    index('outside_changes_of_mission').on(table.missionId),
+    index('outside_changes_of_file').on(table.buildingId, table.repository, table.path),
+  ],
+)
+
+/**
+ * The base of a repository moving during a Building (#148): from and to which commit, the files
+ * the move changed and those among them a task targets (JSON). Information only.
+ */
+export const baseMoves = sqliteTable(
+  'base_moves',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    fromCommit: text('from_commit').notNull(),
+    toCommit: text('to_commit').notNull(),
+    files: text('files').notNull(),
+    targeted: text('targeted').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('base_moves_of_building').on(table.buildingId, table.repository)],
+)
+
+/** A stopped service the user dismissed from a mission's list (#148). */
+export const dismissedServices = sqliteTable(
+  'dismissed_services',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.runId] })],
+)

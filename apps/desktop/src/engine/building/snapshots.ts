@@ -82,6 +82,8 @@ export type SnapshotOwner =
       readonly side: 'before' | 'after'
     }
   | { readonly kind: 'freeze'; readonly missionId: string; readonly freezeId: string }
+  /** The last tree the detector of changes outside Hemera compared (#148). */
+  | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -261,6 +263,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/runs/${owner.runId}/${owner.side}/${leaf}`
     case 'freeze':
       return `${mission}/freezes/${owner.freezeId}/${leaf}`
+    case 'outside':
+      return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
   }
 }
 
@@ -277,6 +281,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `run ${owner.runId} ${owner.side}`
     case 'freeze':
       return `the Freeze ${owner.freezeId}`
+    case 'outside':
+      return `the Workspace compared for Building ${owner.buildingId}`
   }
 }
 

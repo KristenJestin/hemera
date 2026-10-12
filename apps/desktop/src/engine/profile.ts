@@ -172,6 +172,11 @@ import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
+import {
+  type OutsideChanges,
+  type OutsideSettings,
+  outsideChangesLayer,
+} from './building/outside.ts'
 import { type SetupValues, setupValuesLayer } from './setup/values.ts'
 import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import { testerModeLayer } from './tester/mode.ts'
@@ -266,6 +271,8 @@ export interface ProfileParts {
         readonly end?: Layer.Layer<BuildingEnd>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold
+        /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
+        readonly outside?: Partial<OutsideSettings>
       }
     | undefined
   /**
@@ -347,6 +354,7 @@ export type EngineServices =
   | ProbeSteps
   | Snapshots
   | BuildingStart
+  | OutsideChanges
   | Checkpoints
   | FreezeLog
   | TicketProviders
@@ -491,6 +499,8 @@ export const startProfile = (
             Snapshots,
             Snapshots.use((real) => Effect.succeed(wrapped(real))),
           ).pipe(Layer.provide(machineSnapshots))
+    // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
+    const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -603,6 +613,7 @@ export const startProfile = (
                     parts.building?.verdict ?? checksVerdict,
                     parts.building?.end ?? tasksDoneEnd,
                     snapshots,
+                    outside,
                   ).pipe(Layer.provideMerge(parts.building?.checks ?? noTaskChecks)),
                 ),
               ),
@@ -613,6 +624,7 @@ export const startProfile = (
       ),
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
+      outside,
       checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "91b0ec8b-ad27-4abe-84bf-a34a9373e357",
+  "id": "c3eb8863-f9d8-4e94-82f2-c8e414147300",
   "prevIds": ["632418b5-965a-461f-abf3-7fcbbfe691cd"],
   "ddl": [
     {
@@ -18,6 +18,10 @@
     },
     {
       "name": "attempt_writes",
+      "entityType": "tables"
+    },
+    {
+      "name": "base_moves",
       "entityType": "tables"
     },
     {
@@ -98,6 +102,10 @@
     },
     {
       "name": "discussions",
+      "entityType": "tables"
+    },
+    {
+      "name": "dismissed_services",
       "entityType": "tables"
     },
     {
@@ -225,6 +233,14 @@
       "entityType": "tables"
     },
     {
+      "name": "outside_changes",
+      "entityType": "tables"
+    },
+    {
+      "name": "outside_watches",
+      "entityType": "tables"
+    },
+    {
       "name": "permission_requests",
       "entityType": "tables"
     },
@@ -334,6 +350,10 @@
     },
     {
       "name": "snapshot_changes",
+      "entityType": "tables"
+    },
+    {
+      "name": "snapshot_contents",
       "entityType": "tables"
     },
     {
@@ -887,6 +907,96 @@
       "name": "at",
       "entityType": "columns",
       "table": "attempt_writes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "from_commit",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "to_commit",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "files",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "targeted",
+      "entityType": "columns",
+      "table": "base_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "base_moves"
     },
     {
       "type": "text",
@@ -1885,6 +1995,16 @@
       "default": null,
       "generated": null,
       "name": "seen_at",
+      "entityType": "columns",
+      "table": "building_unattributed"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reconciled",
       "entityType": "columns",
       "table": "building_unattributed"
     },
@@ -3169,6 +3289,36 @@
       "table": "discussions"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "at",
+      "entityType": "columns",
+      "table": "dismissed_services"
+    },
+    {
       "type": "integer",
       "notNull": false,
       "autoincrement": true,
@@ -3605,16 +3755,6 @@
       "default": null,
       "generated": null,
       "name": "withheld",
-      "entityType": "columns",
-      "table": "freeze_files"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "tree",
       "entityType": "columns",
       "table": "freeze_files"
     },
@@ -5887,6 +6027,226 @@
       "name": "ended_at",
       "entityType": "columns",
       "table": "needs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "old_path",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "detected_at",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_tree",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "found_tree",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "before_sha",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "after_sha",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "withheld",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_by",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_run",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_session",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_task",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "overwritten_at",
+      "entityType": "columns",
+      "table": "outside_changes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expected_tree",
+      "entityType": "columns",
+      "table": "outside_watches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "compared_at",
+      "entityType": "columns",
+      "table": "outside_watches"
     },
     {
       "type": "text",
@@ -8750,6 +9110,26 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sha256",
+      "entityType": "columns",
+      "table": "snapshot_contents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "content",
+      "entityType": "columns",
+      "table": "snapshot_contents"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -10911,6 +11291,28 @@
       "table": "attempt_writes"
     },
     {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_base_moves_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "base_moves"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_base_moves_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "base_moves"
+    },
+    {
       "columns": ["building_id"],
       "tableTo": "buildings",
       "columnsTo": ["id"],
@@ -11184,6 +11586,17 @@
       "name": "fk_discussions_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "discussions"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_dismissed_services_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "dismissed_services"
     },
     {
       "columns": ["project_id"],
@@ -11602,6 +12015,39 @@
       "name": "fk_needs_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "needs"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_changes_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "outside_changes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_changes_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "outside_changes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_outside_watches_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "outside_watches"
     },
     {
       "columns": ["project_id"],
@@ -12221,6 +12667,13 @@
       "table": "cold_read_findings"
     },
     {
+      "columns": ["mission_id", "run_id"],
+      "nameExplicit": false,
+      "name": "dismissed_services_pk",
+      "entityType": "pks",
+      "table": "dismissed_services"
+    },
+    {
       "columns": ["resource_id", "command_id"],
       "nameExplicit": false,
       "name": "exclusive_resource_commands_pk",
@@ -12254,6 +12707,13 @@
       "name": "model_marks_pk",
       "entityType": "pks",
       "table": "model_marks"
+    },
+    {
+      "columns": ["building_id", "repository"],
+      "nameExplicit": false,
+      "name": "outside_watches_pk",
+      "entityType": "pks",
+      "table": "outside_watches"
     },
     {
       "columns": ["mission_id", "id"],
@@ -12365,6 +12825,13 @@
       "nameExplicit": false,
       "name": "attempt_writes_pk",
       "table": "attempt_writes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "base_moves_pk",
+      "table": "base_moves",
       "entityType": "pks"
     },
     {
@@ -12629,6 +13096,13 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "outside_changes_pk",
+      "table": "outside_changes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "permission_requests_pk",
       "table": "permission_requests",
       "entityType": "pks"
@@ -12778,6 +13252,13 @@
       "nameExplicit": false,
       "name": "setup_cards_pk",
       "table": "setup_cards",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["sha256"],
+      "nameExplicit": false,
+      "name": "snapshot_contents_pk",
+      "table": "snapshot_contents",
       "entityType": "pks"
     },
     {
@@ -12934,6 +13415,24 @@
       "name": "attempt_writes_of_building",
       "entityType": "indexes",
       "table": "attempt_writes"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "repository",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "base_moves_of_building",
+      "entityType": "indexes",
+      "table": "base_moves"
     },
     {
       "columns": [
@@ -13564,6 +14063,42 @@
       "name": "needs_by_mission",
       "entityType": "indexes",
       "table": "needs"
+    },
+    {
+      "columns": [
+        {
+          "value": "mission_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "outside_changes_of_mission",
+      "entityType": "indexes",
+      "table": "outside_changes"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "repository",
+          "isExpression": false
+        },
+        {
+          "value": "path",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "outside_changes_of_file",
+      "entityType": "indexes",
+      "table": "outside_changes"
     },
     {
       "columns": [

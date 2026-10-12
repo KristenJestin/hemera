@@ -20,6 +20,7 @@ import {
 } from './profile.ts'
 import { CatalogueRpcs, RunsRpcs } from './commands.ts'
 import { MemoryRpcs } from './memory.ts'
+import { MissionRpcs } from './mission.ts'
 import { MissionsRpcs, NeedsRpcs } from './missions.ts'
 import { NoticeFeedRpcs, NotificationSettingsRpcs } from './notifications.ts'
 import { JevKeyRpcs, PermissionsRpcs } from './permissions.ts'
@@ -94,7 +95,11 @@ export type EngineStatus = typeof EngineStatus.Type
 
 const ProfileFailed = Schema.Union([StorageFailed, EngineGone])
 
-export const EngineRpcs = RpcGroup.make(
+/**
+ * Everything the window may ask the engine, but the groups whose handlers are served as a layer of
+ * their own (`EngineApartRpcs`).
+ */
+export const EngineCoreRpcs = RpcGroup.make(
   Rpc.make('engine.status', { success: EngineStatus, error: EngineGone }),
   /** The current status, then every change of it, for as long as the caller listens. */
   Rpc.make('engine.statusChanges', { success: EngineStatus, error: EngineGone, stream: true }),
@@ -157,15 +162,25 @@ export const EngineRpcs = RpcGroup.make(
 )
 
 /**
+ * The groups whose handlers are a layer of their own beside the others': one `toLayer` over every
+ * call of the engine goes past the depth TypeScript instantiates.
+ */
+export const EngineApartRpcs = MissionRpcs
+
+export const EngineRpcs = EngineCoreRpcs.merge(EngineApartRpcs)
+
+/**
  * What the engine serves main: everything the window may ask, which main forwards, and what main
  * alone tells it or follows. The window is shown: what waits for the window before it runs (the
  * commands run at each opening) may start now; the engine answers at once and runs them in the
  * background. The notices are main's to deliver, never the window's to follow, and so is the Jev
  * key: main alone seals it, hands its ciphertext to be stored and the decrypted key to be held.
  */
-export const EngineMainRpcs = EngineRpcs.merge(
+export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
   RpcGroup.make(Rpc.make('engine.windowShown', { success: Schema.Void, error: EngineGone })),
   NoticeFeedRpcs,
   JevKeyRpcs,
   JiraTokenEngineRpcs,
 )
+
+export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs)
