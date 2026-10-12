@@ -109,7 +109,8 @@ export function resourceDraftsOf(
   draft: ResourceDraftView,
 ): ReadonlyArray<ResourceDraft> {
   const before = resources.find((one) => one.id === id)
-  const kept = (before?.changes ?? []).filter((one) => !draft.uses.includes(one))
+  const used = new Set(draft.uses)
+  const kept = (before?.changes ?? []).filter((one) => !used.has(one))
   const changes =
     draft.resetCommandId === null || kept.includes(draft.resetCommandId)
       ? kept

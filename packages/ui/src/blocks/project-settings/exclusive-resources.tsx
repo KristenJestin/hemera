@@ -164,6 +164,7 @@ export function ResourceForm({ draft, commands, refused, onDraft }: ResourceForm
       ...draft,
       uses: on ? [...draft.uses, id] : draft.uses.filter((one) => one !== id),
     })
+  const used = new Set(draft.uses)
   return (
     <>
       <Input
@@ -181,7 +182,7 @@ export function ResourceForm({ draft, commands, refused, onDraft }: ResourceForm
         {commands.map((command) => (
           <Checkbox
             key={command.id}
-            checked={draft.uses.includes(command.id)}
+            checked={used.has(command.id)}
             onCheckedChange={(on) => toggle(command.id, on)}
             label={command.name}
           />

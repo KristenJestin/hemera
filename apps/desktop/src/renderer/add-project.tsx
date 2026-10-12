@@ -147,9 +147,10 @@ export function AddProjectDialog({
       (paths) => {
         if (asked !== looking.current) return
         setDetecting(false)
+        const detected = new Set(paths)
         setFound((before) => [
           ...paths.map((path) => ({ path, chosen: true })),
-          ...(before ?? []).filter((one) => one.byHand === true && !paths.includes(one.path)),
+          ...(before ?? []).filter((one) => one.byHand === true && !detected.has(one.path)),
         ])
       },
       (failure: Error) => {
