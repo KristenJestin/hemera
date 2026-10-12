@@ -237,7 +237,8 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
   return testPath === null ? 'assertion_failed' : 'error_before_test'
 }
 
-const posix = (path: string): string => path.replaceAll('\\', '/')
+/** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
+const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
  * A test's declared name as a pattern: what `%s`, `$name` or `${…}` stand for (`describe.each`, a

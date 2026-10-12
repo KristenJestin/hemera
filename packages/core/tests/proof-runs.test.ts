@@ -268,6 +268,15 @@ describe('A valid red', () => {
     expect(validRed(run(TAP_BOTH_FAIL, 1), 'tests/export.test.mjs', scenario)).toBe(true)
   })
 
+  test('a TAP report written on Windows, its location’s backslashes escaped, names the scenario’s test file', () => {
+    const windows = TAP_ASSERTION.replace(
+      /location: '[^']*'/,
+      "location: 'D:\\\\a\\\\_temp\\\\api\\\\tests\\\\export.test.mjs:5:1'",
+    )
+    expect(windows).toContain('D:\\\\a')
+    expect(validRed(run(windows, 1), 'tests/export.test.mjs')).toBe(true)
+  })
+
   test('a red from plain vitest output, with no report, is valid when the scenario’s test is named in it', () => {
     const output = [
       ' FAIL  tests/export.test.ts > exports > the invoices export as Markdown',
