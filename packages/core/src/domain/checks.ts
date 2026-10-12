@@ -279,16 +279,19 @@ export function globMatcher(glob: string): (path: string) => boolean {
 }
 
 /**
- * One file as one word of a line run without a shell: a plain path as it is, any other quoted. A
- * brace is doubled, so the run's templates keep it literal.
+ * One file as one word of a line run without a shell: a plain path as it is, any other in single
+ * quotes, where nothing is shell syntax (a quote inside joined as `"'"`). A path starting with `-`
+ * gets `./`, so it is never read as an option. A brace is doubled, so the run's templates keep it
+ * literal.
  */
 function asWord(path: string): string {
-  const literal = path.replaceAll('{', '{{').replaceAll('}', '}}')
+  const relative = path.startsWith('-') ? `./${path}` : path
+  const literal = relative.replaceAll('{', '{{').replaceAll('}', '}}')
   if (/^[\w./@+=:{}-]+$/.test(literal)) return literal
   return literal
-    .split('"')
-    .map((part) => `"${part}"`)
-    .join(`'"'`)
+    .split("'")
+    .map((part) => `'${part}'`)
+    .join(`"'"`)
 }
 
 /** A file an attempt wrote in the place a check runs, relative to it. */

@@ -14,6 +14,8 @@ import {
   expandFiles,
   globMatcher,
   proposeChecks,
+  shellSyntaxIn,
+  wordsOf,
 } from '../src/domain/index.ts'
 
 const draft = (over: Partial<CheckDraft> = {}): CheckDraft => ({
@@ -183,7 +185,7 @@ describe('{files}', () => {
 
   test('{files} with **/*.test.ts runs only the tests the task wrote, deleted ones left out', () => {
     expect(expandFiles('vitest run {files}', changed, '**/*.test.ts')).toBe(
-      'vitest run src/sum.test.ts "src/my file.test.ts"',
+      "vitest run src/sum.test.ts 'src/my file.test.ts'",
     )
   })
 
@@ -193,6 +195,30 @@ describe('{files}', () => {
 
   test('a line without {files} runs as it is', () => {
     expect(expandFiles('node lint.js', changed, null)).toBe('node lint.js')
+  })
+
+  test('a name holding $, &, ;, %NAME%, a backtick or a quote is one literal word, never shell syntax', () => {
+    const names = [
+      'routes/$postId.test.tsx',
+      'a&b.test.ts',
+      'a;b.test.ts',
+      '%HOME%.test.ts',
+      'a`b.test.ts',
+      "it's.test.ts",
+      'say "hi".test.ts',
+    ]
+    for (const name of names) {
+      const line = expandFiles('vitest run {files}', [{ path: name, deleted: false }], null) ?? ''
+      expect(shellSyntaxIn(line)).toBeNull()
+      expect(wordsOf(line)).toEqual(['vitest', 'run', name])
+    }
+  })
+
+  test('a name starting with - is never read as an option', () => {
+    const line =
+      expandFiles('node --test {files}', [{ path: '--import=x.test.ts', deleted: false }], null) ??
+      ''
+    expect(wordsOf(line)).toEqual(['node', '--test', './--import=x.test.ts'])
   })
 
   test('a brace in a path is kept literal for the run’s templates', () => {

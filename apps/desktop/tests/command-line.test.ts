@@ -7,6 +7,7 @@
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { expandFiles, wordsOf } from '@hemera/core/domain'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { type Lookup, invocationOf } from '../src/engine/command-line.ts'
@@ -45,6 +46,26 @@ describe('A line becomes a process without a shell', () => {
     expect(line).toContain('^"dev^"')
     expect(line).toContain('^"a^&b^"')
     expect(line).toContain('^"two^ words^"')
+  })
+
+  test('on Windows a {files} name holding $, %NAME% or a quote reaches a .cmd shim as its literal name, cmd.exe syntax escaped', () => {
+    const bin = realpathSync.native(temporaryFolder('shims'))
+    writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\n')
+    const line = expandFiles(
+      'pnpm vitest {files}',
+      [
+        { path: 'routes/$postId.test.tsx', deleted: false },
+        { path: '%HOME%.test.ts', deleted: false },
+        { path: "it's.test.ts", deleted: false },
+      ],
+      null,
+    )
+    const invocation = invocationOf(wordsOf(line ?? ''), 'win32', windowsLookup(bin))
+    removeFolders()
+    const quoted = invocation?.args[3] ?? ''
+    expect(quoted).toContain('^"routes/$postId.test.tsx^"')
+    expect(quoted).toContain('^"^%HOME^%.test.ts^"')
+    expect(quoted).toContain(`^"it's.test.ts^"`)
   })
 
   test('on Windows a bare name is the shim cmd.exe would run, never a file without an extension', () => {
