@@ -85,9 +85,12 @@ export function QuestionsToAnswer({
   )
   const toAnswer = (question: Question): boolean =>
     question.state === 'open' && !answeredHere.has(question.id)
-  // The question open: the one chosen while it is listed, else the first to answer.
-  const current =
-    listed.find((question) => question.id === chosen)?.id ?? listed.find(toAnswer)?.id ?? null
+  // The question open: the one chosen while it is listed, else the first to answer, which is then
+  // kept as chosen so that it stays open once put on hold.
+  const kept = listed.some((question) => question.id === chosen)
+  const first = listed.find(toAnswer)?.id ?? null
+  if (!kept && first !== null) setChosen(first)
+  const current = kept ? chosen : first
 
   const answer: PlanningHandlers['onAnswer'] = (id, given) => {
     const at = listed.findIndex((question) => question.id === id)

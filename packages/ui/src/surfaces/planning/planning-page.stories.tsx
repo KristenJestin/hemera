@@ -224,8 +224,8 @@ export const NoWaveAnywhere: Story = {
   },
 }
 
-/** The questions the Planner asks while the page is open join the list, at its end. */
-export const QuestionsArriving: Story = {
+/** A story that asks Q9 on a press, while the page is open: the questions as they arrive. */
+const ARRIVING: Pick<Story, 'args' | 'render'> = {
   args: { moment: 'asked' },
   render: function Arriving(args) {
     const [moment, setMoment] = useState<MomentName>(args.moment)
@@ -240,6 +240,11 @@ export const QuestionsArriving: Story = {
       </>
     )
   },
+}
+
+/** The questions the Planner asks while the page is open join the list, at its end. */
+export const QuestionsArriving: Story = {
+  ...ARRIVING,
   play: async ({ canvasElement }) => {
     const waiting = forYou(canvasElement)
     await expect(waiting.getByRole('article', { name: /^Q5/ })).toBeVisible()
@@ -270,6 +275,33 @@ export const PuttingOnHold: Story = {
       ),
     )
     await expect(waiting.getByRole('article', { name: /^Q5/ })).toBeVisible()
+  },
+}
+
+/**
+ * Questions asked after the last one was answered: the first to answer opens, and stays open
+ * where it stands once put on hold.
+ */
+export const ArrivedQuestionPutOnHold: Story = {
+  ...ARRIVING,
+  play: async ({ canvasElement }) => {
+    const waiting = forYou(canvasElement)
+    const q5 = within(waiting.getByRole('article', { name: /^Q5/ }))
+    await userEvent.click(q5.getByRole('button', { name: /Anyone who can read it/ }))
+    await userEvent.click(page(canvasElement).getByRole('button', { name: 'Ask Q9' }))
+    const q6 = within(await waiting.findByRole('article', { name: /^Q6/ }))
+    await userEvent.click(q6.getByRole('button', { name: /waiting on someone/ }))
+    await userEvent.click(q6.getByRole('button', { name: 'Wait' }))
+    await waitFor(() =>
+      expect(waiting.getByRole('button', { name: /Questions/ })).toHaveTextContent(
+        '1 to answer · 1 waits on someone',
+      ),
+    )
+    await expect(waiting.getByRole('article', { name: /^Q6/ })).toBeVisible()
+    await expect(waiting.getByRole('button', { name: /^Q9/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
   },
 }
 
