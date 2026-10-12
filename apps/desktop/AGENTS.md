@@ -47,6 +47,8 @@ pnpm --filter @hemera/desktop e2e:headless    # never the visible `e2e`
   refuses the click for a while, then gives up. Do not add pauses or retries around a click: when
   the line `click: … did not come to rest` appears in a log, the page was not ready, and the line
   says where the control stood and what the pointer reached.
+- A spec file stops at its first failure (`bail`): its tests follow one another on the state the
+  last one left, so the ones after a failure fail for want of it and only hide the cause.
 - `N passed, M total` from wdio counts spec files × capabilities: "14 passed, 196 total (7%
   completed)" is a full green run of 14 spec files.
 - On Linux, an off-screen window means nothing to a Wayland compositor: the headless config

@@ -79,7 +79,10 @@ export const config: WebdriverIO.Config = {
   })),
   logLevel: 'warn',
   reporters: ['spec'],
-  mochaOpts: { ui: 'bdd', timeout: 60_000 },
+  // A spec file is one story told test by test, each starting from the state the last one left, so
+  // once a test has failed the ones after it fail only for want of that state, and bury the cause
+  // under four others that look as real. `bail` stops the file at its first failure.
+  mochaOpts: { ui: 'bdd', timeout: 60_000, bail: true },
   // One window at a time.
   maxInstances: 1,
 
