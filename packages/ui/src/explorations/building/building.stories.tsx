@@ -291,7 +291,7 @@ export const LongText: Story = {
  * From the keyboard: Tab reaches a requirement, Enter folds it; a task takes Enter and its view the
  * focus; Escape closes it and gives the focus back to the row.
  */
-export const Keyboard: Story = {
+export const Focused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const requirement = canvas.getByRole('button', { name: /R4 / })

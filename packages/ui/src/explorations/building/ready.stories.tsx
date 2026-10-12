@@ -220,7 +220,7 @@ export const LongText: Story = {
 }
 
 /** From the keyboard: Tab reaches Launch, which wears its focus ring; Enter starts the check. */
-export const Keyboard: Story = {
+export const Focused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const launch = canvas.getByRole('button', { name: 'Launch' })
