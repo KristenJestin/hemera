@@ -155,6 +155,10 @@ jobs:
       # the stories 123 to 252 s. The suites get thirty minutes, twice the slowest run; the
       # stories keep fifteen, three and a half times theirs. The one story run that reached
       # fifteen minutes was a hang, not a slow run: every other one stayed under 260 s.
+      #
+      # That hang is one story file that never reports (#244), which Vitest's browser mode waits
+      # for without a limit. `tools/stories-watchdog.ts` fails the run after ninety seconds
+      # without a finished file and names the file; the cap stays for what happens before that.
       - name: Test the repository suites
         id: repository
         if: runner.os == 'Windows'
