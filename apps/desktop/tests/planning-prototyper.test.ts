@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { PLANNER_PROTOTYPE_RULE } from '@hemera/core/domain'
 import { PlanningRefused } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
-import { Effect, Option, Result, Stream } from 'effect'
+import { Effect, Fiber, Option, Result, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -25,10 +25,12 @@ import {
   helperChanges,
   helperRowsOf,
   listHelpers,
+  listPrototypes,
+  prototypeChanges,
   readHelper,
 } from '../src/engine/building/helper-store.ts'
 import { listEvidence } from '../src/engine/memory/evidence.ts'
-import { createMission, getMission } from '../src/engine/missions.ts'
+import { createMission, getMission, moveMission } from '../src/engine/missions.ts'
 import { freezeMission, freezeReadiness } from '../src/engine/planning/freeze.ts'
 import { askPrototype, judgePrototype } from '../src/engine/planning/prototypes.ts'
 import { PLANNER_TEMPLATE } from '../src/engine/planning/role.ts'
@@ -41,6 +43,7 @@ import {
   READING,
   acmeAt,
   call,
+  eventsOf,
   frozenIn,
   grantOf,
   plannedIn,
@@ -181,7 +184,7 @@ describe('The user asks for a prototype and the Planner launches it', () => {
             key: (yield* getMission(mission.id)).key,
             planner: session,
             prototyper,
-            chips: yield* listHelpers(mission.id),
+            chips: yield* listPrototypes(mission.id),
           }
         }),
       ),
@@ -263,6 +266,41 @@ describe('A Spec change of the interface makes the Planner launch it', () => {
     expect(promptsOf(world.agents[0])[0]).toContain(QUESTION)
   })
 
+  test('a Freeze landing between the launch’s check and its record refuses the launch', async () => {
+    const checked = held()
+    const reached = { yes: false }
+    const hold = (at: 'checked') =>
+      at === 'checked'
+        ? Effect.promise(() => {
+            reached.yes = true
+            return checked.promise
+          })
+        : Effect.void
+    const { world, run } = prototyping([], { helpers: { hold } })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acmeAt(work)
+          const { mission, grantId } = yield* plannedIn(project.id, main)
+          const launching = yield* Effect.forkChild(
+            call(grantId, 'helper_launch', { helper: 'prototyper', brief: QUESTION }),
+          )
+          yield* until(Effect.sync(() => reached.yes))
+          yield* moveMission(mission.id, 'freeze', 'user')
+          checked.release()
+          const answer = yield* Fiber.join(launching)
+          return { answer, rows: yield* helperRowsOf(mission.id) }
+        }),
+      ).pipe(Effect.ensuring(Effect.sync(() => checked.release()))),
+    )
+    expect(seen.answer).toBe(
+      'refused: the Prototyper runs in Planning, and the mission is not in it',
+    )
+    expect(seen.rows).toEqual([])
+    expect(world.agents).toHaveLength(0)
+  })
+
   test('the Planner launches only the Prototyper: a free helper is refused, naming the Probe', async () => {
     const { run } = prototyping([])
     const seen = await run(({ profile }) =>
@@ -284,7 +322,7 @@ describe('A Spec change of the interface makes the Planner launch it', () => {
 })
 
 describe('Its result is kept and shown, then frozen with the Spec', () => {
-  test('its files land in evidence, its result reaches the Planner and the chip; running, then unjudged, it holds the Freeze; validated, it is frozen with the Spec', async () => {
+  test('its files land in evidence, its result reaches the Planner and the chip; running, it holds the Freeze; validated, it is frozen with the Spec', async () => {
     const { run } = prototyping([null, READING])
     const seen = await run(({ profile }) =>
       within(
@@ -309,31 +347,30 @@ describe('Its result is kept and shown, then frozen with the Spec', () => {
               (rows) => rows.length > 0,
             ),
           )
-          const unjudged = yield* freezeReadiness(mission.id)
           const shown = yield* readHelper(prototyper.row.id, false)
           yield* judgePrototype(prototyper.row.id, 'validated', 'Keep the two columns.')
           const judged = yield* freezeReadiness(mission.id)
-          const chips = yield* listHelpers(mission.id)
+          const chips = yield* listPrototypes(mission.id)
           const frozen = yield* freezeMission(mission.id, (yield* readSpec(mission.id)).version)
           return {
             running,
             result,
             delivered: yield* deliveriesTo(prototyper.row.parentLineage, 'result'),
-            unjudged,
             shown,
             judged,
             chips,
             frozen,
             evidence: yield* listEvidence(mission.id, null),
+            prototyped: yield* eventsOf(mission.id, 'prototype.result'),
           }
         }),
       ),
     )
+    expect(seen.prototyped).toHaveLength(1)
     expect(seen.running.unsettled).toEqual([`Prototyper H1 runs: ${QUESTION}`])
     expect(seen.result).toBe('Your result is kept and handed to your parent. End your turn now.')
     expect(seen.delivered[0]?.body).toContain('H1 (Prototyper) handed back its result')
     expect(seen.evidence.map((one) => one.name)).toEqual(['H1/list.html'])
-    expect(seen.unjudged.unsettled).toEqual([`Prototyper H1 waits for your verdict: ${QUESTION}`])
     expect(seen.shown).toMatchObject({ state: 'done', verdict: null })
     expect(seen.shown.result).toContain('The two columns hold at 480 pixels.')
     expect(seen.shown.result).toContain('H1/list.html')
@@ -348,6 +385,34 @@ describe('Its result is kept and shown, then frozen with the Spec', () => {
         note: 'Keep the two columns.',
         result: seen.shown.result,
       },
+    ])
+  })
+
+  test('an unjudged Prototyper does not hold the Freeze, and is frozen unjudged', async () => {
+    const { run } = prototyping([null, READING])
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acmeAt(work)
+          const { mission, grantId } = yield* plannedIn(project.id, main)
+          yield* call(grantId, 'helper_launch', { helper: 'prototyper', brief: QUESTION })
+          const prototyper = yield* prototyperIn(mission.id, 1)
+          yield* callTool(prototyper.grantId, 'fs_write', { path: 'list.html', content: '<ul/>\n' })
+          yield* call(prototyper.grantId, 'helper_result', RESULT)
+          yield* writeComplete(grantId)
+          yield* call(grantId, 'declare_complete', { why: 'A Builder can build it.' })
+          yield* readCold(mission.id, 1)
+          const unjudged = yield* freezeReadiness(mission.id)
+          const shown = yield* readHelper(prototyper.row.id, false)
+          const frozen = yield* freezeMission(mission.id, (yield* readSpec(mission.id)).version)
+          return { unjudged, shown, frozen }
+        }),
+      ),
+    )
+    expect(seen.unjudged.ready).toBe(true)
+    expect(seen.frozen.freeze?.prototypes).toEqual([
+      { helper: 'H1', question: QUESTION, verdict: null, note: null, result: seen.shown.result },
     ])
   })
 
@@ -366,12 +431,14 @@ describe('Its result is kept and shown, then frozen with the Spec', () => {
           )
           yield* callTool(prototyper.grantId, 'fs_write', { path: 'list.html', content: '<ul/>\n' })
           yield* call(prototyper.grantId, 'helper_result', RESULT)
-          yield* until(Effect.map(listHelpers(mission.id), (chips) => chips[0]?.state === 'done'))
+          yield* until(
+            Effect.map(listPrototypes(mission.id), (chips) => chips[0]?.state === 'done'),
+          )
           yield* judgePrototype(prototyper.row.id, 'validated', null)
           yield* judgePrototype(prototyper.row.id, 'set-aside', 'Too narrow.')
           return {
             early,
-            chips: yield* listHelpers(mission.id),
+            chips: yield* listPrototypes(mission.id),
             shown: yield* readHelper(prototyper.row.id, false),
             readiness: yield* freezeReadiness(mission.id),
           }
@@ -411,12 +478,12 @@ describe('The Planning page shows it as it shows a Probe', () => {
           yield* call(grantId, 'helper_launch', { helper: 'prototyper', brief: QUESTION })
           const prototyper = yield* prototyperIn(mission.id, 1)
           yield* until(
-            Effect.map(listHelpers(mission.id), (chips) => chips[0]?.step === 'Write list.html'),
+            Effect.map(listPrototypes(mission.id), (chips) => chips[0]?.step === 'Write list.html'),
           )
-          const changed = yield* helperChanges(mission.id).pipe(Stream.runHead)
+          const changed = yield* prototypeChanges(mission.id).pipe(Stream.runHead)
           yield* callTool(prototyper.grantId, 'fs_write', { path: 'list.html', content: '<ul/>\n' })
           yield* call(prototyper.grantId, 'helper_result', RESULT)
-          return { changed, ended: yield* listHelpers(mission.id) }
+          return { changed, ended: yield* listPrototypes(mission.id) }
         }),
       ).pipe(Effect.ensuring(Effect.sync(() => hold.release()))),
     )
@@ -426,6 +493,31 @@ describe('The Planning page shows it as it shows a Probe', () => {
       step: 'Write list.html',
     })
     expect(seen.ended[0]).toMatchObject({ state: 'done', step: null })
+  })
+})
+
+describe('The Building page lists only the Building’s helpers', () => {
+  test('its list and its stream leave Planning’s Prototyper out; the Planning side lists it', async () => {
+    const { run } = prototyping([])
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acmeAt(work)
+          const { mission, grantId } = yield* plannedIn(project.id, main)
+          yield* call(grantId, 'helper_launch', { helper: 'prototyper', brief: QUESTION })
+          yield* prototyperIn(mission.id, 1)
+          return {
+            building: yield* listHelpers(mission.id),
+            followed: yield* helperChanges(mission.id).pipe(Stream.runHead),
+            planning: yield* listPrototypes(mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.building).toEqual([])
+    expect(Option.getOrNull(seen.followed)).toEqual([])
+    expect(seen.planning.map((one) => one.label)).toEqual(['H1'])
   })
 })
 

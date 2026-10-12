@@ -1,7 +1,7 @@
 /**
  * The Freezes as the missions' read model shows them (#92): the last Freeze of a frozen mission,
- * with its base commits, the dirty files of its main checkout and the Prototypers' results the
- * user judged (#222); and the lines the Freeze, the
+ * with its base commits, the dirty files of its main checkout and the Prototypers' results
+ * (#222); and the lines the Freeze, the
  * return to Planning, the dependencies and the outdated mark write in the Journal.
  */
 
@@ -31,7 +31,7 @@ export const writeFrozenBases = Schema.encodeSync(BasesJson)
 
 const PrototypesJson = Schema.fromJsonString(Schema.Array(FrozenPrototype))
 const readPrototypes = Schema.decodeUnknownOption(PrototypesJson)
-/** The Prototypers' results judged by a Freeze, as its row keeps them (#222). */
+/** The Prototypers' results a Freeze kept, as its row keeps them (#222). */
 export const writeFrozenPrototypes = Schema.encodeSync(PrototypesJson)
 
 /** The last Freeze of each mission named, by mission; the caller keeps those still frozen. */

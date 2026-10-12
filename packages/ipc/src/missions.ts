@@ -119,13 +119,14 @@ export const FrozenFile = Schema.Struct({
 })
 export type FrozenFile = typeof FrozenFile.Type
 
-/** A Prototyper's result the user judged before the Freeze, kept with it (#222). */
+/** A Prototyper's result at the Freeze, kept with it and with the user's verdict, if any (#222). */
 export const FrozenPrototype = Schema.Struct({
   /** `H1`. */
   helper: Schema.String,
   /** What the Planner asked it, its brief. */
   question: Schema.String,
-  verdict: PrototypeVerdict,
+  /** The user's verdict, or null when they did not judge it. */
+  verdict: Schema.NullOr(PrototypeVerdict),
   /** What the user said with their verdict, or null. */
   note: Schema.NullOr(Schema.String),
   /** Its result as the Planner read it: what it tried, what works, what does not, its files. */
@@ -135,7 +136,7 @@ export type FrozenPrototype = typeof FrozenPrototype.Type
 
 /**
  * The last Freeze of a mission (#92): the Spec version frozen, the bases, the dirty files, and the
- * Prototypers' results the user judged (#222).
+ * Prototypers' results (#222).
  */
 export const MissionFreeze = Schema.Struct({
   version: Schema.Number,

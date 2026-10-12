@@ -1,8 +1,9 @@
 /**
  * The Prototyper in Planning (#222), around the helpers that run it: the user's ask for a
  * prototype, handed to the Planner as `[hemera:prototype]`; the user's verdict on a Prototyper's
- * result; and what the Freeze reads of them: a Prototyper running, or done and not judged yet,
- * holds it, and every result judged is frozen with the Spec.
+ * result; and what the Freeze reads of them: a Prototyper running holds it, and every result is
+ * frozen with the Spec, with the user's verdict or none. Nothing in the window judges a result
+ * yet (the Planning page's build ticket does): an unjudged one must not hold the Freeze.
  */
 
 import {
@@ -18,7 +19,7 @@ import { type FrozenPrototype, PlanningRefused, UnknownHelper } from '@hemera/ip
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
-import { helperEvent, helperRow } from '../building/helper-store.ts'
+import { helperEvent, helperRow, verdictOf } from '../building/helper-store.ts'
 import { Secrets } from '../secrets.ts'
 import { type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import { helpers } from '../storage/schema.ts'
@@ -112,37 +113,33 @@ const prototypersIn = (transaction: EngineTransaction, missionId: string) =>
     .orderBy(asc(helpers.number))
     .pipe(Effect.mapError(refusedWhile('reading the Prototypers')))
 
-const verdictOf = (verdict: string | null): PrototypeVerdict | null =>
-  verdict === 'validated' || verdict === 'set-aside' ? verdict : null
-
-/** The Prototypers that hold the Freeze, in words: one running, one done and not judged. */
+/** The Prototypers that hold the Freeze, in words: those still running. */
 export const prototypesUnsettledIn = (transaction: EngineTransaction, missionId: string) =>
   Effect.map(prototypersIn(transaction, missionId), (rows) =>
     rows.flatMap((row) => {
       const said = prototypeUnsettled({
         label: helperLabel(row.number),
         state: row.state === 'running' || row.state === 'done' ? row.state : 'failed',
-        verdict: verdictOf(row.verdict),
         question: row.brief,
       })
       return said === null ? [] : [said]
     }),
   )
 
-/** Every Prototyper's result the user judged, as the Freeze keeps it. */
+/** Every Prototyper's result, with the user's verdict or none, as the Freeze keeps it. */
 export const frozenPrototypesIn = (transaction: EngineTransaction, missionId: string) =>
   Effect.map(prototypersIn(transaction, missionId), (rows) =>
-    rows.flatMap((row): ReadonlyArray<FrozenPrototype> => {
-      const verdict = verdictOf(row.verdict)
-      if (verdict === null || row.result === null) return []
-      return [
-        {
-          helper: helperLabel(row.number),
-          question: row.brief,
-          verdict,
-          note: row.verdictNote,
-          result: row.result,
-        },
-      ]
-    }),
+    rows.flatMap((row): ReadonlyArray<FrozenPrototype> =>
+      row.result === null
+        ? []
+        : [
+            {
+              helper: helperLabel(row.number),
+              question: row.brief,
+              verdict: verdictOf(row),
+              note: row.verdictNote,
+              result: row.result,
+            },
+          ],
+    ),
   )

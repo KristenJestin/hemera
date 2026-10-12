@@ -329,6 +329,7 @@ const memoryHandlers = {
   'helpers.read': unused,
   'helpers.judge': unused,
   'helpers.changed': () => Stream.die('not asked of this engine'),
+  'helpers.prototypesChanged': () => Stream.die('not asked of this engine'),
   'discussions.list': unused,
   'discussions.read': unused,
   'discussions.open': unused,

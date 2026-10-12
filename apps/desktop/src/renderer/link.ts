@@ -319,8 +319,8 @@ export interface Link {
     onEnd: (error: Error) => void,
   ) => () => void
   readonly probe: (probeId: string) => Promise<ProbeDetail>
-  /** The mission's helpers now, its Prototypers among them, then again at each change (#222). */
-  readonly onHelpers: (
+  /** The mission's Prototypers now, then again at each change of one of them (#222). */
+  readonly onPrototypes: (
     missionId: string,
     listener: (helpers: ReadonlyArray<HelperChip>) => void,
     onEnd: (error: Error) => void,
@@ -763,8 +763,13 @@ export function linkOver(port: Port): Link {
     onProbes: (missionId, listener, onEnd) =>
       follow((ready) => ready['probes.changed']({ missionId }), listener, anError, onEnd),
     probe: (probeId) => call((ready) => ready['probes.read']({ probeId })),
-    onHelpers: (missionId, listener, onEnd) =>
-      follow((ready) => ready['helpers.changed']({ missionId }), listener, anError, onEnd),
+    onPrototypes: (missionId, listener, onEnd) =>
+      follow(
+        (ready) => ready['helpers.prototypesChanged']({ missionId }),
+        listener,
+        anError,
+        onEnd,
+      ),
     helper: (helperId) => call((ready) => ready['helpers.read']({ helperId, thread: false })),
     judgePrototype: (helperId, verdict, note) =>
       call((ready) => ready['helpers.judge']({ helperId, verdict, note })),

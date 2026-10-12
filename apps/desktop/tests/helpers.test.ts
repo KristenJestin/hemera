@@ -708,6 +708,7 @@ describe('Nothing stops a helper', () => {
       'helpers.changed',
       'helpers.judge',
       'helpers.list',
+      'helpers.prototypesChanged',
       'helpers.read',
     ])
   })

@@ -138,7 +138,7 @@ export const SILENT_LINK: Link = {
   onSpec: silent,
   onDiscussions: silent,
   onProbes: silent,
-  onHelpers: silent,
+  onPrototypes: silent,
   onColdReads: silent,
   onMemory: silent,
   cancelMission: never,

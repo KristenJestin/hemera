@@ -734,7 +734,7 @@ interface Listeners {
   spec: (heard: Spec) => void
   discussions: (heard: ReadonlyArray<Discussion>) => void
   probes: (heard: ReadonlyArray<ProbeChip>) => void
-  helpers: (heard: ReadonlyArray<HelperChip>) => void
+  prototypes: (heard: ReadonlyArray<HelperChip>) => void
   passes: (heard: ReadonlyArray<ColdReadPass>) => void
   end: (error: Error) => void
 }
@@ -746,7 +746,7 @@ const world = (played: Partial<PlanningLink> = {}) => {
     spec: () => undefined,
     discussions: () => undefined,
     probes: () => undefined,
-    helpers: () => undefined,
+    prototypes: () => undefined,
     passes: () => undefined,
     end: () => undefined,
   }
@@ -772,8 +772,8 @@ const world = (played: Partial<PlanningLink> = {}) => {
       listeners.probes = heard
       return () => undefined
     },
-    onHelpers: (_mission, heard) => {
-      listeners.helpers = heard
+    onPrototypes: (_mission, heard) => {
+      listeners.prototypes = heard
       return () => undefined
     },
     onColdReads: (_mission, heard) => {
@@ -884,13 +884,10 @@ describe('A running Probe’s step (#206)', () => {
 })
 
 describe('The Prototyper on the Planning page (#222)', () => {
-  test('only the Prototypers among the mission’s helpers are on the page, with their step and verdict', async () => {
+  test('the mission’s Prototypers are on the page, with their step and verdict', async () => {
     const played = world()
     played.listeners.spec(spec())
-    played.listeners.helpers([
-      PROTOTYPER,
-      { ...PROTOTYPER, id: 'h2', label: 'H2', name: 'Helper', definition: null },
-    ])
+    played.listeners.prototypes([PROTOTYPER])
     await flush()
     expect(played.last().prototypes).toEqual([PROTOTYPER])
   })
@@ -915,7 +912,7 @@ describe('The Prototyper on the Planning page (#222)', () => {
     expect(played.last().prototypeResults).toEqual(new Map([['h1', null]]))
     await flush()
     expect(played.last().prototypeResults.get('h1')?.result).toBe('Tried: two columns.')
-    played.listeners.helpers([PROTOTYPER])
+    played.listeners.prototypes([PROTOTYPER])
     await flush()
     expect(played.named('helper')).toHaveLength(2)
   })

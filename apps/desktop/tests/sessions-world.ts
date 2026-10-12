@@ -118,6 +118,7 @@ export const sessionsEngine = (
     readonly tools?: ProfileParts['tools']
     /** The Probes' Cleanup hook a suite watches. */
     readonly probes?: ProfileParts['probes']
+    readonly helpers?: ProfileParts['helpers']
     /** The fake `gh` of the ticket suites (#95). */
     readonly gh?: GhSettings
     /** What the Freeze keeps of the dirty files, when a suite holds it (#92). */
@@ -177,8 +178,10 @@ export const sessionsEngine = (
     options.tools === undefined ? withMemory : { ...withMemory, tools: options.tools }
   const withProbes =
     options.probes === undefined ? withTools : { ...withTools, probes: options.probes }
+  const withHelpers =
+    options.helpers === undefined ? withProbes : { ...withProbes, helpers: options.helpers }
   const withSnapshots =
-    options.snapshots === undefined ? withProbes : { ...withProbes, snapshots: options.snapshots }
+    options.snapshots === undefined ? withHelpers : { ...withHelpers, snapshots: options.snapshots }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined

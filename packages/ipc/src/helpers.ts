@@ -1,6 +1,6 @@
 /**
- * The helpers of a mission (#145), as the Building page reads them (#151), and its Prototypers as
- * the Planning page does (#222): each one's chip (a letter avatar with a stable colour, its name,
+ * The helpers of a mission's Building (#145), as the Building page reads them (#151), and its
+ * Prototypers, Planning's, as the Planning page does (#222): each one's chip (a letter avatar with a stable colour, its name,
  * its state dot, whether it is stuck, its step), one helper whole (its brief and its result; its
  * hidden thread only for the developer settings), and the chips again at each change. There is no
  * stop: the system is autonomous. The one write is the user's verdict on a Prototyper's result,
@@ -89,7 +89,7 @@ const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Erro
 const ofMission = { missionId: Schema.String }
 
 export const HelpersRpcs = RpcGroup.make(
-  /** A mission's helpers, the first launched first. */
+  /** A mission's Building helpers, the first launched first: its Prototypers are Planning's. */
   Rpc.make('helpers.list', {
     payload: ofMission,
     success: Schema.Array(HelperChip),
@@ -115,8 +115,15 @@ export const HelpersRpcs = RpcGroup.make(
     success: Schema.Void,
     error: failing(...always, UnknownHelper, PlanningRefused),
   }),
-  /** The mission's helpers now, then again at each change of one of them. */
+  /** The mission's Building helpers now, then again at each change of one of them. */
   Rpc.make('helpers.changed', {
+    payload: ofMission,
+    success: Schema.Array(HelperChip),
+    error: failing(...always, UnknownMission),
+    stream: true,
+  }),
+  /** The mission's Prototypers now, then again at each change of one of them (#222). */
+  Rpc.make('helpers.prototypesChanged', {
     payload: ofMission,
     success: Schema.Array(HelperChip),
     error: failing(...always, UnknownMission),

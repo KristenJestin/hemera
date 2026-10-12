@@ -130,27 +130,22 @@ when the Spec changes the interface or rests on an approach nobody has run.`
 
 /**
  * What the user says of a Prototyper's result, before the Freeze (#222): taken as it is, or set
- * aside. The Freeze keeps every result judged, with its verdict.
+ * aside. The Freeze keeps every result, with its verdict or none.
  */
 export const PROTOTYPE_VERDICTS = ['validated', 'set-aside'] as const
 export const PrototypeVerdict = Schema.Literals(PROTOTYPE_VERDICTS)
 export type PrototypeVerdict = typeof PrototypeVerdict.Type
 
-/** Why a Prototyper holds the Freeze, in words; null when it holds nothing. */
+/**
+ * Why a Prototyper holds the Freeze, in words, while it runs; null once it ended. A result the user
+ * has not judged holds nothing: it is frozen unjudged.
+ */
 export const prototypeUnsettled = (prototype: {
   readonly label: string
   readonly state: HelperState
-  readonly verdict: PrototypeVerdict | null
   readonly question: string
-}): string | null => {
-  if (prototype.state === 'running') {
-    return `Prototyper ${prototype.label} runs: ${prototype.question}`
-  }
-  if (prototype.state === 'done' && prototype.verdict === null) {
-    return `Prototyper ${prototype.label} waits for your verdict: ${prototype.question}`
-  }
-  return null
-}
+}): string | null =>
+  prototype.state === 'running' ? `Prototyper ${prototype.label} runs: ${prototype.question}` : null
 
 const TaskNamed = Bounded(20, 'The task, by its id (`T4`).')
 
@@ -239,7 +234,7 @@ export const prototyperResultText = (result: PrototyperResult, kept: string): st
       ? 'Does not work: nothing.'
       : ['Does not work:', ...result.does_not_work.map((one) => `- ${one}`)].join('\n'),
     result.files.length === 0 ? 'Files: none.' : `Files, kept as evidence: ${kept}`,
-    'Nothing of it is in the main checkout. The user judges it before the Freeze, which keeps it with its verdict.',
+    'Nothing of it is in the main checkout. The user may judge it before the Freeze, which keeps it with their verdict.',
   ].join('\n')
 
 /** What a helper's session is made of, for the tools it holds. */

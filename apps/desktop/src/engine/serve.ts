@@ -120,7 +120,12 @@ import {
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
-import { helperChanges, listHelpers, readHelper } from './building/helper-store.ts'
+import {
+  helperChanges,
+  listHelpers,
+  prototypeChanges,
+  readHelper,
+} from './building/helper-store.ts'
 import { askPrototype, judgePrototype } from './planning/prototypes.ts'
 import { taskGraphOf } from './planning/plan.ts'
 import { discussionsOf, readDiscussion } from './planning/discussion-store.ts'
@@ -723,6 +728,8 @@ export const engineHandlers = (
       use(judgePrototype(helperId, verdict, note)).pipe(observed('helpers.judge', log)),
     'helpers.changed': ({ missionId }) =>
       follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
+    'helpers.prototypesChanged': ({ missionId }) =>
+      follow(prototypeChanges(missionId)).pipe(observedStream('helpers.prototypesChanged', log)),
     // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
     'discussions.list': ({ missionId }) =>
       use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),

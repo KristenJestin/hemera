@@ -8,12 +8,11 @@
  *   completeness on the current version, what completeness finds now (a question open or waiting,
  *   an open discussion or a decision in transit, an input not integrated, a target or an insertion
  *   that no longer holds at the base), the cold read of this Planning (#91), a Probe prepared or
- *   running (#89), a Prototyper running or whose result the user has not judged yet (#222), a
- *   dependency the user has not decided yet.
+ *   running (#89), a Prototyper running (#222), a dependency the user has not decided yet.
  * - **Freeze.** Each repository's base commit by the rule of the up-to-date base (CT-24, one fetch
  *   each), the checks of #90 run again at those commits, and the dirty files of the main checkout
  *   kept (CT-23); then, in one transaction, the readiness again, the Spec frozen, the Freeze kept
- *   with the Prototypers' results the user judged (#222), Planning → Ready, the outdated marks
+ *   with the Prototypers' results and the user's verdicts (#222), Planning → Ready, the outdated marks
  *   cleared, the dependencies' marks set, and the stops owed written down. After it the Probes are wiped and the Planner tree stopped; a stop in between
  *   leaves the stops owed, which the next start runs before any session is rebuilt.
  * - **Return.** Ready → Planning, a new Planning cycle, the Spec unfrozen (a new version), the

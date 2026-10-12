@@ -498,7 +498,7 @@ export type PlanningLink = Pick<
   | 'closeDiscussion'
   | 'onProbes'
   | 'probe'
-  | 'onHelpers'
+  | 'onPrototypes'
   | 'helper'
   | 'askPrototype'
   | 'judgePrototype'
@@ -707,10 +707,10 @@ export function followPlanning(
         },
         failed,
       ),
-      link.onHelpers(
+      link.onPrototypes(
         missionId,
         (heard) => {
-          prototypes = heard.filter((one) => one.definition === 'prototyper')
+          prototypes = heard
           // A result open while its Prototyper moves is read again.
           for (const id of prototypeResults.keys()) {
             if (prototypes.some((one) => one.id === id)) readPrototype(id)

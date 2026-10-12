@@ -251,17 +251,14 @@ describe('The brief and the names', () => {
   })
 })
 
-describe('The Prototyper in Planning holds the Freeze until its result is judged', () => {
-  test('running, or done and not judged, it is named; judged or failed, it holds nothing', () => {
+describe('The Prototyper in Planning holds the Freeze only while it runs', () => {
+  test('running, it is named; done, judged or not, or failed, it holds nothing', () => {
     const asked = { label: 'H1', question: 'Two columns?' }
-    expect(prototypeUnsettled({ ...asked, state: 'running', verdict: null })).toBe(
+    expect(prototypeUnsettled({ ...asked, state: 'running' })).toBe(
       'Prototyper H1 runs: Two columns?',
     )
-    expect(prototypeUnsettled({ ...asked, state: 'done', verdict: null })).toBe(
-      'Prototyper H1 waits for your verdict: Two columns?',
-    )
-    expect(prototypeUnsettled({ ...asked, state: 'done', verdict: 'set-aside' })).toBeNull()
-    expect(prototypeUnsettled({ ...asked, state: 'failed', verdict: null })).toBeNull()
+    expect(prototypeUnsettled({ ...asked, state: 'done' })).toBeNull()
+    expect(prototypeUnsettled({ ...asked, state: 'failed' })).toBeNull()
   })
 
   test('its brief reads the Spec as being planned', () => {

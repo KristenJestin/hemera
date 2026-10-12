@@ -50,7 +50,7 @@ import { type TaskChecks, checksVerdict, noTaskChecks } from './building/checks.
 import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -250,6 +250,8 @@ export interface ProfileParts {
     /** Where a suite holds a launch (see `ProbesSettings`); never held otherwise. */
     readonly hold?: ProbesSettings['hold']
   }
+  /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
+  readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** What the Freeze keeps of the dirty files (#92); the database's stand-in otherwise. */
   readonly snapshots?: Layer.Layer<FileSnapshots, never, Secrets>
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
@@ -587,7 +589,7 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
-        helpersLayer({ log }),
+        helpersLayer({ log, hold: parts.helpers?.hold }),
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??

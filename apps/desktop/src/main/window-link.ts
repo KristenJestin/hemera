@@ -765,6 +765,11 @@ const missionWorkHandlers = (engine: EngineClient, log: Log) =>
         streamClosedAs(gone),
         observedStream('helpers.changed', log),
       ),
+    'helpers.prototypesChanged': (request) =>
+      engine['helpers.prototypesChanged'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('helpers.prototypesChanged', log),
+      ),
     'discussions.list': (request) =>
       engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
     'discussions.read': (request) =>

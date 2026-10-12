@@ -106,6 +106,11 @@ import { activeBuildingIn, tasksIn, workItemOf } from './tasks.ts'
 
 export interface HelpersSettings {
   readonly log: Log
+  /**
+   * Runs at a point a suite needs to reach: `checked`, once the Planner's launch found its mission
+   * in Planning and before it records the Prototyper, where a Freeze may fall.
+   */
+  readonly hold?: ((at: 'checked') => Effect.Effect<void>) | undefined
 }
 
 /** The roles a helper's session holds. */
@@ -128,6 +133,17 @@ const NO_PLANNING = refusal(
 )
 
 const readString = Schema.decodeUnknownOption(Schema.String)
+
+/** Whether a mission is in Planning, read with the reader given. */
+const inPlanning = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
+  reader
+    .select({ stage: missions.stage })
+    .from(missions)
+    .where(eq(missions.id, missionId))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the mission')),
+      Effect.map(([mission]) => mission?.stage === 'planning'),
+    )
 
 /** What a refusal or a failure says, in words. */
 const said = (cause: unknown): string =>
@@ -356,15 +372,11 @@ export const helpersLayer = (settings: HelpersSettings) =>
           // The Planner launches the Prototyper, in Planning only; the Building side never does.
           const planning = caller.role === 'planner'
           if (planning) {
-            const [mission] = yield* database
-              .select({ stage: missions.stage })
-              .from(missions)
-              .where(eq(missions.id, missionId))
-              .pipe(Effect.mapError(refusedWhile('reading the mission')))
-            if (mission?.stage !== 'planning') return NO_PLANNING
+            if (!(yield* inPlanning(database, missionId))) return NO_PLANNING
             if (args.helper !== PROTOTYPER.id) {
               return yield* refused(missionId, PLANNER_LAUNCHES_ONLY_PROTOTYPER)
             }
+            if (settings.hold !== undefined) yield* settings.hold('checked')
           } else if (args.helper === PROTOTYPER.id) {
             return yield* refused(missionId, PROTOTYPER_BELONGS_TO_PLANNING)
           }
@@ -457,16 +469,25 @@ export const helpersLayer = (settings: HelpersSettings) =>
                 verdictNote: null,
                 judgedAt: null,
               }
-              // Written before its session opens: its brief and its tools are read from it.
-              yield* mutate('recording a helper', (transaction) =>
-                transaction
-                  .insert(helpers)
-                  .values(row)
-                  .pipe(
-                    Effect.mapError(refusedWhile('recording a helper')),
-                    Effect.as({ result: undefined, events: [] }),
-                  ),
+              // Written before its session opens: its brief and its tools are read from it. The
+              // Planner's is written only while its mission is still in Planning: a Freeze between
+              // the check and here refuses it, and a Freeze after it waits for it to end.
+              const recorded = yield* mutate('recording a helper', (transaction) =>
+                Effect.gen(function* () {
+                  if (planning && !(yield* inPlanning(transaction, missionId))) {
+                    return { result: false, events: [] }
+                  }
+                  yield* transaction
+                    .insert(helpers)
+                    .values(row)
+                    .pipe(Effect.mapError(refusedWhile('recording a helper')))
+                  return { result: true, events: [] }
+                }),
               )
+              if (!recorded) {
+                if (prototype) rmSync(folder, { recursive: true, force: true })
+                return { kind: 'left' } as const
+              }
               const opened = yield* sessions
                 .open({
                   id: row.lineage,
@@ -524,6 +545,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
               return { kind: 'launched', row } as const
             }),
           )
+          if (launched.kind === 'left') return NO_PLANNING
           if (launched.kind === 'refused') return yield* refused(missionId, launched.why)
           const label = helperLabel(launched.row.number)
           return answered(
@@ -823,6 +845,8 @@ export const helpersLayer = (settings: HelpersSettings) =>
       const isHelperEvent = (payload: NewEvent['payload']) =>
         payload !== undefined && HELPER_ROLES.includes(String(payload['role']))
 
+      // Which helper a session runs, or none, read once per session and forgotten when it stops.
+      const helperOfSession = new Map<string, SteppedProbe | null>()
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       yield* events.pipe(
         Stream.runForEach((event) =>
@@ -830,6 +854,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
             const payload = event.payload ?? {}
             const lineage = Option.getOrNull(readString(payload['lineage']))
             if (event.type === 'mission.cancelled') return yield* locked(cancelled(event.entityId))
+            if (event.type === 'session.stopped') helperOfSession.delete(event.entityId)
             if (lineage === null || !isHelperEvent(payload)) return
             if (event.type === 'session.stuck') yield* stuckSession(lineage)
             if (event.type === 'session.replaced') {
@@ -869,7 +894,6 @@ export const helpersLayer = (settings: HelpersSettings) =>
       // What a running helper is doing (#206, #222): the title of its session's latest tool call,
       // masked, kept beside the Probes' steps.
       const steps = yield* ProbeSteps
-      const helperOfSession = new Map<string, SteppedProbe | null>()
       const stepped = (sessionId: string, title: string) =>
         Effect.gen(function* () {
           let helper = helperOfSession.get(sessionId)

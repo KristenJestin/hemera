@@ -1892,8 +1892,8 @@ export const coldReadFindings = sqliteTable(
  * The Freezes of a mission (#92): one per Planning cycle that ended in a Freeze, with the Spec
  * version frozen and when. `bases` is the JSON of the base commit recorded for each repository of
  * the Project (CT-24): its ref and its freshness, "not fetched since" when the fetch failed.
- * `prototypes` is the JSON of the Prototypers' results the user judged by then, with their
- * verdicts (#222).
+ * `prototypes` is the JSON of the Prototypers' results by then, each with the user's verdict or
+ * none (#222).
  */
 export const freezes = sqliteTable(
   'freezes',

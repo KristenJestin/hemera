@@ -12,7 +12,8 @@ import {
   HELPER_STATES,
   type HelperPlace,
   type HelperState,
-  type PrototypeVerdict,
+  PROTOTYPER,
+  PrototypeVerdict,
   avatarToneOf,
   definedHelperNamed,
   helperLabel,
@@ -60,8 +61,10 @@ const stateOf = (state: string): HelperState =>
 
 const placeOf = (place: string): HelperPlace => (place === 'prototype' ? 'prototype' : 'workspace')
 
-const verdictOf = (verdict: string | null): PrototypeVerdict | null =>
-  verdict === 'validated' || verdict === 'set-aside' ? verdict : null
+const readVerdict = Schema.decodeUnknownOption(PrototypeVerdict)
+/** A Prototyper's verdict as its row keeps it, or null before the user judged it. */
+export const verdictOf = (row: Pick<HelperRow, 'verdict'>): PrototypeVerdict | null =>
+  Option.getOrNull(readVerdict(row.verdict))
 
 /** A helper's row by its session's lineage, or null for a session that runs no helper. */
 export const helperOfLineage = (lineage: string, reader?: Reader) =>
@@ -163,7 +166,7 @@ export const chipOf = (row: HelperRow, step: string | null): HelperChip => {
     state: stateOf(row.state),
     stuck: row.stuck,
     step: row.state === 'running' ? step : null,
-    verdict: verdictOf(row.verdict),
+    verdict: verdictOf(row),
     startedAt: row.startedAt,
     endedAt: row.endedAt,
   }
@@ -180,15 +183,25 @@ const missionThere = (missionId: string) =>
     if (mission === undefined) return yield* new UnknownMission({ id: missionId })
   })
 
-/** A mission's helpers as their chips show them. */
-export const listHelpers = (missionId: string) =>
+/** Whether a helper is a Prototyper: Planning's, never listed with the Building's (#222). */
+const isPrototyper = (row: Pick<HelperRow, 'definition'>): boolean =>
+  row.definition === PROTOTYPER.id
+
+/** The chips of a mission's helpers that `keep` keeps, with their steps. */
+const chipsOf = (missionId: string, keep: (row: HelperRow) => boolean) =>
   Effect.gen(function* () {
     yield* missionThere(missionId)
     const steps = yield* ProbeSteps
-    return yield* Effect.forEach(yield* helperRowsOf(missionId), (row) =>
+    return yield* Effect.forEach((yield* helperRowsOf(missionId)).filter(keep), (row) =>
       Effect.map(steps.of(row.id), (step) => chipOf(row, step)),
     )
   })
+
+/** A mission's Building helpers as their chips show them. */
+export const listHelpers = (missionId: string) => chipsOf(missionId, (row) => !isPrototyper(row))
+
+/** A mission's Prototypers as their chips show them, for the Planning page (#222). */
+export const listPrototypes = (missionId: string) => chipsOf(missionId, isPrototyper)
 
 /** The result a helper handed back, as its parent read it, once it is done. */
 const resultTextOf = (row: HelperRow): string | null => row.result
@@ -217,17 +230,14 @@ export const readHelper = (helperId: string, withThread: boolean) =>
     return detail
   })
 
-/**
- * A mission's chips now, then again after each change of one of its helpers, and after each new
- * step of one of them.
- */
-export const helperChanges = (missionId: string) =>
+/** Chips now, then again after each change of one of the mission's helpers, and each new step. */
+const chipChanges = <A, E, R>(missionId: string, list: Effect.Effect<A, E, R>) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const committed = yield* DomainEvents.use((events) => events.subscribe)
       const stepped = yield* ProbeSteps.use((steps) => steps.subscribe)
       return Stream.concat(
-        Stream.fromEffect(listHelpers(missionId)),
+        Stream.fromEffect(list),
         Stream.merge(
           committed.pipe(
             Stream.filter(
@@ -238,10 +248,17 @@ export const helperChanges = (missionId: string) =>
             ),
           ),
           stepped.pipe(Stream.filter((mission) => mission === missionId)),
-        ).pipe(Stream.mapEffect(() => listHelpers(missionId))),
+        ).pipe(Stream.mapEffect(() => list)),
       )
     }),
   )
+
+/** A mission's Building chips now, then again at each change. */
+export const helperChanges = (missionId: string) => chipChanges(missionId, listHelpers(missionId))
+
+/** A mission's Prototypers' chips now, then again at each change (#222). */
+export const prototypeChanges = (missionId: string) =>
+  chipChanges(missionId, listPrototypes(missionId))
 
 const readString = Schema.decodeUnknownOption(Schema.String)
 const readStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String))

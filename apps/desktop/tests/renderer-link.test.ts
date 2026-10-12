@@ -332,6 +332,8 @@ const noProjects = {
   'helpers.read': unused,
   'helpers.judge': unused,
   'helpers.changed': () => Stream.die('the window’s link is not asked for the helpers here'),
+  'helpers.prototypesChanged': () =>
+    Stream.die('the window’s link is not asked for the Prototypers here'),
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,
