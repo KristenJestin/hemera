@@ -43,7 +43,8 @@ Spec, the prototypes frozen with it, the Notes, whether you may write, your dept
 ## Tools
 A subset of your parent's: fs_read, fs_list, search, prototype_read; fs_write, fs_edit if you may write (a file
 another running task holds is refused); commands_run, commands_output, commands_stop; task_start,
-task_finished, task_blocked for your task only; need_propose when Hemera asks you; note_add;
+task_finished, task_blocked for your task only; need_propose when Hemera asks you; proof_run for
+a scenario your task covers; note_add;
 helper_launch and helper_read at depth 1 only; helper_result.
 
 ## How you work

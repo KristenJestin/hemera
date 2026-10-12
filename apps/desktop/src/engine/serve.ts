@@ -11,6 +11,7 @@ import {
   ChecksRpcs,
   DiffRpcs,
   DocRecipesRpcs,
+  ProofsRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -33,6 +34,7 @@ import {
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
+import { judgeManual, proofsRead } from './building/proofs.ts'
 import {
   dismissService,
   missionServices,
@@ -866,7 +868,24 @@ export const engineHandlers = (
     checksHandlers(profile, log),
     docRecipesHandlers(profile, log),
     diffHandlers(profile, log),
+    proofsHandlers(profile, log),
   )
+}
+
+/** The proofs (#144), a layer of their own (see `EngineServedRpcs`). */
+const proofsHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return ProofsRpcs.toLayer({
+    'proofs.read': ({ missionId }) => use(proofsRead(missionId)).pipe(observed('proofs.read', log)),
+    'proofs.validateManual': ({ missionId, scenarioId, note }) =>
+      use(judgeManual(missionId, scenarioId, 'validated', note)).pipe(
+        observed('proofs.validateManual', log),
+      ),
+    'proofs.refuseManual': ({ missionId, scenarioId, note }) =>
+      use(judgeManual(missionId, scenarioId, 'refused', note)).pipe(
+        observed('proofs.refuseManual', log),
+      ),
+  })
 }
 
 /** The Project's checks (#143), a layer of their own (see `EngineSettingsRpcs`). */

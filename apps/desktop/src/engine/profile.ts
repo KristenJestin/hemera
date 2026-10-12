@@ -47,6 +47,7 @@ import {
   tasksDoneEnd,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
+import { proofRunnerLayer } from './building/proof-runner.ts'
 import { projectTaskChecks } from './building/run-checks.ts'
 import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
@@ -635,7 +636,10 @@ export const startProfile = (
                     outside,
                   ).pipe(
                     Layer.provideMerge(
-                      parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                      Layer.mergeAll(
+                        parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                        proofRunnerLayer,
+                      ),
                     ),
                   ),
                 ),
