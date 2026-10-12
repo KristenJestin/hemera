@@ -131,6 +131,10 @@ export const TABLE_CLASSES = {
   building_attempts: 'permanent',
   building_claims: 'state',
   building_decisions: 'permanent',
+  attempt_writes: 'permanent',
+  building_unattributed: 'permanent',
+  building_conflicts: 'permanent',
+  building_check_results: 'permanent',
   helpers: 'permanent',
   // A result waits here only until its parent's lineage takes it.
   queued_results: 'state',

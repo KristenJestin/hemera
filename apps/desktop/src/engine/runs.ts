@@ -159,6 +159,11 @@ export class ReservationLost extends Schema.TaggedError<ReservationLost>()('Rese
   reason: Schema.String,
 }) {}
 
+/** What had to be held before a run launched could not be, and why: the run never launches. */
+export class LaunchWithdrawn extends Schema.TaggedError<LaunchWithdrawn>()('LaunchWithdrawn', {
+  reason: Schema.String,
+}) {}
+
 /** What a run of a declared command waits for: its mission's reservations, left at its end. */
 export interface RunReservation {
   /**
@@ -536,6 +541,12 @@ export interface RunAsked {
    * step: a run that waited and never launched leaves none, so nothing is "maybe done" for it.
    */
   readonly intent?: Effect.Effect<void, DatabaseError>
+  /**
+   * What the run waits for last, once nothing else holds it and before its intent: a Building's
+   * write lock and its snapshots before (#142), never held while the run waits for its
+   * reservation or its permission. When it fails, the run is not started.
+   */
+  readonly beforeLaunch?: Effect.Effect<void, LaunchWithdrawn>
 }
 
 /** A line checked for a run: no shell syntax, only template names Hemera fills. */
@@ -703,13 +714,26 @@ export const startRun = (asked: RunAsked) =>
      * What a run waiting for permission or for its reservation does once it may start: it no
      * longer waits and starts, at once and whole, so a stop finds it either waiting or started.
      */
-    const started = Effect.uninterruptible(
-      Effect.andThen(
-        Effect.sync(() => {
-          live.waiting = null
-        }),
-        launching,
-      ),
+    const ready = asked.beforeLaunch ?? Effect.void
+    const started = ready.pipe(
+      Effect.matchEffect({
+        onFailure: (withdrawn) =>
+          Effect.andThen(
+            Effect.sync(() => {
+              live.waiting = null
+            }),
+            notStarted(runs, live, withdrawn.reason),
+          ),
+        onSuccess: () =>
+          Effect.uninterruptible(
+            Effect.andThen(
+              Effect.sync(() => {
+                live.waiting = null
+              }),
+              launching,
+            ),
+          ),
+      }),
     )
     const proceed =
       reservation === null
@@ -728,7 +752,12 @@ export const startRun = (asked: RunAsked) =>
           )
 
     if (command === null || (!ask && reservation === null)) {
-      yield* launching
+      yield* ready.pipe(
+        Effect.matchEffect({
+          onFailure: (withdrawn) => notStarted(runs, live, withdrawn.reason),
+          onSuccess: () => launching,
+        }),
+      )
       return live.run
     }
     if (!ask) {

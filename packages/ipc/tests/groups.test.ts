@@ -370,6 +370,7 @@ const memoryHandlers = {
   'building.changed': () => Stream.die('not asked of this engine'),
   'building.read': unused,
   'building.task': unused,
+  'building.attempt': unused,
   'building.tasksChanged': () => Stream.die('not asked of this engine'),
   'memory.now': unused,
   'memory.journal': unused,

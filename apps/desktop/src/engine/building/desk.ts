@@ -1,16 +1,16 @@
 /**
- * Where the gate reaches the Building (#141): the Builder's six tools, and the file claims as a
- * mandatory guard of the writing tools. The Builder's service stands on the sessions, above the
- * gate; it puts its work here once it runs, and a call made before waits for it, as the Probes'
- * desk does.
+ * Where the gate reaches the Building (#141): the Builder's tools, the file claims as a mandatory
+ * guard of the writing tools, and the attribution of every write to its task (#142). The Builder's
+ * service stands on the sessions, above the gate; it puts its work here once it runs, and a call
+ * made before waits for it, as the Probes' desk does.
  */
 
-import type { ToolArguments } from '@hemera/core/domain'
+import type { AttemptResult, ToolArguments } from '@hemera/core/domain'
 import { Context, Deferred, Effect, Layer } from 'effect'
 
 import type { Grant } from '../tools/access.ts'
 import type { ToolAnswer } from '../tools/files.ts'
-import { GateGuards, type Guard, type GuardedCall } from '../tools/ports.ts'
+import { GateGuards, type Guard, type GuardedCall, WriteAttribution } from '../tools/ports.ts'
 
 export interface BuildWork {
   readonly read: (grant: Grant, args: ToolArguments<'build_read'>) => Effect.Effect<ToolAnswer>
@@ -21,12 +21,27 @@ export interface BuildWork {
   ) => Effect.Effect<ToolAnswer>
   readonly blocked: (grant: Grant, args: ToolArguments<'task_blocked'>) => Effect.Effect<ToolAnswer>
   readonly need: (grant: Grant, args: ToolArguments<'report_need'>) => Effect.Effect<ToolAnswer>
+  readonly propose: (grant: Grant, args: ToolArguments<'need_propose'>) => Effect.Effect<ToolAnswer>
   readonly summary: (
     grant: Grant,
     args: ToolArguments<'build_summary'>,
   ) => Effect.Effect<ToolAnswer>
-  /** A write's claim: refused when another running task holds the file, recorded when outside. */
+  /**
+   * A write's claim: refused when another running task holds the file, recorded when outside; a
+   * write where another task's command holds the write lock waits for it (#142).
+   */
   readonly claim: Guard
+  /** Where a mission's writes are attributed to their task (#142). */
+  readonly attribution: WriteAttribution['Service']
+  /**
+   * The checks of a requirement or of the end asked through `TaskChecks` (#143, #147): a red opens
+   * an attempt on that scope, handed to the Builder, without changing any task's state.
+   */
+  readonly judgeScope: (
+    missionId: string,
+    scope: 'requirement' | 'end',
+    subject: string | null,
+  ) => Effect.Effect<AttemptResult>
 }
 
 export class BuildDesk extends Context.Service<
@@ -48,12 +63,23 @@ export const buildDeskLayer = Layer.effect(
       finished: (grant, args) => Effect.flatMap(work, (one) => one.finished(grant, args)),
       blocked: (grant, args) => Effect.flatMap(work, (one) => one.blocked(grant, args)),
       need: (grant, args) => Effect.flatMap(work, (one) => one.need(grant, args)),
+      propose: (grant, args) => Effect.flatMap(work, (one) => one.propose(grant, args)),
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
       // Only a mission's write to a path is a claim's business: nothing else waits for the desk.
       claim: (call) =>
         call.session.missionId === null || call.path === null || !WRITES.includes(call.tool)
           ? Effect.succeed(null)
           : Effect.flatMap(work, (one) => one.claim(call)),
+      attribution: {
+        // Only a mission's write is the Building's business: nothing else waits for the desk.
+        written: (file) => (transaction) =>
+          Effect.flatMap(work, (one) => one.attribution.written(file)(transaction)),
+        command: (asked) => Effect.flatMap(work, (one) => one.attribution.command(asked)),
+        holding: (file, write) =>
+          Effect.flatMap(work, (one) => one.attribution.holding(file, write)),
+      },
+      judgeScope: (missionId, scope, subject) =>
+        Effect.flatMap(work, (one) => one.judgeScope(missionId, scope, subject)),
       serve: (one) => Effect.asVoid(Deferred.succeed(served, one)),
     }
   }),
@@ -63,4 +89,10 @@ export const buildDeskLayer = Layer.effect(
 export const claimGuards = Layer.effect(
   GateGuards,
   Effect.map(BuildDesk, (desk) => [desk.claim]),
+)
+
+/** Where the gate's file tools and commands attribute their writes: the Builder's (#142). */
+export const deskAttribution = Layer.effect(
+  WriteAttribution,
+  Effect.map(BuildDesk, (desk) => desk.attribution),
 )

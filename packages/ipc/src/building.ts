@@ -207,8 +207,51 @@ export class UnknownCheck extends Schema.TaggedError<UnknownCheck>()('UnknownChe
 export const BuildingTree = Schema.Struct({ repository: Schema.String, tree: Schema.String })
 export type BuildingTree = typeof BuildingTree.Type
 
-/** One attempt at a task: its snapshots, how it ended, and the paths changed outside its targets. */
+/** A file attributed to an attempt (#142): its change, its lines, and whether it is a target. */
+export const AttemptFileView = Schema.Struct({
+  repository: Schema.String,
+  path: Schema.String,
+  /** Git's letter: added, modified, deleted, renamed, or its type changed. */
+  status: Schema.String,
+  added: Schema.NullOr(Schema.Number),
+  removed: Schema.NullOr(Schema.Number),
+  /** Changed outside its task's targets. */
+  outside: Schema.Boolean,
+})
+export type AttemptFileView = typeof AttemptFileView.Type
+
+/** One check's result on an attempt: where it ran, its verdict, the end of its output, its run. */
+export const AttemptCheckView = Schema.Struct({
+  name: Schema.String,
+  place: Schema.String,
+  verdict: Schema.Literals(['green', 'red', 'skipped']),
+  detail: Schema.String,
+  outputTail: Schema.String,
+  /** The run that holds its full output, or null. */
+  runId: Schema.NullOr(Schema.String),
+})
+export type AttemptCheckView = typeof AttemptCheckView.Type
+
+/** A command's change to a file another running task held: kept, on both tasks. */
+export const AttemptConflictView = Schema.Struct({
+  repository: Schema.String,
+  path: Schema.String,
+  command: Schema.String,
+  byTask: Schema.String,
+  heldBy: Schema.String,
+})
+export type AttemptConflictView = typeof AttemptConflictView.Type
+
+/**
+ * One attempt at a task, a requirement's checks or the end: its snapshots, how it ended, its
+ * verdict, the files attributed to it, its checks and conflicts, and the paths changed outside
+ * its targets.
+ */
 export const BuildingAttemptView = Schema.Struct({
+  id: Schema.String,
+  scope: Schema.Literals(['task', 'requirement', 'end']),
+  /** The requirement of a `requirement` attempt; null otherwise. */
+  subject: Schema.NullOr(Schema.String),
   number: Schema.Number,
   runner: Schema.String,
   startedAt: Schema.String,
@@ -218,6 +261,11 @@ export const BuildingAttemptView = Schema.Struct({
   starts: Schema.Array(BuildingTree),
   ends: Schema.NullOr(Schema.Array(BuildingTree)),
   outside: Schema.Array(Schema.String),
+  /** What its checks said once judged: null before. */
+  verdict: Schema.NullOr(Schema.Literals(['green', 'red', 'not_verified'])),
+  files: Schema.Array(AttemptFileView),
+  checks: Schema.Array(AttemptCheckView),
+  conflicts: Schema.Array(AttemptConflictView),
 })
 export type BuildingAttemptView = typeof BuildingAttemptView.Type
 
@@ -305,9 +353,21 @@ export const BuildingView = Schema.Struct({
   requirements: Schema.Array(BuildingRequirementView),
   tasks: Schema.Array(BuildingTaskView),
   decisions: Schema.Array(BuildingDecisionView),
+  /** The attempts on a requirement's checks or on the end (#142): no task's. */
+  scopes: Schema.Array(BuildingAttemptView),
+  /** The files changed with no known author: the Building's, never a task's (CT-02). */
+  unattributed: Schema.Array(Schema.Struct({ repository: Schema.String, path: Schema.String })),
   summary: Schema.NullOr(Schema.String),
 })
 export type BuildingView = typeof BuildingView.Type
+
+export class UnknownAttempt extends Schema.TaggedError<UnknownAttempt>()('UnknownAttempt', {
+  id: Schema.String,
+}) {
+  override get message(): string {
+    return `The Building has no attempt ${this.id}.`
+  }
+}
 
 export class UnknownBuildingTask extends Schema.TaggedError<UnknownBuildingTask>()(
   'UnknownBuildingTask',
@@ -372,6 +432,12 @@ export const BuildingRpcs = RpcGroup.make(
     payload: { ...ofMission, taskId: Schema.String },
     success: BuildingTaskView,
     error: failing(...always, UnknownMission, UnknownBuildingTask),
+  }),
+  /** One attempt of the mission's Building, its checks naming the runs of their full output. */
+  Rpc.make('building.attempt', {
+    payload: { ...ofMission, attemptId: Schema.String },
+    success: BuildingAttemptView,
+    error: failing(...always, UnknownMission, UnknownAttempt),
   }),
   /** The mission's Building as `building.read` reads it, then again at each change. */
   Rpc.make('building.tasksChanged', {

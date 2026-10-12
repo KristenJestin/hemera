@@ -33,6 +33,8 @@ export const ErrorFields = Schema.TaggedStruct('Error', {
   failed: Schema.String,
   attempts: Schema.Array(Attempt),
   proposals: Schema.Array(Schema.String),
+  /** The proposal recommended and why, once an agent proposed (#142's `need_propose`). */
+  recommended: Schema.optionalKey(Schema.Struct({ option: Schema.String, reason: Schema.String })),
 })
 
 /** The call asked for, the agent's reason, and Hemera's: why Hemera asks rather than lets it by. */
@@ -131,7 +133,14 @@ export function fittingAnswer(fields: NeedFields, owner: NeedOwner, answer: Need
         const text = answer.text.trim()
         return text === '' ? refused('it is empty') : Result.succeed(WrittenAnswer.make({ text }))
       },
-      Error: (error) => chosenAmong(error.proposals, 'it is not one of the proposals'),
+      Error: (error): Fitting => {
+        if (!Predicate.isTagged(answer, 'Written')) {
+          return chosenAmong(error.proposals, 'it is not one of the proposals')
+        }
+        // A direction of one's own, in words, is as much an answer as a proposal (#142).
+        const text = answer.text.trim()
+        return text === '' ? refused('it is empty') : Result.succeed(WrittenAnswer.make({ text }))
+      },
       Permission: (permission): Fitting =>
         Predicate.isTagged(answer, 'Permission') &&
         permissionChoices({

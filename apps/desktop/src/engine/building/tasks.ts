@@ -9,6 +9,8 @@
  */
 
 import {
+  ATTEMPT_RESULTS,
+  ATTEMPT_SCOPES,
   type Amendment,
   type BuildTaskNow,
   TaskAmendment,
@@ -31,12 +33,14 @@ import {
   BuildingTree,
   type BuildingTaskView,
   type BuildingView,
+  UnknownAttempt,
   UnknownBuildingTask,
 } from '@hemera/ipc'
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
+import { checkResultsOf, conflictsIn, unattributedIn } from './attempts.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
 import { Secrets } from '../secrets.ts'
@@ -479,7 +483,31 @@ export const applyAmendmentIn = (
     return events
   })
 
-const attemptViewOf = (row: AttemptRow): BuildingAttemptView => ({
+/** A file attributed to an attempt, as the attempt keeps it once ended. */
+export const AttemptFile = Schema.Struct({
+  repository: Schema.String,
+  path: Schema.String,
+  status: Schema.String,
+  added: Schema.NullOr(Schema.Number),
+  removed: Schema.NullOr(Schema.Number),
+  outside: Schema.Boolean,
+})
+export type AttemptFile = typeof AttemptFile.Type
+export const attemptFiles = json(Schema.Array(AttemptFile))
+
+/** What an attempt's view reads beside its row: its checks and the Building's conflicts. */
+interface AttemptExtras {
+  readonly checks: ReadonlyArray<CheckRow>
+  readonly conflicts: ReadonlyArray<ConflictRow>
+}
+
+type CheckRow = Effect.Success<ReturnType<typeof checkResultsOf>>[number]
+type ConflictRow = Effect.Success<ReturnType<typeof conflictsIn>>[number]
+
+const attemptViewOf = (row: AttemptRow, extras: AttemptExtras): BuildingAttemptView => ({
+  id: row.id,
+  scope: ATTEMPT_SCOPES.find((one) => one === row.scope) ?? 'task',
+  subject: row.subject,
   number: row.number,
   runner: row.runner,
   startedAt: row.startedAt,
@@ -489,6 +517,34 @@ const attemptViewOf = (row: AttemptRow): BuildingAttemptView => ({
   starts: Option.getOrElse(trees.read(row.starts), () => []),
   ends: row.ends === null ? null : Option.getOrElse(trees.read(row.ends), () => []),
   outside: stringsOf(row.outside),
+  verdict: ATTEMPT_RESULTS.find((one) => one === row.verdict) ?? null,
+  files: Option.getOrElse(attemptFiles.read(row.files), () => []),
+  checks: extras.checks
+    .filter((one) => one.attemptId === row.id)
+    .map((one) => ({
+      name: one.name,
+      place: one.place,
+      verdict: one.verdict,
+      detail: one.detail,
+      outputTail: one.outputTail,
+      runId: one.runId,
+    })),
+  // A conflict is on both tasks: the attempt of the command's task, and the one that held it.
+  conflicts: extras.conflicts
+    .filter(
+      (one) =>
+        row.taskId !== null &&
+        (one.byTask === row.taskId || one.heldBy === row.taskId) &&
+        one.at >= row.startedAt &&
+        (row.endedAt === null || one.at <= row.endedAt),
+    )
+    .map((one) => ({
+      repository: one.repository,
+      path: one.path,
+      command: one.command,
+      byTask: one.byTask,
+      heldBy: one.heldBy,
+    })),
 })
 
 const decisionViewOf = (row: DecisionRow): BuildingDecisionView => ({
@@ -513,7 +569,11 @@ const decisionViewOf = (row: DecisionRow): BuildingDecisionView => ({
   answeredAt: row.answeredAt,
 })
 
-const taskViewOf = (task: TaskNow, attempts: ReadonlyArray<AttemptRow>): BuildingTaskView => ({
+const taskViewOf = (
+  task: TaskNow,
+  attempts: ReadonlyArray<AttemptRow>,
+  extras: AttemptExtras,
+): BuildingTaskView => ({
   id: task.id,
   title: task.title,
   result: task.result,
@@ -529,7 +589,9 @@ const taskViewOf = (task: TaskNow, attempts: ReadonlyArray<AttemptRow>): Buildin
   skippedReason: task.skippedReason,
   replacedBy: task.replacedBy,
   decisionId: task.decisionId,
-  attempts: attempts.filter((one) => one.taskId === task.id).map(attemptViewOf),
+  attempts: attempts
+    .filter((one) => one.taskId === task.id)
+    .map((one) => attemptViewOf(one, extras)),
   changes: task.changes,
 })
 
@@ -557,6 +619,13 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
   Effect.gen(function* () {
     const tasks = yield* tasksIn(reader, building.id)
     const attempts = yield* attemptsIn(reader, building.id)
+    const extras: AttemptExtras = {
+      checks: yield* checkResultsOf(
+        reader,
+        attempts.map((one) => one.id),
+      ),
+      conflicts: yield* conflictsIn(reader, building.id),
+    }
     const requirements = [...new Set(tasks.flatMap((task) => task.requirements))]
     const view: BuildingView = {
       missionId: building.missionId,
@@ -581,8 +650,12 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         done: requirementDone(id, tasks),
         tasks: tasks.filter((task) => task.requirements.includes(id)).map((task) => task.id),
       })),
-      tasks: tasks.map((task) => taskViewOf(task, attempts)),
+      tasks: tasks.map((task) => taskViewOf(task, attempts, extras)),
       decisions: (yield* decisionsIn(reader, building.id)).map(decisionViewOf),
+      scopes: attempts
+        .filter((one) => one.taskId === null)
+        .map((one) => attemptViewOf(one, extras)),
+      unattributed: yield* unattributedIn(reader, building.id),
       summary: building.summary,
     }
     return view
@@ -608,6 +681,18 @@ export const buildingTaskOf = (missionId: string, taskId: string) =>
     const task = view?.tasks.find((one) => one.id === taskId)
     if (task === undefined) return yield* new UnknownBuildingTask({ id: taskId })
     return task
+  })
+
+/** One attempt of the mission's latest Building, with its checks and their runs. */
+export const buildingAttemptOf = (missionId: string, attemptId: string) =>
+  Effect.gen(function* () {
+    const view = yield* buildingOf(missionId)
+    const attempt = [
+      ...(view?.tasks.flatMap((task) => task.attempts) ?? []),
+      ...(view?.scopes ?? []),
+    ].find((one) => one.id === attemptId)
+    if (attempt === undefined) return yield* new UnknownAttempt({ id: attemptId })
+    return attempt
   })
 
 /** The mission's latest Building now, then again at each change of the mission. */
