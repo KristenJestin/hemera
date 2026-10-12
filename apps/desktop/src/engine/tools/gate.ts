@@ -408,6 +408,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.report_need.input)(raw)
     case 'need_propose':
       return decoder(tool, TOOLS.need_propose.input)(raw)
+    case 'proof_run':
+      return decoder(tool, TOOLS.proof_run.input)(raw)
     case 'build_summary':
       return decoder(tool, TOOLS.build_summary.input)(raw)
     case 'helper_launch':
@@ -895,6 +897,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* BuildDesk.use((desk) => desk.need(grant, call.args))
             case 'need_propose':
               return yield* BuildDesk.use((desk) => desk.propose(grant, call.args))
+            case 'proof_run':
+              return yield* BuildDesk.use((desk) => desk.proofRun(grant, call.args))
             case 'build_summary':
               return yield* BuildDesk.use((desk) => desk.summary(grant, call.args))
             case 'helper_launch':

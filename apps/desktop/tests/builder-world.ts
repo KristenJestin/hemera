@@ -9,9 +9,11 @@
  * T1 and T4 cannot run together.
  */
 
+import { join } from 'node:path'
+
 import { SPEC_SECTIONS } from '@hemera/core/domain'
 import type { BuildingTaskView, BuildingView, Project } from '@hemera/ipc'
-import { Effect, type Layer } from 'effect'
+import { Effect, type Layer, type Schema } from 'effect'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { checkMission } from '../src/engine/building/check.ts'
@@ -34,6 +36,7 @@ import {
   readCold,
 } from './building-world.ts'
 import { HELPER, sessionsEngine, until } from './sessions-world.ts'
+import { callTool } from './tools-world.ts'
 
 /** The cold read first, then every other agent quiet: the test drives the Builder itself. */
 export const builderAgents = (index: number): FakeScript => (index === 0 ? READING : QUIET)
@@ -118,7 +121,8 @@ type ProjectAt = (
  * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
  * runs on the Project before the launch, for what the launch must already see; `impact` is the
  * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks;
- * `at` the Project, Acme's by default.
+ * `at` the Project, Acme's by default; `proofs` the Proof blocks by scenario, given the `api`
+ * checkout (every other one verified by hand).
  */
 export const launched = <E = never, R = never>(
   work: string,
@@ -126,6 +130,7 @@ export const launched = <E = never, R = never>(
   impact = 'The impact.',
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
   at: ProjectAt = acmeAt,
+  proofs: (api: string) => Readonly<Record<string, Schema.JsonObject>> = () => ({}),
 ) =>
   Effect.gen(function* () {
     const { project, main } = yield* at(work)
@@ -145,7 +150,16 @@ export const launched = <E = never, R = never>(
       scenarios: [scenario('as CSV'), scenario('as Markdown'), scenario('read the README')],
     })
     yield* call(grantId, 'mission_describe', { title: 'Invoices exports', type: 'feature' })
-    for (const id of ['R1.S1', 'R1.S2', 'R1.S3']) yield* call(grantId, 'proof_write', byHand(id))
+    const given = proofs(join(main, 'api'))
+    for (const id of ['R1.S1', 'R1.S2', 'R1.S3']) {
+      const proof = given[id]
+      const answer = yield* callTool(
+        grantId,
+        'proof_write',
+        proof === undefined ? byHand(id) : { scenario: id, proof, base_version: 0 },
+      )
+      if (!answer.ok) return yield* Effect.die(new Error(answer.text))
+    }
     yield* call(grantId, 'tasks_write', { tasks: plan, base_version: 0 })
     yield* call(grantId, 'model_recommend', {
       agent: 'codex',

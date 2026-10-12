@@ -20,7 +20,7 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -370,6 +370,19 @@ export interface GitService {
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
   /**
+   * A proof's addition merged into a file of the Workspace (#144, CT-37): the file at `commit` is
+   * the base, `ours` the Workspace's version, and the base with `patch` applied theirs; `git
+   * merge-file` merges them, nothing written anywhere but a scratch folder. Answers the three
+   * versions and the merge, conflict markers included when it is not clean.
+   */
+  readonly mergeAddition: (
+    folder: string,
+    commit: string,
+    path: string,
+    patch: string,
+    ours: string,
+  ) => Effect.Effect<MergedAddition, GitRefusal>
+  /**
    * Commits only these paths, each as the worktree has it, with the user's own identity and
    * configuration (#142): every other change of the working tree and of the index is left as it
    * is, and a path neither on disk nor tracked is left out. Answers the commit, or null when
@@ -380,6 +393,15 @@ export interface GitService {
     paths: ReadonlyArray<string>,
     message: string,
   ) => Effect.Effect<string | null, GitRefusal>
+}
+
+/** A three-way merge of a proof's addition: its three versions and what the merge gave. */
+export interface MergedAddition {
+  readonly base: string
+  readonly ours: string
+  readonly theirs: string
+  readonly merged: string
+  readonly clean: boolean
 }
 
 /** A file that differs between two commits. */
@@ -769,6 +791,8 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         ],
         'read',
       ).pipe(Effect.map((printed) => printed !== '')),
+    mergeAddition: (folder, commit, path, patch, ours) =>
+      mergeIn(run, folder, commit, path, patch, ours),
     patchShape: (folder, patch) =>
       withPatchFile(patch, (file) =>
         Effect.gen(function* () {
@@ -803,6 +827,67 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         }),
       ),
   })
+
+/** The three versions of an addition merged in a scratch folder, `ours` rewritten by the merge. */
+const mergeIn = (
+  run: GitSpawn,
+  folder: string,
+  commit: string,
+  path: string,
+  patch: string,
+  ours: string,
+) =>
+  withPatchFile(patch, (file) =>
+    Effect.gen(function* () {
+      const scratch = dirname(file)
+      const base = yield* run(folder, ['show', `${commit}:${path}`], 'read')
+      // The patch applied to the base in a repository of its own that borrows these objects.
+      const objects = yield* run(
+        folder,
+        ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
+        'read',
+      )
+      const repository = join(scratch, 'repository')
+      mkdirSync(repository)
+      yield* run(repository, ['init', '--quiet'], 'read')
+      const borrowed = join(repository, '.git', 'objects', 'info')
+      mkdirSync(borrowed, { recursive: true })
+      writeFileSync(join(borrowed, 'alternates'), `${objects.trim()}\n`)
+      yield* run(repository, ['read-tree', '--end-of-options', commit], 'read')
+      yield* run(repository, ['apply', '--cached', file], 'read')
+      const theirs = yield* run(repository, ['show', `:${path}`], 'read')
+      const sides = {
+        ours: join(scratch, 'ours'),
+        base: join(scratch, 'base'),
+        theirs: join(scratch, 'theirs'),
+      }
+      writeFileSync(sides.ours, ours)
+      writeFileSync(sides.base, base)
+      writeFileSync(sides.theirs, theirs)
+      // Git answers the number of conflicts as its exit code: the merge is read from the file.
+      const clean = yield* run(
+        scratch,
+        [
+          'merge-file',
+          '-L',
+          'workspace',
+          '-L',
+          'freeze',
+          '-L',
+          'proof',
+          sides.ours,
+          sides.base,
+          sides.theirs,
+        ],
+        'work',
+      ).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitFailed', () => Effect.succeed(false)),
+      )
+      const merged = readFileSync(sides.ours, 'utf8')
+      return { base, ours, theirs, merged, clean: clean && !merged.includes('<<<<<<< workspace') }
+    }),
+  )
 
 /** A patch written to a scratch file for the time of a use, then removed. */
 const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>

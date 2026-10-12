@@ -23,7 +23,9 @@ import {
   dependantsOf,
   percentDone,
   promotable,
+  redPassed,
   requirementDone,
+  ScenarioProofState,
   settled,
   taskText,
 } from '@hemera/core/domain'
@@ -42,6 +44,7 @@ import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 import { DomainEvents } from '../domain-events.ts'
 import { checkResultsOf, conflictsIn, unattributedIn } from './attempts.ts'
 import { passViewOf, passesIn } from './documenter-store.ts'
+import { requirementProofsIn } from './proof-store.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
 import { Secrets } from '../secrets.ts'
@@ -54,6 +57,7 @@ import {
   buildingTasks,
   buildings,
   runnerLeases,
+  scenarioProofs,
 } from '../storage/schema.ts'
 
 type Reader = EngineTransaction | Database['Service']
@@ -171,6 +175,30 @@ export const activeBuildings = Effect.gen(function* () {
     .where(eq(buildings.state, 'active'))
     .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
 })
+
+/**
+ * The automated scenarios of a Building whose red is not recorded yet (#144): the tasks covering
+ * them wait. A Building begun before the proofs has none.
+ */
+export const waitingRedIn = (reader: Reader, buildingId: string) =>
+  reader
+    .select({ scenario: scenarioProofs.scenario, state: scenarioProofs.state })
+    .from(scenarioProofs)
+    .where(and(eq(scenarioProofs.buildingId, buildingId), eq(scenarioProofs.mode, 'automated')))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the proofs')),
+      Effect.map(
+        (rows) =>
+          new Set(
+            rows
+              .filter((row) => {
+                const state = ScenarioProofState.literals.find((one) => one === row.state)
+                return state === undefined || !redPassed(state)
+              })
+              .map((row) => row.scenario),
+          ),
+      ),
+    )
 
 /** The effective plan, in its order. */
 export const tasksIn = (reader: Reader, buildingId: string) =>
@@ -293,7 +321,7 @@ export const settleIn = (transaction: EngineTransaction, building: BuildingRow, 
       }
       if (freed) tasks = yield* tasksIn(transaction, building.id)
     }
-    const available = promotable(tasks)
+    const available = promotable(tasks, yield* waitingRedIn(transaction, building.id))
     for (const id of available) {
       const task = tasks.find((one) => one.id === id)
       if (task !== undefined) yield* moveIn(transaction, building.id, task, 'available')
@@ -637,6 +665,17 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       conflicts: yield* conflictsIn(reader, building.id),
     }
     const requirements = [...new Set(tasks.flatMap((task) => task.requirements))]
+    const proofsOf = yield* requirementProofsIn(reader, building.missionId, building.id)
+    const requirementViews = requirements.map((id) =>
+      Object.assign(
+        {
+          id,
+          done: requirementDone(id, tasks),
+          tasks: tasks.filter((task) => task.requirements.includes(id)).map((task) => task.id),
+        },
+        proofsOf(id),
+      ),
+    )
     const view: BuildingView = {
       missionId: building.missionId,
       buildingId: building.id,
@@ -645,6 +684,12 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       state: STATES.find((one) => one === building.state) ?? 'active',
       phase: building.phase,
       percent: percentDone(tasks),
+      counts: {
+        tasksDone: tasks.filter((task) => task.state === 'done').length,
+        tasks: tasks.filter((task) => task.state !== 'skipped').length,
+        requirementsProven: requirementViews.filter((one) => one.proven).length,
+        requirements: requirementViews.length,
+      },
       special: { done: 0, total: 0 },
       elapsedSeconds: yield* elapsedIn(reader, building.id),
       startedAt: building.startedAt,
@@ -655,15 +700,12 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         branch: base.branch,
         baseCommit: base.commit,
       })),
-      requirements: requirements.map((id) => ({
-        id,
-        done: requirementDone(id, tasks),
-        tasks: tasks.filter((task) => task.requirements.includes(id)).map((task) => task.id),
-      })),
+      requirements: requirementViews,
       tasks: tasks.map((task) => taskViewOf(task, attempts, extras)),
       decisions: (yield* decisionsIn(reader, building.id)).map(decisionViewOf),
       scopes: attempts
-        .filter((one) => one.taskId === null)
+        // Hemera's writes of the proofs (#144) are its record, not an attempt anyone makes.
+        .filter((one) => one.taskId === null && !(one.scope === 'proof' && one.subject === null))
         .map((one) => attemptViewOf(one, extras)),
       unattributed: yield* unattributedIn(reader, building.id),
       documenter: (yield* passesIn(reader, building.id)).map(passViewOf),

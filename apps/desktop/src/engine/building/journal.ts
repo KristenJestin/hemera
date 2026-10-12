@@ -1,6 +1,6 @@
 /**
  * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
- * (#141) with its attempts and their verdicts (#142) and its checks (#143): each the projection of the domain event written in the same transaction as what it
+ * (#141) with its attempts and their verdicts (#142), its checks (#143) and its proofs (#144): each the projection of the domain event written in the same transaction as what it
  * records.
  */
 
@@ -59,7 +59,9 @@ const subjectOf = (payload: EventPayload): string => {
   const task = stringOf(payload, 'task')
   if (task !== '') return task
   const subject = stringOf(payload, 'subject')
-  return stringOf(payload, 'scope') === 'end' ? 'The end checks' : `The checks of ${subject}`
+  const scope = stringOf(payload, 'scope')
+  if (scope === 'proof') return `The proof of ${subject}`
+  return scope === 'end' ? 'The end checks' : `The checks of ${subject}`
 }
 
 const redSaid = (payload: EventPayload): string => {
@@ -319,6 +321,95 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     lineOf(
       byUser,
       (payload) => `The user restarted the service \`${stringOf(payload, 'command')}\`.`,
+    ),
+  ],
+  [
+    'building.proofs_written',
+    lineOf(byHemera, (payload) => {
+      const conflicts = stringsOf(payload, 'conflicts')
+      return `Hemera wrote the proof tests of ${stringsOf(payload, 'scenarios').join(', ') || 'no scenario'}${conflicts.length === 0 ? '' : `; ${conflicts.join(', ')} conflicted and went to the Builder`}.`
+    }),
+  ],
+  [
+    'building.red_recorded',
+    lineOf(byHemera, (payload) => `The red of ${stringOf(payload, 'scenario')} is recorded.`),
+  ],
+  [
+    'building.red_mismatch',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'scenario')} fails differently from what Planning saw: the user is asked.`,
+    ),
+  ],
+  [
+    'building.already_passes',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'scenario')} already passes before any task: the user is asked.`,
+    ),
+  ],
+  [
+    'building.red_invalid',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The red of ${stringOf(payload, 'scenario')} is not one (${stringOf(payload, 'classification').replaceAll('_', ' ')}): back to the Builder.`,
+    ),
+  ],
+  [
+    'building.not_reproducible',
+    lineOf(
+      byUser,
+      (payload) =>
+        `The user judged ${stringOf(payload, 'scenario')} not reproducible: its tasks go on.`,
+    ),
+  ],
+  [
+    'building.scenario_green',
+    lineOf(byHemera, (payload) => `${stringOf(payload, 'scenario')} is proven: its test passed.`),
+  ],
+  [
+    'building.proof_test_changed',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The proof test of ${stringOf(payload, 'scenario')} changed since its red: ${stringOf(payload, 'path')}.`,
+    ),
+  ],
+  [
+    'building.requirement_proven',
+    lineOf(byHemera, (payload) => `${stringOf(payload, 'requirement')} is proven.`),
+  ],
+  [
+    'building.proof_stale',
+    lineOf(byHemera, (payload) => {
+      const stale = [...stringsOf(payload, 'scenarios'), ...stringsOf(payload, 'manual')]
+      return `${stringOf(payload, 'repository')} changed: ${stale.join(', ')} to run or verify again.`
+    }),
+  ],
+  [
+    'building.proofs_refreshed',
+    lineOf(byHemera, (payload) => {
+      const proofs = stringsOf(payload, 'proofs')
+      const checks = stringsOf(payload, 'checks')
+      return `The proofs were refreshed: ${proofs.length === 0 ? 'no proof' : proofs.join(', ')} ran again${checks.length === 0 ? '' : `, and the final checks ${checks.join(', ')}`}.`
+    }),
+  ],
+  [
+    'proof.manual_validated',
+    lineOf(byUser, (payload) => {
+      const note = stringOf(payload, 'note')
+      return `The user validated ${stringOf(payload, 'scenario')} by hand${note === '' ? '' : `: ${note}`}.`
+    }),
+  ],
+  [
+    'proof.manual_refused',
+    lineOf(
+      byUser,
+      (payload) =>
+        `The user refused ${stringOf(payload, 'scenario')} by hand: ${stringOf(payload, 'note')}.`,
     ),
   ],
   ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],

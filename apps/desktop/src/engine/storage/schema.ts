@@ -2672,6 +2672,92 @@ export const documenterPasses = sqliteTable(
   ],
 )
 
+/**
+ * Where each scenario's proof stands in a Building (#144): `mode` (`automated`, `by_hand`), its
+ * requirement, its state (`waiting_red`, `red_recorded`, `held`, `not_reproducible`, `green`,
+ * `to_rerun`; `to_verify`, `validated`, `refused` by hand), the red and green runs that set it, the
+ * need that holds it, and for a manual proof the user's verdict: who, when, the note and the trees
+ * evaluated (JSON `[{ repository, tree }]`).
+ */
+export const scenarioProofs = sqliteTable(
+  'scenario_proofs',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    scenario: text('scenario').notNull(),
+    requirement: text('requirement').notNull(),
+    /** Its place in the Spec. */
+    rank: integer('rank').notNull(),
+    mode: text('mode').notNull(),
+    state: text('state').notNull(),
+    redRunId: text('red_run_id'),
+    greenRunId: text('green_run_id'),
+    /** The run a need holds it on: a red unlike Planning's, or a proof that already passes. */
+    heldRunId: text('held_run_id'),
+    needId: text('need_id'),
+    judgedBy: text('judged_by'),
+    judgedAt: text('judged_at'),
+    note: text('note').$type<Masked<string>>(),
+    trees: text('trees'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.scenario] })],
+)
+
+/**
+ * One run of a scenario's proof (#144): its phase (`red`, `green`, `rerun`), the line run, the test
+ * path and its sha256 then, the exit code and its classification (CT-35), the failing test and
+ * assertion, whether Planning's key line was found, the end of the output (masked), the whole
+ * output and the test as they were kept as evidence, the run, and the trees it ran on (JSON).
+ */
+export const proofRuns = sqliteTable(
+  'proof_runs',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    scenario: text('scenario').notNull(),
+    phase: text('phase').notNull(),
+    line: text('line').$type<Masked<string>>().notNull(),
+    testPath: text('test_path'),
+    testSha256: text('test_sha256'),
+    exitCode: integer('exit_code'),
+    classification: text('classification').notNull(),
+    failingTest: text('failing_test').$type<Masked<string>>(),
+    assertion: text('assertion').$type<Masked<string>>(),
+    keyLineMatched: integer('key_line_matched', { mode: 'boolean' }),
+    outputTail: text('output_tail').$type<Masked<string>>().notNull(),
+    evidenceId: text('evidence_id'),
+    testEvidenceId: text('test_evidence_id'),
+    runId: text('run_id'),
+    trees: text('trees').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('proof_runs_of_scenario').on(table.buildingId, table.scenario)],
+)
+
+/**
+ * The current tree of each repository of a mission's Workspace (#144, CT-38): the last #140
+ * snapshot taken of it, and when that snapshot began. What tells a proof or a check up to date.
+ */
+export const repositoryTrees = sqliteTable(
+  'repository_trees',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    tree: text('tree').notNull(),
+    takenAt: text('taken_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repository] })],
+)
+
 /** The files a running task holds, from its targets: one holder per file of a Building. */
 export const buildingClaims = sqliteTable(
   'building_claims',

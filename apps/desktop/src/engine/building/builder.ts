@@ -52,6 +52,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
+import { moveMission } from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
@@ -96,6 +97,7 @@ import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
+import { PROOF_KINDS, type ProofNeeds, buildingProofs } from './proofs.ts'
 import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
 import { OutsideChanges } from './outside.ts'
@@ -128,6 +130,7 @@ import {
   tasksIn,
   unblockIn,
   unknownTasks,
+  waitingRedIn,
   writeStrings,
   writeTrees,
 } from './tasks.ts'
@@ -185,6 +188,8 @@ type Needs =
   | Preparations
   | ProjectServices
   | OutsideChanges
+  | ProofNeeds
+  | Effect.Services<ReturnType<typeof moveMission>>
 
 const NO_MISSION = refusal('refused: this session works for no mission')
 const NO_BUILDING = refusal('refused: the mission has no Building under way')
@@ -252,7 +257,8 @@ const answerOf = (need: Need): string | null => {
 
 /**
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
- * start snapshot, after its end snapshot, after its verdict. Never held otherwise.
+ * start snapshot, after its end snapshot, after its verdict, before the proofs are written. Never
+ * held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -265,7 +271,8 @@ export type BuilderHold = (
     | 'cutting'
     | 'writing'
     | 'requirements'
-    | 'resuming',
+    | 'resuming'
+    | 'proving',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -323,6 +330,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           Effect.forkIn(layerScope),
           Effect.asVoid,
         )
+      // Red first, then green (#144).
+      const proofs = buildingProofs({
+        needs: BUILDER_NEEDS,
+        loop,
+        said,
+        deliver: (building, target, kind, body) =>
+          deliverTo(building, target, kind, body).pipe(
+            Effect.catchCause((cause) => said(`a delivery was not kept: ${String(cause)}`)),
+          ),
+        background: (effect) => effect.pipe(provided, Effect.forkIn(layerScope), Effect.asVoid),
+      })
       // One requirement's checks at a time: two tasks done together never run them twice.
       const requirementTurn = Semaphore.makeUnsafe(1)
       /**
@@ -552,6 +570,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   .pipe(Effect.mapError(refusedWhile('copying the tasks')))
               }
               yield* countIn(transaction, id)
+              yield* proofs.setUpIn(transaction, row)
               const settledNow = yield* settleIn(transaction, row, true)
               return {
                 result: row,
@@ -566,7 +585,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }),
           )
-          if (building !== null) yield* ensureBuilder(building)
+          if (building === null) return
+          // The proofs are in the Workspace before the Builder's first ready set (CT-37).
+          yield* hold('proving')
+          yield* proofs.started(building)
+          yield* ensureBuilder(building)
         })
 
       // ---- The calls of the Builder's tools.
@@ -692,9 +715,22 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (done === null) return { judgement, said: null }
           const requirements =
             taskIn(yield* tasksIn(yield* Database, building.id), taskId)?.requirements ?? []
-          // The last task's requirements are judged before the end, never after its checks.
-          if (done) yield* requirementChecks(building, requirements)
-          else yield* requirementsDone(building, requirements)
+          const scenarios =
+            taskIn(yield* tasksIn(yield* Database, building.id), taskId)?.scenarios ?? []
+          // The last task's requirements and proofs are judged before the end, never after it.
+          if (done) {
+            yield* requirementChecks(building, requirements)
+            yield* proofs
+              .greensDue(building, scenarios)
+              .pipe(Effect.catchCause((cause) => said(`the greens did not run: ${String(cause)}`)))
+          } else {
+            yield* requirementsDone(building, requirements)
+            yield* proofs.greensDue(building, scenarios).pipe(
+              Effect.catchCause((cause) => said(`the greens did not run: ${String(cause)}`)),
+              provided,
+              Effect.forkIn(layerScope),
+            )
+          }
           yield* commitsLeft(building)
           if (done) yield* ended(building)
           return { judgement, said: null }
@@ -768,7 +804,16 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const database = yield* Database
           const task = taskIn(yield* tasksIn(database, building.id), args.task)
           if (task === null) return refusal(`refused: ${args.task} is not a task of the plan.`)
-          if (task.state !== 'available') return refusal(notAvailableSaid(task))
+          if (task.state !== 'available') {
+            const reds = [...(yield* waitingRedIn(database, building.id))].filter((one) =>
+              task.scenarios.includes(one),
+            )
+            return task.state === 'waiting' && reds.length > 0
+              ? refusal(
+                  `refused: ${task.id} waits for the red of ${listed(reds)}: Hemera runs ${reds.length === 1 ? 'its proof' : 'their proofs'} before any task covering ${reds.length === 1 ? 'it' : 'them'} starts.`,
+                )
+              : refusal(notAvailableSaid(task))
+          }
           const holder = yield* holderIn(database, building.id, task)
           if (holder !== null) {
             yield* mutate('holding a task back', (transaction) =>
@@ -1334,6 +1379,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           need: answering(need),
           propose: answering(loop.propose),
           summary: answering(summary),
+          proofRun: answering(proofs.proofRun),
+          refreshProofs: (missionId) => proofs.refresh(missionId).pipe(provided, Effect.orDie),
+          touchedProofs: (missionId, repositories) =>
+            proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
           attribution: {
             written: (file) => (transaction) => loop.attribution.written(file)(transaction),
@@ -1476,6 +1525,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           // After three reds, the answer is the next attempt's direction: the count restarts.
           if (decision.kind === 'error')
             yield* loop.answeredErrorIn(transaction, building, decision)
+          // A proof's red answered (#144): before the settle, which lets its tasks on or not.
+          if (decision.scope === 'proof' && decision.kind !== 'error') {
+            events.push(...(yield* proofs.answeredIn(transaction, building, decision, answer)))
+          }
           yield* unblockIn(transaction, building, answeredNeed.id)
           const settledNow = yield* settleIn(transaction, building)
           return [
@@ -1487,6 +1540,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               amendment:
                 chosen && amendment !== null ? secrets.mask(amendmentSaid(amendment)) : null,
               tasks: JSON.parse(decision.tasks),
+              subject: decision.subject,
             }),
             ...events,
             ...settledNow.events,
@@ -1518,6 +1572,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           )
           if (outcome === null) return
           if (outcome.decision.kind === 'commit') yield* commitsLeft(outcome.building)
+          if (
+            outcome.decision.kind === 'proof_environment' &&
+            how === 'withdrawn' &&
+            outcome.decision.subject !== null
+          ) {
+            yield* proofs.retried(outcome.building, outcome.decision.subject)
+          }
           const tasks = JSON.parse(outcome.decision.tasks).join(', ')
           yield* deliver(
             outcome.building,
@@ -1606,7 +1667,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 yield* readyDelivery(building, tasks.map(String))
               }
             }
-            if (event.type === 'building.decision') yield* answerDelivery(event.entityId, payload)
+            if (event.type === 'building.decision') {
+              yield* answerDelivery(event.entityId, payload)
+              const kind = PROOF_KINDS.find((one) => one === payload['kind'])
+              const subject = Option.getOrNull(readString(payload['subject']))
+              if (kind !== undefined && subject !== null) {
+                const cancel = yield* proofs.afterAnswer(
+                  event.entityId,
+                  kind,
+                  subject,
+                  String(payload['answer'] ?? ''),
+                )
+                // "Cancel" on a scenario that already passes is the mission's Cancel (CT-35).
+                if (cancel) yield* moveMission(event.entityId, 'cancel', 'user').pipe(Effect.ignore)
+              }
+            }
             if (
               (event.type === 'need.expired' || event.type === 'need.withdrawn') &&
               payload['service'] === BUILDER_NEEDS
@@ -1670,6 +1745,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (building.tasksDoneAt !== null && building.endCalledAt === null) yield* ended(building)
           // A stop between a task's done and its commit: the commit is made now.
           yield* commitsLeft(building)
+          // The reds a stop left, and the greens due (#144).
+          yield* proofs.resumed(building)
           yield* ensureBuilder(building)
         }
       })
