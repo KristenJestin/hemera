@@ -27,8 +27,11 @@ export const PROOF_CLASSES = [
 export const ProofClass = Schema.Literals(PROOF_CLASSES)
 export type ProofClass = typeof ProofClass.Type
 
-/** Why a proof ran: its red at the start, its green once its tasks are done, a re-run when stale. */
-export const PROOF_PHASES = ['red', 'green', 'rerun'] as const
+/**
+ * Why a proof ran: its red at the start, its green once its tasks are done, a re-run when stale,
+ * or for information only (a `proof_run` before its tasks are done), which judges nothing.
+ */
+export const PROOF_PHASES = ['red', 'green', 'rerun', 'info'] as const
 export const ProofPhase = Schema.Literals(PROOF_PHASES)
 export type ProofPhase = typeof ProofPhase.Type
 
@@ -66,6 +69,12 @@ export interface ProofRunClass {
   readonly assertion: string | null
   /** The file the failing test is in, as the report names it. */
   readonly failingFile: string | null
+  /** Every test the report says failed: its name, its file, and whether an assertion did it. */
+  readonly failures: ReadonlyArray<{
+    readonly test: string
+    readonly file: string | null
+    readonly assertion: boolean
+  }>
 }
 
 /** One failure a report names: its test, its file, and what it says. */
@@ -75,9 +84,12 @@ interface Failure {
   readonly text: string
 }
 
-/** Signs of a world that did not let the test run: a service, a port, a timeout. */
+/**
+ * Signs of a world that did not let the test run: a service, a port, the runner's own timeout.
+ * Words an assertion says ("the export timed out") are the test's, never the environment's.
+ */
 const ENVIRONMENT =
-  /\b(ECONNREFUSED|ECONNRESET|EADDRINUSE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN)\b|\btimed out\b|address already in use/i
+  /\b(ECONNREFUSED|ECONNRESET|EADDRINUSE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN)\b|address already in use|testTimeoutFailure|\bTest timed out in \d+ ?ms|Exceeded timeout of \d+ ?ms|Timeout of \d+ ?ms exceeded/
 /** Signs of a test that never ran: compilation, import, a missing dependency. */
 const BEFORE_TEST =
   /\b(SyntaxError|ReferenceError|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_REQUIRE_ESM)\b|Cannot find (module|package)|error TS\d+|does not provide an export named/
@@ -161,8 +173,8 @@ const assertionOf = (failure: Failure): string | null => {
 }
 
 const classOfFailure = (failure: Failure): ProofClass => {
-  if (ENVIRONMENT.test(failure.text)) return 'environment'
   if (ASSERTION.test(failure.text)) return 'assertion_failed'
+  if (ENVIRONMENT.test(failure.text)) return 'environment'
   return 'error_before_test'
 }
 
@@ -176,7 +188,7 @@ export function classifyProofRun(run: {
   readonly exitCode: number | null
   readonly testPath: string | null
 }): ProofRunClass {
-  const none = { failingTest: null, assertion: null, failingFile: null }
+  const none = { failingTest: null, assertion: null, failingFile: null, failures: [] }
   if (run.exitCode === null) return { classification: 'environment', ...none }
   const report = junitOf(run.output) ?? tapOf(run.output)
   // What the runner says before any test, beside the report, is read first.
@@ -204,6 +216,11 @@ export function classifyProofRun(run: {
       assertion:
         first === undefined || classification !== 'assertion_failed' ? null : assertionOf(first),
       failingFile: first?.file ?? null,
+      failures: report.failures.map((one) => ({
+        test: one.test,
+        file: one.file,
+        assertion: classOfFailure(one) === 'assertion_failed',
+      })),
     }
   }
   if (run.exitCode === 0) return { classification: 'passed', ...none }
@@ -212,9 +229,9 @@ export function classifyProofRun(run: {
 
 /** A failed run without a report, from its words. */
 const wordsClass = (output: string, testPath: string | null): ProofClass => {
+  if (ASSERTION.test(output)) return 'assertion_failed'
   if (ENVIRONMENT.test(output)) return 'environment'
   if (BEFORE_TEST.test(output)) return 'error_before_test'
-  if (ASSERTION.test(output)) return 'assertion_failed'
   // A command's exit code is its expected result; a test that failed in no words never ran.
   return testPath === null ? 'assertion_failed' : 'error_before_test'
 }
@@ -222,14 +239,49 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
 const posix = (path: string): string => path.replaceAll('\\', '/')
 
 /**
- * Whether a run is a valid red: an assertion that failed in the scenario's test. A report that
- * does not name the file is taken as the test's: the proof's command runs that test.
+ * Whether a run is a valid red (CT-35): an assertion that failed in the scenario's own test, which
+ * the report names by its file and, when the proof's code names its tests, by its name. Another
+ * test of the same file failing is not the scenario's red, nor is a report that names no file. A
+ * proof that is a command with no test file is red by its exit code.
  */
-export const validRed = (run: ProofRunClass, testPath: string | null): boolean =>
-  run.classification === 'assertion_failed' &&
-  (testPath === null ||
-    run.failingFile === null ||
-    posix(run.failingFile).endsWith(posix(testPath)))
+export const validRed = (
+  run: ProofRunClass,
+  testPath: string | null,
+  testNames: ReadonlyArray<string> = [],
+): boolean => {
+  if (run.classification !== 'assertion_failed') return false
+  if (testPath === null) return true
+  return run.failures.some(
+    (one) =>
+      one.assertion &&
+      one.file !== null &&
+      posix(one.file).endsWith(posix(testPath)) &&
+      (testNames.length === 0 || testNames.includes(one.test)),
+  )
+}
+
+/** The name a test is declared with, as `test('…'` or `it("…"` declares it. */
+const TEST_NAME = /\b(?:test|it)(?:\.\w+)?\(\s*(['"`])((?:(?!\1).)+)\1/g
+
+/**
+ * The tests a proof adds: every test its new file declares, or those the lines its patch adds
+ * declare; none when the code names none.
+ */
+export const addedTestNames = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<string> => {
+  const added =
+    test.insertion === 'new_file'
+      ? test.code
+      : (test.patch ?? '')
+          .split('\n')
+          .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+          .map((line) => line.slice(1))
+          .join('\n')
+  return [...added.matchAll(TEST_NAME)].map((found) => found[2] ?? '').filter((name) => name !== '')
+}
 
 /** An output with what changes from one run to the next masked, line by line. */
 export const normalisedOutput = (text: string): string =>

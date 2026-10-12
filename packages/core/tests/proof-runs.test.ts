@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   type ScenarioProofState,
   classifyProofRun,
+  addedTestNames,
   keyLineFound,
   normalisedOutput,
   redPassed,
@@ -113,6 +114,68 @@ const JUNIT_EMPTY = `<?xml version="1.0" encoding="utf-8"?>
 </testsuites>
 `
 
+/** Two tests in one file: one that was there fails, the scenario's passes. */
+const TAP_OTHER_FAILS = `TAP version 13
+# Subtest: one is one
+not ok 1 - one is one
+  ---
+  duration_ms: 1.2
+  type: 'test'
+  location: '/work/acme/api/tests/export.test.mjs:5:1'
+  failureType: 'testCodeFailure'
+  error: 'it was broken already'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  ...
+# Subtest: the invoices export as Markdown
+ok 2 - the invoices export as Markdown
+  ---
+  duration_ms: 0.4
+  type: 'test'
+  ...
+1..2
+# tests 2
+# pass 1
+# fail 1
+`
+
+/** The same file, the scenario's test failing too. */
+const TAP_BOTH_FAIL = TAP_OTHER_FAILS.replace(
+  `ok 2 - the invoices export as Markdown
+  ---
+  duration_ms: 0.4
+  type: 'test'
+  ...`,
+  `not ok 2 - the invoices export as Markdown
+  ---
+  duration_ms: 0.4
+  type: 'test'
+  location: '/work/acme/api/tests/export.test.mjs:9:1'
+  failureType: 'testCodeFailure'
+  error: 'export.ts exports nothing yet'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  ...`,
+)
+
+/** The runner stopped a test that ran past its timeout. */
+const TAP_TIMEOUT = `TAP version 13
+# Subtest: exports as CSV
+not ok 1 - exports as CSV
+  ---
+  duration_ms: 30000.2
+  type: 'test'
+  location: '/work/acme/api/tests/export.test.mjs:3:1'
+  failureType: 'testTimeoutFailure'
+  error: 'test timed out after 30000ms'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 1
+# pass 0
+# fail 1
+`
+
 const run = (
   output: string,
   exitCode: number | null,
@@ -121,7 +184,7 @@ const run = (
 
 describe('A proof run is classified (CT-35)', () => {
   test('a TAP report whose test failed on an assertion is assertion_failed, with the test and the assertion', () => {
-    expect(run(TAP_ASSERTION, 1)).toEqual({
+    expect(run(TAP_ASSERTION, 1)).toMatchObject({
       classification: 'assertion_failed',
       failingTest: 'exports as CSV',
       assertion: 'the CSV uses commas',
@@ -176,6 +239,16 @@ describe('A proof run is classified (CT-35)', () => {
     expect(run('api runs on framework 10', 1, null).classification).toBe('assertion_failed')
   })
 
+  test('an assertion whose message says something timed out is assertion_failed, not environment', () => {
+    const timedOut = TAP_ASSERTION.replace('the CSV uses commas', 'the export timed out')
+    expect(run(timedOut, 1).classification).toBe('assertion_failed')
+    expect(run('AssertionError: the export timed out', 1).classification).toBe('assertion_failed')
+  })
+
+  test('the runner’s own timeout is environment', () => {
+    expect(run(TAP_TIMEOUT, 1).classification).toBe('environment')
+  })
+
   test('a failing test run whose words name no assertion is error_before_test', () => {
     expect(run('something went wrong', 1).classification).toBe('error_before_test')
   })
@@ -187,6 +260,38 @@ describe('A valid red', () => {
     expect(validRed(run(TAP_ASSERTION, 1), 'tests/import.test.mjs')).toBe(false)
     expect(validRed(run(TAP_IMPORT, 1), 'tests/export.test.mjs')).toBe(false)
     expect(validRed(run('exit 1', 1, null), null)).toBe(true)
+  })
+
+  test('an existing failing test in the same file is not taken as the scenario’s red', () => {
+    const scenario = ['the invoices export as Markdown']
+    expect(validRed(run(TAP_OTHER_FAILS, 1), 'tests/export.test.mjs', scenario)).toBe(false)
+    expect(validRed(run(TAP_BOTH_FAIL, 1), 'tests/export.test.mjs', scenario)).toBe(true)
+  })
+
+  test('a report that names no file is not a valid red for a scenario’s test', () => {
+    const nowhere = TAP_ASSERTION.replace(/\n  location: [^\n]*/, '')
+    expect(validRed(run(nowhere, 1), 'tests/export.test.mjs')).toBe(false)
+    expect(validRed(run('AssertionError: the CSV uses commas', 1), 'tests/export.test.mjs')).toBe(
+      false,
+    )
+  })
+
+  test('the tests a proof adds are named from its new file, or from the lines its patch adds', () => {
+    expect(
+      addedTestNames({
+        insertion: 'new_file',
+        code: 'test(\'exports as CSV\', () => {})\nit("reads it back", () => {})\n',
+        patch: null,
+      }),
+    ).toEqual(['exports as CSV', 'reads it back'])
+    expect(
+      addedTestNames({
+        insertion: 'addition',
+        code: "test('one is one', () => {})\ntest('the invoices export as Markdown', () => {})\n",
+        patch:
+          "@@ -1 +1,2 @@\n test('one is one', () => {})\n+test('the invoices export as Markdown', () => {})\n",
+      }),
+    ).toEqual(['the invoices export as Markdown'])
   })
 
   test('a scenario got past its red once recorded, set aside as not reproducible, or green since', () => {
