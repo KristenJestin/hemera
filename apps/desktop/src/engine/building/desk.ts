@@ -28,6 +28,18 @@ export interface BuildWork {
     grant: Grant,
     args: ToolArguments<'build_summary'>,
   ) => Effect.Effect<ToolAnswer>
+  /** A scenario's proof run by Hemera when the Builder or a helper asks (#144). */
+  readonly proofRun: (grant: Grant, args: ToolArguments<'proof_run'>) => Effect.Effect<ToolAnswer>
+  /**
+   * Runs again every stale proof and every stale final check of the mission on the current tree
+   * (#144, CT-38): #147's end sequence calls it before the mission leaves Building.
+   */
+  readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
+  /** The proofs and final checks whose repository moved since they ran, among these (R9). */
+  readonly touchedProofs: (
+    missionId: string,
+    repositories: ReadonlyArray<string>,
+  ) => Effect.Effect<ProofsRefreshed>
   /**
    * A write's claim: refused when another running task holds the file, recorded when outside; a
    * write where another task's command holds the write lock waits for it (#142).
@@ -54,6 +66,12 @@ export interface BuildWork {
     name: string,
     repositories: ReadonlyArray<string>,
   ) => Effect.Effect<CheckRunWatch | null>
+}
+
+/** The proofs, by scenario, and the final checks, by name and place, a refresh or a change named. */
+export interface ProofsRefreshed {
+  readonly proofs: ReadonlyArray<string>
+  readonly checks: ReadonlyArray<string>
 }
 
 /** A check's run watched: its locks and trees taken right before its launch, let go at its end. */
@@ -88,6 +106,10 @@ export const buildDeskLayer = Layer.effect(
       need: (grant, args) => Effect.flatMap(work, (one) => one.need(grant, args)),
       propose: (grant, args) => Effect.flatMap(work, (one) => one.propose(grant, args)),
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
+      proofRun: (grant, args) => Effect.flatMap(work, (one) => one.proofRun(grant, args)),
+      refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
+      touchedProofs: (missionId, repositories) =>
+        Effect.flatMap(work, (one) => one.touchedProofs(missionId, repositories)),
       // Only a mission's write to a path is a claim's business: nothing else waits for the desk.
       claim: (call) =>
         call.session.missionId === null || call.path === null || !WRITES.includes(call.tool)

@@ -46,6 +46,7 @@ import { HelpersRpcs } from './helpers.ts'
 import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
+import { ProofsRpcs } from './proofs.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -192,3 +193,9 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
 export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(EngineApartRpcs, EngineSettingsRpcs)
+
+/**
+ * Everything the engine serves: what main asks, and the proofs (#144), served apart until their
+ * screen (R10) forwards them; their handlers are a layer of their own (TS2589).
+ */
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs)
