@@ -31,6 +31,7 @@ import type { EventPayload, NewEvent } from '../journal.ts'
 import type { JournalMapper } from '../memory/index.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions, probeContents, probeFiles, probes } from '../storage/schema.ts'
+import { ProbeSteps } from './probe-steps.ts'
 
 export type ProbeRow = typeof probes.$inferSelect
 
@@ -138,7 +139,8 @@ export const probeOfLineage = (lineage: string) =>
     return row ?? null
   })
 
-export const chipOf = (row: ProbeRow): ProbeChip => ({
+/** A Probe's chip: its step only while it runs (#206). */
+export const chipOf = (row: ProbeRow, step: string | null): ProbeChip => ({
   id: row.id,
   missionId: row.missionId,
   number: row.number,
@@ -147,6 +149,7 @@ export const chipOf = (row: ProbeRow): ProbeChip => ({
   scenario: row.scenario,
   state: stateOf(row.state),
   stuck: row.stuck,
+  step: row.state === 'running' ? step : null,
   startedAt: row.startedAt,
   endedAt: row.endedAt,
   outcome: outcomeOf(row.outcome),
@@ -167,11 +170,14 @@ const missionThere = (missionId: string) =>
 export const listProbes = (missionId: string) =>
   Effect.gen(function* () {
     yield* missionThere(missionId)
-    return (yield* probeRowsOf(missionId)).map(chipOf)
+    const steps = yield* ProbeSteps
+    return yield* Effect.forEach(yield* probeRowsOf(missionId), (row) =>
+      Effect.map(steps.of(row.id), (step) => chipOf(row, step)),
+    )
   })
 
 /** What a Probe captured, its contents with it. */
-const filesOf = (probeId: string) =>
+export const filesOf = (probeId: string) =>
   Effect.gen(function* () {
     const database = yield* Database
     const rows = yield* database
@@ -207,7 +213,7 @@ export const readProbe = (probeId: string) =>
     if (row === null) return yield* new UnknownProbe({ id: probeId })
     const report = reportOf(row)
     const detail: ProbeDetail = {
-      ...chipOf(row),
+      ...chipOf(row, yield* ProbeSteps.use((steps) => steps.of(row.id))),
       brief: row.brief,
       folder: row.folder,
       bases: basesOf(row).map(({ repository, commit, ref, freshness }) => ({
@@ -226,22 +232,28 @@ export const readProbe = (probeId: string) =>
     return detail
   })
 
-/** A mission's chips now, then again after each change of the mission, its Probes included. */
+/**
+ * A mission's chips now, then again after each change of the mission, its Probes included, and
+ * after each new step of one of its Probes.
+ */
 export const probeChanges = (missionId: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const committed = yield* DomainEvents.use((events) => events.subscribe)
+      const stepped = yield* ProbeSteps.use((steps) => steps.subscribe)
       return Stream.concat(
         Stream.fromEffect(listProbes(missionId)),
-        committed.pipe(
-          Stream.filter(
-            (event) =>
-              event.entityKind === 'mission' &&
-              event.entityId === missionId &&
-              event.type.startsWith('probe.'),
+        Stream.merge(
+          committed.pipe(
+            Stream.filter(
+              (event) =>
+                event.entityKind === 'mission' &&
+                event.entityId === missionId &&
+                event.type.startsWith('probe.'),
+            ),
           ),
-          Stream.mapEffect(() => listProbes(missionId)),
-        ),
+          stepped.pipe(Stream.filter((mission) => mission === missionId)),
+        ).pipe(Stream.mapEffect(() => listProbes(missionId))),
       )
     }),
   )

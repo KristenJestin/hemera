@@ -29,6 +29,7 @@ import {
   planningDataOf,
   planningHeadOf,
   plannerOf,
+  probeOf,
   type PlanningLink,
   type PlanningRead,
   type PlanningView,
@@ -682,6 +683,7 @@ const PROBE: ProbeChip = {
   scenario: null,
   state: 'done',
   stuck: false,
+  step: null,
   startedAt: AT,
   endedAt: AT,
   outcome: 'reproduced',
@@ -824,6 +826,14 @@ const world = (played: Partial<PlanningLink> = {}) => {
     named: (call: string) => calls.filter((one) => one.call === call),
   }
 }
+
+describe('A running Probe’s step (#206)', () => {
+  test('its chip shows the step the engine gives, and none when it gives none', () => {
+    const running: ProbeChip = { ...PROBE, state: 'running', endedAt: null, outcome: null }
+    expect(probeOf({ ...running, step: 'Read api/importer.ts' }).step).toBe('Read api/importer.ts')
+    expect(probeOf(running).step).toBeUndefined()
+  })
+})
 
 describe('Following a mission’s Planning', () => {
   test('the page is drawn once the Spec and what goes with it are read, and read again at each change', async () => {
