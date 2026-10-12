@@ -572,9 +572,17 @@ describe('A restart while the task that completes a requirement is checking', ()
   test('an engine stopped while the task that completes a requirement is checking: at the next start the requirement’s checks run once', async () => {
     const release = join(scripts, 'release-requirement')
     // T4 covers no requirement: T3 completes R1 and is not the last task.
-    const plan = PLAN.map((task) =>
-      task.title === 'Name the invoices' ? { ...task, requirements: [] } : task,
-    )
+    const plan = [
+      ...PLAN.slice(0, 3),
+      {
+        title: 'Name the invoices',
+        result: 'Each invoice has a name.',
+        requirements: [],
+        scenarios: ['R1.S1'],
+        targets: [{ repository: 'api', path: 'invoices.ts', intent: 'change' }],
+        depends_on: [],
+      },
+    ]
     // T4 and T3 stay checking: the engine stops between their verdict and their done.
     let held = 0
     const both = Promise.withResolvers<void>()
