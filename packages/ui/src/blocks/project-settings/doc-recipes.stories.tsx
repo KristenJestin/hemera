@@ -341,6 +341,17 @@ export const NoWordRefused: Story = {
   },
 }
 
+/** Files named and nothing said of what they are for: said under the purpose. */
+export const PurposeRefused: Story = {
+  args: { form: { kind: 'new', draft: { ...NEW_DOC_RECIPE, path: 'CHANGELOG.md' } } },
+  play: async () => {
+    const dialog = await body().findByRole('dialog', { name: 'Add a recipe' })
+    expect(within(dialog).getByRole('textbox', { name: 'Purpose' })).toHaveAccessibleDescription(
+      /Say in one sentence what the files are for\./,
+    )
+  },
+}
+
 /** A save the engine refused as a whole: the reason above the buttons, the dialog open. */
 export const SaveRefused: Story = {
   args: { form: { kind: 'edit', id: 'docs' }, refused: STALE },

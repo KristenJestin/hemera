@@ -14,6 +14,9 @@ import {
   WindowCoreRpcs,
   WindowRpcs,
   EngineApartRpcs,
+  ChecksRpcs,
+  CheckRefused,
+  DocRecipesRpcs,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -525,6 +528,23 @@ const main = async (engine: 'answers' | 'gone') => {
       'helpers.prototypesChanged': () =>
         Stream.die('the window’s link is not asked for the Prototypers here'),
     }),
+    ChecksRpcs.toLayer({
+      'checks.list': () => Effect.succeed([]),
+      'checks.propose': unused,
+      'checks.accept': unused,
+      'checks.save': () =>
+        Effect.fail(new CheckRefused({ reason: '“|” is shell syntax.', field: 'line' })),
+      'checks.remove': unused,
+      'checks.move': unused,
+    }),
+    DocRecipesRpcs.toLayer({
+      'docRecipes.list': () => Effect.succeed([]),
+      'docRecipes.propose': unused,
+      'docRecipes.accept': unused,
+      'docRecipes.save': unused,
+      'docRecipes.remove': unused,
+      'docRecipes.move': unused,
+    }),
   )
   const program = Effect.gen(function* () {
     const server = yield* makeServerProtocol
@@ -589,6 +609,29 @@ describe('The window’s link, for components and hooks', () => {
     )
     expect(refusal).toBeInstanceOf(ShellSyntax)
     expect(refusal.message).toContain('“&&” is shell syntax')
+  })
+
+  test('a check the engine refuses rejects with its refusal and the field it concerns', async () => {
+    const { link } = await main('answers')
+    await expect(link.checks('acme')).resolves.toEqual([])
+    await expect(link.docRecipes('acme')).resolves.toEqual([])
+    const refusal = await link
+      .saveCheck('acme', null, {
+        name: 'unit',
+        commandId: null,
+        line: 'node test.mjs | tee out.txt',
+        where: 'changed',
+        repository: null,
+        when: 'task',
+        expect: null,
+        files: null,
+      })
+      .then(
+        () => new Error('the save was not refused'),
+        (error: Error) => error,
+      )
+    expect(refusal).toBeInstanceOf(CheckRefused)
+    expect(refusal).toMatchObject({ field: 'line', message: '“|” is shell syntax.' })
   })
 
   test('a variable’s value is read on request, and the runs are followed as they change', async () => {

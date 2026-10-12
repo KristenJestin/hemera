@@ -10,6 +10,7 @@ import {
   type CheckDraft,
   checkPlaces,
   checkProblem,
+  checkRefusal,
   evaluateExpect,
   expandFiles,
   globMatcher,
@@ -268,5 +269,28 @@ describe('The verdict of a run', () => {
     expect(
       evaluateExpect('Coverage: 81,5%', 0, { pattern: 'Coverage: ([0-9.,]+)%', minimum: 70 }).value,
     ).toBe(81.5)
+  })
+})
+
+describe('A check is refused at the field it concerns', () => {
+  test('each refusal names the field of the settings it is said under', () => {
+    const at = (over: Partial<CheckDraft>, taken: ReadonlyArray<string> = []) =>
+      checkRefusal(draft(over), taken)?.field
+    expect(at({ name: ' ' })).toBe('name')
+    expect(at({}, ['lint'])).toBe('name')
+    expect(at({ line: '  ' })).toBe('line')
+    expect(at({ line: 'node lint.js | tee out.txt' })).toBe('line')
+    expect(at({ line: 'vitest run {files}' })).toBe('files')
+    expect(at({ line: 'vitest run {files}', files: '**/*.{test,spec.ts' })).toBe('files')
+    expect(at({ expect: { pattern: 'Coverage: [0-9.]+%', minimum: 70 } })).toBe('pattern')
+    expect(at({ expect: { pattern: 'Coverage: ([0-9.]+)%', minimum: Number.NaN } })).toBe('minimum')
+    expect(at({ where: 'repository' })).toBeNull()
+    expect(at({ commandId: 'c1', line: 'node lint.js' })).toBeNull()
+  })
+
+  test('the sentence is the one the check is refused with', () => {
+    const refused = draft({ line: 'node lint.js && echo ok' })
+    expect(checkRefusal(refused, [])?.sentence).toBe(checkProblem(refused, []))
+    expect(checkRefusal(draft(), [])).toBeNull()
   })
 })

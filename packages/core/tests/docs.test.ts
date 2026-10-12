@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   type DocRecipeDraft,
   docRecipeProblem,
+  docRecipeRefusal,
   noChangeReasonProblem,
   proposeDocRecipes,
   recipeApplies,
@@ -169,5 +170,17 @@ describe('"No change" is accepted only with a reason specific to this change', (
     expect(
       noChangeReasonProblem('The export is internal: no reader of the README calls it.'),
     ).toBeNull()
+  })
+})
+
+describe('A doc recipe is refused at the field it concerns', () => {
+  test('each refusal names the field of the settings it is said under', () => {
+    const at = (over: Partial<DocRecipeDraft>) => docRecipeRefusal(recipe(over))?.field
+    expect(at({ path: '../secrets.md' })).toBe('path')
+    expect(at({ path: ' ' })).toBe('path')
+    expect(at({ purpose: '' })).toBe('purpose')
+    expect(at({ applies: 'when_impact_names', words: [' '] })).toBe('words')
+    expect(at({ applies: 'always', words: ['API'] })).toBe('words')
+    expect(docRecipeRefusal(recipe())).toBeNull()
   })
 })
