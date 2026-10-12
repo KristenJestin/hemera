@@ -22,7 +22,7 @@
  * There is no stop: neither the parent nor the user stops a helper.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
 import {
@@ -79,6 +79,7 @@ import {
   queuedResults,
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
+import { containedIn } from '../tools/paths.ts'
 import { mutate } from '../transaction.ts'
 import { HelperDesk, type HelperWork } from './helper-desk.ts'
 import {
@@ -547,18 +548,19 @@ export const helpersLayer = (settings: HelpersSettings) =>
         Effect.gen(function* () {
           const label = helperLabel(row.number)
           const kept: string[] = []
+          // Real paths on both sides: a link it made to a file outside its folder is not its own,
+          // nor a path on another drive (#145).
+          const folder = realpathSync(row.folder)
           for (const named of files) {
             const path = resolve(row.folder, named)
-            const inside = relative(row.folder, path)
-            if (inside === '' || inside.startsWith('..') || inside.split(sep).includes('..')) {
+            const real = existsSync(path) ? realpathSync(path) : null
+            if (real === null || !containedIn(folder, real) || !statSync(real).isFile()) {
               return Result.fail(`${named} is not a file of your folder`)
             }
-            if (!existsSync(path) || !statSync(path).isFile()) {
-              return Result.fail(`${named} is not a file of your folder`)
-            }
+            const inside = relative(folder, real)
             const put = yield* putEvidence({
               missionId: row.missionId,
-              content: { bytes: readFileSync(path) },
+              content: { bytes: readFileSync(real) },
               name: `${label}/${inside.split(sep).join('/')}`,
               about: `helper ${label}`,
               author: AgentAuthor.make({ role: session.role, sessionId: session.id }),

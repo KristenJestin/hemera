@@ -12,7 +12,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { PermissionAnswer, TOOL_NAMES, capRefusal, toolsOf } from '@hemera/core/domain'
@@ -353,6 +353,73 @@ describe('The Prototyper tries an approach in its own folder', () => {
     expect(delivered).toContain('H1 (Prototyper) handed back its result')
     expect(delivered).toContain('The accents are kept.')
     expect(existsSync(folder)).toBe(true)
+  })
+})
+
+describe('The Prototyper keeps only the files of its own folder', () => {
+  test('a symlink in its folder to a file outside is refused, naming it, and nothing is copied', async () => {
+    const { run } = helping()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const builder = yield* builderOf(mission.id)
+          yield* call(builder.grantId, 'helper_launch', {
+            helper: 'prototyper',
+            brief: 'Try a CSV writer.',
+          })
+          const helper = yield* helperNumbered(mission.id, 1)
+          // What a command run in its folder could make: a link to a key outside it.
+          const outside = join(work, 'key.pem')
+          writeFileSync(outside, 'not-a-real-key')
+          symlinkSync(outside, join(helper.row.folder, 'link.txt'))
+          const answer = yield* call(helper.grantId, 'helper_result', {
+            tried: 'A CSV writer.',
+            works: [],
+            does_not_work: [],
+            files: ['link.txt'],
+          })
+          return {
+            answer,
+            evidence: yield* listEvidence(mission.id, null),
+            rows: yield* helperRowsOf(mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.answer).toBe('refused: link.txt is not a file of your folder')
+    expect(seen.evidence).toEqual([])
+    expect(seen.rows.map((row) => row.state)).toEqual(['running'])
+  })
+
+  test('an absolute path outside its folder is refused, and nothing is copied', async () => {
+    const { run } = helping()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const builder = yield* builderOf(mission.id)
+          yield* call(builder.grantId, 'helper_launch', {
+            helper: 'prototyper',
+            brief: 'Try a CSV writer.',
+          })
+          const helper = yield* helperNumbered(mission.id, 1)
+          const outside = join(work, 'notes.txt')
+          writeFileSync(outside, 'outside')
+          const answer = yield* call(helper.grantId, 'helper_result', {
+            tried: 'A CSV writer.',
+            works: [],
+            does_not_work: [],
+            files: [outside],
+          })
+          return { answer, outside, evidence: yield* listEvidence(mission.id, null) }
+        }),
+      ),
+    )
+    expect(seen.answer).toBe(`refused: ${seen.outside} is not a file of your folder`)
+    expect(seen.evidence).toEqual([])
   })
 })
 
