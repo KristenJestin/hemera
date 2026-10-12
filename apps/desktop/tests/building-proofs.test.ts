@@ -34,10 +34,16 @@ import {
 } from '../src/engine/building/proofs.ts'
 import { readEvidence } from '../src/engine/memory/evidence.ts'
 import { getMission } from '../src/engine/missions.ts'
-import { answerNeed, retryNeed } from '../src/engine/needs.ts'
+import { answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { saveCheck } from '../src/engine/project-checks.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { buildingAttempts, buildingTasks, sessionDeliveries } from '../src/engine/storage/schema.ts'
+import {
+  buildingAttempts,
+  buildingDecisions,
+  buildingTasks,
+  scenarioProofs,
+  sessionDeliveries,
+} from '../src/engine/storage/schema.ts'
 import { call, eventsOf } from './building-world.ts'
 import { PLAN, builderAgents, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { git } from './repositories.ts'
@@ -192,7 +198,7 @@ const deliveredTo = (missionId: string, start: string) =>
   })
 
 /** The mission's need of one kind, once there is one. */
-const needOf = (missionId: string, tag: 'Decision' | 'Environment') =>
+const needOf = (missionId: string, tag: 'Decision' | 'Environment' | 'Error') =>
   Effect.gen(function* () {
     const found = Effect.map(getMission(missionId), (mission) =>
       mission.needs.find((need) => Predicate.isTagged(need.fields, tag)),
@@ -1175,7 +1181,10 @@ describe('A failed green', () => {
           yield* builds(grantId, 'T4')
           yield* builds(grantId, 'T3')
           yield* proofIn(mission.id, 'R1.S1', 'green')
-          yield* deliveredTo(mission.id, 'The end waits')
+          yield* deliveredTo(mission.id, "The end waits: R1.S2's proof is not green.")
+          const said = (all: string) => all.split('The end waits').length - 1
+          yield* Effect.sleep('1 second')
+          const before = said(yield* deliveredTo(mission.id, 'The end waits'))
           // R1.S1 goes stale and green again: the end still waits on R1.S2 alone.
           writeFileSync(
             join(yield* apiOf(mission.id), 'invoices.ts'),
@@ -1184,12 +1193,11 @@ describe('A failed green', () => {
           yield* BuildDesk.use((desk) => desk.refreshProofs(mission.id))
           yield* proofIn(mission.id, 'R1.S1', 'green')
           yield* Effect.sleep('1 second')
-          const all = yield* deliveredTo(mission.id, 'The end waits')
-          return all.split('The end waits').length - 1
+          return said(yield* deliveredTo(mission.id, 'The end waits')) - before
         }),
       ),
     )
-    expect(seen).toBe(1)
+    expect(seen).toBe(0)
   })
 
   test('the end is not called while a proof of a done requirement is red, and the Builder is told which', async () => {
@@ -1218,13 +1226,45 @@ describe('A failed green', () => {
 })
 
 describe('The end never waits on a scenario nothing can move', () => {
+  const line = "error: 'rounding is off by a cent'"
+  /** R1.S2 red, but not as Planning saw it. */
+  const mismatch = (api: string) => ({
+    'R1.S2': automated(EXPORT_PATH, testFile("  assert.fail('total is wrong')"), {
+      seen_today: true,
+      observed: `not ok 1 - the scenario holds\n  ${line}`,
+      key_line: line,
+      base_commit: [{ repository: 'api', commit: git(api, 'rev-parse', 'HEAD').trim() }],
+    }),
+  })
+
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  /** The need of the pending one, once there is one. */
+  const unprovenNeed = Effect.gen(function* () {
+    yield* until(
+      Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+      20_000,
+    )
+    const rows = yield* unprovenAsked
+    return rows.find((one) => one.state === 'pending')?.needId ?? ''
+  })
+
   /**
-   * R1.S2's red recorded, then T2, the only task covering it, skipped by the user: its green fails
-   * once the other tasks are done, and nothing of the plan can make it pass any more.
+   * R1.S2's red sent back to the Builder, then T2, the only task covering it, skipped by the user:
+   * once the other tasks are done, nothing of the plan runs its proof any more.
    */
   const stuck = Effect.gen(function* () {
-    const { mission } = yield* launchedWith(markdownProof)
-    yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+    const { mission } = yield* launchedWith(mismatch)
+    const need = yield* needOf(mission.id, 'Decision')
+    yield* answerNeed({ id: need.id, answer: ChosenAnswer.make({ option: SEND_BACK }), key: 'a' })
+    yield* deliveredTo(mission.id, 'the user sent this red back')
     const database = yield* Database
     yield* database
       .update(buildingTasks)
@@ -1234,8 +1274,7 @@ describe('The end never waits on a scenario nothing can move', () => {
     yield* builds(grantId, 'T1')
     yield* builds(grantId, 'T4')
     yield* builds(grantId, 'T3')
-    const need = yield* needOf(mission.id, 'Decision')
-    return { mission, need }
+    return { mission, grantId, needId: yield* unprovenNeed }
   })
 
   test('the user is asked about it, and "try again" runs its proof again', async () => {
@@ -1243,24 +1282,27 @@ describe('The end never waits on a scenario nothing can move', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { mission, need } = yield* stuck
+          const { mission, needId } = yield* stuck
           const before = yield* endCalled(mission.id)
-          writeFileSync(join(yield* apiOf(mission.id), 'export.ts'), RIGHT_EXPORT)
+          const asked = yield* getNeed(needId)
           yield* answerNeed({
-            id: need.id,
+            id: needId,
             answer: ChosenAnswer.make({ option: TRY_AGAIN }),
-            key: 'answer-1',
+            key: 'b',
           })
-          yield* proofIn(mission.id, 'R1.S2', 'green')
-          yield* until(endCalled(mission.id), 20_000)
-          return { need, before }
+          yield* until(
+            Effect.map(proofOf(mission.id, 'R1.S2'), (proof) => proof.runs.length === 2),
+            20_000,
+          )
+          return { before, asked, proof: yield* proofOf(mission.id, 'R1.S2') }
         }),
       ),
     )
     expect(seen.before).toBe(false)
-    expect(Predicate.isTagged(seen.need.fields, 'Decision') && seen.need.fields.question).toContain(
-      'R1.S2 is not proven',
-    )
+    expect(
+      Predicate.isTagged(seen.asked.fields, 'Decision') && seen.asked.fields.question,
+    ).toContain('R1.S2 is not proven')
+    expect(seen.proof.runs.map((one) => one.phase)).toEqual(['red', 'red'])
   })
 
   test('"end without it" records the scenario as not proven and calls the end, which says so', async () => {
@@ -1268,11 +1310,11 @@ describe('The end never waits on a scenario nothing can move', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { mission, need } = yield* stuck
+          const { mission, needId } = yield* stuck
           yield* answerNeed({
-            id: need.id,
+            id: needId,
             answer: ChosenAnswer.make({ option: END_WITHOUT }),
-            key: 'answer-1',
+            key: 'b',
           })
           yield* until(endCalled(mission.id), 20_000)
           return {
@@ -1286,6 +1328,173 @@ describe('The end never waits on a scenario nothing can move', () => {
     expect(seen.proof.state).toBe('not_proven')
     expect(seen.delivered).toContain('ended without proving R1.S2')
     expect(seen.events).toEqual([{ scenarios: ['R1.S2'] }])
+  })
+
+  test('"end without it" never sets a scenario that went green since to not proven', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, needId } = yield* stuck
+          // Moved since it was asked, out of anything that judges the end again.
+          const database = yield* Database
+          yield* database
+            .update(scenarioProofs)
+            .set({ state: 'green' })
+            .where(eq(scenarioProofs.scenario, 'R1.S2'))
+          yield* answerNeed({
+            id: needId,
+            answer: ChosenAnswer.make({ option: END_WITHOUT }),
+            key: 'b',
+          })
+          yield* until(endCalled(mission.id), 20_000)
+          return yield* proofOf(mission.id, 'R1.S2')
+        }),
+      ),
+    )
+    expect(seen.state).toBe('green')
+  })
+
+  test('a listed scenario that moves withdraws the need, and the end is judged again', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId } = yield* stuck
+          // The Builder makes the test fail as Planning saw it: its red is a decision again.
+          writeFileSync(
+            join(yield* apiOf(mission.id), EXPORT_PATH),
+            testFile("  assert.fail('rounding is off by a cent')"),
+          )
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.every((one) => one.state !== 'pending')),
+            20_000,
+          )
+          return { asked: yield* unprovenAsked, proof: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    expect(seen.proof.state).toBe('red_recorded')
+    expect(seen.asked.map((one) => one.state)).toEqual(['withdrawn'])
+  })
+
+  test('a need about them that expires unanswered is asked again while they stay stuck', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { needId } = yield* stuck
+          yield* expireNeed(needId, 'The mission moved on.')
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.length === 2),
+            20_000,
+          )
+          return yield* unprovenAsked
+        }),
+      ),
+    )
+    expect(seen.map((one) => one.state)).toEqual(['expired', 'pending'])
+  })
+
+  test('"end without it" closes the attempt left open on the scenario', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, needId } = yield* stuck
+          const building = yield* buildingNow(mission.id)
+          const database = yield* Database
+          yield* database.insert(buildingAttempts).values({
+            id: 'left-open',
+            buildingId: building.buildingId,
+            taskId: null,
+            scope: 'proof',
+            subject: 'R1.S2',
+            number: 9,
+            runner: 'builder',
+            epoch: 0,
+            starts: '[]',
+            startedAt: new Date().toISOString(),
+            outside: '[]',
+          })
+          yield* answerNeed({
+            id: needId,
+            answer: ChosenAnswer.make({ option: END_WITHOUT }),
+            key: 'b',
+          })
+          yield* until(endCalled(mission.id), 20_000)
+          return yield* proofAttemptsOf('R1.S2')
+        }),
+      ),
+    )
+    expect(seen.filter((one) => one.endedAt === null)).toEqual([])
+  })
+
+  test('skipped tasks do not make a failed green stuck while a write can run it again', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const database = yield* Database
+          yield* database
+            .update(buildingTasks)
+            .set({ state: 'skipped' })
+            .where(eq(buildingTasks.id, 'T2'))
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* deliveredTo(mission.id, 'The end waits')
+          const asked = yield* unprovenAsked
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* until(endCalled(mission.id), 20_000)
+          return asked
+        }),
+      ),
+    )
+    expect(seen).toEqual([])
+  })
+
+  test('after the user answered three reds, the next red is not stuck: the Builder works on the answer', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+          // Two more reds: the third is an error need for the user.
+          yield* writes(grantId, 'export.ts', 'export const toCsv = () => "a"\n')
+          yield* until(
+            Effect.map(proofAttemptsOf('R1.S2'), (rows) => rows.length === 2),
+            20_000,
+          )
+          yield* writes(grantId, 'export.ts', 'export const toCsv = () => "b"\n')
+          const error = yield* needOf(mission.id, 'Error')
+          yield* answerNeed({
+            id: error.id,
+            answer: WrittenAnswer.make({ text: 'Export as Markdown, not CSV.' }),
+            key: 'e',
+          })
+          yield* writes(grantId, 'export.ts', 'export const toCsv = () => "c"\n')
+          yield* until(
+            Effect.map(proofAttemptsOf('R1.S2'), (rows) => rows.length === 4),
+            20_000,
+          )
+          yield* Effect.sleep('1 second')
+          return yield* unprovenAsked
+        }),
+      ),
+    )
+    expect(seen).toEqual([])
   })
 })
 

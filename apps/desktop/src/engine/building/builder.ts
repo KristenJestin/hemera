@@ -340,7 +340,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       const proofs = buildingProofs({
         needs: BUILDER_NEEDS,
         hold,
-        greened: (building) =>
+        moved: (building) =>
           Effect.suspend(() => endIfReady(building)).pipe(
             provided,
             Effect.catchCause((cause) => said(`the end was not called: ${String(cause)}`)),
@@ -713,15 +713,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (row?.id !== building.id || row.tasksDoneAt === null || row.endCalledAt !== null)
               return
             const red = yield* proofs.unproven(row)
-            if (red.length > 0) {
-              // The end never waits on a scenario nothing moves any more: the user is asked.
-              if (yield* proofs.unprovenAsked(row)) return
-              const stuck = yield* proofs.stuckOf(row, red)
-              if (stuck.length === red.length) {
-                endWaits.delete(row.id)
-                yield* proofs.askUnproven(row, stuck)
-                return
-              }
+            const stuck = red.length === 0 ? [] : yield* proofs.stuckOf(row, red)
+            const allStuck = red.length > 0 && stuck.length === red.length
+            // The end never waits on a scenario nothing moves any more: the user is asked, once;
+            // asked about scenarios that moved since, the question is withdrawn.
+            const asked = yield* proofs.unprovenPending(row)
+            if (asked !== null) {
+              if (allStuck && asked.scenarios.join(',') === stuck.join(',')) return
+              yield* proofs.withdrawUnproven(asked)
+            }
+            if (allStuck) {
+              endWaits.delete(row.id)
+              yield* proofs.askUnproven(row, stuck)
+              return
             }
             const waits = red.join('\u0000')
             if (red.length > 0 && endWaits.get(row.id) === waits) return
@@ -1663,6 +1667,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           )
           if (outcome === null) return
           if (outcome.decision.kind === 'commit') yield* commitsLeft(outcome.building)
+          // A question about the proofs the end waits on, ended unanswered: the end is judged
+          // again, and asks again while they stay stuck.
+          if (outcome.decision.kind === 'proofs_unproven') {
+            yield* endIfReady(outcome.building)
+            return
+          }
           if (
             outcome.decision.kind === 'proof_environment' &&
             how === 'withdrawn' &&
