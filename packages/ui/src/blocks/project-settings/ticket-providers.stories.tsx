@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { IconPlug } from '../../icons.ts'
 import {
   ProjectSettings,
@@ -399,7 +400,7 @@ export const AddGitHub: Story = {
 export const AddJiraCloud: Story = {
   args: { form: { kind: 'jira', deployment: 'cloud' } },
   play: async () => {
-    const dialog = await body().findByRole('dialog', { name: 'Add Jira' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'Add Jira' })
     await expect(within(dialog).getByLabelText('Account email')).toBeVisible()
     await expect(within(dialog).getByLabelText('API token')).toHaveAttribute('type', 'password')
     // A token typed has one way out, the field's own Save: the foot's Add waits for it.
@@ -421,7 +422,7 @@ export const AddJiraCloud: Story = {
 export const AddJiraDataCenter: Story = {
   args: { form: { kind: 'jira', deployment: 'datacenter' } },
   play: async () => {
-    const dialog = await body().findByRole('dialog', { name: 'Add Jira' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'Add Jira' })
     await expect(within(dialog).queryByLabelText('Account email')).toBeNull()
     await expect(within(dialog).getByLabelText('Personal access token')).toBeVisible()
   },
@@ -483,7 +484,7 @@ export const JiraTokenMissing: Story = {
 export const JiraTokenRefused: Story = {
   args: { providers: [JIRA_TOKEN_REFUSED], form: { kind: 'provider', id: 'jira' } },
   play: async () => {
-    const dialog = await body().findByRole('dialog', { name: 'Jira · acme.atlassian.net' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'Jira · acme.atlassian.net' })
     await expect(dialog).toHaveTextContent('Jira refused the saved token')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Replace' }))
     await expect(within(dialog).getByLabelText('API token')).toBeVisible()
@@ -494,7 +495,7 @@ export const JiraTokenRefused: Story = {
 export const JiraStorageUnavailable: Story = {
   args: { providers: [JIRA_STORAGE_UNAVAILABLE], form: { kind: 'provider', id: 'jira' } },
   play: async () => {
-    const dialog = await body().findByRole('dialog', { name: 'Jira · acme.atlassian.net' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'Jira · acme.atlassian.net' })
     await expect(within(dialog).queryByLabelText('API token')).toBeNull()
     await expect(within(dialog).getByRole('button', { name: 'Check again' })).toBeVisible()
   },

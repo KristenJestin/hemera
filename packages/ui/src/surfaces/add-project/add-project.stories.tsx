@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import type { Identity } from '../../components/project-mark/project-mark.tsx'
 import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { AddProject, type FoundRepository } from './add-project.tsx'
@@ -226,7 +227,7 @@ export const FolderRefused: Story = {
     folderError: '“~/work/acme” is refused: it is already the main checkout of the Project Acme.',
   },
   play: async () => {
-    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'Add a Project' })
     expect(within(dialog).getByText(/already the main checkout of the Project Acme/)).toBeVisible()
     expect(within(dialog).getByRole('textbox', { name: 'Folder' })).toHaveAttribute(
       'aria-invalid',
@@ -335,7 +336,7 @@ export const SetUpOffered: Story = {
 export const SetUpUnavailable: Story = {
   args: { folder: '~/work/acme', found: ACME_FOUND, setUp: 'unavailable' },
   play: async () => {
-    const dialog = await within(document.body).findByRole('dialog', { name: 'Add a Project' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'Add a Project' })
     const offer = within(dialog).getByRole('checkbox', {
       name: /^Let an agent propose the rest of the setup/,
     })

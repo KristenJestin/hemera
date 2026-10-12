@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { FAILED_RUN, RUNS, STALE } from '../../blocks/project-settings/project-settings-fixtures.ts'
 import { SettingsFixture } from './settings-fixtures.tsx'
 
@@ -189,7 +190,7 @@ export const Commands: Story = {
 export const CommandOpen: Story = {
   args: { section: 'commands', form: { kind: 'command', id: 'test' } },
   play: async () => {
-    const dialog = await within(document.body).findByRole('dialog', { name: 'test' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'test' })
     const line = within(dialog).getByRole('textbox', { name: 'Line' })
     await userEvent.type(line, ' && pnpm lint')
     expect(await within(dialog).findByText(/“&&” is shell syntax/)).toBeVisible()
@@ -275,7 +276,7 @@ export const NeverRunAdd: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Refuse a command' }))
-    const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'Never run' })
     const field = within(dialog).getByRole('textbox', { name: 'Command' })
     await userEvent.type(field, 'terraform apply')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
@@ -409,7 +410,7 @@ export const Focused: Story = {
     const build = await canvas.findByRole('button', { name: /^build\b.*Build/ })
     build.focus()
     await userEvent.keyboard('{Enter}')
-    const dialog = await within(document.body).findByRole('dialog', { name: 'build' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'build' })
     await waitFor(() => {
       expect(dialog.contains(document.activeElement)).toBe(true)
     })
@@ -430,7 +431,7 @@ export const ReducedMotion: Story = {
     </MotionConfig>
   ),
   play: async () => {
-    const dialog = await within(document.body).findByRole('dialog', { name: 'build' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'build' })
     expect(dialog).toBeVisible()
   },
 }
