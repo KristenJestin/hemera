@@ -170,7 +170,7 @@ describe('Saving a key', () => {
     expect(status).toEqual({
       key: 'storage-unavailable',
       consent: true,
-      judge: 'Hemera asks',
+      judge: 'Each agent (its own model)',
       missing: 'No Secret Service is running.',
     })
   })
@@ -183,13 +183,13 @@ describe('Saving a key', () => {
     expect(status.key).toBe('missing')
   })
 
-  test('without consent the key is saved, and nobody judges', async () => {
+  test('without consent the key is saved, and each agent judges with its own model', async () => {
     const side = engine({ consent: false })
     const { key } = handling(side, storage())
     expect(await Effect.runPromise(key.save(KEY))).toMatchObject({
       key: 'saved',
       consent: false,
-      judge: 'Hemera asks',
+      judge: 'Each agent (its own model)',
     })
   })
 
@@ -243,7 +243,7 @@ describe('Restoring the key at start', () => {
     await Effect.runPromise(key.restore)
     expect(await Effect.runPromise(key.status)).toMatchObject({
       key: 'invalid',
-      judge: 'Hemera asks',
+      judge: 'Each agent (its own model)',
     })
   })
 })

@@ -186,6 +186,9 @@ const taskkill = (pid: number) =>
     })
   })
 
+/** How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow. */
+export const WINDOWS_COMMAND_LINE_MS = 20_000
+
 /** What Windows says a pid runs: PowerShell is the one program every Windows has that tells it. */
 const windowsCommandLine = (pid: number) =>
   Effect.callback<string | null>((resume) => {
@@ -197,7 +200,7 @@ const windowsCommandLine = (pid: number) =>
         '-Command',
         `(Get-CimInstance Win32_Process -Filter 'ProcessId=${String(pid)}').CommandLine`,
       ],
-      { windowsHide: true, timeout: 20_000 },
+      { windowsHide: true, timeout: WINDOWS_COMMAND_LINE_MS },
       (error, stdout) => {
         const line = String(stdout).trim()
         resume(Effect.succeed(error !== null || line === '' ? null : line))

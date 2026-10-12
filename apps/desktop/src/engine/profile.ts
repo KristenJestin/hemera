@@ -44,10 +44,13 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
-  noCheckVerdict,
   tasksDoneEnd,
 } from './building/builder.ts'
-import { buildDeskLayer, claimGuards } from './building/desk.ts'
+import { type TaskChecks, checksVerdict, noTaskChecks } from './building/checks.ts'
+import { type BuildDesk, buildDeskLayer, claimGuards, deskAttribution } from './building/desk.ts'
+import { helperDeskLayer } from './building/helper-desk.ts'
+import { HELPER_MAPPERS } from './building/helper-store.ts'
+import { helpersLayer } from './building/helpers.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -104,6 +107,7 @@ import {
   settleLeftActions,
 } from './tools/actions.ts'
 import { type ToolsParts, type ToolAccess, type ToolGate, toolsLayer } from './tools/index.ts'
+import { agentJudgesLayer, noAgentJudges } from './permissions/agent-judge.ts'
 import {
   type Evidence,
   Memory,
@@ -158,6 +162,7 @@ import {
   noProbeCleanup,
   probeDeskLayer,
 } from './planning/probe-desk.ts'
+import { type ProbeSteps, probeStepsLayer } from './planning/probe-steps.ts'
 import { PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
@@ -257,6 +262,8 @@ export interface ProfileParts {
     | {
         readonly start?: Layer.Layer<BuildingStart>
         readonly verdict?: Layer.Layer<TaskVerdict>
+        /** The checks a finished attempt is judged on (#142's port, #143's checks): none. */
+        readonly checks?: Layer.Layer<TaskChecks>
         readonly end?: Layer.Layer<BuildingEnd>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold
@@ -336,7 +343,9 @@ export type EngineServices =
   | SpecBoard
   | ExclusiveResources
   | LivingSpec
+  | BuildDesk
   | ProbeDesk
+  | ProbeSteps
   | FileSnapshots
   | Snapshots
   | BuildingStart
@@ -423,10 +432,14 @@ export const startProfile = (
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
     const desk = Context.get(deskContext, ProbeDesk)
+    // What each running Probe is doing (#206), written by the Probes and read by their chips.
+    const stepsContext = yield* Layer.build(probeStepsLayer)
     // Where the gate reads what an agent offers, served by the agents' runtime above it (#90).
     const offersContext = yield* Layer.build(agentOffersLayer)
     // Where the gate reaches the Builder's tools and the claims, served by the Builder (#141).
     const buildContext = yield* Layer.build(buildDeskLayer)
+    // Where the gate reaches the helpers' tools, served by the helpers' service (#145).
+    const helperContext = yield* Layer.build(helperDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -437,8 +450,10 @@ export const startProfile = (
       parts.liveMissions ?? noLiveMissions,
       parts.probes?.cleanup ?? noProbeCleanup,
       Layer.succeedContext(deskContext),
+      Layer.succeedContext(stepsContext),
       Layer.succeedContext(offersContext),
       Layer.succeedContext(buildContext),
+      Layer.succeedContext(helperContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -534,16 +549,25 @@ export const startProfile = (
         ...FREEZE_MAPPERS,
         ...TICKET_MAPPERS,
         ...BUILDING_MAPPERS,
+        ...HELPER_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
     const toolsParts: ToolsParts = {
+      // An engine that can start agents has their own judges (#197); one that cannot asks.
+      agentJudges:
+        parts.sessions?.starter === undefined
+          ? noAgentJudges
+          : agentJudgesLayer({ dataFolder, log }),
       ...parts.tools,
       notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
       setup: setupDeskLayer,
       guards:
         parts.tools?.guards ?? claimGuards.pipe(Layer.provide(Layer.succeedContext(buildContext))),
+      attribution:
+        parts.tools?.attribution ??
+        deskAttribution.pipe(Layer.provide(Layer.succeedContext(buildContext))),
     }
     // A suite's role stands in for a registered role of the same id, in its place.
     const suiteRoles = parts.sessions?.roles ?? []
@@ -563,16 +587,17 @@ export const startProfile = (
         ticketEventRunsLayer({ log }),
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
+        helpersLayer({ log }),
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??
               builder.layer.pipe(
                 Layer.provide(
                   Layer.mergeAll(
-                    parts.building?.verdict ?? noCheckVerdict,
+                    parts.building?.verdict ?? checksVerdict,
                     parts.building?.end ?? tasksDoneEnd,
                     snapshots,
-                  ),
+                  ).pipe(Layer.provideMerge(parts.building?.checks ?? noTaskChecks)),
                 ),
               ),
           ),
@@ -591,8 +616,6 @@ export const startProfile = (
         Layer.mergeAll(
           sessionInstructionsLayer(process.platform),
           memoryBriefSources,
-          parts.sessions?.starter ?? noStarter,
-          parts.sessions?.discovery ?? discoveryLayer.pipe(Layer.provide(machineLayer())),
           idleAgentsLayer,
           acpTracesLayer(dataFolder),
           defaultPermissionAnswerLayer,
@@ -613,6 +636,13 @@ export const startProfile = (
     // The Memory stands on the missions, and the tools on the Memory.
     const layers = sessionsLayers.pipe(
       Layer.provideMerge(toolsLayer(log, version, toolsParts)),
+      // How agents are found and started: for the role sessions, and for the agents' own judges.
+      Layer.provideMerge(
+        Layer.mergeAll(
+          parts.sessions?.starter ?? noStarter,
+          parts.sessions?.discovery ?? discoveryLayer.pipe(Layer.provide(machineLayer())),
+        ),
+      ),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
@@ -632,7 +662,9 @@ export const startProfile = (
         ),
       ),
       Layer.provideMerge(
-        (parts.actionRules ?? resourceActionRules(log)).pipe(Layer.provideMerge(profileLayers)),
+        (parts.actionRules ?? resourceActionRules(log, builder.cut)).pipe(
+          Layer.provideMerge(profileLayers),
+        ),
       ),
     )
     const opened = yield* Layer.build(layers).pipe(
@@ -697,23 +729,9 @@ export const startProfile = (
       clearStagedRestore(dataFolder)
     }
 
-    const pending = yield* run(pendingRestore).pipe(Effect.orDie)
-    if (pending === null) {
-      yield* gate.open
-    } else {
-      yield* publish('running')
-      log('reconciling the restored Profile; automations wait until it ends')
-      yield* run(reconcile(pending, log)).pipe(
-        Effect.matchEffect({
-          onFailure: () => publish('failed'),
-          onSuccess: () => Effect.andThen(gate.open, publish('none')),
-        }),
-        Effect.forkScoped,
-      )
-    }
-
     // An action a stopped engine left without an outcome is perhaps done: it becomes indeterminate,
-    // and what its post-condition finds is written, before anything acts.
+    // and what its post-condition finds is written, before anything acts:
+    // before the automation gate opens, so a Building's resume finds it settled (#142).
     yield* run(settleLeftActions).pipe(
       Effect.tap((left) =>
         left.length === 0
@@ -730,6 +748,21 @@ export const startProfile = (
         ),
       ),
     )
+
+    const pending = yield* run(pendingRestore).pipe(Effect.orDie)
+    if (pending === null) {
+      yield* gate.open
+    } else {
+      yield* publish('running')
+      log('reconciling the restored Profile; automations wait until it ends')
+      yield* run(reconcile(pending, log)).pipe(
+        Effect.matchEffect({
+          onFailure: () => publish('failed'),
+          onSuccess: () => Effect.andThen(gate.open, publish('none')),
+        }),
+        Effect.forkScoped,
+      )
+    }
 
     // What a stopped engine left running is ended and marked interrupted before anything starts;
     // what is still going when this engine ends is written stopped.
@@ -813,7 +846,11 @@ export const startProfile = (
     yield* gate.pass.pipe(
       Effect.andThen(step('stopping what cancelled missions left', runStops(null))),
       Effect.andThen(step('handing over the answers left', deliverAnswers)),
+      // What a stop cut: its writes attributed, then its actions handed over, and only then do
+      // the Buildings resume (#142).
+      Effect.andThen(step('attributing the writes a stop left', builder.restarted)),
       Effect.andThen(step('handing the indeterminate actions over', handleIndeterminate)),
+      Effect.andThen(builder.handed),
       // What #71 queued before the sessions existed becomes their deliveries; then the sessions a
       // stopped engine left are rebuilt, by this supervisor alone (CT-11).
       Effect.andThen(step('handing the queued results to the sessions', drainQueuedResults)),

@@ -98,6 +98,28 @@ const COMMITS: ValidationSection = {
   read: () => Effect.succeed(HEMERA_DOES_NOT_COMMIT),
 }
 
+/**
+ * The value of the "who commits" section that asks for one commit per task (#142, open question
+ * 26), with the commit message's template (`{key}`, `{task}`, `{title}`). Its owner (R5) writes it
+ * into the copy; until then no copy holds it, which reads as "at push": no commit in Building.
+ */
+export const CommitPerTask = Schema.Struct({
+  perTask: Schema.Literal(true),
+  template: Schema.String,
+})
+export type CommitPerTask = typeof CommitPerTask.Type
+
+export const ONE_COMMIT_PER_TASK: CommitPerTask = {
+  perTask: true,
+  template: '{key} {task}: {title}',
+}
+
+const readCommitPerTask = Schema.decodeUnknownOption(CommitPerTask)
+
+/** The reader of the "who commits" section: one commit per task and its template, or null. */
+export const commitRuleOf = (sections: Sections): CommitPerTask | null =>
+  Option.getOrNull(readCommitPerTask(sections[COMMITS.id]))
+
 /** The sections this version copies, in their order. */
 export const VALIDATION_SECTIONS: ReadonlyArray<ValidationSection> = [CATALOGUE, RESOURCES, COMMITS]
 

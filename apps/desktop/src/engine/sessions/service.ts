@@ -138,6 +138,11 @@ export interface OpenAsked {
   readonly folder: string
   /** The session that starts it, for a child: a helper, a Probe. */
   readonly parent?: RoleSession | undefined
+  /**
+   * Its id, which is its lineage's, when its opener writes what describes it before it starts (a
+   * helper, #145); a new one otherwise.
+   */
+  readonly id?: string | undefined
   readonly chosen?: RoleSession['chosen']
   /**
    * Who asks for it: an agent's call, which the Project's cap refuses above it and which spends
@@ -161,6 +166,16 @@ export class Sessions extends Context.Service<
       asked: OpenAsked,
       reason: string,
     ) => Effect.Effect<RoleSession, SessionRefused | DatabaseError>
+    /**
+     * Stores a delivery to a lineage and opens the lineage's next session, as `reopen` does and
+     * under the same lock: queued before the new session starts and after the old ones ended, the
+     * delivery goes with the new one's brief, in its first turn (a Chat's message that opens it).
+     */
+    readonly deliverAndReopen: (
+      asked: DeliveryAsked & { readonly target: { readonly lineage: string } },
+      start: OpenAsked,
+      reason: string,
+    ) => Effect.Effect<RoleSession, DeliveryKindRefused | SessionRefused | DatabaseError>
     /**
      * Starts a lineage stopped as failed or ended again, when it has no live successor and its
      * owner is active: the successor takes its leases and the resume block. Null otherwise.
@@ -684,9 +699,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           yield* post.turning(driver.session.id, null, false)
         })
 
-      /** Tells a session's parent, between its turns, what happened to its child. */
+      /**
+       * Tells a session's parent, between its turns, what happened to its child; a role whose owner
+       * tells the parent itself is left to it.
+       */
       const tellParent = (session: RoleSession, text: string) =>
-        session.parent === null
+        session.parent === null || roleNamed(registry, session.role)?.toldToParentByOwner === true
           ? Effect.void
           : storeDelivery({
               owner: session.owner,
@@ -982,6 +1000,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (now - driver.lastSign < limit) continue
           // A silent command that just ended is as recent a sign as the agent's own.
           if (now - (yield* commandSign(driver.session.id, now)) < limit) continue
+          // So is a write or a command waiting for another task's write lock (#142).
+          if (yield* post.lockWaiting(driver.session.id)) continue
           const reason = `no activity for ${Duration.format(timings.stuckAfter)}`
           yield* setState(driver.session.id, 'stuck', reason)
           // Told to whoever follows the session's role (a Probe's chip, #89).
@@ -1187,7 +1207,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               reason: `${entry.displayName} belongs to a ${entry.ownerKind}`,
             })
           }
-          const id = crypto.randomUUID()
+          const id = at === null ? (asked.id ?? crypto.randomUUID()) : crypto.randomUUID()
           // Until its session is written, whatever stops an agent's launch gives back its slot.
           const session = yield* Effect.gen(function* () {
             if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
@@ -1218,6 +1238,30 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           yield* start(session, null).pipe(Effect.forkIn(scope))
           return session
         }).pipe(run)
+
+      /**
+       * Opens the next session of a lineage under the lock, once what lives on it ended and
+       * `first` ran: what `first` queues for the lineage goes to the new session alone.
+       */
+      const reopenAfter = <E>(
+        lineage: string,
+        asked: OpenAsked,
+        reason: string,
+        first: Effect.Effect<unknown, E, Needs>,
+      ) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(
+          Effect.gen(function* () {
+            // Read again under the lock: a replacement may have moved the lineage on since.
+            const rows = yield* sessionsOfLineage(lineage)
+            yield* endLive(rows, reason)
+            yield* first
+            const epoch = Math.max(-1, ...rows.map((one) => one.epoch)) + 1
+            return yield* openAt(asked, { lineage, epoch })
+          }),
+        ).pipe(run)
 
       /**
        * A launch an agent asks for: a slot of the cap at once, or refused with the sentence it
@@ -1386,19 +1430,9 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (live) yield* dispatch
             return id
           }).pipe(run),
-        reopen: (lineage, asked, reason) =>
-          Semaphore.withPermits(
-            lock,
-            1,
-          )(
-            Effect.gen(function* () {
-              // Read again under the lock: a replacement may have moved the lineage on since.
-              const rows = yield* sessionsOfLineage(lineage)
-              yield* endLive(rows, reason)
-              const epoch = Math.max(-1, ...rows.map((one) => one.epoch)) + 1
-              return yield* openAt(asked, { lineage, epoch })
-            }),
-          ).pipe(run),
+        reopen: (lineage, asked, reason) => reopenAfter(lineage, asked, reason, Effect.void),
+        deliverAndReopen: (delivery, asked, reason) =>
+          reopenAfter(delivery.target.lineage, asked, reason, storeDelivery(delivery)),
         resume,
         replace,
         stopTree,

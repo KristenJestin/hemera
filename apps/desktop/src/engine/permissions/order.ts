@@ -59,7 +59,7 @@ import { Secrets } from '../secrets.ts'
 import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
-import { resolvePath, shownPath } from '../tools/paths.ts'
+import { containedIn, resolvePath, shownPath } from '../tools/paths.ts'
 import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
 import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
@@ -172,7 +172,7 @@ interface Decision {
   /** The grant that allowed it. */
   readonly grantId: string | null
   /** How it was settled: by the rules, a grant, the judge now or reused, or asked for want of one. */
-  readonly settled: 'rules' | 'grant' | 'jev' | 'reused' | 'asked'
+  readonly settled: 'rules' | 'grant' | 'jev' | 'agent' | 'reused' | 'asked'
   /** The judge's rating, when one rated it. */
   readonly judged: Judged | null
   /** Why the judge failed, as a safe category, when it did. */
@@ -302,7 +302,14 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             Effect.gen(function* () {
               const found = yield* sensitiveOf(call, written, resolved.path, writes)
               if (found !== null) sensitive.push(found)
-              if (!resolved.inside || !resolved.certain) {
+              // The Workspace a place reads beside its own folder is inside for a read (#145).
+              const readable = call.session.place.readable
+              const read =
+                !writes &&
+                resolved.certain &&
+                readable !== undefined &&
+                [readable, realRoot(readable)].some((one) => containedIn(one, resolved.path))
+              if ((!resolved.inside || !resolved.certain) && !read) {
                 concerns.push({ kind: 'outside', place: shownPath(resolved.path, home) })
               }
             })
@@ -485,7 +492,11 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               : [
                   `judge=${rating.judge} model=${rating.model} risk=${String(rating.scores.risk)} approval=${String(rating.scores.approval)} userRequested=${String(rating.scores.userRequested)}`,
                 ]),
-            ...(decision.roundTripMs === null ? [] : [`jev=${String(decision.roundTripMs)}ms`]),
+            ...(decision.roundTripMs === null
+              ? []
+              : [
+                  `${decision.settled === 'agent' || (decision.failure?.startsWith('agent ') ?? false) ? 'agent' : 'jev'}=${String(decision.roundTripMs)}ms`,
+                ]),
             ...(decision.failure === null ? [] : [`failure=${decision.failure}`]),
             `settled=${decision.settled} in ${String(latencyMs)}ms`,
           ]

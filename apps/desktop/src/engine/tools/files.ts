@@ -33,6 +33,7 @@ import { sessionFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
+import { WriteAttribution } from './ports.ts'
 import { fingerprintOf, numbered, readPage } from './read.ts'
 import { type SearchResult, searchIn } from './search.ts'
 
@@ -364,6 +365,7 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
       path: call.path,
       before,
       after,
+      sessionId: call.sessionId,
     })
     const written = yield* attempt(async () => {
       await mkdir(dirname(call.path), { recursive: true })
@@ -373,7 +375,22 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
       yield* actions.failed(intent, written.failure)
       return failure(`could not write ${call.named}: ${written.failure}; the file is as it was`)
     }
-    yield* actions.done(intent, `wrote ${String(Buffer.byteLength(content, 'utf8'))} bytes`)
+    // In the outcome's own transaction, a mission's write is attributed to its task (#142).
+    const attributed =
+      call.owner.kind === 'mission'
+        ? (yield* WriteAttribution).written({
+            sessionId: call.sessionId,
+            missionId: call.owner.missionId,
+            path: call.path,
+            fingerprint: after,
+            actionId: intent,
+          })
+        : undefined
+    yield* actions.done(
+      intent,
+      `wrote ${String(Buffer.byteLength(content, 'utf8'))} bytes`,
+      attributed,
+    )
     yield* keepFingerprint(call.sessionId, call.path, after)
     call.versions.keep(call.sessionId, call.path, content)
     return null

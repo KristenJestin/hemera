@@ -55,14 +55,16 @@ export interface NotificationsShown {
   readonly sounds: Toggle[]
   readonly style: string
   readonly styles: SoundStyleChoice[]
+  readonly volume: number
 }
 
-/** One switch per kind of event and per sound, then the sound styles. */
+/** One switch per kind of event and per sound, then the sound styles and the volume. */
 export const notificationsOf = (settings: NotificationSettings): NotificationsShown => ({
   events: settings.kinds.map((kind) => ({ id: kind.id, label: kind.label, on: kind.on })),
   sounds: settings.sounds.map((sound) => ({ id: sound.sound, label: sound.label, on: sound.on })),
   style: settings.style,
   styles: settings.styles.map((style) => ({ id: style.style, label: style.label })),
+  volume: settings.volume,
 })
 
 /** A time of day as the settings say it: `08:12`, in the machine's own zone unless one is given. */
@@ -159,7 +161,7 @@ export function writing<A>(
 
 /** Who judges now, as Hemera Auto's section says it. */
 export const judgeSaid = (judge: HemeraAutoStatus['judge']): string =>
-  judge === 'Jev' ? 'Hemera Auto (Jev)' : 'Hemera asks'
+  judge === 'Jev' ? 'Hemera Auto (Jev)' : judge
 
 /** What became of a key saved or removed: the status the engine answered, or why not in words. */
 export type KeyWritten =

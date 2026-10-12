@@ -103,7 +103,7 @@ describe('Hemera Auto', () => {
 })
 
 describe('Notifications & sounds', () => {
-  test('one switch per kind and per sound, and the styles', () => {
+  test('one switch per kind and per sound, the styles and the volume', () => {
     const settings: NotificationSettings = {
       kinds: [
         {
@@ -116,12 +116,14 @@ describe('Notifications & sounds', () => {
       ],
       sounds: [{ sound: 'needs-you', label: 'Something needs you', on: false }],
       style: 'soft',
+      volume: 35,
       styles: [{ style: 'soft', label: 'Soft' }],
     }
     expect(notificationsOf(settings)).toEqual({
       events: [{ id: 'need', label: 'A need waits for you', on: true }],
       sounds: [{ id: 'needs-you', label: 'Something needs you', on: false }],
       style: 'soft',
+      volume: 35,
       styles: [{ id: 'soft', label: 'Soft' }],
     })
   })
@@ -265,7 +267,7 @@ describe('The Jev key in Hemera Auto', () => {
 
   test('who judges now, in the settings’ words', () => {
     expect(judgeSaid('Jev')).toBe('Hemera Auto (Jev)')
-    expect(judgeSaid('Hemera asks')).toBe('Hemera asks')
+    expect(judgeSaid('Each agent (its own model)')).toBe('Each agent (its own model)')
   })
 
   test('a key saved: the status the engine answered', async () => {
@@ -279,7 +281,7 @@ describe('The Jev key in Hemera Auto', () => {
     const unprotected: HemeraAutoStatus = {
       ...STATUS,
       key: 'storage-unavailable',
-      judge: 'Hemera asks',
+      judge: 'Each agent (its own model)',
       missing: 'No Secret Service is running.',
     }
     expect(await keyWritten(Promise.resolve(unprotected), 'saved')).toEqual({
@@ -290,7 +292,11 @@ describe('The Jev key in Hemera Auto', () => {
   })
 
   test('a key removed: the status the engine answered', async () => {
-    const removed: HemeraAutoStatus = { ...STATUS, key: 'missing', judge: 'Hemera asks' }
+    const removed: HemeraAutoStatus = {
+      ...STATUS,
+      key: 'missing',
+      judge: 'Each agent (its own model)',
+    }
     expect(await keyWritten(Promise.resolve(removed), 'missing')).toEqual({
       kind: 'done',
       status: removed,

@@ -30,6 +30,7 @@ const SETTINGS: NotificationSettings = {
   kinds: [{ id: 'need', label: 'A need', on: true, byDefault: true, sound: 'needs-you' }],
   sounds: [{ sound: 'needs-you', label: 'Needs you', on: true }],
   style: 'glass',
+  volume: 35,
   styles: [
     { style: 'hemera', label: 'Hemera' },
     { style: 'glass', label: 'Glass' },
@@ -60,7 +61,7 @@ interface Machine {
   doNotDisturb: DoNotDisturb
   readonly shown: Delivery[]
   readonly closed: string[]
-  /** Each sound played, in the style it was played in: `glass/needs-you`. */
+  /** Each sound played, in the style and at the volume it was played in: `glass/needs-you@35`. */
   readonly played: string[]
   readonly told: WindowNotice[]
   readonly forward: number[]
@@ -87,7 +88,7 @@ const portsOf = (seen: Machine): NotifierPorts => ({
     seen.clicks.set(delivery.id, onClick)
     return { close: () => seen.closed.push(delivery.id) }
   },
-  play: (sound, style) => seen.played.push(`${style}/${sound}`),
+  play: (sound, style, volume) => seen.played.push(`${style}/${sound}@${String(volume)}`),
   bringForward: () => seen.forward.push(seen.forward.length + 1),
   tell: (notice) => seen.told.push(notice),
   log: () => undefined,
@@ -114,7 +115,7 @@ const notifying = (
 const raised = (notice: Notice) => NoticeRaised.make({ notice })
 
 describe('The window not focused: a system notification created in main', () => {
-  test('what arrives within the window is one notification with one sound, in the chosen style', async () => {
+  test('what arrives within the window is one notification with one sound, in the chosen style and at the volume kept', async () => {
     const seen = machine(false)
     await notifying(seen, (tell) =>
       Effect.gen(function* () {
@@ -128,7 +129,7 @@ describe('The window not focused: a system notification created in main', () => 
       }),
     )
     expect(seen.shown.map((one) => one.body)).toEqual(['3 things wait for you in Acme'])
-    expect(seen.played).toEqual(['glass/needs-you'])
+    expect(seen.played).toEqual(['glass/needs-you@35'])
     expect(seen.told).toEqual([])
   })
 
@@ -195,7 +196,7 @@ describe('The window focused: the in-app notification only', () => {
       }),
     )
     expect(seen.shown).toEqual([])
-    expect(seen.played).toEqual(['glass/needs-you'])
+    expect(seen.played).toEqual(['glass/needs-you@35'])
     expect(seen.told).toEqual([
       InAppNotice.make({
         id: one.id,

@@ -2451,8 +2451,105 @@ export const buildingAttempts = sqliteTable(
     outcome: text('outcome'),
     summary: text('summary').$type<Masked<string>>(),
     outside: text('outside').notNull(),
+    /** What it is an attempt at (#142): a task, a requirement's checks, or the end. */
+    scope: text('scope').notNull().default('task'),
+    /** The requirement of a `requirement` attempt; null otherwise. */
+    subject: text('subject'),
+    /** What its checks said once judged: `green`, `red` or `not_verified`; null before. */
+    verdict: text('verdict'),
+    /** Whether a red of it counts toward the three reds: an answered error need sets it false. */
+    counted: integer('counted', { mode: 'boolean' }).notNull().default(true),
+    /** The files attributed to it once ended, with their status and lines (JSON). */
+    files: text('files').notNull().default('[]'),
   },
   (table) => [index('building_attempts_of_task').on(table.buildingId, table.taskId)],
+)
+
+/**
+ * One write attributed to its author (#142, CT-02): the attempt and session that wrote it, the
+ * repository and path, `file_tool` or `command` (with the run), and the file's fingerprint after.
+ */
+export const attemptWrites = sqliteTable(
+  'attempt_writes',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    attemptId: text('attempt_id').notNull(),
+    taskId: text('task_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    kind: text('kind').notNull(),
+    runId: text('run_id'),
+    /** The intent of a file tool write, which a restart resolves (CT-09). */
+    actionId: text('action_id'),
+    fingerprint: text('fingerprint'),
+    at: text('at').notNull(),
+  },
+  (table) => [
+    index('attempt_writes_of_attempt').on(table.attemptId),
+    index('attempt_writes_of_building').on(table.buildingId, table.repository, table.path),
+  ],
+)
+
+/** A file changed during an attempt with no known author: the Building's, never a task's (#148). */
+export const buildingUnattributed = sqliteTable(
+  'building_unattributed',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    /** The attempt whose interval saw it change. */
+    attemptId: text('attempt_id'),
+    seenAt: text('seen_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
+)
+
+/**
+ * A command's change to a file another running task held (#142): kept, attributed to the command,
+ * recorded on both tasks.
+ */
+export const buildingConflicts = sqliteTable(
+  'building_conflicts',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    runId: text('run_id').notNull(),
+    command: text('command').$type<Masked<string>>().notNull(),
+    /** The task whose command wrote it, and the task that held it. */
+    byTask: text('by_task').notNull(),
+    heldBy: text('held_by').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('building_conflicts_of_building').on(table.buildingId)],
+)
+
+/** One check's result on an attempt (#142's `TaskChecks`): where it ran, its verdict, its tail. */
+export const buildingCheckResults = sqliteTable(
+  'building_check_results',
+  {
+    id: text('id').primaryKey(),
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildingAttempts.id, { onDelete: 'cascade' }),
+    name: text('name').$type<Masked<string>>().notNull(),
+    place: text('place').notNull(),
+    verdict: text('verdict').notNull(),
+    detail: text('detail').$type<Masked<string>>().notNull(),
+    outputTail: text('output_tail').$type<Masked<string>>().notNull(),
+    runId: text('run_id'),
+    at: text('at').notNull(),
+  },
+  (table) => [index('building_check_results_of_attempt').on(table.attemptId)],
 )
 
 /** The files a running task holds, from its targets: one holder per file of a Building. */
@@ -2495,6 +2592,69 @@ export const buildingDecisions = sqliteTable(
     requestedBy: text('requested_by').notNull(),
     requestedAt: text('requested_at').notNull(),
     answeredAt: text('answered_at'),
+    /** For an error need (#142): the lineage asked to fill its proposal with `need_propose`. */
+    proposer: text('proposer'),
+    /** For a scope's error need (#142): the scope and its subject whose reds it stops. */
+    scope: text('scope'),
+    subject: text('subject'),
   },
   (table) => [uniqueIndex('building_decision_of_need').on(table.needId)],
 )
+
+/**
+ * The helpers of a Building (#145): child sessions the Builder, or a helper at depth 1, launched.
+ * `number` makes its id (`H2`) within the mission; `parentLineage` is the session that launched it;
+ * `definition` the defined helper it runs, or null for a free one; `taskId` the task it is tied to,
+ * or null. `place` is `workspace` or `prototype`, `folder` where it works. `tools` (JSON) are the
+ * tools its parent chose for a free one, or null for its role's. `state` runs `running` → `done`
+ * or `failed`; `stuck` is set while its session is silent in a turn; `result` is its validated
+ * result (JSON).
+ */
+export const helpers = sqliteTable(
+  'helpers',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    parentLineage: text('parent_lineage').notNull(),
+    lineage: text('lineage').notNull(),
+    depth: integer('depth').notNull(),
+    definition: text('definition'),
+    taskId: text('task_id'),
+    writes: integer('writes', { mode: 'boolean' }).notNull(),
+    place: text('place').notNull(),
+    folder: text('folder').notNull(),
+    tools: text('tools'),
+    brief: text('brief').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    stuck: integer('stuck', { mode: 'boolean' }).notNull(),
+    result: text('result').$type<Masked<string>>(),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    unique('helper_number_in_mission').on(table.missionId, table.number),
+    uniqueIndex('helper_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * A helper's result queued for its parent (#145): written in the transaction that ends the helper,
+ * so that a quit loses none, and marked delivered in the transaction that hands it to the parent's
+ * lineage as a delivery.
+ */
+export const queuedResults = sqliteTable('queued_results', {
+  helperId: text('helper_id')
+    .primaryKey()
+    .references(() => helpers.id, { onDelete: 'cascade' }),
+  missionId: text('mission_id')
+    .notNull()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  parentLineage: text('parent_lineage').notNull(),
+  body: text('body').$type<Masked<string>>().notNull(),
+  queuedAt: text('queued_at').notNull(),
+  deliveredAt: text('delivered_at'),
+})

@@ -21,6 +21,7 @@ import {
   OpenTarget,
   type Sound,
   type SoundStyle,
+  type SoundVolume,
   type WindowNotice,
 } from '@hemera/ipc'
 import { Effect, Predicate, Queue, Stream } from 'effect'
@@ -41,8 +42,8 @@ export interface NotifierPorts {
   readonly doNotDisturb: Effect.Effect<DoNotDisturb>
   /** Shows a system notification; a click on it calls `onClick`. */
   readonly show: (delivery: Delivery, onClick: () => void) => Shown
-  /** Plays a sound in the style chosen. */
-  readonly play: (sound: Sound, style: SoundStyle) => void
+  /** Plays a sound in the style chosen, at the volume kept. */
+  readonly play: (sound: Sound, style: SoundStyle, volume: SoundVolume) => void
   /** Brings the window forward: shown, restored, focused. */
   readonly bringForward: () => void
   /** Tells the window: an in-app notification, one gone, or where a click leads. */
@@ -91,8 +92,8 @@ export const runNotifier = <E>(
         })
       }
 
-      const deliver = (delivery: Delivery, style: SoundStyle) => {
-        if (delivery.sound !== null) ports.play(delivery.sound, style)
+      const deliver = (delivery: Delivery, style: SoundStyle, volume: SoundVolume) => {
+        if (delivery.sound !== null) ports.play(delivery.sound, style, volume)
         if (delivery.where === 'in-app') {
           ports.tell(
             InAppNotice.make({
@@ -138,7 +139,7 @@ export const runNotifier = <E>(
           settings,
           doNotDisturb: yield* ports.doNotDisturb,
         })
-        if (delivery !== null) deliver(delivery, settings.style)
+        if (delivery !== null) deliver(delivery, settings.style, settings.volume)
       }).pipe(
         Effect.catch((failure) =>
           Effect.sync(() => ports.log(`a notification was not delivered: ${said(failure)}`)),

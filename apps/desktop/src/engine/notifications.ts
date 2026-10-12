@@ -17,6 +17,7 @@
 import { type NeedFields, missionKey } from '@hemera/core/domain'
 import {
   DEFAULT_SOUND_STYLE,
+  DEFAULT_SOUND_VOLUME,
   HomeTarget,
   MissionTarget,
   type KindSetting,
@@ -34,6 +35,7 @@ import {
   SOUNDS,
   type Sound,
   SoundStyle,
+  SoundVolume,
   UnknownNotificationKind,
 } from '@hemera/ipc'
 import { eq, like, sql } from 'drizzle-orm'
@@ -655,6 +657,7 @@ export const noticeFeed = (
 const KIND_KEY = 'notifications.kind.'
 const SOUND_KEY = 'notifications.sound.'
 const STYLE_KEY = 'notifications.style'
+const VOLUME_KEY = 'notifications.volume'
 
 const switchCodec = Schema.fromJsonString(Schema.Boolean)
 const readSwitch = Schema.decodeUnknownOption(switchCodec)
@@ -663,6 +666,10 @@ const writeSwitch = Schema.encodeSync(switchCodec)
 const styleCodec = Schema.fromJsonString(SoundStyle)
 const readStyle = Schema.decodeUnknownOption(styleCodec)
 const writeStyle = Schema.encodeSync(styleCodec)
+
+const volumeCodec = Schema.fromJsonString(SoundVolume)
+const readVolume = Schema.decodeUnknownOption(volumeCodec)
+const writeVolume = Schema.encodeSync(volumeCodec)
 
 /** The words of each sound's switch. */
 export const SOUND_LABELS: Record<Sound, string> = {
@@ -691,7 +698,8 @@ export const SOUND_STYLE_LABELS: Record<SoundStyle, string> = {
 /**
  * The switches as they stand, listed from the registry: a kind registered later appears with its
  * default, and a switch this version cannot read answers its default too. So does the sound style:
- * Hemera's own when none was chosen or the one kept is not a style of this version.
+ * Hemera's own when none was chosen or the one kept is not a style of this version. The volume
+ * is half when none was chosen or the one kept is not a volume.
  */
 export const readNotificationSettings = (
   registry: Registry,
@@ -720,7 +728,8 @@ export const readNotificationSettings = (
     }))
     const style = Option.getOrElse(readStyle(kept.get(STYLE_KEY)), () => DEFAULT_SOUND_STYLE)
     const styles = SOUND_STYLES.map((one) => ({ style: one, label: SOUND_STYLE_LABELS[one] }))
-    return { kinds, sounds, style, styles }
+    const volume = Option.getOrElse(readVolume(kept.get(VOLUME_KEY)), () => DEFAULT_SOUND_VOLUME)
+    return { kinds, sounds, style, volume, styles }
   })
 
 const writeRow = (key: string, value: string) =>
@@ -750,3 +759,7 @@ export const setNotificationSound = (registry: Registry, sound: Sound, on: boole
 /** Chooses the sound style, and answers the settings as they now stand. */
 export const setSoundStyle = (registry: Registry, style: SoundStyle) =>
   Effect.andThen(writeRow(STYLE_KEY, writeStyle(style)), readNotificationSettings(registry))
+
+/** Sets the volume of the sounds, and answers the settings as they now stand. */
+export const setSoundVolume = (registry: Registry, volume: SoundVolume) =>
+  Effect.andThen(writeRow(VOLUME_KEY, writeVolume(volume)), readNotificationSettings(registry))

@@ -462,6 +462,23 @@ export const expireNeedIn = (transaction: EngineTransaction, id: string, reason:
     )
 
 /**
+ * The fields of a pending need rewritten by its owner, masked first, inside the owner's
+ * transaction: what an agent proposes on an error need it was asked to fill (#142). Answers the
+ * events; nothing when the need is no longer pending.
+ */
+export const reviseNeedIn = (transaction: EngineTransaction, id: string, fields: Fields) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets
+    const rows = yield* transaction
+      .update(needs)
+      .set({ fields: maskedJson(secrets.maskRecord(fields)) })
+      .where(and(eq(needs.id, id), eq(needs.state, 'pending')))
+      .returning()
+      .pipe(Effect.mapError(refusedWhile('revising a need')))
+    return rows.map((row) => needEvent('need.revised', row, BY_HEMERA))
+  })
+
+/**
  * A need an engine service creates and owns: an error, a permission, or any of the four kinds. No
  * agent tool reaches this: an agent asks through `requestFromAgent`.
  */

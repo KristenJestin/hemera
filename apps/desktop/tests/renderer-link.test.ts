@@ -325,7 +325,11 @@ const noProjects = {
   'building.changed': () => Stream.die('the window’s link is not asked for the Building here'),
   'building.read': unused,
   'building.task': unused,
+  'building.attempt': unused,
   'building.tasksChanged': () => Stream.die('the window’s link is not asked for the Building here'),
+  'helpers.list': unused,
+  'helpers.read': unused,
+  'helpers.changed': () => Stream.die('the window’s link is not asked for the helpers here'),
   'memory.now': unused,
   'memory.journal': unused,
   'memory.notes': unused,
@@ -339,6 +343,7 @@ const noProjects = {
   'notifications.setKind': unused,
   'notifications.setSound': unused,
   'notifications.setStyle': unused,
+  'notifications.setVolume': unused,
 }
 
 /** Notes what the window asked of main: one line per call, the call then its payload as JSON. */
@@ -430,6 +435,7 @@ const recording = (asked: string[]) => {
     'building.changed': stream('building.changed'),
     'building.read': call('building.read'),
     'building.task': call('building.task'),
+    'building.attempt': call('building.attempt'),
     'building.tasksChanged': stream('building.tasksChanged'),
     'tickets.events': call('tickets.events'),
     'tickets.acknowledge': call('tickets.acknowledge'),

@@ -250,9 +250,12 @@ const notifications = (props: Partial<Parameters<typeof NotificationsSection>[0]
     ]}
     style="hemera"
     styles={STYLES}
+    volume={50}
     onEvent={fn()}
     onSound={fn()}
     onStyle={fn()}
+    onVolume={fn()}
+    onVolumeCommitted={fn()}
     onPreview={fn()}
     {...props}
   />
@@ -264,6 +267,8 @@ export const Notifications: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('combobox', { name: 'Sound style' })).toHaveTextContent('Hemera')
+    await expect(canvas.getByRole('slider', { name: 'Volume' })).toHaveValue('50')
+    await expect(canvas.getByText('50 %')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Play Something needs you' })).toBeEnabled()
     await expect(canvas.getByRole('button', { name: 'Play Something failed' })).toBeEnabled()
     await expect(canvas.getByRole('button', { name: 'Play Something is done' })).toBeEnabled()
@@ -291,6 +296,63 @@ export const SoundStyleChosen: Story = {
     // The choice closes the list: the accessibility check that follows the play would otherwise
     // read it half way through its exit, a scrolling box with nothing left to focus.
     await waitFor(() => expect(within(document.body).queryByRole('listbox')).toBeNull())
+  },
+}
+
+const onVolume = fn()
+const onVolumeCommitted = fn()
+
+/** The section with a volume the story keeps, as the page above it would. */
+function Volume(props: {
+  onVolume: (volume: number) => void
+  onVolumeCommitted: (v: number) => void
+}) {
+  const [volume, setVolume] = useState(50)
+  return notifications({
+    volume,
+    onVolume: (next) => {
+      setVolume(next)
+      props.onVolume(next)
+    },
+    onVolumeCommitted: props.onVolumeCommitted,
+  })
+}
+
+/** The volume: the slider follows the hand, and speaks once when it lets go, to keep and to play. */
+export const SoundVolumeMoved: Story = {
+  args: {
+    current: 'notifications',
+    children: <Volume onVolume={onVolume} onVolumeCommitted={onVolumeCommitted} />,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thumb = canvas.getByRole('slider', { name: 'Volume' })
+    await expect(thumb).toHaveValue('50')
+    thumb.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}{ArrowLeft}')
+    await expect(thumb).toHaveValue('47')
+    await expect(canvas.getByText('47 %')).toBeVisible()
+    await expect(onVolume).toHaveBeenLastCalledWith(47)
+    await userEvent.keyboard('{Home}')
+    await expect(thumb).toHaveValue('0')
+    await expect(canvas.getByText('0 %')).toBeVisible()
+    await expect(onVolumeCommitted).toHaveBeenLastCalledWith(0)
+  },
+}
+
+/** The volume refused by the engine: said in words on its row, the slider where it was left. */
+export const SoundVolumeRefused: Story = {
+  args: {
+    current: 'notifications',
+    children: notifications({
+      volume: 20,
+      errors: { volume: 'The volume could not be changed' },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('slider', { name: 'Volume' })).toHaveValue('20')
+    await expect(canvas.getByRole('alert')).toHaveTextContent('The volume could not be changed')
   },
 }
 
@@ -723,14 +785,14 @@ export const HemeraAutoJudgedByJev: Story = {
   },
 }
 
-/** No key: Hemera asks you. */
-export const HemeraAutoAsks: Story = {
+/** No key: each agent judges its own calls with its own model. */
+export const HemeraAutoAgentJudges: Story = {
   args: {
     current: 'hemera-auto',
-    children: auto({ jevKey: 'missing', consent: undefined, judge: 'Hemera asks' }),
+    children: auto({ jevKey: 'missing', consent: undefined, judge: 'Each agent (its own model)' }),
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Hemera asks')).toBeVisible()
+    await expect(within(canvasElement).getByText('Each agent (its own model)')).toBeVisible()
   },
 }
 

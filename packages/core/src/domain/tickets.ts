@@ -325,6 +325,13 @@ export type TicketWriteState = typeof TicketWriteState.Type
 export const KEEP_TICKET_CHANGE = 'Keep the ticket’s change'
 export const WRITE_SPEC_OVER = 'Write the Spec over it'
 
+/**
+ * The two answers of the decision an edit overwritten inside a write's window asks (#207): the
+ * mission outdated with that edit, or the Spec left as written.
+ */
+export const TAKE_OVERWRITTEN_EDIT = 'Take their edit into the Spec'
+export const KEEP_SPEC_WRITTEN = 'Keep the Spec as written'
+
 // --- The fingerprint ------------------------------------------------------------------------------
 
 /** Text as a fingerprint reads it: Unicode NFC, line endings LF, trailing spaces trimmed. */

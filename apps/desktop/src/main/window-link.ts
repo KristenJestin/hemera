@@ -25,6 +25,7 @@ import {
   type Sound,
   type SoundPreview,
   type SoundStyle,
+  type SoundVolume,
   type StorageFailed,
   type WindowNotice,
 } from '@hemera/ipc'
@@ -52,7 +53,11 @@ export interface Application {
   /** What main tells the window of notifications, from the moment it listens. */
   readonly notices: Stream.Stream<WindowNotice>
   /** Plays one sound of one style once, as a notification would. */
-  readonly preview: (style: SoundStyle, sound: Sound) => Effect.Effect<SoundPreview>
+  readonly preview: (
+    style: SoundStyle,
+    sound: Sound,
+    volume: SoundVolume,
+  ) => Effect.Effect<SoundPreview>
   /** Hemera Auto's key, which main alone seals: where it stands, saved, removed. */
   readonly hemeraAuto: {
     readonly status: Effect.Effect<HemeraAutoStatus, StorageFailed | EngineGone>
@@ -547,6 +552,15 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         streamClosedAs(gone),
         observedStream('probes.changed', log),
       ),
+    'helpers.list': (request) =>
+      engine['helpers.list'](request).pipe(closedAs(gone), observed('helpers.list', log)),
+    'helpers.read': (request) =>
+      engine['helpers.read'](request).pipe(closedAs(gone), observed('helpers.read', log)),
+    'helpers.changed': (request) =>
+      engine['helpers.changed'](request).pipe(
+        streamClosedAs(gone),
+        observedStream('helpers.changed', log),
+      ),
     'discussions.list': (request) =>
       engine['discussions.list'](request).pipe(closedAs(gone), observed('discussions.list', log)),
     'discussions.read': (request) =>
@@ -697,6 +711,8 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
       engine['building.read'](request).pipe(closedAs(gone), observed('building.read', log)),
     'building.task': (request) =>
       engine['building.task'](request).pipe(closedAs(gone), observed('building.task', log)),
+    'building.attempt': (request) =>
+      engine['building.attempt'](request).pipe(closedAs(gone), observed('building.attempt', log)),
     'building.tasksChanged': (request) =>
       engine['building.tasksChanged'](request).pipe(
         streamClosedAs(gone),
@@ -778,8 +794,13 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         closedAs(gone),
         observed('notifications.setStyle', log),
       ),
-    'notifications.preview': ({ style, sound }) =>
-      application.preview(style, sound).pipe(observed('notifications.preview', log)),
+    'notifications.setVolume': (request) =>
+      engine['notifications.setVolume'](request).pipe(
+        closedAs(gone),
+        observed('notifications.setVolume', log),
+      ),
+    'notifications.preview': ({ style, sound, volume }) =>
+      application.preview(style, sound, volume).pipe(observed('notifications.preview', log)),
     'notifications.window': () =>
       application.notices.pipe(observedStream('notifications.window', log)),
     'environment.report': () => application.report.pipe(observed('environment.report', log)),

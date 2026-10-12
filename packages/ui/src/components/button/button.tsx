@@ -5,7 +5,7 @@ import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
-import { MARK_TRAVEL, press, useHand, useTransition } from '../../motion.ts'
+import { MARK_TRAVEL, instant, instantEnough, press, useHand, useTransition } from '../../motion.ts'
 import { Loading } from '../loading/loading.tsx'
 
 /**
@@ -130,7 +130,7 @@ function Pressable({
           // Going quiet is a change like any other: it fades rather than switching off, which
           // is why the opacity lives here and not in a class the browser applies at once.
           animate={{ opacity: disabled || working ? 0.5 : 1 }}
-          transition={transition}
+          transition={transition === instant ? instantEnough : transition}
         />
       }
     >

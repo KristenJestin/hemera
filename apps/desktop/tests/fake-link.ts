@@ -86,6 +86,7 @@ export const SILENT_LINK: Link = {
   setNotificationKind: never,
   setNotificationSound: never,
   setSoundStyle: never,
+  setSoundVolume: never,
   previewSound: never,
   backups: never,
   backUp: never,

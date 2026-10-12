@@ -27,7 +27,12 @@ import {
   chooseBuilderModel,
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
-import { buildingOf, buildingTaskChanges, buildingTaskOf } from './building/tasks.ts'
+import {
+  buildingAttemptOf,
+  buildingOf,
+  buildingTaskChanges,
+  buildingTaskOf,
+} from './building/tasks.ts'
 import type { StartedProfile } from './profile.ts'
 import {
   addRepository,
@@ -72,6 +77,7 @@ import {
   setNotificationKind,
   setNotificationSound,
   setSoundStyle,
+  setSoundVolume,
 } from './notifications.ts'
 import { MAX_AGE_DAYS, MAX_TOTAL_MEGABYTES } from './retention.ts'
 import { missionBudget, projectLimits, setProjectLimits } from './budget.ts'
@@ -114,6 +120,7 @@ import {
 } from './planning/calls.ts'
 import { inputsOf, openQuestions, questionsChanged, wavesOf } from './planning/questions.ts'
 import { listProbes, probeChanges, readProbe } from './planning/probe-store.ts'
+import { helperChanges, listHelpers, readHelper } from './building/helper-store.ts'
 import { taskGraphOf } from './planning/plan.ts'
 import { discussionsOf, readDiscussion } from './planning/discussion-store.ts'
 import {
@@ -594,6 +601,8 @@ export const engineHandlers = (
       use(setNotificationSound(REGISTRY, sound, on)).pipe(observed('notifications.setSound', log)),
     'notifications.setStyle': ({ style }) =>
       use(setSoundStyle(REGISTRY, style)).pipe(observed('notifications.setStyle', log)),
+    'notifications.setVolume': ({ volume }) =>
+      use(setSoundVolume(REGISTRY, volume)).pipe(observed('notifications.setVolume', log)),
     'notifications.feed': () =>
       follow(noticeFeed(REGISTRY)).pipe(observedStream('notifications.feed', log)),
     // The field searches first and creates only on the user's explicit choice (#84).
@@ -701,6 +710,13 @@ export const engineHandlers = (
     'probes.read': ({ probeId }) => use(readProbe(probeId)).pipe(observed('probes.read', log)),
     'probes.changed': ({ missionId }) =>
       follow(probeChanges(missionId)).pipe(observedStream('probes.changed', log)),
+    // The helpers of a Building (#145), as their chips show them; no stop, no write.
+    'helpers.list': ({ missionId }) =>
+      use(listHelpers(missionId)).pipe(observed('helpers.list', log)),
+    'helpers.read': ({ helperId, thread }) =>
+      use(readHelper(helperId, thread)).pipe(observed('helpers.read', log)),
+    'helpers.changed': ({ missionId }) =>
+      follow(helperChanges(missionId)).pipe(observedStream('helpers.changed', log)),
     // The Discuss conversations (#87): the user's side; the Planner's goes through the gate.
     'discussions.list': ({ missionId }) =>
       use(discussionsOf(missionId)).pipe(observed('discussions.list', log)),
@@ -754,6 +770,8 @@ export const engineHandlers = (
       use(buildingOf(missionId)).pipe(observed('building.read', log)),
     'building.task': ({ missionId, taskId }) =>
       use(buildingTaskOf(missionId, taskId)).pipe(observed('building.task', log)),
+    'building.attempt': ({ missionId, attemptId }) =>
+      use(buildingAttemptOf(missionId, attemptId)).pipe(observed('building.attempt', log)),
     'building.tasksChanged': ({ missionId }) =>
       follow(buildingTaskChanges(missionId)).pipe(observedStream('building.tasksChanged', log)),
     'engine.windowShown': () => profile.windowShown.pipe(observed('engine.windowShown', log)),

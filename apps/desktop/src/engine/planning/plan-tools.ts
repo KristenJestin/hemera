@@ -62,7 +62,7 @@ import {
   writeStrings,
   writeTargets,
 } from './plan.ts'
-import { basesOf, readProbe, reportOf } from './probe-store.ts'
+import { basesOf, filesOf, reportOf } from './probe-store.ts'
 import { type SpecWriter, afterWrite, bump, standingOf } from './store.ts'
 
 const now = (): string => new Date().toISOString()
@@ -186,7 +186,7 @@ const proofFromProbe = (
       )
     }
     const bases = new Map(basesOf(row).map((base) => [base.repository, base.commit]))
-    const { files } = yield* readProbe(row.id)
+    const files = yield* filesOf(row.id)
     const isTest = (file: { readonly repository: string; readonly path: string }) =>
       report.test !== undefined &&
       file.repository === report.test.repository &&

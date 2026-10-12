@@ -115,6 +115,7 @@ export {
   type SheetView,
   type SheetWidth,
 } from './components/sheet/sheet.tsx'
+export { Slider, type SliderProps } from './components/slider/slider.tsx'
 export {
   OVER_MARK,
   SlidingMark,

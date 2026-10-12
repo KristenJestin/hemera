@@ -1,6 +1,6 @@
 /**
- * The ports the order of decision calls and later tickets fill: the remote judge (Hemera Auto,
- * `hemera-auto.ts`), the grants of "Allow for this mission" (`grants.ts`), the Project's "who
+ * The ports the order of decision calls and later tickets fill: the judge (Hemera Auto's Jev, or
+ * the agent's own, `hemera-auto.ts`), the grants of "Allow for this mission" (`grants.ts`), the Project's "who
  * commits" rule (B4, R5), the folders of the data folder a mission's sessions may reach (CT-17),
  * and the turns of the agents' sessions, within which a judge's verdict may be reused.
  *
@@ -19,12 +19,12 @@ import type { JudgedCall } from '../tools/ports.ts'
 
 /** How a judge rated a call, as its decision records it. */
 export interface Judged {
-  /** Who judged, as the settings name it: `Jev`. */
+  /** Who judged: `Jev`, or the session's agent by its name (`Claude Code`). */
   readonly judge: string
   readonly model: string
   readonly scores: JudgeScores
-  /** Asked now, or a verdict of the same turn reused. */
-  readonly settled: 'jev' | 'reused'
+  /** Jev or the agent's own judge asked now, or a verdict of the same turn reused. */
+  readonly settled: 'jev' | 'agent' | 'reused'
   /** The round trip to the judge, when it was asked now. */
   readonly roundTripMs: number | null
 }
@@ -42,7 +42,7 @@ export type JudgeAnswer =
       readonly settingsSection?: string
     }
 
-/** Step 5 of the order: the remote judge. */
+/** Step 5 of the order: Jev, or the agent's own judge. */
 export class Judge extends Context.Service<
   Judge,
   { readonly judge: (call: JudgedCall) => Effect.Effect<JudgeAnswer> }

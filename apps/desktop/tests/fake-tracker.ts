@@ -10,6 +10,11 @@
  * when its description moved since the fingerprint expected; the suite can refuse writes, edit the
  * issue just before a write, hold a write before or after it lands (what an engine killed in
  * between leaves), and see every body written.
+ *
+ * Every change of a body is kept in the issue's edit history, as GitHub's `userContentEdits` keeps
+ * it (#207): when, by whom, and the body it left; a write is Hemera's edit. The suite can land a
+ * teammate's edit inside a write's window, after the tracker compared the ticket and before the
+ * body is replaced, which no precondition catches.
  */
 
 import {
@@ -94,6 +99,13 @@ export interface FakeTracker {
    * a teammate's edit landing between Hemera's read again and its write.
    */
   readonly beforeWrite: (edit: () => void) => void
+  /**
+   * Runs once, at the next write, after the tracker compared the ticket with the version expected
+   * and before it replaces the body: a teammate's edit inside the write's window.
+   */
+  readonly duringWrite: (edit: () => void) => void
+  /** How many times the edit history was read. */
+  readonly editReads: () => number
   /** How many writes were asked, sent or not. */
   readonly asksToWrite: () => number
 }
@@ -114,6 +126,14 @@ export const fakeTracker = (): FakeTracker => {
   let writeMode: 'answer' | 'hang' | 'landed' = 'answer'
   let asksToWrite = 0
   let editBeforeWrite: (() => void) | null = null
+  let editDuringWrite: (() => void) | null = null
+  let editReads = 0
+  const history = new Map<string, Array<{ at: string; author: string; body: string }>>()
+  const edited = (key: string, author: string, body: string, at: string) => {
+    const edits = history.get(key) ?? []
+    edits.push({ at, author, body })
+    history.set(key, edits)
+  }
   const written: Array<{ key: string; text: string }> = []
   let gate: { promise: Promise<void>; release: () => void } | null = null
   let readGate: { promise: Promise<void>; release: () => void } | null = null
@@ -252,11 +272,31 @@ export const fakeTracker = (): FakeTracker => {
             )
           }
           if (writeMode === 'hang') return yield* Effect.never
+          const during = editDuringWrite
+          editDuringWrite = null
+          during?.()
+          // The edit made just now replaced the issue: the write lands on what it left.
+          const landing = issues.get(id(host, reference.number)) ?? issue
           written.push({ key, text })
-          issue.body = text
-          issue.updatedAt = nextDate()
+          landing.body = text
+          landing.updatedAt = nextDate()
+          edited(id(host, reference.number), 'hemera-account', text, landing.updatedAt)
           if (writeMode === 'landed') return yield* Effect.never
-          return versionOf(host, reference.number, issue)
+          return versionOf(host, reference.number, landing)
+        }),
+      edits: (reference: TicketReference) =>
+        Effect.gen(function* () {
+          editReads += 1
+          if (out) return yield* Effect.fail(offline())
+          if (!Predicate.isTagged(reference, 'GithubIssue')) {
+            return yield* Effect.fail(
+              new TicketNotFound({ key: ticketKeyOf(reference), detail: 'none' }),
+            )
+          }
+          // Newest first, as GitHub answers them.
+          return (history.get(id(host, reference.number)) ?? [])
+            .map((one) => ({ at: one.at, author: one.author, description: one.body }))
+            .toReversed()
         }),
     }
   }
@@ -267,7 +307,7 @@ export const fakeTracker = (): FakeTracker => {
     }),
     set: (number, change, host = 'github.com') => {
       const was = issues.get(id(host, number))
-      issues.set(id(host, number), {
+      const issue: FakeIssue = {
         title: 'Export notes as Markdown',
         body: '## Why\nExports are slow.\n',
         state: 'open',
@@ -276,7 +316,9 @@ export const fakeTracker = (): FakeTracker => {
         ...was,
         ...change,
         updatedAt: nextDate(),
-      })
+      }
+      issues.set(id(host, number), issue)
+      if (issue.body !== was?.body) edited(id(host, number), 'grace', issue.body, issue.updatedAt)
     },
     remove: (number, host = 'github.com') => {
       issues.delete(id(host, number))
@@ -325,6 +367,10 @@ export const fakeTracker = (): FakeTracker => {
     beforeWrite: (edit) => {
       editBeforeWrite = edit
     },
+    duringWrite: (edit) => {
+      editDuringWrite = edit
+    },
+    editReads: () => editReads,
     asksToWrite: () => asksToWrite,
   }
 }

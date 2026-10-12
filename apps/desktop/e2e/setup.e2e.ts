@@ -89,8 +89,10 @@ describe('A first launch, and a new Project set up by its agent', () => {
     await write(field(adding, 'Folder'), ACME)
     // Hemera has looked in the folder, the rest grown in: nothing found where it looks.
     await expect(adding).toHaveText(expect.stringContaining('None in this folder'))
-    // The setup is the user's choice, offered with the agent the setup role runs on.
-    await adding.$('aria/Let an agent propose the rest of the setup').click()
+    // The setup is offered with the agent the setup role runs on, and ticked by default.
+    await expect(
+      adding.$('label*=Let an agent propose the rest of the setup').$('[role="checkbox"]'),
+    ).toHaveAttribute('aria-checked', 'true')
     await adding.$('button=Add acme').waitForClickable()
     await adding.$('button=Add acme').click()
     await expect(adding).not.toBeExisting()

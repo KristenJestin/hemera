@@ -229,6 +229,7 @@ const missionHandlers = {
   'notifications.setKind': unused,
   'notifications.setSound': unused,
   'notifications.setStyle': unused,
+  'notifications.setVolume': unused,
 }
 
 /** The Memory of an engine that keeps one piece of evidence, a png, and nothing else. */
@@ -323,6 +324,9 @@ const memoryHandlers = {
   'probes.list': unused,
   'probes.read': unused,
   'probes.changed': () => Stream.die('not asked of this engine'),
+  'helpers.list': unused,
+  'helpers.read': unused,
+  'helpers.changed': () => Stream.die('not asked of this engine'),
   'discussions.list': unused,
   'discussions.read': unused,
   'discussions.open': unused,
@@ -366,6 +370,7 @@ const memoryHandlers = {
   'building.changed': () => Stream.die('not asked of this engine'),
   'building.read': unused,
   'building.task': unused,
+  'building.attempt': unused,
   'building.tasksChanged': () => Stream.die('not asked of this engine'),
   'memory.now': unused,
   'memory.journal': unused,

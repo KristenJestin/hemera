@@ -7,7 +7,13 @@
  * diagnostic log instead.
  */
 
-import type { NotificationSettings, Sound, SoundStyle, WindowNotice } from '@hemera/ipc'
+import type {
+  NotificationSettings,
+  Sound,
+  SoundStyle,
+  SoundVolume,
+  WindowNotice,
+} from '@hemera/ipc'
 import { Effect } from 'effect'
 import { BrowserWindow, Notification } from 'electron/main'
 
@@ -44,8 +50,8 @@ export interface SystemSoundsOptions {
 /** Do Not Disturb and the sound player of this machine, shared by notifications and previews. */
 export interface SystemSounds {
   readonly doNotDisturb: Effect.Effect<DoNotDisturb>
-  /** Plays a sound in a style: whether a player did. */
-  readonly play: (style: SoundStyle, sound: Sound) => Effect.Effect<boolean>
+  /** Plays a sound in a style at a volume: whether a player did. */
+  readonly play: (style: SoundStyle, sound: Sound, volume: SoundVolume) => Effect.Effect<boolean>
 }
 
 export function systemSounds(options: SystemSoundsOptions): SystemSounds {
@@ -55,13 +61,13 @@ export function systemSounds(options: SystemSoundsOptions): SystemSounds {
     doNotDisturb: quiet
       ? Effect.succeed('off')
       : Effect.promise(() => readDoNotDisturb(process.platform, process.env, systemAsker)),
-    play: (style, sound) =>
+    play: (style, sound, volume) =>
       Effect.promise(async () => {
         if (quiet) {
           log(`a sound was not played: ${style}/${sound}`)
           return false
         }
-        const played = await playing(style, sound)
+        const played = await playing(style, sound, volume)
         if (!played) log(`no player could play the sound ${style}/${sound}`)
         return played
       }),
@@ -99,8 +105,8 @@ export function systemNotifierPorts(options: SystemNotifierOptions): NotifierPor
       notification.show()
       return { close: () => notification.close() }
     },
-    play: (sound, style) => {
-      Effect.runFork(sounds.play(style, sound))
+    play: (sound, style, volume) => {
+      Effect.runFork(sounds.play(style, sound, volume))
     },
     bringForward: () => {
       if (!quiet) bringForward()

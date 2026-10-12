@@ -4,15 +4,34 @@
  * sound never takes the focus, and plays the same whether the window is shown, minimised or hidden.
  * WAV everywhere, since Windows' player reads nothing else.
  *
+ * The volume is Hemera's own, applied to the samples and not asked of the player: `pw-play` and
+ * `paplay` have a volume flag, `aplay` and Windows' player have none. Below full, the player is
+ * handed a quieter copy of the file, written in the temporary folder.
+ *
  * In a package the files are unpacked beside the archive (`app.asar.unpacked`), since a player is
  * another program and cannot read inside the archive.
  */
 
 import { execFile } from 'node:child_process'
-import { closeSync, existsSync, openSync, readSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 
-import { DEFAULT_SOUND_STYLE, type Sound, type SoundPreview, type SoundStyle } from '@hemera/ipc'
+import {
+  DEFAULT_SOUND_STYLE,
+  type Sound,
+  type SoundPreview,
+  type SoundStyle,
+  type SoundVolume,
+} from '@hemera/ipc'
 import { Effect } from 'effect'
 
 import type { DoNotDisturb } from './notifications.ts'
@@ -96,33 +115,75 @@ export async function playSound(
   return false
 }
 
-/** Plays a sound in a style with the first player that does; false when none could. */
+/** The header of a PCM WAV file: the samples follow it. */
+const WAV_HEADER_BYTES = 44
+
+/**
+ * What a volume multiplies the samples by. The ear hears amplitude on a curve, so the slider
+ * squares it: half of the slider is a quarter of the amplitude, about 12 dB under the file.
+ */
+export const gainOf = (volume: SoundVolume): number => (volume / 100) ** 2
+
+/** A PCM 16-bit WAV with its samples scaled to the volume, its header untouched. */
+export function quietWav(wav: Buffer, volume: SoundVolume): Buffer {
+  const quiet = Buffer.from(wav)
+  const gain = gainOf(volume)
+  for (let at = WAV_HEADER_BYTES; at + 1 < quiet.length; at += 2) {
+    quiet.writeInt16LE(Math.round(quiet.readInt16LE(at) * gain), at)
+  }
+  return quiet
+}
+
+/** Where the quieter copies are written, and how a file at a volume is turned into one. */
+export type Quieter = (file: string, volume: SoundVolume) => string
+
+/** A copy of a sound at a volume, written in the folder given, named after the sound. */
+export const quieterFile =
+  (folder: string): Quieter =>
+  (file, volume) => {
+    mkdirSync(folder, { recursive: true })
+    const copy = join(
+      folder,
+      `${basename(dirname(file))}-${basename(file, '.wav')}-${String(volume)}.wav`,
+    )
+    writeFileSync(copy, quietWav(readFileSync(file), volume))
+    return copy
+  }
+
+/**
+ * Plays a sound in a style at a volume with the first player that does; false when none could.
+ * Full volume plays the file itself, none plays nothing, and nothing failed.
+ */
 export const playStyle =
   (
     platform: NodeJS.Platform,
     folder: string,
     player: Player,
     exists: (file: string) => boolean = existsSync,
+    quieter: Quieter = quieterFile(join(tmpdir(), 'hemera-sounds')),
   ) =>
-  (style: SoundStyle, sound: Sound): Promise<boolean> =>
-    playSound(platform, soundFile(folder, style, sound, exists), player)
+  (style: SoundStyle, sound: Sound, volume: SoundVolume): Promise<boolean> => {
+    if (volume === 0) return Promise.resolve(true)
+    const file = soundFile(folder, style, sound, exists)
+    return playSound(platform, volume === 100 ? file : quieter(file, volume), player)
+  }
 
 export interface PreviewPorts {
   readonly doNotDisturb: Effect.Effect<DoNotDisturb>
-  /** Plays the sound in the style: whether a player did. */
-  readonly play: (style: SoundStyle, sound: Sound) => Effect.Effect<boolean>
+  /** Plays the sound in the style at the volume: whether a player did. */
+  readonly play: (style: SoundStyle, sound: Sound, volume: SoundVolume) => Effect.Effect<boolean>
 }
 
 /**
- * One sound of one style, played once, as a notification's would be. The window asking has the
+ * One sound of one style at a volume, played once, as a notification's would be. The window asking has the
  * focus, so it is the in-app rule: Do Not Disturb on keeps it quiet, unreadable lets it be heard.
  */
 export const previewSound =
   (ports: PreviewPorts) =>
-  (style: SoundStyle, sound: Sound): Effect.Effect<SoundPreview> =>
+  (style: SoundStyle, sound: Sound, volume: SoundVolume): Effect.Effect<SoundPreview> =>
     Effect.gen(function* () {
       if ((yield* ports.doNotDisturb) === 'on') return 'do-not-disturb'
-      return (yield* ports.play(style, sound)) ? 'played' : 'no-player'
+      return (yield* ports.play(style, sound, volume)) ? 'played' : 'no-player'
     })
 
 /** How long a player may take: the sounds last under a second and a half. */

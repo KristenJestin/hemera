@@ -65,6 +65,17 @@ export const MissingTicket = Schema.TaggedStruct('Missing', {
 
 export type TicketChange = typeof MovedTicket.Type | typeof MissingTicket.Type
 
+/**
+ * One edit of a ticket's description in the tracker's history (#207): when the tracker says it
+ * was made, by whom, and the description it left, in Markdown. GitHub's `userContentEdits`, Jira's
+ * changelog; in any order.
+ */
+export interface DescriptionEdit {
+  readonly at: string
+  readonly author: string | null
+  readonly description: string
+}
+
 export interface TicketProvider {
   readonly kind: ProviderKind
   /** How its errors and notices name it: `GitHub`, `GitHub (git.acme.test)`. */
@@ -97,6 +108,32 @@ export interface TicketProvider {
     text: string,
     expected: { readonly fingerprint: string },
   ) => Effect.Effect<TicketVersion, TicketWriteError>
+  /**
+   * The edits of the ticket's description its tracker keeps (#207), read after a write to find an
+   * edit no precondition could stop: one made between the read again and the write.
+   */
+  readonly edits: (
+    reference: TicketReference,
+  ) => Effect.Effect<ReadonlyArray<DescriptionEdit>, TicketError>
+}
+
+const instant = (at: string): number => Date.parse(at)
+
+/**
+ * The edit a write overwrote (#207), or null: told by the tracker's own dates only, never by the
+ * text, which a tracker stores its own way. Hemera's edit is the last one at or before the ticket
+ * read back holding the Spec; an edit after the ticket read before the write (`since`, its update
+ * date) and before Hemera's is inside the window, and the last of them is what was lost.
+ */
+export const overwrittenEdit = (
+  edits: ReadonlyArray<DescriptionEdit>,
+  since: string,
+  back: string,
+): DescriptionEdit | null => {
+  const ordered = edits
+    .filter((one) => !Number.isNaN(instant(one.at)) && instant(one.at) <= instant(back))
+    .toSorted((one, other) => instant(one.at) - instant(other.at))
+  return ordered.slice(0, -1).findLast((one) => instant(one.at) > instant(since)) ?? null
 }
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')

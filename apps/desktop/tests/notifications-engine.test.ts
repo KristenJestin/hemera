@@ -43,12 +43,13 @@ import {
   setNotificationKind,
   setNotificationSound,
   setSoundStyle,
+  setSoundVolume,
 } from '../src/engine/notifications.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { addGithub } from '../src/engine/tickets/store.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { probes as probesTable, workspaces } from '../src/engine/storage/schema.ts'
+import { appPreferences, probes as probesTable, workspaces } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { workspaceEvent } from '../src/engine/workspaces.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
@@ -590,6 +591,34 @@ describe('The switches are the application’s, listed from the registry', () =>
       profile.use(readNotificationSettings(REGISTRY)),
     )
     expect(settings.style).toBe('glass')
+  })
+
+  test('the volume: half by default, the one chosen survives a restart', async () => {
+    const first = await engine()(({ profile }) => profile.use(readNotificationSettings(REGISTRY)))
+    expect(first.volume).toBe(50)
+    const chosen = await engine()(({ profile }) => profile.use(setSoundVolume(REGISTRY, 20)))
+    expect(chosen.volume).toBe(20)
+    const settings = await engine()(({ profile }) =>
+      profile.use(readNotificationSettings(REGISTRY)),
+    )
+    expect(settings.volume).toBe(20)
+  })
+
+  test('a volume this version cannot read answers the default', async () => {
+    const settings = await engine()(({ profile }) =>
+      profile.use(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const database = yield* Database
+            yield* database
+              .insert(appPreferences)
+              .values({ key: 'notifications.volume', value: '"loud"' })
+          }),
+          readNotificationSettings(REGISTRY),
+        ),
+      ),
+    )
+    expect(settings.volume).toBe(50)
   })
 
   test('a kind that is not registered is refused', async () => {
