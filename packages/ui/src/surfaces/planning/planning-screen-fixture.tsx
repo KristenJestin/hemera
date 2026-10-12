@@ -41,6 +41,7 @@ const MOMENTS = {
   vision: moments.vision,
   almostReady: moments.almostReady,
   settled: moments.readyToFreeze,
+  mootByDiscussion: moments.mootByDiscussion,
   freezeRefused: moments.freezeRefused,
   frozen: moments.frozen,
   outdated: moments.outdated,

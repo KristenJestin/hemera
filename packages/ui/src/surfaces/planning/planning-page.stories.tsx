@@ -357,6 +357,18 @@ export const Discussing: Story = {
   },
 }
 
+/** A question made moot by a discussion: under the rest, it opens its discussion again. */
+export const DiscussionReadAgain: Story = {
+  args: { moment: 'mootByDiscussion' },
+  play: async ({ canvasElement, args }) => {
+    const others = rest(canvasElement)
+    await userEvent.click(others.getByRole('button', { name: /Answered/ }))
+    const q7 = within(await others.findByRole('article', { name: /^Q7/ }))
+    await userEvent.click(q7.getByRole('button', { name: 'Open the discussion' }))
+    await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q7' })
+  },
+}
+
 /** A discussion on Q5, open over the page, the agent's decision proposed. */
 export const DiscussionOpen: Story = {
   args: { moment: 'discussing', opened: 'discussion:question:Q5' },

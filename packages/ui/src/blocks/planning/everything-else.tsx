@@ -56,7 +56,10 @@ export function EverythingElse({ data, mentionables, handlers }: EverythingElseP
               <li key={question.id}>
                 <QuestionCard
                   question={question}
-                  discussed={false}
+                  discussed={data.discussions.some(
+                    (discussion) =>
+                      discussion.item.kind === 'question' && discussion.item.id === question.id,
+                  )}
                   mentionables={mentionables}
                   onAnswer={handlers.onAnswer}
                   onWaitOnSomeone={handlers.onWaitOnSomeone}

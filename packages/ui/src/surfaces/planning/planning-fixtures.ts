@@ -989,6 +989,31 @@ export function readyToFreeze(): PlanningMoment {
   })
 }
 
+/** Q7 made moot by a discussion closed on its decision, which its question opens again. */
+export function mootByDiscussion(): PlanningMoment {
+  const ready = readyToFreeze()
+  return scene({
+    data: {
+      ...ready.data,
+      discussions: [
+        ...ready.data.discussions,
+        {
+          ...DISCUSSION,
+          id: 'd2',
+          label: '#2',
+          item: { kind: 'question', id: 'Q7' },
+          state: 'closed',
+          outcome: 'decision',
+          decision: 'D2, a front matter holds every field of a note.',
+          proposal: null,
+          waitsOn: null,
+        },
+      ],
+    },
+    head: ready.head,
+  })
+}
+
 /** Freeze pressed as the Planner changed the Spec: refused, each reason named. */
 export function freezeRefused(): PlanningMoment {
   const ready = readyToFreeze()
