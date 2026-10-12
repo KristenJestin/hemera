@@ -24,6 +24,7 @@ import {
   toolsOf,
 } from '@hemera/core/domain'
 import { and, asc, eq } from 'drizzle-orm'
+import { LaunchFailed } from '@hemera/ipc'
 import { Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -111,6 +112,8 @@ const ending = (
     readonly checks?: ChecksOf
     readonly resumed?: boolean
     readonly folder?: string
+    /** Runs as each agent starts: a failure there is an agent that cannot start. */
+    readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -127,6 +130,7 @@ const ending = (
   const checks = options.checks ?? (() => [])
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
+    starting: options.starting ?? (() => Effect.void),
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: {
       checks: Layer.succeed(TaskChecks, { run: (asked) => Effect.succeed(checks(asked)) }),
@@ -1112,6 +1116,133 @@ describe('The reviewers count in the cap', () => {
   })
 })
 
+/** Waits until the mission has a pending error need, and answers it Retry. */
+const retried = (missionId: string) =>
+  Effect.gen(function* () {
+    const errorNeeds = Effect.map(getMission(missionId), (mission) =>
+      mission.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+    )
+    yield* until(
+      Effect.map(errorNeeds, (found) => found.length > 0),
+      LONG,
+    )
+    const [need] = yield* errorNeeds
+    if (need === undefined) return yield* Effect.die(new Error('no error need'))
+    yield* answerNeed({ id: need.id, answer: ChosenAnswer.make({ option: 'Retry' }), key: need.id })
+    return need
+  })
+
+describe('A pass that fails', () => {
+  test(
+    'a reviewer that cannot start holds the end on an error need; Retry runs its pass again',
+    SLOW,
+    async () => {
+      // Every agent but those already known when it is set: the reviewers.
+      let known: ReadonlySet<string> | null = null
+      const { world, run } = ending({
+        starting: (sessionId) =>
+          known === null || known.has(sessionId)
+            ? Effect.void
+            : Effect.fail(new LaunchFailed({ reason: 'the agent could not be spawned' })),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* agentOf(world, mission.id, 'documenter')
+            known = new Set(
+              (yield* sessionsIn(SESSION_STATES, { kind: 'mission', missionId: mission.id })).map(
+                (one) => one.id,
+              ),
+            )
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(
+                autoReviewOf(mission.id),
+                (review) =>
+                  review !== null &&
+                  review.passes.length === 2 &&
+                  review.passes.every((one) => one.state === 'failed'),
+              ),
+              LONG,
+            )
+            // Long enough for anything on its way to move the end on.
+            yield* Effect.sleep('1 second')
+            const holding = yield* buildingNow(mission.id)
+            known = null
+            const need = yield* retried(mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return { need, holding, review: yield* autoReviewOf(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.holding.phase).toBe('review')
+      expect(Predicate.isTagged(seen.need.fields, 'Error')).toBe(true)
+      if (Predicate.isTagged(seen.need.fields, 'Error')) {
+        expect(seen.need.fields.failed).toContain('the agent could not be spawned')
+        expect(seen.need.fields.proposals).toEqual(['Retry'])
+      }
+      expect(seen.review?.passes.map((one) => one.state).toSorted()).toEqual([
+        'done',
+        'done',
+        'failed',
+        'failed',
+      ])
+    },
+  )
+
+  test(
+    'a reviewer lineage that stops for good holds the end on an error need; Retry runs a new pass',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            const code = yield* agentOf(world, mission.id, 'code-reviewer')
+            yield* Sessions.use((sessions) =>
+              sessions.end(code.session.lineage, 'the agent was closed'),
+            )
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            const holding = yield* buildingNow(mission.id)
+            const need = yield* retried(mission.id)
+            const again = yield* agentOf(world, mission.id, 'code-reviewer', 2)
+            const answer = yield* callTool(again.grantId, 'review_report', { findings: [] })
+            if (!answer.ok) return yield* Effect.die(new Error(answer.text))
+            world.release(again.index)
+            yield* inReview(mission.id)
+            return { need, holding, review: yield* autoReviewOf(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.holding.phase).toBe('review')
+      if (Predicate.isTagged(seen.need.fields, 'Error')) {
+        expect(seen.need.fields.failed).toContain('Code reviewer')
+      }
+      expect(seen.review?.passes.map((one) => `${one.reviewer} ${one.state}`).toSorted()).toEqual([
+        'code-reviewer done',
+        'code-reviewer failed',
+        'spec-reviewer done',
+      ])
+    },
+  )
+})
+
 describe('A restart in the middle of the end', () => {
   test('a restart in the middle of the sequence resumes at its step', SLOW, async () => {
     const before = ending()
@@ -1155,5 +1286,46 @@ describe('A restart in the middle of the end', () => {
     expect(seen.passes.every((one) => one.state === 'done')).toBe(true)
     expect(seen.types.filter((type) => type === 'building.end_started')).toHaveLength(1)
     expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
+  })
+
+  test('a restart during the documenter’s pass runs the pass again', SLOW, async () => {
+    const before = ending()
+    const left = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          yield* builtAll(builder.grantId)
+          yield* agentOf(before.world, mission.id, 'documenter')
+          return mission
+        }),
+      ),
+    )
+    const after = ending({ resumed: true })
+    const seen = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* documented(after.world, left.id)
+          yield* reviewed(after.world, left.id, 'spec-reviewer')
+          yield* reviewed(after.world, left.id, 'code-reviewer')
+          yield* inReview(left.id)
+          const database = yield* Database
+          return {
+            documenter: yield* database
+              .select()
+              .from(documenterPasses)
+              .orderBy(asc(documenterPasses.number)),
+            mission: yield* getMission(left.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.documenter.map((one) => `${one.mode} ${one.state}`)).toEqual([
+      'full failed',
+      'full reported',
+    ])
+    expect(seen.mission.needs).toEqual([])
   })
 })

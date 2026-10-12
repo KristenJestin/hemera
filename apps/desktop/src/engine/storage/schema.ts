@@ -3012,7 +3012,8 @@ export const reviewPasses = sqliteTable(
     endedAt: text('ended_at'),
   },
   (table) => [
-    unique('review_pass_of_reviewer').on(table.buildingId, table.reviewer),
+    // A failed pass the user retried is followed by another of the same reviewer.
+    index('review_passes_of_building').on(table.buildingId, table.reviewer),
     uniqueIndex('review_pass_of_lineage').on(table.lineage),
   ],
 )

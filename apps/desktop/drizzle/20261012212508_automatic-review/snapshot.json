@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "bff7ad50-4e21-443c-83b5-e40c00c119f1",
+  "id": "30eaf79f-eec5-4397-a8ad-7720d0cc4071",
   "prevIds": ["aaa282f8-89fd-4506-8392-1be76d1857f8"],
   "ddl": [
     {
@@ -16002,6 +16002,24 @@
     {
       "columns": [
         {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "reviewer",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "review_passes_of_building",
+      "entityType": "indexes",
+      "table": "review_passes"
+    },
+    {
+      "columns": [
+        {
           "value": "lineage",
           "isExpression": false
         }
@@ -16368,13 +16386,6 @@
       "name": "claim_once_per_mission",
       "entityType": "uniques",
       "table": "resource_claims"
-    },
-    {
-      "columns": ["building_id", "reviewer"],
-      "nameExplicit": true,
-      "name": "review_pass_of_reviewer",
-      "entityType": "uniques",
-      "table": "review_passes"
     },
     {
       "columns": ["session_id", "path"],

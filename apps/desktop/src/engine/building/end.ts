@@ -28,7 +28,9 @@ import {
   CONTRADICTION_OPTIONS,
   DOCUMENTATION,
   DecisionFields,
+  ErrorFields,
   MissionOwner,
+  REVIEWERS,
   REVIEWER_NAMES,
   RESULT_IS_RIGHT,
   ROOT_REPOSITORY,
@@ -37,7 +39,7 @@ import {
   specialTaskOf,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
-import { and, eq, gt, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { Cause, Effect, Layer, Option, Predicate, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
@@ -46,7 +48,7 @@ import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
-import { DeliveryFailed, type NeedHandler, createNeedIn } from '../needs.ts'
+import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
 import { SessionPost } from '../sessions/post.ts'
@@ -62,6 +64,7 @@ import {
   checkpointRepositories,
   checkpoints,
   missions,
+  needs,
   reviewChangedAfter,
   reviewFindings,
 } from '../storage/schema.ts'
@@ -69,13 +72,14 @@ import { mutate } from '../transaction.ts'
 import { BuildingEnd } from './builder.ts'
 import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
-import { Documenter } from './documenter.ts'
-import { passesIn } from './documenter-store.ts'
+import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
+import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
 import { finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
   REVIEW_NEEDS,
   type ReviewFindingRow,
+  lastPassesOf,
   reviewFindingsIn,
   reviewPassesIn,
   reviewerOf,
@@ -92,6 +96,15 @@ import {
   tasksIn,
   writeStrings,
 } from './tasks.ts'
+
+/**
+ * The service of the error needs the end raises when one of its steps cannot go on (a pass that
+ * failed, a step that threw): their Retry drives the end again, and the step tries again.
+ */
+export const END_NEEDS = needService('building-end')
+
+/** The one answer an error need of the end offers. */
+export const RETRY = 'Retry'
 
 /** The steps of the end, in their order, as `buildings.phase` keeps them. */
 export const END_PHASES = [
@@ -246,6 +259,62 @@ export const buildingEndLayer = (log: Log) => {
           return row ?? null
         })
 
+      /** The last error need the end raised for a mission, or null. */
+      const endNeedOf = (missionId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ id: needs.id, state: needs.state, createdAt: needs.createdAt })
+            .from(needs)
+            .where(and(eq(needs.missionId, missionId), eq(needs.service, END_NEEDS)))
+            .orderBy(desc(needs.createdAt))
+            .limit(1)
+            .pipe(Effect.mapError(refusedWhile('reading the end’s needs')))
+          return row ?? null
+        })
+
+      /** Whether the user answered Retry to the need raised for a failure ended at `failedAt`. */
+      const retried = (missionId: string, failedAt: string) =>
+        Effect.map(
+          endNeedOf(missionId),
+          (need) => need !== null && need.state === 'answered' && need.createdAt >= failedAt,
+        )
+
+      /** The owner of the mission's needs. */
+      const ownerOf = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const [mission] = yield* database
+            .select({ projectId: missions.projectId })
+            .from(missions)
+            .where(eq(missions.id, building.missionId))
+            .pipe(Effect.mapError(refusedWhile('reading the mission')))
+          return MissionOwner.make({
+            projectId: mission?.projectId ?? '',
+            missionId: building.missionId,
+            taskId: null,
+          })
+        })
+
+      /** The end cannot go on: an error need on the mission, which it waits on until Retry. */
+      const raise = (building: BuildingRow, failed: string) =>
+        Effect.gen(function* () {
+          const write = yield* createNeedIn(
+            END_NEEDS,
+            yield* ownerOf(building),
+            ErrorFields.make({ failed, attempts: [], proposals: [RETRY] }),
+          )
+          yield* mutate('asking the user to retry the end', (transaction) =>
+            Effect.gen(function* () {
+              const current = yield* activeBuildingIn(transaction, building.missionId)
+              if (current?.id !== building.id) return { result: undefined, events: [] }
+              const made = yield* write(transaction)
+              return { result: undefined, events: made.events }
+            }),
+          )
+          yield* said(failed)
+        })
+
       /** The phase moves on, if the Building is still at the step it left; with its events. */
       const moveOn = (
         building: BuildingRow,
@@ -307,7 +376,7 @@ export const buildingEndLayer = (log: Log) => {
       // --- the steps --------------------------------------------------------------------------------
 
       /** The documenter's pass, run by this engine and waited on through its events. */
-      const document = (building: BuildingRow, mode: Parameters<Documenter['Service']['run']>[1]) =>
+      const document = (building: BuildingRow, mode: DocumenterMode) =>
         Effect.gen(function* () {
           documenting.add(building.id)
           yield* Documenter.use((documenter) => documenter.run(building.id, mode)).pipe(
@@ -318,6 +387,24 @@ export const buildingEndLayer = (log: Log) => {
             Effect.andThen(drive(building.id)),
             provided,
             Effect.forkIn(scope),
+          )
+        })
+
+      /**
+       * A documenter's pass that failed: run again when a stop of Hemera failed it, or at the
+       * user's Retry; otherwise the user is asked.
+       */
+      const documenterFailed = (building: BuildingRow, pass: PassRow, mode: DocumenterMode) =>
+        Effect.gen(function* () {
+          if (
+            stoppedByHemera(pass.failure) ||
+            (yield* retried(building.missionId, pass.endedAt ?? ''))
+          ) {
+            return yield* document(building, mode)
+          }
+          yield* raise(
+            building,
+            `The documenter's pass did not finish: ${pass.failure ?? 'no reason given'}.`,
           )
         })
 
@@ -346,14 +433,17 @@ export const buildingEndLayer = (log: Log) => {
           const missionId = building.missionId
           switch (phase) {
             case 'documenter': {
-              const passes = yield* passesIn(database, building.id)
               if (documenting.has(building.id)) return false
-              if (passes.some((one) => one.state === 'waiting_for_slot' || one.state === 'running'))
-                return false
-              if (passes.length === 0) {
+              const last = (yield* passesIn(database, building.id)).at(-1)
+              if (last === undefined) {
                 yield* document(building, { kind: 'full' })
                 return false
               }
+              if (last.state === 'failed') {
+                yield* documenterFailed(building, last, { kind: 'full' })
+                return false
+              }
+              if (last.state === 'waiting_for_slot' || last.state === 'running') return false
               return yield* moveOn(building, 'final_checks')
             }
             case 'final_checks': {
@@ -416,10 +506,37 @@ export const buildingEndLayer = (log: Log) => {
             case 'review': {
               const checkpointId = building.reviewCheckpointId
               if (checkpointId === null) return yield* moveOn(building, 'checkpoint')
-              const passes = yield* reviewPassesIn(database, building.id)
-              if (passes.length === 0) {
+              const passes = lastPassesOf(yield* reviewPassesIn(database, building.id))
+              const failed = passes.filter((one) => one.state === 'failed')
+              const again =
+                failed.length > 0 &&
+                (yield* retried(
+                  missionId,
+                  failed.map((one) => one.endedAt ?? '').toSorted()[0] ?? '',
+                ))
+              if (passes.length < REVIEWERS.length || again) {
                 const folder = yield* copyOf(building, checkpointId)
-                yield* AutoReview.use((review) => review.start(building, checkpointId, folder))
+                yield* AutoReview.use((review) =>
+                  review.start(
+                    building,
+                    checkpointId,
+                    folder,
+                    failed.map((one) => reviewerOf(one)),
+                  ),
+                )
+                return false
+              }
+              if (failed.length > 0) {
+                // A failed pass never lets the end go on: the user is asked, and Retry runs it.
+                yield* raise(
+                  building,
+                  `The automatic review did not finish: ${failed
+                    .map(
+                      (one) =>
+                        `the ${REVIEWER_NAMES[reviewerOf(one)]}'s pass failed (${one.failure ?? 'no reason given'})`,
+                    )
+                    .join('; ')}.`,
+                )
                 return false
               }
               if (passes.some((one) => one.state === 'waiting' || one.state === 'running'))
@@ -437,11 +554,16 @@ export const buildingEndLayer = (log: Log) => {
             }
             case 'documenter_delta': {
               if (documenting.has(building.id)) return false
-              const passes = yield* passesIn(database, building.id)
-              if (passes.some((one) => one.state === 'waiting_for_slot' || one.state === 'running'))
+              const last = (yield* passesIn(database, building.id)).at(-1)
+              if (last?.state === 'waiting_for_slot' || last?.state === 'running') return false
+              if (last?.mode === 'delta') {
+                if (last.state !== 'failed') return yield* moveOn(building, 'refresh')
+                yield* documenterFailed(building, last, {
+                  kind: 'delta',
+                  files: filesOfPass(last),
+                })
                 return false
-              if (passes.some((one) => one.mode === 'delta'))
-                return yield* moveOn(building, 'refresh')
+              }
               const special = yield* database
                 .select({ repository: attemptWrites.repository, path: attemptWrites.path })
                 .from(attemptWrites)
@@ -509,16 +631,7 @@ export const buildingEndLayer = (log: Log) => {
       const sortFindings = (building: BuildingRow) =>
         Effect.gen(function* () {
           const database = yield* Database
-          const [mission] = yield* database
-            .select({ projectId: missions.projectId })
-            .from(missions)
-            .where(eq(missions.id, building.missionId))
-            .pipe(Effect.mapError(refusedWhile('reading the mission')))
-          const owner = MissionOwner.make({
-            projectId: mission?.projectId ?? '',
-            missionId: building.missionId,
-            taskId: null,
-          })
+          const owner = yield* ownerOf(building)
           const pending = (yield* reviewFindingsIn(database, building.id)).filter(
             (one) => one.fate === null,
           )
@@ -721,6 +834,8 @@ export const buildingEndLayer = (log: Log) => {
             }
             const phase = endPhaseOf(building.phase)
             if (phase === null) return
+            // An error need of the end holds it until the user's Retry.
+            if ((yield* endNeedOf(building.missionId))?.state === 'pending') return
             if (!(yield* step(building, phase))) return
           }
         })
@@ -914,5 +1029,14 @@ export const buildingEndLayer = (log: Log) => {
       }
     }),
   )
-  return { layer, handler }
+  /** An error need of the end answered: the end is driven again, and its step tries again. */
+  const retry: NeedHandler = {
+    deliver: (need) =>
+      Effect.succeed(
+        Predicate.isTagged(need.owner, 'Mission')
+          ? [buildingEvent(need.owner.missionId, 'building.end_retried')]
+          : [],
+      ),
+  }
+  return { layer, handler, retry }
 }

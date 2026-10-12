@@ -354,6 +354,10 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     ),
   ],
   [
+    'building.end_retried',
+    lineOf(byUser, () => 'The user asked the end of the Building to try its step again.'),
+  ],
+  [
     'building.documenter_delta',
     lineOf(
       byHemera,

@@ -230,6 +230,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'review_findings_of_building',
       'review_pass_of_lineage',
       'review_passes',
+      'review_passes_of_building',
       'role_models',
       'runner_leases',
       'runs_by_place',

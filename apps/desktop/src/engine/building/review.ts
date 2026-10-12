@@ -16,7 +16,8 @@
  *   withheld". `evidence_read` answers the Building's evidence.
  * - **Health.** A turn that ends without the report is reminded once per session; a second one
  *   from the same session replaces it, which #41's counter of replacements watches (three within 30
- *   minutes make an error need). A lineage that stops for good fails its pass.
+ *   minutes make an error need, whose Retry starts the lineage again). A lineage that stops for
+ *   good with no such need fails its pass: the end asks the user, whose Retry records a new one.
  * - **A stop.** A running pass's session is rebuilt at the next start with the restart sentence
  *   (#40); a pass still waiting for its slot waits again.
  */
@@ -30,6 +31,7 @@ import {
   REVIEWERS,
   REVIEWER_NAMES,
   ROOT_REPOSITORY,
+  type Reviewer,
   type ToolArguments,
   findingProblem,
   sensitivePlace,
@@ -61,11 +63,14 @@ import { Sessions } from '../sessions/service.ts'
 import { getSession, sessionsOfLineage } from '../sessions/store.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import {
+  agentSessions,
   buildings,
   checkpointRepositories,
   missions,
+  needs,
   reviewFindings,
   reviewPasses,
+  sessionNeeds,
 } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
@@ -76,6 +81,7 @@ import { ReviewDesk } from './review-desk.ts'
 import {
   type ReviewPassRow,
   checkpointFilesIn,
+  lastPassesOf,
   reviewFindingsIn,
   reviewPassOfLineage,
   reviewPassesIn,
@@ -89,12 +95,14 @@ export class AutoReview extends Context.Service<
   {
     /**
      * Both passes of a Building's review on its checkpoint, recorded once and started, the
-     * reviewers working in `folder`, the copy of its trees. Nothing when they are recorded already.
+     * reviewers working in `folder`, the copy of its trees. A pass recorded already is not
+     * recorded again, unless it failed and its reviewer is in `again` (the user's Retry).
      */
     readonly start: (
       building: BuildingRow,
       checkpointId: string,
       folder: string,
+      again?: ReadonlyArray<Reviewer>,
     ) => Effect.Effect<void, DatabaseError>
   }
 >()('AutoReview') {}
@@ -359,13 +367,23 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
           )
         })
 
-      const start = (building: BuildingRow, checkpointId: string, folder: string) =>
+      const start = (
+        building: BuildingRow,
+        checkpointId: string,
+        folder: string,
+        again: ReadonlyArray<Reviewer> = [],
+      ) =>
         Effect.gen(function* () {
           const recorded = yield* mutate('recording the review’s passes', (transaction) =>
             Effect.gen(function* () {
               const existing = yield* reviewPassesIn(transaction, building.id)
-              if (existing.length > 0) return { result: existing, events: [] }
-              const rows: ReviewPassRow[] = REVIEWERS.map((reviewer) => ({
+              const last = lastPassesOf(existing)
+              const missing = REVIEWERS.filter((reviewer) => {
+                const one = last.find((pass) => pass.reviewer === reviewer)
+                return one === undefined || (one.state === 'failed' && again.includes(reviewer))
+              })
+              if (missing.length === 0) return { result: existing, events: [] }
+              const rows: ReviewPassRow[] = missing.map((reviewer) => ({
                 id: crypto.randomUUID(),
                 missionId: building.missionId,
                 buildingId: building.id,
@@ -382,7 +400,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
                 .insert(reviewPasses)
                 .values(rows)
                 .pipe(Effect.mapError(refusedWhile('recording the review’s passes')))
-              return { result: rows, events: [] }
+              return { result: [...existing, ...rows], events: [] }
             }),
           )
           for (const row of recorded) {
@@ -436,6 +454,15 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             LIVE.some((state) => state === one.state),
           )
           if (live) return
+          // A lineage its sessions' need holds (#41) goes on at that need's Retry, with its pass.
+          const held = yield* database
+            .select({ id: needs.id })
+            .from(sessionNeeds)
+            .innerJoin(needs, eq(needs.id, sessionNeeds.needId))
+            .innerJoin(agentSessions, eq(agentSessions.id, sessionNeeds.sessionId))
+            .where(and(eq(agentSessions.lineage, lineage), eq(needs.state, 'pending')))
+            .pipe(Effect.mapError(refusedWhile('reading the reviewer’s needs')))
+          if (held.length > 0) return
           yield* fail(row.id, `its session stopped: ${why}`)
         })
 
@@ -713,7 +740,8 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             }
             if (event.type !== 'session.stopped') return
             if (!REVIEWERS.some((one) => one === payload['role'])) return
-            if (payload['state'] === 'replaced' || payload['state'] === 'ended') return
+            // Ended too: a pass that reported is done before its session ends.
+            if (payload['state'] === 'replaced') return
             const lineage = Option.getOrNull(readString(payload['lineage']))
             const why = Option.getOrElse(readString(payload['reason']), () => 'no reason given')
             if (lineage !== null) yield* stoppedSession(lineage, why)

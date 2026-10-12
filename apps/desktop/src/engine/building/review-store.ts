@@ -54,8 +54,19 @@ export const reviewPassesIn = (reader: Reader, buildingId: string) =>
       .where(eq(reviewPasses.buildingId, buildingId))
       .pipe(Effect.mapError(refusedWhile('reading the review’s passes'))),
     (rows) =>
-      rows.toSorted((a, b) => REVIEWERS.indexOf(reviewerOf(a)) - REVIEWERS.indexOf(reviewerOf(b))),
+      rows.toSorted(
+        (a, b) =>
+          REVIEWERS.indexOf(reviewerOf(a)) - REVIEWERS.indexOf(reviewerOf(b)) ||
+          a.startedAt.localeCompare(b.startedAt),
+      ),
   )
+
+/** Each reviewer's last pass: a failed one the user retried is followed by another. */
+export const lastPassesOf = (rows: ReadonlyArray<ReviewPassRow>): ReadonlyArray<ReviewPassRow> =>
+  REVIEWERS.flatMap((reviewer) => {
+    const last = rows.findLast((one) => one.reviewer === reviewer)
+    return last === undefined ? [] : [last]
+  })
 
 /** The pass a lineage runs, or null. */
 export const reviewPassOfLineage = (reader: Reader, lineage: string) =>

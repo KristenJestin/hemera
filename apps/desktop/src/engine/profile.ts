@@ -56,7 +56,7 @@ import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
-import { buildingEndLayer } from './building/end.ts'
+import { END_NEEDS, buildingEndLayer } from './building/end.ts'
 import { autoReviewLayer } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
@@ -539,6 +539,7 @@ export const startProfile = (
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
         [REVIEW_NEEDS, ending.handler],
+        [END_NEEDS, ending.retry],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
