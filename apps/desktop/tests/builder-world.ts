@@ -118,7 +118,8 @@ type ProjectAt = (
  * A mission of Acme planned with the four tasks, frozen, checked and launched: Building. `before`
  * runs on the Project before the launch, for what the launch must already see; `impact` is the
  * Impact section, whose repositories the Workspace holds beside the tasks' (`api`); `plan` the tasks;
- * `at` the Project, Acme's by default.
+ * `at` the Project, Acme's by default; `during` runs in Planning, once the mission exists, with the
+ * Planner's grant (#235: the Prototypers).
  */
 export const launched = <E = never, R = never>(
   work: string,
@@ -126,11 +127,16 @@ export const launched = <E = never, R = never>(
   impact = 'The impact.',
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
   at: ProjectAt = acmeAt,
+  during: (
+    mission: { readonly id: string },
+    plannerGrantId: string,
+  ) => Effect.Effect<void, E, R> = () => Effect.void,
 ) =>
   Effect.gen(function* () {
     const { project, main } = yield* at(work)
     yield* before(project.id)
     const { mission, grantId } = yield* plannedIn(project.id, main)
+    yield* during(mission, grantId)
     for (const section of SPEC_SECTIONS) {
       yield* call(grantId, 'spec_write_section', {
         section,

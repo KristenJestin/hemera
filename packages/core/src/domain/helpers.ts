@@ -223,6 +223,10 @@ export const freeResultText = (result: FreeHelperResult): string =>
       : ['Left:', ...result.left.map((one) => `- ${one}`)].join('\n'),
   ].join('\n')
 
+/** The last line of a Prototyper's result: for the Planner, who reads it before the Freeze. */
+export const PROTOTYPE_RESULT_NOTE =
+  'Nothing of it is in the main checkout. The user may judge it before the Freeze, which keeps it with their verdict.'
+
 /** The Prototyper's result as its parent reads it, with where its files were kept. */
 export const prototyperResultText = (result: PrototyperResult, kept: string): string =>
   [
@@ -234,7 +238,7 @@ export const prototyperResultText = (result: PrototyperResult, kept: string): st
       ? 'Does not work: nothing.'
       : ['Does not work:', ...result.does_not_work.map((one) => `- ${one}`)].join('\n'),
     result.files.length === 0 ? 'Files: none.' : `Files, kept as evidence: ${kept}`,
-    'Nothing of it is in the main checkout. The user may judge it before the Freeze, which keeps it with their verdict.',
+    PROTOTYPE_RESULT_NOTE,
   ].join('\n')
 
 /** What a helper's session is made of, for the tools it holds. */
