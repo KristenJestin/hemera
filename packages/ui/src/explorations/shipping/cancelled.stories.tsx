@@ -71,7 +71,7 @@ export const CleanupConfirmation: Story = {
       await waitFor(() => within(document.body).getByRole('dialog', { name: 'Clean up ACME-12?' })),
     )
     const kept = within(dialog.getByRole('region', { name: 'Kept by the guard' }))
-    await expect(kept.getByText(/#18 and #22 are still open/)).toBeVisible()
+    await waitFor(() => expect(kept.getByText(/#18 and #22 are still open/)).toBeVisible())
     await expect(
       within(dialog.getByRole('region', { name: 'Removed' })).getAllByRole('listitem'),
     ).toHaveLength(3)

@@ -155,7 +155,9 @@ export const StopDelivery: Story = {
     const dialog = await waitFor(() =>
       within(document.body).getByRole('dialog', { name: 'Stop the delivery of ACME-12?' }),
     )
-    await expect(within(dialog).getByText(/What is delivered stays delivered/)).toBeVisible()
+    await waitFor(() =>
+      expect(within(dialog).getByText(/What is delivered stays delivered/)).toBeVisible(),
+    )
     await userEvent.click(within(dialog).getByRole('button', { name: 'Stop delivery' }))
     await expect(args.onStopDelivery).toHaveBeenCalledOnce()
     await waitFor(() =>
