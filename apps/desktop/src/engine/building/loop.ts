@@ -18,7 +18,6 @@
  *   committed with the user's identity, as an action with its intent and outcome.
  */
 
-import { realpathSync } from 'node:fs'
 import { posix } from 'node:path'
 
 import {
@@ -78,6 +77,8 @@ import {
 } from './attempts.ts'
 import { checkAttempt } from './checks.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
+import { OutsideChanges } from './outside.ts'
+import { fileOf } from './place.ts'
 import { type ChangedFile, Snapshots } from './snapshots.ts'
 import {
   type AttemptFile,
@@ -131,55 +132,12 @@ export interface LoopParts {
   readonly ran: (building: BuildingRow) => Effect.Effect<void>
 }
 
+export { fileOf, inRepository } from './place.ts'
+
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
 const placeOfBase = (base: BuildingBase) => ({ name: base.repository, folder: base.folder })
-
-/** A folder as the file tools resolve paths: its real path, or as written when it is gone. */
-const realFolder = (folder: string): string => {
-  try {
-    return realpathSync.native(folder)
-  } catch {
-    return folder
-  }
-}
-
-/**
- * A path of a repository of the Workspace, or null when it is in none. Both sides are real paths;
- * on Windows the case of their letters does not tell two paths apart.
- */
-export const inRepository = (
-  repositories: ReadonlyArray<{ readonly repository: string; readonly folder: string }>,
-  resolved: string,
-  platform: NodeJS.Platform = process.platform,
-): { readonly repository: string; readonly path: string } | null => {
-  const separator = platform === 'win32' ? '\\' : '/'
-  const folded = (path: string) => (platform === 'win32' ? path.toLowerCase() : path)
-  const at = folded(resolved)
-  const found = repositories
-    .toSorted((a, b) => b.folder.length - a.folder.length)
-    .find((one) => at.startsWith(`${folded(one.folder)}${separator}`))
-  return found === undefined
-    ? null
-    : {
-        repository: found.repository,
-        path: resolved
-          .slice(found.folder.length + 1)
-          .split(separator)
-          .join('/'),
-      }
-}
-
-/** A resolved path in a repository of the Building, or null. */
-export const fileOf = (building: BuildingRow, resolved: string) =>
-  inRepository(
-    basesOf(building).map((base) => ({
-      repository: base.repository,
-      folder: realFolder(base.folder),
-    })),
-    resolved,
-  )
 
 /** The tasks a lineage runs now, in the plan's order. */
 export const runningOf = (tasks: ReadonlyArray<TaskNow>, lineage: string) =>
@@ -383,7 +341,7 @@ export const buildingLoop = (parts: LoopParts) => {
       const name = asked.command?.name ?? asked.line
       const watchId = crypto.randomUUID()
       const context = yield* Effect.context<
-        Database | DomainEvents | Secrets | Snapshots | SessionPost
+        Database | DomainEvents | Secrets | Snapshots | SessionPost | OutsideChanges
       >()
       // One at a time: the launch's snapshots and the finish never cross.
       const turn = yield* Semaphore.make(1)
@@ -429,6 +387,13 @@ export const buildingLoop = (parts: LoopParts) => {
           )
         }
         yield* hold('locked')
+        // What the user changed there before it runs is recorded first, with its content (#148).
+        yield* Effect.forEach(
+          repositories,
+          (base) =>
+            OutsideChanges.use((outside) => outside.compare(building.missionId, base.repository)),
+          { discard: true },
+        )
         yield* Semaphore.withPermits(
           turn,
           1,
@@ -650,6 +615,25 @@ export const buildingLoop = (parts: LoopParts) => {
           'conflict',
           `${conflict.repository}/${conflict.path} was rewritten by \`${name}\` of ${task?.id ?? 'a session'}: read it again before writing.`,
         )
+      }
+      // A change outside Hemera it overwrote says so; then the Workspace is compared after it (#148).
+      const outside = yield* OutsideChanges
+      for (const { base, tree } of before) {
+        const files = changes.find((one) => one.repository === base.repository)?.files ?? []
+        if (files.length > 0) {
+          yield* outside.rewrote({
+            building,
+            repository: base.repository,
+            before: tree,
+            files,
+            command: name,
+            runId,
+            sessionId: session.id,
+            taskId: task?.id ?? null,
+            lineage: task?.runner ?? session.lineage,
+          })
+        }
+        yield* outside.compare(building.missionId, base.repository)
       }
     })
 

@@ -190,6 +190,19 @@ const tellOf = (row: EventRow): Effect.Effect<Option.Option<Told>, DatabaseError
           : Option.none(),
       )
     }
+    case 'building.base_moved': {
+      const targeted = Option.getOrElse(
+        Schema.decodeUnknownOption(Schema.Array(Schema.String))(payload['targeted']),
+        () => [],
+      )
+      return Effect.succeed(
+        Option.some<Told>({
+          subject: asMission(row),
+          tone: 'info',
+          text: `The base of ${textOf(payload, 'repository') ?? 'a repository'} moved${targeted.length === 0 ? '' : `: ${targeted.join(', ')} among the targets`}; the Building goes on`,
+        }),
+      )
+    }
     case 'need.created':
       return failedNeed(row)
     default:
@@ -203,6 +216,7 @@ const ALWAYS_TOLD = [
   'mission.unblocked',
   'planning.triaged',
   'planning.wave_asked',
+  'building.base_moved',
 ] as const
 
 /** The types of event that can be told at all: the rest is never read. */
