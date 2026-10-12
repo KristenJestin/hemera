@@ -37,8 +37,8 @@ export type ProofPhase = typeof ProofPhase.Type
 
 /**
  * Where a scenario's proof stands in a Building. Automated: waiting for its red, its red recorded,
- * held by a need, not reproducible, green, or to re-run (its green is stale). Verified by hand: to
- * verify, validated, refused.
+ * held by a need, not reproducible, green, or to re-run (its green is stale); not proven when the
+ * user ended the Building without it. Verified by hand: to verify, validated, refused.
  */
 export const SCENARIO_PROOF_STATES = [
   'waiting_red',
@@ -47,6 +47,7 @@ export const SCENARIO_PROOF_STATES = [
   'not_reproducible',
   'green',
   'to_rerun',
+  'not_proven',
   'to_verify',
   'validated',
   'refused',
