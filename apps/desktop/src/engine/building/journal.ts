@@ -1,6 +1,6 @@
 /**
  * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
- * (#141): each the projection of the domain event written in the same transaction as what it
+ * (#141) with its attempts and their verdicts (#142): each the projection of the domain event written in the same transaction as what it
  * records.
  */
 
@@ -46,6 +46,21 @@ const lineOf =
 
 const byHemera = (): MemoryAuthor => HEMERA
 const byUser = (): MemoryAuthor => USER
+
+/** What an attempt is on: a task, or a requirement's or the end's checks. */
+const subjectOf = (payload: EventPayload): string => {
+  const task = stringOf(payload, 'task')
+  if (task !== '') return task
+  const subject = stringOf(payload, 'subject')
+  return stringOf(payload, 'scope') === 'end' ? 'The end checks' : `The checks of ${subject}`
+}
+
+const redSaid = (payload: EventPayload): string => {
+  const check = stringOf(payload, 'check')
+  const place = stringOf(payload, 'place')
+  const where = place === '' ? 'the Workspace root' : place
+  return `${subjectOf(payload)} is red${check === '' ? '' : `: ${check} failed in ${where}`}.`
+}
 
 const checkStartedSaid = (payload: EventPayload): string => {
   const blocked = stringsOf(payload, 'blockedBy')
@@ -179,6 +194,57 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       const amendment = stringOf(payload, 'amendment')
       return `Decided: ${stringOf(payload, 'answer')}.${amendment === '' ? '' : ` The plan changed: ${amendment}`}`
     }),
+  ],
+  [
+    'building.attempt_opened',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${subjectOf(payload)}: attempt ${String(numberOf(payload, 'attempt'))} opened after a red.`,
+    ),
+  ],
+  ['building.attempt_red', lineOf(byHemera, redSaid)],
+  ['building.attempt_green', lineOf(byHemera, (payload) => `${subjectOf(payload)} is green.`)],
+  [
+    'building.three_reds',
+    lineOf(
+      byHemera,
+      (payload) => `${subjectOf(payload)} is red for the third time: Hemera asks the user.`,
+    ),
+  ],
+  [
+    'building.write_conflict',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'file')} was rewritten by \`${stringOf(payload, 'command')}\` of ${stringOf(payload, 'byTask')} while ${stringOf(payload, 'heldBy') || 'another task'} held it.`,
+    ),
+  ],
+  [
+    'building.write_waiting',
+    lineOf(agentOrHemera, (payload) => {
+      const task = stringOf(payload, 'task')
+      return `A write waited ${String(numberOf(payload, 'seconds'))} s for \`${stringOf(payload, 'command')}\`${task === '' ? '' : ` (${task})`}, which writes in ${stringOf(payload, 'repository')}.`
+    }),
+  ],
+  [
+    'building.indeterminate',
+    lineOf(byHemera, (payload) => {
+      const task = stringOf(payload, 'task')
+      const told =
+        payload['asked'] === true
+          ? 'the user is asked whether it ran'
+          : 'its runner is told to check the real state'
+      return `\`${stringOf(payload, 'command')}\`${task === '' ? '' : ` of ${task}`} was cut by a restart and may have run: ${told}.`
+    }),
+  ],
+  [
+    'building.commit',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'task')} committed in ${stringOf(payload, 'repository')}: ${stringOf(payload, 'commit').slice(0, 12)}.`,
+    ),
   ],
   ['building.resumed', lineOf(byHemera, () => 'The Building resumed after a restart.')],
   ['building.tasks_done', lineOf(byHemera, () => 'Every task of the plan is done or skipped.')],

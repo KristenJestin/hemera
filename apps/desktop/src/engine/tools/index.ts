@@ -72,9 +72,11 @@ import {
   type SessionNotes,
   type SetupDesk,
   type Verdicts,
+  type WriteAttribution,
   noGateGuards,
   noSessionNotes,
   noSetupDesk,
+  noWriteAttribution,
 } from './ports.ts'
 import { ToolServer, toolServerLayer } from './server.ts'
 import type { ProjectServices } from '../repositories.ts'
@@ -92,6 +94,8 @@ export interface ToolsParts {
   readonly permissionRequests?: Layer.Layer<PermissionRequests>
   readonly sensitivePlaces?: Layer.Layer<SensitivePlaces>
   readonly guards?: Layer.Layer<GateGuards>
+  /** Where a mission's writes are attributed to their task (#142); nowhere otherwise. */
+  readonly attribution?: Layer.Layer<WriteAttribution>
   /** Step 5 of the order of decision: Jev, through Hemera Auto, otherwise. */
   readonly judge?: Layer.Layer<Judge>
   /**
@@ -271,6 +275,7 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
         parts.verdicts ?? decisionOrderLayer({ log, home, platform }),
         parts.permissionRequests ?? permissionRequestsLayer({ log, home, platform }),
         parts.guards ?? noGateGuards,
+        parts.attribution ?? noWriteAttribution,
         parts.notes ?? noSessionNotes,
         parts.setup ?? noSetupDesk,
         effectfulActionsLayer,

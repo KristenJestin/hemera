@@ -842,6 +842,23 @@ const ReportNeed = Schema.Struct({
     'Ask the user for what is not one task’s: Hemera checks the request and creates the need.',
 })
 
+const NeedPropose = Schema.Struct({
+  need: Bounded(64, 'The error need you were asked to fill, by its id.'),
+  options: Schema.Array(
+    Schema.Struct({
+      label: NeedOption,
+      detail: Bounded(MAX_REQUESTED_TEXT, 'What this option changes, and what it assumes.'),
+    }),
+  )
+    .check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_REQUESTED_OPTIONS))
+    .annotate({ description: 'What you propose to do next, each a different assumption.' }),
+  recommended: NeedOption.annotate({ description: 'The label of the option you recommend.' }),
+  reason: Bounded(MAX_REQUESTED_TEXT, 'Why you recommend it.'),
+}).annotate({
+  description:
+    'Fill what is proposed on an error need Hemera asked you to fill after three reds on a task: the options, the one you recommend and why. Refused for any other need.',
+})
+
 const BuildSummary = Schema.Struct({
   text: Bounded(8000, 'What was built, what was not and why, every failure said.'),
 }).annotate({
@@ -1414,6 +1431,14 @@ export const TOOLS = {
     input: ReportNeed,
     label: { label: 'Report a need', mark: 'report-need', doing: 'Asking the user' },
   }),
+  need_propose: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: NeedPropose,
+    label: { label: 'Propose a way on', mark: 'need-propose', doing: 'Proposing what to try' },
+  }),
   build_summary: tool({
     roles: ['builder'],
     gate: 'workflow',
@@ -1528,6 +1553,7 @@ export const TOOL_NAMES = [
   'task_finished',
   'task_blocked',
   'report_need',
+  'need_propose',
   'build_summary',
   'helper_launch',
   'helper_read',

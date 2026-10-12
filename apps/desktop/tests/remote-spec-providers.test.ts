@@ -30,13 +30,20 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { createProject } from '../src/engine/projects.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
 import { githubProvider } from '../src/engine/tickets/github.ts'
-import { descriptionFingerprint } from '../src/engine/tickets/provider.ts'
+import { descriptionFingerprint, overwrittenEdit } from '../src/engine/tickets/provider.ts'
 import { saveJiraToken } from '../src/engine/tickets/jira-tokens.ts'
 import { providerOf } from '../src/engine/tickets/search.ts'
 import { addJira } from '../src/engine/tickets/store.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { type GhRule, fakeGh, included } from './fake-gh.ts'
-import { type FakeIssue, type FakeJira, type JiraRule, adf, fakeJira } from './fake-jira.ts'
+import {
+  type FakeHistory,
+  type FakeIssue,
+  type FakeJira,
+  type JiraRule,
+  adf,
+  fakeJira,
+} from './fake-jira.ts'
 import { repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -273,6 +280,89 @@ describe('GitHub: the body goes on the standard input of gh api, never in an arg
   })
 })
 
+describe('GitHub: the edit history of an issue (#207)', () => {
+  test('it reads userContentEdits over GraphQL: each edit with its date, its editor and the body it left', async () => {
+    const edits = included(
+      JSON.stringify({
+        data: {
+          repository: {
+            issue: {
+              userContentEdits: {
+                nodes: [
+                  {
+                    editedAt: '2026-10-01T10:05:00Z',
+                    editor: { login: 'hemera-account' },
+                    diff: '## Why\nThe Spec.',
+                  },
+                  { editedAt: '2026-10-01T10:03:00Z', editor: { login: 'grace' }, diff: 'Hers.' },
+                  { editedAt: '2026-10-01T09:00:00Z', editor: null, diff: null },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+    const { gh, run } = withGithub([{ when: ['userContentEdits'], stdout: edits }], (provider) =>
+      Effect.andThen(provider.read(reference('acme/shop#41')), () =>
+        provider.edits(reference('acme/shop#41')),
+      ),
+    )
+    const exit = await run
+    expect(Exit.isSuccess(exit) && exit.value).toEqual([
+      { at: '2026-10-01T10:05:00Z', author: 'hemera-account', description: '## Why\nThe Spec.' },
+      { at: '2026-10-01T10:03:00Z', author: 'grace', description: 'Hers.' },
+      { at: '2026-10-01T09:00:00Z', author: null, description: '' },
+    ])
+    const asked = gh.calls().at(-1)?.args ?? []
+    expect(asked.slice(0, 2)).toEqual(['api', 'graphql'])
+    expect(asked.some((arg) => arg.includes('userContentEdits(first: 100)'))).toBe(true)
+    expect(asked).toContain('number=41')
+  })
+})
+
+describe('Which edit a write overwrote: told by the tracker’s dates, never its text (#207)', () => {
+  const edit = (at: string, author: string) => ({ at, author, description: author })
+  const READ = '2026-10-01T10:00:00Z'
+  const BACK = '2026-10-01T10:05:00Z'
+
+  test('an edit between the read and Hemera’s write is the one lost, whatever order the history comes in', () => {
+    const history = [
+      edit('2026-10-01T10:05:00Z', 'hemera'),
+      edit('2026-10-01T09:00:00Z', 'ada'),
+      edit('2026-10-01T10:02:00Z', 'grace'),
+      edit('2026-10-01T10:03:00Z', 'linus'),
+    ]
+    expect(overwrittenEdit(history, READ, BACK)?.author).toBe('linus')
+    expect(overwrittenEdit(history.toReversed(), READ, BACK)?.author).toBe('linus')
+  })
+
+  test('an edit before the read, or after Hemera’s write, is none', () => {
+    expect(
+      overwrittenEdit(
+        [
+          edit('2026-10-01T09:00:00Z', 'ada'),
+          edit('2026-10-01T10:05:00Z', 'hemera'),
+          edit('2026-10-01T10:09:00Z', 'grace'),
+        ],
+        READ,
+        BACK,
+      ),
+    ).toBeNull()
+    expect(overwrittenEdit([], READ, BACK)).toBeNull()
+  })
+
+  test('Jira’s dates with an offset are compared as instants', () => {
+    expect(
+      overwrittenEdit(
+        [edit('2026-10-01T10:02:00.000Z', 'grace'), edit('2026-10-01T10:04:00.000Z', 'hemera')],
+        '2026-10-01T12:00:00.000+02:00',
+        '2026-10-01T12:04:00.000+02:00',
+      )?.author,
+    ).toBe('grace')
+  })
+})
+
 // --- Jira -----------------------------------------------------------------------------------------
 
 const TOKEN = 'jira-test-token-4471c0de'
@@ -292,6 +382,32 @@ const SHOP_7 = (deployment: 'cloud' | 'datacenter'): FakeIssue => ({
   comments: [],
 })
 
+/** SHOP-7's changelog: a label, then Grace's description, then Hemera's. */
+const CHANGELOG: ReadonlyArray<FakeHistory> = [
+  {
+    id: '100',
+    author: 'Ada',
+    created: '2026-10-01T11:00:00.000+0200',
+    items: [{ field: 'labels', fromString: '', toString: 'export' }],
+  },
+  {
+    id: '101',
+    author: 'Grace',
+    created: '2026-10-01T12:01:00.000+0200',
+    items: [
+      { field: 'description', fromString: 'h2. Why', toString: 'h2. Why\nGrace wrote this.' },
+    ],
+  },
+  {
+    id: '102',
+    author: 'Hemera',
+    created: '2026-10-01T12:02:00.000+0200',
+    items: [
+      { field: 'description', fromString: 'h2. Why\nGrace wrote this.', toString: 'h1. Spec' },
+    ],
+  },
+]
+
 const withJira = async <A, E>(
   deployment: 'cloud' | 'datacenter',
   program: (
@@ -299,13 +415,15 @@ const withJira = async <A, E>(
     expected: { fingerprint: string },
   ) => Effect.Effect<A, E>,
   rules: ReadonlyArray<JiraRule> = [],
+  changelogPage = 100,
 ) => {
   const server = await fakeJira({
     deployment,
     email: EMAIL,
     token: TOKEN,
-    issues: [SHOP_7(deployment)],
+    issues: [{ ...SHOP_7(deployment), changelog: CHANGELOG }],
     rules,
+    changelogPage,
   })
   servers.push(server)
   const exit = await commandsEngine(data, { jira: { open }, secrets: secretsRegistry() })(
@@ -438,5 +556,39 @@ describe('Jira: the description replaced, ADF on Cloud and wiki markup on Data C
     expect(failure?.message).toBe(
       "The Spec is too long for SHOP-7's description (32767 characters at most): it stays in Hemera.",
     )
+  })
+})
+
+describe('Jira: the description edits of an issue’s changelog (#207)', () => {
+  const EDITS = [
+    { at: '2026-10-01T10:01:00.000Z', author: 'Grace', description: '## Why\nGrace wrote this.' },
+    { at: '2026-10-01T10:02:00.000Z', author: 'Hemera', description: '# Spec' },
+  ]
+
+  test('cloud: the changelog paged from the oldest, only its description items, dates as instants', async () => {
+    const { server, exit } = await withJira(
+      'cloud',
+      (provider) => provider.edits(reference('SHOP-7')),
+      [],
+      2,
+    )
+    expect(Exit.isSuccess(exit) && exit.value).toEqual(EDITS)
+    const pages = server.requests().filter((one) => one.path.endsWith('/changelog'))
+    expect(pages.map((one) => [one.path, one.query])).toEqual([
+      ['/rest/api/3/issue/SHOP-7/changelog', 'startAt=0&maxResults=100'],
+      ['/rest/api/3/issue/SHOP-7/changelog', 'startAt=2&maxResults=100'],
+    ])
+  })
+
+  test('datacenter: the issue read with expand=changelog, its histories', async () => {
+    const { server, exit } = await withJira('datacenter', (provider) =>
+      provider.edits(reference('SHOP-7')),
+    )
+    expect(Exit.isSuccess(exit) && exit.value).toEqual(EDITS)
+    const asked = server.requests().at(-1)
+    expect([asked?.path, asked?.query]).toEqual([
+      '/rest/api/2/issue/SHOP-7',
+      'fields=updated&expand=changelog',
+    ])
   })
 })

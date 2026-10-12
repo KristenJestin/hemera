@@ -1111,9 +1111,13 @@ export const indeterminateRun = (action: EffectfulAction) =>
 
 /**
  * The rules of the actions with an effect outside the database: this version's, and a run cut
- * short on a shared resource handed to `indeterminateRun`.
+ * short handed first to `first` (a building mission's, #142), then on a shared resource to
+ * `indeterminateRun`.
  */
-export const resourceActionRules = (log: Log) =>
+export const resourceActionRules = (
+  log: Log,
+  first: (action: EffectfulAction) => Effect.Effect<boolean> = () => Effect.succeed(false),
+) =>
   Layer.effect(
     ActionRules,
     Effect.map(Effect.context<Database | DomainEvents | Secrets>(), (context) => ({
@@ -1122,7 +1126,9 @@ export const resourceActionRules = (log: Log) =>
         [
           'command.run',
           (action: EffectfulAction) =>
-            indeterminateRun(action).pipe(
+            Effect.flatMap(first(action), (taken) =>
+              taken ? Effect.void : indeterminateRun(action),
+            ).pipe(
               Effect.provide(context),
               Effect.catchCause((cause) =>
                 Effect.sync(() =>
