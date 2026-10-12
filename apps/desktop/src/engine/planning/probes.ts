@@ -105,6 +105,7 @@ import { answered, failure, refusal } from '../tools/files.ts'
 import { type Mutation, mutate } from '../transaction.ts'
 import { type WorkspaceServices, createWorkspace, getWorkspace, worktreeOf } from '../workspaces.ts'
 import { ProbeCleanup, ProbeDesk, ProbeWipeFailed, type ProbeWork } from './probe-desk.ts'
+import { ProbeSteps, type SteppedProbe } from './probe-steps.ts'
 import {
   PROBES_FOLDER,
   type ProbeBaseKept,
@@ -456,6 +457,7 @@ type Needs =
   | ExclusiveResources
   | ProbeCleanup
   | ProbeDesk
+  | ProbeSteps
   | AgentRuntime
   | SessionPost
   | AutomationGate
@@ -477,6 +479,7 @@ export const probesLayer = (settings: ProbesSettings) =>
       const cleanup = yield* ProbeCleanup
       const runs = yield* Runs
       const secrets = yield* Secrets
+      const steps = yield* ProbeSteps
 
       const locks = new Map<string, Semaphore.Semaphore>()
       /** One Probe's changes, one after the other. */
@@ -1170,6 +1173,7 @@ export const probesLayer = (settings: ProbesSettings) =>
             )
             // 1. Its whole process tree: its sessions and every run of its Workspace.
             yield* stopProcesses(row, 'its Probe is wiped')
+            yield* steps.forget(row.id)
             const done = yield* Effect.gen(function* () {
               // 2. The Project's Cleanup steps for its folder, never the Closing.
               yield* cleanup.run({ probeId: row.id, missionId: row.missionId, folder: row.folder })
@@ -1323,11 +1327,29 @@ export const probesLayer = (settings: ProbesSettings) =>
         ),
         Effect.forkScoped,
       )
+      // What a running Probe is doing (#206): the title of its session's latest tool call, masked.
+      const probeOfSession = new Map<string, SteppedProbe | null>()
+      const stepped = (sessionId: string, title: string) =>
+        Effect.gen(function* () {
+          let probe = probeOfSession.get(sessionId)
+          if (probe === undefined) {
+            const session = yield* getSession(sessionId)
+            const row = session.role === 'probe' ? yield* probeOfLineage(session.lineage) : null
+            probe = row === null ? null : { probeId: row.id, missionId: row.missionId }
+            probeOfSession.set(sessionId, probe)
+          }
+          if (probe !== null) yield* steps.set(probe, secrets.mask(title))
+        })
       const runtime = yield* AgentRuntime
       yield* runtime.activity.pipe(
         Stream.filter(({ event }) => !event.replay),
-        Stream.runForEach(({ sessionId }) =>
-          spoke(sessionId).pipe(
+        Stream.runForEach(({ sessionId, event }) =>
+          Effect.gen(function* () {
+            yield* spoke(sessionId)
+            if (Predicate.isTagged(event, 'ToolCall') && event.call.title !== null) {
+              yield* stepped(sessionId, event.call.title)
+            }
+          }).pipe(
             run,
             Effect.catchCause((cause) => log(`a sign of life was not read: ${String(cause)}`)),
           ),
