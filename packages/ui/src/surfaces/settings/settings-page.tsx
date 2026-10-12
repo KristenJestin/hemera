@@ -61,17 +61,22 @@ const ROOM = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
 
 const SCROLL = 'flex min-h-0 flex-1 flex-col overflow-auto'
 
-const SPLIT = 'flex min-w-0 items-start gap-8'
+/** On a phone-wide window the list stands above the section; wider, beside it. */
+const SPLIT = 'flex min-w-0 flex-col gap-4 md:flex-row md:items-start md:gap-8'
 
-/** The list of sections: it stays in sight while the section beside it scrolls. */
-const NAV = 'sticky top-0 isolate flex w-settings-nav shrink-0 flex-col gap-0.5'
+/**
+ * The list of sections: it stays in sight while the section beside it scrolls. On a phone-wide
+ * window it is one line above the section, scrolled sideways.
+ */
+const NAV =
+  'relative isolate flex shrink-0 gap-0.5 overflow-x-auto md:sticky md:top-0 md:w-settings-nav md:flex-col md:overflow-visible'
 
 /**
  * A section's entry: faint under the hand — a tint and the text's own colour — and, chosen, clearly
  * apart: the primary's quiet fill under it, its words in the primary's ink and heavier.
  */
 const ITEM =
-  'flex h-control-sm w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground outline-none select-none hover:tinted hover:text-foreground focus-ring hover-motion aria-[current=page]:font-medium aria-[current=page]:text-primary-muted-foreground aria-[current=page]:hover:shadow-none'
+  'flex h-control-sm w-auto shrink-0 items-center gap-2 rounded-md px-2 text-left md:w-full md:min-w-0 md:shrink text-sm text-muted-foreground outline-none select-none hover:tinted hover:text-foreground focus-ring hover-motion aria-[current=page]:font-medium aria-[current=page]:text-primary-muted-foreground aria-[current=page]:hover:shadow-none'
 
 const ITEM_ICON = 'flex size-icon-md shrink-0 items-center justify-center'
 
