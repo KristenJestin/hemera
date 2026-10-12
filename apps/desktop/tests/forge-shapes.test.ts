@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import { COMMAND_SHAPES, shapeOf } from '../src/engine/forges/shapes.ts'
+import { COMMAND_SHAPES, aimsAt, shapeOf } from '../src/engine/forges/shapes.ts'
 
 /** One allowed command per CT-50 write the runner runs, as its operation names it. */
 const ALLOWED: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<string>]> = [
@@ -17,7 +17,7 @@ const ALLOWED: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<strin
       'pr',
       'create',
       '--repo',
-      'acme/shop',
+      'github.com/acme/shop',
       '--base',
       'main',
       '--head',
@@ -31,16 +31,20 @@ const ALLOWED: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<strin
   [
     'gh',
     'pr.edit',
-    ['pr', 'edit', '7', '--repo', 'acme/shop', '--title', 'Export', '--body-file', '-'],
+    ['pr', 'edit', '7', '--repo', 'github.com/acme/shop', '--title', 'Export', '--body-file', '-'],
   ],
-  ['gh', 'pr.attach', ['pr', 'edit', '7', '--repo', 'acme/shop', '--attach', 'shot.png#The list']],
-  ['gh', 'pr.merge', ['pr', 'merge', '7', '--repo', 'acme/shop', '--squash']],
+  [
+    'gh',
+    'pr.attach',
+    ['pr', 'edit', '7', '--repo', 'github.com/acme/shop', '--attach', 'shot.png#The list'],
+  ],
+  ['gh', 'pr.merge', ['pr', 'merge', '7', '--repo', 'github.com/acme/shop', '--squash']],
   [
     'gh',
     'workflow.run',
-    ['workflow', 'run', 'release.yml', '--repo', 'acme/shop', '--ref', 'main'],
+    ['workflow', 'run', 'release.yml', '--repo', 'github.com/acme/shop', '--ref', 'main'],
   ],
-  ['gh', 'run.rerun', ['run', 'rerun', '123', '--repo', 'acme/shop']],
+  ['gh', 'run.rerun', ['run', 'rerun', '123', '--repo', 'github.com/acme/shop']],
   [
     'gh',
     'deployment.approve',
@@ -61,6 +65,10 @@ const ALLOWED: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<strin
     [
       'pr',
       'create',
+      '--context',
+      'oss',
+      '--workspace',
+      'acme-team',
       '--repo',
       'shop',
       '--source',
@@ -73,9 +81,43 @@ const ALLOWED: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<strin
       'Why',
     ],
   ],
-  ['bkt', 'pr.edit', ['pr', 'edit', '7', '--repo', 'shop', '--title', 'Export']],
-  ['bkt', 'pr.merge', ['pr', 'merge', '7', '--repo', 'shop', '--close-source=false']],
-  ['bkt', 'pipeline.run', ['pipeline', 'run', '--repo', 'shop', '--ref', 'main']],
+  [
+    'bkt',
+    'pr.edit',
+    ['pr', 'edit', '7', '--context', 'work', '--project', 'PROJ', '--repo', 'shop', '--title', 'X'],
+  ],
+  [
+    'bkt',
+    'pr.merge',
+    [
+      'pr',
+      'merge',
+      '7',
+      '--context',
+      'oss',
+      '--workspace',
+      'acme-team',
+      '--repo',
+      'shop',
+      '--close-source=false',
+    ],
+  ],
+  [
+    'bkt',
+    'pipeline.run',
+    [
+      'pipeline',
+      'run',
+      '--context',
+      'oss',
+      '--workspace',
+      'acme-team',
+      '--repo',
+      'shop',
+      '--ref',
+      'main',
+    ],
+  ],
 ]
 
 describe('Every write shape is closed', () => {
@@ -107,12 +149,32 @@ describe('Every write shape is closed', () => {
 
   test('a body is read from the standard input only, never from a local file', () => {
     expect(
-      shapeOf('gh', ['pr', 'edit', '7', '--repo', 'acme/shop', '--body-file', 'notes.md']),
+      shapeOf('gh', [
+        'pr',
+        'edit',
+        '7',
+        '--repo',
+        'github.com/acme/shop',
+        '--body-file',
+        'notes.md',
+      ]),
     ).toBeNull()
   })
 
   test('a merge keeps the source branch on Bitbucket: --close-source=false is required', () => {
-    expect(shapeOf('bkt', ['pr', 'merge', '7', '--repo', 'shop'])).toBeNull()
+    expect(
+      shapeOf('bkt', [
+        'pr',
+        'merge',
+        '7',
+        '--context',
+        'oss',
+        '--workspace',
+        'acme-team',
+        '--repo',
+        'shop',
+      ]),
+    ).toBeNull()
   })
 
   test('a required flag is required', () => {
@@ -128,5 +190,58 @@ describe('Every write shape is closed', () => {
     expect(approve('repos/acme/shop/actions/runs/1/pending_deployments')?.operation).toBe(
       'deployment.approve',
     )
+  })
+})
+
+describe('A write names its forge: the bkt context, the gh host', () => {
+  const BKT_CREATE = ['pr', 'create', '--source', 'feat/x', '--target', 'main', '--title', 'X']
+
+  test('a bkt write without --context is refused: bkt would send it to its active context', () => {
+    expect(shapeOf('bkt', [...BKT_CREATE, '--workspace', 'acme-team', '--repo', 'shop'])).toBeNull()
+    expect(
+      shapeOf('bkt', [
+        'pipeline',
+        'run',
+        '--workspace',
+        'acme-team',
+        '--repo',
+        'shop',
+        '--ref',
+        'main',
+      ]),
+    ).toBeNull()
+  })
+
+  test('a bkt write names its workspace or its project, one of the two', () => {
+    const place = ['--context', 'oss', '--repo', 'shop']
+    expect(shapeOf('bkt', [...BKT_CREATE, ...place])).toBeNull()
+    expect(
+      shapeOf('bkt', [...BKT_CREATE, ...place, '--workspace', 'acme-team', '--project', 'PROJ']),
+    ).toBeNull()
+    expect(shapeOf('bkt', [...BKT_CREATE, ...place, '--project', 'PROJ'])?.operation).toBe(
+      'pr.create',
+    )
+    expect(
+      shapeOf('bkt', ['pipeline', 'run', '--context', 'oss', '--repo', 'shop', '--ref', 'main']),
+    ).toBeNull()
+  })
+
+  test('a gh write names its repository with its host: never a bare owner/repo', () => {
+    expect(shapeOf('gh', ['pr', 'merge', '7', '--repo', 'acme/shop', '--squash'])).toBeNull()
+    expect(
+      shapeOf('gh', ['run', 'rerun', '1', '--repo', 'git.acme.test:8443/acme/shop'])?.operation,
+    ).toBe('run.rerun')
+  })
+
+  test('a gh command aims at its target host only: an Enterprise repository never goes to github.com', () => {
+    const merge = (repo: string) => ['pr', 'merge', '7', '--repo', repo, '--squash']
+    expect(aimsAt('gh', merge('git.acme.test/acme/shop'), 'git.acme.test')).toBe(true)
+    expect(aimsAt('gh', merge('github.com/acme/shop'), 'git.acme.test')).toBe(false)
+    expect(aimsAt('gh', merge('git.acme.test/acme/shop'), 'github.com')).toBe(false)
+    expect(aimsAt('gh', ['auth', 'status', '--hostname', 'github.com'], 'git.acme.test')).toBe(
+      false,
+    )
+    expect(aimsAt('gh', ['auth', 'status', '--hostname', 'GitHub.com'], 'github.com')).toBe(true)
+    expect(aimsAt('gh', ['--version'], 'git.acme.test')).toBe(true)
   })
 })

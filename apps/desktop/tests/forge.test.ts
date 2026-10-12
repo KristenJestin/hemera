@@ -555,7 +555,15 @@ describe('The registered write shapes equal CT-50’s list', () => {
             forge: 'github',
             host: 'github.com',
             projectId,
-            args: ['workflow', 'run', 'release.yml', '--repo', 'acme/shop', '--ref', 'main'],
+            args: [
+              'workflow',
+              'run',
+              'release.yml',
+              '--repo',
+              'github.com/acme/shop',
+              '--ref',
+              'main',
+            ],
           })
           return yield* listActions()
         }),
@@ -613,7 +621,7 @@ describe('What a CLI prints and the command it ran are masked', () => {
                   'pr',
                   'create',
                   '--repo',
-                  'acme/shop',
+                  'github.com/acme/shop',
                   '--base',
                   'main',
                   '--head',
@@ -876,5 +884,169 @@ describe('Forcing a forge is stored and told', () => {
       { shop: 'https://git.acme.test/scm/proj/shop.git' },
     )
     expect(refused).toBeInstanceOf(ForgeRefused)
+  })
+})
+
+describe('A bkt write goes to the context of the repository’s host, never to the active one', () => {
+  const DC = 'https://git.acme.test:7990'
+  const TWO = { api: REMOTES.api, dc: 'ssh://git@git.acme.test:7999/proj/dc.git' }
+  /** A pull request created through the port, with the place the target names. */
+  const create = (repositoryId: string) =>
+    Effect.flatMap(forge, (port) =>
+      port.operate(repositoryId, (target, run) =>
+        run([
+          'pr',
+          'create',
+          ...target.place,
+          '--source',
+          'feat/x',
+          '--target',
+          'main',
+          '--title',
+          'X',
+        ]),
+      ),
+    )
+
+  test('Cloud and Data Center configured, Cloud active: the Data Center write names its own context', async () => {
+    const fake = fakeForge(bktReady([BKT_CLOUD, { base: DC, kind: 'dc' }]))
+    await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(
+            projectId,
+            repository('dc'),
+            'bitbucket-datacenter',
+            'git.acme.test',
+          )
+          yield* create(repository('dc'))
+          yield* create(repository('api'))
+        }),
+      TWO,
+    )
+    const writes = fake.calls().filter((call) => call.args[0] === 'pr')
+    expect(writes.map((call) => call.args.slice(2, 8))).toEqual([
+      ['--context', 'work', '--project', 'PROJ', '--repo', 'dc'],
+      ['--context', 'oss', '--workspace', 'acme-team', '--repo', 'api'],
+    ])
+  })
+
+  test.each([
+    ['no context was ever made', []],
+    [
+      'the only context is another host’s',
+      [{ name: 'work', host: 'git.acme.test:7990', active: true }],
+    ],
+  ])('a host signed in but %s: not ready, with the context to create', async (_case, contexts) => {
+    const fake = fakeForge(bktReady([BKT_CLOUD, { base: DC, kind: 'dc' }], contexts))
+    const statuses = await withForge(
+      fake,
+      ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+      { api: REMOTES.api },
+    )
+    expect(byPath(statuses)['api']).toMatchObject({
+      state: 'signed-out',
+      fix: 'bkt context create acme-team-bitbucket.org --host api.bitbucket.org --workspace acme-team',
+    })
+  })
+
+  test('a Data Center host without its context gives the project to create it with', async () => {
+    const fake = fakeForge(bktReady([{ base: DC, kind: 'dc' }], []))
+    const statuses = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.flatMap(forge, (port) =>
+          port.setForced(projectId, repository('dc'), 'bitbucket-datacenter', 'git.acme.test'),
+        ),
+      { dc: TWO.dc },
+    )
+    expect(byPath(statuses)['dc']).toMatchObject({
+      state: 'signed-out',
+      fix: 'bkt context create proj-git.acme.test --host git.acme.test:7990 --project PROJ',
+    })
+  })
+})
+
+describe('A gh write names its repository with its host', () => {
+  test('the target places a GitHub Enterprise repository on its own host', async () => {
+    const fake = fakeForge([
+      ...ghReady('git.acme.test'),
+      { cli: 'gh', when: ['pr', 'merge'], stdout: 'merged\n' },
+    ])
+    await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(projectId, repository('shop'), 'github', 'git.acme.test')
+          yield* port.operate(repository('shop'), (target, run) =>
+            run(['pr', 'merge', '7', ...target.place, '--squash']),
+          )
+        }),
+      { shop: 'https://git.acme.test/acme/shop.git' },
+    )
+    const merge = fake.calls().find((call) => call.args[0] === 'pr')
+    expect(merge?.args).toEqual([
+      'pr',
+      'merge',
+      '7',
+      '--repo',
+      'git.acme.test/acme/shop',
+      '--squash',
+    ])
+  })
+
+  test('a write for an Enterprise host naming github.com is refused before spawning', async () => {
+    const fake = fakeForge(ghReady('git.acme.test'))
+    const refused = await withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flip(
+          Effect.flatMap(runner, (forgeRunner) =>
+            forgeRunner.run({
+              cli: 'gh',
+              forge: 'github',
+              host: 'git.acme.test',
+              projectId,
+              args: ['pr', 'merge', '7', '--repo', 'github.com/acme/shop', '--squash'],
+            }),
+          ),
+        ),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls()).toEqual([])
+  })
+})
+
+describe('Waiters wake on a change of state, not of its detail', () => {
+  test('two waiters on an unreachable forge whose message changes each check: a bounded number of checks', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        stderr: 'error connecting to api.github.com (attempt {call})\n',
+        code: 1,
+      },
+    ])
+    await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const first = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const second = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* Effect.sleep('2 seconds')
+          expect(first.pollUnsafe()).toBeUndefined()
+          expect(second.pollUnsafe()).toBeUndefined()
+          yield* Fiber.interruptAll([first, second])
+        }),
+      { shop: REMOTES.shop },
+    )
+    const checks = fake.calls().filter((call) => call.args[0] === 'auth').length
+    expect(checks).toBeLessThanOrEqual(4)
   })
 })

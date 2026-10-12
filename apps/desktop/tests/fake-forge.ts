@@ -21,6 +21,7 @@ export interface FakeRule {
   /** Every word must appear among the arguments. */
   readonly when: ReadonlyArray<string>
   readonly stdout?: string
+  /** `{call}` in it is replaced by the call's number. */
   readonly stderr?: string
   readonly code?: number
   /** Never answers: the call is cut at its limit. */
@@ -60,8 +61,10 @@ module.exports = (cli, args) => {
     process.exit(1)
   }
   if (rule.hang) { setInterval(() => {}, 1000); return }
-  process.stdout.write(rule.stdout ?? '')
-  process.stderr.write(rule.stderr ?? '')
+  // \`{call}\` is this call's number, for an answer that differs each time.
+  const call = String(readFileSync(process.env.FAKE_FORGE_LOG, 'utf8').split('\\n').length - 1)
+  process.stdout.write((rule.stdout ?? '').replaceAll('{call}', call))
+  process.stderr.write((rule.stderr ?? '').replaceAll('{call}', call))
   process.exitCode = rule.code ?? 0
 }
 `
@@ -171,12 +174,25 @@ export const ghSignedOut = (host = 'github.com'): ReadonlyArray<FakeRule> => [
 /** Bitbucket Cloud as bkt stores it: under the API's host, whatever URL the login was given. */
 export const BKT_CLOUD = { base: 'https://api.bitbucket.org/2.0', kind: 'cloud' } as const
 
+/** A bkt context: its name, the key of its host, and whether it is the active one. */
+export interface BktContext {
+  readonly name: string
+  readonly host: string
+  readonly active?: boolean
+}
+
 /**
  * `bkt` signed in on these hosts, at a version, as `bkt auth status --json` prints them: each host
- * keyed by the host of its base URL, port included (`HostKeyFromURL`), indented.
+ * keyed by the host of its base URL, port included (`HostKeyFromURL`), indented. Unless told, each
+ * host has a context of its own, named after its kind, the first one active.
  */
 export const bktReady = (
   hosts: ReadonlyArray<{ readonly base: string; readonly kind: 'cloud' | 'dc' }> = [BKT_CLOUD],
+  contexts: ReadonlyArray<BktContext> = hosts.map((host, at) => ({
+    name: host.kind === 'cloud' ? 'oss' : 'work',
+    host: new URL(host.base).host,
+    active: at === 0,
+  })),
 ): ReadonlyArray<FakeRule> => [
   { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\r\n' },
   {
@@ -192,10 +208,20 @@ export const bktReady = (
           auth_method: host.kind === 'cloud' ? 'basic' : 'bearer',
           token_source: 'keyring',
         })),
-        contexts: [],
+        // bkt prints null, not an empty list, when no context was ever made.
+        contexts:
+          contexts.length === 0
+            ? null
+            : contexts.map((context) => ({
+                name: context.name,
+                host: context.host,
+                active: context.active ?? false,
+              })),
       },
       null,
       2,
     ).replaceAll('\n', '\r\n')}\r\n`,
   },
+  // What a write answers: the fake records its arguments.
+  { cli: 'bkt', when: ['pr'], stdout: '{"id": 7}\r\n' },
 ]
