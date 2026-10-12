@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { findOpen } from '../../overlay-play.ts'
 import { LONG_NEVER, NEVER_LINES, neverRefusal } from './agent-settings-fixtures.ts'
 import { NeverForm, type NeverLine, NeverSection, type NeverSectionProps } from './never.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
@@ -128,7 +129,7 @@ export const Adding: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Refuse a command' }))
-    const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'Never run' })
     const field = within(dialog).getByRole('textbox', { name: 'Command' })
     await userEvent.type(field, 'pnpm publish')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
@@ -184,7 +185,7 @@ export const Focused: Story = {
     expect(canvas.getByRole('button', { name: 'Remove pnpm publish' })).toHaveFocus()
     add.focus()
     await userEvent.keyboard('{Enter}')
-    const dialog = await within(document.body).findByRole('dialog', { name: 'Never run' })
+    const dialog = await findOpen(within(document.body), 'dialog', { name: 'Never run' })
     await waitFor(() => {
       expect(dialog.contains(document.activeElement)).toBe(true)
     })
