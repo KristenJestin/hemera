@@ -22,7 +22,7 @@ import { Context, Effect, Layer, Schema } from 'effect'
 import type { DomainEvents } from '../domain-events.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { buildingAttempts, buildingCheckResults } from '../storage/schema.ts'
+import { buildingAttempts, buildingCheckResults, missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn, checkResultsIn } from './attempts.ts'
 
@@ -133,6 +133,22 @@ export class TaskChecks extends Context.Service<
 export const noTaskChecks = Layer.succeed(TaskChecks, { run: () => Effect.succeed([]) })
 
 /** Asks the checks about an attempt and keeps what they said on it; answers the results. */
+/** Whether the user cancelled the mission: a check it stopped then is no verdict. */
+export const missionCancelled = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [mission] = yield* database
+      .select({ stage: missions.stage })
+      .from(missions)
+      .where(eq(missions.id, missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission')))
+    return mission?.stage === 'cancelled'
+  })
+
+/**
+ * Judges an attempt on its checks and keeps the verdict; a null verdict when the user cancelled
+ * the mission while they ran, nothing kept then.
+ */
 export const checkAttempt = (
   asked: Omit<ChecksAsked, 'files'>,
   /** The files to judge when they are not the attempt's own: a scope's, its tasks'. */
@@ -168,6 +184,7 @@ export const checkAttempt = (
         }),
       ),
     )
+    if (yield* missionCancelled(asked.missionId)) return { verdict: null, results: [] }
     const results = yield* checkResultsIn(database, asked.attemptId)
     const verdict = attemptResult(results.map((one) => one.verdict))
     yield* mutate('keeping the verdict of an attempt', (transaction) =>
@@ -197,7 +214,7 @@ export const checksVerdict = Layer.effect(
           subject: asked.taskId,
           attemptId: asked.attemptId,
         }).pipe(
-          Effect.map(({ verdict }) => JUDGED[verdict]),
+          Effect.map(({ verdict }) => (verdict === null ? 'pending' : JUDGED[verdict])),
           Effect.provide(context),
           Effect.orDie,
         ),

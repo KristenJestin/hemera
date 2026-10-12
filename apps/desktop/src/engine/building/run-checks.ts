@@ -50,7 +50,13 @@ import { buildingCheckRuns, buildings, missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { placeOf } from '../workspaces.ts'
 import { checkResultsIn } from './attempts.ts'
-import { type CheckResult, type ChecksAsked, TaskChecks, keepCheckResult } from './checks.ts'
+import {
+  type CheckResult,
+  type ChecksAsked,
+  TaskChecks,
+  keepCheckResult,
+  missionCancelled,
+} from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { Snapshots } from './snapshots.ts'
 import { type BuildingBase, bases as basesCodec, buildingEvent } from './tasks.ts'
@@ -351,7 +357,9 @@ const runChecks = (asked: ChecksAsked) =>
           continue
         }
         const result = yield* runOne(check, place)
-        yield* keepCheckResult(asked.attemptId, result)
+        // Cancelled while it ran: no result, and no check after it.
+        const cancelled = yield* missionCancelled(asked.missionId)
+        if (!cancelled) yield* keepCheckResult(asked.attemptId, result)
         yield* mutate('forgetting a check that ended', (transaction) =>
           transaction
             .delete(buildingCheckRuns)
@@ -367,6 +375,7 @@ const runChecks = (asked: ChecksAsked) =>
               Effect.as({ result: undefined, events: [] }),
             ),
         )
+        if (cancelled) return []
         results.push(result)
       }
     }

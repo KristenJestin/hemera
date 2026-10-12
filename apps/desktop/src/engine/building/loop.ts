@@ -1215,6 +1215,8 @@ export const buildingLoop = (parts: LoopParts) => {
         files,
       )
       const verdict = judged.verdict
+      // Cancelled while its checks ran: the attempt stays as it was.
+      if (verdict === null) return 'not_verified' satisfies AttemptResult
       const results = judged.results
       yield* mutate('ending a scope attempt', (transaction) =>
         transaction

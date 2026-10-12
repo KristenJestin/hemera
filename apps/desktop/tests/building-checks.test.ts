@@ -29,6 +29,8 @@ import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  buildingAttempts,
+  buildingCheckResults,
   buildingCheckRuns,
   commandRuns,
   domainEvents,
@@ -900,7 +902,7 @@ describe('A restart in the middle of the checks', () => {
 })
 
 describe('A cancel in the middle of the checks', () => {
-  test('Cancel stops a check that runs: its run ends stopped and it writes nothing', async () => {
+  test('Cancel stops a check that runs: its run ends stopped, and no result, verdict or red is written', async () => {
     const release = join(scripts, 'release-cancel')
     const seen = await checksEngine(data).run(({ profile }) =>
       within(
@@ -920,12 +922,27 @@ describe('A cancel in the middle of the checks', () => {
           yield* until(Effect.map(running, (states) => states.includes('running')))
           yield* moveMission(mission.id, 'cancel', 'user')
           yield* until(Effect.map(running, (states) => !states.includes('running')))
-          return { states: yield* running }
+          // The check is over once its row is gone: nothing it judged is written after that.
+          yield* until(
+            Effect.map(database.select().from(buildingCheckRuns), (rows) => rows.length === 0),
+          )
+          return {
+            states: yield* running,
+            verdicts: yield* database
+              .select({ verdict: buildingAttempts.verdict })
+              .from(buildingAttempts),
+            results: yield* database.select().from(buildingCheckResults),
+            reds: yield* eventsOf(mission.id, 'building.check_red'),
+          }
         }),
       ),
     )
     writeFileSync(release, '')
     expect(seen.states).toEqual(['stopped'])
     expect(ranIn('slow.log')).toHaveLength(0)
+    // A check Cancel stopped is no verdict: nothing red is said of a mission the user cancelled.
+    expect(seen.verdicts).toEqual([{ verdict: null }])
+    expect(seen.results).toEqual([])
+    expect(seen.reds).toEqual([])
   })
 })
