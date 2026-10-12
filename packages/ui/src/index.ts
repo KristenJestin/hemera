@@ -169,6 +169,7 @@ export { type MissionStage } from './blocks/mission/vocabulary.ts'
 export * from './blocks/mission/vocabulary.ts'
 export * from './blocks/mission/mission-marks.tsx'
 export * from './blocks/mission/mission-row.tsx'
+export * from './blocks/mission/stage-card.tsx'
 export * from './surfaces/living-spec/living-spec-types.ts'
 export * from './surfaces/living-spec/living-spec-page.tsx'
 /** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Wave`. */
