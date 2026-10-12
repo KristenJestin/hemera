@@ -1,11 +1,11 @@
 /**
  * A mission planned in the real application, its Planner the fake agent the suite scripts
- * (`planning-script.ts`): the vision that starts it, the draft it writes, two waves answered one
- * by one, a question put on hold with a note, a discussion closed on the decision it proposed, a
- * Probe's chip, the question on hold answered at last, the cold read's report, and Freeze offered:
- * each settled wave folded to its line, and the head's Now line leading to Freeze once it is ready.
- * `planning.restarted.e2e.ts` starts Hemera again on the same data folder, finds all of it, and
- * freezes the Spec.
+ * (`planning-script.ts`): the vision that starts it, the draft it writes, the stage card and For
+ * you, the questions answered one by one — each answer opening the next —, a question put on hold
+ * with a note, a discussion closed on the decision it proposed, a Probe's chip, the question on
+ * hold answered at last, the cold read's report, and Freeze offered: the answers folded under the
+ * rest, and the stage card saying Freeze is ready. `planning.restarted.e2e.ts` starts Hemera again
+ * on the same data folder, finds all of it, and freezes the Spec.
  *
  * Every gesture waits for the mark the Planner's turn leaves on the page before the next one: two
  * gestures within one turn would reach the Planner as one prompt.
@@ -37,13 +37,19 @@ export const PLANNED = join(tmpdir(), 'hemera-e2e-planning-mission.json')
 const places = () => $('nav[aria-label="Places"]')
 const spec = () => $('section[aria-label="Spec"]')
 const rail = () => $('aside[aria-label="What calls for you"]')
+/** The stage card at the top of the rail, and its line. */
+const stageCard = () => rail().$('section[aria-label="Planning"]')
+const stageLine = () => stageCard().$('[role="status"]')
+const forYou = () => rail().$('section[aria-label="For you"]')
+const rest = () => rail().$('section[aria-label="Everything else"]')
 /** A question's card in the rail, by its id. */
 const card = (id: string) => rail().$(`article[aria-label^="${id} ·"]`)
 const option = (id: string, letter: string) => card(id).$(`button[aria-label^="${letter} "]`)
-/** A settled wave's line, which opens its questions. */
-const settledWave = (number: number) => rail().$(`button*=Wave ${String(number)}`)
-/** The head's Now line. */
-const nowLine = () => $('[data-now]')
+/** A question's line in For you, which opens it. */
+const questionLine = (id: string) =>
+  forYou().$('ul[aria-label="Questions to answer"]').$(`button*=${id}`)
+/** A line of the rest, by its title, which unfolds what it summarises. */
+const restLine = (title: string) => rest().$(`button*=${title}`)
 /** The view of a discussion over the page. */
 const view = () => $('[data-view^="discussion:"]')
 
@@ -80,10 +86,13 @@ describe('A mission planned with its Planner', () => {
     writeFileSync(PLANNED, JSON.stringify({ key }))
     await places().$('button*=Acme').click()
     await $('ul[aria-label="Planning missions"]').$(`button*=${key}`).click()
+    await expect(stageCard()).toBeDisplayed()
+    await expect(forYou()).toHaveText(expect.stringContaining('Nothing waits for you'))
+    await restLine('Your vision').click()
     await expect(rail().$('section[aria-label="Your vision"]')).toBeDisplayed()
   })
 
-  it('starts the Planner with a vision, which writes its draft and asks a first wave', async () => {
+  it('starts the Planner with a vision, which writes its draft and asks its questions', async () => {
     await say(
       rail().$('[role="textbox"][aria-label="Your vision"]'),
       'Keep the export small: one note at a time.',
@@ -92,22 +101,24 @@ describe('A mission planned with its Planner', () => {
       expect.stringContaining(DRAFT_MARK),
       { wait: 30_000 },
     )
-    await expect(rail().$('ul[aria-label="Wave 1"]')).toBeDisplayed()
-    await expect(card('Q2')).toBeDisplayed()
+    await expect(stageLine()).toHaveText('2 questions wait for your answer', { wait: 30_000 })
+    await expect(card('Q1')).toBeDisplayed()
+    await expect(questionLine('Q2')).toBeDisplayed()
     await expect(rail().$('ul[aria-label="Your vision so far"]')).toHaveText(
       expect.stringContaining('one note at a time'),
     )
   })
 
-  it('answers the first wave one question at a time, each answer integrated, then folds it', async () => {
+  it('answers the questions one at a time, each answer opening the next, then folds them', async () => {
     await expect(card('Q1').$('[data-input="unanswered"]')).toBeExisting()
     await option('Q1', 'A').click()
+    await expect(card('Q2')).toBeFocused()
     await expect(card('Q1').$('[data-input="integrated"]')).toBeExisting({ wait: 30_000 })
     await expect(card('Q2').$('[data-input="unanswered"]')).toBeExisting()
     await option('Q2', 'B').click()
-    await expect(settledWave(1)).toHaveText(expect.stringContaining('2 settled'), { wait: 30_000 })
-    await expect(rail().$('ul[aria-label="Wave 1"]')).not.toBeExisting()
-    await expect(rail().$('ul[aria-label="Wave 2"]')).toBeDisplayed({ wait: 30_000 })
+    await expect(restLine('Answered')).toHaveText(expect.stringContaining('2'), { wait: 30_000 })
+    await expect(card('Q3')).toBeDisplayed({ wait: 30_000 })
+    await expect(questionLine('Q4')).toBeDisplayed()
   })
 
   it('puts a question on hold with a note, and is handed a drafted message', async () => {
@@ -121,6 +132,7 @@ describe('A mission planned with its Planner', () => {
   })
 
   it('discusses a question, and closes the discussion on the decision proposed', async () => {
+    await questionLine('Q4').click()
     await card('Q4').$('button*=Discuss').click()
     await say(view().$('[role="textbox"][aria-label="Your first message on Q4"]'), 'Why not both?')
     const proposed = view().$('[role="group"][aria-label="Proposed decision"]')
@@ -128,17 +140,24 @@ describe('A mission planned with its Planner', () => {
     await proposed.$('button=Accept').click()
     await expect(view()).toHaveText(expect.stringContaining('Closed on a decision'))
     await $('button[aria-label^="Close Discussion"]').click()
-    await expect(card('Q4')).toHaveText(expect.stringContaining(`Moot: ${DECISION}`), {
+    await expect(restLine('Answered')).toHaveText(expect.stringContaining('1 set aside'), {
       wait: 30_000,
     })
+    await restLine('Answered').click()
+    await expect(card('Q4')).toHaveText(expect.stringContaining(`Moot: ${DECISION}`))
+    await restLine('Answered').click()
     await expect(spec().$('section[aria-label="Decisions"]')).toHaveText(
       expect.stringContaining(DECISION),
     )
   })
 
   it('shows the Probe the Planner launched as a chip that ends, and its report', async () => {
-    const chip = rail().$('section[aria-label="Probes"]').$('button[data-live-chip]')
-    await expect(chip).toHaveAttribute('data-state', 'failed', { wait: 30_000 })
+    await expect(restLine('Probes')).toHaveText(expect.stringContaining('1 ended'), {
+      wait: 30_000,
+    })
+    await restLine('Probes').click()
+    const chip = rest().$('button[data-live-chip]')
+    await expect(chip).toHaveAttribute('data-state', 'failed')
     await expect(spec().$('section[aria-label="Risks & trade-offs"]')).toHaveText(
       expect.stringContaining(NOT_PROBED),
       { wait: 30_000 },
@@ -155,14 +174,11 @@ describe('A mission planned with its Planner', () => {
       async (_, script) => await globalThis.hemeraProbe?.scriptAgent(script),
       COLD_READER,
     )
+    await questionLine('Q3').click()
     await option('Q3', 'A').click()
-    await expect(settledWave(2)).toHaveText(expect.stringContaining('settled'), { wait: 30_000 })
     await expect($('button=Freeze')).toBeEnabled({ wait: 45_000 })
-    await expect(rail().$('section[aria-label="Cold read"]')).toHaveText(
-      expect.stringContaining('Nothing found.'),
-    )
-    await expect(nowLine()).toHaveText('Ready to freeze')
-    await nowLine().click()
-    await expect($('button=Freeze')).toBeFocused()
+    await expect(restLine('Cold read')).toHaveText(expect.stringContaining('Nothing found'))
+    await expect(stageLine()).toHaveText('Ready to freeze')
+    await expect(forYou()).toHaveText(expect.stringContaining('Only Freeze is left'))
   })
 })

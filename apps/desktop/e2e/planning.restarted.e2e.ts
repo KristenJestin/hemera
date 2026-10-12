@@ -2,7 +2,7 @@
  * Hemera started again on the data folder `planning.e2e.ts` left, with Freeze offered: every
  * answer and where it stands, the decision of the discussion (read again from its question), the
  * Probe's chip, the vision and the cold read's report are found as they were, drawn as they were
- * left (each settled wave folded to its line, the Now line on Freeze), and the Spec is frozen.
+ * left (the answers folded under the rest, the stage card on Freeze), and the Spec is frozen.
  */
 
 import { readFileSync } from 'node:fs'
@@ -23,7 +23,9 @@ const spec = () => $('section[aria-label="Spec"]')
 const rail = () => $('aside[aria-label="What calls for you"]')
 const card = (id: string) => rail().$(`article[aria-label^="${id} ·"]`)
 const track = () => $('ol[aria-label="Stage"]')
-const settledWave = (number: number) => rail().$(`button*=Wave ${String(number)}`)
+const rest = () => rail().$('section[aria-label="Everything else"]')
+/** A line of the rest, by its title, which unfolds what it summarises. */
+const restLine = (title: string) => rest().$(`button*=${title}`)
 
 describe('A mission’s Planning, found again after Hemera started anew', () => {
   // SAFETY: `planning.e2e.ts` wrote this file as `{ key }` just before Hemera was restarted.
@@ -49,16 +51,19 @@ describe('A mission’s Planning, found again after Hemera started anew', () => 
     )
   })
 
-  it('draws the page as it was left: the waves folded, the Now line on Freeze', async () => {
-    await expect(rail().$('ul[aria-label="Wave 1"]')).not.toBeExisting()
-    await expect(settledWave(1)).toHaveText(expect.stringContaining('2 settled'))
-    await expect(settledWave(2)).toHaveText(expect.stringContaining('settled'))
-    await expect($('[data-now]')).toHaveText('Ready to freeze')
+  it('draws the page as it was left: the answers folded, the stage card on Freeze', async () => {
+    await expect(rail().$('section[aria-label="Planning"]').$('[role="status"]')).toHaveText(
+      'Ready to freeze',
+    )
+    await expect(rail().$('section[aria-label="For you"]')).toHaveText(
+      expect.stringContaining('Only Freeze is left'),
+    )
+    await expect(restLine('Answered')).toHaveText(expect.stringContaining('3 · 1 set aside'))
+    await expect(card('Q1')).not.toBeExisting()
   })
 
   it('keeps every answer, each still integrated, and the question made moot', async () => {
-    await settledWave(1).click()
-    await settledWave(2).click()
+    await restLine('Answered').click()
     await expect(card('Q1').$('[data-input="integrated"]')).toBeExisting()
     await expect(card('Q2').$('[data-input="integrated"]')).toBeExisting()
     await expect(card('Q3').$('[data-input="integrated"]')).toBeExisting()
@@ -77,15 +82,13 @@ describe('A mission’s Planning, found again after Hemera started anew', () => 
   })
 
   it('keeps the vision, the Probe’s chip and the cold read’s report', async () => {
+    await restLine('Your vision').click()
     await expect(rail().$('ul[aria-label="Your vision so far"]')).toHaveText(
       expect.stringContaining('one note at a time'),
     )
-    await expect(
-      rail().$('section[aria-label="Probes"]').$('button[data-live-chip]'),
-    ).toHaveAttribute('data-state', 'failed')
-    await expect(rail().$('section[aria-label="Cold read"]')).toHaveText(
-      expect.stringContaining('Nothing found.'),
-    )
+    await restLine('Probes').click()
+    await expect(rest().$('button[data-live-chip]')).toHaveAttribute('data-state', 'failed')
+    await expect(restLine('Cold read')).toHaveText(expect.stringContaining('Nothing found'))
   })
 
   it('still offers Freeze, which freezes the Spec', async () => {
