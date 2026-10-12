@@ -484,9 +484,11 @@ export const forgePort = () => {
             } satisfies CliCheck
           }
           // bkt sends a command to its active context, whatever its host: a write names the
-          // context of the repository's host, the active one when several are.
-          const contexts = (read.value.contexts ?? []).filter((one) =>
-            bktServes({ key: one.host }, forge, host),
+          // context of the repository's host, the active one when several are. A name that is not
+          // one plain word could not be passed to bkt (the runner refuses it): such a context is
+          // as good as none, and the line to copy makes one.
+          const contexts = (read.value.contexts ?? []).filter(
+            (one) => SAFE_WORD.test(one.name) && bktServes({ key: one.host }, forge, host),
           )
           const chosen = contexts.find((one) => one.active === true) ?? contexts[0]
           return chosen === undefined

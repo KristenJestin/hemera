@@ -986,6 +986,27 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     })
   })
 
+  test.each([
+    ['a space', 'my work'],
+    ['a parenthesis', 'work(dc)'],
+  ])(
+    'a context whose name holds %s is left out: the repository is signed out',
+    async (_case, name) => {
+      const fake = fakeForge(
+        bktReady([BKT_CLOUD], [{ name, host: 'api.bitbucket.org', active: true }]),
+      )
+      const statuses = await withForge(
+        fake,
+        ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
+        { api: REMOTES.api },
+      )
+      expect(byPath(statuses)['api']).toMatchObject({
+        state: 'signed-out',
+        fix: 'bkt context create acme-team-bitbucket.org --host api.bitbucket.org --workspace acme-team',
+      })
+    },
+  )
+
   test('a host key bkt prints with a shell character gives no line to copy', async () => {
     const fake = fakeForge([
       { cli: 'bkt', when: ['--version'], stdout: 'bkt version 0.26.0\n' },
