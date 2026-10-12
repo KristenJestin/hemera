@@ -80,7 +80,7 @@ export const jevKeyHandling = (settings: JevKeySettings) => {
     return {
       key,
       consent: state.consent,
-      judge: whoJudges(key === 'saved' && state.consent),
+      judge: whoJudges(key === 'saved' && state.consent, null),
       missing: isReady ? null : settings.missing(),
     }
   })

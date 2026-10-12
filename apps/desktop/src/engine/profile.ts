@@ -104,6 +104,7 @@ import {
   settleLeftActions,
 } from './tools/actions.ts'
 import { type ToolsParts, type ToolAccess, type ToolGate, toolsLayer } from './tools/index.ts'
+import { agentJudgesLayer, noAgentJudges } from './permissions/agent-judge.ts'
 import {
   type Evidence,
   Memory,
@@ -541,6 +542,11 @@ export const startProfile = (
       ]),
     }
     const toolsParts: ToolsParts = {
+      // An engine that can start agents has their own judges (#197); one that cannot asks.
+      agentJudges:
+        parts.sessions?.starter === undefined
+          ? noAgentJudges
+          : agentJudgesLayer({ dataFolder, log }),
       ...parts.tools,
       notes: sessionNotesLayer.pipe(Layer.provide(postLayer)),
       delivery: parts.tools?.delivery ?? sessionsDelivery.pipe(Layer.provide(postLayer)),
@@ -597,8 +603,6 @@ export const startProfile = (
         Layer.mergeAll(
           sessionInstructionsLayer(process.platform),
           memoryBriefSources,
-          parts.sessions?.starter ?? noStarter,
-          parts.sessions?.discovery ?? discoveryLayer.pipe(Layer.provide(machineLayer())),
           idleAgentsLayer,
           acpTracesLayer(dataFolder),
           defaultPermissionAnswerLayer,
@@ -619,6 +623,13 @@ export const startProfile = (
     // The Memory stands on the missions, and the tools on the Memory.
     const layers = sessionsLayers.pipe(
       Layer.provideMerge(toolsLayer(log, version, toolsParts)),
+      // How agents are found and started: for the role sessions, and for the agents' own judges.
+      Layer.provideMerge(
+        Layer.mergeAll(
+          parts.sessions?.starter ?? noStarter,
+          parts.sessions?.discovery ?? discoveryLayer.pipe(Layer.provide(machineLayer())),
+        ),
+      ),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
       Layer.provideMerge(missionsLayer(missionParts)),

@@ -266,19 +266,19 @@ export function AddProject({
                   />
                 )}
               </div>
-              {setup !== undefined &&
-                (setup.unavailable === undefined ? (
-                  <Checkbox
-                    checked={setUp}
-                    onCheckedChange={(next) => onSetUp?.(next)}
-                    label="Let an agent propose the rest of the setup"
-                    description="Its commands, preparation and variables, as proposals: nothing changes until you answer."
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No agent can propose the rest of the setup: {setup.unavailable}
-                  </p>
-                ))}
+              {setup !== undefined && (
+                <Checkbox
+                  checked={setUp}
+                  disabled={setup.unavailable !== undefined}
+                  onCheckedChange={(next) => onSetUp?.(next)}
+                  label="Let an agent propose the rest of the setup"
+                  description={
+                    setup.unavailable === undefined
+                      ? 'Its commands, preparation and variables, as proposals: nothing changes until you answer.'
+                      : `No agent can propose the rest of the setup: ${setup.unavailable}`
+                  }
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>

@@ -465,7 +465,7 @@ describe('No secret leaves in a request, an event or a log line', () => {
     const { lines } = await withJev(({ builder }) => write(builder))
     const line = lines.find((one) => one.startsWith('permissions:') && one.includes('fs_write'))
     expect(line).toMatch(
-      /fs_write ~\/acme\/notes\.md: allow by judge .*\[policy 1, normal\] judge=Jev model=jev-1\.13\.0 risk=0\.6 approval=0\.2 userRequested=0\.1 jev=\d+ms/,
+      /fs_write ~\/acme\/notes\.md: allow by judge .*\[policy 2, normal\] judge=Jev model=jev-1\.13\.0 risk=0\.6 approval=0\.2 userRequested=0\.1 jev=\d+ms/,
     )
   })
 })
@@ -516,7 +516,7 @@ describe('The key and the consent', () => {
 })
 
 describe('Who judges, whatever the agent and its mode', () => {
-  test('"Jev" with a key and consent, "Hemera asks" otherwise; never "Auto"', async () => {
+  test('"Jev" with a key and consent, the agent with its own model otherwise; never "Auto"', async () => {
     const pairs = AGENT_PROVIDERS.flatMap((agent) =>
       [null, ...AGENT_MODES[agent].map((mode): string | null => mode.id)].map((mode) => ({
         agent,
@@ -532,7 +532,7 @@ describe('Who judges, whatever the agent and its mode', () => {
     for (const options of [{ key: false }, { consent: false }]) {
       // oxlint-disable-next-line no-await-in-loop -- one engine at a time on the data folder
       const answers = await said(options)
-      expect(new Set(answers)).toEqual(new Set(['Hemera asks']))
+      expect(answers).toEqual(pairs.map(({ agent }) => `${ADAPTERS[agent].label} (its own model)`))
       expect(answers.some((one) => /auto/i.test(one))).toBe(false)
     }
   })

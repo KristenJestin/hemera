@@ -8,7 +8,12 @@ import {
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { createRefusalOf, folderName, newProjectOf } from '../src/renderer/add-project.tsx'
+import {
+  createRefusalOf,
+  folderName,
+  newProjectOf,
+  settingUpOf,
+} from '../src/renderer/add-project.tsx'
 
 const FOUND = [
   { path: 'api', chosen: true },
@@ -33,6 +38,17 @@ describe('Adding a Project', () => {
 
   test('a folder with nothing found and nothing added is a Project all the same', () => {
     expect(newProjectOf('/work/notes', 'notes', []).repositories).toEqual([])
+  })
+
+  test('the setup is ticked by default when an agent can run it, and never when none can', () => {
+    const available = {}
+    const unavailable = { unavailable: 'Claude Code is not signed in' }
+    expect(settingUpOf(null, available)).toBe(true)
+    expect(settingUpOf(false, available)).toBe(false)
+    expect(settingUpOf(true, available)).toBe(true)
+    expect(settingUpOf(null, unavailable)).toBe(false)
+    expect(settingUpOf(true, unavailable)).toBe(false)
+    expect(settingUpOf(null, null)).toBe(false)
   })
 
   test('a refusal is said where it concerns: the folder, the name, a path added by hand', () => {

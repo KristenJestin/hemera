@@ -31,9 +31,9 @@ const refusalOf = (words: ReadonlyArray<string>, mayCommit = false, context = LI
   missionRefusal(effectiveAction(words, context).sequences, mayCommit)
 
 describe('The policy is versioned data with one level', () => {
-  test('version 1, level Normal, its thresholds', () => {
+  test('version 2 (the agent’s own judge, #197), level Normal, its thresholds', () => {
     expect(PERMISSION_POLICY).toEqual({
-      policyVersion: 1,
+      policyVersion: 2,
       level: 'normal',
       alwaysAskRisk: 2.5,
       askRisk: 1.5,
