@@ -93,6 +93,17 @@ describe('Each recognised shape is masked without its value being known', () => 
     ],
     ['a Slack token', 'xoxb-1234-5678-abcdef', 'xoxb-1234'],
     ['a GitLab token', 'glpat-abcdefghij0123456789', 'glpat-abc'],
+    ['a Bitbucket app password', 'ATBB0123456789abcdefABCDEF0123456789AB', 'ATBB0123'],
+    [
+      'an Atlassian API token',
+      'ATATT3xFfGF0abcdefghij_ABCDEFGHIJ-0123456789=AB12CD34',
+      'ATATT3xFfGF0',
+    ],
+    [
+      'a Bitbucket Data Center access token',
+      'BBDC-MDEyMzQ1Njc4OTAxOkFCQ0RFRkdISUpLTE1OT1BRUlNU',
+      'BBDC-MDEy',
+    ],
     ['an AWS access key', 'AKIAABCDEFGHIJKLMNOP', 'AKIAABCDEFGHIJKLMNOP'],
     [
       'a JSON Web Token',
