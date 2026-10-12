@@ -302,12 +302,14 @@ export function runRowsOf(
   repositories: ReadonlyArray<Repository>,
   outputs: ReadonlyMap<string, ReadonlyArray<string>>,
 ): SettingsRun[] {
+  // The runs come newest first: the first of a command is its last.
+  const lastRuns = new Map<string | null, Run>()
+  for (const run of runs) if (!lastRuns.has(run.commandId)) lastRuns.set(run.commandId, run)
   const rows: SettingsRun[] = []
   for (const command of catalogue) {
     const place = pathOf(repositories, command.repositoryId)
     const id = commandLineId(command.id)
-    // The runs come newest first: the first of a command is its last.
-    const last = runs.find((one) => one.commandId === command.id)
+    const last = lastRuns.get(command.id)
     if (last !== undefined) rows.push(rowOfRun(id, last, command.name, place, outputs))
     else if (command.type === 'serve' && command.scope === 'project') {
       rows.push({
