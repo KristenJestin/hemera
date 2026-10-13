@@ -893,11 +893,47 @@ const mergeIn = (
 
 const lf = (text: string) => text.replaceAll('\r\n', '\n')
 
+/** Above this many cells, the lines between the shared start and end are not aligned in a table. */
+const ALIGNMENT_CELLS = 16_000_000
+
+/**
+ * For each of the merged lines, the index of the held line it is aligned with, or -1 for a new
+ * line: a longest common subsequence of the two. Past `ALIGNMENT_CELLS`, a line is aligned with
+ * the last occurrence of its text among the held ones.
+ */
+function alignedWith(held: ReadonlyArray<string>, merged: ReadonlyArray<string>): Array<number> {
+  const width = merged.length + 1
+  if ((held.length + 1) * width > ALIGNMENT_CELLS) {
+    const last = new Map(held.map((line, at) => [line, at]))
+    return merged.map((line) => last.get(line) ?? -1)
+  }
+  // `table[i * width + j]`: the length of the longest common subsequence of `held[i..]` and `merged[j..]`.
+  const table = new Uint32Array((held.length + 1) * width)
+  for (let i = held.length - 1; i >= 0; i -= 1)
+    for (let j = merged.length - 1; j >= 0; j -= 1)
+      table[i * width + j] =
+        held[i] === merged[j]
+          ? (table[(i + 1) * width + j + 1] ?? 0) + 1
+          : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
+  const aligned = merged.map(() => -1)
+  let i = 0
+  let j = 0
+  while (i < held.length && j < merged.length) {
+    if (held[i] === merged[j]) {
+      aligned[j] = i
+      i += 1
+      j += 1
+    } else if ((table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)) i += 1
+    else j += 1
+  }
+  return aligned
+}
+
 /**
  * Merged lines given back the endings of the Workspace's file: the lines both share at its start
- * and at its end keep their own endings, in place; between them, a line it holds keeps its ending
- * (a repeated line, that of its last occurrence there), any other line takes the ending of the line
- * above.
+ * and at its end keep their own endings, in place; those between them are aligned with the file's
+ * line by line (a longest common subsequence), and a line aligned with a held line takes its
+ * ending, any other line the ending of the line above.
  */
 function withEndingsOf(ours: string, merged: string): string {
   if (!ours.includes('\r\n')) return merged
@@ -906,27 +942,30 @@ function withEndingsOf(ours: string, merged: string): string {
   const endingOf = (line = '') => (line.endsWith('\r') ? '\r\n' : '\n')
   const lines = merged.split('\n')
   const last = lines.pop() ?? ''
+  const texts = held.map(textOf)
   let leading = 0
-  while (
-    leading < Math.min(held.length, lines.length) &&
-    textOf(held[leading] ?? '') === lines[leading]
-  )
+  while (leading < Math.min(held.length, lines.length) && texts[leading] === lines[leading])
     leading += 1
   let trailing = 0
   while (
     trailing < Math.min(held.length, lines.length) - leading &&
-    textOf(held[held.length - 1 - trailing] ?? '') === lines[lines.length - 1 - trailing]
+    texts[held.length - 1 - trailing] === lines[lines.length - 1 - trailing]
   )
     trailing += 1
-  const endings = new Map(
-    held.slice(leading, held.length - trailing).map((line) => [textOf(line), endingOf(line)]),
-  )
+  const between = alignedWith(
+    texts.slice(leading, held.length - trailing),
+    lines.slice(leading, lines.length - trailing),
+  ).map((aligned) => (aligned < 0 ? -1 : leading + aligned))
+  const heldAt = (at: number) =>
+    at < leading
+      ? at
+      : at >= lines.length - trailing
+        ? held.length - (lines.length - at)
+        : (between[at - leading] ?? -1)
   let above = endingOf(held[0])
   const ended = lines.map((line, at) => {
-    if (at < leading) above = endingOf(held[at])
-    else if (at >= lines.length - trailing)
-      above = endingOf(held[held.length - (lines.length - at)])
-    else above = endings.get(line) ?? above
+    const aligned = heldAt(at)
+    if (aligned >= 0) above = endingOf(held[aligned])
     return `${line}${above}`
   })
   return `${ended.join('')}${last}`
