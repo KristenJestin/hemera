@@ -3,7 +3,7 @@ import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import type { KeyboardEvent, ReactNode, Ref } from 'react'
 
-import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
+import { MARK_TRAVEL, collapse, expand, fold, press, useTransition } from '../../motion.ts'
 
 /**
  * The two text controls, on Base UI's `Field`.
@@ -23,7 +23,9 @@ import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
  * The error is declared with `match` rather than rendered conditionally, so the element exists
  * for the control to point at from the first render, and it arrives from under the control
  * rather than appearing there: a message that shifts the page without moving is a message the
- * eye misses. It is on the `press` preset, because it answers what was just typed.
+ * eye misses. It is on the `press` preset, because it answers what was just typed. The room it
+ * takes grows and folds on `fold`, so what stands under the field is pushed rather than jumping;
+ * the room carries the gap above it, so a folded error takes none.
  */
 const CONTROL =
   'w-full rounded-md border border-input bg-input-fill text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
@@ -62,6 +64,7 @@ interface FieldShellProps {
 
 function FieldShell({ label, description, error, disabled, className, children }: FieldShellProps) {
   const transition = useTransition(press)
+  const folding = useTransition(fold)
   return (
     <Field.Root
       disabled={disabled === true}
@@ -80,17 +83,25 @@ function FieldShell({ label, description, error, disabled, className, children }
           <Field.Error
             key="error"
             match
-            className="text-xs text-destructive-muted-foreground"
+            className="-mt-1 overflow-hidden text-xs text-destructive-muted-foreground"
             render={
-              <motion.p
-                initial={{ opacity: 0, y: -MARK_TRAVEL }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -MARK_TRAVEL }}
-                transition={transition}
+              <motion.div
+                initial={collapse}
+                animate={expand}
+                exit={collapse}
+                transition={folding}
               />
             }
           >
-            {error}
+            <motion.p
+              className="pt-1"
+              initial={{ opacity: 0, y: -MARK_TRAVEL }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -MARK_TRAVEL }}
+              transition={transition}
+            >
+              {error}
+            </motion.p>
           </Field.Error>
         )}
       </AnimatePresence>
