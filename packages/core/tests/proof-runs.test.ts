@@ -5,6 +5,8 @@
  * durations, addresses and numbers are masked.
  */
 
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -1070,5 +1072,240 @@ describe('The key line observed in Planning', () => {
     const now = '\u001b[31mError: the total is 41 in /work/wt-7/api/totals.ts (12ms)\u001b[0m'
     expect(keyLineFound(now, today)).toBe(true)
     expect(keyLineFound('Error: the totals file is missing', today)).toBe(false)
+  })
+})
+
+/** A runner's output captured as it printed it, colours included, under `fixtures/proof-runs`. */
+const captured = (name: string): string =>
+  readFileSync(new URL(`fixtures/proof-runs/${name}.txt`, import.meta.url), 'utf8')
+
+/**
+ * The tests of a Rust file under each declaration: `#[test]`, a `#[should_panic]` test,
+ * `#[tokio::test(…)]`, `#[rstest]` with and without cases, `#[test_case(…)]`. The cargo test 1.97
+ * and cargo-nextest 0.9.148 fixtures are this file's runs.
+ */
+const RUST_DECLARATIONS = `pub fn to_markdown(rows: &[&str]) -> String {
+    rows.join("\\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use test_case::test_case;
+
+    #[test]
+    fn one_is_one() {
+        assert_eq!(1, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn rejects_empty() {
+        to_markdown(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn rejects_blank() {
+        panic!("blank");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exports_async() {
+        assert_eq!(to_markdown(&[]), "| total |");
+    }
+
+    #[rstest]
+    fn reads_plain() {
+        assert_eq!(to_markdown(&["a"]), "a");
+    }
+
+    #[rstest]
+    #[case(0)]
+    #[case(1)]
+    fn exports_cases(#[case] n: usize) {
+        assert_eq!(to_markdown(&vec!["a"; n]), "a");
+    }
+
+    #[test_case(vec![] ; "with no rows")]
+    #[test_case(vec!["| total |"] ; "with one row")]
+    fn exports_markdown(rows: Vec<&str>) {
+        assert_eq!(to_markdown(&rows), "| total |");
+    }
+
+    #[test_case(vec!["a"] ; "with one row")]
+    fn reads_rows(rows: Vec<&str>) {
+        assert_eq!(to_markdown(&rows), "a");
+    }
+}
+`
+
+/** The tests the Rust file declares under the given names, as a proof adding it reads them. */
+const rustTests = (names: ReadonlyArray<string>) => {
+  const file = { insertion: 'new_file', code: RUST_DECLARATIONS, patch: null } as const
+  const declared = addedTestNames(file)
+  return addedTests(file).filter((_, at) => names.includes(declared[at] ?? ''))
+}
+
+describe('A red read from the failing names #260 still missed', () => {
+  test('a failing Rust #[should_panic] test is a red, by name; one that panicked as expected is not', () => {
+    const output = captured('cargo-test-should-panic')
+    const path = 'src/lib.rs'
+    expect(run(output, 101, path).classification).toBe('assertion_failed')
+    expect(validRed(run(output, 101, path), path, rustTests(['rejects_empty']))).toBe(true)
+    expect(validRed(run(output, 101, path), path, rustTests(['rejects_blank']))).toBe(false)
+  })
+
+  test('a python -m unittest or Django FAIL: heading is a red, by name; an ERROR:, a skipped or a passing test is not', () => {
+    const unittest = captured('unittest')
+    const path = 'tests/test_export.py'
+    for (const name of ['test_exports_markdown', 'test_exports_rows']) {
+      expect(validRed(run(unittest, 1, path), path, [name])).toBe(true)
+    }
+    for (const name of ['test_reads_back', 'test_exports_csv', 'test_one_is_one']) {
+      expect(validRed(run(unittest, 1, path), path, [name])).toBe(false)
+    }
+    const django = captured('django')
+    const tests = 'exports/tests.py'
+    expect(validRed(run(django, 1, tests), tests, ['test_exports_markdown'])).toBe(true)
+    expect(validRed(run(django, 1, tests), tests, ['test_one_is_one'])).toBe(false)
+  })
+
+  test('a log line saying FAIL: is not a unittest heading', () => {
+    const output = ['FAIL: test_exports_markdown upload refused', 'AssertionError: no'].join('\n')
+    expect(run(output, 1, 'tests/test_export.py').failingLines).toEqual([])
+  })
+
+  test('a cargo-nextest FAIL line is a red, by name; its PASS lines are not', () => {
+    const output = captured('cargo-nextest')
+    const path = 'src/lib.rs'
+    expect(run(output, 100, path).failingLines).toContain(
+      '        FAIL [   0.007s] ( 6/10) acme tests::exports_async',
+    )
+    expect(validRed(run(output, 100, path), path, rustTests(['exports_async']))).toBe(true)
+    expect(validRed(run(output, 100, path), path, rustTests(['rejects_empty']))).toBe(true)
+    for (const name of ['one_is_one', 'reads_plain', 'rejects_blank']) {
+      expect(validRed(run(output, 100, path), path, rustTests([name]))).toBe(false)
+    }
+  })
+
+  test('a gotestsum === FAIL: line is a red, by name; its SKIP lines and a build failure are not', () => {
+    const output = captured('gotestsum')
+    const path = 'export_test.go'
+    expect(run(output, 1, path).classification).toBe('assertion_failed')
+    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['TestExportMarkdownSkipped'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(false)
+    const broken = run(captured('gotestsum-build-failed'), 1, path)
+    expect(broken.classification).not.toBe('assertion_failed')
+    expect(broken.failingLines.filter((line) => line.startsWith('==='))).toEqual([])
+  })
+
+  test('Rust tests under #[tokio::test(…)], #[rstest] and #[test_case(…)] are named', () => {
+    expect(addedTestNames({ insertion: 'new_file', code: RUST_DECLARATIONS, patch: null })).toEqual(
+      [
+        'one_is_one',
+        'rejects_empty',
+        'rejects_blank',
+        'exports_async',
+        'reads_plain',
+        'exports_cases',
+        'exports_markdown',
+        'reads_rows',
+      ],
+    )
+    const lines = [
+      '#[test_case(',
+      '    vec![] ;',
+      '    "with no rows"',
+      ')]',
+      '#[should_panic(',
+      '    expected = "no rows"',
+      ')]',
+      'fn rejects_markdown(rows: Vec<&str>) {}',
+    ].join('\n')
+    expect(addedTests({ insertion: 'new_file', code: lines, patch: null })).toEqual([
+      { function: 'rejects_markdown' },
+    ])
+  })
+
+  test('the cases of an #[rstest] or #[test_case(…)] test failing are its red, in cargo test and cargo-nextest; a case passing is not', () => {
+    const path = 'src/lib.rs'
+    for (const output of [captured('cargo-test-cases'), captured('cargo-nextest')]) {
+      for (const name of ['exports_async', 'exports_cases', 'exports_markdown']) {
+        expect(validRed(run(output, 101, path), path, rustTests([name]))).toBe(true)
+      }
+      for (const name of ['reads_plain', 'reads_rows', 'one_is_one']) {
+        expect(validRed(run(output, 101, path), path, rustTests([name]))).toBe(false)
+      }
+    }
+  })
+
+  test('a plain #[test] fn is not read from the cases of a module of the same name', () => {
+    const path = 'src/lib.rs'
+    const output = captured('cargo-test-cases')
+    expect(validRed(run(output, 101, path), path, ['exports_markdown'])).toBe(false)
+    expect(validRed(run(output, 101, path), path, ['exports'])).toBe(false)
+  })
+
+  test('jest’s file line with a project displayName is a failing line', () => {
+    for (const [output, lines] of [
+      [
+        captured('jest-display-name'),
+        [' FAIL   unit  tests/export.test.js', ' FAIL   unit  tests/broken.test.js'],
+      ],
+      [
+        captured('jest-display-name-plain'),
+        ['FAIL unit tests/export.test.js', 'FAIL unit tests/broken.test.js'],
+      ],
+    ] as const) {
+      const failing = run(output, 1, 'tests/export.test.js').failingLines
+      for (const line of lines) expect(failing).toContain(line)
+    }
+  })
+
+  test('a log line or a passing file holding FAIL and a file name is not jest’s file line', () => {
+    const output = [
+      'FAIL to upload report.json',
+      'FAIL upload of tests/export.test.js retried',
+      ' PASS   unit  tests/export.test.js',
+      ' × tests/export.test.ts > one is one 3ms',
+      'AssertionError: no',
+    ].join('\n')
+    expect(run(output, 1).failingLines).toEqual([' × tests/export.test.ts > one is one 3ms'])
+  })
+
+  test('numbered log lines do not push mocha’s failure past the failing lines cap', () => {
+    const output = captured('mocha-numbered-logs')
+    const path = 'tests/upload.test.cjs'
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(true)
+    expect(run(output, 1, path).failingLines.length).toBeLessThanOrEqual(2)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(false)
+  })
+
+  test('a numbered log line without mocha’s failing count is not a failing line', () => {
+    const output = ['  2) retrying upload', ' × tests/export.test.ts > one is one 3ms'].join('\n')
+    expect(run(output, 1).failingLines).toEqual([' × tests/export.test.ts > one is one 3ms'])
+  })
+
+  test('jest’s Console and Test suite failed to run headings are not failing lines', () => {
+    const failing = run(captured('jest-display-name'), 1, 'tests/export.test.js').failingLines
+    expect(failing).toContain('  ● exports › the invoices export as Markdown')
+    expect(failing).not.toContain('  ● Console')
+    expect(failing).not.toContain('  ● Test suite failed to run')
+  })
+
+  test('a real vitest run, its tree and its coloured FAIL badge, is a red by name', () => {
+    const output = captured('vitest-tree')
+    const path = 'tests/export.test.ts'
+    expect(output).toContain('\u001b[41m')
+    expect(run(output, 1, path).failingLines).toEqual([
+      '     × the invoices export as Markdown 3ms',
+      ' FAIL  tests/export.test.ts > exports > the invoices export as Markdown',
+    ])
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['the invoices export as CSV'])).toBe(false)
   })
 })
