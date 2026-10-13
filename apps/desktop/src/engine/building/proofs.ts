@@ -1445,11 +1445,19 @@ export const buildingProofs = (parts: ProofParts) => {
     Effect.gen(function* () {
       const building = yield* activeBuildingIn(transaction, file.missionId)
       if (building === null) return
-      const waiting = (yield* scenarioProofsIn(transaction, building.id))
+      const rows = yield* scenarioProofsIn(transaction, building.id)
+      // Held on a green or a rerun, its red is recorded already (#306).
+      const greens = rows.some((row) => stateOf(row) === 'held')
+        ? (yield* proofRunsIn(transaction, building.id))
+            .filter((one) => one.phase === 'green' || one.phase === 'rerun')
+            .map((one) => one.id)
+        : []
+      const waiting = rows
         .filter(
           (row) =>
             modeOf(row) === 'automated' &&
-            (stateOf(row) === 'waiting_red' || stateOf(row) === 'held'),
+            (stateOf(row) === 'waiting_red' ||
+              (stateOf(row) === 'held' && !greens.includes(row.heldRunId ?? ''))),
         )
         .map((row) => row.scenario)
       if (waiting.length === 0) return
