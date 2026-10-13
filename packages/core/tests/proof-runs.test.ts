@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs'
 
+import { Predicate } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -1584,5 +1585,154 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_x'])).toBe(false)
     expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_other'])).toBe(true)
     expect(validRed(run(PYTEST_ID_INSIDE_FAILS, 1, path), path, ['test_x'])).toBe(true)
+  })
+})
+
+/** go test, Go 1.27: an older `TestExport/csv/empty` and `TestExport/empty` fail; `TestExport/md/empty` passes. */
+const GO_OTHER_EMPTY_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/csv (0.00s)
+        --- FAIL: TestExport/csv/empty (0.00s)
+            export_test.go:8: got 1 rows, want 0
+    --- FAIL: TestExport/empty (0.00s)
+        export_test.go:12: got 2 rows, want 0
+FAIL
+FAIL	example.com/acme	0.004s
+FAIL
+`
+
+/** go test, Go 1.27: an older subtest `TestExport/csv` fails, with no subtest of its own. */
+const GO_CSV_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/csv (0.00s)
+        export_test.go:7: got 1 rows, want 0
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+/** `git diff` (3 lines of context): `empty` added at the end of a long `md`, whose `t.Run` the hunk does not show. */
+const GO_INSIDE_PATCH = [
+  '@@ -17,5 +17,8 @@ func TestExport(t *testing.T) {',
+  ' \t\tif len(rows) != 1 {',
+  ' \t\t\tt.Fatalf("got %d rows", len(rows))',
+  ' \t\t}',
+  '+\t\tt.Run("empty", func(t *testing.T) {',
+  '+\t\t\tt.Errorf("got %q, want %q", "x", "")',
+  '+\t\t})',
+  ' \t})',
+  ' }',
+].join('\n')
+
+/** pytest 9.1: an older case id holds ` b::test_x[1]`, another test's message names `test_x[1]`; `test_x` passes. */
+const PYTEST_SPACED_OTHER_FAILS = `================================================= test session starts ==================================================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 5 items
+
+tests/test_export.py F.F..                                                                                       [100%]
+
+======================================================= FAILURES =======================================================
+______________________________________________ test_other[a b::test_x[1]] ______________________________________________
+
+ref = 'a b::test_x[1]'
+
+    @pytest.mark.parametrize("ref", ["a b::test_x[1]", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a b::test_x[1]' == 'b'
+E         
+E         - b
+E         + a b::test_x[1]
+
+tests/test_export.py:6: AssertionError
+________________________________________________________ test_y ________________________________________________________
+
+    def test_y():
+>       assert False, "tests/test_export.py::test_x[1] failed"
+E       AssertionError: tests/test_export.py::test_x[1] failed
+E       assert False
+
+tests/test_export.py:10: AssertionError
+=============================================== short test summary info ================================================
+FAILED tests/test_export.py::test_other[a b::test_x[1]] - AssertionError: assert 'a b::test_x[1]' == 'b'
+FAILED tests/test_export.py::test_y - AssertionError: tests/test_export.py::test_x[1] failed
+============================================= 2 failed, 3 passed in 0.01s ==============================================
+`
+
+describe('A Go subtest’s nesting read at its own brace, and the pytest ids #291 left', () => {
+  test('a t.Run in a comment names no subtest and sets no level', () => {
+    const path = 'export_test.go'
+    const code = [
+      'func TestExport(t *testing.T) {',
+      '\t// Like t.Run("csv", …) below, for Markdown.',
+      '\tfor _, tc := range cases {',
+      '\t\tt.Run(tc.name, func(t *testing.T) { // like t.Run("csv", ...)',
+      '\t\t\tt.Run("empty", func(t *testing.T) { t.Errorf("x") })',
+      '\t\t})',
+      '\t}',
+      '}',
+    ].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual([
+      'TestExport',
+      { parent: 'TestExport', subtest: 'empty', nesting: [null], whole: true },
+    ])
+    const subtests = names.slice(1)
+    expect(validRed(run(GO_CSV_FAILS, 1, path), path, subtests)).toBe(false)
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, subtests)).toBe(true)
+  })
+
+  test('a Go subtest’s level is read at its t.Run’s own brace, braces in their order on the line', () => {
+    const path = 'export_test.go'
+    const layouts = [
+      [
+        '\tt.Run("md", func(t *testing.T) { defer func() {',
+        '\t\t_ = recover()',
+        '\t}()',
+        '\t\tt.Run("empty", func(t *testing.T) { t.Errorf("x") })',
+        '\t})',
+      ],
+      [
+        '\tt.Run("csv", func(t *testing.T) {',
+        '\t}); t.Run("md", func(t *testing.T) {',
+        '\t\tt.Run("empty", func(t *testing.T) { t.Errorf("x") })',
+        '\t})',
+      ],
+      [
+        '\tt.Run(',
+        '\t\t"md", func(t *testing.T) {',
+        '\t\t\tt.Run("empty", func(t *testing.T) { t.Errorf("x") })',
+        '\t\t})',
+      ],
+    ]
+    for (const layout of layouts) {
+      const code = ['func TestExport(t *testing.T) {', ...layout, '}'].join('\n')
+      const names = addedTests({ insertion: 'new_file', code, patch: null })
+      const empty = names.filter(
+        (name) => Predicate.hasProperty(name, 'subtest') && name.subtest === 'empty',
+      )
+      expect(empty).toEqual([
+        { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: true },
+      ])
+      expect(validRed(run(GO_OTHER_EMPTY_FAILS, 1, path), path, empty)).toBe(false)
+      expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
+    }
+  })
+
+  test('a subtest in a hunk that starts inside its t.Run block is decided by the key line when the proof has one', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_INSIDE_PATCH })
+    expect(names).toEqual([{ parent: 'TestExport', subtest: 'empty', nesting: [], whole: false }])
+    expect(validRed(run(GO_OTHER_BRANCH_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, null)).toBe(true)
+  })
+
+  test('a pytest id after a space in a case id, or in a summary line’s message, is not that test', () => {
+    const path = 'tests/test_export.py'
+    expect(run(PYTEST_SPACED_OTHER_FAILS, 1, path).failingLines).toHaveLength(2)
+    expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_x'])).toBe(false)
+    expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_other'])).toBe(true)
+    expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_y'])).toBe(true)
   })
 })

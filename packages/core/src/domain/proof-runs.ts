@@ -319,7 +319,8 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
  * A test's declared name as a pattern matched whole: from the start of a line or after a
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
  * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. A
- * `::` is a node id's before its first `[`: a case id holding `::test_x[` is not `test_x`. What
+ * `::` is a node id's before its first `[`, and no name is read inside brackets still open: a
+ * case id holding `::test_x[` or ` b::test_x[` is not `test_x`. What
  * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
  * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
  * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
@@ -332,8 +333,9 @@ const namePattern = (name: string, cases = false): RegExp | null => {
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
   const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
+  const outside = '(?<=^(?:[^[\\]]|\\[[^[\\]]*\\])*)'
   return new RegExp(
-    `(?:^|\\s)[^\\s[]*::${body}\\[|(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `${outside}(?:^|\\s)[^\\s[]*::${body}\\[|${outside}(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
@@ -354,6 +356,21 @@ const subtestPattern = (test: GoSubtest): RegExp | null => {
   )
 }
 
+/**
+ * A pytest summary line's node id, without the message after its first ` - ` outside a case id's
+ * brackets (`FAILED a.py::test_y - AssertionError: a.py::test_x[1] failed`); any other line whole.
+ */
+const nodeIdOf = (text: string): string => {
+  if (!/^FAILED \S+::/.test(text)) return text
+  let brackets = 0
+  for (const [at, char] of text.split('').entries()) {
+    if (char === '[') brackets += 1
+    if (char === ']') brackets -= 1
+    if (brackets === 0 && text.startsWith(' - ', at)) return text.slice(0, at)
+  }
+  return text
+}
+
 const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): boolean =>
   names.some((name) => {
     const pattern = Predicate.isString(name)
@@ -361,7 +378,7 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): bo
       : Predicate.hasProperty(name, 'function')
         ? namePattern(name.function, true)
         : subtestPattern(name)
-    return pattern !== null && texts.some((text) => pattern.test(text))
+    return pattern !== null && texts.some((text) => pattern.test(nodeIdOf(text)))
   })
 
 /**
@@ -373,7 +390,8 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): bo
  * output); failing that, the key line decides, never the exit code alone. A proof whose code names
  * no test, or a command with no test file, is red by its exit code, the key line its guard. A Go
  * subtest whose parent is unknown is a test the proof adds without a name: alone, the key line
- * decides when the proof has one, and the exit code when it has none.
+ * decides when the proof has one, and the exit code when it has none. So is a subtest whose
+ * nesting the code does not show whole, when the proof has a key line.
  */
 export const validRed = (
   run: ProofRunClass,
@@ -384,10 +402,16 @@ export const validRed = (
   if (run.classification !== 'assertion_failed') return false
   if (testPath === null) return true
   const located = run.failures.filter((one) => one.file !== null)
+  const read =
+    keyLineMatched === null
+      ? testNames
+      : testNames.map((name) =>
+          Predicate.hasProperty(name, 'whole') && !name.whole ? { ...name, parent: null } : name,
+        )
   const unnamed =
-    testNames.length > 0 &&
-    testNames.every((name) => Predicate.hasProperty(name, 'parent') && name.parent === null)
-  const names = unnamed && keyLineMatched === null ? [] : testNames
+    read.length > 0 &&
+    read.every((name) => Predicate.hasProperty(name, 'parent') && name.parent === null)
+  const names = unnamed && keyLineMatched === null ? [] : read
   if (located.length > 0) {
     return located.some(
       (one) =>
@@ -417,9 +441,10 @@ const EACH_NAME =
 
 const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
 const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
-const GO_SUBTEST_NAME = /\b\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/
+/** A `t.Run(` call's literal name, read where the call starts, across lines. */
+const GO_SUBTEST_NAME = /\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/y
 /** A `t.Run(` call, its name a literal or not. */
-const GO_RUN = /\b\w+\.Run\(/
+const GO_RUN = /\b\w+\.Run\(/g
 /** Go's strings, runes and comments, a raw string or a block comment across lines. */
 const GO_LITERAL = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
 /** The function a line of Go declares, or a hunk header names after its `@@`. */
@@ -464,7 +489,8 @@ export const addedTests = (test: {
  * The literal names of the Go subtests a proof adds (`t.Run("…",`), each with the test function
  * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
  * function its `@@ … @@ func TestX(` header names, null when it is under no test function. Its
- * nesting is read from the braces of the lines above it, strings, runes and comments aside.
+ * nesting is read from the braces above it in their order, strings, runes and comments aside: a
+ * `t.Run` opens a level at its function's own brace, the first one directly inside its call.
  */
 const subtestsOf = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -484,13 +510,20 @@ const subtestsOf = (test: {
               : { text: line.slice(1), added: line.startsWith('+') },
           )
   const code = goCode(lines.map((line) => line.text))
+  const raw = lines.map((line) => line.text).join('\n')
   const found: GoSubtest[] = []
   let parent: string | null = null
   let whole = true
-  // The `t.Run` blocks open above, each with the depth of braces inside it.
+  // The `t.Run` blocks open above, each with the depth of braces inside it, and the calls still
+  // waiting for their function's brace, each with the depth of parentheses inside it.
   let open: Array<{ readonly name: string | null; readonly depth: number }> = []
+  let calls: Array<{ readonly name: string | null; readonly parens: number }> = []
   let depth = 0
+  let parens = 0
+  let offset = 0
   for (const [at, line] of lines.entries()) {
+    const start = offset
+    offset += line.text.length + 1
     const isHeader = line.text.startsWith('@@')
     if (GO_FUNCTION.test(line.text) || isHeader) {
       parent = GO_FUNCTION.test(line.text)
@@ -500,17 +533,37 @@ const subtestsOf = (test: {
         : null
       whole = !isHeader
       open = []
+      calls = []
       depth = 0
+      parens = 0
       if (isHeader) continue
     }
-    const subtest = GO_SUBTEST_NAME.exec(line.text)?.groups?.['name']
-    const nesting = open.map((block) => block.name)
-    if (line.added && subtest !== undefined) found.push({ parent, subtest, nesting, whole })
     const text = code[at] ?? ''
-    const before = depth
-    depth += (text.match(/\{/g) ?? []).length - (text.match(/\}/g) ?? []).length
-    if (depth > before && GO_RUN.test(text)) open.push({ name: subtest ?? null, depth })
-    open = open.filter((block) => block.depth <= depth)
+    const runs = new Set(Array.from(text.matchAll(GO_RUN), (run) => run.index))
+    for (const [column, char] of text.split('').entries()) {
+      if (runs.has(column)) {
+        GO_SUBTEST_NAME.lastIndex = start + column
+        const subtest = GO_SUBTEST_NAME.exec(raw)?.groups?.['name']
+        const nesting = open.map((block) => block.name)
+        if (line.added && subtest !== undefined) found.push({ parent, subtest, nesting, whole })
+        calls.push({ name: subtest ?? null, parens: parens + 1 })
+      }
+      if (char === '(') parens += 1
+      if (char === ')') {
+        parens -= 1
+        calls = calls.filter((call) => call.parens <= parens)
+      }
+      if (char === '{') {
+        depth += 1
+        const call = calls.find((one) => one.parens === parens)
+        if (call !== undefined) open.push({ name: call.name, depth })
+        calls = calls.filter((one) => one !== call)
+      }
+      if (char === '}') {
+        depth -= 1
+        open = open.filter((block) => block.depth <= depth)
+      }
+    }
   }
   return found
 }
