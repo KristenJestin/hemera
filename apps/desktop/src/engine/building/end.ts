@@ -83,7 +83,15 @@ import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
 import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
 import { STOPPED_AT_THE_END } from './helper-store.ts'
-import { currentTreesIn, finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
+import {
+  type Tree,
+  currentTreesIn,
+  finalChecksIn,
+  scenarioProofsIn,
+  modeOf,
+  stateOf,
+  upToDate,
+} from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
   REVIEW_NEEDS,
@@ -264,7 +272,7 @@ export const buildingEndLayer = (log: Log) => {
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
       /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
-      const refreshed = new Map<string, string>()
+      const refreshed = new Map<string, ReadonlyArray<Tree>>()
       /**
        * The Buildings whose Builder this end started again, since the exit last stopped it or the
        * user last retried: one that stops once more is the user's to start again.
@@ -667,7 +675,7 @@ export const buildingEndLayer = (log: Log) => {
               const stale = last === undefined ? [] : yield* staleLeft(building)
               if (
                 last === undefined ||
-                (stale.length > 0 && last !== (yield* treesOf(missionId)))
+                (stale.length > 0 && !upToDate(last, yield* currentTreesIn(database, missionId)))
               ) {
                 yield* refresh(building)
               } else if (stale.length > 0) {
@@ -782,21 +790,15 @@ export const buildingEndLayer = (log: Log) => {
           return [...proofs, ...checks]
         })
 
-      /** The mission's current trees, as one key: a snapshot that saw a change changes it. */
-      const treesOf = (missionId: string) =>
-        Effect.gen(function* () {
-          const current = yield* currentTreesIn(yield* Database, missionId)
-          return JSON.stringify([...current].toSorted(([a], [b]) => a.localeCompare(b)))
-        })
-
       /**
-       * The stale proofs and final checks run again, once per tree: the trees are read before the
-       * refresh, so a write that lands during it makes the next step refresh again.
+       * The stale proofs and final checks run again, once per tree: the trees kept are those the
+       * refresh's own snapshot took, so the next step never refreshes again what it just saw, and a
+       * write a later snapshot saw makes it refresh again.
        */
       const refresh = (building: BuildingRow) =>
         Effect.gen(function* () {
-          refreshed.set(building.id, yield* treesOf(building.missionId))
-          yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          const done = yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          refreshed.set(building.id, done.trees)
         })
 
       /**

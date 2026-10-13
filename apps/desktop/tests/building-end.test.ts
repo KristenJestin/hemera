@@ -2247,6 +2247,85 @@ describe('The refresh', () => {
     },
   )
   test(
+    'a refresh whose own snapshot sees a change is not run again on that same tree: the stale proof it cannot run asks the user after one refresh',
+    SLOW,
+    async () => {
+      // A change no snapshot saw yet lands as the refresh takes its own snapshot.
+      let unseen: (() => void) | null = null
+      const { world, run } = ending({
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind === 'run' && owner.runId.startsWith('refresh-') && unseen !== null) {
+              unseen()
+              unseen = null
+            }
+            return real.take(place, owner)
+          },
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Export a function, not a flag.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // The proof is no longer in the Spec: nothing can run it again once RV1 makes it stale.
+            const database = yield* Database
+            yield* database
+              .delete(specProofs)
+              .where(and(eq(specProofs.missionId, mission.id), eq(specProofs.scenarioId, 'R1.S2')))
+            unseen = () => writtenInWorkspace(api, 'notes.md', 'A note of the user.\n')
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => ""\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const refreshes = eventsOf(mission.id, 'building.proofs_refreshed')
+            const errorNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* errorNeeds).length > 0 || (yield* refreshes).length >= 3
+              }),
+              LONG,
+            )
+            // Long enough for a second refresh to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              refreshes: yield* refreshes,
+              needs: yield* errorNeeds,
+              unseen,
+            }
+          }),
+        ),
+      )
+      expect(seen.unseen).toBeNull()
+      expect(seen.refreshes).toHaveLength(1)
+      expect(seen.needs).toHaveLength(1)
+    },
+  )
+  test(
     'a stale final check the refresh cannot run again is refreshed once and holds the end on an error need instead of looping',
     SLOW,
     async () => {
