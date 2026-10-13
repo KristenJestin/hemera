@@ -724,6 +724,85 @@ describe('What a CLI prints and the command it ran are masked', () => {
   })
 })
 
+describe('A JSON answer of any shape is masked value by value and stays JSON', () => {
+  /** What the runner gives back of `gh api … user` when the fake prints this. */
+  const printed = (stdout: string) => {
+    const fake = fakeForge([{ cli: 'gh', when: ['api', 'user'], stdout }])
+    return withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flatMap(runner, (forgeRunner) =>
+          forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId,
+            args: ['api', '--hostname', 'github.com', 'user', '--jq', '.login'],
+          }),
+        ),
+      { shop: REMOTES.shop },
+    ).then((answer) => answer.stdout)
+  }
+
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(4)}`
+  /** A field named as a credential, and a body that quotes a password with escaped quotes. */
+  const item = (at: number) => ({
+    number: at,
+    token: `plain-${String(at)}`,
+    body: `set password="x${String(at)}" then ${token}`,
+  })
+  const masked = (at: number) => ({ number: at, token: '•••', body: 'set password=••• then •••' })
+
+  test('a top-level array, as gh --json lists print it', async () => {
+    const stdout = await printed(`${JSON.stringify([item(1), item(2)], null, 2)}\n`)
+    expect(JSON.parse(stdout)).toEqual([masked(1), masked(2)])
+  })
+
+  test('a top-level object holding an array', async () => {
+    const stdout = await printed(JSON.stringify({ items: [item(1)] }))
+    expect(JSON.parse(stdout)).toEqual({ items: [masked(1)] })
+  })
+
+  test.each([
+    [JSON.stringify(item(1).body), masked(1).body],
+    ['42\n', 42],
+    ['null\n', null],
+  ])('a top-level string, number or null: %j', async (stdout, expected) => {
+    expect(JSON.parse(await printed(stdout))).toEqual(expected)
+  })
+
+  test('NDJSON, as --jq prints it, line by line', async () => {
+    const lines = [item(1), item(2), item(3).body].map((one) => JSON.stringify(one))
+    const stdout = await printed(`${lines.join('\n')}\n`)
+    expect(stdout.split('\n').map((line) => JSON.parse(line))).toEqual([
+      masked(1),
+      masked(2),
+      masked(3).body,
+    ])
+  })
+
+  test('a line of NDJSON that is no JSON is masked as text', async () => {
+    const stdout = await printed(
+      `${JSON.stringify(item(1))}\nwarning: token=${token}\n${JSON.stringify(item(2))}\n`,
+    )
+    const [first, text, last] = stdout.split('\n')
+    expect(JSON.parse(first ?? '')).toEqual(masked(1))
+    expect(text).toBe('warning: token=•••')
+    expect(JSON.parse(last ?? '')).toEqual(masked(2))
+  })
+
+  test('a private key printed as text is masked whole, across its lines', async () => {
+    const block = [
+      '-----BEGIN OPENSSH PRIVATE KEY-----',
+      'b3BlbnNzaC1rZXktdjEAAAAA',
+      'QUJDREVGR0hJ',
+      '-----END OPENSSH PRIVATE KEY-----',
+    ]
+    const stdout = await printed(`{"a": 1}\n${block.join('\n')}\n`)
+    expect(stdout).toBe('{"a":1}\n•••')
+  })
+})
+
 describe('A timeout gives ForgeTimeout, not a success', () => {
   test('a read cut at its limit', async () => {
     const fake = fakeForge([

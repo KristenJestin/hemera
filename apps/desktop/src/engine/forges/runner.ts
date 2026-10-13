@@ -31,9 +31,7 @@ import { type CommandShape, type ParsedCommand, aimsAt, parseCommand } from './s
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
 
-const readJsonObject = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
-)
+const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 /** How much of what a CLI prints is read before the call is cut. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
@@ -65,9 +63,11 @@ export interface ForgeCall {
 
 /**
  * What a call answered: the command it ran, its exit code, what it printed and its standard error,
- * all three masked. An output that is a JSON object is read first and masked value by value
- * (`maskRecord`: every string, and a credential field whole), then written back, so its structure
- * stays readable; any other output is masked as text.
+ * all three masked. An output that is JSON (any value: an object, a list, a string…) is read first
+ * and masked value by value (`maskRecord`: every string, and a credential field whole), then
+ * written back, so it stays JSON; NDJSON (`--jq`) is read so line by line. What is not JSON is
+ * masked as text, each run of such lines as one, so a credential spread over lines (a private
+ * key) goes whole.
  */
 export interface ForgeAnswer {
   readonly command: string
@@ -166,11 +166,36 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         return { ...given, ...QUIET[cli] }
       }
 
-      /** What a CLI printed, masked: a JSON object value by value, any other text as text. */
+      /**
+       * A JSON value masked value by value. Masked as text, a field named `token` or a body holding
+       * `password=\"x\"` would lose its quotes, and the JSON with them.
+       */
+      const maskJson = (value: Schema.Json): string =>
+        JSON.stringify(secrets.maskRecord({ value }).value)
+
+      /** What a CLI printed, masked: JSON value by value, NDJSON line by line, the rest as text. */
       const maskOutput = (printed: string): string =>
-        Option.match(readJsonObject(printed), {
-          onNone: () => secrets.mask(printed),
-          onSome: (object) => JSON.stringify(secrets.maskRecord(object)),
+        Option.match(readJson(printed), {
+          onSome: maskJson,
+          onNone: () => {
+            const masked: string[] = []
+            let text: string[] = []
+            const flush = () => {
+              if (text.length > 0) masked.push(secrets.mask(text.join('\n')))
+              text = []
+            }
+            for (const line of printed.split('\n')) {
+              const json = line.trim() === '' ? Option.none() : readJson(line)
+              if (Option.isNone(json)) {
+                text.push(line)
+              } else {
+                flush()
+                masked.push(maskJson(json.value))
+              }
+            }
+            flush()
+            return masked.join('\n')
+          },
         })
 
       const find = (cli: ForgeCli) =>
