@@ -2173,6 +2173,66 @@ describe('The refresh', () => {
       }
     },
   )
+  test(
+    'a stale final check the refresh cannot run again is refreshed once and holds the end on an error need instead of looping',
+    SLOW,
+    async () => {
+      // The end's check answers once, on a tree the Workspace has moved past; run again, the
+      // Project has it no more.
+      let ends = 0
+      const { world, run } = ending({
+        checks: ({ scope }) => {
+          if (scope !== 'end') return []
+          ends += 1
+          return ends === 1
+            ? [{ ...GREEN, trees: [{ repository: 'api', tree: '0'.repeat(40) }] }]
+            : []
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const refreshes = eventsOf(mission.id, 'building.proofs_refreshed')
+            const errorNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* errorNeeds).length > 0 || (yield* refreshes).length >= 3
+              }),
+              LONG,
+            )
+            // Long enough for a loop to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              refreshes: yield* refreshes,
+              needs: yield* errorNeeds,
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+              ends,
+            }
+          }),
+        ),
+      )
+      expect(seen.refreshes).toHaveLength(1)
+      expect(seen.ends).toBe(2)
+      expect(seen.stage).toBe('building')
+      expect(seen.view.phase).toBe('refresh')
+      expect(seen.needs).toHaveLength(1)
+      const [need] = seen.needs
+      if (need !== undefined && Predicate.isTagged(need.fields, 'Error')) {
+        expect(need.fields.failed).toContain('unit tests · api')
+        expect(need.fields.proposals).toEqual(['Retry'])
+      }
+    },
+  )
 })
 
 describe('The reviewers count in the cap', () => {
