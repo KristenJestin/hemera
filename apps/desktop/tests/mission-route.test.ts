@@ -214,8 +214,10 @@ describe('The needs at the top', () => {
 
 describe('The base of each stage', () => {
   test('is the empty base with the stage’s name when no page is registered', () => {
-    expect(STAGE_PAGES.Building).toBeUndefined()
-    expect(drawn({ mission: mission({ stage: 'building' }) })).toContain('The Building page')
+    expect(STAGE_PAGES.Review).toBeUndefined()
+    expect(drawn({ mission: mission({ stage: 'review', frozen: true }) })).toContain(
+      'The Review page',
+    )
   })
 
   test('is the registered page of the stage, given the mission', () => {
@@ -232,6 +234,20 @@ describe('The base of each stage', () => {
 
   test('Planning has its page', () => {
     expect(STAGE_PAGES.Planning).toBeDefined()
+  })
+
+  test('Ready has its page: the frozen Spec is read first, and nothing launches meanwhile', () => {
+    const markup = drawn({ mission: mission({ stage: 'ready', frozen: true }) })
+    expect(markup).toContain('Reading the frozen Spec')
+    expect(markup).not.toContain('The Ready page')
+    expect(markup).not.toContain('>Launch<')
+  })
+
+  test('Building has its page: rows of its shape while it is read', () => {
+    const markup = drawn({ mission: mission({ stage: 'building', frozen: true }) })
+    expect(markup).toContain('data-stage="building"')
+    expect(markup).toContain('aria-busy="true"')
+    expect(markup).toContain('Reading where Building stands')
   })
 
   test('a page adds its views over itself and its Now line', () => {
@@ -343,8 +359,14 @@ describe('The head of a mission in Planning', () => {
     const planning = drawn()
     expect(planning).toContain('data-ball="agent"')
     expect(planning).not.toContain('data-now=""')
-    expect(drawn({ mission: mission({ stage: 'building', frozen: true }) })).not.toContain(
+    expect(drawn({ mission: mission({ stage: 'review', frozen: true }) })).not.toContain(
       'data-ball="agent"',
     )
+  })
+
+  test('on Ready and Building too: their stage card draws the face', () => {
+    for (const stage of ['ready', 'building'] as const) {
+      expect(drawn({ mission: mission({ stage, frozen: true }) })).toContain('data-ball="agent"')
+    }
   })
 })

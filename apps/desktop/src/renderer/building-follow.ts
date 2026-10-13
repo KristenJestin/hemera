@@ -36,6 +36,7 @@ import {
   readyMomentOf,
   type MissionRead,
 } from './building-model.ts'
+import { markedAs } from './chat-actions.ts'
 import { settingOfChoice } from './chat-items.ts'
 import type { Link } from './link.ts'
 
@@ -65,6 +66,12 @@ export interface ReadyFollowing {
   readonly backToPlanning: () => Promise<void>
   /** The Builder's model for this mission, or null to inherit it. */
   readonly chooseModel: (choice: ModelChoice | null) => Promise<void>
+  /** A model starred or hidden in the picker, by its agent and its name. */
+  readonly mark: (
+    agent: string,
+    model: string,
+    change: { readonly favourite?: boolean; readonly hidden?: boolean },
+  ) => Promise<void>
   readonly revoke: (grantId: string) => Promise<void>
   /** Reads again, after a failure. */
   readonly retry: () => void
@@ -327,6 +334,22 @@ export function followReady(
           model = heard
           emit()
         },
+        (failure: Error) => {
+          refused = failure.message
+          emit()
+        },
+      )
+    },
+    mark: (agentId, name, change) => {
+      // The picker offers the agents it was given: one it names is one of them.
+      const agent = agents.find((one) => one.id === agentId)?.id
+      if (agent === undefined) return Promise.resolve()
+      return link.markModel(markedAs(marks, agent, name, change)).then(
+        () =>
+          link.modelMarks().then((read) => {
+            marks = read
+            emit()
+          }),
         (failure: Error) => {
           refused = failure.message
           emit()

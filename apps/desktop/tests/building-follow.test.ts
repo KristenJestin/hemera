@@ -241,6 +241,23 @@ describe('Launching from the Ready page', () => {
     expect(calls).toEqual(['model claude sonnet', 'model default'])
   })
 
+  test('a model starred or hidden in the picker is marked, over its earlier mark', async () => {
+    const marked: string[] = []
+    const { link } = linkOf({
+      modelMarks: () =>
+        Promise.resolve([{ agent: 'claude', model: 'opus', favourite: false, hidden: true }]),
+      markModel: (mark) => {
+        marked.push(`${mark.model} ${String(mark.favourite)} ${String(mark.hidden)}`)
+        return Promise.resolve()
+      },
+    })
+    const { following } = ready(link)
+    await settled()
+    await following.mark('claude', 'opus', { favourite: true })
+    await following.mark('ghost', 'opus', { favourite: true })
+    expect(marked).toEqual(['opus true true'])
+  })
+
   test('a grant revoked is read again, and leaves the list', async () => {
     let grants = [grant()]
     const { link, calls } = linkOf({
