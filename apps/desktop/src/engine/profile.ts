@@ -33,7 +33,7 @@ import {
   Stream,
   SubscriptionRef,
 } from 'effect'
-import type { Scope } from 'effect'
+import type { Duration, Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
@@ -286,6 +286,8 @@ export interface ProfileParts {
         readonly hold?: BuilderHold
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
         readonly outside?: Partial<OutsideSettings>
+        /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */
+        readonly proofLimit?: Duration.Duration | undefined
       }
     | undefined
   /**
@@ -663,7 +665,7 @@ export const startProfile = (
                     Layer.provideMerge(
                       Layer.mergeAll(
                         parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
-                        proofRunnerLayer,
+                        proofRunnerLayer(parts.building?.proofLimit),
                       ),
                     ),
                   ),
