@@ -681,6 +681,28 @@ describe('A need made as its CLI turned ready does not stay pending', () => {
   })
 })
 
+describe('A repository removed while nothing waits on it settles its need', () => {
+  test('after a restart, the only repository waiting removed: its need is withdrawn and its row deleted, with no Retry', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...bktReady()])
+    const rows = await restartedWith(fake, REMOTES, 1, ({ projectId, repository }) =>
+      Effect.gen(function* () {
+        yield* removeRepository({
+          id: repository('shop'),
+          version: (yield* getProject(projectId)).version,
+        })
+        yield* pendingNeeds.pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced('50 millis'),
+            until: (pending) => pending.length === 0,
+          }),
+        )
+        return yield* forgeNeedRows
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+})
+
 describe('A forge need’s row is deleted when its need ends', () => {
   test('withdrawn by Check again', async () => {
     const fake = fakeForge(ghSignedOut())

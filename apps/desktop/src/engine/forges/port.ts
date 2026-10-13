@@ -208,6 +208,9 @@ const BktStatus = Schema.fromJsonString(
 )
 const readBktStatus = Schema.decodeUnknownOption(BktStatus)
 
+/** The Project a `repository.removed` event names. */
+const readRemoved = Schema.decodeUnknownOption(Schema.Struct({ projectId: Schema.String }))
+
 /** A host without its port, lower case. */
 const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, '')
 
@@ -1128,6 +1131,20 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
             return stillWaits(project, yield* SubscriptionRef.get(memory), waits.cli, waits.host)
           }),
         ).pipe(Effect.catch(() => Effect.succeed(true)))
+
+      // A repository removed while nothing waits on it: its Project's needs are settled now, not
+      // at the next Retry or recheck (which a closed automation gate holds back).
+      const removals = yield* DomainEvents.use((domain) => domain.subscribe)
+      yield* removals.pipe(
+        Stream.filter((event) => event.type === 'repository.removed'),
+        Stream.runForEach((event) =>
+          Option.match(readRemoved(event.payload), {
+            onNone: () => Effect.void,
+            onSome: ({ projectId }) => provided(settleNeeds(projectId)),
+          }),
+        ),
+        Effect.forkScoped,
+      )
 
       // The rows of needs that ended another way (kept by an engine before #262, or left by a stop
       // between a need's end and its row's deletion) wait for nothing: they go at the start. One
