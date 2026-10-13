@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
+import { instructionsText } from '../src/engine/sessions/instructions.ts'
 import {
   MEMORY_TOOLS,
   ROLES_REGISTERED,
@@ -85,6 +86,38 @@ describe('The role registry', () => {
 describe('The roles this version ships', () => {
   test('the test role is not one of them: only the suites register it', () => {
     expect(ROLES_REGISTERED.map((role) => role.id)).not.toContain('test')
+  })
+})
+
+describe('A reviewer that finds nothing may say so', () => {
+  const received = (id: 'spec-reviewer' | 'code-reviewer'): string => {
+    const role = roleNamed(ROLES_REGISTERED, id)
+    if (role === undefined) throw new Error(`${id} is not registered`)
+    return instructionsText(
+      {
+        owner: 'mission ACME-12',
+        role: role.displayName,
+        userLanguage: 'en',
+        specLanguage: 'en',
+        readsMemory: role.readsMemory,
+        testerMode: null,
+        hemeraOnly: true,
+      },
+      role,
+      [],
+    )
+  }
+
+  test('the Code reviewer is told in its instructions that an empty report is valid', () => {
+    expect(received('code-reviewer')).toContain(
+      'One review_report, then end. An empty report is valid.',
+    )
+  })
+
+  test('the Spec reviewer still is', () => {
+    expect(received('spec-reviewer')).toContain(
+      'One review_report, then end. An empty report is valid.',
+    )
   })
 })
 

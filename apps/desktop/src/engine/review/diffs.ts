@@ -722,7 +722,8 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
        * Both sides as the user's checkout has them, on any Git configuration: the snapshot holds
        * what Git stores (`core.autocrlf` or `eol` turn CRLF into LF), so the live side is read from
        * the disk, and the base side through Git's line-ending conversions. A file whose attributes
-       * name a filter driver keeps its base as stored: a driver is a program of the user's.
+       * name a filter driver keeps both sides as stored, as the list counted them: a driver is a
+       * program of the user's, and what it checks out (git-lfs's bytes) is never read.
        */
       const checkedOut = (
         place: Place,
@@ -733,25 +734,34 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
         Effect.gen(function* () {
           const readable = (side: FileSide | null): side is FileSide =>
             side !== null && side.withheld === null && side.content !== null
+          if (!readable(sides.before) && !readable(sides.after)) return sides
+          const stored = found.oldPath ?? found.path
+          const filtered = yield* run(
+            place.folder,
+            ['check-attr', '-z', 'filter', '--', ...new Set([stored, found.path])],
+            'read',
+          ).pipe(
+            Effect.map((printed) =>
+              fieldsOf(printed).some((value, at) => at % 3 === 2 && value !== 'unspecified'),
+            ),
+            Effect.orElseSucceed(() => true),
+          )
+          if (filtered) return sides
           const onDisk = readable(sides.after) ? diskBytes(join(place.folder, found.path)) : null
           const after =
             onDisk === null || sides.after === null ? sides.after : textSide(sides.after, onDisk)
-          const stored = found.oldPath ?? found.path
+          const was = sides.before
           const before =
-            readable(sides.before) && base !== null
-              ? yield* Effect.gen(function* () {
-                  const attributes = fieldsOf(
-                    yield* run(place.folder, ['check-attr', '-z', 'filter', '--', stored], 'read'),
-                  )
-                  if (attributes[2] !== 'unspecified') return sides.before
-                  const bytes = yield* run(
-                    place.folder,
-                    ['cat-file', '--filters', `${base}:${stored}`],
-                    'read',
-                  )
-                  return sides.before === null ? null : textSide(sides.before, bytes)
-                }).pipe(Effect.orElseSucceed(() => sides.before))
-              : sides.before
+            readable(was) && base !== null
+              ? yield* run(
+                  place.folder,
+                  ['cat-file', '--filters', `${base}:${stored}`],
+                  'read',
+                ).pipe(
+                  Effect.map((bytes) => textSide(was, bytes)),
+                  Effect.orElseSucceed(() => was),
+                )
+              : was
           return { before, after }
         })
 
