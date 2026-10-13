@@ -853,7 +853,7 @@ const READY: ReadyMoment = {
       spent: '0',
       share: 0,
       limits: ['0 of 8 launches', '0 of 30 tries', '0 of 3 rounds'],
-      usage: '$3.10 · 0.9 M tokens',
+      usage: '$3.10 · 900 k tokens',
       estimated: true,
     },
   },
@@ -861,13 +861,13 @@ const READY: ReadyMoment = {
 
 const MOVED_TARGETS = [
   {
-    kind: 'target',
+    kind: 'other',
     what: 'api/src/invoices/invoices.query.ts',
     how: '+12 −3 in 2 commits',
     verdict: { holds: true, why: 'Only a column renamed; T2 reads the new name.' },
   },
   {
-    kind: 'proof',
+    kind: 'other',
     what: 'web/e2e/billing.spec.ts',
     how: '+40 in 1 commit',
     verdict: { holds: true, why: 'New tests of the filters, none on the export.' },
@@ -877,7 +877,7 @@ const MOVED_TARGETS = [
 
 const MOVED_BREAKING = [
   {
-    kind: 'target',
+    kind: 'other',
     what: 'api/src/invoices/export.query.ts',
     how: '+88 −14 in 3 commits',
     verdict: {
@@ -1015,7 +1015,7 @@ export const READY_MOMENTS: Record<ReadyName, () => ReadyMoment> = {
       state: 'outdated',
       moved: [
         {
-          kind: 'target',
+          kind: 'other',
           what: 'api/src/invoices/exports/streaming/csv/export-with-filters-and-time-zones.query.ts',
           how: '+88 −14 in 3 commits, two of them merges from the main branch of the repository',
           verdict: MOVED_BREAKING[0].verdict,
