@@ -36,6 +36,7 @@ import { SetupProposal } from './setup.ts'
 import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
 import { DocsReport } from './docs.ts'
+import { CheckpointRead, EvidenceRead, ReviewReport } from './review.ts'
 import { TaskAmendment } from './build-tasks.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
@@ -805,6 +806,13 @@ const TaskFinished = Schema.Struct({
     'Say a task you run is finished, once you verified it yourself. Hemera takes its end state and judges it: never call it to see what the checks say.',
 })
 
+const ProofRun = Schema.Struct({
+  scenario: Bounded(40, 'The scenario whose proof to run (`R1.S2`).'),
+}).annotate({
+  description:
+    "Run a scenario's proof as Hemera runs it, and read how it ended: during the red phase it records the red; once the tasks covering it are done it judges its green; before that it only says where it stands. Refused for a scenario verified by hand, and before its test is in place.",
+})
+
 const NeedOption = Bounded(MAX_REQUESTED_OPTION, 'One option, in a few words.')
 
 const NeedOptions = Schema.Array(NeedOption).check(
@@ -925,7 +933,7 @@ const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
 /** Every tool of Hemera's, by its name as the agent asks for it. */
 export const TOOLS = {
   fs_read: tool({
-    roles: [...READERS, 'code-reviewer'],
+    roles: [...READERS, 'spec-reviewer', 'code-reviewer'],
     gate: 'local',
     effect: 'reads',
     path: 'path',
@@ -1090,6 +1098,8 @@ export const TOOLS = {
       'helper',
       'prototyper',
       'documenter',
+      'spec-reviewer',
+      'code-reviewer',
     ],
     gate: 'workflow',
     effect: 'reads',
@@ -1457,6 +1467,14 @@ export const TOOLS = {
     input: NeedPropose,
     label: { label: 'Propose a way on', mark: 'need-propose', doing: 'Proposing what to try' },
   }),
+  proof_run: tool({
+    roles: ['builder', 'helper'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: ProofRun,
+    label: { label: 'Run a proof', mark: 'proof-run', doing: 'Running a proof' },
+  }),
   build_summary: tool({
     roles: ['builder'],
     gate: 'workflow',
@@ -1512,6 +1530,34 @@ export const TOOLS = {
       mark: 'docs-report',
       doing: 'Reporting the documentation',
     },
+  }),
+  checkpoint_read: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: CheckpointRead,
+    label: {
+      label: 'Read the checkpoint',
+      mark: 'checkpoint-read',
+      doing: 'Reading the checkpoint',
+    },
+  }),
+  evidence_read: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'reads',
+    path: null,
+    input: EvidenceRead,
+    label: { label: 'Read the evidence', mark: 'evidence-read', doing: 'Reading the evidence' },
+  }),
+  review_report: tool({
+    roles: ['spec-reviewer', 'code-reviewer'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: ReviewReport,
+    label: { label: 'Report the review', mark: 'review-report', doing: 'Reporting the review' },
   }),
   hemera_report: tool({
     roles: ROLES,
@@ -1592,12 +1638,16 @@ export const TOOL_NAMES = [
   'task_blocked',
   'report_need',
   'need_propose',
+  'proof_run',
   'build_summary',
   'helper_launch',
   'helper_read',
   'prototype_read',
   'helper_result',
   'docs_report',
+  'checkpoint_read',
+  'evidence_read',
+  'review_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

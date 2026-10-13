@@ -37,8 +37,11 @@ export const TASK_STATES = [
 export const TaskState = Schema.Literals(TASK_STATES)
 export type TaskState = typeof TaskState.Type
 
-/** Where a task of the effective plan comes from: the frozen Spec, or an amendment. */
-export const TASK_ORIGINS = ['spec', 'amendment'] as const
+/**
+ * Where a task of the effective plan comes from: the frozen Spec, an amendment, or a finding of the
+ * automatic review (a special task, #147).
+ */
+export const TASK_ORIGINS = ['spec', 'amendment', 'review'] as const
 export const TaskOrigin = Schema.Literals(TASK_ORIGINS)
 export type TaskOrigin = typeof TaskOrigin.Type
 
@@ -81,11 +84,22 @@ const lets = (
 const dependenciesMet = (task: BuildTaskNow, byId: ReadonlyMap<string, BuildTaskNow>) =>
   task.dependsOn.every((id) => lets(id, byId))
 
-/** The waiting tasks whose dependencies are all done: they become available, in plan order. */
-export const promotable = (tasks: Tasks): ReadonlyArray<string> => {
+/**
+ * The waiting tasks whose dependencies are all done: they become available, in plan order. A task
+ * covering a scenario whose red is not recorded yet (`waitingRed`, #144) waits for it.
+ */
+export const promotable = (
+  tasks: Tasks,
+  waitingRed: ReadonlySet<string> = new Set(),
+): ReadonlyArray<string> => {
   const byId = byIdOf(tasks)
   return tasks
-    .filter((task) => task.state === 'waiting' && dependenciesMet(task, byId))
+    .filter(
+      (task) =>
+        task.state === 'waiting' &&
+        dependenciesMet(task, byId) &&
+        !task.scenarios.some((scenario) => waitingRed.has(scenario)),
+    )
     .map((task) => task.id)
 }
 

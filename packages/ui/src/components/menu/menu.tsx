@@ -137,6 +137,7 @@ export function Menu({
             {groups.map((group, index) => (
               // A group is a position in the list, and two of them can open on the same
               // command: its place is the only thing that tells it from the next one.
+              // react-doctor-disable-next-line no-array-index-as-key -- said above
               <BaseMenu.Group key={index}>
                 {index > 0 && <BaseMenu.Separator className="my-1 border-t border-border" />}
                 {group.map((item) => (

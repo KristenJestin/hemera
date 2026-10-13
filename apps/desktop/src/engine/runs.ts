@@ -120,6 +120,11 @@ export interface RunsSettings {
   readonly graceMillis: number
   /** The empty folder the forge CLIs of an agent's commands read their configuration from. */
   readonly agentConfigFolder: string
+  /**
+   * Runs at a point a suite needs to reach: `launched`, once a run's process is started and
+   * before the run says it is running. Never held otherwise.
+   */
+  readonly hold?: ((at: 'launched') => Effect.Effect<void>) | undefined
 }
 
 /** One run going in this engine, and everything known of it. */
@@ -245,6 +250,7 @@ export const runsLayer = (log: Log, settings: Partial<RunsSettings> = {}) =>
           graceMillis: settings.graceMillis ?? STOP_GRACE_MS,
           agentConfigFolder:
             settings.agentConfigFolder ?? join(tmpdir(), 'hemera-agents-no-forge-login'),
+          hold: settings.hold,
         },
         mask: secrets.mask,
         reservations: { current: { enter: () => Effect.succeed(null) } },
@@ -479,6 +485,7 @@ const launch = (live: Live, asked: Launch) =>
     }
     child.onStdout(heard)
     child.onStderr(heard)
+    if (runs.settings.hold !== undefined) yield* runs.settings.hold('launched')
     live.run = { ...live.run, state: 'running' }
     yield* writeRun(live, 'run.started')
 
@@ -910,6 +917,22 @@ export const stopMissionRuns = (missionId: string) =>
   Effect.gen(function* () {
     const runs = yield* Runs
     const going = [...runs.live.values()].filter((live) => live.run.missionId === missionId)
+    yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
+      concurrency: 'unbounded',
+      discard: true,
+    })
+  })
+
+/**
+ * Stops every run a mission's agents started: what the end of its Building asks. A run the user or
+ * Hemera started keeps going.
+ */
+export const stopAgentRuns = (missionId: string) =>
+  Effect.gen(function* () {
+    const runs = yield* Runs
+    const going = [...runs.live.values()].filter(
+      (live) => live.run.missionId === missionId && live.run.startedBy === 'agent',
+    )
     yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
       concurrency: 'unbounded',
       discard: true,

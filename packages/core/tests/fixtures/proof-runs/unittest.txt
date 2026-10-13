@@ -1,0 +1,41 @@
+sFFF.E
+======================================================================
+ERROR: test_reads_back (tests.test_export.ExportTest.test_reads_back)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/tests/test_export.py", line 16, in test_reads_back
+    read_back()
+    ^^^^^^^^^
+NameError: name 'read_back' is not defined
+
+======================================================================
+FAIL: test_exports_markdown (tests.test_export.ExportTest.test_exports_markdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/tests/test_export.py", line 13, in test_exports_markdown
+    self.assertEqual(to_markdown([]), "| total |")
+AssertionError: '' != '| total |'
++ | total |
+
+======================================================================
+FAIL: test_exports_rows (tests.test_export.ExportTest.test_exports_rows) (n=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/tests/test_export.py", line 25, in test_exports_rows
+    self.assertEqual(to_markdown([n]), "| total |")
+AssertionError: '' != '| total |'
++ | total |
+
+======================================================================
+FAIL: test_exports_rows (tests.test_export.ExportTest.test_exports_rows) (n=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/tests/test_export.py", line 25, in test_exports_rows
+    self.assertEqual(to_markdown([n]), "| total |")
+AssertionError: '' != '| total |'
++ | total |
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.001s
+
+FAILED (failures=3, errors=1, skipped=1)

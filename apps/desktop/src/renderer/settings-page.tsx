@@ -240,6 +240,7 @@ function useLineChecks(
     for (const line of wanted.split('\n')) {
       if (line === '' || asked.current.has(line)) continue
       asked.current.add(line)
+      // react-doctor-disable-next-line no-pass-data-to-parent -- a request to the engine, whose answer comes back into this hook
       check(line).then(
         (problem) => setChecked((before) => new Map(before).set(line, problem)),
         () => asked.current.delete(line),
@@ -266,7 +267,9 @@ function useSettled(
     )
   }
   // A value changed elsewhere is taken, unless the user is typing in the field.
+  // react-doctor-disable-next-line no-derived-state-effect -- the field's own copy, which typing keeps apart from what is saved
   useEffect(() => {
+    // react-doctor-disable-next-line no-derived-state -- the same copy
     if (!typing.current) setValue(saved)
   }, [saved])
   useEffect(

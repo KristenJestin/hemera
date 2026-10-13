@@ -93,6 +93,7 @@ import { HelperDesk, type HelperWork } from './helper-desk.ts'
 import {
   type HelperRow,
   PROTOTYPES_FOLDER,
+  STOPPED_AT_THE_END,
   helperEvent,
   helperNameOf,
   helperOfLineage,
@@ -863,7 +864,11 @@ export const helpersLayer = (settings: HelpersSettings) =>
                 Option.getOrElse(readString(payload['reason']), () => ''),
               )
             }
-            if (event.type === 'session.stopped' && payload['state'] === 'failed') {
+            // A helper the end of its Building stopped fails as one whose session failed.
+            if (
+              event.type === 'session.stopped' &&
+              (payload['state'] === 'failed' || payload['reason'] === STOPPED_AT_THE_END)
+            ) {
               yield* stoppedSession(
                 lineage,
                 Option.getOrElse(readString(payload['reason']), () => 'its session failed'),

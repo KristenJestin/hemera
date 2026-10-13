@@ -1,0 +1,11 @@
+✖  .
+
+=== Failed
+=== FAIL: .  (0.00s)
+FAIL	example.com/acme [build failed]
+
+=== Errors
+./export_test.go:20:33: undefined: undefinedThing
+
+
+DONE 0 tests, 1 failure, 1 error in 0.000s

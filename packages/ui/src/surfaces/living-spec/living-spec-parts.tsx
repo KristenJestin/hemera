@@ -217,6 +217,7 @@ export function History({
       {changes.map((change, index) => {
         const { byMission } = change
         return (
+          // react-doctor-disable-next-line no-array-index-as-key -- a history never reorders, and the same change can come twice
           <li key={`${change.what}-${change.at}-${String(index)}`} className="flex gap-2">
             <span className="flex pt-0.5 text-muted-foreground">
               <IconHistory size="sm" aria-hidden="true" />

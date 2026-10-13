@@ -68,7 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -116,20 +116,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
       - name: Fetch the Playwright browser
         working-directory: source/packages/ui
-        run: pnpm exec playwright install chromium ${{ runner.os == 'Linux' && '--with-deps' || '' }}
-      # A Windows runner's temporary folder is on C:, the system disk, which saturates at a few
-      # hundred writes a second. The suites write their repositories, worktrees and databases
-      # there, and every `git` and `node` a test starts is read from that same disk. Measured:
-      # with it on C:, C: was 85% busy, a write waited up to a third of a second, the
-      # processors sat idle and one `git rev-parse` took 45 s, past a test's timeout. On D:, the
-      # runner's local disk, the repository suites ran in 174 s instead of 285 s and no `git`
-      # took more than 0.6 s.
-      - name: Keep the temporary folder off the system disk
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
-          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+        run: pnpm exec playwright install chromium --with-deps
 
       - working-directory: source
         run: pnpm build
@@ -140,36 +127,129 @@ jobs:
       # The step is capped: a suite that hangs fails this in twenty minutes rather than in the
       # fifty a Windows job once sat for, and the suites' own timeouts catch what really stalls.
       - name: Test
-        if: runner.os != 'Windows'
         working-directory: source
         timeout-minutes: 20
         run: pnpm test
-      # A Windows runner has two cores. There, the stories' two Chromiums beside the repository
-      # suites hold the processors at full load, and a `git` a suite starts takes seconds instead
-      # of milliseconds. So Windows runs the two one after the other, and the stories run even
-      # when the suites failed, so one run reports both.
+
+  # Windows runs the same work as `verify` above, split over three runners side by side. On one
+  # runner it took 23 to 26 minutes (#277): its four processors were full for the whole of the
+  # repository suites, so the time was the sum of every test, not one slow test. Each part sets
+  # up on its own, and `verify (windows-latest)` below is green only when all three are.
+  windows:
+    name: windows (${{ matrix.part }})
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [checks and stories, repository 1/2, repository 2/2]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        working-directory: source
+        run: corepack enable
+
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+
+      - working-directory: source
+        run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: source/apps/desktop
+        run: pnpm exec install-electron
+
+      - if: matrix.part == 'checks and stories'
+        working-directory: source
+        run: pnpm typecheck
+      - if: matrix.part == 'checks and stories'
+        working-directory: source
+        run: pnpm lint
+      - if: matrix.part == 'checks and stories'
+        working-directory: source
+        run: pnpm fmt:check
+      - name: Cache the Playwright browser
+        if: matrix.part == 'checks and stories'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+      - name: Fetch the Playwright browser
+        if: matrix.part == 'checks and stories'
+        working-directory: source/packages/ui
+        run: pnpm exec playwright install chromium
+      # A Windows runner's temporary folder is on C:, the system disk, which saturates at a few
+      # hundred writes a second. The suites write their repositories, worktrees and databases
+      # there, and every `git` and `node` a test starts is read from that same disk. Measured:
+      # with it on C:, C: was 85% busy, a write waited up to a third of a second, the
+      # processors sat idle and one `git rev-parse` took 45 s, past a test's timeout. On D:, the
+      # runner's local disk, the repository suites ran in 174 s instead of 285 s and no `git`
+      # took more than 0.6 s.
+      - name: Keep the temporary folder off the system disk
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      # The `git` on a runner's PATH is Git for Windows' launcher, which starts the real `git.exe`
+      # as a second process. Measured on a runner (#277): a `git --version` took 25 ms through it
+      # and 13 ms straight, a `git status` 25 and 16 ms. The suites start a `git` for most of
+      # what they check, so the real one comes first on PATH.
+      - name: Start Git without its launcher
+        shell: pwsh
+        run: '"C:\Program Files\Git\mingw64\bin" >> $env:GITHUB_PATH'
+
+      - working-directory: source
+        run: pnpm build
+
+      # The stories do not run beside the repository suites: there, the stories' two Chromiums
+      # held the processors at full load and a `git` a suite starts took seconds instead of
+      # milliseconds. Each part has a runner of its own instead.
       #
       # Each cap sits well above what the step takes, so that only a hang reaches it. Measured on
       # the twenty latest green Windows jobs (12 October 2026): the repository suites took 491 to
-      # 893 s (the slowest within seconds of the old 900 s cap, and the suite is still growing),
-      # the stories 123 to 252 s. The suites get thirty minutes, twice the slowest run; the
-      # stories keep fifteen, three and a half times theirs. The one story run that reached
-      # fifteen minutes was a hang, not a slow run: every other one stayed under 260 s.
+      # 893 s on one runner (the slowest within seconds of the old 900 s cap, and the suite is
+      # still growing), the stories 123 to 252 s. The suites keep thirty minutes, twice the
+      # slowest whole run; the stories keep fifteen, three and a half times theirs. The one story
+      # run that reached fifteen minutes was a hang, not a slow run: every other one stayed under
+      # 260 s.
       #
       # That hang is one story file that never reports (#244), which Vitest's browser mode waits
       # for without a limit. `tools/stories-watchdog.ts` fails the run after ninety seconds
       # without a finished file and names the file; the cap stays for what happens before that.
+      #
+      # Vitest splits the repository suites in two by their files: the two halves together run
+      # every file, each once.
       - name: Test the repository suites
-        id: repository
-        if: runner.os == 'Windows'
+        if: startsWith(matrix.part, 'repository')
         working-directory: source
         timeout-minutes: 30
-        run: pnpm test --project repository
+        run: pnpm test --project repository --shard=${{ matrix.part == 'repository 1/2' && '1/2' || '2/2' }}
       - name: Test the stories
-        if: runner.os == 'Windows' && (success() || steps.repository.conclusion == 'failure')
+        if: matrix.part == 'checks and stories'
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project storybook-light --project storybook-dark
+
+  # The check the branch rules require, under the name it had when one runner did it all.
+  windows-result:
+    name: verify (windows-latest)
+    needs: windows
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every Windows part passed
+        run: test "${{ needs.windows.result }}" = success
 
   # The end-to-end suite, which drives the built application's window. A runner has no display,
   # so the window opens in a virtual X server (`xvfb-run`); the run needs no compositor of its

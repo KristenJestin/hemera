@@ -115,6 +115,8 @@ export const Now = Schema.Struct({
   running: Schema.Array(NowRunning),
   /** A Hemera phase waiting for a free slot of the Project's cap, said as Now says it (#41). */
   slotWait: Schema.NullOr(Schema.String),
+  /** Where the end of the Building stands, as Hemera computes it (#147): one sentence each. */
+  end: Schema.Array(Schema.String),
   next: Schema.NullOr(NowNext),
   doing: Schema.Array(NowDoing),
 })

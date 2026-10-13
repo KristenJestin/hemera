@@ -1,0 +1,43 @@
+[0m[7m[1m[31m FAIL [39m[22m[27m[0m [0m[7m[37m unit [39m[27m[0m [2mtests/[22m[1mexport.test.js[22m
+  [1m● [22mConsole
+
+    [2mconsole.log[22m
+      rows read
+[2m[22m
+[2m      [2mat Object.log ([22m[2m[0m[36mtests/export.test.js[39m[0m[2m:5:13)[22m[2m[22m
+
+[1m[31m  [1m● [22m[1mexports › the invoices export as Markdown[39m[22m
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"| total |"[39m
+    Received: [31m""[39m
+[2m[22m
+[2m      4 |   test('the invoices export as Markdown', () => {[22m
+[2m      5 |     console.log('rows read')[22m
+[2m    > 6 |     expect(toMarkdown()).toBe('| total |')[22m
+[2m        |                          ^[22m
+[2m      7 |   })[22m
+[2m      8 | })[22m
+[2m      9 |[22m
+[2m[22m
+[2m      [2mat Object.toBe ([22m[2m[0m[36mtests/export.test.js[39m[0m[2m:6:26)[22m[2m[22m
+
+[0m[7m[1m[31m FAIL [39m[22m[27m[0m [0m[7m[37m unit [39m[27m[0m [2mtests/[22m[1mbroken.test.js[22m
+  [1m● [22mTest suite failed to run
+
+    Cannot find module './missing-module' from 'tests/broken.test.js'
+
+    > 1 | require('./missing-module')
+        | ^
+      2 | test('never runs', () => {})
+      3 |
+
+      [2mat Resolver._throwModNotFoundError ([22mnode_modules/.pnpm/jest-resolve@30.2.0/node_modules/jest-resolve/build/index.js[2m:863:11)[22m
+      [2mat Object.require ([22m[0m[36mtests/broken.test.js[39m[0m[2m:1:1)[22m
+
+[1mTest Suites: [22m[1m[31m2 failed[39m[22m, 2 total
+[1mTests:       [22m[1m[31m1 failed[39m[22m, [1m[32m1 passed[39m[22m, 2 total
+[1mSnapshots:   [22m0 total
+[1mTime:[22m        0.253 s, estimated 1 s
+[2mRan all test suites[22m[2m.[22m

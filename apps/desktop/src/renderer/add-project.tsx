@@ -104,7 +104,8 @@ export function AddProjectDialog({
   const settingUp = settingUpOf(setUp, setupOffer)
   const [folder, setFolder] = useState('')
   const [name, setName] = useState('')
-  const [named, setNamed] = useState(false)
+  // Named by hand: the folder's name no longer follows the folder. Read when it changes, never drawn.
+  const named = useRef(false)
   const [found, setFound] = useState<ReadonlyArray<FoundRepository> | null>(null)
   const [detecting, setDetecting] = useState(false)
   const [byHand, setByHand] = useState('')
@@ -126,7 +127,7 @@ export function AddProjectDialog({
     if (timer.current !== null) clearTimeout(timer.current)
     setFolder('')
     setName('')
-    setNamed(false)
+    named.current = false
     setFound(null)
     setDetecting(false)
     setByHand('')
@@ -147,9 +148,10 @@ export function AddProjectDialog({
       (paths) => {
         if (asked !== looking.current) return
         setDetecting(false)
+        const detected = new Set(paths)
         setFound((before) => [
           ...paths.map((path) => ({ path, chosen: true })),
-          ...(before ?? []).filter((one) => one.byHand === true && !paths.includes(one.path)),
+          ...(before ?? []).filter((one) => one.byHand === true && !detected.has(one.path)),
         ])
       },
       (failure: Error) => {
@@ -164,7 +166,7 @@ export function AddProjectDialog({
     setFolder(next)
     setFound(null)
     setRefusal({})
-    if (!named) setName(folderName(next))
+    if (!named.current) setName(folderName(next))
     // The list holds its rows' shape from the first keystroke, not once the typing settles.
     setDetecting(next.trim() !== '')
     if (timer.current !== null) clearTimeout(timer.current)
@@ -191,7 +193,7 @@ export function AddProjectDialog({
       name={name}
       onName={(next) => {
         setName(next)
-        setNamed(true)
+        named.current = true
       }}
       nameError={refusal.name}
       found={found}

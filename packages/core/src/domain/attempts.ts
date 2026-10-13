@@ -9,8 +9,12 @@
 
 import { Schema } from 'effect'
 
-/** What an attempt is at: a task, the checks of a requirement, or the end of the Building. */
-export const ATTEMPT_SCOPES = ['task', 'requirement', 'end'] as const
+/**
+ * What an attempt is at: a task, the checks of a requirement, the end of the Building, or a
+ * scenario's proof (#144: Hemera's writing of the proofs, a red that is not one, a proof that is not
+ * green once its tasks are done).
+ */
+export const ATTEMPT_SCOPES = ['task', 'requirement', 'end', 'proof'] as const
 export const AttemptScope = Schema.Literals(ATTEMPT_SCOPES)
 export type AttemptScope = typeof AttemptScope.Type
 
