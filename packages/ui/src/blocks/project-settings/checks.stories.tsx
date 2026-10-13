@@ -27,6 +27,7 @@ import {
   PROPOSED_CHECKS,
   checkRefusals,
   draftOf,
+  proofLimitRefusal,
 } from './checks-fixtures.ts'
 import { FormFoot } from './parts.tsx'
 import { STALE } from './project-settings-fixtures.ts'
@@ -45,6 +46,9 @@ interface PageProps {
   onRemove: (id: string) => void
   onAccept: (ids: readonly string[]) => void
   onReorder: (ids: readonly string[]) => void
+  /** How long a proof may run as its field holds it: null for the default, 10 minutes. */
+  proofLimit?: string | null | undefined
+  onProofLimit: (value: string | null) => void
 }
 
 /** What a check becomes once its proposal is accepted: its own id, the proposal's mark gone. */
@@ -65,6 +69,7 @@ function Page(props: PageProps): ReactNode {
   const [checks, setChecks] = useState(props.checks)
   const [proposals, setProposals] = useState(props.proposals ?? [])
   const [form, setForm] = useState<Open | null>(props.form ?? null)
+  const [limit, setLimit] = useState(props.proofLimit ?? null)
   const draftFor = (open: Open | null): CheckDraft => {
     if (open === null) return NEW_CHECK
     if (open.kind === 'new') return open.draft ?? NEW_CHECK
@@ -167,6 +172,15 @@ function Page(props: PageProps): ReactNode {
           error={props.error}
           onOpen={(id) => open({ kind: 'edit', id })}
           onAdd={() => open({ kind: 'new' })}
+          proofLimit={{
+            value: limit,
+            fallback: 10,
+            error: proofLimitRefusal(limit),
+            onChange: (value) => {
+              props.onProofLimit(value)
+              setLimit(value)
+            },
+          }}
           onAccept={(id) => accept([id])}
           onAcceptAll={() => accept(proposals.map((one) => one.id))}
           onReorder={(ids) => {
@@ -202,6 +216,7 @@ const meta = {
     onRemove: fn(),
     onAccept: fn(),
     onReorder: fn(),
+    onProofLimit: fn(),
   },
   argTypes: {
     checks: { table: { disable: true } },
@@ -243,6 +258,52 @@ export const Filled: Story = {
     const ground = getComputedStyle(head).backgroundColor
     expect(ground).not.toBe('rgba(0, 0, 0, 0)')
     expect(ground).not.toBe(line === undefined ? '' : getComputedStyle(line).backgroundColor)
+  },
+}
+
+const limitField = (canvasElement: HTMLElement): HTMLElement =>
+  within(canvasElement).getByRole('textbox', { name: 'How long a proof may run' })
+
+/**
+ * How long a proof may run, beside the checks: empty, the field shows the default, 10 minutes, in
+ * its quiet tone, and that default applies.
+ */
+export const ProofLimitDefault: Story = {
+  play: async ({ canvasElement }) => {
+    const field = limitField(canvasElement)
+    expect(field).toHaveValue('')
+    expect(field).toHaveAttribute('placeholder', '10')
+    expect(within(canvasElement).getByText(/In minutes/)).toBeVisible()
+    expect(within(canvasElement).queryByRole('button', { name: /Back to the default/ })).toBeNull()
+  },
+}
+
+/** A limit written: 30 minutes, the × that empties it back to the default beside it. */
+export const ProofLimitChanged: Story = {
+  args: { proofLimit: '30' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    expect(limitField(canvasElement)).toHaveValue('30')
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Back to the default time limit of a proof' }),
+    )
+    expect(args.onProofLimit).toHaveBeenLastCalledWith(null)
+    await userEvent.type(limitField(canvasElement), '45')
+    expect(args.onProofLimit).toHaveBeenLastCalledWith('45')
+    expect(canvas.queryByRole('alert')).toBeNull()
+  },
+}
+
+/** A limit the engine refuses: said under the field, in its words. */
+export const ProofLimitRefused: Story = {
+  args: { proofLimit: '0' },
+  play: async ({ canvasElement }) => {
+    expect(await within(canvasElement).findByText('A proof needs at least 1 minute.')).toBeVisible()
+    await userEvent.clear(limitField(canvasElement))
+    await userEvent.type(limitField(canvasElement), '300')
+    expect(
+      await within(canvasElement).findByText(/A proof may run 120 minutes at most/),
+    ).toBeVisible()
   },
 }
 

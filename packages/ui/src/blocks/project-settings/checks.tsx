@@ -2,7 +2,7 @@ import { cn } from 'cn'
 import { AnimatePresence, Reorder, motion, useDragControls } from 'motion/react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
-import { Button } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
@@ -10,6 +10,7 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconChevronRight,
   IconFileText,
@@ -18,11 +19,12 @@ import {
   IconListCheck,
   IconPlus,
   IconTerminal,
+  IconX,
 } from '../../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CatalogueChoice, CommandLineField } from './command-line.tsx'
 import { typeIcon } from './command-types.tsx'
-import { Section, SectionRefusal } from './parts.tsx'
+import { FieldSkeleton, Section, SectionRefusal } from './parts.tsx'
 
 /**
  * The checks of a Project, in its settings: what Hemera runs to judge the work, never the agent.
@@ -39,6 +41,10 @@ import { Section, SectionRefusal } from './parts.tsx'
  * A Project with no check is offered what the catalogue holds, each proposal where it would run,
  * in the quiet tone, with Accept; Accept all stands in the head. Nothing is kept before it is
  * accepted. What arrives or leaves grows and folds on `fold`, pushing what stands under it.
+ *
+ * Under the checks, how long a proof may run before Hemera ends it, as the Cap and budget fields
+ * are: empty until the user writes in it, the default shown in its quiet tone, the × that empties
+ * it, and a value refused said under it.
  */
 export type CheckWhen = 'task' | 'requirement' | 'end'
 
@@ -435,6 +441,59 @@ function Checks({
   )
 }
 
+/** How long a proof may run, in minutes, as its field holds it. */
+export interface ProofLimitField {
+  /** What the user wrote, or null for the default. */
+  value: string | null
+  /** The minutes that apply while the field is empty. */
+  fallback: number
+  /** Why the value is refused, in words. */
+  error?: string | undefined
+  /** Null: the limit is on its way. */
+  loading?: boolean | undefined
+  /** What the field now holds; null once it is emptied. */
+  onChange: (value: string | null) => void
+}
+
+const LIMIT_LABEL = 'How long a proof may run'
+
+const LIMIT_GROUP = 'grid grid-cols-1 items-start gap-4 p-4 sm:grid-cols-3'
+
+/** The proof's time limit, in a frame of its own under the checks. */
+function ProofLimit({ field }: { field: ProofLimitField }): ReactNode {
+  return (
+    <Frame>
+      <div className={LIMIT_GROUP} aria-busy={field.loading === true}>
+        {field.loading === true ? (
+          <FieldSkeleton label={LIMIT_LABEL} />
+        ) : (
+          <Input
+            label={LIMIT_LABEL}
+            description="In minutes. Hemera ends a proof that runs longer."
+            placeholder={String(field.fallback)}
+            value={field.value ?? ''}
+            error={field.error}
+            onValueChange={(value) => field.onChange(value.trim() === '' ? null : value)}
+            trailing={
+              field.value === null ? undefined : (
+                <Tooltip label="Back to the default">
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconX size="sm" />}
+                    aria-label="Back to the default time limit of a proof"
+                    onClick={() => field.onChange(null)}
+                  />
+                </Tooltip>
+              )
+            }
+          />
+        )}
+      </div>
+    </Frame>
+  )
+}
+
 export interface ChecksSectionProps {
   /** Null: the checks are on their way. */
   checks: readonly SettingsCheck[] | null
@@ -448,12 +507,15 @@ export interface ChecksSectionProps {
   onReorder: (ids: string[]) => void
   onAccept: (id: string) => void
   onAcceptAll: () => void
+  /** How long a proof may run (#321), under the checks; not shown without it. */
+  proofLimit?: ProofLimitField | undefined
 }
 
 export function ChecksSection({
   checks,
   proposals = [],
   error,
+  proofLimit,
   onOpen,
   onAdd,
   onReorder,
@@ -598,6 +660,7 @@ export function ChecksSection({
           'Hemera proposes these from the catalogue. Nothing is kept until you accept it. '}
         Missions already running keep the checks they were launched with.
       </p>
+      {proofLimit !== undefined && <ProofLimit field={proofLimit} />}
     </Section>
   )
 }
