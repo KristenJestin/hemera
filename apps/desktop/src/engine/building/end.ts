@@ -250,7 +250,10 @@ const specialTaskIn = (
     }
   })
 
-export const buildingEndLayer = (log: Log) => {
+/** Where a suite holds the end: as it takes in the end of a Builder's turn. Nothing otherwise. */
+export type EndHold = (at: 'turned') => Effect.Effect<void>
+
+export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
@@ -488,7 +491,7 @@ export const buildingEndLayer = (log: Log) => {
             .pipe(Effect.mapError(refusedWhile('reading the red delivered to the Builder')))
           if (red?.state === 'queued') return true
           const since = red?.sentAt ?? open.startedAt
-          return turned === null || turned < since
+          return turned === null || turned <= since
         })
 
       /** Whether the last result of a final check is red. */
@@ -895,7 +898,7 @@ export const buildingEndLayer = (log: Log) => {
             .pipe(Effect.mapError(refusedWhile('reading the Building')))
           const turned = turnedOf(building.id, row?.turned ?? null)
           return answers.some(
-            (one) => one.sentAt === null || turned === null || turned < one.sentAt,
+            (one) => one.sentAt === null || turned === null || turned <= one.sentAt,
           )
         })
 
@@ -1275,7 +1278,10 @@ export const buildingEndLayer = (log: Log) => {
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
             if (building === null || endPhaseOf(building.phase) === null) return
-            const at = now()
+            yield* hold('turned')
+            // When it ended, never when it is heard: a red or an answer its session sent next was
+            // taken after it, whatever this listener was busy with.
+            const at = turn.at
             turnedHere.set(building.id, at)
             // Kept, so a red the Builder fixes is judged after this turn even across a restart; a
             // record that fails still leaves the turn heard, and the end driven.

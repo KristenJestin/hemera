@@ -20,6 +20,7 @@ import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import { planningInputs, sessionDeliveries } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { instant } from './instants.ts'
 import type { SessionOwner } from './roles.ts'
 import { type RoleSession, ownerId } from './store.ts'
 
@@ -176,7 +177,7 @@ export const markSent = (
     ? Effect.succeed<ReadonlyArray<string>>([])
     : transaction
         .update(sessionDeliveries)
-        .set({ state: 'sent', sentAt: new Date().toISOString(), sentTo: sessionId })
+        .set({ state: 'sent', sentAt: instant(), sentTo: sessionId })
         .where(and(inArray(sessionDeliveries.id, [...ids]), eq(sessionDeliveries.state, 'queued')))
         .returning({ id: sessionDeliveries.id })
         .pipe(
