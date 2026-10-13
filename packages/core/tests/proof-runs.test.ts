@@ -1658,7 +1658,46 @@ FAILED tests/test_export.py::test_y - AssertionError: tests/test_export.py::test
 ============================================= 2 failed, 3 passed in 0.01s ==============================================
 `
 
+/** go test, Go 1.27: an older top-level `TestExport/inner` fails; `TestExport/w/inner` passes. */
+const GO_INNER_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/inner (0.00s)
+        export_test.go:9: got 1 rows, want 0
+FAIL
+FAIL	example.com/acme	0.003s
+FAIL
+`
+
+/** go test, Go 1.27: `TestExport/w/inner`, run through a wrapper of its closure, fails. */
+const GO_WRAPPED_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/w (0.00s)
+        --- FAIL: TestExport/w/inner (0.00s)
+            export_test.go:12: got "x", want ""
+FAIL
+FAIL	example.com/acme	0.003s
+FAIL
+`
+
 describe('A Go subtest’s nesting read at its own brace, and the pytest ids #291 left', () => {
+  test('a Go subtest whose closure a wrapper call takes opens its level at the closure’s brace', () => {
+    const path = 'export_test.go'
+    const code = [
+      'func TestExport(t *testing.T) {',
+      '\tt.Run("w", withDB(func(t *testing.T) {',
+      '\t\tt.Run("inner", func(t *testing.T) { t.Errorf("x") })',
+      '\t}))',
+      '}',
+    ].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual([
+      'TestExport',
+      { parent: 'TestExport', subtest: 'w', nesting: [], whole: true },
+      { parent: 'TestExport', subtest: 'inner', nesting: ['w'], whole: true },
+    ])
+    const inner = names.slice(2)
+    expect(validRed(run(GO_INNER_FAILS, 1, path), path, inner)).toBe(false)
+    expect(validRed(run(GO_WRAPPED_FAILS, 1, path), path, inner)).toBe(true)
+  })
+
   test('a t.Run in a comment names no subtest and sets no level', () => {
     const path = 'export_test.go'
     const code = [

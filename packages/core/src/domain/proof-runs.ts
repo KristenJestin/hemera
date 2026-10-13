@@ -484,7 +484,8 @@ export const addedTests = (test: {
  * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
  * function its `@@ … @@ func TestX(` header names, null when it is under no test function. Its
  * nesting is read from the braces above it in their order, strings, runes and comments aside: a
- * `t.Run` opens a level at its function's own brace, the first one directly inside its call.
+ * `t.Run` opens a level at its function's own brace, the first one inside its call (a closure
+ * that a wrapper call takes, `withDB(func(t *testing.T) {`, as well).
  */
 const subtestsOf = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -549,7 +550,7 @@ const subtestsOf = (test: {
       }
       if (char === '{') {
         depth += 1
-        const call = calls.find((one) => one.parens === parens)
+        const call = calls.findLast((one) => one.parens <= parens)
         if (call !== undefined) open.push({ name: call.name, depth })
         calls = calls.filter((one) => one !== call)
       }
