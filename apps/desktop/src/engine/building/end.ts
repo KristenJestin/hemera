@@ -41,7 +41,7 @@ import {
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
 import { and, desc, eq, gt, gte, inArray, isNull } from 'drizzle-orm'
-import { Cause, Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { Cause, Effect, Layer, Option, Predicate, Schema, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
@@ -155,6 +155,8 @@ type Needs =
   | ToolAccess
   | Effect.Services<ReturnType<typeof getMission>>
 
+const readString = Schema.decodeUnknownOption(Schema.String)
+
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
@@ -263,6 +265,16 @@ export const buildingEndLayer = (log: Log) => {
        * user last retried: one that stops once more is the user's to start again.
        */
       const broughtBack = new Set<string>()
+      /**
+       * The end of the last Builder turn this engine heard, by Building: what is read when its
+       * record could not be written, so a turn that ended is never waited for again.
+       */
+      const turnedHere = new Map<string, string>()
+      /** The end of the Builder's last turn: as kept, or as this engine heard it, the later. */
+      const turnedOf = (buildingId: string, kept: string | null) => {
+        const heard = turnedHere.get(buildingId) ?? null
+        return kept === null || (heard !== null && heard > kept) ? heard : kept
+      }
 
       const buildingRow = (buildingId: string) =>
         Effect.gen(function* () {
@@ -449,7 +461,10 @@ export const buildingEndLayer = (log: Log) => {
             .where(eq(buildingCheckRuns.attemptId, open.id))
             .pipe(Effect.mapError(refusedWhile('reading the checks running')))
           if (checking.length > 0) return false
-          const turned = (yield* buildingRow(building.id))?.builderTurnedAt ?? null
+          const turned = turnedOf(
+            building.id,
+            (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
+          )
           return turned === null || turned < open.startedAt
         })
 
@@ -794,6 +809,14 @@ export const buildingEndLayer = (log: Log) => {
           if (!broughtBack.has(building.id)) {
             const brought = yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
             if (brought === 'started') broughtBack.add(building.id)
+            if (brought === 'no_workspace') {
+              // Retry would meet the same: the user is told what is missing.
+              yield* raise(
+                building,
+                'The Builder cannot be started: its Building has no Workspace any more.',
+              )
+              return false
+            }
             if (brought !== 'stopped') return false
           } else if ((yield* BuildDesk.use((desk) => desk.builderNow(missionId))) !== 'stopped') {
             return false
@@ -853,7 +876,7 @@ export const buildingEndLayer = (log: Log) => {
             .from(buildings)
             .where(eq(buildings.id, building.id))
             .pipe(Effect.mapError(refusedWhile('reading the Building')))
-          const turned = row?.turned ?? null
+          const turned = turnedOf(building.id, row?.turned ?? null)
           return answers.some(
             (one) => one.sentAt === null || turned === null || turned < one.sentAt,
           )
@@ -1210,9 +1233,16 @@ export const buildingEndLayer = (log: Log) => {
 
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       const follow = events.pipe(
-        Stream.filter((event) => event.entityKind === 'mission'),
-        Stream.runForEach((event) =>
-          driveMission(event.entityId).pipe(
+        Stream.map((event) => {
+          if (event.entityKind === 'mission') return event.entityId
+          // A Builder session that ended or failed, once written: a start that failed before it
+          // had a turn, or a failure written after its turn's end was heard, says so only here.
+          if (event.type !== 'session.stopped' || event.payload['role'] !== 'builder') return null
+          return Option.getOrNull(readString(event.payload['missionId']))
+        }),
+        Stream.filter((missionId) => missionId !== null),
+        Stream.runForEach((missionId) =>
+          driveMission(missionId).pipe(
             provided,
             Effect.catchCause((cause) => said(`an event was not followed: ${String(cause)}`)),
           ),
@@ -1226,16 +1256,23 @@ export const buildingEndLayer = (log: Log) => {
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
             if (building === null || endPhaseOf(building.phase) === null) return
-            // Kept, so a red the Builder fixes is judged after this turn even across a restart.
+            const at = now()
+            turnedHere.set(building.id, at)
+            // Kept, so a red the Builder fixes is judged after this turn even across a restart; a
+            // record that fails still leaves the turn heard, and the end driven.
             yield* mutate('keeping the end of the Builder’s turn', (transaction) =>
               transaction
                 .update(buildings)
-                .set({ builderTurnedAt: now() })
+                .set({ builderTurnedAt: at })
                 .where(eq(buildings.id, building.id))
                 .pipe(
                   Effect.mapError(refusedWhile('keeping the end of the Builder’s turn')),
                   Effect.as({ result: undefined, events: [] }),
                 ),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                said(`the end of a Builder's turn was not kept: ${String(cause)}`),
+              ),
             )
             yield* drive(building.id)
           }).pipe(
@@ -1257,10 +1294,17 @@ export const buildingEndLayer = (log: Log) => {
         }
       })
 
+      // Once the start brought back its Builders, each end under way is driven again: one told to
+      // wait for the start learns what it could not bring back.
+      const resumed = BuildDesk.use((desk) => desk.resumed).pipe(Effect.andThen(resume))
+
       yield* AutomationGate.use((gate) => gate.pass).pipe(
         Effect.andThen(Memory.use((memory) => memory.ready)),
         Effect.andThen(
-          Effect.all([follow, turns, resume], { concurrency: 'unbounded', discard: true }),
+          Effect.all([follow, turns, resume, resumed], {
+            concurrency: 'unbounded',
+            discard: true,
+          }),
         ),
         provided,
         Effect.catchCause((cause) => said(`the end stopped: ${String(cause)}`)),

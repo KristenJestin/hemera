@@ -16,10 +16,10 @@ import { DocsDesk } from './docs-desk.ts'
 
 /**
  * Where the mission's Builder stands for the end: a session runs; another brings it back (the
- * user's Retry of a need about its sessions, or this engine's start); one was started now; or none
- * runs and nothing will start it.
+ * user's Retry of a need about its sessions, or this engine's start); one was started now; none
+ * runs and nothing will start it; or none can be opened, its Building having no Workspace.
  */
-export type BuilderNow = 'live' | 'waits' | 'started' | 'stopped'
+export type BuilderNow = 'live' | 'waits' | 'started' | 'stopped' | 'no_workspace'
 
 export interface BuildWork {
   readonly read: (grant: Grant, args: ToolArguments<'build_read'>) => Effect.Effect<ToolAnswer>
@@ -51,6 +51,8 @@ export interface BuildWork {
   readonly ensureBuilder: (missionId: string) => Effect.Effect<BuilderNow>
   /** Where the mission's Builder stands, with nothing started: never `started`. */
   readonly builderNow: (missionId: string) => Effect.Effect<BuilderNow>
+  /** Done once this engine's start brought back the Builders it resumes. */
+  readonly resumed: Effect.Effect<void>
   /** The proofs and final checks whose repository moved since they ran, among these (R9). */
   readonly touchedProofs: (
     missionId: string,
@@ -126,6 +128,7 @@ export const buildDeskLayer = Layer.effect(
       refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
       ensureBuilder: (missionId) => Effect.flatMap(work, (one) => one.ensureBuilder(missionId)),
       builderNow: (missionId) => Effect.flatMap(work, (one) => one.builderNow(missionId)),
+      resumed: Effect.flatMap(work, (one) => one.resumed),
       touchedProofs: (missionId, repositories) =>
         Effect.flatMap(work, (one) => one.touchedProofs(missionId, repositories)),
       // Only a mission's write to a path is a claim's business: nothing else waits for the desk.

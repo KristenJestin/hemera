@@ -534,7 +534,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const folder = yield* folderOf(building)
           if (folder === null) {
             yield* said(`no Workspace for ${building.missionId}`)
-            return 'stopped' as const
+            return 'no_workspace' as const
           }
           return yield* Sessions.use((sessions) =>
             sessions.open({ owner, role: 'builder', folder }),
@@ -1608,6 +1608,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               if (building === null || (yield* builderWaits(missionId))) return 'waits' as const
               return (yield* startsIt(building)) ? ('waits' as const) : ('stopped' as const)
             }).pipe(provided, Effect.orDie),
+          resumed: Deferred.await(resumedAll),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
