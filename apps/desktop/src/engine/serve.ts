@@ -142,6 +142,7 @@ import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
+import { keptAgentChanges } from './sessions/kept.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
 import { SESSION_STATES } from '@hemera/core/domain'
@@ -869,6 +870,8 @@ export const engineHandlers = (
       follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
         observedStream('mission.changed', log),
       ),
+    'mission.keptAgents': ({ missionId }) =>
+      follow(keptAgentChanges(missionId)).pipe(observedStream('mission.keptAgents', log)),
   })
   return Layer.mergeAll(
     core,

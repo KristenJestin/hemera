@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { type KeptAgentView, keptAgentChips } from '../mission/kept-agent-chip.tsx'
 import { StageCard } from '../mission/stage-card.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { IconEye } from '../../icons.ts'
@@ -11,16 +12,20 @@ export interface PlanningStageCardProps {
   attention: Attention
   data: PlanningData
   onOpenProbe: (id: string) => void
+  /** The mission's agents Hemera started before its last restart and could not stop. */
+  kept?: readonly KeptAgentView[] | undefined
 }
 
 /**
  * Planning's stage card, at the top of the rail: the face, the line that says what happens or
- * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes.
+ * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes, and
+ * an agent Hemera started before its last restart and could not stop.
  */
 export function PlanningStageCard({
   attention,
   data,
   onOpenProbe,
+  kept = [],
 }: PlanningStageCardProps): ReactNode {
   const pass = data.passes.at(-1)
   const reading =
@@ -35,7 +40,7 @@ export function PlanningStageCard({
       line={attention.now}
       progress={attention.progress}
       running={
-        reading || probes.length > 0 ? (
+        reading || probes.length > 0 || kept.length > 0 ? (
           <>
             {reading && (
               <LiveChip
@@ -57,6 +62,7 @@ export function PlanningStageCard({
             {probes.map((probe) => (
               <ProbeChip key={probe.id} probe={probe} onOpen={onOpenProbe} />
             ))}
+            {keptAgentChips(kept)}
           </>
         ) : undefined
       }

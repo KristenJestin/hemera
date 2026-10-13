@@ -25,6 +25,8 @@ import { type LiveState, LiveTint, useSweep } from './tint.tsx'
  * - Stuck — no event for five minutes in the middle of a turn — the breath stops and the seconds
  *   go on.
  * - Its legend — the whole name and the state in words — is its tooltip.
+ * - What Hemera did not start and cannot time has no start (`startedAt` null): no seconds then,
+ *   and words of its own (`legend`) say what it is, in its tooltip and to a screen reader.
  *
  * There is no × on the chip: nobody stops a helper or a Probe by hand, and a run's ×, which stops
  * the run, belongs to the line of the page the chip stands on.
@@ -108,8 +110,8 @@ export interface LiveChipProps {
   /** The slot: a command's type icon, a helper's letter avatar. */
   icon: ReactNode
   state: LiveState
-  /** When it started, in milliseconds since the epoch. */
-  startedAt: number
+  /** When it started, in milliseconds since the epoch; null when it is not known: no seconds. */
+  startedAt: number | null
   /** When it ended; null while it works or is stuck, and the seconds tick. */
   endedAt: number | null
   /**
@@ -125,6 +127,8 @@ export interface LiveChipProps {
    * check. The mark tells the two apart, so nothing stands beside the chip.
    */
   calls?: boolean | undefined
+  /** What it is, in plain words, said after its name instead of its state's words. */
+  legend?: string | undefined
 }
 
 const CALLS_GLYPH = <IconBell size="sm" aria-hidden="true" />
@@ -183,16 +187,18 @@ export function LiveChip({
   glance,
   onPress,
   calls = false,
+  legend,
 }: LiveChipProps): ReactNode {
-  const now = useNow(endedAt === null)
+  const now = useNow(endedAt === null && startedAt !== null)
   const sweep = useSweep(state)
-  const time = durationOf((endedAt ?? now) - startedAt)
+  const time = startedAt === null ? null : durationOf((endedAt ?? now) - startedAt)
+  const said = legend ?? `${LIVE_WORDS[state]}${calls ? ', waits for you' : ''}`
 
   const chip = (
     <button
       type="button"
       className={CHIP}
-      aria-label={`${name}, ${LIVE_WORDS[state]}${calls ? ', waits for you' : ''}`}
+      aria-label={`${name}, ${said}`}
       data-live-chip=""
       data-state={state}
       data-sweep-tone={sweep.swept ?? undefined}
@@ -203,16 +209,16 @@ export function LiveChip({
       <span className={NAME} data-name="">
         {name}
       </span>
-      <span className={TIME}>{time}</span>
+      {time !== null && <span className={TIME}>{time}</span>}
     </button>
   )
   // With a glance, the glance is the legend, and more: the chip opens it rather than a tooltip.
   if (glance !== undefined) {
     return (
       <Popover trigger={chip} label={name} align="start">
-        <LiveChipGlance name={name} state={state} time={time} glance={glance} />
+        <LiveChipGlance name={name} state={state} time={time ?? ''} glance={glance} />
       </Popover>
     )
   }
-  return <Tooltip label={`${name} · ${legendOf(state, time)}`}>{chip}</Tooltip>
+  return <Tooltip label={`${name} · ${legend ?? legendOf(state, time ?? '')}`}>{chip}</Tooltip>
 }

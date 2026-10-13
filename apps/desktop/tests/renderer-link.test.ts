@@ -523,6 +523,7 @@ const main = async (engine: 'answers' | 'gone') => {
       'mission.serviceDismiss': unused,
       'mission.focused': unused,
       'mission.changed': () => Stream.die('the window’s link is not asked for a mission here'),
+      'mission.keptAgents': () => Stream.die('the window’s link is not asked for a mission here'),
       'helpers.list': unused,
       'helpers.read': unused,
       'helpers.judge': unused,
