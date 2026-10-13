@@ -240,7 +240,16 @@ export interface SessionsSettings {
   readonly timings?: Partial<SessionTimings> | undefined
   /** Where a suite holds the start's rebuild of the sessions; never held otherwise. */
   readonly rebuildHold?: Effect.Effect<void> | undefined
+  /** Where a suite holds a session, or fails it; never otherwise. */
+  readonly sessionHold?: SessionHold | undefined
 }
+
+/**
+ * Where a suite holds a session: as its start begins, before anything of it starts (a defect there
+ * is a start that fails before it has a driver); as it fails, between its turn's end and its
+ * failure written.
+ */
+export type SessionHold = (at: 'starting' | 'failing', session: RoleSession) => Effect.Effect<void>
 
 /** One live session, as its driver holds it. */
 interface Driver {
@@ -374,6 +383,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const startedAt = new Date().toISOString()
       const run = <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.provide(effect, context)
       const said = (line: string) => Effect.sync(() => settings.log(`sessions: ${line}`))
+      const hold: SessionHold = settings.sessionHold ?? (() => Effect.void)
 
       /** The driver of a lineage's live session, if one runs. */
       const liveOfLineage = (lineage: string): Driver | undefined =>
@@ -589,6 +599,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       /** Starts a session's driver once automations may run and the Memory is ready. */
       const start = (session: RoleSession, predecessor: Predecessor | null) =>
         Effect.gen(function* () {
+          yield* hold('starting', session)
           yield* AutomationGate.use((gate) => gate.pass)
           yield* Memory.use((memory) => memory.ready)
           const entry = roleNamed(registry, session.role)
@@ -744,6 +755,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const fail = (driver: Driver, reason: string) =>
         Effect.gen(function* () {
           yield* letGo(driver)
+          yield* hold('failing', driver.session)
           yield* endQuietly(driver.session, 'failed', reason)
           yield* addToThread(driver.session.id, 'state', `failed: ${reason}`)
           yield* tellParent(

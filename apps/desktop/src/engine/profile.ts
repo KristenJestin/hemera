@@ -203,7 +203,12 @@ import {
   type RoleRegistry,
   roleRegistryLayer,
 } from './sessions/roles.ts'
-import { type SessionTimings, Sessions, sessionsLayer } from './sessions/service.ts'
+import {
+  type SessionHold,
+  type SessionTimings,
+  Sessions,
+  sessionsLayer,
+} from './sessions/service.ts'
 import {
   ExclusiveResources,
   RESOURCE_EVENTS,
@@ -318,6 +323,8 @@ export interface SessionsParts {
   readonly timings?: Partial<SessionTimings>
   /** Where a suite holds the start's rebuild of the sessions a stopped engine left. */
   readonly rebuildHold?: Effect.Effect<void>
+  /** Where a suite holds a session as it starts or fails, or fails its start. */
+  readonly sessionHold?: SessionHold
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
   /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
@@ -703,6 +710,7 @@ export const startProfile = (
           log,
           timings: parts.sessions?.timings,
           rebuildHold: parts.sessions?.rebuildHold,
+          sessionHold: parts.sessions?.sessionHold,
         }),
       ),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

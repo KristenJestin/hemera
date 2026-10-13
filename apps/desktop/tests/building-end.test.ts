@@ -24,13 +24,14 @@ import {
   TOOLS,
   toolsOf,
 } from '@hemera/core/domain'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { LaunchFailed } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import type { BuilderHold } from '../src/engine/building/builder.ts'
+import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
@@ -41,7 +42,7 @@ import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
-import { answerNeed } from '../src/engine/needs.ts'
+import { answerNeed, retryNeed } from '../src/engine/needs.ts'
 import { getRun } from '../src/engine/runs.ts'
 import { TaskStates, everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
@@ -51,7 +52,7 @@ import {
   memoryContractBroken,
   roleNamed,
 } from '../src/engine/sessions/roles.ts'
-import { Sessions } from '../src/engine/sessions/service.ts'
+import { type SessionHold, Sessions } from '../src/engine/sessions/service.ts'
 import {
   type RoleSession,
   getSession,
@@ -62,6 +63,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import {
   agentSessions,
+  buildings,
   checkpoints,
   permissionRequests,
   documenterPasses,
@@ -148,6 +150,8 @@ const ending = (
     readonly attribution?: Layer.Layer<WriteAttribution>
     /** Where the Builder is held, when a test orders it against the end. */
     readonly hold?: BuilderHold
+    /** Where a session is held as it starts or fails, or its start failed. */
+    readonly sessionHold?: SessionHold
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -167,6 +171,7 @@ const ending = (
   const taskStates = options.taskStates ?? everyTaskHolds
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
+    sessions: options.sessionHold === undefined ? {} : { sessionHold: options.sessionHold },
     starting: options.starting ?? (() => Effect.void),
     snapshots: options.snapshots ?? ((real) => real),
     tools:
@@ -2314,9 +2319,49 @@ describe('A Builder stopped at a provider limit', () => {
   )
 })
 
-describe('The Builder while the end waits at refresh', () => {
+describe('The Builder while the end waits on it', () => {
+  /** A Builder session that ended with no need of its own, as the store reads it. */
+  const endedQuietly = (sessionId: string) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      yield* database
+        .update(agentSessions)
+        .set({ state: 'ended', stateReason: null, endedAt: new Date().toISOString() })
+        .where(eq(agentSessions.id, sessionId))
+    })
+
+  /** Mission events, as a proof run or a need brings them: each drives the end again. */
+  const driven = (missionId: string) =>
+    Effect.gen(function* () {
+      for (let count = 0; count < 3; count += 1) {
+        yield* mutate('driving the end', () =>
+          Effect.succeed({
+            result: undefined,
+            events: [buildingEvent(missionId, 'building.resumed')],
+          }),
+        )
+        yield* Effect.sleep('200 millis')
+      }
+      // Long enough for a resume to show itself.
+      yield* Effect.sleep('1 second')
+    })
+
+  /** The Builder's question, which holds the end at refresh until the user answers it. */
+  const asked = (grantId: string) =>
+    call(grantId, 'report_need', {
+      kind: 'decision',
+      text: 'Which separator do the exports use?',
+      options: ['Comma', 'Semicolon'],
+      tasks: [],
+    })
+
+  const errorNeedsOf = (missionId: string) =>
+    Effect.map(getMission(missionId), (one) =>
+      one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+    )
+
   test(
-    'a Builder that stopped while the end waits at refresh is brought back once per engine, not at every drive',
+    'a Builder that was live when the end first waited at refresh, then stopped with no need, is brought back: only a resume the end started counts',
     SLOW,
     async () => {
       const { world, run } = ending()
@@ -2328,26 +2373,48 @@ describe('The Builder while the end waits at refresh', () => {
             const builder = yield* builderOf(mission.id)
             const lineage = sessionsOfLineage(builder.session.lineage)
             yield* builtAll(builder.grantId)
-            // A question of the Builder holds the end at refresh.
-            yield* call(builder.grantId, 'report_need', {
-              kind: 'environment',
-              text: 'The ACME-12 sandbox is down.',
-              tasks: [],
-            })
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            // The end first waits at refresh with its Builder live: nothing to bring back.
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            yield* driven(mission.id)
+            const first = yield* lineage
+            // Then the Builder stops, with no need of its own.
+            yield* endedQuietly(builder.session.id)
+            yield* driven(mission.id)
+            return { first, lineage: yield* lineage, view: yield* buildingNow(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.first).toHaveLength(1)
+      expect(seen.lineage.map((one) => one.state)).toEqual(['ended', 'working'])
+      expect(seen.view.phase).toBe('refresh')
+    },
+  )
+
+  test(
+    'a Builder the end brought back that stops again with no need holds the end on an error need, and its Retry brings the Builder back',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
             yield* documented(world, mission.id)
             yield* reviewed(world, mission.id, 'spec-reviewer')
             // A Builder session that ended with no need of its own, before the end reaches refresh.
-            const database = yield* Database
-            const ended = (sessionId: string) =>
-              database
-                .update(agentSessions)
-                .set({
-                  state: 'ended',
-                  stateReason: null,
-                  endedAt: new Date().toISOString(),
-                })
-                .where(eq(agentSessions.id, sessionId))
-            yield* ended(builder.session.id)
+            yield* endedQuietly(builder.session.id)
             yield* reviewed(world, mission.id, 'code-reviewer')
             // The end brings it back as it first waits at refresh.
             yield* until(
@@ -2355,24 +2422,689 @@ describe('The Builder while the end waits at refresh', () => {
               LONG,
             )
             // Its successor ends too, with no need: mission events drive the end again.
-            yield* ended((yield* lineage).at(-1)?.id ?? '')
-            for (let count = 0; count < 3; count += 1) {
-              yield* mutate('driving the end', () =>
-                Effect.succeed({
-                  result: undefined,
-                  events: [buildingEvent(mission.id, 'building.resumed')],
-                }),
-              )
-              yield* Effect.sleep('200 millis')
+            yield* endedQuietly((yield* lineage).at(-1)?.id ?? '')
+            yield* driven(mission.id)
+            const holding = {
+              lineage: yield* lineage,
+              needs: yield* errorNeedsOf(mission.id),
+              view: yield* buildingNow(mission.id),
             }
-            // Long enough for a resume to show itself.
-            yield* Effect.sleep('1 second')
+            // The user's Retry brings the Builder back once more.
+            yield* retried(mission.id)
+            yield* until(
+              Effect.map(lineage, (rows) => rows.length === 3 && rows[2]?.state === 'working'),
+              LONG,
+            )
+            return { holding, lineage: yield* lineage }
+          }),
+        ),
+      )
+      expect(seen.holding.lineage).toHaveLength(2)
+      expect(seen.holding.view.phase).toBe('refresh')
+      expect(seen.holding.needs).toHaveLength(1)
+      const [need] = seen.holding.needs
+      if (need !== undefined && Predicate.isTagged(need.fields, 'Error')) {
+        expect(need.fields.failed).toContain('The Builder stopped')
+        expect(need.fields.proposals).toEqual(['Retry'])
+      }
+      expect(seen.lineage.map((one) => one.state)).toEqual(['ended', 'ended', 'working'])
+    },
+  )
+
+  test(
+    'a Builder the end brings back whose start fails before it has a driver holds the end on an error need',
+    SLOW,
+    async () => {
+      let failing = false
+      const { world, run } = ending({
+        // Once armed, a Builder's start fails before anything of it starts: no driver, no turn.
+        sessionHold: (at, session) =>
+          at === 'starting' && failing && session.role === 'builder'
+            ? Effect.die(new Error('the brief could not be read'))
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* endedQuietly(builder.session.id)
+            // The end brings the Builder back at refresh, and that start fails.
+            failing = true
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(errorNeedsOf(mission.id), (found) => found.length > 0),
+              LONG,
+            )
             return { lineage: yield* lineage, view: yield* buildingNow(mission.id) }
           }),
         ),
       )
-      expect(seen.lineage).toHaveLength(2)
+      expect(seen.lineage.map((one) => one.state)).toEqual(['ended', 'failed'])
       expect(seen.view.phase).toBe('refresh')
+    },
+  )
+
+  test(
+    'a Builder whose failure is written after the end of its turn was heard is still brought back',
+    SLOW,
+    async () => {
+      let dying = false
+      let failing = false
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        builder: {
+          get steps(): ReadonlyArray<FakeStep> {
+            return dying ? [{ does: 'dies' }] : [says('Read.')]
+          },
+        },
+        // Once armed, the next agent to start cannot: its turn ends, then its session fails.
+        starting: () =>
+          Effect.suspend(() => {
+            if (!failing) return Effect.void
+            failing = false
+            return Effect.fail(new LaunchFailed({ reason: 'the agent could not be spawned' }))
+          }),
+        // The Builder's failure is written only once the test lets it, after its turn's end.
+        sessionHold: (at, session) =>
+          at === 'failing' && session.role === 'builder'
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            const turned = Effect.map(buildingNow(mission.id), (view) => view.buildingId).pipe(
+              Effect.flatMap((id) =>
+                Database.use((database) =>
+                  database
+                    .select({ at: buildings.builderTurnedAt })
+                    .from(buildings)
+                    .where(eq(buildings.id, id)),
+                ),
+              ),
+              Effect.map((rows) => rows[0]?.at ?? null),
+            )
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            // The end waits at refresh on the question, its Builder live.
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            yield* Effect.sleep('500 millis')
+            const before = yield* turned
+            // The Builder's process dies, and its replacement cannot start.
+            dying = true
+            failing = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { lineage: builder.session.lineage },
+                kind: 'note',
+                body: 'One more thing.',
+              }),
+            )
+            // The end hears the replacement's turn end while its session still reads live.
+            yield* Deferred.await(entered)
+            yield* until(
+              Effect.map(turned, (at) => at !== before),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            yield* Deferred.succeed(release, undefined)
+            yield* until(
+              Effect.map(lineage, (rows) =>
+                ['starting', 'working', 'idle'].includes(rows.at(-1)?.state ?? ''),
+              ),
+              LONG,
+            )
+            return yield* lineage
+          }),
+        ),
+      ).finally(() => Effect.runSync(Deferred.succeed(release, undefined)))
+      expect(seen.map((one) => one.state)).toContain('failed')
+    },
+  )
+
+  test(
+    'after a restart, a Builder the start cannot bring back holds the end on an error need',
+    SLOW,
+    async () => {
+      const checks: ChecksOf = ({ scope }) => (scope === 'end' ? [RED] : [])
+      let holding = false
+      const turn = held()
+      const before = ending({
+        checks,
+        builder: {
+          steps: [says('Read.')],
+          between: () => (holding ? turn.promise : Promise.resolve()),
+        },
+      })
+      const left = await before
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              yield* builtAll(builder.grantId)
+              yield* agentOf(before.world, mission.id, 'documenter')
+              // The Builder's turns from now on hold: the one the red starts is not over.
+              holding = true
+              yield* documented(before.world, mission.id)
+              yield* until(
+                Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+                LONG,
+              )
+              // The Builder's last session is one its lineage cannot be started again from.
+              yield* Database.use((database) =>
+                database
+                  .update(agentSessions)
+                  .set({ state: 'replaced', endedAt: new Date().toISOString() })
+                  .where(eq(agentSessions.id, builder.session.id)),
+              )
+              return mission
+            }),
+          ),
+        )
+        .finally(() => turn.release())
+      // The start is held once it tried the Builder, while the end is driven at the start.
+      const settled = held()
+      const after = ending({
+        checks,
+        resumed: true,
+        hold: (at) => (at === 'resumed' ? Effect.promise(() => settled.promise) : Effect.void),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* Effect.sleep('2 seconds')
+            settled.release()
+            yield* until(
+              Effect.map(errorNeedsOf(left.id), (found) => found.length > 0),
+              LONG,
+            )
+            return { needs: yield* errorNeedsOf(left.id), view: yield* buildingNow(left.id) }
+          }),
+        ),
+      )
+      expect(seen.view.phase).toBe('final_checks')
+      expect(seen.needs).toHaveLength(1)
+    },
+  )
+
+  test(
+    'an answer the Builder acted on releases the exit even when the end of its turn could not be kept',
+    SLOW,
+    async () => {
+      let gate: ReturnType<typeof held> | null = null
+      const first = held()
+      const second = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+      })
+      await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const database = yield* Database
+            const answers = Effect.map(
+              database
+                .select()
+                .from(sessionDeliveries)
+                .where(
+                  and(
+                    eq(sessionDeliveries.ownerId, mission.id),
+                    eq(sessionDeliveries.kind, 'answer'),
+                  ),
+                ),
+              (rows) => rows.map((row) => row.state),
+            )
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            gate = first
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { lineage: builder.session.lineage },
+                kind: 'note',
+                body: 'One more thing.',
+              }),
+            )
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            gate = second
+            first.release()
+            yield* until(
+              Effect.map(answers, (rows) => rows.includes('sent')),
+              LONG,
+            )
+            // From now on, the end of a Builder's turn cannot be written.
+            yield* database.run(sql`CREATE TRIGGER refuse_turns BEFORE UPDATE OF builder_turned_at
+              ON buildings BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+            gate = null
+            second.release()
+            yield* inReview(mission.id)
+          }),
+        ),
+      ).finally(() => {
+        first.release()
+        second.release()
+      })
+    },
+  )
+
+  test(
+    'a Builder that cannot be started for want of a Workspace says so, not that Retry starts it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            // The Builder stops, and the Building has no Workspace to open one in any more.
+            yield* endedQuietly(builder.session.id)
+            const database = yield* Database
+            yield* database
+              .update(agentSessions)
+              .set({ role: 'retired' })
+              .where(eq(agentSessions.id, builder.session.id))
+            yield* database
+              .update(buildings)
+              .set({ workspaceId: null })
+              .where(eq(buildings.missionId, mission.id))
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(errorNeedsOf(mission.id), (found) => found.length > 0),
+              LONG,
+            )
+            return yield* errorNeedsOf(mission.id)
+          }),
+        ),
+      )
+      const [need] = seen
+      const failed =
+        need !== undefined && Predicate.isTagged(need.fields, 'Error') ? need.fields.failed : ''
+      expect(failed).toContain('no Workspace')
+      expect(failed).not.toContain('Retry starts it again')
+    },
+  )
+
+  test(
+    'a Builder that cannot be spoken to while a red of the final checks waits on it is brought back',
+    SLOW,
+    async () => {
+      let dying = false
+      let failing = false
+      // The Builder's turns hold before each step while the gate is set.
+      let gate: ReturnType<typeof held> | null = null
+      const turn = held()
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          get steps(): ReadonlyArray<FakeStep> {
+            return dying ? [says('Working.'), { does: 'dies' }] : [says('Read.')]
+          },
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+        // Once armed, the next agent to start cannot: its session fails, with no need.
+        starting: () =>
+          Effect.suspend(() => {
+            if (!failing) return Effect.void
+            failing = false
+            return Effect.fail(new LaunchFailed({ reason: 'the agent could not be spawned' }))
+          }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* builtAll(builder.grantId)
+            // The Builder's next turn holds, then dies once let go.
+            dying = true
+            gate = turn
+            yield* documented(world, mission.id)
+            // The red of the final checks waits on the Builder, live in its held turn.
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            yield* Effect.sleep('500 millis')
+            // Its process dies, and its replacement cannot start.
+            failing = true
+            turn.release()
+            yield* until(
+              Effect.map(lineage, (rows) => rows.some((row) => row.state === 'failed')),
+              LONG,
+            )
+            yield* until(
+              Effect.map(lineage, (rows) =>
+                ['starting', 'working', 'idle'].includes(rows.at(-1)?.state ?? ''),
+              ),
+              LONG,
+            )
+            return {
+              lineage: yield* lineage,
+              view: yield* buildingNow(mission.id),
+              needs: (yield* getMission(mission.id)).needs,
+            }
+          }),
+        ),
+      ).finally(() => turn.release())
+      expect(seen.lineage.map((one) => one.state)).toContain('failed')
+      expect(seen.view.phase).toBe('final_checks')
+      expect(seen.needs).toEqual([])
+    },
+  )
+
+  test(
+    'a Builder that stops with no need while a special task waits on it is brought back',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 is the Builder's, and the Builder stops with no need of its own.
+            yield* endedQuietly(builder.session.id)
+            yield* driven(mission.id)
+            return { lineage: yield* lineage, view: yield* buildingNow(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.lineage.map((one) => one.state)).toEqual(['ended', 'working'])
+      expect(seen.view.phase).toBe('special_tasks')
+    },
+  )
+
+  test(
+    'an answer that reaches the Builder once the exit looked at the Workspace sends the exit back, and waits for a turn of the Builder on it',
+    SLOW,
+    async () => {
+      const looking = Deferred.makeUnsafe<void>()
+      const answered = Deferred.makeUnsafe<void>()
+      let first = true
+      const { world, run } = ending({
+        // The exit's first look at the Workspace waits until an answer reached the Builder.
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind !== 'review_exit' || !first) return real.take(place, owner)
+            first = false
+            return Deferred.succeed(looking, undefined).pipe(
+              Effect.andThen(Deferred.await(answered)),
+              Effect.andThen(real.take(place, owner)),
+            )
+          },
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(looking)
+            // An answer the user gave a moment before, stored for the Builder only now.
+            const id = yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'answer',
+                body: 'The user answered: Comma',
+              }),
+            )
+            yield* Deferred.succeed(answered, undefined)
+            // The exit goes back to the Builder, started again to take the answer: its turn ends.
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* until(
+              Effect.map(lineage, (rows) => rows.at(-1)?.state === 'working'),
+              LONG,
+            )
+            yield* until(
+              Effect.sync(() => world.agents.length > 0),
+              LONG,
+            )
+            for (const index of world.agents.keys()) world.release(index)
+            yield* inReview(mission.id)
+            const database = yield* Database
+            const [answer] = yield* database
+              .select()
+              .from(sessionDeliveries)
+              .where(eq(sessionDeliveries.id, id))
+            const [ended] = yield* database
+              .select({ turned: buildings.builderTurnedAt })
+              .from(buildings)
+              .where(eq(buildings.missionId, mission.id))
+            return { answer, turned: ended?.turned ?? null }
+          }),
+        ),
+      )
+      expect(seen.answer?.state).toBe('sent')
+      expect(seen.turned).not.toBeNull()
+      expect((seen.turned ?? '') > (seen.answer?.sentAt ?? '')).toBe(true)
+    },
+  )
+
+  test(
+    'a Builder the user’s Retry starts again after the exit marked the mission runs the calls the user allowed',
+    SLOW,
+    async () => {
+      let limiting = false
+      const limit: FakeStep = { does: 'limits', title: 'The Acme account has no available quota.' }
+      const { run } = ending({
+        builder: {
+          get steps() {
+            return limiting ? [limit] : [says('Read.')]
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const owner = { kind: 'mission', missionId: mission.id } as const
+            // The Builder's next turn meets the provider's limit: its session ends, the user is asked.
+            limiting = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner,
+                target: { lineage: builder.session.lineage },
+                kind: 'note',
+                body: 'One more thing.',
+              }),
+            )
+            const limitNeed = Effect.map(getMission(mission.id), (one) =>
+              one.needs.find(
+                (need) =>
+                  Predicate.isTagged(need.fields, 'Environment') &&
+                  need.fields.missing.includes('provider limit'),
+              ),
+            )
+            yield* until(
+              Effect.map(limitNeed, (found) => found !== undefined),
+              LONG,
+            )
+            limiting = false
+            // The exit marked the mission as its tree stopped, then asked for the Builder back, as
+            // it does on a question raised meanwhile: the Builder waits on its own need.
+            yield* ToolAccess.use((access) => access.exiting(mission.id, [builder.session.lineage]))
+            yield* BuildDesk.use((desk) => desk.ensureBuilder(mission.id))
+            // The user's Retry of that need starts the Builder again, through the sessions.
+            yield* retryNeed((yield* limitNeed)?.id ?? '')
+            yield* until(
+              Effect.map(sessionsIn(['working', 'idle'], owner), (rows) =>
+                rows.some((row) => row.role === 'builder'),
+              ),
+              LONG,
+            )
+            return {
+              allowed: yield* ToolAccess.use((access) =>
+                access.counted(
+                  { missionId: mission.id, lineage: builder.session.lineage },
+                  Effect.succeed('ran'),
+                ),
+              ),
+            }
+          }),
+        ),
+      )
+      expect(seen.allowed).toBe('ran')
+    },
+  )
+
+  test(
+    'an answer to the Builder’s question holds the exit until a turn of the Builder on it ended',
+    SLOW,
+    async () => {
+      // The Builder's turns hold on the gate set when they start, until the test lets it go.
+      let gate: ReturnType<typeof held> | null = null
+      const first = held()
+      const second = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const database = yield* Database
+            const answers = Effect.map(
+              database
+                .select()
+                .from(sessionDeliveries)
+                .where(
+                  and(
+                    eq(sessionDeliveries.ownerId, mission.id),
+                    eq(sessionDeliveries.kind, 'answer'),
+                  ),
+                ),
+              (rows) => rows.map((row) => row.state),
+            )
+            const stage = Effect.map(getMission(mission.id), (one) => one.stage)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            // The Builder is in a long turn: what is delivered between turns waits for its end.
+            gate = first
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { lineage: builder.session.lineage },
+                kind: 'note',
+                body: 'One more thing.',
+              }),
+            )
+            yield* until(
+              Effect.map(getSession(builder.session.id), (session) => session.state === 'working'),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            yield* until(
+              Effect.map(answers, (rows) => rows.length > 0),
+              LONG,
+            )
+            // Long enough for an exit to have run.
+            yield* Effect.sleep('1 second')
+            const queued = { stage: yield* stage, answers: yield* answers }
+            // The long turn ends; the next one takes the answer, and holds in turn.
+            gate = second
+            first.release()
+            yield* until(
+              Effect.map(answers, (rows) => rows.includes('sent')),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            const taken = { stage: yield* stage, answers: yield* answers }
+            gate = null
+            second.release()
+            yield* inReview(mission.id)
+            return { queued, taken }
+          }),
+        ),
+      ).finally(() => {
+        first.release()
+        second.release()
+      })
+      expect(seen.queued).toEqual({ stage: 'building', answers: ['queued'] })
+      expect(seen.taken).toEqual({ stage: 'building', answers: ['sent'] })
     },
   )
 })
@@ -2848,6 +3580,81 @@ describe('A restart in the middle of the end', () => {
       )
       expect(seen.waited).toEqual(['red', null])
       expect(seen.judged).toEqual(['red', 'green'])
+    },
+  )
+
+  test(
+    'after a restart, a stopped Builder a red of the final checks waits on is brought back only once the start settled what the stop left',
+    SLOW,
+    async () => {
+      const checks: ChecksOf = ({ scope }) => (scope === 'end' ? [RED] : [])
+      let holding = false
+      const turn = held()
+      const before = ending({
+        checks,
+        builder: {
+          steps: [says('Read.')],
+          between: () => (holding ? turn.promise : Promise.resolve()),
+        },
+      })
+      const left = await before
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              yield* builtAll(builder.grantId)
+              yield* agentOf(before.world, mission.id, 'documenter')
+              // The Builder's turns from now on hold: the one the red starts is not over.
+              holding = true
+              yield* documented(before.world, mission.id)
+              yield* until(
+                Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+                LONG,
+              )
+              // The Builder stops with no need of its own before the engine does.
+              yield* Database.use((database) =>
+                database
+                  .update(agentSessions)
+                  .set({ state: 'ended', stateReason: null, endedAt: new Date().toISOString() })
+                  .where(eq(agentSessions.id, builder.session.id)),
+              )
+              return { mission, lineage: builder.session.lineage }
+            }),
+          ),
+        )
+        .finally(() => turn.release())
+      // Started again, the start's resume is held before it settles what the stop left.
+      const settling = held()
+      const after = ending({
+        checks,
+        resumed: true,
+        hold: (at) => (at === 'resuming' ? Effect.promise(() => settling.promise) : Effect.void),
+      })
+      const seen = await after
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const lineage = sessionsOfLineage(left.lineage)
+              // Long enough for the end, driven at the start, to have brought it back.
+              yield* Effect.sleep('2 seconds')
+              const waited = yield* lineage
+              settling.release()
+              yield* until(
+                Effect.map(lineage, (rows) =>
+                  ['starting', 'working', 'idle'].includes(rows.at(-1)?.state ?? ''),
+                ),
+                LONG,
+              )
+              return { waited, lineage: yield* lineage }
+            }),
+          ),
+        )
+        .finally(() => settling.release())
+      expect(seen.waited.map((one) => one.state)).toEqual(['ended'])
+      expect(seen.lineage).toHaveLength(2)
     },
   )
 

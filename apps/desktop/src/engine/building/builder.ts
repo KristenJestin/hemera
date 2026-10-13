@@ -498,31 +498,53 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               Effect.catchTag('UnknownWorkspace', () => Effect.succeed(null)),
             )
 
+      /** Done once this engine's start brought back every Builder it resumes. */
+      const resumedAll = Deferred.makeUnsafe<void>()
+
+      /** Whether a session of the mission's Builder runs. */
+      const builderLive = (missionId: string) =>
+        Effect.map(
+          sessionsIn(['starting', 'working', 'idle', 'stuck'], { kind: 'mission', missionId }),
+          (live) => live.some((one) => one.role === 'builder'),
+        )
+
       /**
        * The mission's Builder: opened when it never had one, its lineage started again when it
        * stopped (#40's resume: its leases and the resume block pass to the fresh one). A stuck one
-       * is #40's to replace. The calls the user allowed run again from here.
+       * is #40's to replace. The calls the user allowed run again from here. Says whether a
+       * Builder was live already, was started here, or could not be.
        */
       const ensureBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           yield* ToolAccess.use((access) => access.building(building.missionId))
           const owner = { kind: 'mission', missionId: building.missionId } as const
-          const live = yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner)
-          if (live.some((one) => one.role === 'builder')) return
+          if (yield* builderLive(building.missionId)) return 'live' as const
           const last = (yield* sessionsIn(['ended', 'failed', 'replaced'], owner))
             .filter((one) => one.role === 'builder')
             .toSorted((a, b) => b.epoch - a.epoch)[0]
           if (last !== undefined) {
             const resumed = yield* Sessions.use((sessions) => sessions.resume(last.id))
-            if (resumed === null)
-              yield* said(`the Builder of ${building.missionId} was not resumed`)
-            return
+            if (resumed !== null) return 'started' as const
+            yield* said(`the Builder of ${building.missionId} was not resumed`)
+            // Started meanwhile by another hand: a resume finds its lineage live and does nothing.
+            return (yield* builderLive(building.missionId))
+              ? ('live' as const)
+              : ('stopped' as const)
           }
           const folder = yield* folderOf(building)
-          if (folder === null) return yield* said(`no Workspace for ${building.missionId}`)
-          yield* Sessions.use((sessions) => sessions.open({ owner, role: 'builder', folder })).pipe(
+          if (folder === null) {
+            yield* said(`no Workspace for ${building.missionId}`)
+            return 'no_workspace' as const
+          }
+          return yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', folder }),
+          ).pipe(
+            Effect.as('started' as const),
             Effect.catchTag('SessionRefused', (refused) =>
-              said(`no Builder for ${building.missionId}: ${refused.message}`),
+              Effect.as(
+                said(`no Builder for ${building.missionId}: ${refused.message}`),
+                'stopped' as const,
+              ),
             ),
           )
         })
@@ -552,6 +574,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             .pipe(Effect.mapError(refusedWhile('reading the Builder’s needs')))
           return pending.length > 0
         })
+
+      /**
+       * Whether this engine's start still has the Builder to bring back: before the end's last
+       * step, its resume does, last of all (CT-09), and nothing brings it back before.
+       */
+      const startsIt = (building: BuildingRow) =>
+        Effect.map(Deferred.isDone(resumedAll), (done) => !done && building.phase !== 'refresh')
 
       /** The interval of this engine's time, opened for a Building. */
       const countIn = (transaction: EngineTransaction, buildingId: string) =>
@@ -1562,9 +1591,24 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ensureBuilder: (missionId) =>
             Effect.gen(function* () {
               const building = yield* activeBuildingIn(yield* Database, missionId)
-              if (building === null || (yield* builderWaits(missionId))) return
-              yield* ensureBuilder(building)
+              if (building === null) return 'waits' as const
+              if (yield* builderWaits(missionId)) {
+                // Its Retry starts it through the sessions: the calls the user allowed run again
+                // from here, not from the next exit.
+                yield* ToolAccess.use((access) => access.building(missionId))
+                return 'waits' as const
+              }
+              if (yield* startsIt(building)) return 'waits' as const
+              return yield* ensureBuilder(building)
             }).pipe(provided, Effect.orDie),
+          builderNow: (missionId) =>
+            Effect.gen(function* () {
+              if (yield* builderLive(missionId)) return 'live' as const
+              const building = yield* activeBuildingIn(yield* Database, missionId)
+              if (building === null || (yield* builderWaits(missionId))) return 'waits' as const
+              return (yield* startsIt(building)) ? ('waits' as const) : ('stopped' as const)
+            }).pipe(provided, Effect.orDie),
+          resumed: Deferred.await(resumedAll),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
@@ -1970,7 +2014,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (current !== null && current.phase !== 'refresh') yield* ensureBuilder(current)
           yield* hold('resumed')
         }
-      })
+      }).pipe(Effect.ensuring(Deferred.succeed(resumedAll, undefined)))
 
       const heartbeat = Effect.gen(function* () {
         const database = yield* Database
