@@ -98,18 +98,25 @@ const BEFORE_TEST =
   /\b(SyntaxError|ReferenceError|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_REQUIRE_ESM)\b|Cannot find (module|package)|error TS\d+|does not provide an export named/
 /**
  * Signs of an assertion that failed: JavaScript's, pytest's (`E   assert …`, `FAILED file::test`),
- * Go's (`--- FAIL:`) and Rust's (`assertion … failed`, a test's panic).
+ * Go's (`--- FAIL:`, gotestsum's `=== FAIL: pkg TestX (…)`) and Rust's (`assertion … failed`, a
+ * test's panic, a `#[should_panic]` test that did not).
  */
 const ASSERTION =
-  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |\bassertion\b.*\bfailed\b|\bpanicked at\b/m
+  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b/m
 /**
  * A line a known test runner starts with for a test that failed, never a mark in the middle of a
- * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading; vitest and jest's
- * `FAIL <file>`; TAP's `not ok n`; mocha's `1) name`; pytest's `FAILED file::test`; Go's
- * `--- FAIL: TestX`; Rust's `test x ... FAILED`.
+ * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading (not its `● Console` nor
+ * its `● Test suite failed to run`); vitest and jest's `FAIL <file>`, jest's with a project's
+ * `displayName` before a test file; TAP's `not ok n`; pytest's `FAILED file::test`; unittest's
+ * and Django's `FAIL: test_x (module.Class.test_x)`; Go's `--- FAIL: TestX`, gotestsum's
+ * `=== FAIL: pkg TestX (0.00s)`; Rust's `test x ... FAILED` (`test x - should panic ... FAILED`),
+ * cargo-nextest's `FAIL [ 0.004s] (1/2) crate x`. Mocha's `1) name` is read apart.
  */
 const FAILING_LINE =
-  /^\s*[×✕✖●]\s|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*not ok \d+|^\s*\d+\) |^FAILED \S+::|^\s*--- FAIL: |^test \S+ \.\.\. FAILED\s*$/
+  /^\s*[×✕✖]\s|^\s*●\s(?!(?:Console|Test suite failed to run)\s*$)|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*FAIL\s+\S.*?\s(?:\S+\.(?:test|spec)\.\w+|\S*__tests__\/\S+)(?:\s+\(\d+(?:\.\d+)? m?s\))?\s*$|^\s*not ok \d+|^FAILED \S+::|^FAIL: test\w* \(\w+(?:\.\w+)+\)(?: .*)?$|^\s*--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|^test \S+(?: - should panic)? \.\.\. FAILED\s*$|^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?\S+ \S+\s*$/
+/** Mocha's numbered failure, `1) name`, in its tree and again in its list after `N failing`. */
+const MOCHA_FAILURE = /^\s*(\d+)\) /
+const MOCHA_FAILING = /^\s*(\d+) failing\s*$/
 /** At most this many failing lines are kept. */
 const FAILING_LINES = 500
 /** Signs of a test file the runner did not find. */
@@ -119,6 +126,30 @@ const NOT_FOUND =
 /** A line without its ANSI colours and cursor moves. */
 // oxlint-disable-next-line no-control-regex -- the escape character is what is matched
 const uncoloured = (line: string): string => line.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
+
+/**
+ * The lines of an output that mark a failing test, uncoloured, up to the cap. A numbered line is
+ * mocha's only below the `N failing` it ends with, and twice at most (its tree, its list): a
+ * numbered log line is not one, and cannot push a real failure past the cap.
+ */
+const failingLinesOf = (output: string): ReadonlyArray<string> => {
+  const lines = output.split(/\r?\n/).map(uncoloured)
+  const failing = lines.reduce(
+    (most, line) => Math.max(most, Number(MOCHA_FAILING.exec(line)?.[1] ?? 0)),
+    0,
+  )
+  const numbered = new Map<number, number>()
+  return lines
+    .filter((line) => {
+      if (FAILING_LINE.test(line)) return true
+      const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
+      if (number < 1 || number > failing) return false
+      const seen = (numbered.get(number) ?? 0) + 1
+      numbered.set(number, seen)
+      return seen <= 2
+    })
+    .slice(0, FAILING_LINES)
+}
 
 const unescapeXml = (text: string): string =>
   text
@@ -209,11 +240,7 @@ export function classifyProofRun(run: {
   readonly exitCode: number | null
   readonly testPath: string | null
 }): ProofRunClass {
-  const failingLines = run.output
-    .split(/\r?\n/)
-    .map(uncoloured)
-    .filter((line) => FAILING_LINE.test(line))
-    .slice(0, FAILING_LINES)
+  const failingLines = failingLinesOf(run.output)
   const none = { failingTest: null, assertion: null, failingFile: null, failures: [], failingLines }
   if (run.exitCode === null) return { classification: 'environment', ...none }
   const report = junitOf(run.output) ?? tapOf(run.output)
@@ -268,8 +295,15 @@ export interface GoSubtest {
   readonly parent: string
   readonly subtest: string
 }
-/** A test a proof adds: its declared name, or a Go subtest under its parent. */
-export type TestName = string | GoSubtest
+/**
+ * A Rust test with cases (`#[rstest]`, `#[test_case(…)]`): its function's name, which libtest
+ * prints alone or with each case under it (`tests::exports::case_1`).
+ */
+export interface RustCasedTest {
+  readonly function: string
+}
+/** A test a proof adds: its declared name, a Go subtest under its parent, or a Rust cased test. */
+export type TestName = string | GoSubtest | RustCasedTest
 
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
@@ -279,16 +313,19 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
  * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. What
  * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
- * name made of placeholders alone is none.
+ * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
+ * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
+ * named the same.
  */
-const namePattern = (name: string): RegExp | null => {
+const namePattern = (name: string, cases = false): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
   if (parts.every((part, at) => at % 2 === 1 || part.trim() === '')) return null
   const body = parts
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
+  const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
   return new RegExp(
-    `::${body}\\[|(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `::${body}\\[|(?:^|[\\s>›]|::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
@@ -307,7 +344,11 @@ const subtestPattern = (test: GoSubtest): RegExp => {
 
 const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): boolean =>
   names.some((name) => {
-    const pattern = Predicate.isString(name) ? namePattern(name) : subtestPattern(name)
+    const pattern = Predicate.isString(name)
+      ? namePattern(name)
+      : Predicate.hasProperty(name, 'function')
+        ? namePattern(name.function, true)
+        : subtestPattern(name)
     return pattern !== null && texts.some((text) => pattern.test(text))
   })
 
@@ -348,7 +389,8 @@ export const validRed = (
 /**
  * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`
  * (its pytest cases, `test_…[id]`, are its own), a Go `func TestX(t *testing.T)` and the literal
- * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
+ * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test(…)]`),
+ * and a Rust cased test under `#[rstest]` or `#[test_case(…)]`.
  */
 const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
 /** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
@@ -361,7 +403,9 @@ const GO_SUBTEST_NAME = /\b\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/
 /** The function a line of Go declares, or a hunk header names after its `@@`. */
 const GO_FUNCTION = /^(?:@@[^@]*@@\s*)?func\s/
 const RUST_NAME =
-  /#\[(?:\w+::)*test\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
+  /#\[(?:\w+::)*test(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
+const RUST_CASED_NAME =
+  /#\[(?:\w+::)*(?:rstest|test_case)(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 
 /**
  * The tests a proof adds: every test its new file declares, or those the lines its patch adds
@@ -380,11 +424,17 @@ export const addedTests = (test: {
           .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
           .map((line) => line.slice(1))
           .join('\n')
-  const declared = [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME]
-    .flatMap((pattern) => Array.from(added.matchAll(pattern)))
-    .toSorted((a, b) => a.index - b.index)
-    .map((found) => found.groups?.['name'] ?? '')
-    .filter((name) => name !== '')
+  const declared = [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME, RUST_CASED_NAME]
+    .flatMap((pattern) =>
+      Array.from(added.matchAll(pattern), (found) => ({
+        at: found.index,
+        name: found.groups?.['name'] ?? '',
+        cased: pattern === RUST_CASED_NAME,
+      })),
+    )
+    .filter((found) => found.name !== '')
+    .toSorted((a, b) => a.at - b.at)
+    .map((found): TestName => (found.cased ? { function: found.name } : found.name))
   return [...declared, ...subtestsOf(test)]
 }
 
@@ -432,7 +482,13 @@ export const addedTestNames = (test: {
   readonly code: string
   readonly patch: string | null
 }): ReadonlyArray<string> =>
-  addedTests(test).map((name) => (Predicate.isString(name) ? name : name.subtest))
+  addedTests(test).map((name) =>
+    Predicate.isString(name)
+      ? name
+      : Predicate.hasProperty(name, 'function')
+        ? name.function
+        : name.subtest,
+  )
 
 /** An output with what changes from one run to the next masked, line by line. */
 export const normalisedOutput = (text: string): string =>

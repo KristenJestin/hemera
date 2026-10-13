@@ -1,3 +1,4 @@
+import type { Mission } from '@hemera/ipc'
 import { SidebarRow, SidebarStageGroup, type SidebarPlace } from '@hemera/ui'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 
@@ -116,6 +117,8 @@ function usePercents(
   return percents
 }
 
+const NO_MISSIONS: ReadonlyArray<Mission> = []
+
 /** The missions listed under an open Project in the sidebar, by stage; none until they are read. */
 export function SidebarMissions({
   link,
@@ -125,7 +128,7 @@ export function SidebarMissions({
   onOpenMission,
 }: SidebarMissionsProps): ReactNode {
   const state = useMissions(link, engineReady, projectId)
-  const missions = state.kind === 'ready' ? state.missions : []
+  const missions = state.kind === 'ready' ? state.missions : NO_MISSIONS
   const events = useLastEvents(link, engineReady, missions)
   // Marks are not drawn here, so a repository is named by its id.
   const lines = useMemo(() => missions.map((mission) => lineOf(mission, (id) => id)), [missions])

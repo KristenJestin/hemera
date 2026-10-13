@@ -114,6 +114,7 @@ export function SheetStack({
       return next
     })
   const byId = new Map(views.map((view) => [view.id, view]))
+  const isOpen = new Set(open)
   const opened = open.flatMap((id) => {
     const view = byId.get(id)
     return view === undefined ? [] : [view]
@@ -174,7 +175,7 @@ export function SheetStack({
             data-grown={grown.has(view.id)}
             // Out of sight while another stands over it; a sheet on its way out stays in
             // sight, or its leaving would be a cut.
-            hidden={open.includes(view.id) && shown !== view.id}
+            hidden={isOpen.has(view.id) && shown !== view.id}
             initial={SHEET.from}
             animate={SHEET.to}
             exit={SHEET.from}
@@ -226,6 +227,7 @@ export function SheetStack({
             {view.form === true ? (
               <div className={FORM}>{view.body}</div>
             ) : (
+              // react-doctor-disable-next-line no-noninteractive-tabindex -- a body that scrolls takes the focus, so the keyboard can scroll it
               <div className={BODY} tabIndex={0}>
                 {view.body}
               </div>

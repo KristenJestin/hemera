@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
@@ -353,7 +353,8 @@ export function QuestionCard({
 }: QuestionCardProps): ReactNode {
   const [ownWords, setOwnWords] = useState(false)
   const [text, setText] = useState('')
-  const [editing, setEditing] = useState<string | null>(null)
+  // The proposal whose words are being edited: read when the answer is sent, never drawn.
+  const editing = useRef<string | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
   // Change opens a folded card again until the next answer comes: the count of answers then.
@@ -393,11 +394,15 @@ export function QuestionCard({
     const said = text.trim()
     if (said === '') return
     answering.send(
-      () =>
-        editing === null ? onAnswer(question.id, { text: said }) : onAcceptProposed(editing, said),
+      () => {
+        const edited = editing.current
+        return edited === null
+          ? onAnswer(question.id, { text: said })
+          : onAcceptProposed(edited, said)
+      },
       () => {
         setText('')
-        setEditing(null)
+        editing.current = null
         setOwnWords(false)
       },
     )
@@ -503,7 +508,7 @@ export function QuestionCard({
                 proposal={proposal}
                 onAccept={() => onAcceptProposed(proposal.id, null)}
                 onEdit={() => {
-                  setEditing(proposal.id)
+                  editing.current = proposal.id
                   setText(proposal.text)
                   setOwnWords(true)
                 }}
@@ -552,7 +557,7 @@ export function QuestionCard({
                 size="sm"
                 aria-expanded={ownWords}
                 onClick={() => {
-                  setEditing(null)
+                  editing.current = null
                   setOwnWords(!ownWords)
                 }}
               >

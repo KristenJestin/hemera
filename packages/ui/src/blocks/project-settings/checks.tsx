@@ -481,8 +481,9 @@ export function ChecksSection({
   }
   /** The whole order, the checks of one moment put back in their new order where they stood. */
   const merge = (among: readonly string[], next: readonly string[]): string[] => {
+    const moving = new Set(among)
     let at = 0
-    return ids.map((id) => (among.includes(id) ? (next[at++] ?? id) : id))
+    return ids.map((id) => (moving.has(id) ? (next[at++] ?? id) : id))
   }
   const lists = MOMENTS.map((moment) => ({
     label: MOMENT_WORDS[moment],

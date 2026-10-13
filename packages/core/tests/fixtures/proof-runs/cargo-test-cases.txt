@@ -1,0 +1,52 @@
+   Compiling acme v0.1.0 (/work/acme/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (target/debug/deps/acme-75767ee0f6da9864)
+
+running 10 tests
+test tests::exports_cases::case_2 ... ok
+test tests::exports_cases::case_1 ... FAILED
+test tests::exports_markdown::test_case_1_with_no_rows ... FAILED
+test tests::one_is_one ... ok
+test tests::exports_markdown::test_case_2_with_one_row ... ok
+test tests::reads_rows::test_case_1_with_one_row ... ok
+test tests::reads_plain ... ok
+test tests::rejects_empty - should panic ... FAILED
+test tests::rejects_blank - should panic ... ok
+test tests::exports_async ... FAILED
+
+failures:
+
+---- tests::exports_cases::case_1 stdout ----
+
+thread 'tests::exports_cases::case_1' (1510015) panicked at src/lib.rs:42:9:
+assertion `left == right` failed
+  left: ""
+ right: "a"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::exports_markdown::test_case_1_with_no_rows stdout ----
+
+thread 'tests::exports_markdown::test_case_1_with_no_rows' (1510017) panicked at src/lib.rs:48:9:
+assertion `left == right` failed
+  left: ""
+ right: "| total |"
+
+---- tests::rejects_empty stdout ----
+note: test did not panic as expected at src/lib.rs:18:8
+---- tests::exports_async stdout ----
+
+thread 'tests::exports_async' (1510014) panicked at src/lib.rs:30:9:
+assertion `left == right` failed
+  left: ""
+ right: "| total |"
+
+
+failures:
+    tests::exports_async
+    tests::exports_cases::case_1
+    tests::exports_markdown::test_case_1_with_no_rows
+    tests::rejects_empty
+
+test result: FAILED. 6 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

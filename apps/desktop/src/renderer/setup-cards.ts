@@ -492,11 +492,12 @@ const readProposal = Schema.decodeUnknownOption(SetupProposal)
  */
 export function editedChangesOf(cards: ReadonlyArray<SetupCard>, draft: Proposal): EditedCards {
   const waiting = pendingOf(cards, draft.kind)
+  const byId = new Map(cards.map((card) => [card.id, card]))
   const changes: EditedChange[] = []
   for (const [at, item] of draft.items.entries()) {
     // The scripts listed apart are not edited: they stay as they are.
     if ('other' in item && item.other === true) continue
-    const card = cards.find((one) => one.id === item.id)
+    const card = byId.get(item.id)
     if (card !== undefined && card.state !== 'pending') continue
     const proposal = readProposal(proposalOfLine(draft, at, card?.change))
     if (Option.isNone(proposal)) return { refused: LINE_MISSING }
