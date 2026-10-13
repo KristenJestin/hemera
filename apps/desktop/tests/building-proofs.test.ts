@@ -23,6 +23,7 @@ import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { BuildingEnd, type BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
+import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
 import {
   ACCEPT_RED,
   CANCEL_MISSION,
@@ -69,12 +70,21 @@ const proofsEngine = (
   hold: BuilderHold = () => Effect.void,
   end?: Layer.Layer<BuildingEnd>,
   agents: (index: number) => FakeScript = builderAgents,
-  proofLimit?: Duration.Duration,
+  more: {
+    /** How long a proof may run (#290). */
+    readonly proofLimit?: Duration.Duration
+    /** The snapshot service as the suite sees it, wrapped around the real one. */
+    readonly snapshots?: (real: SnapshotsService) => SnapshotsService
+  } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
-    building: end === undefined ? { hold, proofLimit } : { hold, end, proofLimit },
+    snapshots: more.snapshots ?? ((real) => real),
+    building:
+      end === undefined
+        ? { hold, proofLimit: more.proofLimit }
+        : { hold, end, proofLimit: more.proofLimit },
   })
 
 /**
@@ -1656,6 +1666,64 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     ])
   })
 
+  test('a command whose changes are known but whose attribution then fails: its write still counts, no question, and the proof is run again', async () => {
+    let held = false
+    let open: () => void = () => undefined
+    const gate = new Promise<void>((done) => {
+      open = done
+    })
+    const agents = (index: number): FakeScript =>
+      index === 0 ? READING : { ...QUIET, between: () => (held ? gate : Promise.resolve()) }
+    const fixer = join(scratch, 'fix.mjs')
+    writeFileSync(
+      fixer,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync('export.ts', ${JSON.stringify(RIGHT_EXPORT)})\n`,
+    )
+    // Once the command ran, copying its changes fails: what follows the changes known never ends.
+    let failing = false
+    const snapshots = (real: SnapshotsService): SnapshotsService => ({
+      ...real,
+      capture: (missionId, place, from, to, files) =>
+        failing
+          ? Effect.fail(
+              new SnapshotFailed({ repository: place.name, owner: 'run', said: 'disk full' }),
+            )
+          : real.capture(missionId, place, from, to, files),
+    })
+    const seen = await proofsEngine(data, undefined, undefined, agents, { snapshots }).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            held = true
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            failing = true
+            const ran = yield* call(grantId, 'commands_run', {
+              line: `"${process.execPath}" "${fixer}"`,
+              repository: 'api',
+            })
+            open()
+            yield* until(endCalled(mission.id), 20_000)
+            return {
+              ran,
+              asked: yield* unprovenAsked,
+              proof: yield* proofOf(mission.id, 'R1.S2'),
+            }
+          }),
+        ),
+    )
+    expect(seen.ran).toMatch(/exit code 0/)
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
+  })
+
   test('Try again, then a Builder turn that writes nothing while the proof runs: the question does not come back before the run ends', async () => {
     const log = join(scratch, 'runs.log')
     const release = join(scratch, 'release')
@@ -1738,25 +1806,26 @@ describe('A proof run that never ends', () => {
         ),
       ),
     })
-    const seen = await proofsEngine(data, undefined, undefined, undefined, Duration.seconds(6)).run(
-      ({ profile }) =>
-        within(
-          profile,
-          Effect.gen(function* () {
-            const { mission } = yield* launchedWith(hanging)
-            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
-            const { grantId } = yield* builderOf(mission.id)
-            yield* builds(grantId, 'T1')
-            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
-            yield* builds(grantId, 'T4')
-            yield* builds(grantId, 'T3')
-            yield* until(
-              Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
-              25_000,
-            )
-            return { proof: yield* proofOf(mission.id, 'R1.S2') }
-          }),
-        ),
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofLimit: Duration.seconds(6),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(hanging)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+            25_000,
+          )
+          return { proof: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
     )
     const green = seen.proof.runs.at(-1)
     expect(seen.proof.runs.map((one) => one.phase)).toEqual(['red', 'green'])

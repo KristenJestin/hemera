@@ -81,7 +81,7 @@ import { documentationAttemptIn } from './documenter-store.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { OutsideChanges } from './outside.ts'
 import { fileOf } from './place.ts'
-import { type ChangedFile, Snapshots } from './snapshots.ts'
+import { type ChangedFile, type RepositoryPlace, Snapshots } from './snapshots.ts'
 import {
   type AttemptFile,
   type BuildingBase,
@@ -455,7 +455,7 @@ export const buildingLoop = (parts: LoopParts) => {
             if (closed) return
             closed = true
             if (runId !== null && before !== null) {
-              const changed = yield* afterCommand(
+              yield* afterCommand(
                 building,
                 task,
                 session,
@@ -464,8 +464,8 @@ export const buildingLoop = (parts: LoopParts) => {
                 watchId,
                 runId,
                 before,
+                wrote,
               )
-              if (changed) yield* wrote
             }
           }),
         ).pipe(
@@ -563,7 +563,7 @@ export const buildingLoop = (parts: LoopParts) => {
         Effect.suspend(() =>
           runId === null || before === null
             ? Effect.void
-            : afterCommand(building, null, told, name, null, watchId, runId, before),
+            : afterCommand(building, null, told, name, null, watchId, runId, before, Effect.void),
         ).pipe(
           Effect.catchCause((cause) =>
             said(`a check's changes were not recorded: ${String(cause)}`),
@@ -603,7 +603,7 @@ export const buildingLoop = (parts: LoopParts) => {
 
   /**
    * What a command changed, attributed to its task; a held file of another task is a conflict.
-   * Answers whether it changed a file.
+   * `wrote` runs once it is known to have changed a file, before anything else is recorded.
    */
   const afterCommand = (
     building: BuildingRow,
@@ -614,11 +614,15 @@ export const buildingLoop = (parts: LoopParts) => {
     watchId: string,
     runId: string,
     before: ReadonlyArray<{ readonly base: BuildingBase; readonly tree: string }>,
+    wrote: Effect.Effect<void>,
   ) =>
     Effect.gen(function* () {
       const snapshots = yield* Snapshots
       const changes: Array<{
         readonly repository: string
+        readonly place: RepositoryPlace
+        readonly tree: string
+        readonly after: string
         readonly files: ReadonlyArray<ChangedFile>
       }> = []
       for (const { base, tree } of before) {
@@ -632,9 +636,13 @@ export const buildingLoop = (parts: LoopParts) => {
         const changed = (yield* snapshots.changed(building.missionId, place, tree, after)).filter(
           (file) => globs === null || globs.some((glob) => posix.matchesGlob(file.path, glob)),
         )
-        if (changed.length > 0)
-          yield* snapshots.capture(building.missionId, place, tree, after, changed)
-        changes.push({ repository: base.repository, files: changed })
+        changes.push({ repository: base.repository, place, tree, after, files: changed })
+      }
+      // Counted as soon as it is known: a step after it that fails never loses the write (#290).
+      if (changes.some((one) => one.files.length > 0)) yield* wrote
+      for (const { place, tree, after, files } of changes) {
+        if (files.length > 0)
+          yield* snapshots.capture(building.missionId, place, tree, after, files)
       }
       const secrets = yield* Secrets
       const conflicts = yield* mutate('attributing a command', (transaction) =>
@@ -734,7 +742,6 @@ export const buildingLoop = (parts: LoopParts) => {
         }
         yield* outside.compare(building.missionId, base.repository)
       }
-      return changes.some((one) => one.files.length > 0)
     })
 
   /**
