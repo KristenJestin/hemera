@@ -49,7 +49,7 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { getAgentSession } from '../agents/sessions.ts'
-import { getSession, sessionsOfLineage } from '../sessions/store.ts'
+import { type RoleSession, getSession, sessionsOfLineage } from '../sessions/store.ts'
 import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
@@ -1010,20 +1010,15 @@ export const toolGateLayer = (settings: GateSettings) =>
        * Whether the end of its Building stopped a session's lineage: an approved call of it runs
        * nothing then. One replaced (a restart, a resume) acts on through its successor.
        */
-      const stoppedAtTheEnd = (sessionId: string) =>
-        getSession(sessionId).pipe(
-          Effect.flatMap((session) =>
-            Effect.map(sessionsOfLineage(session.lineage), (lineage) =>
-              [session, ...lineage].reduce((latest, one) =>
-                one.epoch >= latest.epoch ? one : latest,
-              ),
-            ),
-          ),
-          Effect.map(
-            (latest) => latest.state === 'ended' && latest.stateReason === STOPPED_AT_THE_END,
-          ),
-          Effect.catchTag('UnknownSession', () => Effect.succeed(false)),
-        )
+      const stoppedAtTheEnd = (session: RoleSession | null) =>
+        session === null
+          ? Effect.succeed(false)
+          : Effect.map(sessionsOfLineage(session.lineage), (lineage) => {
+              const latest = [session, ...lineage].reduce((last, one) =>
+                one.epoch >= last.epoch ? one : last,
+              )
+              return latest.state === 'ended' && latest.stateReason === STOPPED_AT_THE_END
+            })
 
       /**
        * A call the user allowed, acted on by Hemera: its guards, its places and the refusals of the
@@ -1051,14 +1046,17 @@ export const toolGateLayer = (settings: GateSettings) =>
             if (refused !== null) {
               return { kind: 'changed', reason: `refused: ${refused}` } satisfies Performed
             }
-            // Counted before its session is read: an exit that stops the session either finds the
-            // call counted and waits for it, or stopped the session first and nothing runs. One
-            // whose session ended before the exit is refused by the exit's mark.
+            // Counted before its session's state is read: an exit that stops the session either
+            // finds the call counted and waits for it, or stopped the session first and nothing
+            // runs. One whose session ended before the exit is refused by the exit's mark.
+            const session = yield* getSession(frozen.grant.sessionId).pipe(
+              Effect.catchTag('UnknownSession', () => Effect.succeed(null)),
+            )
             const acted = yield* ToolAccess.use((access) =>
               access.counted(
-                frozen.grant.missionId,
+                { missionId: frozen.grant.missionId, lineage: session?.lineage ?? null },
                 Effect.gen(function* () {
-                  if (yield* stoppedAtTheEnd(frozen.grant.sessionId)) {
+                  if (yield* stoppedAtTheEnd(session)) {
                     return { kind: 'changed', reason: STOPPED_AT_THE_END } satisfies Performed
                   }
                   const changed = yield* holds(judged)
