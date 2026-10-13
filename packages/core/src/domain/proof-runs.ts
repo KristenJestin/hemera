@@ -319,8 +319,7 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
  * A test's declared name as a pattern matched whole: from the start of a line or after a
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
  * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. A
- * `::` is a node id's before its first `[`, and no name is read inside brackets still open: a
- * case id holding `::test_x[` or ` b::test_x[` is not `test_x`. What
+ * `::` is a node id's before its first `[`: a case id holding `::test_x[` is not `test_x`. What
  * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
  * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
  * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
@@ -333,9 +332,8 @@ const namePattern = (name: string, cases = false): RegExp | null => {
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
   const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
-  const outside = '(?<=^(?:[^[\\]]|\\[[^[\\]]*\\])*)'
   return new RegExp(
-    `${outside}(?:^|\\s)[^\\s[]*::${body}\\[|${outside}(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `(?:^|\\s)[^\\s[]*::${body}\\[|(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
@@ -358,17 +356,20 @@ const subtestPattern = (test: GoSubtest): RegExp | null => {
 
 /**
  * A pytest summary line's node id, without the message after its first ` - ` outside a case id's
- * brackets (`FAILED a.py::test_y - AssertionError: a.py::test_x[1] failed`); any other line whole.
+ * brackets (`FAILED a.py::test_y - AssertionError: a.py::test_x[1] failed`), and with what its
+ * case ids hold blanked (`test_other[a b::test_x[1]]`); any other line whole.
  */
 const nodeIdOf = (text: string): string => {
   if (!/^FAILED \S+::/.test(text)) return text
   let brackets = 0
+  let id = ''
   for (const [at, char] of text.split('').entries()) {
-    if (char === '[') brackets += 1
+    if (brackets <= 0 && text.startsWith(' - ', at)) return id
     if (char === ']') brackets -= 1
-    if (brackets === 0 && text.startsWith(' - ', at)) return text.slice(0, at)
+    id += brackets > 0 ? ' ' : char
+    if (char === '[') brackets += 1
   }
-  return text
+  return id
 }
 
 const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): boolean =>

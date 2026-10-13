@@ -1728,6 +1728,22 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, null)).toBe(true)
   })
 
+  test('a test under a describe name holding brackets, closed or not, is read by its name', () => {
+    const path = 'src/a.test.ts'
+    const lines = [
+      '  ● with [[1,2],[3]] › reads a file',
+      ' × src/a.test.ts > with [[1,2],[3]] > reads a file 3ms',
+      ' FAIL  src/a.test.ts > matrix [ [ 1, 2 ], [ 3 ] ] > reads a file',
+      ' × src/a.test.ts > range [0, 5) > reads a file 3ms',
+      '  ● parser [x › reads a file',
+    ]
+    for (const line of lines) {
+      const output = `${line}\nAssertionError: expected false to be true // Object.is equality`
+      expect(validRed(run(output, 1, path), path, ['reads a file'])).toBe(true)
+      expect(validRed(run(output, 1, path), path, ['reads a dir'])).toBe(false)
+    }
+  })
+
   test('a pytest id after a space in a case id, or in a summary line’s message, is not that test', () => {
     const path = 'tests/test_export.py'
     expect(run(PYTEST_SPACED_OTHER_FAILS, 1, path).failingLines).toHaveLength(2)
