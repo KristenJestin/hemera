@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { foldedOut } from '../../exit-play.ts'
 import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist } from '../../icons.ts'
 import {
@@ -597,6 +598,113 @@ export const Dense: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getAllByRole('button', { name: /^Move / })).toHaveLength(DENSE_CHECKS.length)
+  },
+}
+
+const rowOf = (canvasElement: HTMLElement, selector: string): HTMLElement => {
+  const row = canvasElement.querySelector<HTMLElement>(selector)
+  if (row === null) throw new Error(`no row ${selector}`)
+  return row
+}
+
+const reduced: Story['render'] = (args) => (
+  <MotionConfig reducedMotion="always">
+    <Page {...args} />
+  </MotionConfig>
+)
+
+/** The checks of Acme but e2e: build alone at the end. */
+const BUILD_ALONE = CHECKS.filter((one) => one.id !== 'e2e')
+
+/** The last check of a moment removed: the moment folds out, its line folding out with it. */
+async function removeBuild(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-check="build"]')
+  const dialog = await body().findByRole('dialog', { name: 'build' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove build' }))
+  await waitFor(() => {
+    expect(within(canvasElement).queryByRole('heading', { name: 'At the end' })).toBeNull()
+  })
+  expect(within(canvasElement).queryByRole('list', { name: 'At the end' })).toBeNull()
+  return row
+}
+
+/** Removing the last check of a moment: its line folds out, and the moment with it. */
+export const RemoveTheLastCheckOfAMoment: Story = {
+  args: { checks: BUILD_ALONE, form: { kind: 'edit', id: 'build' } },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await removeBuild(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the line and its moment are gone at once. */
+export const RemoveTheLastCheckOfAMomentReducedMotion: Story = {
+  args: { checks: BUILD_ALONE, form: { kind: 'edit', id: 'build' } },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await removeBuild(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
+  },
+}
+
+/** The last check of the Project removed: its line folds out while Hemera falls asleep. */
+async function removeLint(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-check="lint"]')
+  const dialog = await body().findByRole('dialog', { name: 'lint' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove lint' }))
+  expect(
+    await within(canvasElement).findByRole('heading', { name: 'No check yet' }),
+  ).toBeInTheDocument()
+  return row
+}
+
+/** Removing the last check: its line folds out with its list, and the section says there is none. */
+export const RemoveTheLastCheck: Story = {
+  args: { checks: CHECKS.slice(0, 1), form: { kind: 'edit', id: 'lint' } },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await removeLint(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the line is gone at once, and the section says there is none. */
+export const RemoveTheLastCheckReducedMotion: Story = {
+  args: { checks: CHECKS.slice(0, 1), form: { kind: 'edit', id: 'lint' } },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await removeLint(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
+  },
+}
+
+/** Lint alone proposed after each task: accepting it empties that moment's proposals. */
+const LINT_ALONE = PROPOSED_CHECKS.filter((one) => one.id !== 'proposed-typecheck')
+
+async function acceptLint(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-proposal="proposed-lint"]')
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'Accept lint' }))
+  await waitFor(() => {
+    expect(
+      within(canvasElement).queryByRole('list', { name: 'Proposed after each task' }),
+    ).toBeNull()
+  })
+  expect(within(moment(canvasElement, 'After each task')).getAllByRole('listitem')).toHaveLength(1)
+  return row
+}
+
+/** Accepting the last proposal of a moment: it folds out with the proposals of its moment. */
+export const AcceptTheLastProposalOfAMoment: Story = {
+  args: { checks: [], proposals: LINT_ALONE },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await acceptLint(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the proposal is gone at once, lint kept in its place. */
+export const AcceptTheLastProposalOfAMomentReducedMotion: Story = {
+  args: { checks: [], proposals: LINT_ALONE },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await acceptLint(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
   },
 }
 

@@ -378,7 +378,7 @@ function Checks({
   const folding = useTransition(fold)
   const ids = checks.map((check) => check.id)
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} propagate>
       {checks.length > 0 && (
         <motion.div
           key="kept"
@@ -395,7 +395,7 @@ function Checks({
             aria-label={label}
             className="flex flex-col"
           >
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} propagate>
               {checks.map((check, index) => (
                 <CheckRow
                   key={check.id}
@@ -420,7 +420,7 @@ function Checks({
           exit={collapse}
           transition={folding}
         >
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} propagate>
             {proposals.map((proposal) => (
               <ProposedCheckRow
                 key={proposal.id}
@@ -509,59 +509,90 @@ export function ChecksSection({
         }
       />
       <SectionRefusal error={error} />
-      {(error === undefined || !empty) && (
-        <Frame>
-          {empty ? (
-            <Empty
-              face="asleep"
-              title="No check yet"
-              description="Until a check runs after it, a task is done, not verified."
-              action={add}
-            />
-          ) : (
-            <>
-              <ColumnsHead />
-              {loading ? (
-                <ul aria-label="Checks" aria-busy="true" className="flex flex-col">
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                </ul>
-              ) : (
-                <AnimatePresence initial={false}>
-                  {lists
-                    .filter((list) => list.checks.length + list.proposals.length > 0)
-                    .map((list) => {
-                      const among = list.checks.map((check) => check.id)
-                      return (
-                        <motion.div
-                          key={list.label}
-                          className="overflow-hidden border-b border-border last:border-b-0"
-                          initial={collapse}
-                          animate={expand}
-                          exit={collapse}
-                          transition={folding}
-                        >
-                          <h3 className={MOMENT}>{list.label}</h3>
-                          <Checks
-                            label={list.label}
-                            checks={list.checks}
-                            proposals={list.proposals}
-                            onOpen={onOpen}
-                            onMove={(id, by) => move(among, id, by)}
-                            onReorder={(next) => onReorder(merge(among, next))}
-                            onAccept={onAccept}
-                          />
-                        </motion.div>
-                      )
-                    })}
-                </AnimatePresence>
-              )}
-            </>
-          )}
-        </Frame>
-      )}
+      {/* Presences that outlive what they hold: the last line folds out with its list while the
+          empty state grows in, and a refusal with nothing to show folds the frame away. */}
+      <AnimatePresence initial={false}>
+        {(error === undefined || !empty) && (
+          <motion.div
+            key="frame"
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <Frame>
+              <AnimatePresence initial={false} propagate>
+                {empty ? (
+                  <motion.div
+                    key="empty"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <Empty
+                      face="asleep"
+                      title="No check yet"
+                      description="Until a check runs after it, a task is done, not verified."
+                      action={add}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="list"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <ColumnsHead />
+                    {loading ? (
+                      <ul aria-label="Checks" aria-busy="true" className="flex flex-col">
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                      </ul>
+                    ) : (
+                      <AnimatePresence initial={false} propagate>
+                        {lists
+                          .filter((list) => list.checks.length + list.proposals.length > 0)
+                          .map((list) => {
+                            const among = list.checks.map((check) => check.id)
+                            return (
+                              <motion.div
+                                key={list.label}
+                                className="overflow-hidden border-b border-border last:border-b-0"
+                                initial={collapse}
+                                animate={expand}
+                                exit={collapse}
+                                transition={folding}
+                              >
+                                <h3 className={MOMENT}>{list.label}</h3>
+                                <Checks
+                                  label={list.label}
+                                  checks={list.checks}
+                                  proposals={list.proposals}
+                                  onOpen={onOpen}
+                                  onMove={(id, by) => move(among, id, by)}
+                                  onReorder={(next) => onReorder(merge(among, next))}
+                                  onAccept={onAccept}
+                                />
+                              </motion.div>
+                            )
+                          })}
+                      </AnimatePresence>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Frame>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <p className={NOTE}>
         {proposals.length > 0 &&
           'Hemera proposes these from the catalogue. Nothing is kept until you accept it. '}
