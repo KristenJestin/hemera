@@ -76,8 +76,17 @@ export interface ProofRunClass {
     readonly file: string | null
     readonly assertion: boolean
   }>
-  /** The lines of the whole output that start with a known runner's failure mark, uncoloured. */
+  /**
+   * The lines of the whole output that start with a known runner's failure mark, uncoloured, each
+   * cut to a few KB.
+   */
   readonly failingLines: ReadonlyArray<string>
+  /**
+   * The lines a test's name is read on, among those of a failure whose own text says an assertion
+   * failed: a failing line, a pytest section heading, a Rust failure's stdout heading, mocha's
+   * numbered failure and the lines of its title.
+   */
+  readonly assertionLines: ReadonlyArray<string>
 }
 
 /** One failure a report names: its test, its file, and what it says. */
@@ -119,6 +128,21 @@ const MOCHA_FAILURE = /^\s*(\d+)\) /
 const MOCHA_FAILING = /^\s*(\d+) failing\s*$/
 /** At most this many failing lines are kept. */
 const FAILING_LINES = 500
+/** Each line is read up to this many characters: a name is never that long. */
+const LINE_CAP = 4_096
+/** pytest's heading of a test's section in its FAILURES (`____ test_x[md] ____`). */
+const PYTEST_SECTION = /^_{3,} \S.* _{3,}\s*$/
+/** pytest's summary line, `FAILED file::test - message`. */
+const PYTEST_SUMMARY = /^FAILED \S+::/
+/** libtest's heading of a failure's output, below its `failures:` line. */
+const RUST_STDOUT = /^---- \S+ stdout ----\s*$/
+const RUST_FAILURES = /^failures:\s*$/
+/**
+ * The first error a failure's text says was thrown: JavaScript's and Python's (`TypeError: …`,
+ * `E   NameError: …`, `AssertionError [ERR_ASSERTION]: …`) or Go's `panic: `.
+ */
+const THROWN = /^\s*(?:E\s+)?(?:(?<error>(?:[A-Z]\w*)?(?:Error|Exception))(?: \[\w+\])?:|panic: )/m
+const ASSERTION_THROWN = /^Assertion(?:Failed)?Error$/
 /** Signs of a test file the runner did not find. */
 const NOT_FOUND =
   /Could not find '|No test files? found|no tests? (were )?found|ENOENT[^\n]*\.test\./i
@@ -128,27 +152,94 @@ const NOT_FOUND =
 const uncoloured = (line: string): string => line.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
 
 /**
- * The lines of an output that mark a failing test, uncoloured, up to the cap. A numbered line is
- * mocha's only below the `N failing` it ends with, and twice at most (its tree, its list): a
- * numbered log line is not one, and cannot push a real failure past the cap.
+ * Whether a failure's own text says an assertion failed: the first error it says was thrown when
+ * there is one (an assertion's, or a `TypeError` whose code frame shows an `expect`), otherwise
+ * the words of an assertion.
  */
-const failingLinesOf = (output: string): ReadonlyArray<string> => {
-  const lines = output.split(/\r?\n/).map(uncoloured)
-  const failing = lines.reduce(
-    (most, line) => Math.max(most, Number(MOCHA_FAILING.exec(line)?.[1] ?? 0)),
-    0,
-  )
+const asserts = (text: string): boolean => {
+  const thrown = THROWN.exec(text)
+  if (thrown !== null) return ASSERTION_THROWN.test(thrown.groups?.['error'] ?? '')
+  return ASSERTION.test(text)
+}
+
+/**
+ * The failing lines of an output, uncoloured and cut, and those a name is read on when their own
+ * text says an assertion failed. A failure's text is its line and those below it, up to the next
+ * failure's line; a pytest summary line's is its message, read as pytest's traceback prints it.
+ * A numbered line is mocha's only below the `N failing` it ends with, and twice at most (its tree,
+ * its list): a numbered log line is not one, and cannot push a real failure past the cap. Its two
+ * lines take the class of its list's text, and the lines of its title in the list are read too.
+ */
+const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'assertionLines'> => {
+  const lines = output.split(/\r?\n/).map((line) => uncoloured(line).slice(0, LINE_CAP))
+  let failing = 0
+  let listAt = -1
+  for (const [at, line] of lines.entries()) {
+    const count = Number(MOCHA_FAILING.exec(line)?.[1] ?? 0)
+    if (count > 0) listAt = at
+    failing = Math.max(failing, count)
+  }
+  const rustAt = lines.findIndex((line) => RUST_FAILURES.test(line))
   const numbered = new Map<number, number>()
-  return lines
-    .filter((line) => {
-      if (FAILING_LINE.test(line)) return true
-      const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
-      if (number < 1 || number > failing) return false
-      const seen = (numbered.get(number) ?? 0) + 1
-      numbered.set(number, seen)
-      return seen <= 2
-    })
-    .slice(0, FAILING_LINES)
+  const entries: Array<{ readonly at: number; readonly marked: boolean; readonly number: number }> =
+    []
+  for (const [at, line] of lines.entries()) {
+    if (FAILING_LINE.test(line)) {
+      entries.push({ at, marked: true, number: 0 })
+      continue
+    }
+    if (PYTEST_SECTION.test(line) || (rustAt >= 0 && at > rustAt && RUST_STDOUT.test(line))) {
+      entries.push({ at, marked: false, number: 0 })
+      continue
+    }
+    const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
+    if (number < 1 || number > failing) continue
+    const seen = (numbered.get(number) ?? 0) + 1
+    numbered.set(number, seen)
+    if (seen <= 2) entries.push({ at, marked: true, number })
+  }
+  const read = entries.slice(0, FAILING_LINES).map((entry, index) => {
+    const line = lines[entry.at] ?? ''
+    const head = PYTEST_SUMMARY.test(line)
+      ? `E   ${line.slice(nodeIdOf(line).length).replace(/^ - /, '')}`
+      : line.trimStart()
+    const below = lines.slice(entry.at + 1, entries[index + 1]?.at ?? lines.length)
+    return {
+      at: entry.at,
+      marked: entry.marked,
+      number: entry.number,
+      line,
+      asserts: asserts([head, ...below].join('\n')),
+    }
+  })
+  const assertedNumbers = new Set(
+    read.filter((entry) => entry.number > 0 && entry.asserts).map((entry) => entry.number),
+  )
+  return {
+    failingLines: read.filter((entry) => entry.marked).map((entry) => entry.line),
+    assertionLines: read
+      .filter((entry) => entry.asserts || assertedNumbers.has(entry.number))
+      .flatMap((entry) =>
+        entry.number > 0 && entry.at > listAt
+          ? mochaTitle(lines, entry.at).map((title) => `${String(entry.number)}) ${title}`)
+          : [entry.line],
+      ),
+  }
+}
+
+/**
+ * The lines of a mocha failure's title in its list, each without the `:` the last one ends with:
+ * `1) exports` and `the invoices export as Markdown:` below it. Its line alone when no line
+ * below ends the title.
+ */
+const mochaTitle = (lines: ReadonlyArray<string>, at: number): ReadonlyArray<string> => {
+  const title = [(lines[at] ?? '').replace(MOCHA_FAILURE, '')]
+  for (const line of lines.slice(at + 1, at + 10)) {
+    if ((title.at(-1) ?? '').trimEnd().endsWith(':') || line.trim() === '') break
+    title.push(line)
+  }
+  if (!(title.at(-1) ?? '').trimEnd().endsWith(':')) return [title[0] ?? '']
+  return title.map((line) => line.trim().replace(/:$/, ''))
 }
 
 const unescapeXml = (text: string): string =>
@@ -240,8 +331,8 @@ export function classifyProofRun(run: {
   readonly exitCode: number | null
   readonly testPath: string | null
 }): ProofRunClass {
-  const failingLines = failingLinesOf(run.output)
-  const none = { failingTest: null, assertion: null, failingFile: null, failures: [], failingLines }
+  const lines = failingLinesOf(run.output)
+  const none = { failingTest: null, assertion: null, failingFile: null, failures: [], ...lines }
   if (run.exitCode === null) return { classification: 'environment', ...none }
   const report = junitOf(run.output) ?? tapOf(run.output)
   // What the runner says before any test, beside the report, is read first.
@@ -274,7 +365,7 @@ export function classifyProofRun(run: {
         file: one.file,
         assertion: classOfFailure(one) === 'assertion_failed',
       })),
-      failingLines,
+      ...lines,
     }
   }
   if (run.exitCode === 0) return { classification: 'passed', ...none }
@@ -316,14 +407,19 @@ export type TestName = string | GoSubtest | RustCasedTest
 const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
- * A test's declared name as a pattern matched whole: from the start of a line or after a
- * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
- * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. A
- * `::` is a node id's before its first `[`: a case id holding `::test_x[` is not `test_x`. What
- * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
- * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
- * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
- * named the same.
+ * A test's declared name as a pattern matched whole, between the separators its runner prints
+ * around a name, never any space inside a longer name. Before it: a runner's mark (`×`, `✕`, `✖`,
+ * `●`), vitest's ` > ` and jest's ` › `, mocha's `1) `, a path's `::` (pytest's, Rust's), Go's
+ * `--- FAIL: `, gotestsum's `=== FAIL: pkg `, unittest's `FAIL: `, libtest's `test ` and `---- `,
+ * cargo-nextest's `FAIL [ 0.004s] (1/2) crate `, a pytest section's `____ ` (its class before it),
+ * or the start of a report's test name. After it: the end of the line, or a duration ending it
+ * (`3ms`, `(3 ms)`, `(0.00s)`); unittest's `(module.Class.test_x)`; libtest's ` ... `,
+ * ` - should panic ...` and ` stdout ----`; pytest's case `[id]`, its summary's ` - ` and its
+ * section's ` ____`. A `::` is a node id's before its first `[`: a case id holding `::test_x[` is
+ * not `test_x`. What `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words
+ * within a name; a name made of placeholders alone is none. A Rust cased test's name may go on
+ * with its cases, shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another
+ * test of a module named the same.
  */
 const namePattern = (name: string, cases = false): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
@@ -332,8 +428,27 @@ const namePattern = (name: string, cases = false): RegExp | null => {
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
   const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
+  const path = '(?:^|\\s)[^\\s[]*::'
+  const anyLeft = [
+    '^',
+    '^\\s*[×✕✖●]\\s+',
+    '\\s[>›]\\s',
+    '^\\s*\\d+\\) ',
+    path,
+    '^\\s*--- FAIL: ',
+    '^=== FAIL: \\S+ ',
+    '^\\s*FAIL \\[[^\\]]*\\] (?:\\(\\s*\\d+\\/\\d+\\) )?\\S+ ',
+  ].join('|')
+  const anyRight = '\\s*$|\\s+\\(?\\d+(?:\\.\\d+)?\\s?m?s\\)?\\s*$'
   return new RegExp(
-    `(?:^|\\s)[^\\s[]*::${body}\\[|(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    [
+      `(?:${anyLeft})${named}(?=${anyRight})`,
+      `^FAIL: ${body}(?= \\(\\w+(?:\\.\\w+)+\\))`,
+      `(?:^test |^---- |${path})${named}(?= \\.\\.\\. | - should panic \\.\\.\\. | stdout ----)`,
+      `(?:^|${path})${body}(?=\\[)`,
+      `${path}${body}(?= - )`,
+      `^_{3,} (?:\\w+\\.)*${body}(?=\\[| _{3,}\\s*$)`,
+    ].join('|'),
   )
 }
 
@@ -350,21 +465,23 @@ const subtestPattern = (test: GoSubtest): RegExp | null => {
     .map((name) => `/${name === null ? '[^\\s/]+' : escape(name)}`)
     .join('')
   return new RegExp(
-    `^(?:\\s*--- FAIL: )?${escape(test.parent)}${test.whole ? '' : '(?:/[^\\s/]+)*'}${path}(?=\\s+\\(|\\s*$)`,
+    `^(?:\\s*--- FAIL: )?${escape(test.parent)}${test.whole ? '' : '(?:/[^\\s/]+)*'}${path}(?:#\\d+)?(?=\\s+\\(|\\s*$)`,
   )
 }
 
 /**
  * A pytest summary line's node id, without the message after its first ` - ` outside a case id's
  * brackets (`FAILED a.py::test_y - AssertionError: a.py::test_x[1] failed`), and with what its
- * case ids hold blanked (`test_other[a b::test_x[1]]`); any other line whole.
+ * case ids hold blanked (`test_other[a b::test_x[1]]`), as in a pytest section's heading; any
+ * other line whole.
  */
 const nodeIdOf = (text: string): string => {
-  if (!/^FAILED \S+::/.test(text)) return text
+  const summary = PYTEST_SUMMARY.test(text)
+  if (!summary && !PYTEST_SECTION.test(text)) return text
   let brackets = 0
   let id = ''
   for (const [at, char] of text.split('').entries()) {
-    if (brackets <= 0 && text.startsWith(' - ', at)) return id
+    if (summary && brackets <= 0 && text.startsWith(' - ', at)) return id
     if (char === ']') brackets -= 1
     id += brackets > 0 ? ' ' : char
     if (char === '[') brackets += 1
@@ -387,8 +504,9 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): bo
  * report that names the files tells it by its file and, when the proof's code names its tests, by
  * its name: another test of the same file failing is not the scenario's red. Without a file named
  * (no report, or JUnit's `classname` only), a test the proof adds must be named whole among the
- * failures (a report's failing tests, or the lines the runner marks as failing in the whole
- * output); failing that, the key line decides, never the exit code alone. A proof whose code names
+ * failures that are assertions (a report's failing tests, or the failing lines of the whole output
+ * whose own text says an assertion failed); failing that, the key line decides, never the exit
+ * code alone. A proof whose code names
  * no test, or a command with no test file, is red by its exit code, the key line its guard. A Go
  * subtest whose parent is unknown is a test the proof adds without a name: alone, the key line
  * decides when the proof has one, and the exit code when it has none.
@@ -418,7 +536,7 @@ export const validRed = (
   const failing =
     run.failures.length > 0
       ? run.failures.filter((one) => one.assertion).map((one) => one.test)
-      : run.failingLines
+      : run.assertionLines
   return named(failing, names) || keyLineMatched === true
 }
 

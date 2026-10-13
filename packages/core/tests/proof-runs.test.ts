@@ -1783,13 +1783,16 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     }
   })
 
-  test('a failing line of 300 KB is read in well under a second', () => {
+  test('a failing line of 300 KB is read quickly, cut to a few KB', () => {
     const path = 'src/a.test.ts'
     const long = ` × src/a.test.ts > ${'[a] '.repeat(75_000)}> reads a file 3ms`
     const output = `${long}\nAssertionError: expected false to be true // Object.is equality`
     const started = performance.now()
-    expect(validRed(run(output, 1, path), path, ['reads a dir'])).toBe(false)
-    expect(performance.now() - started).toBeLessThan(500)
+    const classified = run(output, 1, path)
+    expect(classified.failingLines[0]?.length).toBeLessThanOrEqual(8_192)
+    expect(validRed(classified, path, ['reads a dir'])).toBe(false)
+    // Generous, for a busy runner: what keeps it fast is the cut, checked above.
+    expect(performance.now() - started).toBeLessThan(5_000)
   })
 
   test('a pytest id after a space in a case id, or in a summary line’s message, is not that test', () => {
@@ -1798,5 +1801,189 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_x'])).toBe(false)
     expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_other'])).toBe(true)
     expect(validRed(run(PYTEST_SPACED_OTHER_FAILS, 1, path), path, ['test_y'])).toBe(true)
+  })
+})
+
+/** pytest -v with -rN: no summary, each failing test read from its section in FAILURES. */
+const PYTEST_VERBOSE_NEW_NAME_ERROR = `tests/test_export.py::test_one_is_one FAILED                              [ 50%]
+tests/test_export.py::test_exports_markdown FAILED                        [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:6: AssertionError
+____________________________ test_exports_markdown _____________________________
+
+    def test_exports_markdown():
+>       assert to_markdown([]) == "| total |"
+E       NameError: name 'to_markdown' is not defined
+
+tests/test_export.py:10: NameError
+============================== 2 failed in 0.01s ===============================
+`
+
+describe('A red read line by line and on the runner’s separators (#303)', () => {
+  test('a pytest test the proof adds failing on a NameError, beside an older one failing on assert, is not a red', () => {
+    const path = 'tests/test_export.py'
+    const output = [
+      'E   assert 1 == 2',
+      'FAILED tests/test_export.py::test_one_is_one - assert 1 == 2',
+      "FAILED tests/test_export.py::test_exports_markdown - NameError: name 'to_markdown' is not defined",
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['test_exports_markdown'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+  })
+
+  test('a jest test the proof adds that timed out, beside an older one failing on expect, is not a red', () => {
+    const path = 'tests/export.test.js'
+    const output = [
+      '  ✕ one is one (3 ms)',
+      '  ✕ the invoices export as Markdown (5003 ms)',
+      '',
+      '  ● one is one',
+      '',
+      '    expect(received).toBe(expected) // Object.is equality',
+      '',
+      '  ● the invoices export as Markdown',
+      '',
+      '    thrown: "Exceeded timeout of 5000 ms for a test.',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+  })
+
+  test('a test the proof adds that threw a TypeError, its code frame holding an expect, is not a red', () => {
+    const path = 'tests/export.test.ts'
+    const output = [
+      ' FAIL  tests/export.test.ts > the invoices export as Markdown',
+      'TypeError: toMarkdown is not a function',
+      ' ❯ tests/export.test.ts:4:12',
+      '      4|   expect(toMarkdown([])).toBe("| total |")',
+      ' FAIL  tests/export.test.ts > one is one',
+      'AssertionError: expected 1 to be 2 // Object.is equality',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+  })
+
+  test('a Go test the proof adds that panicked, beside an older one failing on t.Errorf, is not a red', () => {
+    const path = 'export_test.go'
+    const output = [
+      '--- FAIL: TestOneIsOne (0.00s)',
+      '    export_test.go:5: got 1, want 2',
+      '--- FAIL: TestExportMarkdown (0.00s)',
+      'panic: runtime error: invalid memory address or nil pointer dereference [recovered]',
+      'FAIL\texample.com/acme\t0.01s',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(true)
+  })
+
+  test('a name is not matched inside a longer name: saves is not never saves, exports is not exports (csv)', () => {
+    const path = 'tests/export.test.ts'
+    const jest = [
+      '  ✕ never saves (3 ms)',
+      '  ✓ saves (1 ms)',
+      '',
+      '  ● never saves',
+      '',
+      '    expect(received).toBe(expected)',
+    ].join('\n')
+    expect(validRed(run(jest, 1, path), path, ['saves'])).toBe(false)
+    expect(validRed(run(jest, 1, path), path, ['never saves'])).toBe(true)
+    const vitest = [
+      ' × tests/export.test.ts > export > never saves 3ms',
+      ' ✓ tests/export.test.ts > export > saves 1ms',
+      'AssertionError: expected 1 to be 2',
+    ].join('\n')
+    expect(validRed(run(vitest, 1, path), path, ['saves'])).toBe(false)
+    expect(validRed(run(vitest, 1, path), path, ['never saves'])).toBe(true)
+    const csv = ['  ✕ exports (csv) (3 ms)', '  ✓ exports (1 ms)', '    expect(received).toBe(1)']
+    expect(validRed(run(csv.join('\n'), 1, path), path, ['exports'])).toBe(false)
+    expect(validRed(run(csv.join('\n'), 1, path), path, ['exports (csv)'])).toBe(true)
+    const later = ' × tests/export.test.ts > retries 3 ms later 3ms\nAssertionError: no'
+    expect(validRed(run(later, 1, path), path, ['retries'])).toBe(false)
+  })
+
+  test('a template-literal name against a failing line of 300 KB is read quickly, the line cut to a few KB', () => {
+    const path = 'tests/export.test.ts'
+    const output = `× ${'a '.repeat(150_000)}\nexpect(1).toBe(2)\n`
+    const classified = run(output, 1, path)
+    expect(classified.failingLines[0]?.length).toBeLessThanOrEqual(8_192)
+    const started = performance.now()
+    expect(validRed(classified, path, ['${a} to ${b}'])).toBe(false)
+    // Generous: 17 s before the cut; a busy runner stays far below this.
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+
+  test('a Go subtest Go renamed with #01, as a duplicate name, is a red by its name', () => {
+    const path = 'export_test.go'
+    const output = '--- FAIL: TestE (0.00s)\n    --- FAIL: TestE/csv#01 (0.00s)\n'
+    const subtest = { parent: 'TestE', subtest: 'csv', nesting: [], whole: true }
+    expect(validRed(run(output, 1, path), path, [subtest])).toBe(true)
+    const other = { parent: 'TestE', subtest: 'cs', nesting: [], whole: true }
+    expect(validRed(run(output, 1, path), path, [other])).toBe(false)
+  })
+
+  test('a Rust run with the terse format is a red by its name, from the failure’s stdout', () => {
+    const path = 'src/lib.rs'
+    const output = [
+      'running 2 tests',
+      '.F',
+      'failures:',
+      '',
+      '---- tests::exports stdout ----',
+      "thread 'tests::exports' panicked at src/lib.rs:9:5:",
+      'assertion `left == right` failed',
+      '',
+      'failures:',
+      '    tests::exports',
+    ].join('\n')
+    expect(validRed(run(output, 101, path), path, ['exports'])).toBe(true)
+    expect(validRed(run(output, 101, path), path, ['imports'])).toBe(false)
+  })
+
+  test('mocha’s dot reporter with a nested describe is a red by its name', () => {
+    const path = 'test/export.spec.js'
+    const output = [
+      '  ..!',
+      '',
+      '  2 passing (4ms)',
+      '  1 failing',
+      '',
+      '  1) export',
+      '       writes markdown:',
+      '     AssertionError [ERR_ASSERTION]: Expected values to be strictly equal',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['writes markdown'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['markdown'])).toBe(false)
+    const thrown = output.replace('AssertionError [ERR_ASSERTION]', 'TypeError')
+    expect(validRed(run(thrown, 1, path), path, ['writes markdown'])).toBe(false)
+  })
+
+  test('pytest -v with -rN is read from its FAILURES sections, each test by its own error', () => {
+    const path = 'tests/test_export.py'
+    const output = PYTEST_VERBOSE_NEW_NAME_ERROR
+    expect(validRed(run(output, 1, path), path, ['test_exports_markdown'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+    const asserts = output.replace(
+      "E       NameError: name 'to_markdown' is not defined",
+      "E       AssertionError: assert '' == '| total |'",
+    )
+    expect(validRed(run(asserts, 1, path), path, ['test_exports_markdown'])).toBe(true)
+  })
+
+  test('go test -json is not read: it is never a red, whatever its key line', () => {
+    const path = 'export_test.go'
+    const output = [
+      '{"Action":"output","Test":"TestExportMarkdown","Output":"--- FAIL: TestExportMarkdown (0.00s)\\n"}',
+      '{"Action":"fail","Package":"example.com/acme","Test":"TestExportMarkdown","Elapsed":0}',
+    ].join('\n')
+    expect(run(output, 1, path).classification).not.toBe('assertion_failed')
+    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'], true)).toBe(false)
   })
 })
