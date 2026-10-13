@@ -257,6 +257,8 @@ export const buildingEndLayer = (log: Log) => {
       const documenting = new Set<string>()
       /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
       const refreshed = new Map<string, string>()
+      /** The Buildings whose Builder this engine brought back once as their end waited at refresh. */
+      const broughtBack = new Set<string>()
 
       const buildingRow = (buildingId: string) =>
         Effect.gen(function* () {
@@ -636,7 +638,7 @@ export const buildingEndLayer = (log: Log) => {
               return false
             }
             case 'refresh': {
-              if (yield* waitsOnBuilder(building)) return yield* withBuilder(missionId)
+              if (yield* waitsOnBuilder(building)) return yield* withBuilder(building)
               const last = refreshed.get(building.id)
               const stale = last === undefined ? [] : yield* staleLeft(building)
               if (
@@ -656,11 +658,11 @@ export const buildingEndLayer = (log: Log) => {
               } else if (yield* checksRed(building)) {
                 yield* BuildDesk.use((desk) => desk.judgeScope(missionId, 'end', null))
               }
-              if (yield* waitsOnBuilder(building)) return yield* withBuilder(missionId)
+              if (yield* waitsOnBuilder(building)) return yield* withBuilder(building)
               // The proofs are waited on, never the Builder: their runs drive the end again.
-              if (yield* unsettled(building)) return yield* withBuilder(missionId)
+              if (yield* unsettled(building)) return yield* withBuilder(building)
               if ((yield* getMission(missionId)).needs.length > 0)
-                return yield* withBuilder(missionId)
+                return yield* withBuilder(building)
               return yield* exit(building)
             }
           }
@@ -773,13 +775,19 @@ export const buildingEndLayer = (log: Log) => {
 
       /**
        * The end waits at its last step: the Builder works meanwhile. A restart does not resume it
-       * there (the exit could be under way), so the end does, before it next exits.
+       * there (the exit could be under way), so the end does, before it next exits: once per
+       * engine, not at every drive, so a Builder that stopped again (a provider limit, a start that
+       * failed) is the user's to start again.
        */
-      const withBuilder = (missionId: string) =>
-        Effect.as(
-          BuildDesk.use((desk) => desk.ensureBuilder(missionId)),
-          false,
-        )
+      const withBuilder = (building: BuildingRow) =>
+        Effect.suspend(() => {
+          if (broughtBack.has(building.id)) return Effect.succeed(false)
+          broughtBack.add(building.id)
+          return Effect.as(
+            BuildDesk.use((desk) => desk.ensureBuilder(building.missionId)),
+            false,
+          )
+        })
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
       const unsettled = (building: BuildingRow) =>
@@ -837,7 +845,10 @@ export const buildingEndLayer = (log: Log) => {
           yield* stopAll(missionId)
           // A question a stopped call raised as the tree stopped holds the exit until answered, with
           // the Builder back to take its answer.
-          if ((yield* getMission(missionId)).needs.length > 0) return yield* withBuilder(missionId)
+          if ((yield* getMission(missionId)).needs.length > 0) {
+            yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
+            return false
+          }
           const snapshots = yield* Snapshots
           const ends: Array<{ readonly base: BuildingBase; readonly tree: string }> = []
           for (const base of basesOf(building)) {

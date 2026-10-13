@@ -29,13 +29,13 @@ import { LaunchFailed } from '@hemera/ipc'
 import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { FakeScript } from '../src/engine/agents/fake.ts'
+import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
 import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
-import { attemptsIn, buildingPartOf } from '../src/engine/building/tasks.ts'
+import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
 import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
@@ -59,6 +59,7 @@ import {
   sessionsOfLineage,
 } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { mutate } from '../src/engine/transaction.ts'
 import {
   agentSessions,
   checkpoints,
@@ -2236,6 +2237,146 @@ describe('The refresh', () => {
   )
 })
 
+describe('A Builder stopped at a provider limit', () => {
+  test(
+    'a Builder stopped at a provider limit is not resumed while the end waits at refresh: the limit need is left to the user',
+    SLOW,
+    async () => {
+      let limiting = false
+      const limit: FakeStep = { does: 'limits', title: 'The Acme account has no available quota.' }
+      const { world, run } = ending({
+        builder: {
+          get steps() {
+            return limiting ? [limit] : [says('Read.')]
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            // The Builder's next turn meets the provider's limit: its session ends, the user is asked.
+            limiting = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { lineage: builder.session.lineage },
+                kind: 'note',
+                body: 'One more thing.',
+              }),
+            )
+            const limitNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter(
+                (need) =>
+                  Predicate.isTagged(need.fields, 'Environment') &&
+                  need.fields.missing.includes('provider limit'),
+              ),
+            )
+            yield* until(
+              Effect.map(limitNeeds, (found) => found.length === 1),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            // The end waits at its last step on the user's answer.
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            // Mission events, as a proof run or a need brings them: each drives the end again.
+            for (let count = 0; count < 3; count += 1) {
+              yield* mutate('driving the end', () =>
+                Effect.succeed({
+                  result: undefined,
+                  events: [buildingEvent(mission.id, 'building.resumed')],
+                }),
+              )
+              yield* Effect.sleep('200 millis')
+            }
+            // Long enough for a resume to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              lineage: yield* sessionsOfLineage(builder.session.lineage),
+              needs: yield* limitNeeds,
+              view: yield* buildingNow(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.lineage.map((one) => one.state)).toEqual(['ended'])
+      expect(seen.needs).toHaveLength(1)
+      expect(seen.view.phase).toBe('refresh')
+    },
+  )
+})
+
+describe('The Builder while the end waits at refresh', () => {
+  test(
+    'a Builder that stopped while the end waits at refresh is brought back once per engine, not at every drive',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const lineage = sessionsOfLineage(builder.session.lineage)
+            yield* builtAll(builder.grantId)
+            // A question of the Builder holds the end at refresh.
+            yield* call(builder.grantId, 'report_need', {
+              kind: 'environment',
+              text: 'The ACME-12 sandbox is down.',
+              tasks: [],
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            // A Builder session that ended with no need of its own, before the end reaches refresh.
+            const database = yield* Database
+            const ended = (sessionId: string) =>
+              database
+                .update(agentSessions)
+                .set({
+                  state: 'ended',
+                  stateReason: null,
+                  endedAt: new Date().toISOString(),
+                })
+                .where(eq(agentSessions.id, sessionId))
+            yield* ended(builder.session.id)
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            // The end brings it back as it first waits at refresh.
+            yield* until(
+              Effect.map(lineage, (rows) => rows.length === 2),
+              LONG,
+            )
+            // Its successor ends too, with no need: mission events drive the end again.
+            yield* ended((yield* lineage).at(-1)?.id ?? '')
+            for (let count = 0; count < 3; count += 1) {
+              yield* mutate('driving the end', () =>
+                Effect.succeed({
+                  result: undefined,
+                  events: [buildingEvent(mission.id, 'building.resumed')],
+                }),
+              )
+              yield* Effect.sleep('200 millis')
+            }
+            // Long enough for a resume to show itself.
+            yield* Effect.sleep('1 second')
+            return { lineage: yield* lineage, view: yield* buildingNow(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.lineage).toHaveLength(2)
+      expect(seen.view.phase).toBe('refresh')
+    },
+  )
+})
+
 describe('The reviewers count in the cap', () => {
   test('with three sub-agents running, the reviewers wait for slots', SLOW, async () => {
     const { world, run } = ending()
@@ -2787,6 +2928,75 @@ describe('A restart in the middle of the end', () => {
       )
       expect(seen.live.map((one) => one.role)).toEqual([])
       expect(seen.mission.needs).toEqual([])
+    },
+  )
+
+  test(
+    'a Builder resume that lands between the exit’s stops and its commit sends the commit back, and the exit runs again',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewing(mission.id)
+            return mission
+          }),
+        ),
+      )
+      // Started again, the Builder's resume reads the end's step while the reviewers run, then is
+      // held until the exit's stops are done: it brings the Builder back between them and the
+      // commit, and the exit's first look at the Workspace waits for it.
+      const stopped = held()
+      const resumed = held()
+      let exits = 0
+      const after = ending({
+        resumed: true,
+        hold: (at) => {
+          if (at === 'bringing') return Effect.promise(() => stopped.promise)
+          if (at === 'resumed') return Effect.sync(() => resumed.release())
+          return Effect.void
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind !== 'review_exit') return real.take(place, owner)
+            exits += 1
+            if (exits > 1) return real.take(place, owner)
+            stopped.release()
+            return Effect.andThen(
+              Effect.promise(() => resumed.promise),
+              real.take(place, owner),
+            )
+          },
+        }),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            return {
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.id,
+              }),
+              types: yield* typesOf(left.id),
+            }
+          }),
+        ),
+      )
+      // The commit went back once: the exit stopped the resumed Builder and looked again.
+      expect(exits).toBe(2)
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
     },
   )
 
