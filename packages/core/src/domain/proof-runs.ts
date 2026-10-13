@@ -113,7 +113,7 @@ const ASSERTION =
  * cargo-nextest's `FAIL [ 0.004s] (1/2) crate x`. Mocha's `1) name` is read apart.
  */
 const FAILING_LINE =
-  /^\s*[×✕✖]\s|^\s*●\s(?!(?:Console|Test suite failed to run)\s*$)|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*FAIL\s+\S.*?\s(?:\S+\.(?:test|spec)\.\w+|\S*__tests__\/\S+)(?:\s+\(\d+(?:\.\d+)? m?s\))?\s*$|^\s*not ok \d+|^FAILED \S+::|^FAIL: test\w* \([\w.]+\)(?: .*)?$|^\s*--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|^test \S+(?: - should panic)? \.\.\. FAILED\s*$|^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?\S+ \S+\s*$/
+  /^\s*[×✕✖]\s|^\s*●\s(?!(?:Console|Test suite failed to run)\s*$)|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*FAIL\s+\S.*?\s(?:\S+\.(?:test|spec)\.\w+|\S*__tests__\/\S+)(?:\s+\(\d+(?:\.\d+)? m?s\))?\s*$|^\s*not ok \d+|^FAILED \S+::|^FAIL: test\w* \(\w+(?:\.\w+)+\)(?: .*)?$|^\s*--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|^test \S+(?: - should panic)? \.\.\. FAILED\s*$|^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?\S+ \S+\s*$/
 /** Mocha's numbered failure, `1) name`, in its tree and again in its list after `N failing`. */
 const MOCHA_FAILURE = /^\s*(\d+)\) /
 const MOCHA_FAILING = /^\s*(\d+) failing\s*$/

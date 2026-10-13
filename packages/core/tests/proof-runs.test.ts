@@ -1177,6 +1177,13 @@ describe('A red read from the failing names #260 still missed', () => {
     expect(run(output, 1, 'tests/test_export.py').failingLines).toEqual([])
   })
 
+  test('a log line saying FAIL: test_x (a word) is not a unittest heading', () => {
+    const output = ['FAIL: test_exports_markdown (retrying)', 'AssertionError: no'].join('\n')
+    const path = 'tests/test_export.py'
+    expect(run(output, 1, path).failingLines).toEqual([])
+    expect(validRed(run(output, 1, path), path, ['test_exports_markdown'])).toBe(false)
+  })
+
   test('a cargo-nextest FAIL line is a red, by name; its PASS lines are not', () => {
     const output = captured('cargo-nextest')
     const path = 'src/lib.rs'
