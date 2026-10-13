@@ -28,21 +28,31 @@ import { launchMission, preparationOf } from '../src/engine/building/launch.ts'
 import { PRELAUNCH_ROLE } from '../src/engine/building/prelaunch-role.ts'
 import { validationSettingsOf } from '../src/engine/building/validation.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
+import {
+  addRequirement,
+  modifyRequirement,
+  removeRequirement,
+} from '../src/engine/living-spec/store.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { getNeed, retryNeed } from '../src/engine/needs.ts'
 import { REGISTRY } from '../src/engine/notifications.ts'
 import { decideDependency, dependenciesOf } from '../src/engine/planning/dependencies.ts'
+import { freezeMission } from '../src/engine/planning/freeze.ts'
 import { PLANNER_TEMPLATE } from '../src/engine/planning/role.ts'
+import { readSpec } from '../src/engine/planning/store.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { saveRecipe } from '../src/engine/recipe.ts'
 import { roleSettingAt } from '../src/engine/sessions/cascade.ts'
 import { ROLES_REGISTERED } from '../src/engine/sessions/roles.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  livingDomains,
   missionTickets,
   missions,
   sessionDeliveries,
+  specRequirements,
   specs,
   ticketVersions,
 } from '../src/engine/storage/schema.ts'
@@ -65,11 +75,13 @@ import {
   marksOf,
   plannedIn,
   plannerTook,
+  readCold,
   pushedOnRemote,
   refusedWith,
   reporting,
   settledAndFrozen,
   startedIn,
+  writeComplete,
 } from './building-world.ts'
 import { git } from './repositories.ts'
 import { text, until, within } from './sessions-world.ts'
@@ -147,6 +159,42 @@ const ticketMoved = (missionId: string) =>
       linkedAt: new Date().toISOString(),
     })
   })
+
+const SCENARIO = [{ when: 'the user exports the invoices', then: 'a CSV file is saved' }]
+
+/** The Project's living spec holds one validated requirement, LR1 at version 1, in Invoices. */
+const livingInvoices = (projectId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const at = new Date().toISOString()
+    const secrets = yield* Secrets
+    const domainId = crypto.randomUUID()
+    yield* database.insert(livingDomains).values({
+      id: domainId,
+      projectId,
+      rank: 1,
+      name: secrets.mask('Invoices'),
+      summary: secrets.mask('What the invoices cover.'),
+      uncertainty: secrets.mask(''),
+      state: 'validated',
+      validatedAt: at,
+      createdAt: at,
+      updatedAt: at,
+    })
+    return yield* addRequirement(
+      { projectId, domainId, text: 'The invoices export as XLSX.', scenarios: SCENARIO },
+      { kind: 'user' },
+    )
+  })
+
+/** The living requirement, moved by another mission's merge: its text changed, version 2. */
+const livingModified = (id: string) =>
+  modifyRequirement(
+    id,
+    1,
+    { text: 'The invoices export as CSV and XLSX.', scenarios: SCENARIO },
+    { kind: 'user' },
+  )
 
 describe('The check lists what moved since the Freeze, and the choice stays the user’s', () => {
   test('a targeted file changed on the remote base is moved and marks the mission outdated; Launch anyway and Back to Planning are offered; Launch anyway launches', async () => {
@@ -231,6 +279,121 @@ describe('The check lists what moved since the Freeze, and the choice stays the 
       expect.objectContaining({ kind: 'ticket', repository: null, path: null }),
     )
     expect(seen.verdict.outdated).toBe(true)
+  })
+
+  test('a living requirement a delta was written against, moved to version 2 by another mission’s merge, is listed as moved and marks the mission outdated', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const living = yield* livingInvoices(project.id)
+          const { mission } = yield* frozenIn(project.id, main, {
+            living: { ref: living, version: 1, domain: 'Invoices' },
+          })
+          yield* livingModified(living)
+          yield* checkMission(mission.id)
+          return { view: yield* checked(mission.id), marked: yield* getMission(mission.id), living }
+        }),
+      ),
+    )
+    expect(seen.view.moved).toContainEqual(
+      expect.objectContaining({
+        kind: 'requirement',
+        repository: null,
+        path: null,
+        said: `R1 was written against ${seen.living} at version 1: it is at version 2 now.`,
+      }),
+    )
+    expect(seen.view.verdict.outdated).toBe(true)
+    expect(marksOf(seen.marked)).toContain('outdated')
+  })
+
+  test('a living requirement a delta was written against, removed since, is listed as moved and marks the mission outdated', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const living = yield* livingInvoices(project.id)
+          const { mission } = yield* frozenIn(project.id, main, {
+            living: { ref: living, version: 1, domain: 'Invoices' },
+          })
+          yield* removeRequirement(living, 1, 'No export any more.', { kind: 'user' })
+          yield* checkMission(mission.id)
+          return { view: yield* checked(mission.id), marked: yield* getMission(mission.id), living }
+        }),
+      ),
+    )
+    expect(seen.view.moved).toContainEqual(
+      expect.objectContaining({
+        kind: 'requirement',
+        repository: null,
+        path: null,
+        said: `R1 was written against ${seen.living} at version 1: it is removed from the living spec since.`,
+      }),
+    )
+    expect(seen.view.verdict.outdated).toBe(true)
+    expect(marksOf(seen.marked)).toContain('outdated')
+  })
+
+  test('a requirement of a dependency the Spec relies on, changed since, is listed as moved of kind relied and marks the mission outdated', async () => {
+    const { run } = buildingEngine(data, work, agents())
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme()
+          const two = yield* plannedIn(project.id, main, 'Totals on invoices')
+          yield* writeComplete(two.grantId)
+          const one = yield* plannedIn(project.id, main)
+          yield* call(one.grantId, 'dependency_propose', {
+            mission: 'ACME-1',
+            reason: 'It relies on the totals ACME-1 adds.',
+          })
+          const [dependency] = (yield* dependenciesOf(one.mission.id)).dependsOn
+          yield* decideDependency(dependency?.id ?? '', true)
+          yield* plannerTook(one.mission.id)
+          yield* call(one.grantId, 'input_integrated', { id: 'I1', where: 'decisions' })
+          yield* writeComplete(one.grantId)
+          yield* call(one.grantId, 'relies_on_write', {
+            requirement: 'R1',
+            dependency: 'ACME-1',
+            their_requirement: 'R1',
+            their_version: 1,
+            base_version: 1,
+          })
+          yield* call(one.grantId, 'declare_complete', { why: 'A Builder can build it.' })
+          yield* readCold(one.mission.id, 1)
+          const frozen = yield* freezeMission(
+            one.mission.id,
+            (yield* readSpec(one.mission.id)).version,
+          )
+          // ACME-1 rewrote its R1 since: version 2.
+          const database = yield* Database
+          yield* database
+            .update(specRequirements)
+            .set({ version: 2 })
+            .where(
+              and(eq(specRequirements.missionId, two.mission.id), eq(specRequirements.id, 'R1')),
+            )
+          yield* checkMission(frozen.id)
+          return { view: yield* checked(frozen.id), marked: yield* getMission(frozen.id) }
+        }),
+      ),
+    )
+    expect(seen.view.moved).toContainEqual(
+      expect.objectContaining({
+        kind: 'relied',
+        repository: null,
+        path: null,
+        said: 'R1 relies on ACME-1 R1 at version 1: it is at version 2 now.',
+      }),
+    )
+    expect(seen.view.verdict.outdated).toBe(true)
+    expect(marksOf(seen.marked)).toContain('outdated')
   })
 
   test('nothing moved: Launch is offered, and the agent of the check is not asked', async () => {
