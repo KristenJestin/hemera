@@ -14,7 +14,7 @@
  *   colours removed, paths, durations, addresses and numbers masked.
  */
 
-import { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 
 /** How a proof run ended, as Hemera classifies it (CT-35). */
 export const PROOF_CLASSES = [
@@ -263,14 +263,23 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
   return testPath === null ? 'assertion_failed' : 'error_before_test'
 }
 
+/** A Go subtest a proof adds: the test function it runs under, and its literal `t.Run` name. */
+export interface GoSubtest {
+  readonly parent: string
+  readonly subtest: string
+}
+/** A test a proof adds: its declared name, or a Go subtest under its parent. */
+export type TestName = string | GoSubtest
+
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
  * A test's declared name as a pattern matched whole: from the start of a line or after a
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
- * name (a duration, `(`, `[`, ` - `, ` ...`). What `%s`, `$name` or `${…}` stand for (`each`, a
- * template literal) matches words within a name; a name made of placeholders alone is none.
+ * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. What
+ * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
+ * name made of placeholders alone is none.
  */
 const namePattern = (name: string): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
@@ -279,13 +288,26 @@ const namePattern = (name: string): RegExp | null => {
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
   return new RegExp(
-    `(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `::${body}\\[|(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
-const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<string>): boolean =>
+/**
+ * A Go subtest as `go test` prints it: its parent function, any subtests between, then its name
+ * with each space turned into `_` (`TestExport/as_markdown/with_header`), on a `--- FAIL:` line or
+ * as a report's test name.
+ */
+const subtestPattern = (test: GoSubtest): RegExp => {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const subtest = escape(test.subtest.replace(/\s/g, '_'))
+  return new RegExp(
+    `^(?:\\s*--- FAIL: )?${escape(test.parent)}(?:/[^\\s/]+)*/${subtest}(?=\\s+\\(|\\s*$)`,
+  )
+}
+
+const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): boolean =>
   names.some((name) => {
-    const pattern = namePattern(name)
+    const pattern = Predicate.isString(name) ? namePattern(name) : subtestPattern(name)
     return pattern !== null && texts.some((text) => pattern.test(text))
   })
 
@@ -301,7 +323,7 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<string>): bool
 export const validRed = (
   run: ProofRunClass,
   testPath: string | null,
-  testNames: ReadonlyArray<string> = [],
+  testNames: ReadonlyArray<TestName> = [],
   keyLineMatched: boolean | null = null,
 ): boolean => {
   if (run.classification !== 'assertion_failed') return false
@@ -324,8 +346,9 @@ export const validRed = (
 }
 
 /**
- * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`,
- * a Go `func TestX(t *testing.T)`, a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
+ * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`
+ * (its pytest cases, `test_…[id]`, are its own), a Go `func TestX(t *testing.T)` and the literal
+ * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test]`).
  */
 const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
 /** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
@@ -334,18 +357,21 @@ const EACH_NAME =
 
 const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
 const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
+const GO_SUBTEST_NAME = /\b\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/
+/** The function a line of Go declares, or a hunk header names after its `@@`. */
+const GO_FUNCTION = /^(?:@@[^@]*@@\s*)?func\s/
 const RUST_NAME =
   /#\[(?:\w+::)*test\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 
 /**
  * The tests a proof adds: every test its new file declares, or those the lines its patch adds
- * declare; none when the code names none.
+ * declare, a Go subtest with the function it runs under; none when the code names none.
  */
-export const addedTestNames = (test: {
+export const addedTests = (test: {
   readonly insertion: 'new_file' | 'addition'
   readonly code: string
   readonly patch: string | null
-}): ReadonlyArray<string> => {
+}): ReadonlyArray<TestName> => {
   const added =
     test.insertion === 'new_file'
       ? test.code
@@ -354,12 +380,59 @@ export const addedTestNames = (test: {
           .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
           .map((line) => line.slice(1))
           .join('\n')
-  return [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME]
+  const declared = [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME]
     .flatMap((pattern) => Array.from(added.matchAll(pattern)))
     .toSorted((a, b) => a.index - b.index)
     .map((found) => found.groups?.['name'] ?? '')
     .filter((name) => name !== '')
+  return [...declared, ...subtestsOf(test)]
 }
+
+/**
+ * The literal names of the Go subtests a proof adds (`t.Run("…",`), each with the test function
+ * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
+ * function its `@@ … @@ func TestX(` header names. A subtest under no test function is not named.
+ */
+const subtestsOf = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<GoSubtest> => {
+  const lines =
+    test.insertion === 'new_file'
+      ? test.code.split('\n').map((line) => ({ text: line, added: true }))
+      : (test.patch ?? '')
+          .split('\n')
+          .filter((line) => !line.startsWith('---') && !line.startsWith('+++'))
+          .filter((line) => !line.startsWith('-'))
+          .map((line) =>
+            line.startsWith('@@')
+              ? { text: line, added: false }
+              : { text: line.slice(1), added: line.startsWith('+') },
+          )
+  const found: GoSubtest[] = []
+  let parent: string | null = null
+  for (const line of lines) {
+    if (GO_FUNCTION.test(line.text)) {
+      parent =
+        new RegExp(GO_NAME.source).exec(line.text.replace(/^@@[^@]*@@\s*/, ''))?.groups?.['name'] ??
+        null
+      continue
+    }
+    if (line.text.startsWith('@@')) parent = null
+    const subtest = GO_SUBTEST_NAME.exec(line.text)?.groups?.['name']
+    if (line.added && parent !== null && subtest !== undefined) found.push({ parent, subtest })
+  }
+  return found
+}
+
+/** The literal names a proof's tests are declared with, as its code reads. */
+export const addedTestNames = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<string> =>
+  addedTests(test).map((name) => (Predicate.isString(name) ? name : name.subtest))
 
 /** An output with what changes from one run to the next masked, line by line. */
 export const normalisedOutput = (text: string): string =>
