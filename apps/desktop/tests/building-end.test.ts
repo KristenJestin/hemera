@@ -1221,6 +1221,82 @@ describe('The exit', () => {
     },
   )
   test(
+    'a Builder the exit sends back after a late write is handed what was queued for it before the exit',
+    SLOW,
+    async () => {
+      let late: (() => void) | null = null
+      let holding = false
+      const turn = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => (holding ? turn.promise : Promise.resolve()),
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind === 'review_exit' && late !== null) {
+              late()
+              late = null
+            }
+            return real.take(place, owner)
+          },
+        }),
+      })
+      const QUEUED = 'ACME-12 is to be named in the changelog.'
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            late = () => writtenInWorkspace(api, 'src/late.ts', 'export const late = true\n')
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            // The Builder is in a turn that does not end: what is delivered to it now waits.
+            holding = true
+            const owner = { kind: 'mission', missionId: mission.id } as const
+            const target = { lineage: builder.session.lineage }
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({ owner, target, kind: 'note', body: 'One more thing.' }),
+            )
+            yield* until(
+              Effect.map(getSession(builder.session.id), (one) => one.state === 'working'),
+              LONG,
+            )
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({ owner, target, kind: 'note', body: QUEUED }),
+            )
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return {
+              late,
+              handed: world.agents
+                .slice(2)
+                .some((agent) => agent.answers.prompts.some((one) => text(one).includes(QUEUED))),
+              lineage: yield* sessionsOfLineage(builder.session.lineage),
+            }
+          }),
+        ),
+      ).finally(() => turn.release())
+      expect(seen.late).toBeNull()
+      // The exit went back once: the Builder's lineage was resumed, and its successor had it.
+      expect(seen.lineage.length).toBeGreaterThan(1)
+      expect(seen.handed).toBe(true)
+    },
+  )
+  test(
     'a helper and a command still running at the exit are stopped before the snapshot: nothing they do after it lands',
     SLOW,
     async () => {

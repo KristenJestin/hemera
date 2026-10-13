@@ -198,8 +198,15 @@ export class Sessions extends Context.Service<
       sessionId: string,
       reason: string,
     ) => Effect.Effect<RoleSession | null, DatabaseError>
-    /** Stops every session of an owner, children first, their processes with them. */
-    readonly stopTree: (owner: SessionOwner, reason?: string) => Effect.Effect<void, DatabaseError>
+    /**
+     * Stops every session of an owner, children first, their processes with them, and sets its
+     * queued deliveries aside, unless they are kept for a session started again later.
+     */
+    readonly stopTree: (
+      owner: SessionOwner,
+      reason?: string,
+      deliveries?: 'set aside' | 'kept',
+    ) => Effect.Effect<void, DatabaseError>
     /** The start's rebuild of the sessions a stopped engine left (CT-11). */
     readonly rebuild: Effect.Effect<ReadonlyArray<RoleSession>, DatabaseError>
     /** Waits until a session is between turns with nothing queued for it. */
@@ -1025,7 +1032,11 @@ export const sessionsLayer = (settings: SessionsSettings) =>
 
       // --- the whole tree --------------------------------------------------------------------
 
-      const stopTree = (owner: SessionOwner, reason = 'stopped') =>
+      const stopTree = (
+        owner: SessionOwner,
+        reason = 'stopped',
+        deliveries: 'set aside' | 'kept' = 'set aside',
+      ) =>
         Semaphore.withPermits(
           lock,
           1,
@@ -1041,6 +1052,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               yield* endQuietly(session, 'ended', reason)
               yield* addToThread(session.id, 'state', `ended: ${reason}`)
             }
+            if (deliveries === 'kept') return
             yield* mutate('setting an owner’s deliveries aside', (transaction) =>
               Effect.as(supersedeAll(transaction, owner), { result: undefined, events: [] }),
             )

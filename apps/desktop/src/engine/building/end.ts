@@ -53,6 +53,7 @@ import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../
 import { ProfileHome } from '../profile-home.ts'
 import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
+import { supersedeAll } from '../sessions/deliveries.ts'
 import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
 import { getSession, sessionsIn } from '../sessions/store.ts'
@@ -797,8 +798,9 @@ export const buildingEndLayer = (log: Log) => {
        * The mission's whole tree stops: every session, children first, and every command its agents
        * started. Then the calls already executing end, and what one started meanwhile (a helper's
        * session, a command) is stopped in turn, and its calls waited for: nothing of theirs lands
-       * after this. A call the user allowed runs no more from the first stop, whoever asked it, until
-       * a Builder works on the mission again.
+       * after this. A call the user allowed runs no more from the first stop, whoever of the tree
+       * asked it, until a Builder works on the mission again. What was queued for them is kept, for
+       * a Builder the exit sends back; the exit's commit sets it aside.
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
@@ -809,7 +811,7 @@ export const buildingEndLayer = (log: Log) => {
           )
           yield* ToolAccess.use((access) => access.exiting(missionId, lineages))
           const once = Sessions.use((sessions) =>
-            sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END),
+            sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END, 'kept'),
           ).pipe(
             Effect.andThen(stopAgentRuns(missionId)),
             Effect.andThen(ToolAccess.use((access) => access.settled(missionId))),
@@ -938,6 +940,8 @@ export const buildingEndLayer = (log: Log) => {
                 'endBuilding',
                 'hemera',
               )
+              // Kept through the stops for a Builder the exit sends back, never sent now.
+              yield* supersedeAll(transaction, { kind: 'mission', missionId })
               const at = new Date().toISOString()
               yield* transaction
                 .update(buildings)
