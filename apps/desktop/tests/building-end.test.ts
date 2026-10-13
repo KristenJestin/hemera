@@ -2465,6 +2465,159 @@ describe('A Builder stopped at a provider limit', () => {
 })
 
 describe('The Builder while the end waits on it', () => {
+  test(
+    'a red of the final checks delivered while a Builder turn runs is judged again only after a turn that started once it was delivered',
+    SLOW,
+    async () => {
+      // Once armed, each turn of the Builder holds until the test lets it go.
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const turnsHeld = (count: number) =>
+        until(
+          Effect.sync(() => turns.length >= count),
+          LONG,
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            // The Builder is in a turn of its own before the final checks run.
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* turnsHeld(1)
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // The turn that started before the red ends: the red is taken by the next one.
+            turns[0]?.release()
+            yield* turnsHeld(2)
+            // Long enough for a judgement on the first turn's end to have run.
+            yield* Effect.sleep('1 second')
+            const whileTaken = yield* endAttempts(mission.id)
+            turns[1]?.release()
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 3),
+              LONG,
+            )
+            return { whileTaken, after: yield* endAttempts(mission.id) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
+      expect(seen.after).toEqual(['red', 'red', null])
+    },
+  )
+
+  test(
+    'a red of the final checks no turn took, its Builder ended mid-turn, is judged again only after the Builder brought back took it',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* until(
+              Effect.sync(() => turns.length >= 1),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // Its session ends in the turn that started before the red: nobody took the red.
+            yield* Sessions.use((sessions) =>
+              sessions.end(builder.session.lineage, 'the test ended it'),
+            )
+            // The end brings it back, and the red reaches its first turn, which holds.
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ state: sessionDeliveries.state })
+                  .from(sessionDeliveries)
+                  .where(
+                    and(
+                      eq(sessionDeliveries.ownerId, mission.id),
+                      eq(sessionDeliveries.kind, 'red'),
+                    ),
+                  ),
+                (reds) => reds.length === 1 && reds[0]?.state === 'sent',
+              ),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            const whileTaken = yield* endAttempts(mission.id)
+            for (const index of world.agents.keys()) world.release(index)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 3),
+              LONG,
+            )
+            return { whileTaken, after: yield* endAttempts(mission.id) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
+      expect(seen.after).toEqual(['red', 'red', null])
+    },
+  )
+
   /** A Builder session that ended with no need of its own, as the store reads it. */
   const endedQuietly = (sessionId: string) =>
     Effect.gen(function* () {
