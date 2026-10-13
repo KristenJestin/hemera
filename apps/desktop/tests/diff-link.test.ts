@@ -1,6 +1,7 @@
 /**
- * The live diff of a mission asked from the window through main to the engine (#249): the
- * diff group crosses both links, its refusals arriving typed.
+ * The live diff of a mission asked from the window through main to the engine (#249), and its
+ * automatic review (#147) for the Building page (#151): each group crosses both links, its
+ * refusals arriving typed.
  */
 
 import { mkdirSync } from 'node:fs'
@@ -121,5 +122,40 @@ describe('The diff crosses main', () => {
     expect(seen.unknown).toBeInstanceOf(UnknownMission)
     expect(seen.checkpoint).toBeInstanceOf(UnknownCheckpoint)
     expect(seen.file).toBeInstanceOf(UnknownDiffFile)
+  })
+})
+
+describe('The automatic review crosses main', () => {
+  test('a mission before its Building has no review, and an unknown mission is refused typed', async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const window = yield* chain
+        const main = temporaryFolder('acme')
+        mkdirSync(join(main, 'api'), { recursive: true })
+        git(join(main, 'api'), 'init', '-q', '-b', 'main')
+        const project = yield* window['projects.create']({
+          name: 'Acme',
+          mainCheckout: main,
+          repositories: ['api'],
+        })
+        const mission = yield* window['missions.create']({
+          projectId: project.id,
+          idea: { sentence: 'Export the invoices as CSV', ticket: null },
+        })
+        return {
+          none: yield* window['autoReview.read']({ missionId: mission.id, buildingId: null }),
+          first: yield* window['autoReview.changed']({ missionId: mission.id }).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+          unknown: yield* Effect.flip(
+            window['autoReview.read']({ missionId: 'nope', buildingId: null }),
+          ),
+        }
+      }),
+    )
+    expect(seen.none).toBeNull()
+    expect([...seen.first]).toEqual([null])
+    expect(seen.unknown).toBeInstanceOf(UnknownMission)
   })
 })
