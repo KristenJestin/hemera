@@ -1645,8 +1645,8 @@ export const buildingProofs = (parts: ProofParts) => {
     Effect.gen(function* () {
       const database = yield* Database
       const building = yield* activeBuildingIn(database, missionId)
-      if (building === null) return { proofs: [], checks: [] }
-      yield* snapshotNow(building, 'refresh')
+      if (building === null) return { proofs: [], checks: [], trees: [] }
+      const trees = yield* snapshotNow(building, 'refresh')
       const rerun: string[] = []
       const failed = yield* failedGreens(building)
       yield* inTurn(
@@ -1679,7 +1679,7 @@ export const buildingProofs = (parts: ProofParts) => {
           ],
         }),
       )
-      return { proofs: rerun, checks }
+      return { proofs: rerun, checks, trees }
     })
 
   /**

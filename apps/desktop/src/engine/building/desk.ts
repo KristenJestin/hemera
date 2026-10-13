@@ -41,7 +41,7 @@ export interface BuildWork {
    * Runs again every stale proof and every stale final check of the mission on the current tree
    * (#144, CT-38): #147's end sequence calls it before the mission leaves Building.
    */
-  readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
+  readonly refreshProofs: (missionId: string) => Effect.Effect<Refreshed>
   /**
    * The mission's Builder, resumed when its session ended while its Building is still active:
    * what #147's end calls while it waits on the Builder. Never while a need about the Builder's
@@ -90,6 +90,11 @@ export interface BuildWork {
 export interface ProofsRefreshed {
   readonly proofs: ReadonlyArray<string>
   readonly checks: ReadonlyArray<string>
+}
+
+/** A refresh: what it ran again, and the trees its own snapshot took first, which it ran them on. */
+export interface Refreshed extends ProofsRefreshed {
+  readonly trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
 }
 
 /** A check's run watched: its locks and trees taken right before its launch, let go at its end. */
