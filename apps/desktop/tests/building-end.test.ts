@@ -2076,6 +2076,35 @@ describe('The exit', () => {
   )
 })
 
+/** R1.S2's test: green while `api/export.ts` exports `toMarkdown`. */
+const markdownTest = [
+  "import { test } from 'node:test'",
+  "import assert from 'node:assert/strict'",
+  "import { existsSync, readFileSync } from 'node:fs'",
+  '',
+  "test('the scenario holds', () => {",
+  "  const file = new URL('../export.ts', import.meta.url)",
+  "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+  '})',
+  '',
+].join('\n')
+const markdownProof = () => ({
+  'R1.S2': {
+    mode: 'automated',
+    actions: ['Run the test'],
+    starting_data: 'None.',
+    expected: 'The assertion of the test holds.',
+    test: {
+      repository: 'api',
+      path: 'tests/export.test.mjs',
+      code: markdownTest,
+      insertion: 'new_file',
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+    },
+    seen_today: false,
+  },
+})
+
 describe('The refresh', () => {
   test(
     'a proof red at the refresh is waited on, not the Builder: its green moves the end on with no turn of the Builder',
@@ -2178,33 +2207,6 @@ describe('The refresh', () => {
     'a proof red at the refresh that the Builder looks at and leaves unfixed asks the user: Try again, or End without it, which moves the end on',
     SLOW,
     async () => {
-      const markdown = [
-        "import { test } from 'node:test'",
-        "import assert from 'node:assert/strict'",
-        "import { existsSync, readFileSync } from 'node:fs'",
-        '',
-        "test('the scenario holds', () => {",
-        "  const file = new URL('../export.ts', import.meta.url)",
-        "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
-        '})',
-        '',
-      ].join('\n')
-      const proofs = () => ({
-        'R1.S2': {
-          mode: 'automated',
-          actions: ['Run the test'],
-          starting_data: 'None.',
-          expected: 'The assertion of the test holds.',
-          test: {
-            repository: 'api',
-            path: 'tests/export.test.mjs',
-            code: markdown,
-            insertion: 'new_file',
-            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
-          },
-          seen_today: false,
-        },
-      })
       const { world, run } = ending()
       const seen = await run(({ profile }) =>
         within(
@@ -2217,7 +2219,7 @@ describe('The refresh', () => {
               PLAN,
               undefined,
               undefined,
-              proofs,
+              markdownProof,
             )
             const builder = yield* builderOf(mission.id)
             yield* proofState(mission.id, 'R1.S2', 'red_recorded')
@@ -2272,6 +2274,102 @@ describe('The refresh', () => {
       expect(proof?.state).toBe('not_proven')
       // The end is called once: the refresh never calls it again.
       expect(seen.told.filter((one) => one.startsWith('done: '))).toHaveLength(1)
+    },
+  )
+
+  test(
+    'a proof red at the refresh whose Builder writes a file unchanged, then leaves it, still asks the user',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        builder: {
+          ...QUIET,
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              markdownProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            yield* specialDone(builder.grantId, 'RV1', 'export.ts', 'export const toCsv = 1\n')
+            yield* until(
+              Effect.map(sessionsIn(['idle'], { kind: 'mission', missionId: mission.id }), (rows) =>
+                rows.some((row) => row.role === 'builder'),
+              ),
+              LONG,
+            )
+            // The Builder's turn on the refresh's red holds while it writes.
+            holding = true
+            yield* documented(world, mission.id, 2)
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ state: sessionDeliveries.state, body: sessionDeliveries.body })
+                  .from(sessionDeliveries)
+                  .where(
+                    and(
+                      eq(sessionDeliveries.ownerId, mission.id),
+                      eq(sessionDeliveries.kind, 'red'),
+                    ),
+                  ),
+                (reds) =>
+                  reds.some((one) => one.state === 'sent' && one.body.startsWith("R1.S2's proof")),
+              ),
+              LONG,
+            )
+            // The same content again: no tree moves, nothing runs the proof again.
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const toCsv = 1\n',
+            })
+            yield* Effect.sleep('1 second')
+            holding = false
+            for (const turn of turns) turn.release()
+            const decisions = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Decision')),
+            )
+            yield* until(
+              Effect.map(decisions, (found) => found.length > 0),
+              LONG,
+            )
+            return yield* decisions
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      const fields = seen[0]?.fields
+      expect(Predicate.isTagged(fields, 'Decision') ? fields.question : '').toContain(
+        'R1.S2 is not proven',
+      )
     },
   )
 
