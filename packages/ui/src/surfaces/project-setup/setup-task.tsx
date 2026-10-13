@@ -38,14 +38,14 @@ const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 
 /** "1 of 3 proposals answered": one mark per proposal on a track that shows, filled once answered. */
 function Progress({ cards }: { cards: readonly SetupCardEntry[] }): ReactNode {
-  const answered = cards.filter(
-    (card) => card.status.state === 'accepted' || card.status.state === 'declined',
+  const answered = new Set(
+    cards.filter((card) => card.status.state === 'accepted' || card.status.state === 'declined'),
   )
   if (cards.length === 0) return null
   return (
     <span
       role="img"
-      aria-label={`${String(answered.length)} of ${String(cards.length)} proposals answered`}
+      aria-label={`${String(answered.size)} of ${String(cards.length)} proposals answered`}
       className="flex h-1 w-full max-w-60 min-w-0 gap-1"
     >
       {cards.map((card) => (
@@ -54,7 +54,7 @@ function Progress({ cards }: { cards: readonly SetupCardEntry[] }): ReactNode {
           data-segment=""
           className={cn(
             'h-full min-w-0 flex-1 rounded-full bg-border',
-            answered.includes(card) && 'primary-fill',
+            answered.has(card) && 'primary-fill',
           )}
         />
       ))}

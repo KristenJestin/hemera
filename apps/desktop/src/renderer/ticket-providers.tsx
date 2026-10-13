@@ -21,7 +21,7 @@ import {
   providerTitle,
   type SettingsForm,
 } from '@hemera/ui'
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react'
+import { type ReactNode, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react'
 
 import type { Link } from './link.ts'
 import {
@@ -142,12 +142,13 @@ function useProposals(
   host: string,
   answered: (proposed: ReadonlyArray<string>) => void,
 ): void {
+  const answer = useEffectEvent(answered)
   useEffect(() => {
     if (host.trim() === '') return undefined
     let current = true
     const timer = setTimeout(() => {
       link.proposeGithub(projectId, host.trim().toLowerCase()).then((proposed) => {
-        if (current) answered(proposed)
+        if (current) answer(proposed)
       }, nothing)
     }, TYPING_SETTLES_MS)
     return () => {
