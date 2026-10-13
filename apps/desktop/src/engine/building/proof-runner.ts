@@ -143,7 +143,8 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       desk.checkRun(asked.missionId, `proof ${asked.scenario}`, repositories),
     )
     let trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }> = []
-    // Its limit counts from its launch, never while it waits for a permission or a reservation.
+    // Its limit counts from its launch, never while it waits for a permission; a reservation held
+    // elsewhere is waited for that long at most, then the run fails unstarted (#306).
     const started = Deferred.makeUnsafe<void>()
     const launched = yield* startRun({
       projectId: mission.projectId,
@@ -154,6 +155,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       startedBy: 'hemera',
       sessionId: null,
       missionId: asked.missionId,
+      waitLimit: limit,
       beforeLaunch: Effect.andThen(
         watch === null
           ? Effect.void
