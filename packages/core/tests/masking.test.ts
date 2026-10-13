@@ -76,6 +76,25 @@ describe('Known values are masked whole, the longest first', () => {
   })
 })
 
+/**
+ * The fixtures shaped like a provider's token, made of parts at run time: a secret scanner reading
+ * this file must not take a whole fake for a leaked token.
+ */
+const joined = (...parts: ReadonlyArray<string>): string => parts.join('')
+const FAKE = {
+  anthropic: joined('sk-', 'ant-api03-', 'abcdefghijklmnop'),
+  github: joined('ghp', '_0123456789', 'abcdefghijABCDEFGHIJ012345'),
+  githubOAuth: joined('gho', '_0123456789', 'abcdefghijABCDEFGHIJ012345'),
+  githubFineGrained: joined('github', '_pat_', '11ABCDEFG0123456789_abcdefghijklmnop'),
+  slack: joined('xoxb', '-1234-5678-', 'abcdef'),
+  gitlab: joined('glpat', '-abcdefghij', '0123456789'),
+  bitbucketAppPassword: joined('ATBB', '0123456789abcdef', 'ABCDEF0123456789AB'),
+  atlassian: joined('ATATT', '3xFfGF0abcdefghij_', 'ABCDEFGHIJ-0123456789=AB12CD34'),
+  bitbucketDataCenter: joined('BBDC', '-MDEyMzQ1Njc4OTAx', 'OkFCQ0RFRkdISUpLTE1OT1BRUlNU'),
+  aws: joined('AKIA', 'ABCDEFGHIJKLMNOP'),
+  jwt: joined('eyJhbGciOiJIUzI1NiJ9', '.', 'eyJzdWIiOiIxIn0', '.c2lnbmF0dXJl'),
+}
+
 describe('Each recognised shape is masked without its value being known', () => {
   const cases: ReadonlyArray<readonly [string, string, string]> = [
     [
@@ -83,33 +102,17 @@ describe('Each recognised shape is masked without its value being known', () => 
       '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----',
       'b3BlbnNzaC1rZXk',
     ],
-    ['an OpenAI style key', 'key sk-ant-api03-abcdefghijklmnop', 'sk-ant-api03'],
-    ['a GitHub token', 'ghp_0123456789abcdefghijABCDEFGHIJ012345', 'ghp_0123'],
-    ['a GitHub OAuth token', 'gho_0123456789abcdefghijABCDEFGHIJ012345', 'gho_0123'],
-    [
-      'a fine-grained GitHub token',
-      'github_pat_11ABCDEFG0123456789_abcdefghijklmnop',
-      'github_pat_11',
-    ],
-    ['a Slack token', 'xoxb-1234-5678-abcdef', 'xoxb-1234'],
-    ['a GitLab token', 'glpat-abcdefghij0123456789', 'glpat-abc'],
-    ['a Bitbucket app password', 'ATBB0123456789abcdefABCDEF0123456789AB', 'ATBB0123'],
-    [
-      'an Atlassian API token',
-      'ATATT3xFfGF0abcdefghij_ABCDEFGHIJ-0123456789=AB12CD34',
-      'ATATT3xFfGF0',
-    ],
-    [
-      'a Bitbucket Data Center access token',
-      'BBDC-MDEyMzQ1Njc4OTAxOkFCQ0RFRkdISUpLTE1OT1BRUlNU',
-      'BBDC-MDEy',
-    ],
-    ['an AWS access key', 'AKIAABCDEFGHIJKLMNOP', 'AKIAABCDEFGHIJKLMNOP'],
-    [
-      'a JSON Web Token',
-      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl',
-      'eyJhbGciOiJIUzI1NiJ9',
-    ],
+    ['an OpenAI style key', `key ${FAKE.anthropic}`, 'sk-ant-api03'],
+    ['a GitHub token', FAKE.github, 'ghp_0123'],
+    ['a GitHub OAuth token', FAKE.githubOAuth, 'gho_0123'],
+    ['a fine-grained GitHub token', FAKE.githubFineGrained, 'github_pat_11'],
+    ['a Slack token', FAKE.slack, 'xoxb-1234'],
+    ['a GitLab token', FAKE.gitlab, 'glpat-abc'],
+    ['a Bitbucket app password', FAKE.bitbucketAppPassword, 'ATBB0123'],
+    ['an Atlassian API token', FAKE.atlassian, 'ATATT3xFfGF0'],
+    ['a Bitbucket Data Center access token', FAKE.bitbucketDataCenter, 'BBDC-MDEy'],
+    ['an AWS access key', FAKE.aws, FAKE.aws],
+    ['a JSON Web Token', FAKE.jwt, 'eyJhbGciOiJIUzI1NiJ9'],
     ['an Authorization header', 'Authorization: Bearer abc.def-ghi', 'abc.def-ghi'],
     ['a Proxy-Authorization header', 'Proxy-Authorization: Basic dXNlcjpwYXNz', 'dXNlcjpwYXNz'],
     ['a Cookie header', 'Cookie: session=a1b2c3; theme=dark', 'a1b2c3'],
