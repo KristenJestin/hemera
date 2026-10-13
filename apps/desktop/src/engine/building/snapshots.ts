@@ -477,6 +477,14 @@ function batches(blobs: ReadonlyArray<string>, sizes: ReadonlyMap<string, number
   return groups
 }
 
+/**
+ * Git's words for writing a whole index into the copy. A split index (`core.splitIndex`, or a
+ * `link` extension the copy already carries) has Git write a `sharedindex.*` file into the
+ * repository's own Git folder: a change to the user's repository. Written whole, the copy keeps
+ * what `copyIndex` gave it, so the racy-entry check of #267 is the same.
+ */
+const WHOLE_INDEX = ['-c', 'core.splitIndex=false']
+
 /** A repository whose working tree is not there any more has no objects to lend. */
 const NO_ALTERNATE: Readonly<Record<string, string>> = {}
 
@@ -803,6 +811,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                 yield* run(
                   repository.folder,
                   [
+                    ...WHOLE_INDEX,
                     'add',
                     '--all',
                     '--',
@@ -825,12 +834,14 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                   ).trim()
                   yield* run(
                     repository.folder,
-                    ['update-index', '--add', '--cacheinfo', '100644', blob, path],
+                    [...WHOLE_INDEX, 'update-index', '--add', '--cacheinfo', '100644', blob, path],
                     'work',
                     { env },
                   )
                 }
-                return text(yield* run(repository.folder, ['write-tree'], 'work', { env })).trim()
+                return text(
+                  yield* run(repository.folder, [...WHOLE_INDEX, 'write-tree'], 'work', { env }),
+                ).trim()
               }),
             // A folder left behind is litter in the temporary directory, not a failed snapshot.
             (scratch) =>
