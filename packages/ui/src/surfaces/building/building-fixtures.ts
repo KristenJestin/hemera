@@ -319,7 +319,14 @@ export const MISSION_THINGS: MissionThings = {
       uses: 12,
     },
   ],
-  budget: { cap: '$40', spent: '$12.40', share: 0.31, estimated: false },
+  budget: {
+    cap: '30 tries',
+    spent: '12',
+    share: 0.4,
+    limits: ['12 of 30 tries', '1 of 8 launches', '0 of 3 rounds'],
+    usage: '$12.40 · 4.1 M tokens',
+    estimated: false,
+  },
 }
 
 const permission = (
@@ -461,9 +468,15 @@ export const REFUSALS: readonly NeedRow[] = [
     id: 'r1',
     project: 'Acme',
     need: {
-      ask: { kind: 'environment', action: 'Raise the budget', settings: 'Budget' },
-      title: 'The mission’s budget is spent: $40 of $40',
-      text: 'Building paused after T10. Nothing is lost; it goes on from T11 once the budget allows it.',
+      ask: {
+        kind: 'decision',
+        options: [
+          { label: 'Raise it by 10 for this mission', recommended: 'three tasks are left' },
+          { label: 'Keep the limit' },
+        ],
+      },
+      title: 'The attempts budget of ACME-12 is spent',
+      text: 'Building paused after T10: 30 of 30 tries. Nothing is lost; it goes on from T11 once the budget allows it.',
       when: 'now',
     },
   },
@@ -559,7 +572,12 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     helpers: [],
     mission: {
       ...MISSION_THINGS,
-      budget: { cap: '$40', spent: '$40.00', share: 1, estimated: false },
+      budget: {
+        ...MISSION_THINGS.budget,
+        spent: '30',
+        share: 1,
+        limits: ['30 of 30 tries', '1 of 8 launches', '0 of 3 rounds'],
+      },
     },
   }),
   checkFailed: () => ({
@@ -830,7 +848,14 @@ const READY: ReadyMoment = {
     ...MISSION_THINGS,
     dependencies: MISSION_THINGS.dependencies.slice(0, 1),
     grants: MISSION_THINGS.grants.slice(2),
-    budget: { cap: '$40', spent: '$3.10', share: 0.08, estimated: true },
+    budget: {
+      cap: '8 launches',
+      spent: '0',
+      share: 0,
+      limits: ['0 of 8 launches', '0 of 30 tries', '0 of 3 rounds'],
+      usage: '$3.10 · 0.9 M tokens',
+      estimated: true,
+    },
   },
 }
 
