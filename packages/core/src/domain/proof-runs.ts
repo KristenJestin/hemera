@@ -291,12 +291,13 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
 }
 
 /**
- * A Go subtest a proof adds: the test function it runs under, its literal `t.Run` name, and the `t.Run` names it is nested in, outermost first (null for a
+ * A Go subtest a proof adds: the test function it runs under (null when the code does not say),
+ * its literal `t.Run` name, and the `t.Run` names it is nested in, outermost first (null for a
  * name that is not a literal), as far as the code shows them: from the function's own body when
  * `whole`, otherwise from a hunk that starts inside it.
  */
 export interface GoSubtest {
-  readonly parent: string
+  readonly parent: string | null
   readonly subtest: string
   readonly nesting: ReadonlyArray<string | null>
   readonly whole: boolean
@@ -340,8 +341,10 @@ const namePattern = (name: string, cases = false): RegExp | null => {
  * A Go subtest as `go test` prints it: its parent function, the subtests it is nested in, then its
  * name, each space turned into `_` (`TestExport/as_markdown/with_header`), on a `--- FAIL:` line or
  * as a report's test name. Any subtests may come before the nesting the code does not show whole.
+ * A subtest whose parent is unknown is none.
  */
-const subtestPattern = (test: GoSubtest): RegExp => {
+const subtestPattern = (test: GoSubtest): RegExp | null => {
+  if (test.parent === null) return null
   const escape = (text: string) => text.replace(/\s/g, '_').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const path = [...test.nesting, test.subtest]
     .map((name) => `/${name === null ? '[^\\s/]+' : escape(name)}`)
@@ -368,7 +371,9 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): bo
  * (no report, or JUnit's `classname` only), a test the proof adds must be named whole among the
  * failures (a report's failing tests, or the lines the runner marks as failing in the whole
  * output); failing that, the key line decides, never the exit code alone. A proof whose code names
- * no test, or a command with no test file, is red by its exit code, the key line its guard.
+ * no test, or a command with no test file, is red by its exit code, the key line its guard. A Go
+ * subtest whose parent is unknown is a test the proof adds without a name: alone, the key line
+ * decides.
  */
 export const validRed = (
   run: ProofRunClass,
@@ -379,12 +384,17 @@ export const validRed = (
   if (run.classification !== 'assertion_failed') return false
   if (testPath === null) return true
   const located = run.failures.filter((one) => one.file !== null)
+  const unnamed =
+    testNames.length > 0 &&
+    testNames.every((name) => Predicate.hasProperty(name, 'parent') && name.parent === null)
   if (located.length > 0) {
     return located.some(
       (one) =>
         one.assertion &&
         posix(one.file ?? '').endsWith(posix(testPath)) &&
-        (testNames.length === 0 || named([one.test], testNames)),
+        (testNames.length === 0 ||
+          named([one.test], testNames) ||
+          (unnamed && keyLineMatched === true)),
     )
   }
   if (testNames.length === 0) return true
@@ -454,8 +464,8 @@ export const addedTests = (test: {
 /**
  * The literal names of the Go subtests a proof adds (`t.Run("…",`), each with the test function
  * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
- * function its `@@ … @@ func TestX(` header names. A subtest under no test function is not named.
- * Its nesting is read from the braces of the lines above it, strings, runes and comments aside.
+ * function its `@@ … @@ func TestX(` header names, null when it is under no test function. Its
+ * nesting is read from the braces of the lines above it, strings, runes and comments aside.
  */
 const subtestsOf = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -496,8 +506,7 @@ const subtestsOf = (test: {
     }
     const subtest = GO_SUBTEST_NAME.exec(line.text)?.groups?.['name']
     const nesting = open.map((block) => block.name)
-    if (line.added && parent !== null && subtest !== undefined)
-      found.push({ parent, subtest, nesting, whole })
+    if (line.added && subtest !== undefined) found.push({ parent, subtest, nesting, whole })
     const text = code[at] ?? ''
     const before = depth
     depth += (text.match(/\{/g) ?? []).length - (text.match(/\}/g) ?? []).length

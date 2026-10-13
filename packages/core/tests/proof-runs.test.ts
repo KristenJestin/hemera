@@ -1051,13 +1051,6 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
     expect(validRed(run(output('  × items[0] is defined'), 1, path), path, ['items'])).toBe(false)
     expect(validRed(run(output('  × as_markdown'), 1, path), path, ['as markdown'])).toBe(false)
   })
-
-  test('a subtest whose parent the code does not say is not named', () => {
-    const patch = ['@@ -3,0 +4,3 @@', '+\tt.Run("empty", func(t *testing.T) {', '+\t})'].join('\n')
-    expect(addedTests({ insertion: 'addition', code: '', patch })).toEqual([])
-    const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
-    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([])
-  })
 })
 
 describe('The key line observed in Planning', () => {
@@ -1387,6 +1380,23 @@ const GO_BRANCH_PATCH = [
   ' }',
 ].join('\n')
 
+/** `git diff -U0`: git names the hunk after a raw string's line, not the function it is in. */
+const GO_PARENTLESS_PATCH = [
+  '@@ -13,0 +14,3 @@ name,total',
+  '+\tt.Run("md", func(t *testing.T) {',
+  '+\t\tt.Errorf("got %q, want %q", "", "| total |")',
+  '+\t})',
+].join('\n')
+
+/** go test, Go 1.27: the subtest that patch adds fails. */
+const GO_PARENTLESS_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/md (0.00s)
+        export_test.go:15: got "", want "| total |"
+FAIL
+FAIL	example.com/acme	0.002s
+FAIL
+`
+
 /** pytest 9.1: an older parametrised test fails on cases whose ids hold `::test_x[` and `::test_x - `; `test_x` passes. */
 const PYTEST_ID_INSIDE_OTHER_FAILS = `============================= test session starts ==============================
 platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
@@ -1514,6 +1524,24 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     expect(red(GO_OTHER_BRANCH_FAILS, 3)).toBe(true)
     expect(red(GO_OTHER_BRANCH_FAILS, 4)).toBe(false)
     expect(red(GO_OTHER_PARENT_FAILS, 4)).toBe(false)
+  })
+
+  test('a subtest seen with its parent unknown is decided by the key line, not the exit code', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH })
+    expect(names).toEqual([{ parent: null, subtest: 'md', nesting: [], whole: false }])
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(false)
+    const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
+    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([
+      { parent: null, subtest: 'empty', nesting: [], whole: true },
+    ])
+    // A report that names the file decides by the key line too; a named test keeps its own rule.
+    const junit = run(JUNIT_ASSERTION, 1)
+    expect(validRed(junit, 'tests/export.test.mjs', names, true)).toBe(true)
+    expect(validRed(junit, 'tests/export.test.mjs', names, false)).toBe(false)
+    expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], true)).toBe(false)
   })
 
   test('a pytest id inside another test’s case id is not that test', () => {
