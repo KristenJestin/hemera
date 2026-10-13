@@ -373,7 +373,7 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): bo
  * output); failing that, the key line decides, never the exit code alone. A proof whose code names
  * no test, or a command with no test file, is red by its exit code, the key line its guard. A Go
  * subtest whose parent is unknown is a test the proof adds without a name: alone, the key line
- * decides.
+ * decides when the proof has one, and the exit code when it has none.
  */
 export const validRed = (
   run: ProofRunClass,
@@ -387,22 +387,21 @@ export const validRed = (
   const unnamed =
     testNames.length > 0 &&
     testNames.every((name) => Predicate.hasProperty(name, 'parent') && name.parent === null)
+  const names = unnamed && keyLineMatched === null ? [] : testNames
   if (located.length > 0) {
     return located.some(
       (one) =>
         one.assertion &&
         posix(one.file ?? '').endsWith(posix(testPath)) &&
-        (testNames.length === 0 ||
-          named([one.test], testNames) ||
-          (unnamed && keyLineMatched === true)),
+        (names.length === 0 || named([one.test], names) || (unnamed && keyLineMatched === true)),
     )
   }
-  if (testNames.length === 0) return true
+  if (names.length === 0) return true
   const failing =
     run.failures.length > 0
       ? run.failures.filter((one) => one.assertion).map((one) => one.test)
       : run.failingLines
-  return named(failing, testNames) || keyLineMatched === true
+  return named(failing, names) || keyLineMatched === true
 }
 
 /**

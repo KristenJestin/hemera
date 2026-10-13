@@ -1476,6 +1476,30 @@ FAILED tests/test_export.py::test_x[1] - assert 1 > 1
 ========================= 2 failed, 2 passed in 0.01s ==========================
 `
 
+/** `git diff`: a testify suite method and its subtest, added under an older suite. */
+const GO_SUITE_PATCH = [
+  '@@ -13,3 +13,9 @@ func (s *ExportSuite) Run(name string, f func()) {',
+  ' func TestExportSuite(t *testing.T) {',
+  ' \tt.Run("TestMarkdown", func(t *testing.T) { (&ExportSuite{t}).TestMarkdown() })',
+  ' }',
+  '+',
+  '+func (s *ExportSuite) TestMarkdown() {',
+  '+\ts.Run("empty", func() {',
+  '+\t\ts.t.Errorf("got %q, want %q", "| total |", "")',
+  '+\t})',
+  '+}',
+].join('\n')
+
+/** go test, Go 1.27: that method's subtest fails, under a suite run as testify runs one. */
+const GO_SUITE_FAILS = `--- FAIL: TestExportSuite (0.00s)
+    --- FAIL: TestExportSuite/TestMarkdown (0.00s)
+        --- FAIL: TestExportSuite/TestMarkdown/empty (0.00s)
+            export_test.go:19: got "| total |", want ""
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
 describe('A red read from the Go subtests and pytest ids #279 left', () => {
   test('a Go subtest under the same parent but another branch is not the red', () => {
     const path = 'export_test.go'
@@ -1526,13 +1550,13 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     expect(red(GO_OTHER_PARENT_FAILS, 4)).toBe(false)
   })
 
-  test('a subtest seen with its parent unknown is decided by the key line, not the exit code', () => {
+  test('a subtest seen with its parent unknown is decided by the key line when the proof has one', () => {
     const path = 'export_test.go'
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH })
     expect(names).toEqual([{ parent: null, subtest: 'md', nesting: [], whole: false }])
     expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
     expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
-    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(false)
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(true)
     const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
     expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([
       { parent: null, subtest: 'empty', nesting: [], whole: true },
@@ -1542,6 +1566,16 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     expect(validRed(junit, 'tests/export.test.mjs', names, true)).toBe(true)
     expect(validRed(junit, 'tests/export.test.mjs', names, false)).toBe(false)
     expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], true)).toBe(false)
+  })
+
+  test('a testify suite method’s subtest is a red on its exit code when the proof has no key line, and not when its key line differs', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUITE_PATCH })
+    expect(names).toEqual([{ parent: null, subtest: 'empty', nesting: [], whole: true }])
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, null)).toBe(true)
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(validRed(run(JUNIT_ASSERTION, 1), 'tests/export.test.mjs', names, null)).toBe(true)
   })
 
   test('a pytest id inside another test’s case id is not that test', () => {
