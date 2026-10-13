@@ -3,7 +3,8 @@
  * per repository, with the contents of each side, and the mission's services, started, stopped,
  * restarted and dismissed by the user. `focused` is the window regaining the focus, which compares
  * the Workspaces and reads the bases again; `changed` names each mission whose changes outside
- * Hemera or services changed, for as long as the caller listens.
+ * Hemera or services changed, for as long as the caller listens. `keptAgents` follows the agents
+ * of the mission a start could not stop (#320).
  */
 
 import {
@@ -100,6 +101,16 @@ export const MissionService = Schema.Struct({
 })
 export type MissionService = typeof MissionService.Type
 
+/**
+ * An earlier agent of the mission still running, which a start of Hemera could not stop: its
+ * program and pid. It is tried again at the next start.
+ */
+export const KeptAgent = Schema.Struct({
+  program: Schema.String,
+  pid: Schema.Number,
+})
+export type KeptAgent = typeof KeptAgent.Type
+
 /** A service act the mission refuses, in words: dismissing a running one, a run of elsewhere. */
 export class ServiceRefused extends Schema.TaggedError<ServiceRefused>()('ServiceRefused', {
   reason: Schema.String,
@@ -177,6 +188,13 @@ export const MissionRpcs = RpcGroup.make(
   Rpc.make('mission.focused', { success: Schema.Void, error: failing(...always) }),
   Rpc.make('mission.changed', {
     success: Schema.String,
+    error: failing(...always),
+    stream: true,
+  }),
+  /** The mission's agents a start kept, now, then again at each change: none once ended or gone. */
+  Rpc.make('mission.keptAgents', {
+    payload: { missionId: Schema.String },
+    success: Schema.Array(KeptAgent),
     error: failing(...always),
     stream: true,
   }),

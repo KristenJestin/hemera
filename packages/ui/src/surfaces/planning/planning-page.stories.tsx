@@ -158,6 +158,19 @@ export const PlannerWriting: Story = {
 }
 
 /**
+ * An agent Hemera started before its last restart, still running: its chip in the stage card,
+ * under the progress line, beside what runs.
+ */
+export const KeptAgentInTheCard: Story = {
+  args: { moment: 'writing', kept: [{ program: 'claude', pid: 48213 }] },
+  play: async ({ canvasElement }) => {
+    await expect(
+      card(canvasElement).getByRole('button', { name: /^claude · pid 48213,/ }),
+    ).toBeVisible()
+  },
+}
+
+/**
  * Eight questions asked, one list: two answered, one waiting on someone, five to answer. The
  * card says so and where the Spec stands; the first to answer stands whole, the others one line
  * each; the answered ones are one line under the rest.
