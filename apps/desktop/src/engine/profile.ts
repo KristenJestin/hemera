@@ -293,6 +293,8 @@ export interface ProfileParts {
         readonly outside?: Partial<OutsideSettings>
         /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */
         readonly proofLimit?: Duration.Duration | undefined
+        /** How long a minute of the Project's proof limit lasts (#321): a minute otherwise. */
+        readonly proofMinute?: Duration.Duration | undefined
       }
     | undefined
   /**
@@ -677,7 +679,7 @@ export const startProfile = (
                     Layer.provideMerge(
                       Layer.mergeAll(
                         parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
-                        proofRunnerLayer(parts.building?.proofLimit),
+                        proofRunnerLayer(parts.building?.proofLimit, parts.building?.proofMinute),
                       ),
                     ),
                   ),

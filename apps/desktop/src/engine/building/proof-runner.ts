@@ -5,6 +5,9 @@
  * the write locks and the trees of the repositories it is asked to be fresh on (its test's and
  * every one its tasks wrote) right before it launches, as a check does (#143). Once it ends it is classified (CT-35), compared with the key line Planning observed, and
  * recorded with its tree, the end of its output, and its whole output and test kept as evidence.
+ *
+ * It is ended past the Project's time limit (#321), read at each run: a change in the settings
+ * reaches the next run of a mission already launched.
  */
 
 import { createHash } from 'node:crypto'
@@ -12,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 import {
+  DEFAULT_PROOF_MINUTES,
   type Masked,
   type Proof,
   type ProofPhase,
@@ -29,7 +33,7 @@ import { putEvidence } from '../memory/evidence.ts'
 import { awaitRun, runOutput, startRun, stopRun } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { buildings, missions, proofRuns } from '../storage/schema.ts'
+import { buildings, missions, projects, proofRuns } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { placeOf } from '../workspaces.ts'
 import { BuildDesk } from './desk.ts'
@@ -66,6 +70,8 @@ export interface ProofRun extends ProofRunClass {
   readonly runId: string | null
   readonly trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
   readonly at: string
+  /** The Project's limit it ran past, in minutes, when Hemera ended it there; null otherwise. */
+  readonly timedOutAfter: number | null
 }
 
 /** The proof's command: what runs its test, or the command with no test file. */
@@ -79,13 +85,25 @@ export class ProofRunner extends Context.Service<
 >()('ProofRunner') {}
 
 /**
- * How long a proof may run before Hemera ends it (#290): a test that never ends (a watch mode, a
- * wait on the network) would otherwise hold the end of the Building for good. The checks have no
- * limit of their own to take; ten minutes is far above a scenario's test.
+ * How long a proof may run before Hemera ends it (#290) while its Project sets no limit (#321): a
+ * test that never ends (a watch mode, a wait on the network) would otherwise hold the end of the
+ * Building for good. Ten minutes is far above a scenario's test.
  */
-export const PROOF_LIMIT = Duration.minutes(10)
+export const PROOF_LIMIT = Duration.minutes(DEFAULT_PROOF_MINUTES)
 
-const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
+/** What a run's limit is made of: the default, and how long a minute of the Project's lasts. */
+export interface ProofLimits {
+  readonly limit: Duration.Duration
+  readonly minute: Duration.Duration
+}
+
+const REAL: ProofLimits = { limit: PROOF_LIMIT, minute: Duration.minutes(1) }
+
+/** How long a proof may run: the Project's minutes, or the default while it sets none. */
+export const proofLimitFor = (minutes: number | null, limits: ProofLimits = REAL) =>
+  minutes === null ? limits.limit : Duration.times(limits.minute, minutes)
+
+const runProof = (asked: ProofAsked, limits: ProofLimits) =>
   Effect.gen(function* () {
     const database = yield* Database
     const secrets = yield* Secrets
@@ -95,13 +113,15 @@ const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
       .where(eq(buildings.id, asked.buildingId))
       .pipe(Effect.mapError(refusedWhile('reading the Building')))
     const [mission] = yield* database
-      .select({ projectId: missions.projectId })
+      .select({ projectId: missions.projectId, minutes: projects.proofLimitMinutes })
       .from(missions)
+      .innerJoin(projects, eq(projects.id, missions.projectId))
       .where(eq(missions.id, asked.missionId))
       .pipe(Effect.mapError(refusedWhile('reading the mission')))
     if (building === undefined || mission === undefined) {
       return yield* Effect.die(new Error('a proof ran for a Building that is not there'))
     }
+    const limit = proofLimitFor(mission.minutes, limits)
     const bases = Option.getOrElse(basesCodec.read(building.bases), () => [])
     const workspace = yield* placeOf(mission.projectId, building.workspaceId)
     const test = asked.proof.test ?? null
@@ -147,6 +167,7 @@ const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
     let exitCode: number | null = null
     let runId: string | null = null
     let line = command
+    let timedOut = false
     if (Result.isFailure(launched)) {
       if (watch !== null) yield* watch.finish(null)
       output = `It could not start: ${launched.failure.message}`
@@ -167,6 +188,7 @@ const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
         Effect.ensuring(watch === null ? Effect.void : watch.finish(id)),
       )
       output = (yield* runOutput(id)).output
+      timedOut = ended.timedOut
       if (ended.timedOut) {
         output = `${output}\nIt timed out after ${Duration.format(limit)}: Hemera ended it.`
       }
@@ -211,6 +233,7 @@ const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
       runId,
       trees,
       at: new Date().toISOString(),
+      timedOutAfter: timedOut ? (mission.minutes ?? DEFAULT_PROOF_MINUTES) : null,
     }
     yield* mutate('recording a proof run', (transaction) =>
       transaction
@@ -244,14 +267,21 @@ const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
     return run
   })
 
-/** The proofs, run by Hemera (#144), each ended at `limit` (#290). */
-export const proofRunnerLayer = (limit: Duration.Duration = PROOF_LIMIT) =>
+/**
+ * The proofs, run by Hemera (#144), each ended at its Project's limit (#321), or at `limit` while
+ * the Project sets none (#290); `minute` is how long one minute of the Project's limit lasts.
+ */
+export const proofRunnerLayer = (
+  limit: Duration.Duration = PROOF_LIMIT,
+  minute: Duration.Duration = REAL.minute,
+) =>
   Layer.effect(
     ProofRunner,
     Effect.gen(function* () {
       const context = yield* Effect.context<Effect.Services<ReturnType<typeof runProof>>>()
       return {
-        run: (asked) => runProof(asked, limit).pipe(Effect.provide(context), Effect.orDie),
+        run: (asked) =>
+          runProof(asked, { limit, minute }).pipe(Effect.provide(context), Effect.orDie),
       }
     }),
   )

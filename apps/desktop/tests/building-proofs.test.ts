@@ -37,7 +37,8 @@ import {
 import { readEvidence } from '../src/engine/memory/evidence.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
-import { saveCheck } from '../src/engine/project-checks.ts'
+import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
+import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingAttempts,
@@ -73,6 +74,8 @@ const proofsEngine = (
   more: {
     /** How long a proof may run (#290). */
     readonly proofLimit?: Duration.Duration
+    /** How long a minute of the Project's limit lasts (#321). */
+    readonly proofMinute?: Duration.Duration
     /** The snapshot service as the suite sees it, wrapped around the real one. */
     readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   } = {},
@@ -83,8 +86,8 @@ const proofsEngine = (
     snapshots: more.snapshots ?? ((real) => real),
     building:
       end === undefined
-        ? { hold, proofLimit: more.proofLimit }
-        : { hold, end, proofLimit: more.proofLimit },
+        ? { hold, proofLimit: more.proofLimit, proofMinute: more.proofMinute }
+        : { hold, end, proofLimit: more.proofLimit, proofMinute: more.proofMinute },
   })
 
 /**
@@ -457,7 +460,7 @@ describe('The red phase (CT-35)', () => {
     expect(seen.delivered).toContain('did not run')
   })
 
-  test('an unreachable service gives an environment need', async () => {
+  test('an unreachable service gives an environment need, its words untouched by the time limit', async () => {
     const port = await closedPort()
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
@@ -480,12 +483,19 @@ describe('The red phase (CT-35)', () => {
             Effect.map(proofOf(mission.id, 'R1.S2'), (proof) => proof.runs.length === 2),
             20_000,
           )
-          return { held, view }
+          return { held, view, need }
         }),
       ),
     )
     expect(seen.held.state).toBe('held')
     expect(seen.held.runs.map((one) => one.classification)).toEqual(['environment'])
+    expect(seen.need.fields).toMatchObject({
+      missing: expect.stringContaining(
+        "R1.S2's proof could not run: the environment kept it from running.",
+      ),
+      action: 'Fix what it says (a service, a port), then Retry: Hemera runs the proof again.',
+      settingsSection: null,
+    })
     expect(seen.view.tasks.find((task) => task.id === 'T2')?.state).toBe('blocked')
   })
 
@@ -1786,6 +1796,59 @@ describe('A proof run that never ends', () => {
       .where(eq(buildingDecisions.kind, 'proofs_unproven'))
   })
 
+  test('a Project with no value keeps 10 minutes', () => {
+    expect(PROOF_LIMIT).toEqual(Duration.minutes(10))
+    expect(proofLimitFor(null)).toEqual(PROOF_LIMIT)
+    expect(proofLimitFor(25)).toEqual(Duration.minutes(25))
+    // A suite's default and its minute, never the Project's value.
+    expect(
+      proofLimitFor(null, { limit: Duration.seconds(6), minute: Duration.seconds(1) }),
+    ).toEqual(Duration.seconds(6))
+    expect(proofLimitFor(4, { limit: Duration.seconds(6), minute: Duration.seconds(1) })).toEqual(
+      Duration.seconds(4),
+    )
+  })
+
+  test('a timed-out red: the need names the Project’s limit, says to change the proof’s command when it never ends, and points at the Checks section', async () => {
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(3),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) => Effect.asVoid(setProofLimit(projectId, 1)),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(
+                EXPORT_PATH,
+                testFile('  await new Promise(() => setInterval(() => undefined, 1000))'),
+              ),
+            }),
+          )
+          return {
+            need: yield* needOf(mission.id, 'Environment'),
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(seen.proof.runs.map((one) => one.classification)).toEqual(['environment'])
+    const fields = seen.need.fields
+    if (!Predicate.isTagged(fields, 'Environment')) throw new Error('not an environment need')
+    expect(fields.settingsSection).toBe('checks')
+    expect(fields.missing).toContain(
+      "R1.S2's proof ran past the Project's limit of 1 minute: Hemera ended it.",
+    )
+    expect(fields.action).toContain('If its command never ends on its own (a watch mode')
+    expect(fields.action).toContain('Otherwise raise the limit in the Checks settings')
+    expect(fields.action).toContain('then Retry')
+  })
+
   test('a proof that never ends: its run ends at its limit as a red that timed out, and the question comes', async () => {
     const log = join(scratch, 'runs.log')
     const pid = join(scratch, 'pid')
@@ -1806,13 +1869,22 @@ describe('A proof run that never ends', () => {
         ),
       ),
     })
+    // The Project's limit of 2 minutes, a minute lasting 3 seconds here: the default stays 10.
     const seen = await proofsEngine(data, undefined, undefined, undefined, {
-      proofLimit: Duration.seconds(6),
+      proofMinute: Duration.seconds(3),
     }).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
-          const { mission } = yield* launchedWith(hanging)
+          const { mission } = yield* launched(
+            work,
+            (projectId) => Effect.asVoid(setProofLimit(projectId, 2)),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            hanging,
+          )
           yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
           const { grantId } = yield* builderOf(mission.id)
           yield* builds(grantId, 'T1')
