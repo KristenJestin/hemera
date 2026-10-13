@@ -195,7 +195,8 @@ describe('A mission launched from its Ready page', () => {
   })
 
   it('shows Building’s percentage beside the mission in the sidebar', async () => {
-    // The sidebar lists the open Project's missions by stage: the percentage rides on the row.
+    // The sidebar lists a Project's missions by stage once it is opened: the percentage rides on the row.
+    await places().$('button[aria-label="Open the missions of Acme"]').click()
     await expect(
       places().$('[role="group"][aria-label="Building"]').$(`button*=${key}`),
     ).toHaveText(expect.stringContaining('0%'), { wait: 30_000 })
