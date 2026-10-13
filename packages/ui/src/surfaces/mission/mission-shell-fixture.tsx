@@ -395,6 +395,15 @@ const CAST = {
     marks: [],
     cancel: true,
   },
+  'ACME-22': {
+    title: 'Send the reminders before the due date',
+    stage: 'Building',
+    frozen: true,
+    type: 'feature',
+    ball: 'agent',
+    marks: [{ kind: 'kept', program: 'claude', pid: 48213 }],
+    cancel: true,
+  },
   'ACME-9': {
     title: 'Export the movements',
     stage: 'Done',

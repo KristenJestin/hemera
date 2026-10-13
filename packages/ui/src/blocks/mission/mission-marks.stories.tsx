@@ -6,8 +6,8 @@ import { type MissionMarkView, markWords } from './vocabulary.ts'
 
 /**
  * The marks a mission carries, as a list or the header draws them: a glyph with its legend, and
- * for the two marks whose cause must be read without pointing (blocked, waiting) the words next
- * to it. The frozen Spec and the ticket link are the two other small parts of the same row.
+ * for the marks whose cause must be read without pointing (blocked, waiting, an earlier agent
+ * still running) the words next to it. The frozen Spec and the ticket link are the two other small parts of the same row.
  */
 const meta = {
   tags: ['autodocs'],
@@ -75,6 +75,32 @@ export const Spelled: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByText('Blocked by ACME-9')).toBeInTheDocument()
     expect(canvas.getByText('Waiting on CI on acme/shop#52')).toBeInTheDocument()
+  },
+}
+
+/**
+ * An earlier agent of the mission still running, which Hemera could not stop: spelled, with its
+ * program and pid, one per agent.
+ */
+export const KeptAgents: Story = {
+  args: {
+    marks: [
+      { kind: 'kept', program: 'claude', pid: 48213 },
+      { kind: 'kept', program: 'codex', pid: 48377 },
+    ],
+  },
+  play: ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(
+      canvas.getByText(
+        'Earlier claude (48213) still running · Hemera tries again at the next start',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      canvas.getByText(
+        'Earlier codex (48377) still running · Hemera tries again at the next start',
+      ),
+    ).toBeInTheDocument()
   },
 }
 

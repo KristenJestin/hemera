@@ -382,6 +382,22 @@ export const MissionLongCauses: Story = {
   },
 }
 
+/**
+ * Building, with an agent an earlier start of Hemera could not stop: its program and pid are on
+ * the line, with the next start that tries again, until it is ended or gone.
+ */
+export const MissionKeptAgent: Story = {
+  render: () => <MissionStageFixture missionKey="ACME-22" />,
+  play: async ({ canvasElement }) => {
+    expect(
+      says(
+        canvasElement,
+        'Earlier claude (48213) still running · Hemera tries again at the next start',
+      ),
+    ).toBe(true)
+  },
+}
+
 /** Over a stage's page, a view stands and goes: the page under it is the one that was there. */
 export const MissionStageViewsOverBase: Story = {
   render: () => <MissionStageFixture missionKey="ACME-19" />,

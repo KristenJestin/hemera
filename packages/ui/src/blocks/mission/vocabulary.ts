@@ -57,10 +57,12 @@ export type MissionMarkView =
   | { kind: 'outdated' }
   | { kind: 'outside'; repository: string }
   | { kind: 'fixing' }
+  /** An earlier agent of the mission still running, which a start of Hemera could not stop. */
+  | { kind: 'kept'; program: string; pid: number }
 
 /** The marks whose cause must be read without pointing at them: drawn with their words. */
 export const SPELLED_MARKS: ReadonlySet<MissionMarkView['kind']> = new Set<MissionMarkView['kind']>(
-  ['blocked', 'waiting'],
+  ['blocked', 'waiting', 'kept'],
 )
 
 /** A mark in words: the legend on its glyph, and what the spelled form writes. */
@@ -78,6 +80,8 @@ export function markWords(mark: MissionMarkView): string {
       return `${mark.repository} changed outside Hemera`
     case 'fixing':
       return 'Fixing'
+    case 'kept':
+      return `Earlier ${mark.program} (${String(mark.pid)}) still running · Hemera tries again at the next start`
   }
 }
 
