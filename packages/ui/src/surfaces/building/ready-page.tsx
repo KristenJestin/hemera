@@ -10,8 +10,8 @@ import { type ModelChoice, ModelPicker } from '../../components/model-picker/mod
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconAlertTriangle, IconFileText, IconGitCompare } from '../../icons.ts'
-import { Fold, ID, MissionFolds, QUIET, ROW } from './parts.tsx'
-import type { Dependency, LaunchCheck, Moved, ReadyMoment } from './types.ts'
+import { Fold, ID, MissionFolds, QUIET, ROW } from './building-parts.tsx'
+import type { Dependency, LaunchCheck, Moved, ReadyMoment } from './building-types.ts'
 
 /**
  * The Ready page as #149 proposes it, in the language of the Planning page's rail (#193): the

@@ -10,7 +10,7 @@ import type {
   Service,
   Task,
   TaskDetail,
-} from './types.ts'
+} from './building-types.ts'
 
 /**
  * ACME-12 at a real size, for the Ready and Building pages of #149: nine requirements, twenty-two

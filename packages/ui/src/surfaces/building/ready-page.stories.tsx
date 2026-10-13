@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE } from './fixtures.ts'
-import { tabTo } from './play.ts'
-import { ReadyScreen } from './screen.tsx'
+import { LONG_TITLE } from './building-fixtures.ts'
+import { tabTo } from './building-play.ts'
+import { ReadyScreen } from './building-screen-fixture.tsx'
 
 /**
  * The Ready page of #149, recommended: the frozen Spec in summary in the middle, and at the top of
@@ -14,7 +14,7 @@ import { ReadyScreen } from './screen.tsx'
  * header while it can be pressed. The mission's dependencies, grants and budget end the rail.
  */
 const meta = {
-  title: 'Explorations/Building/Ready',
+  title: 'Surfaces/Ready',
   component: ReadyScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },

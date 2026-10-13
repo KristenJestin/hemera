@@ -5,8 +5,8 @@ import { Button } from '../../components/button/button.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconAlertTriangle } from '../../icons.ts'
-import { CODE, QUIET, ROW } from './parts.tsx'
-import type { TaskDetail } from './types.ts'
+import { CODE, QUIET, ROW } from './building-parts.tsx'
+import type { TaskDetail } from './building-types.ts'
 
 /**
  * A task opened over the Building page, in the mission's sheet: where it aims, its tries and who

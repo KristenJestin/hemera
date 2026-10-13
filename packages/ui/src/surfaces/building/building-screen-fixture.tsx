@@ -10,16 +10,16 @@ import {
   MissionFrameNeeds,
   type MissionMore,
   type MissionView,
-} from '../../surfaces/mission/mission-frame.tsx'
+} from '../mission/mission-frame.tsx'
 import {
   AT_BASE,
   type MissionFrameState,
   closeView,
   openView,
   showView,
-} from '../../surfaces/mission/navigation.ts'
+} from '../mission/navigation.ts'
 import { stageWords } from '../../blocks/mission/vocabulary.ts'
-import { BuildingPage, type BuildingHandlers } from './building.tsx'
+import { BuildingPage, type BuildingHandlers } from './building-page.tsx'
 import {
   BRANCH,
   KEY,
@@ -29,10 +29,10 @@ import {
   type ReadyName,
   TASK_DETAILS,
   TITLE,
-} from './fixtures.ts'
-import { ReadyPage, blockerOf, launchable } from './ready.tsx'
+} from './building-fixtures.ts'
+import { ReadyPage, blockerOf, launchable } from './ready-page.tsx'
 import { TaskView } from './task-view.tsx'
-import type { BuildingMoment, Task, TaskDetail } from './types.ts'
+import type { BuildingMoment, Task, TaskDetail } from './building-types.ts'
 
 /**
  * The Ready and Building pages of ACME-12 in their mission frame, under the window's header that

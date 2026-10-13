@@ -6,7 +6,7 @@ import { Button } from '../../components/button/button.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconChevronRight, IconFolder, IconLink, IconGauge, IconShieldCheck } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import type { Budget, Dependency, Grant, MissionThings } from './types.ts'
+import type { Budget, Dependency, Grant, MissionThings } from './building-types.ts'
 
 /**
  * The pieces the Ready and Building pages share: a line that unfolds to what it summarises, and

@@ -25,7 +25,17 @@ import {
   IconTerminal,
   IconX,
 } from '../../icons.ts'
-import { CHEVRON, CODE, Fold, ID, LINE, MissionFolds, QUIET, ROW, Unfolding } from './parts.tsx'
+import {
+  CHEVRON,
+  CODE,
+  Fold,
+  ID,
+  LINE,
+  MissionFolds,
+  QUIET,
+  ROW,
+  Unfolding,
+} from './building-parts.tsx'
 import type {
   BuildingMoment,
   Check,
@@ -35,7 +45,7 @@ import type {
   Scenario,
   Task,
   TaskState,
-} from './types.ts'
+} from './building-types.ts'
 
 /**
  * The Building page as #149 proposes it, in the language of the Planning page's rail (#193): the
