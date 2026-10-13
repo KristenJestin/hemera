@@ -16,7 +16,8 @@
  * start, a root a previous engine left is ended as a tree if it is still alive and still the same
  * program; a pid now held by another program is not ours and is never touched. The roots left are
  * looked at side by side, so that many cost about the time of one. One that cannot be ended (what
- * it runs could not be said in time, or its kill did not end it) is kept for the next start.
+ * it runs could not be said in time, or its kill did not end it) is kept: listed, watched until it
+ * is gone, and tried again at the next start.
  *
  * A child can also be started elsewhere and handed over by its pid (main forks the agents'
  * processes for the engine): the same policy applies to it. What a child writes on its standard
@@ -30,8 +31,18 @@ import { basename, extname } from 'node:path'
 import type { Readable } from 'node:stream'
 
 import { and, eq, ne } from 'drizzle-orm'
-import { Context, Deferred, Duration, Effect, Layer, Option, Ref, Schema } from 'effect'
-import type { Scope } from 'effect'
+import {
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  SubscriptionRef,
+} from 'effect'
+import type { Scope, Stream } from 'effect'
 
 import { Database, refusedWhile } from './storage/database.ts'
 import { supervisedProcesses } from './storage/schema.ts'
@@ -411,6 +422,9 @@ export interface Orphan {
  */
 export const ORPHAN_EXIT_MS = 10_000
 
+/** How often a kept orphan is looked at, to drop it from the list once it is gone. */
+export const KEPT_WATCH_MS = 1_000
+
 /** How long a child is given to end itself before its tree is taken down, unless told. */
 export const DEFAULT_GRACE_MS = 5_000
 
@@ -457,6 +471,10 @@ export class ProcessSupervisor extends Context.Service<
      * say, or that its kill did not end, which is kept for the next start.
      */
     readonly endOrphans: (kind: ProcessOwner['kind']) => Effect.Effect<ReadonlyArray<Orphan>>
+    /** The orphans a sweep of this engine kept, for as long as each is alive. */
+    readonly kept: Effect.Effect<ReadonlyArray<RegisteredRoot>>
+    /** The kept orphans now, then again at each change. */
+    readonly keptChanges: Stream.Stream<ReadonlyArray<RegisteredRoot>>
   }
 >()('ProcessSupervisor') {}
 
@@ -484,6 +502,8 @@ export const processSupervisorLayer = Layer.effect(
     const sink = yield* StderrSink
     const registry = yield* ProcessRegistry
     const engine = crypto.randomUUID()
+    const scope = yield* Effect.scope
+    const kept = yield* SubscriptionRef.make<ReadonlyArray<RegisteredRoot>>([])
 
     const signalQuietly = (child: Child, signal: Signal) =>
       Effect.sync(() => {
@@ -679,6 +699,28 @@ export const processSupervisorLayer = Layer.effect(
       )
     }
 
+    /** Watches a kept orphan until it is gone, then drops it: the next start would only forget it. */
+    const keep = (root: RegisteredRoot) =>
+      Effect.gen(function* () {
+        yield* SubscriptionRef.update(kept, (roots) => [
+          ...roots.filter((one) => one.id !== root.id),
+          root,
+        ])
+        const gone: Effect.Effect<void> = Effect.suspend(() =>
+          host.alive(root.pid)
+            ? Effect.andThen(Effect.sleep(Duration.millis(KEPT_WATCH_MS)), gone)
+            : Effect.void,
+        )
+        yield* gone.pipe(
+          Effect.andThen(registry.remove(root.id)),
+          Effect.andThen(
+            SubscriptionRef.update(kept, (roots) => roots.filter((one) => one.id !== root.id)),
+          ),
+          Effect.forkIn(scope),
+        )
+        return { root, ended: false }
+      })
+
     /** One root left by a previous engine: ended, forgotten, or kept for the next start. */
     const endOrphan = (root: RegisteredRoot) =>
       Effect.gen(function* () {
@@ -698,7 +740,7 @@ export const processSupervisorLayer = Layer.effect(
             yield* sink.write(
               `kept ${which}: what it runs could not be read, asked again at the next start`,
             )
-            return { root, ended: false }
+            return yield* keep(root)
           }
           ours = stillRuns(root, line, host.platform)
         }
@@ -712,7 +754,7 @@ export const processSupervisorLayer = Layer.effect(
             yield* sink.write(
               `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
             )
-            return { root, ended: false }
+            return yield* keep(root)
           }
           yield* sink.write(`ended ${which}`)
         }
@@ -726,7 +768,14 @@ export const processSupervisorLayer = Layer.effect(
         Effect.forEach(left, endOrphan, { concurrency: 'unbounded' }),
       )
 
-    return { engine, start, adopt, endOrphans }
+    return {
+      engine,
+      start,
+      adopt,
+      endOrphans,
+      kept: SubscriptionRef.get(kept),
+      keptChanges: SubscriptionRef.changes(kept),
+    }
   }),
 )
 

@@ -193,6 +193,28 @@ describe('The header of a mission', () => {
   })
 })
 
+describe('An earlier agent a start could not stop (#320)', () => {
+  test('is said on the header with its program and pid, one line per agent', () => {
+    const markup = drawn({
+      mission: mission({ stage: 'building', frozen: true }),
+      kept: [
+        { program: 'claude', pid: 48213 },
+        { program: 'codex', pid: 48377 },
+      ],
+    })
+    expect(markup).toContain(
+      'Earlier claude (48213) still running · Hemera tries again at the next start',
+    )
+    expect(markup).toContain(
+      'Earlier codex (48377) still running · Hemera tries again at the next start',
+    )
+  })
+
+  test('is not said once none is kept', () => {
+    expect(drawn({ kept: [] })).not.toContain('still running')
+  })
+})
+
 describe('The needs at the top', () => {
   test('are listed under Needs you, with the mission’s key', () => {
     const markup = drawn({

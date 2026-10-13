@@ -50,6 +50,7 @@ import {
   type HelperChip,
   type HelperDetail,
   type ProbeChip,
+  type KeptAgent,
   type ProbeDetail,
   type ResourceDraft,
   type ResourceHolding,
@@ -365,6 +366,12 @@ export interface Link {
     onEnd: (error: Error) => void,
   ) => () => void
   readonly probe: (probeId: string) => Promise<ProbeDetail>
+  /** The mission's agents a start could not stop, now, then again at each change (#320). */
+  readonly onKeptAgents: (
+    missionId: string,
+    listener: (agents: ReadonlyArray<KeptAgent>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The mission's Prototypers now, then again at each change of one of them (#222). */
   readonly onPrototypes: (
     missionId: string,
@@ -830,6 +837,8 @@ export function linkOver(port: Port): Link {
     onProbes: (missionId, listener, onEnd) =>
       follow((ready) => ready['probes.changed']({ missionId }), listener, anError, onEnd),
     probe: (probeId) => call((ready) => ready['probes.read']({ probeId })),
+    onKeptAgents: (missionId, listener, onEnd) =>
+      follow((ready) => ready['mission.keptAgents']({ missionId }), listener, anError, onEnd),
     onPrototypes: (missionId, listener, onEnd) =>
       follow(
         (ready) => ready['helpers.prototypesChanged']({ missionId }),

@@ -907,6 +907,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           streamClosedAs(gone),
           observedStream('mission.changed', log),
         ),
+      'mission.keptAgents': (request) =>
+        engine['mission.keptAgents'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('mission.keptAgents', log),
+        ),
     }),
     // The Project's checks (#143) and doc recipes (#146), each a layer of its own.
     ChecksRpcs.toLayer({

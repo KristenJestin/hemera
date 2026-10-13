@@ -640,6 +640,52 @@ describe('The start does not wait on the left-over agents one after another', ()
   })
 })
 
+describe('A kept agent is followed until it is ended or gone', () => {
+  test('a kept orphan is listed while it runs, and dropped once it is gone', async () => {
+    const left = leftRunning([script(STAYS_UP)])
+    const pid = left.pid ?? -1
+
+    const [whileRunning, afterGone, registered] = await supervised(
+      freshSeen(),
+      undefined,
+      true,
+    )(
+      Effect.gen(function* () {
+        yield* ProcessRegistry.use((registry) =>
+          registry.add({
+            id: 'left',
+            pid,
+            program: process.execPath,
+            args: left.spawnargs.slice(1),
+            owner: { kind: 'session', id: 's1' },
+            engine: 'crashed',
+          }),
+        )
+        const supervisor = yield* ProcessSupervisor
+        yield* supervisor.endOrphans('session')
+        const kept = yield* supervisor.kept
+        // It ends by itself, without Hemera: the next start would only forget it.
+        process.kill(pid, 'SIGKILL')
+        yield* Effect.promise(() => goneWithin(pid))
+        yield* Effect.promise(() =>
+          untilTrue(() => Effect.runSync(supervisor.kept).length === 0, 10_000),
+        )
+        return [
+          kept,
+          yield* supervisor.kept,
+          yield* ProcessRegistry.use((registry) => registry.leftBy('session', supervisor.engine)),
+        ] as const
+      }),
+    )
+
+    expect(whileRunning.map((root) => [root.pid, root.owner])).toEqual([
+      [pid, { kind: 'session', id: 's1' }],
+    ])
+    expect(afterGone).toEqual([])
+    expect(registered).toEqual([])
+  })
+})
+
 describe('The machine says what a pid runs', () => {
   test(
     'a living process is matched by what the system says it runs, within its bound',
