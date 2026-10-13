@@ -35,7 +35,7 @@ import {
   type UnknownProject,
   UnknownRepository,
 } from '@hemera/ipc'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import { join } from 'node:path'
 import {
   Context,
@@ -576,11 +576,26 @@ export const forgePort = () => {
         })
 
       /**
-       * The Project's needs nothing waits on any more withdrawn: their CLI is ready for their host,
-       * or no repository of the Project reaches that host through it now (forced elsewhere, gone).
-       * After a restart the states known are only those checked since, and a repository not known
-       * yet may still wait on any of them: each such one is checked first, so a need is settled on
-       * the states of all the Project's repositories.
+       * A forge need's row: what it waits for matters only while it is pending, so it goes when the
+       * need ends.
+       */
+      const forgetNeed = (needId: string) =>
+        mutate('forgetting a forge need', (transaction) =>
+          transaction
+            .delete(forgeNeeds)
+            .where(eq(forgeNeeds.needId, needId))
+            .pipe(
+              Effect.mapError(refusedWhile('deleting the forge need')),
+              Effect.as({ result: undefined, events: [] }),
+            ),
+        )
+
+      /**
+       * The Project's needs nothing waits on any more withdrawn, and their rows deleted: their CLI
+       * is ready for their host, or no repository of the Project reaches that host through it now
+       * (forced elsewhere, gone). After a restart the states known are only those checked since,
+       * and a repository not known yet may still wait on any of them: each such one is checked
+       * first, so a need is settled on the states of all the Project's repositories.
        */
       // Typed: it checks the repositories not known yet, and a check settles in turn.
       const settleNeeds = (projectId: string): Effect.Effect<void, never, ForgePortServices> =>
@@ -593,6 +608,7 @@ export const forgePort = () => {
           for (const need of pending) {
             if (stillWaits(project, known, need.cli, need.host)) continue
             yield* withdrawNeed(need.id, `nothing waits on ${need.cli} for ${need.host} any more`)
+            yield* forgetNeed(need.id)
           }
         }).pipe(Effect.catch(() => Effect.void))
 
@@ -1102,6 +1118,36 @@ export const forgePort = () => {
             return stillWaits(project, yield* SubscriptionRef.get(memory), waits.cli, waits.host)
           }),
         ).pipe(Effect.catch(() => Effect.succeed(true)))
+
+      // The rows of needs that ended another way (kept by an engine before #262, or left by a stop
+      // between a need's end and its row's deletion) wait for nothing: they go at the start. One
+      // that cannot go is harmless, since only a pending need's row is ever read.
+      yield* provided(
+        Effect.gen(function* () {
+          const database = yield* Database
+          const ended = yield* database
+            .select({ id: forgeNeeds.needId })
+            .from(forgeNeeds)
+            .innerJoin(needs, eq(needs.id, forgeNeeds.needId))
+            .where(ne(needs.state, 'pending'))
+            .pipe(Effect.mapError(refusedWhile('reading the forge needs')))
+          if (ended.length === 0) return
+          yield* mutate('forgetting the forge needs that ended', (transaction) =>
+            transaction
+              .delete(forgeNeeds)
+              .where(
+                inArray(
+                  forgeNeeds.needId,
+                  ended.map((one) => one.id),
+                ),
+              )
+              .pipe(
+                Effect.mapError(refusedWhile('deleting the forge needs')),
+                Effect.as({ result: undefined, events: [] }),
+              ),
+          )
+        }),
+      ).pipe(Effect.catch(() => Effect.void))
 
       return {
         status,

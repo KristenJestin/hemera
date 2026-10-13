@@ -33,11 +33,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
-import { listNeeds, retryNeed } from '../src/engine/needs.ts'
+import { listNeeds, retryNeed, withdrawNeed } from '../src/engine/needs.ts'
 import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts'
 import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { forgeNeeds } from '../src/engine/storage/schema.ts'
 import { listActions } from '../src/engine/tools/actions.ts'
 import { commandsEngine } from './commands-engine.ts'
 import {
@@ -473,6 +475,12 @@ describe('A waiting operation survives a restart and wakes on any change', () =>
   })
 })
 
+/** The rows of `forge_needs`, whatever the state of their need. */
+const forgeNeedRows = Effect.gen(function* () {
+  const database = yield* Database
+  return yield* database.select().from(forgeNeeds)
+})
+
 /** What each pending need says is missing. */
 const missingOf = (pending: ReadonlyArray<Need>) =>
   pending.map((need) =>
@@ -625,6 +633,113 @@ describe('A check after a restart settles only the needs whose CLI and host it c
     )
     expect(kept).toBe('pending')
     expect(retried).toBe('withdrawn')
+  })
+})
+
+describe('A forge need’s row is deleted when its need ends', () => {
+  test('withdrawn by Check again', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { during, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const rows = yield* forgeNeedRows
+          fake.answer(ghReady())
+          yield* port.checkAgain(projectId, null)
+          yield* Fiber.join(waiting)
+          return { during: rows, after: yield* forgeNeedRows }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(during).toHaveLength(1)
+    expect(after).toEqual([])
+  })
+
+  test('withdrawn by Retry', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const [need] = yield* someNeed
+          fake.answer(ghReady())
+          yield* retryNeed(need?.id ?? '')
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('the repository forced to none', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('the repository removed', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          const project = yield* getProject(projectId)
+          yield* removeRepository({ id: repository('shop'), version: project.version })
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop, api: REMOTES.api },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('a row whose need ended another way goes at the next start', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const engine = commandsEngine(data, {
+      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+    })
+    const main = checkout({ shop: REMOTES.shop })
+    const left = await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(project.repositories[0]?.id ?? ''))
+          const [need] = yield* someNeed
+          // Ended outside the port, as an older engine left it.
+          yield* withdrawNeed(need?.id ?? '', 'ended elsewhere')
+          return yield* forgeNeedRows
+        }),
+      ),
+    )
+    const after = await engine(({ profile }) => profile.use(forgeNeedRows))
+    expect(left).toHaveLength(1)
+    expect(after).toEqual([])
   })
 })
 
