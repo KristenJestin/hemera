@@ -170,6 +170,20 @@ export const CheckExpired: Story = {
   },
 }
 
+/** The check could not finish: why, in words, and Check again; nothing launches. */
+export const CheckFailed: Story = {
+  args: { moment: 'failed' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(statusOf(canvasElement)).toHaveTextContent('The check could not finish')
+    await expect(canvas.getByText(/could not be read/)).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Launch anyway' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Launch' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheckAgain).toHaveBeenCalled()
+  },
+}
+
 /** A dependency went back from Done during the check: no launch, nothing to press. */
 export const DependencyNotDone: Story = {
   args: { moment: 'dependency' },

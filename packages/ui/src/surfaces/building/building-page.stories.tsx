@@ -76,7 +76,6 @@ export const TaskStates: Story = {
       'Done, not verified',
       'Running',
       'Waiting for you',
-      'Blocked',
       'Skipped',
       'To do',
     ]) {
@@ -86,6 +85,15 @@ export const TaskStates: Story = {
       })
     }
     await expect(canvas.getAllByRole('img', { name: 'To re-run' }).length).toBeGreaterThan(0)
+    // A blocked task says why in its mark's tooltip; a scenario verified by hand waits for you.
+    await expect(
+      canvas.getByRole('img', { name: 'Blocked: waits for ACME-10’s read rules' }),
+    ).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: /R6 / }))
+    await userEvent.click(canvas.getByRole('button', { name: /R6 / }))
+    await waitFor(() => {
+      expect(canvas.getByRole('img', { name: 'To verify by hand' })).toBeVisible()
+    })
     await expect(canvas.getAllByRole('img', { name: /^Red recorded at/ }).length).toBeGreaterThan(0)
   },
 }
@@ -178,6 +186,20 @@ export const Services: Story = {
     await expect(args.onService).toHaveBeenCalledWith('api', 'stop')
     await userEvent.click(within(rows).getByRole('button', { name: 'Start worker' }))
     await expect(args.onService).toHaveBeenCalledWith('worker', 'start')
+    // A running one opens at its address, copies it, restarts; a stopped one leaves the list.
+    await userEvent.click(
+      within(rows).getByRole('button', { name: 'Open api at http://localhost:3012' }),
+    )
+    await expect(args.onService).toHaveBeenCalledWith('api', 'open')
+    await userEvent.click(within(rows).getByRole('button', { name: 'Copy the address of api' }))
+    await expect(args.onService).toHaveBeenCalledWith('api', 'copy')
+    await userEvent.click(within(rows).getByRole('button', { name: 'Restart api' }))
+    await expect(args.onService).toHaveBeenCalledWith('api', 'restart')
+    await userEvent.click(within(rows).getByRole('button', { name: 'Remove worker from the list' }))
+    await expect(args.onService).toHaveBeenCalledWith('worker', 'dismiss')
+    await expect(
+      within(rows).queryByRole('button', { name: 'Remove api from the list' }),
+    ).toBeNull()
     await userEvent.click(
       canvas.getByRole('button', { name: 'Start a service from the catalogue…' }),
     )
@@ -323,6 +345,32 @@ export const JournalOpen: Story = {
     await userEvent.click(canvas.getByRole('button', { name: /^Journal/ }))
     const journal = await waitFor(() => canvas.getByRole('list', { name: 'Journal' }))
     await expect(within(journal).getAllByRole('listitem')[0]).toHaveTextContent('10:58')
+  },
+}
+
+/** A journal longer than its first page: Earlier events reads further back. */
+export const JournalEarlier: Story = {
+  args: { moment: 'working', journalMore: true, onJournalMore: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Journal/ }))
+    await userEvent.click(
+      await waitFor(() => canvas.getByRole('button', { name: 'Earlier events' })),
+    )
+    await expect(args.onJournalMore).toHaveBeenCalled()
+  },
+}
+
+/** Without a diff to open it in, the changes say what changed and offer no Diff. */
+export const ChangesWithoutDiff: Story = {
+  render: (args) => <BuildingScreen {...args} onOpenDiff={undefined} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Changes/ }))
+    await waitFor(() => {
+      expect(canvas.getByRole('list', { name: 'Changes' })).toBeVisible()
+    })
+    await expect(canvas.queryByRole('button', { name: /^Diff of/ })).toBeNull()
   },
 }
 

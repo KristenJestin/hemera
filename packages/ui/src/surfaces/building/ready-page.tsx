@@ -5,7 +5,6 @@ import { Button } from '../../components/button/button.tsx'
 import { Frame, FrameHeader } from '../../components/frame/frame.tsx'
 import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
 import type { FaceState } from '../../components/face/states.ts'
-import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import { type ModelChoice, ModelPicker } from '../../components/model-picker/model-picker.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
@@ -30,8 +29,11 @@ export interface ReadyHandlers {
   onBackToPlanning: () => void
   onCheckAgain: () => void
   onModel: (choice: ModelChoice | null) => void
+  onFavourite: (agent: string, model: string, favourite: boolean) => void
+  onHide: (agent: string, model: string, hidden: boolean) => void
   onOpenSpec: () => void
-  onOpenDiff: (what: string) => void
+  /** Opens what changed in a file; left out while there is no diff to open it in. */
+  onOpenDiff?: ((what: string) => void) | undefined
   onRevoke: (id: string) => void
 }
 
@@ -71,7 +73,7 @@ function MovedLine({
   onOpenDiff,
 }: {
   moved: Moved
-  onOpenDiff: (what: string) => void
+  onOpenDiff: ReadyHandlers['onOpenDiff']
 }): ReactNode {
   const breaks = moved.verdict !== undefined && !moved.verdict.holds
   return (
@@ -102,13 +104,14 @@ function MovedLine({
               {moved.verdict.why}
             </p>
           )}
-          {(moved.kind === 'target' || moved.kind === 'proof' || moved.kind === 'dirty') && (
-            <span>
-              <Button variant="link" size="sm" onClick={() => onOpenDiff(moved.what)}>
-                What changed
-              </Button>
-            </span>
-          )}
+          {onOpenDiff !== undefined &&
+            (moved.kind === 'target' || moved.kind === 'proof' || moved.kind === 'dirty') && (
+              <span>
+                <Button variant="link" size="sm" onClick={() => onOpenDiff(moved.what)}>
+                  What changed
+                </Button>
+              </span>
+            )}
         </div>
       </Fold>
     </li>
@@ -121,7 +124,7 @@ function MovedList({
   onOpenDiff,
 }: {
   moved: readonly Moved[]
-  onOpenDiff: (what: string) => void
+  onOpenDiff: ReadyHandlers['onOpenDiff']
 }): ReactNode {
   const sorted = [...moved].sort(
     (a, b) => Number(a.verdict?.holds ?? true) - Number(b.verdict?.holds ?? true),
@@ -192,6 +195,8 @@ function standing(check: LaunchCheck, blocker: Dependency | undefined, frozenAt:
         under: 'Its result no longer says how things stand.',
         tone: 'calls',
       }
+    case 'failed':
+      return { line: 'The check could not finish', under: check.reason, tone: 'calls' }
     case 'dependency':
       return {
         line: `${check.dependency.key} is not done`,
@@ -244,6 +249,7 @@ function progressOf(moment: ReadyMoment): StageCardProps['progress'] {
           : `${String(check.moved.length)} moved`,
     }
   }
+  if (check.state === 'failed') return { step: 'Check', detail: 'stopped' }
   return { step: 'Check', detail: check.state === 'clear' ? 'nothing moved' : 'to run again' }
 }
 
@@ -274,6 +280,7 @@ function Choices({ check, handlers }: { check: LaunchCheck; handlers: ReadyHandl
         </>
       )
     case 'expired':
+    case 'failed':
       return (
         <Button variant="primary" size="sm" onClick={handlers.onCheckAgain}>
           Check again
@@ -292,7 +299,7 @@ function Choices({ check, handlers }: { check: LaunchCheck; handlers: ReadyHandl
  */
 export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
   const blocker = blockerOf(moment)
-  const { check, preparation } = moment
+  const { check, preparation, model } = moment
   const said = standing(check, blocker, moment.frozenAt)
   const moved = 'moved' in check ? check.moved : []
   const choices = <Choices check={check} handlers={handlers} />
@@ -322,27 +329,29 @@ export function ReadyCard({ moment, ...handlers }: ReadyPageProps): ReactNode {
           <div className="flex flex-col gap-1.5 px-4 py-3">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <span className="text-xs font-medium text-muted-foreground">
-                {moment.overridden ? 'Your choice for Building' : 'Recommended for Building'}
+                {model.value !== null
+                  ? 'Your choice for Building'
+                  : model.recommended !== undefined
+                    ? 'Recommended for Building'
+                    : 'Model for Building'}
               </span>
               <ModelPicker
                 label="Model of the Builder"
-                agents={AGENTS}
-                value={moment.overridden ? moment.model : null}
-                fallback={
-                  moment.overridden
-                    ? { agent: 'claude', model: 'opus', effort: 'high' }
-                    : moment.model
-                }
+                agents={model.agents}
+                value={model.value}
+                fallback={model.fallback}
                 onChange={handlers.onModel}
-                onFavourite={() => undefined}
-                onHide={() => undefined}
+                onFavourite={handlers.onFavourite}
+                onHide={handlers.onHide}
               />
             </div>
-            <p className="text-xs break-words text-muted-foreground">
-              {moment.overridden
-                ? `The Planner recommended Opus · High: ${moment.why}`
-                : moment.why}
-            </p>
+            {model.recommended !== undefined && (
+              <p className="text-xs break-words text-muted-foreground">
+                {model.value !== null
+                  ? `The Planner recommended ${model.recommended.words}: ${model.recommended.why}`
+                  : model.recommended.why}
+              </p>
+            )}
           </div>
         </Frame>
       </section>
