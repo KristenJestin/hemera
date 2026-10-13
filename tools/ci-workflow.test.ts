@@ -63,7 +63,9 @@ const commitMessagesStep = (before: string, head: string): string => {
     .replaceAll('${{ github.event.pull_request.head.sha || github.sha }}', head)
     .replaceAll(
       'node tools/commit-message.ts',
-      `node ${join(repository, 'tools', 'commit-message.ts')}`,
+      // Forward slashes: the script runs in a POSIX shell, where a Windows path's backslashes
+      // are escapes.
+      `node ${join(repository, 'tools', 'commit-message.ts').replaceAll('\\', '/')}`,
     )
 }
 
