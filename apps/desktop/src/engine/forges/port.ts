@@ -75,7 +75,7 @@ import {
   identify,
 } from './identity.ts'
 import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
-import { GH_NAME, SAFE_WORD, shapeOf } from './shapes.ts'
+import { REPO_NAME, SAFE_WORD, shapeOf } from './shapes.ts'
 
 /** The service the forge's needs belong to. */
 export const FORGE_NEEDS = needService('forge')
@@ -894,7 +894,8 @@ export const forgePort = () => {
               const place =
                 owner === null ||
                 slug === null ||
-                !(cli === 'gh' ? GH_NAME.test(owner) && GH_NAME.test(slug) : SAFE_WORD.test(owner))
+                !REPO_NAME.test(slug) ||
+                !(cli === 'gh' ? REPO_NAME.test(owner) : SAFE_WORD.test(owner))
                   ? []
                   : cli === 'gh'
                     ? ['--repo', `${host}/${owner}/${slug}`]

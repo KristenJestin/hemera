@@ -75,16 +75,16 @@ const read = (cli: ForgeCli, operation: string, words: ReadonlyArray<string>) =>
   shape(cli, 'read', operation, words)
 
 /**
- * A workspace, a project key or a bkt context: one plain word, never a flag (`~` opens a Data
- * Center personal project).
+ * A workspace, a project key or a bkt context: one plain word, never a flag, never `.` or `..`
+ * (`~` opens a Data Center personal project).
  */
-export const SAFE_WORD = /^(?!-)[A-Za-z0-9._~-]+$/
+export const SAFE_WORD = /^(?!-)(?!\.{1,2}$)[A-Za-z0-9._~-]+$/
 
 const NUMBER: readonly [string, RegExp] = ['<number>', /^\d+$/]
-/** One owner or repository name: never `.` or `..`, which would walk out of the path. */
-const NAME = String.raw`(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
-/** A gh owner or repository name, as the shapes accept it. */
-export const GH_NAME = new RegExp(`^${NAME}$`)
+/** One owner or repository name: never `.` or `..`, which would walk out of the path, nor a flag. */
+const NAME = String.raw`(?!-)(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
+/** An owner or repository name, as the shapes accept it: a gh owner, a gh or bkt repository. */
+export const REPO_NAME = new RegExp(`^${NAME}$`)
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
@@ -92,7 +92,7 @@ const APPROVAL = new RegExp(
 /** The repository a gh command acts on, always named with its host: `host/owner/repo`. */
 const GH_REPO: readonly [string, FlagRule] = [
   '--repo',
-  valueFlag(true, new RegExp(String.raw`^[A-Za-z0-9.-]+(:\d+)?/${NAME}/${NAME}$`)),
+  valueFlag(true, new RegExp(String.raw`^(?!-)[A-Za-z0-9.-]+(:\d+)?/${NAME}/${NAME}$`)),
 ]
 /** The bkt context a command goes through: the one of the repository's host. */
 const BKT_CONTEXT: readonly [string, FlagRule] = ['--context', valueFlag(true, SAFE_WORD)]
@@ -104,7 +104,7 @@ const BKT_PLACE: ReadonlyArray<readonly [string, FlagRule]> = [
   BKT_CONTEXT,
   ['--workspace', { value: true, pattern: SAFE_WORD, required: false, oneOf: 'place' }],
   ['--project', { value: true, pattern: SAFE_WORD, required: false, oneOf: 'place' }],
-  ['--repo', valueFlag(true)],
+  ['--repo', valueFlag(true, REPO_NAME)],
 ]
 
 export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
@@ -239,7 +239,7 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     [
       BKT_CONTEXT,
       ['--workspace', valueFlag(true, SAFE_WORD)],
-      ['--repo', valueFlag(true)],
+      ['--repo', valueFlag(true, REPO_NAME)],
       ['--ref', valueFlag(true)],
       ['--selector-type', valueFlag()],
       ['--selector-pattern', valueFlag()],
