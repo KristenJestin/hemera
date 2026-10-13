@@ -263,3 +263,102 @@ describe('A write names its forge: the bkt context, the gh host', () => {
     expect(aimsAt('gh', ['--version'], 'git.acme.test')).toBe(true)
   })
 })
+
+describe('Every name a write carries is one its forge can hold', () => {
+  const BKT_CREATE = ['pr', 'create', '--source', 'feat/x', '--target', 'main', '--title', 'X']
+  const bktCreate = (context: string, workspace: string, repo: string) => [
+    ...BKT_CREATE,
+    '--context',
+    context,
+    '--workspace',
+    workspace,
+    '--repo',
+    repo,
+  ]
+
+  test('a bkt repository is one name, never a path, a query or a flag', () => {
+    expect(shapeOf('bkt', bktCreate('oss', 'acme-team', 'shop.js'))?.operation).toBe('pr.create')
+    for (const bad of ['sh?op', 'sh#op', 'sh%3Fop', '..', '.', 'a b', 'a/b', '-x', '']) {
+      expect(shapeOf('bkt', bktCreate('oss', 'acme-team', bad)), `repo ${bad}`).toBeNull()
+    }
+    expect(
+      shapeOf('bkt', [
+        'pipeline',
+        'run',
+        '--context',
+        'oss',
+        '--workspace',
+        'acme-team',
+        '--repo',
+        '..',
+        '--ref',
+        'main',
+      ]),
+    ).toBeNull()
+  })
+
+  test('a bkt context, workspace or project is never . nor ..', () => {
+    for (const bad of ['.', '..']) {
+      expect(shapeOf('bkt', bktCreate(bad, 'acme-team', 'shop')), `context ${bad}`).toBeNull()
+      expect(shapeOf('bkt', bktCreate('oss', bad, 'shop')), `workspace ${bad}`).toBeNull()
+    }
+  })
+
+  test('a gh repository never walks out of its owner', () => {
+    for (const bad of ['github.com/../shop', 'github.com/acme/..', 'github.com/./shop']) {
+      expect(shapeOf('gh', ['pr', 'merge', '7', '--repo', bad, '--squash']), bad).toBeNull()
+    }
+  })
+})
+
+describe('The host a gh command aims at is read from its parsed flags', () => {
+  test('a title that reads --hostname does not move the host', () => {
+    const create = [
+      'pr',
+      'create',
+      '--repo',
+      'github.com/acme/shop',
+      '--title',
+      '--hostname',
+      '--base',
+      'main',
+      '--head',
+      'feat/x',
+      '--body-file',
+      '-',
+    ]
+    expect(shapeOf('gh', create)?.operation).toBe('pr.create')
+    expect(aimsAt('gh', create, 'github.com')).toBe(true)
+    expect(aimsAt('gh', create, 'git.acme.test')).toBe(false)
+  })
+
+  test('a command that matches no shape aims at no host', () => {
+    expect(aimsAt('gh', ['pr', 'merge', '7', '--squash'], 'github.com')).toBe(false)
+  })
+})
+
+describe('What a shape refuses stays refused', () => {
+  const BKT_MERGE = ['pr', 'merge', '7', '--workspace', 'acme-team', '--repo', 'shop']
+  const CLOSE = '--close-source=false'
+
+  test('a repeated --context is refused: bkt would keep the last one', () => {
+    expect(shapeOf('bkt', [...BKT_MERGE, '--context', 'oss', CLOSE])?.operation).toBe('pr.merge')
+    expect(
+      shapeOf('bkt', [...BKT_MERGE, '--context', 'oss', '--context', 'work', CLOSE]),
+    ).toBeNull()
+  })
+
+  test('a word or a flag in another case is refused', () => {
+    expect(shapeOf('gh', ['PR', 'merge', '7', '--repo', 'github.com/acme/shop'])).toBeNull()
+    expect(shapeOf('gh', ['pr', 'merge', '7', '--Repo', 'github.com/acme/shop'])).toBeNull()
+    expect(
+      shapeOf('bkt', ['pr', 'MERGE', '7', '--context', 'oss', ...BKT_MERGE.slice(3), CLOSE]),
+    ).toBeNull()
+  })
+
+  test('a gh --repo value starting with - is refused', () => {
+    for (const bad of ['-R', '--hostname', '-github.com/acme/shop']) {
+      expect(shapeOf('gh', ['pr', 'merge', '7', '--repo', bad, '--squash']), bad).toBeNull()
+    }
+  })
+})

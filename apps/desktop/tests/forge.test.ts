@@ -9,7 +9,14 @@
  * real `gh` or `bkt`, and none reaches a forge.
  */
 
-import { mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { ProjectOwner } from '@hemera/core/domain'
@@ -26,7 +33,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { listNeeds, retryNeed } from '../src/engine/needs.ts'
-import { ForgePort, forgeError } from '../src/engine/forges/port.ts'
+import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts'
 import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
@@ -1243,5 +1250,276 @@ describe('Waiters wake on a change of state, not of its detail', () => {
     )
     const checks = fake.calls().filter((call) => call.args[0] === 'auth').length
     expect(checks).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('A bkt repository name the shapes would refuse gives no place', () => {
+  test.each([
+    ['a query in its slug', 'https://bitbucket.org/acme-team/sh%3Fop.git'],
+    ['.. for its slug', 'git@bitbucket.org:acme-team/...git'],
+    ['.. for its workspace', 'git@bitbucket.org:../api.git'],
+  ])('%s: the write is refused before spawning', async (_case, remote) => {
+    const fake = fakeForge(bktReady())
+    const refused = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(
+          Effect.flatMap(forge, (port) =>
+            port.operate(repository('api'), (target, run) =>
+              run([
+                'pr',
+                'create',
+                ...target.place,
+                '--source',
+                'feat/x',
+                '--target',
+                'main',
+                '--title',
+                'X',
+              ]),
+            ),
+          ),
+        ),
+      { api: remote },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+})
+
+describe('Two waiters on a forge whose state flips each check', () => {
+  test('they do not wake each other: a bounded number of checks', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        alternate: [
+          'You are not logged into any GitHub hosts.\n',
+          'error connecting to api.github.com\n',
+        ],
+        code: 1,
+      },
+    ])
+    await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const first = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const second = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* Effect.sleep('2 seconds')
+          expect(first.pollUnsafe()).toBeUndefined()
+          expect(second.pollUnsafe()).toBeUndefined()
+          yield* Fiber.interruptAll([first, second])
+        }),
+      { shop: REMOTES.shop },
+    )
+    const checks = fake.calls().filter((call) => call.args[0] === 'auth').length
+    expect(checks).toBeLessThanOrEqual(4)
+  })
+})
+
+describe('An image is attached from Hemera’s own screenshot folder only', () => {
+  const attach = (path: string) =>
+    Effect.flip(
+      Effect.flatMap(runner, (forgeRunner) =>
+        forgeRunner.run({
+          cli: 'gh',
+          forge: 'github',
+          host: 'github.com',
+          projectId: 'p',
+          args: ['pr', 'edit', '7', '--repo', 'github.com/acme/shop', '--attach', path],
+        }),
+      ),
+    )
+  const ATTACH_OK = { cli: 'gh', when: ['pr', 'edit'], stdout: 'attached\n' } as const
+
+  test('a screenshot of Hemera’s is attached', async () => {
+    const fake = fakeForge([...ghReady(), ATTACH_OK])
+    await withForge(
+      fake,
+      () =>
+        Effect.gen(function* () {
+          const folder = join(data, 'screenshots')
+          mkdirSync(folder, { recursive: true })
+          writeFileSync(join(folder, 'shot.png'), 'png')
+          const forgeRunner = yield* ForgeRunner
+          return yield* forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId: 'p',
+            args: [
+              'pr',
+              'edit',
+              '7',
+              '--repo',
+              'github.com/acme/shop',
+              '--attach',
+              `${join(folder, 'shot.png')}#The list`,
+            ],
+          })
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toHaveLength(1)
+  })
+
+  test.each([
+    ['a file elsewhere', () => join(work, 'id_ed25519')],
+    ['a path walking out of the folder', () => join(data, 'screenshots', '..', 'hemera.db')],
+    ['a relative path', () => 'shot.png'],
+    ['a screenshot that does not exist', () => join(data, 'screenshots', 'none.png')],
+  ])('%s is refused before spawning', async (_case, path) => {
+    const fake = fakeForge([...ghReady(), ATTACH_OK])
+    const refused = await withForge(
+      fake,
+      () =>
+        Effect.gen(function* () {
+          writeFileSync(join(work, 'id_ed25519'), 'secret')
+          mkdirSync(join(data, 'screenshots'), { recursive: true })
+          return yield* attach(path())
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a link in the folder to a file elsewhere is refused before spawning',
+    async () => {
+      const fake = fakeForge([...ghReady(), ATTACH_OK])
+      const refused = await withForge(
+        fake,
+        () =>
+          Effect.gen(function* () {
+            writeFileSync(join(work, 'id_ed25519'), 'secret')
+            const folder = join(data, 'screenshots')
+            mkdirSync(folder, { recursive: true })
+            symlinkSync(join(work, 'id_ed25519'), join(folder, 'shot.png'))
+            return yield* attach(join(folder, 'shot.png'))
+          }),
+        { shop: REMOTES.shop },
+      )
+      expect(refused).toBeInstanceOf(ForgeCommandRefused)
+      expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+    },
+  )
+})
+
+describe('The line to copy is quoted for the shell of the platform', () => {
+  test.each([
+    [
+      'linux',
+      "bkt context create '~kris-git.acme.test' --host git.acme.test:7990 --project '~KRIS'",
+    ],
+    [
+      'darwin',
+      "bkt context create '~kris-git.acme.test' --host git.acme.test:7990 --project '~KRIS'",
+    ],
+    [
+      'win32',
+      'bkt context create "~kris-git.acme.test" --host git.acme.test:7990 --project "~KRIS"',
+    ],
+  ] as const)('on %s', (platform, line) => {
+    expect(
+      contextLine('bitbucket-datacenter', 'git.acme.test', 'git.acme.test:7990', '~kris', platform),
+    ).toBe(line)
+  })
+})
+
+describe('A write goes only where its target names', () => {
+  test('a gh write naming another repository of the same host is refused before spawning', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'merge'], stdout: 'merged\n' }])
+    const refused = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(
+          Effect.flatMap(forge, (port) =>
+            port.operate(repository('shop'), (_target, run) =>
+              run(['pr', 'merge', '7', '--repo', 'github.com/acme/other', '--squash']),
+            ),
+          ),
+        ),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+
+  test('a bkt write naming another workspace is refused before spawning', async () => {
+    const fake = fakeForge(bktReady())
+    const refused = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.flip(
+          Effect.flatMap(forge, (port) =>
+            port.operate(repository('api'), (_target, run) =>
+              run([
+                'pr',
+                'create',
+                '--context',
+                'oss',
+                '--workspace',
+                'other-team',
+                '--repo',
+                'api',
+                '--source',
+                'feat/x',
+                '--target',
+                'main',
+                '--title',
+                'X',
+              ]),
+            ),
+          ),
+        ),
+      { api: REMOTES.api },
+    )
+    expect(refused).toBeInstanceOf(ForgeRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+
+  test.each([
+    ['another context than its call’s', 'work'],
+    ['a context, its call none', null],
+  ])('the runner refuses a bkt write through %s', async (_case, context) => {
+    const fake = fakeForge(bktReady())
+    const refused = await withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flip(
+          Effect.flatMap(runner, (forgeRunner) =>
+            forgeRunner.run({
+              cli: 'bkt',
+              forge: 'bitbucket-cloud',
+              host: 'bitbucket.org',
+              projectId,
+              context,
+              args: [
+                'pr',
+                'create',
+                '--context',
+                'oss',
+                '--workspace',
+                'acme-team',
+                '--repo',
+                'api',
+                '--source',
+                'feat/x',
+                '--target',
+                'main',
+                '--title',
+                'X',
+              ],
+            }),
+          ),
+        ),
+      { api: REMOTES.api },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls()).toEqual([])
   })
 })
