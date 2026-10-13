@@ -17,8 +17,9 @@
  *
  * A write names its forge: a gh command its repository with its host (`--repo host/owner/repo`), a
  * bkt command its context (bkt sends a command to its active context otherwise, whatever the
- * repository's host) and its workspace or project. The runner also checks that a gh command aims at
- * the host of its call (`aimsAt`).
+ * repository's host) and its workspace or project. Every owner and repository name is one name of
+ * the forge's, never `.` or `..`. The runner also checks that a gh command aims at the host of its
+ * call (`aimsAt`), read from the parse of its arguments (`parseCommand`).
  */
 
 import type { ForgeCli } from '@hemera/ipc'
@@ -254,56 +255,80 @@ const fitsWord = (owner: CommandShape, word: string, arg: string): boolean => {
   return !arg.startsWith('-') && (owner.patterns.get(word)?.test(arg) ?? true)
 }
 
-/** Whether what follows the words is only flags of the shape, each once, the required ones there. */
-const fitsFlags = (owner: CommandShape, rest: ReadonlyArray<string>): boolean => {
-  const seen = new Set<string>()
+/** A command read against its shape: the value of each slot and of each flag given. */
+export interface ParsedCommand {
+  readonly shape: CommandShape
+  readonly slots: ReadonlyMap<string, string>
+  /** Each flag given, with its value; a switch with none. */
+  readonly flags: ReadonlyMap<string, string | null>
+}
+
+/**
+ * The flags after the words, when they are only flags of the shape, each once, the required ones
+ * there; null otherwise.
+ */
+const flagsOf = (
+  owner: CommandShape,
+  rest: ReadonlyArray<string>,
+): ReadonlyMap<string, string | null> | null => {
+  const seen = new Map<string, string | null>()
   for (let at = 0; at < rest.length; at += 1) {
     const name = rest[at] ?? ''
     const rule = owner.flags.get(name)
-    if (rule === undefined || seen.has(name)) return false
-    seen.add(name)
-    if (!rule.value) continue
+    if (rule === undefined || seen.has(name)) return null
+    if (!rule.value) {
+      seen.set(name, null)
+      continue
+    }
     at += 1
     const value = rest[at]
-    if (value === undefined) return false
-    if (rule.pattern !== undefined && !rule.pattern.test(value)) return false
+    if (value === undefined) return null
+    if (rule.pattern !== undefined && !rule.pattern.test(value)) return null
+    seen.set(name, value)
   }
   const flags = [...owner.flags]
   const groups = new Set(
     flags.flatMap(([, rule]) => (rule.oneOf === undefined ? [] : [rule.oneOf])),
   )
-  return (
+  const complete =
     flags.every(([name, rule]) => !rule.required || seen.has(name)) &&
     [...groups].every(
       (group) =>
         flags.filter(([name, rule]) => rule.oneOf === group && seen.has(name)).length === 1,
     )
-  )
+  return complete ? seen : null
+}
+
+/** These arguments of this CLI read against the first shape they match; null when none does. */
+export const parseCommand = (cli: ForgeCli, args: ReadonlyArray<string>): ParsedCommand | null => {
+  for (const one of COMMAND_SHAPES) {
+    if (one.cli !== cli || args.length < one.words.length) continue
+    if (!one.words.every((word, at) => fitsWord(one, word, args[at] ?? ''))) continue
+    const flags = flagsOf(one, args.slice(one.words.length))
+    if (flags === null) continue
+    const slots = new Map(
+      one.words.flatMap((word, at) => (SLOT.test(word) ? [[word, args[at] ?? '']] : [])),
+    )
+    return { shape: one, slots, flags }
+  }
+  return null
 }
 
 /** The shape these arguments of this CLI match, the first in the list; null when none does. */
 export const shapeOf = (cli: ForgeCli, args: ReadonlyArray<string>): CommandShape | null =>
-  COMMAND_SHAPES.find(
-    (one) =>
-      one.cli === cli &&
-      args.length >= one.words.length &&
-      one.words.every((word, at) => fitsWord(one, word, args[at] ?? '')) &&
-      fitsFlags(one, args.slice(one.words.length)),
-  ) ?? null
-
-/** The value that follows a flag among the arguments, or null. */
-const valueAfter = (args: ReadonlyArray<string>, flag: string): string | null => {
-  const at = args.indexOf(flag)
-  return at < 0 ? null : (args[at + 1] ?? null)
-}
+  parseCommand(cli, args)?.shape ?? null
 
 /**
- * Whether a command aims at this host only. A gh command names its host in `--hostname`, or in its
- * `--repo host/owner/repo`; one that names neither (`--version`) reaches no forge. A bkt command
- * goes through the context the port chose for the host.
+ * Whether a command aims at this host only, read from its parse: a gh command names its host in
+ * its `<host>` slot (`--hostname <host>`) or in its `--repo host/owner/repo`; a read that names
+ * neither (`--version`) reaches no forge, a write must name one. A command no shape matches aims
+ * at nothing. A bkt command goes through the context its call carries (the runner compares them).
  */
 export const aimsAt = (cli: ForgeCli, args: ReadonlyArray<string>, host: string): boolean => {
+  const parsed = parseCommand(cli, args)
+  if (parsed === null) return false
   if (cli === 'bkt') return true
-  const named = valueAfter(args, '--hostname') ?? valueAfter(args, '--repo')?.split('/')[0] ?? null
-  return named === null || named.toLowerCase() === host.toLowerCase()
+  const named = parsed.slots.get('<host>') ?? parsed.flags.get('--repo')?.split('/')[0] ?? null
+  if (named === null) return parsed.shape.class === 'read'
+  return named.toLowerCase() === host.toLowerCase()
 }
