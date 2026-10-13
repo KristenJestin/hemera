@@ -1592,6 +1592,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           summary: answering(summary),
           proofRun: answering(proofs.proofRun),
           refreshProofs: (missionId) => proofs.refresh(missionId).pipe(provided, Effect.orDie),
+          rerunning: proofs.rerunning,
           ensureBuilder: (missionId) =>
             Effect.gen(function* () {
               const building = yield* activeBuildingIn(yield* Database, missionId)

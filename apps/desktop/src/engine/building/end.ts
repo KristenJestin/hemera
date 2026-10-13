@@ -250,8 +250,11 @@ const specialTaskIn = (
     }
   })
 
-/** Where a suite holds the end: as it takes in the end of a Builder's turn. Nothing otherwise. */
-export type EndHold = (at: 'turned') => Effect.Effect<void>
+/**
+ * Where a suite holds the end: as it takes in the end of a Builder's turn, and as a pass over its
+ * steps begins and ends. Nothing otherwise.
+ */
+export type EndHold = (at: 'turned' | 'advancing' | 'advanced') => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
@@ -781,7 +784,8 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
 
       /**
        * What is stale and waits for no one: each automated proof made stale with no failed run
-       * waiting for its fix, and each final check that is not red but ran on an older tree.
+       * waiting for its fix nor a Retry running it again, and each final check that is not red but
+       * ran on an older tree.
        */
       const staleLeft = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -789,12 +793,15 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
+          // A Retry's run is recorded with events that drive the end again (#306).
+          const retrying = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
           const proofs = (yield* scenarioProofsIn(database, building.id))
             .filter(
               (row) =>
                 modeOf(row) === 'automated' &&
                 stateOf(row) === 'to_rerun' &&
-                !fixing.includes(row.scenario),
+                !fixing.includes(row.scenario) &&
+                !retrying.includes(row.scenario),
             )
             .map((row) => row.scenario)
           const checks = (yield* finalChecksIn(database, building.missionId, building.id))
@@ -1148,11 +1155,15 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             return Effect.void
           }
           running.set(buildingId, false)
-          const once: Effect.Effect<void> = advance(buildingId).pipe(
+          const once: Effect.Effect<void> = Effect.andThen(
+            hold('advancing'),
+            advance(buildingId),
+          ).pipe(
             provided,
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.void : stepFailed(buildingId, cause),
             ),
+            Effect.andThen(hold('advanced')),
             Effect.andThen(
               Effect.suspend(() => {
                 if (running.get(buildingId) === true) {
