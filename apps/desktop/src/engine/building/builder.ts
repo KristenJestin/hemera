@@ -788,7 +788,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
        * The end called once every task is done and every automated proof is green (or stale, which
        * the end runs again, or not reproducible, or ended without by the user); while one is not,
        * the end waits and the Builder is told which proof keeps it, once for each set it waits on
-       * (#144). When only scenarios nothing moves any more keep it, the user is asked instead.
+       * (#144). When only scenarios nothing moves any more keep it, the user is asked instead. Once
+       * the end is called, a proof red again at its refresh is asked about the same way (#306): its
+       * red was told to the Builder with its attempt, and the end waits on the question.
        */
       const endIfReady = (building: BuildingRow) =>
         Semaphore.withPermits(
@@ -797,9 +799,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         )(
           Effect.gen(function* () {
             const row = yield* activeBuildingIn(yield* Database, building.missionId)
-            if (row?.id !== building.id || row.tasksDoneAt === null || row.endCalledAt !== null)
-              return
-            const red = yield* proofs.unproven(row)
+            if (row?.id !== building.id || row.tasksDoneAt === null) return
+            const refreshing = row.endCalledAt !== null
+            if (refreshing && row.phase !== 'refresh') return
+            const red = yield* proofs.unproven(row, refreshing)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
             // A proof of the mission runs: the end is judged again once it ends (#258).
@@ -830,6 +833,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               yield* watchQuiet(row)
               return
             }
+            if (refreshing) return
             endWaits.set(row.id, waits)
             yield* ended(row)
           }),

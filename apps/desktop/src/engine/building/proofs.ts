@@ -86,6 +86,7 @@ import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
 import { fileOf } from './place.ts'
 import { type ProofRun, ProofRunner } from './proof-runner.ts'
 import {
+  type ScenarioProofRow,
   currentTreesIn,
   proofsViewIn,
   finalChecksIn,
@@ -139,6 +140,15 @@ const SETTLED: ReadonlyArray<ScenarioProofState> = [
   'not_reproducible',
   'not_proven',
 ]
+
+/**
+ * Whether the end waits on a scenario's proof: not settled, or stale with its run again failed
+ * (`failing`, the scenarios whose failed green waits for its fix).
+ */
+const waitsOn = (row: ScenarioProofRow, failing: ReadonlyArray<string>) => {
+  const state = stateOf(row)
+  return !SETTLED.includes(state) || (state === 'to_rerun' && failing.includes(row.scenario))
+}
 
 /** The kinds of the decisions a proof asks: kept on the Building's decisions. */
 export const PROOF_KINDS = [
@@ -1229,13 +1239,15 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * The automated scenarios that keep the end waiting: any not green (nor stale, which the end
-   * runs again, nor set aside as not reproducible) once every task is done.
+   * runs again, nor set aside as not reproducible) once every task is done; at the end's refresh,
+   * a stale one whose run again failed too, which waits for its fix like a failed green (#306).
    */
-  const unproven = (building: BuildingRow) =>
+  const unproven = (building: BuildingRow, refreshing = false) =>
     Effect.gen(function* () {
       const database = yield* Database
+      const failing = refreshing ? yield* failedGreens(building) : []
       return (yield* scenarioProofsIn(database, building.id))
-        .filter((row) => modeOf(row) === 'automated' && !SETTLED.includes(stateOf(row)))
+        .filter((row) => modeOf(row) === 'automated' && waitsOn(row, failing))
         .map((row) => row.scenario)
     })
 
@@ -1440,9 +1452,12 @@ export const buildingProofs = (parts: ProofParts) => {
         if (answer !== END_WITHOUT) return []
         // Only those still unproven: one that went green since stays green.
         const rows = yield* scenarioProofsIn(transaction, building.id)
+        const failing = (yield* attemptsIn(transaction, building.id))
+          .filter((one) => one.scope === 'proof' && one.subject !== null && one.endedAt === null)
+          .map((one) => one.subject ?? '')
         const scenarios = scenario.split(',').filter((one) => {
           const row = rows.find((proof) => proof.scenario === one)
-          return row !== undefined && !SETTLED.includes(stateOf(row))
+          return row !== undefined && waitsOn(row, failing)
         })
         for (const one of scenarios) {
           yield* setProofIn(transaction, building.id, one, { state: 'not_proven' })

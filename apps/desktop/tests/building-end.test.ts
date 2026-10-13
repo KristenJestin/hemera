@@ -2171,6 +2171,107 @@ describe('The refresh', () => {
   )
 
   test(
+    'a proof red at the refresh that the Builder looks at and leaves unfixed asks the user: Try again, or End without it, which moves the end on',
+    SLOW,
+    async () => {
+      const markdown = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { existsSync, readFileSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', () => {",
+        "  const file = new URL('../export.ts', import.meta.url)",
+        "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+        '})',
+        '',
+      ].join('\n')
+      const proofs = () => ({
+        'R1.S2': {
+          mode: 'automated',
+          actions: ['Run the test'],
+          starting_data: 'None.',
+          expected: 'The assertion of the test holds.',
+          test: {
+            repository: 'api',
+            path: 'tests/export.test.mjs',
+            code: markdown,
+            insertion: 'new_file',
+            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+          },
+          seen_today: false,
+        },
+      })
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              proofs,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 breaks what the proof reads: the refresh runs it again, red, and the Builder,
+            // told, ends its turn without writing.
+            yield* specialDone(builder.grantId, 'RV1', 'export.ts', 'export const toCsv = 1\n')
+            yield* documented(world, mission.id, 2)
+            const decisions = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Decision')),
+            )
+            yield* until(
+              Effect.map(decisions, (found) => found.length > 0),
+              LONG,
+            )
+            const [asked] = yield* decisions
+            if (asked === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: asked.id,
+              answer: ChosenAnswer.make({ option: 'End without it' }),
+              key: asked.id,
+            })
+            // A Builder the exit brings back to take the answer holds its turn: it is let go.
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                return (yield* getMission(mission.id)).stage === 'review'
+              }),
+              LONG,
+            )
+            return {
+              asked,
+              view: yield* buildingNow(mission.id),
+              told: yield* toBuilder(mission.id, builder.session.lineage),
+            }
+          }),
+        ),
+      )
+      const fields = seen.asked.fields
+      if (!Predicate.isTagged(fields, 'Decision')) throw new Error('not a decision')
+      expect(fields.question).toContain('R1.S2 is not proven')
+      expect(fields.options).toEqual(['Try again', 'End without it'])
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof?.state).toBe('not_proven')
+      // The end is called once: the refresh never calls it again.
+      expect(seen.told.filter((one) => one.startsWith('done: '))).toHaveLength(1)
+    },
+  )
+
+  test(
     'a stale proof the refresh cannot run is refreshed once, said once, and holds the end on an error need instead of looping',
     SLOW,
     async () => {
