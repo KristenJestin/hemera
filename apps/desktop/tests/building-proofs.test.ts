@@ -2275,6 +2275,84 @@ describe('What the reviewers see of the red phase', () => {
     ).toEqual([['api', 'invoices.ts', 'T1', ['R1.S2']]])
   })
 
+  test('a green held on its environment is no red to wait for: the Builder’s writes meanwhile are not recorded as written before it', async () => {
+    let proofCommand = ''
+    let held = false
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free for the red; from the green on, another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          held = true
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* needOf(mission.id, 'Environment')
+          const waiting = (yield* proofOf(mission.id, 'R1.S2')).state
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* writes(grantId, 'invoices.ts', 'export const invoices = [1]\n')
+          return { waiting, view: yield* proofsOf(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.waiting).toBe('held')
+    expect(seen.view.writtenBeforeRed).toEqual([])
+  })
+
   test('the detector of changes outside Hemera does not report Hemera’s proof writes', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
