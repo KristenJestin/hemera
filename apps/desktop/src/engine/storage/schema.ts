@@ -114,6 +114,8 @@ export const projects = sqliteTable(
     ticketSyncMinutes: integer('ticket_sync_minutes').notNull().default(60),
     /** When the last check of its tickets succeeded with every provider (#97); null before. */
     ticketsCheckedAt: text('tickets_checked_at'),
+    /** How long a proof may run, in minutes (#321), 1 to 1440; null keeps the default, 10. */
+    proofLimitMinutes: integer('proof_limit_minutes'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),

@@ -57,6 +57,14 @@ describe('The window’s routes', () => {
     expect(focusOf(go(START, { kind: 'settings' }).route)).toBe(false)
   })
 
+  test('a proof past its time limit opens the Checks of its Project’s settings', () => {
+    expect(go(START, linkedSettings({ projectId: 'acme', section: 'checks' })).route).toEqual({
+      kind: 'projectSettings',
+      id: 'acme',
+      section: 'checks',
+    })
+  })
+
   test('Home filtered to a Project says it after Home, which leads back to every need', () => {
     const filtered = go(START, { kind: 'home', projectId: 'acme' })
     const trail = trailOf(filtered, names)

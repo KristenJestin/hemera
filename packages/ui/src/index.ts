@@ -274,6 +274,7 @@ export {
   NEW_CHECK,
   type CheckDraft,
   type CheckRefusals,
+  type ProofLimitField,
   type SettingsCheck,
 } from './blocks/project-settings/checks.tsx'
 export {

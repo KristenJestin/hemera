@@ -928,6 +928,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['checks.remove'](request).pipe(closedAs(gone), observed('checks.remove', log)),
       'checks.move': (request) =>
         engine['checks.move'](request).pipe(closedAs(gone), observed('checks.move', log)),
+      'checks.proofLimit': (request) =>
+        engine['checks.proofLimit'](request).pipe(
+          closedAs(gone),
+          observed('checks.proofLimit', log),
+        ),
+      'checks.setProofLimit': (request) =>
+        engine['checks.setProofLimit'](request).pipe(
+          closedAs(gone),
+          observed('checks.setProofLimit', log),
+        ),
     }),
     DocRecipesRpcs.toLayer({
       'docRecipes.list': (request) =>

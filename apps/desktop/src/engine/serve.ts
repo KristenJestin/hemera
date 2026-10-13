@@ -126,9 +126,11 @@ import {
   acceptChecks,
   listChecks,
   moveCheck,
+  proofLimitOf,
   proposedChecks,
   removeCheck,
   saveCheck,
+  setProofLimit,
 } from './project-checks.ts'
 import {
   acceptDocRecipes,
@@ -927,6 +929,10 @@ const checksHandlers = (profile: StartedProfile, log: Log) => {
       use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
     'checks.move': ({ projectId, id, rank }) =>
       use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
+    'checks.proofLimit': ({ projectId }) =>
+      use(proofLimitOf(projectId)).pipe(observed('checks.proofLimit', log)),
+    'checks.setProofLimit': ({ projectId, minutes }) =>
+      use(setProofLimit(projectId, minutes)).pipe(observed('checks.setProofLimit', log)),
   })
 }
 

@@ -50,6 +50,8 @@ export const SILENT_LINK: Link = {
   saveCheck: never,
   removeCheck: never,
   moveCheck: never,
+  proofLimit: never,
+  setProofLimit: never,
   docRecipes: never,
   proposeDocRecipes: never,
   acceptDocRecipes: never,

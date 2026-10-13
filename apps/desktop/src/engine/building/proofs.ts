@@ -125,6 +125,9 @@ export const MORE_INFORMATION = 'More information'
 export const NOT_REPRODUCIBLE = 'Not reproducible'
 export const CANCEL_MISSION = 'Cancel the mission'
 
+/** The section of the Project's settings where a proof's time limit is set (#321). */
+export const PROOF_LIMIT_SECTION = 'checks'
+
 /** The options of the scenarios nothing moves any more, which the end would wait on forever. */
 export const TRY_AGAIN = 'Try again'
 export const END_WITHOUT = 'End without it'
@@ -858,6 +861,25 @@ export const buildingProofs = (parts: ProofParts) => {
             recommended: null,
           }),
           event: buildingEvent(building.missionId, 'building.already_passes', { scenario }),
+        })
+      }
+      if (run.classification === 'environment' && run.timedOutAfter !== null) {
+        // Ended at the Project's limit (#321): either it never ends by design, or it needs longer.
+        const minutes = `${String(run.timedOutAfter)} minute${run.timedOutAfter === 1 ? '' : 's'}`
+        const missing = `${scenario}'s proof ran past the Project's limit of ${minutes}: Hemera ended it.\n${fenced(run.outputTail)}`
+        return yield* held(building, scenario, run, {
+          kind: 'proof_environment',
+          question: missing,
+          options: [],
+          fields: EnvironmentFields.make({
+            missing,
+            action: [
+              'If its command never ends on its own (a watch mode, such as vitest without run), the command must change; it is written in the frozen Spec, which a launched mission cannot change.',
+              'Otherwise raise the limit in the Checks settings of the Project, then Retry: Hemera runs the proof again.',
+            ].join(' '),
+            settingsSection: PROOF_LIMIT_SECTION,
+          }),
+          event: null,
         })
       }
       if (run.classification === 'environment') {

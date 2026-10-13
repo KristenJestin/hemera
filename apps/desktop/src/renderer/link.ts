@@ -221,6 +221,10 @@ export interface Link {
     id: string,
     rank: number,
   ) => Promise<ReadonlyArray<ProjectCheck>>
+  /** How long a proof may run, in minutes; null while the Project keeps the default. */
+  readonly proofLimit: (projectId: string) => Promise<number | null>
+  /** Rejects with `InvalidProofLimit` with its reason; null empties it back to the default. */
+  readonly setProofLimit: (projectId: string, minutes: number | null) => Promise<number | null>
   /** The Project's doc recipes, in their order. */
   readonly docRecipes: (projectId: string) => Promise<ReadonlyArray<DocRecipe>>
   /** The recipes proposed from the main checkout, never saved: none once the Project has some. */
@@ -725,6 +729,9 @@ export function linkOver(port: Port): Link {
     removeCheck: (projectId, id) => call((ready) => ready['checks.remove']({ projectId, id })),
     moveCheck: (projectId, id, rank) =>
       call((ready) => ready['checks.move']({ projectId, id, rank })),
+    proofLimit: (projectId) => call((ready) => ready['checks.proofLimit']({ projectId })),
+    setProofLimit: (projectId, minutes) =>
+      call((ready) => ready['checks.setProofLimit']({ projectId, minutes })),
     docRecipes: (projectId) => call((ready) => ready['docRecipes.list']({ projectId })),
     proposeDocRecipes: (projectId) =>
       call((ready) => ready['docRecipes.propose']({ projectId, asked: false })),
