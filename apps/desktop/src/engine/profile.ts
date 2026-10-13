@@ -313,6 +313,8 @@ export interface SessionsParts {
   readonly testerMode?: Layer.Layer<TesterMode>
   /** Shorter bounds for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings>
+  /** Where a suite holds the start's rebuild of the sessions a stopped engine left. */
+  readonly rebuildHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
   /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
@@ -693,7 +695,13 @@ export const startProfile = (
         Layer.provide(Layer.mergeAll(checkpoints, outside)),
       ),
     ).pipe(
-      Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
+      Layer.provideMerge(
+        sessionsLayer({
+          log,
+          timings: parts.sessions?.timings,
+          rebuildHold: parts.sessions?.rebuildHold,
+        }),
+      ),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
         Layer.mergeAll(
