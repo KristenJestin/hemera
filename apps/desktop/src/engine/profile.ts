@@ -146,6 +146,9 @@ import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
+import { FORGE_NEEDS, type ForgePort, forgePort } from './forges/port.ts'
+import { screenshotIn, screenshotsFolder } from './screenshots.ts'
+import { type ForgeRunner, type ForgeSettings, forgeRunnerLayer } from './forges/runner.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
 import { type TicketProviders, ticketProvidersLayer, ticketSearchLayer } from './tickets/search.ts'
@@ -268,6 +271,8 @@ export interface ProfileParts {
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** Where the forge CLIs are found, in which environment, and their limits (#253); this machine's otherwise. */
+  readonly forge?: ForgeSettings | undefined
   /** How the supervisor asks about and ends the machine's processes; this machine's otherwise. */
   readonly hostProcesses?: Layer.Layer<HostProcesses> | undefined
   /**
@@ -309,6 +314,8 @@ export interface SessionsParts {
   readonly testerMode?: Layer.Layer<TesterMode>
   /** Shorter bounds for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings>
+  /** Where a suite holds the start's rebuild of the sessions a stopped engine left. */
+  readonly rebuildHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
   /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
@@ -360,6 +367,8 @@ export type EngineServices =
   | TesterFindings
   | TicketSearch
   | GhCli
+  | ForgeRunner
+  | ForgePort
   | JiraLink
   | PlannerWake
   | SpecBoard
@@ -509,6 +518,8 @@ export const startProfile = (
     const postLayer = Layer.succeedContext(postContext)
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
+    // The forge port, and where its needs' Retry goes (#253).
+    const forge = forgePort()
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
@@ -542,6 +553,7 @@ export const startProfile = (
         [PERMISSION_REQUESTS, requestsHandler],
         [RESOURCE_NEEDS, resources.handler],
         [TICKET_WRITES, ticketWritesNeeds],
+        [FORGE_NEEDS, forge.handler],
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
         [REVIEW_NEEDS, ending.handler],
@@ -684,7 +696,13 @@ export const startProfile = (
         Layer.provide(Layer.mergeAll(checkpoints, outside)),
       ),
     ).pipe(
-      Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
+      Layer.provideMerge(
+        sessionsLayer({
+          log,
+          timings: parts.sessions?.timings,
+          rebuildHold: parts.sessions?.rebuildHold,
+        }),
+      ),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -719,9 +737,17 @@ export const startProfile = (
       ),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
+      Layer.provideMerge(forge.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
       Layer.provideMerge(parts.ticketProviders ?? ticketProvidersLayer),
+      // Images are attached from Hemera's own screenshot folder only (#253).
+      Layer.provideMerge(
+        forgeRunnerLayer({
+          attachable: screenshotIn(screenshotsFolder(dataFolder)),
+          ...parts.forge,
+        }),
+      ),
       Layer.provideMerge(ghCliLayer(parts.gh)),
       Layer.provideMerge(jiraLinkLayer(parts.jira)),
       Layer.provideMerge(runsRecipeRunnerLayer),
@@ -853,6 +879,8 @@ export const startProfile = (
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
     // A `gh` call a stopped engine left (#95) is ended: none outlives the call that started it.
     yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('tickets')))
+    // So is a forge CLI's call (#253).
+    yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('forge')))
     // The reservations a stop left: those whose mission is no longer in Building are released.
     yield* run(ExclusiveResources.use((reservations) => reservations.atStart)).pipe(
       Effect.tap((released) =>

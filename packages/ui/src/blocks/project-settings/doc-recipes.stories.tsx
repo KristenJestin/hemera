@@ -3,6 +3,7 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { foldedOut } from '../../exit-play.ts'
 import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist, IconFileText } from '../../icons.ts'
 import {
@@ -58,13 +59,6 @@ function accepted(proposal: SettingsDocRecipe): SettingsDocRecipe {
 function Page(props: PageProps): ReactNode {
   const [recipes, setRecipes] = useState(props.recipes)
   const [proposals, setProposals] = useState(props.proposals ?? [])
-  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
-  const [given, setGiven] = useState({ recipes: props.recipes, proposals: props.proposals })
-  if (given.recipes !== props.recipes || given.proposals !== props.proposals) {
-    setGiven({ recipes: props.recipes, proposals: props.proposals })
-    setRecipes(props.recipes)
-    setProposals(props.proposals ?? [])
-  }
   const [form, setForm] = useState<Open | null>(props.form ?? null)
   const draftFor = (open: Open | null): DocRecipeDraft => {
     if (open === null) return NEW_DOC_RECIPE
@@ -73,6 +67,23 @@ function Page(props: PageProps): ReactNode {
     return found === undefined ? NEW_DOC_RECIPE : recipeDraftOf(found)
   }
   const [draft, setDraft] = useState<DocRecipeDraft>(draftFor(props.form ?? null))
+  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
+  const [given, setGiven] = useState({
+    recipes: props.recipes,
+    proposals: props.proposals,
+    form: props.form,
+  })
+  if (
+    given.recipes !== props.recipes ||
+    given.proposals !== props.proposals ||
+    given.form !== props.form
+  ) {
+    setGiven({ recipes: props.recipes, proposals: props.proposals, form: props.form })
+    setRecipes(props.recipes)
+    setProposals(props.proposals ?? [])
+    setForm(props.form ?? null)
+    setDraft(draftFor(props.form ?? null))
+  }
   const open = (next: Open): void => {
     setDraft(draftFor(next))
     setForm(next)
@@ -463,6 +474,40 @@ export const Dense: Story = {
   },
   play: async ({ canvasElement }) => {
     expect(within(recipesList(canvasElement)).getAllByRole('listitem')).toHaveLength(14)
+  },
+}
+
+/** The last recipe removed: its line folds out with the list while Hemera falls asleep. */
+async function removeReadme(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = canvasElement.querySelector<HTMLElement>('[data-recipe="readme"]')
+  if (row === null) throw new Error('no row for the readme')
+  const dialog = await body().findByRole('dialog', { name: 'README.md in root' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove README.md in root' }))
+  expect(
+    await within(canvasElement).findByRole('heading', { name: 'No recipe yet' }),
+  ).toBeInTheDocument()
+  return row
+}
+
+/** Removing the last recipe: its line folds out with its list, and the section says there is none. */
+export const RemoveTheLastRecipe: Story = {
+  args: { recipes: DOC_RECIPES.slice(0, 1), form: { kind: 'edit', id: 'readme' } },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await removeReadme(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the line is gone at once, and the section says there is none. */
+export const RemoveTheLastRecipeReducedMotion: Story = {
+  args: { recipes: DOC_RECIPES.slice(0, 1), form: { kind: 'edit', id: 'readme' } },
+  render: (args) => (
+    <MotionConfig reducedMotion="always">
+      <Page {...args} />
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const row = await removeReadme(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
   },
 }
 

@@ -451,7 +451,7 @@ describe('The same call key executes once', () => {
 })
 
 describe('Writing only on the version that was read', () => {
-  const engine = () =>
+  const engine = (rebuildHold: Effect.Effect<void> = Effect.void) =>
     commandsEngine(data, {
       tools: { verdicts: verdictsSaying(() => ALLOW).layer },
       secrets: (() => {
@@ -459,6 +459,7 @@ describe('Writing only on the version that was read', () => {
         secrets.register('project-variables:acme', ['hunter2'])
         return secrets
       })(),
+      sessions: { rebuildHold },
     })
 
   test('fs_write on a file the session never read is refused if the file exists', async () => {
@@ -652,13 +653,15 @@ describe('Writing only on the version that was read', () => {
         }),
       ),
     )
-    const answer = await engine()(({ profile }) =>
+    // The start's rebuild would replace the session: held until the write is answered.
+    const rebuilt = Deferred.makeUnsafe<void>()
+    const answer = await engine(Deferred.await(rebuilt))(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(grant))
           const again = yield* ToolAccess.use((access) => access.byToken(token))
           return yield* callTool(again?.id ?? '', 'fs_write', { path: 'a.txt', content: 'two\n' })
-        }),
+        }).pipe(Effect.ensuring(Deferred.succeed(rebuilt, undefined))),
       ),
     )
     expect(answer).toMatchObject({ ok: true })

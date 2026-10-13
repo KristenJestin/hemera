@@ -18,6 +18,7 @@ import {
   DiffRpcs,
   CheckRefused,
   DocRecipesRpcs,
+  ForgeRpcs,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -522,6 +523,7 @@ const main = async (engine: 'answers' | 'gone') => {
       'mission.serviceDismiss': unused,
       'mission.focused': unused,
       'mission.changed': () => Stream.die('the window’s link is not asked for a mission here'),
+      'mission.keptAgents': () => Stream.die('the window’s link is not asked for a mission here'),
       'helpers.list': unused,
       'helpers.read': unused,
       'helpers.judge': unused,
@@ -545,6 +547,12 @@ const main = async (engine: 'answers' | 'gone') => {
       'docRecipes.save': unused,
       'docRecipes.remove': unused,
       'docRecipes.move': unused,
+    }),
+    ForgeRpcs.toLayer({
+      'forge.status': unused,
+      'forge.checkAgain': unused,
+      'forge.setForced': unused,
+      'forge.changes': () => Stream.die('the window’s link is not asked for the forges here'),
     }),
     DiffRpcs.toLayer({
       'diff.live': unused,

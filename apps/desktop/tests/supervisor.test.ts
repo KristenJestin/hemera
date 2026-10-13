@@ -2,17 +2,20 @@
  * The process supervisor: whatever Hemera starts, it stops as a whole tree, on Windows too, and
  * nothing outlives the engine, even one that crashed.
  *
- * Nothing is mocked: the children are real `node` processes running scripts this suite writes
- * into a temporary folder, and a process is gone when the system says so (`process.kill(pid, 0)`
- * failing), never because a `stop` returned. The registry is the data folder's own table.
+ * The children are real `node` processes running scripts this suite writes into a temporary
+ * folder, and a process is gone when the system says so (`process.kill(pid, 0)` failing), never
+ * because a `stop` returned. The registry is the data folder's own table. Only what a left-over
+ * pid runs is answered by the suite, as the system says it: the real query (PowerShell on
+ * Windows, up to `WINDOWS_COMMAND_LINE_MS`) has a test of its own.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer, Option } from 'effect'
 import type { Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -21,8 +24,10 @@ import {
   ProcessSupervisor,
   SpawnFailed,
   StderrSink,
+  WINDOWS_COMMAND_LINE_MS,
   databaseRegistryLayer,
   hostProcessesLayer,
+  outputOf,
   processSupervisorLayer,
   stillRuns,
 } from '../src/engine/supervisor.ts'
@@ -35,6 +40,12 @@ let folder: string
 let data: string
 let scripts = 0
 const strays: ChildProcess[] = []
+/**
+ * What the machine says each process this suite left running runs, as the system would say it:
+ * the supervisor's lookup is answered from here, never by PowerShell, which may take up to
+ * `WINDOWS_COMMAND_LINE_MS` on a loaded runner (one test below asks the real machine, alone).
+ */
+const lines = new Map<number, string>()
 /** Processes a test leaves behind on purpose, ended after it. */
 const strayPids: number[] = []
 
@@ -45,6 +56,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  lines.clear()
   await Promise.all(strays.splice(0).map(endChild))
   const left = strayPids.splice(0).filter(alive)
   for (const pid of left) process.kill(pid, 'SIGKILL')
@@ -137,6 +149,18 @@ async function pidsIn(path: string, count: number): Promise<number[]> {
   return pids
 }
 
+/** A process a previous engine left running, its command line answered as the system says it. */
+function leftRunning(args: ReadonlyArray<string>, options: { readonly detached?: boolean } = {}) {
+  const child = spawn(process.execPath, [...args], {
+    detached: options.detached ?? !onWindows,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  strays.push(child)
+  lines.set(child.pid ?? -1, child.spawnargs.join(' '))
+  return child
+}
+
 /** What a run of the supervisor saw: the sink's lines, and the trees `taskkill` was asked for. */
 interface Seen {
   readonly sink: string[]
@@ -147,8 +171,9 @@ interface Seen {
  * The supervisor over the real machine, a sink and a spy on the tree kills, on `data`. With
  * `killLandsAfter`, a tree kill answers at once and only lands that many milliseconds later: a
  * `taskkill` that returns before the process has exited; with `NEVER`, it never lands (a `taskkill`
- * that hung past its bound, or whose `/F` was refused). With `lineUnknown`, the machine cannot
- * say what any pid runs: a PowerShell that did not answer in time.
+ * that hung past its bound, or whose `/F` was refused). What a pid runs is answered from `lines`;
+ * with `lineUnknown`, the machine cannot say what any pid runs: a PowerShell that did not answer in
+ * time.
  */
 function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
   const host = Layer.effect(
@@ -157,8 +182,17 @@ function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
       const real = yield* HostProcesses
       return {
         ...real,
-        commandLineOf: (pid: number) =>
-          lineUnknown ? Effect.succeed(null) : real.commandLineOf(pid),
+        commandLinesOf: (pids: ReadonlyArray<number>) =>
+          Effect.succeed(
+            new Map(
+              lineUnknown
+                ? []
+                : pids.flatMap((pid) => {
+                    const line = lines.get(pid)
+                    return line === undefined ? [] : [[pid, line] as const]
+                  }),
+            ),
+          ),
         killTree: (pid: number, grouped: boolean) =>
           Effect.andThen(
             Effect.sync(() => seen.killedTrees.push(pid)),
@@ -394,14 +428,9 @@ describe('The registry outlives a crash', () => {
     const tree = script(TREE_OF_THREE)
     const other = script(STAYS_UP)
     // What a crashed engine left: a tree it started in a group of its own, still running.
-    const left = spawn(process.execPath, [tree, where, '2'], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
+    const left = leftRunning([tree, where, '2'])
     // And a pid it registered that another program holds now.
-    const stranger = spawn(process.execPath, [other], { stdio: 'ignore', windowsHide: true })
-    strays.push(left, stranger)
+    const stranger = leftRunning([other], { detached: false })
     const pids = await pidsIn(where, 2)
 
     const orphans = await supervised(seen)(
@@ -449,12 +478,7 @@ describe('The registry outlives a crash', () => {
   })
   test('an orphan is said ended only once it is gone, even when the kill answers before it exits', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
 
     const [orphans, aliveWhenSaid, said] = await supervised(
@@ -482,12 +506,7 @@ describe('The registry outlives a crash', () => {
   })
   test('an orphan its kill did not end is kept for the next start, which ends it', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
     const leftNow = ProcessRegistry.use((registry) => registry.leftBy('run', 'another engine'))
 
@@ -532,12 +551,7 @@ describe('The registry outlives a crash', () => {
   })
   test('a live orphan whose command line is unknown is kept for the next start, which ends it', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
     const root = {
       id: 'left',
@@ -580,6 +594,205 @@ describe('The registry outlives a crash', () => {
     expect(known.kept).toEqual([])
     expect(alive(pid)).toBe(false)
   })
+})
+
+describe('The start does not wait on the left-over agents one after another', () => {
+  test('three orphans whose lookups each take the worst case are handled in about one worst case', async () => {
+    // Three pids alive, whose lookup never answers: on Windows, a PowerShell past its bound.
+    const pids = [90_001, 90_002, 90_003]
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => pids.includes(pid),
+          commandLinesOf: () => Effect.never,
+          killTree: () => Effect.void,
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const [settled, orphans] = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        const sweep = yield* ProcessSupervisor.use((supervisor) =>
+          supervisor.endOrphans('session'),
+        ).pipe(Effect.forkChild)
+        // One worst case of a lookup on the test clock: every orphan's bound passes at once.
+        yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+        yield* Effect.yieldNow
+        const done = sweep.pollUnsafe() !== undefined
+        return [done, done ? yield* Fiber.join(sweep) : []] as const
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+    expect(settled).toBe(true)
+    // Each orphan the bound cut is kept, as one whose command line is unknown.
+    expect(orphans.map((one) => [one.root.pid, one.ended])).toEqual(pids.map((pid) => [pid, false]))
+  })
+})
+
+describe('The machine is asked once for every left-over agent', () => {
+  test('many orphans are looked up in one query of the machine, and each is ended', async () => {
+    const pids = Array.from({ length: 10 }, (_, index) => 91_000 + index)
+    const living = new Set(pids)
+    const asked: Array<ReadonlyArray<number>> = []
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => living.has(pid),
+          commandLinesOf: (wanted: ReadonlyArray<number>) =>
+            Effect.sync(() => {
+              asked.push(wanted)
+              return new Map(wanted.map((pid) => [pid, `${process.execPath} agent.mjs`]))
+            }),
+          killTree: (pid: number) => Effect.sync(() => living.delete(pid)),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const orphans = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        return yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('session'))
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(asked.map((one) => one.toSorted())).toEqual([pids])
+    expect(orphans.every((one) => one.ended)).toBe(true)
+  })
+
+  test('a lookup cut by its bound ends the program it started', async () => {
+    const where = join(folder, 'lookup.pid')
+    const hangs = script(`
+import { writeFileSync } from 'node:fs'
+writeFileSync(process.argv[2], String(process.pid))
+${STAYS_UP}`)
+    const said = await Effect.runPromise(
+      outputOf(process.execPath, [hangs, where], WINDOWS_COMMAND_LINE_MS).pipe(
+        Effect.timeoutOption('1 second'),
+      ),
+    )
+    const [pid] = await pidsIn(where, 1)
+
+    expect(Option.isNone(said)).toBe(true)
+    expect(await goneWithin(pid ?? -1)).toBe(true)
+  })
+})
+
+describe('A kept agent is followed until it is ended or gone', () => {
+  test('a kept orphan is listed while it runs, and dropped once it is gone', async () => {
+    const left = leftRunning([script(STAYS_UP)])
+    const pid = left.pid ?? -1
+
+    const [whileRunning, afterGone, registered] = await supervised(
+      freshSeen(),
+      undefined,
+      true,
+    )(
+      Effect.gen(function* () {
+        yield* ProcessRegistry.use((registry) =>
+          registry.add({
+            id: 'left',
+            pid,
+            program: process.execPath,
+            args: left.spawnargs.slice(1),
+            owner: { kind: 'session', id: 's1' },
+            engine: 'crashed',
+          }),
+        )
+        const supervisor = yield* ProcessSupervisor
+        yield* supervisor.endOrphans('session')
+        const kept = yield* supervisor.kept
+        // It ends by itself, without Hemera: the next start would only forget it.
+        process.kill(pid, 'SIGKILL')
+        yield* Effect.promise(() => goneWithin(pid))
+        yield* Effect.promise(() =>
+          untilTrue(() => Effect.runSync(supervisor.kept).length === 0, 10_000),
+        )
+        return [
+          kept,
+          yield* supervisor.kept,
+          yield* ProcessRegistry.use((registry) => registry.leftBy('session', supervisor.engine)),
+        ] as const
+      }),
+    )
+
+    expect(whileRunning.map((root) => [root.pid, root.owner])).toEqual([
+      [pid, { kind: 'session', id: 's1' }],
+    ])
+    expect(afterGone).toEqual([])
+    expect(registered).toEqual([])
+  })
+})
+
+describe('The machine says what a pid runs', () => {
+  test(
+    'living processes are matched by what the system says they run, in one query within its bound',
+    async () => {
+      const one = leftRunning([script(STAYS_UP), '--flag'])
+      const other = leftRunning([script(STAYS_UP), 'two words'])
+      const gone = leftRunning([script('')])
+      await goneWithin(gone.pid ?? -1)
+      const said = await Effect.runPromise(
+        Effect.provide(
+          HostProcesses.use((host) =>
+            host.commandLinesOf([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1]),
+          ),
+          hostProcessesLayer,
+        ),
+      )
+      for (const child of [one, other]) {
+        expect(
+          stillRuns(
+            { program: process.execPath, args: child.spawnargs.slice(1) },
+            said.get(child.pid ?? -1) ?? '',
+            process.platform,
+          ),
+        ).toBe(true)
+      }
+      expect(said.has(gone.pid ?? -1)).toBe(false)
+    },
+    WINDOWS_COMMAND_LINE_MS + 10_000,
+  )
 })
 
 describe('A command line is matched before anything is ended', () => {

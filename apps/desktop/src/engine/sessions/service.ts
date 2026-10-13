@@ -238,6 +238,8 @@ export interface SessionsSettings {
   readonly log: Log
   /** Shorter bounds, for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings> | undefined
+  /** Where a suite holds the start's rebuild of the sessions; never held otherwise. */
+  readonly rebuildHold?: Effect.Effect<void> | undefined
 }
 
 /** One live session, as its driver holds it. */
@@ -1103,6 +1105,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
 
       const rebuild = Effect.gen(function* () {
         yield* AutomationGate.use((gate) => gate.pass)
+        yield* settings.rebuildHold ?? Effect.void
         yield* Memory.use((memory) => memory.ready)
         // Orphan agent processes a stopped engine left are ended before anything starts.
         const orphans = (yield* ProcessSupervisor.use((supervisor) =>
