@@ -1718,12 +1718,12 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     }
   })
 
-  test('a subtest in a hunk that starts inside its t.Run block is decided by the key line when the proof has one', () => {
+  test('a subtest in a hunk that starts inside its t.Run block is still read by its name, a differing key line left to the user', () => {
     const path = 'export_test.go'
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_INSIDE_PATCH })
     expect(names).toEqual([{ parent: 'TestExport', subtest: 'empty', nesting: [], whole: false }])
-    expect(validRed(run(GO_OTHER_BRANCH_FAILS, 1, path), path, names, false)).toBe(false)
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(false)
+    // A red whose key line differs is a red the user is asked about (red_mismatch), not refused.
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(true)
     expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, true)).toBe(true)
     expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, null)).toBe(true)
   })
