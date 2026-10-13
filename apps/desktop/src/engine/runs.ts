@@ -923,6 +923,22 @@ export const stopMissionRuns = (missionId: string) =>
     })
   })
 
+/**
+ * Stops every run a mission's agents started: what the end of its Building asks. A run the user or
+ * Hemera started keeps going.
+ */
+export const stopAgentRuns = (missionId: string) =>
+  Effect.gen(function* () {
+    const runs = yield* Runs
+    const going = [...runs.live.values()].filter(
+      (live) => live.run.missionId === missionId && live.run.startedBy === 'agent',
+    )
+    yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
+      concurrency: 'unbounded',
+      discard: true,
+    })
+  })
+
 /** The runs of a place, the newest first: the Workspace's, or the main checkout's for null. */
 export const listRuns = (projectId: string, workspaceId: string | null) =>
   Effect.gen(function* () {

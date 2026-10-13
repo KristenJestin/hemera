@@ -11,7 +11,7 @@
  * lets it go, once it reported. The checks are a fake `TaskChecks`: none unless a test says.
  */
 
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
@@ -25,11 +25,12 @@ import {
 } from '@hemera/core/domain'
 import { and, asc, eq } from 'drizzle-orm'
 import { LaunchFailed } from '@hemera/ipc'
-import { Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
+import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingPartOf } from '../src/engine/building/tasks.ts'
@@ -39,6 +40,7 @@ import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
+import { getRun } from '../src/engine/runs.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
 import {
   MEMORY_TOOLS,
@@ -47,7 +49,7 @@ import {
   roleNamed,
 } from '../src/engine/sessions/roles.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import { type RoleSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   checkpoints,
@@ -55,12 +57,14 @@ import {
   domainEvents,
   proofRuns,
   reviewPasses,
+  runnerLeases,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
 import { QUIET, READING, call, eventsOf, grantOf, says } from './building-world.ts'
 import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
+import type { EngineServices } from '../src/engine/profile.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -290,6 +294,27 @@ const specialDone = (grantId: string, task: string, path: string | null, content
       yield* call(grantId, 'fs_write', { repository: 'api', path, content })
     }
     return yield* call(grantId, 'task_finished', { task, summary: `${task} done.` })
+  })
+
+/** The mission's helper of a number, once its session runs, and a grant the test drives it with. */
+const helperNumbered = (missionId: string, number: number) =>
+  Effect.gen(function* () {
+    const sessionOf = Effect.gen(function* () {
+      const row = (yield* helperRowsOf(missionId)).find((one) => one.number === number)
+      if (row === undefined) return null
+      const live = (yield* sessionsOfLineage(row.lineage)).filter((one) =>
+        ['working', 'idle'].includes(one.state),
+      )
+      const session = live.toSorted((a, b) => b.epoch - a.epoch).at(0)
+      return session === undefined ? null : { row, session }
+    })
+    yield* until(
+      Effect.map(sessionOf, (found) => found !== null),
+      LONG,
+    )
+    const found = yield* sessionOf
+    if (found === null) return yield* Effect.die(new Error(`no helper H${String(number)}`))
+    return { ...found, grantId: yield* grantOf(found.session.id) }
   })
 
 /** Waits until the mission reached Review. */
@@ -1134,6 +1159,130 @@ describe('The exit', () => {
         .find((one) => one.scenario === 'R1.S2')
       expect(proof).toMatchObject({ state: 'green', upToDate: true })
       expect(seen.review?.changedAfter.map((one) => one.path)).toContain('src/late.ts')
+    },
+  )
+  test(
+    'a helper and a command still running at the exit are stopped before the snapshot: nothing they do after it lands',
+    SLOW,
+    async () => {
+      // What the helper and the command do once the exit looked at the Workspace.
+      let afterSnapshot: Effect.Effect<void> | null = null
+      const { world, run } = ending({
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real.take(place, owner).pipe(
+              Effect.tap(() => {
+                if (owner.kind !== 'review_exit') return Effect.void
+                const after = afterSnapshot
+                afterSnapshot = null
+                return after ?? Effect.void
+              }),
+            ),
+        }),
+      })
+      const trigger = join(work, 'trigger')
+      const script = join(work, 'late-command.mjs')
+      writeFileSync(
+        script,
+        [
+          "import { existsSync, writeFileSync } from 'node:fs'",
+          'const [trigger, target] = process.argv.slice(2)',
+          'const wait = setInterval(() => {',
+          '  if (!existsSync(trigger)) return',
+          "  writeFileSync(target, 'export const command = true\\n')",
+          '  clearInterval(wait)',
+          '}, 20)',
+          '',
+        ].join('\n'),
+      )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            const byCommand = join(api, 'command.ts')
+            const launch = yield* call(builder.grantId, 'helper_launch', {
+              brief: 'Tidy the export.',
+              writes: true,
+            })
+            if (launch.startsWith('refused')) return yield* Effect.die(new Error(launch))
+            const helper = yield* helperNumbered(mission.id, 1)
+            const context = yield* Effect.context<EngineServices>()
+            const writing = yield* Deferred.make<string>()
+            afterSnapshot = Effect.gen(function* () {
+              writeFileSync(trigger, '')
+              // Long enough for a command still running to write, and end: it holds the write lock.
+              yield* until(
+                Effect.sync(() => existsSync(byCommand)),
+                3_000,
+              ).pipe(Effect.exit)
+              // Its own fiber: a write waits for the exit it lands after.
+              yield* call(helper.grantId, 'fs_write', {
+                repository: 'api',
+                path: 'helper.ts',
+                content: 'export const helper = true\n',
+              }).pipe(
+                Effect.flatMap((answer) => Deferred.succeed(writing, answer)),
+                Effect.forkDetach,
+              )
+            }).pipe(Effect.provide(context))
+            yield* builtAll(builder.grantId)
+            // Started once its tasks are done: a command running holds the Workspace's write lock.
+            const started = yield* call(builder.grantId, 'commands_run', {
+              line: `"${process.execPath}" "${script}" "${trigger}" "${byCommand}"`,
+              repository: 'api',
+              timeout: 1,
+            })
+            const runId = /^run (\S+):/.exec(started)?.[1] ?? ''
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            const failed = Effect.map(helperRowsOf(mission.id), (rows) =>
+              rows.find((one) => one.number === 1),
+            )
+            // Not a failure here: the expectations below say what was left instead.
+            yield* until(
+              Effect.map(failed, (row) => row?.state === 'failed'),
+              LONG,
+            ).pipe(Effect.exit)
+            const database = yield* Database
+            return {
+              started,
+              written: yield* Deferred.await(writing),
+              helperWrote: existsSync(join(api, 'helper.ts')),
+              commandWrote: existsSync(byCommand),
+              run: yield* getRun(runId),
+              helper: yield* failed,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: mission.id,
+              }),
+              leases: (yield* database.select().from(runnerLeases)).filter(
+                (one) => one.lineage === helper.row.lineage,
+              ),
+              needs: (yield* getMission(mission.id)).needs,
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      // Both still ran when the exit came.
+      expect(seen.started).toContain('it keeps going')
+      // The helper's write after the snapshot is refused, and the command was stopped before it.
+      expect(seen.written).toBe('refused: this session has ended')
+      expect(seen.helperWrote).toBe(false)
+      expect(seen.commandWrote).toBe(false)
+      expect(seen.run.state).toBe('stopped')
+      // Nothing of the tree is left: no session, no lease, no need; the helper ended, said why.
+      expect(seen.live).toEqual([])
+      expect(seen.leases).toEqual([])
+      expect(seen.needs).toEqual([])
+      expect(seen.helper).toMatchObject({ state: 'failed', failure: STOPPED_AT_THE_END })
+      expect(seen.review?.changedAfter.map((one) => one.path)).not.toContain('helper.ts')
     },
   )
 })

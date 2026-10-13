@@ -14,7 +14,8 @@
  *  7. on `ask`: the single human question, which answers the agent at once;
  *  8. idempotency: the same call key in the same session gives the same outcome, one execution
  *     and one record, and a retry that arrives while the first call runs waits for it;
- *  9. the execution, whose effects outside the database record their intent and outcome;
+ *  9. the execution, whose effects outside the database record their intent and outcome, only
+ *     while the grant is still live, and counted until it ends (`ToolAccess.settled`);
  * 10. the record of the call: session, role, mission, tool, class, verdict and who gave it,
  *     outcome, duration; its reason masked, never a file's content.
  *
@@ -992,7 +993,11 @@ export const toolGateLayer = (settings: GateSettings) =>
               return refusal(question.answer)
             }
           }
-          const answer = yield* execute(grant, prepared.success)
+          // A session ended while its call waited executes nothing: its owner may be settling.
+          const answer =
+            (yield* ToolAccess.use((access) =>
+              access.executing(grant.id, execute(grant, prepared.success)),
+            )) ?? refusal('refused: this session has ended')
           const notes = prepared.success.notes
           return notes.length === 0
             ? answer

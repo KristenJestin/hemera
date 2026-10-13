@@ -50,10 +50,11 @@ import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
 import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
+import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
 import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
-import { getSession, sessionsIn } from '../sessions/store.ts'
+import { getSession } from '../sessions/store.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   attemptWrites,
@@ -69,6 +70,7 @@ import {
   reviewChangedAfter,
   reviewFindings,
 } from '../storage/schema.ts'
+import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
 import { BuildingEnd } from './builder.ts'
 import { checkResultsIn } from './attempts.ts'
@@ -76,6 +78,7 @@ import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
 import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
+import { STOPPED_AT_THE_END } from './helper-store.ts'
 import { finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
@@ -141,6 +144,8 @@ type Needs =
   | ProfileHome
   | AutomationGate
   | Memory
+  | Runs
+  | ToolAccess
   | Effect.Services<ReturnType<typeof getMission>>
 
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
@@ -742,10 +747,25 @@ export const buildingEndLayer = (log: Log) => {
         })
 
       /**
-       * The exit. The Builder's sessions end first, so no write of theirs lands after the Workspace
-       * is looked at; then a snapshot of each repository, which makes stale whatever a late write
-       * touched. Anything stale or red sends the end back to the Builder, resumed, with the stale
-       * proofs and checks run again. Otherwise what changed after the review checkpoint is kept
+       * The mission's whole tree stops: every session, children first, and every command its agents
+       * started. Then the calls already executing end, and what one started meanwhile (a helper's
+       * session, a command) is stopped in turn: nothing of theirs lands after this.
+       */
+      const stopAll = (missionId: string) =>
+        Effect.gen(function* () {
+          const once = Sessions.use((sessions) =>
+            sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END),
+          ).pipe(Effect.andThen(stopAgentRuns(missionId)))
+          yield* once
+          yield* ToolAccess.use((access) => access.settled(missionId))
+          yield* once
+        })
+
+      /**
+       * The exit. The mission's whole tree stops first, so no write of its sessions or of their
+       * commands lands after the Workspace is looked at; then a snapshot of each repository, which
+       * makes stale whatever a late write touched. Anything stale or red sends the end back to the
+       * Builder, resumed, with the stale proofs and checks run again. Otherwise what changed after the review checkpoint is kept
        * with who wrote it, and the mission moves to Review and the Building ends, in one
        * transaction. A failure in between leaves the end at `refresh`, which runs the exit again.
        */
@@ -753,14 +773,9 @@ export const buildingEndLayer = (log: Log) => {
         Effect.gen(function* () {
           const database = yield* Database
           const missionId = building.missionId
-          const owner = { kind: 'mission', missionId } as const
-          for (const session of yield* sessionsIn(
-            ['starting', 'working', 'idle', 'stuck'],
-            owner,
-          )) {
-            if (session.role !== 'builder') continue
-            yield* Sessions.use((sessions) => sessions.end(session.lineage, 'the Building ended'))
-          }
+          yield* stopAll(missionId)
+          // A question a stopped call raised as the tree stopped holds the exit until answered.
+          if ((yield* getMission(missionId)).needs.length > 0) return
           const snapshots = yield* Snapshots
           const ends: Array<{ readonly base: BuildingBase; readonly tree: string }> = []
           for (const base of basesOf(building)) {
