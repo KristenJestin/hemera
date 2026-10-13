@@ -12,6 +12,7 @@ import {
   DiffRpcs,
   DocRecipesRpcs,
   ProofsRpcs,
+  AutoReviewRpcs,
   EngineApartRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -25,6 +26,7 @@ import { Effect } from 'effect'
 
 import { observed, observedStream, type Log } from '../main/diagnostic.ts'
 import { Agents, machineAgentsLayer } from './agents/service.ts'
+import { autoReviewChanges, autoReviewOf } from './building/review-store.ts'
 import {
   backToPlanningFromCheck,
   checkMission,
@@ -869,6 +871,7 @@ export const engineHandlers = (
     docRecipesHandlers(profile, log),
     diffHandlers(profile, log),
     proofsHandlers(profile, log),
+    autoReviewHandlers(profile, log),
   )
 }
 
@@ -885,6 +888,17 @@ const proofsHandlers = (profile: StartedProfile, log: Log) => {
       use(judgeManual(missionId, scenarioId, 'refused', note)).pipe(
         observed('proofs.refuseManual', log),
       ),
+  })
+}
+
+/** The automatic review (#147), a layer of its own (see `EngineServedRpcs`). */
+const autoReviewHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return AutoReviewRpcs.toLayer({
+    'autoReview.read': ({ missionId, buildingId }) =>
+      use(autoReviewOf(missionId, buildingId)).pipe(observed('autoReview.read', log)),
+    'autoReview.changed': ({ missionId }) =>
+      follow(autoReviewChanges(missionId)).pipe(observedStream('autoReview.changed', log)),
   })
 }
 

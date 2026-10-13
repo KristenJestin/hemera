@@ -37,8 +37,11 @@ export const TASK_STATES = [
 export const TaskState = Schema.Literals(TASK_STATES)
 export type TaskState = typeof TaskState.Type
 
-/** Where a task of the effective plan comes from: the frozen Spec, or an amendment. */
-export const TASK_ORIGINS = ['spec', 'amendment'] as const
+/**
+ * Where a task of the effective plan comes from: the frozen Spec, an amendment, or a finding of the
+ * automatic review (a special task, #147).
+ */
+export const TASK_ORIGINS = ['spec', 'amendment', 'review'] as const
 export const TaskOrigin = Schema.Literals(TASK_ORIGINS)
 export type TaskOrigin = typeof TaskOrigin.Type
 

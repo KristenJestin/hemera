@@ -99,6 +99,7 @@ import type { SpecBoard } from '../planning/board.ts'
 import { BuildDesk } from '../building/desk.ts'
 import { HelperDesk } from '../building/helper-desk.ts'
 import { DocsDesk } from '../building/docs-desk.ts'
+import { ReviewDesk } from '../building/review-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -216,6 +217,7 @@ export type GateServices =
   | BuildDesk
   | HelperDesk
   | DocsDesk
+  | ReviewDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -397,6 +399,12 @@ const decodeCall = (
       return decoder(tool, TOOLS.prelaunch_report.input)(raw)
     case 'docs_report':
       return decoder(tool, TOOLS.docs_report.input)(raw)
+    case 'checkpoint_read':
+      return decoder(tool, TOOLS.checkpoint_read.input)(raw)
+    case 'evidence_read':
+      return decoder(tool, TOOLS.evidence_read.input)(raw)
+    case 'review_report':
+      return decoder(tool, TOOLS.review_report.input)(raw)
     case 'build_read':
       return decoder(tool, TOOLS.build_read.input)(raw)
     case 'task_start':
@@ -914,6 +922,12 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* HelperDesk.use((desk) => desk.result(grant, call.args))
             case 'docs_report':
               return yield* DocsDesk.use((desk) => desk.report(grant, call.args))
+            case 'checkpoint_read':
+              return yield* ReviewDesk.use((desk) => desk.checkpoint(grant, call.args))
+            case 'evidence_read':
+              return yield* ReviewDesk.use((desk) => desk.evidence(grant, call.args))
+            case 'review_report':
+              return yield* ReviewDesk.use((desk) => desk.report(grant, call.args))
             case 'hemera_report':
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
