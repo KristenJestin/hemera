@@ -130,13 +130,22 @@ const MOCHA_FAILING = /^\s*(\d+) failing\s*$/
 const FAILING_LINES = 500
 /** Each line is read up to this many characters: a name is never that long. */
 const LINE_CAP = 4_096
-/** pytest's heading of a test's section in its FAILURES (`____ test_x[md] ____`). */
-const PYTEST_SECTION = /^_{3,} \S.* _{3,}\s*$/
+/**
+ * pytest's heading of a test's section in its FAILURES (`____ test_x[md] ____`), padded with a
+ * single `_` when its name is long, never the `_ _ _ _` separator between a traceback's frames.
+ */
+const PYTEST_SECTION = /^(?!(?:_ )+_?\s*$)_+ \S.* _+\s*$/
 /**
  * What a pytest section says, never the test's source it prints unnumbered above: its `E ` lines
  * and its `file:line: Name` trailer.
  */
 const PYTEST_SAID = /^E(?:\s|$)|^\S+:\d+: [\w.]*\s*$/
+/**
+ * With `--tb=native`, a section prints no `E ` line: what it says is the exception of its last
+ * traceback, at column 0 (its source and frames are indented), above what the test printed.
+ */
+const PYTEST_TRACEBACK = /^Traceback \(most recent call last\):\s*$/
+const PYTEST_CAPTURED = /^-+ Captured .* -+\s*$/
 /** pytest's summary line, `FAILED file::test - message`. */
 const PYTEST_SUMMARY = /^FAILED \S+::/
 /** libtest's heading of a failure's output, below its `failures:` line. */
@@ -202,7 +211,11 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
     if (number < 1 || number > failing) continue
     if (at < listAt) tree.set(number, at)
-    else if (!list.has(number) && line.startsWith(`${listIndent}${String(number)}) `))
+    else if (
+      !list.has(number) &&
+      line.startsWith(`${listIndent}${String(number)}) `) &&
+      mochaTitle(lines, at, listIndent) !== null
+    )
       list.set(number, at)
   }
   const entries: Array<{ readonly at: number; readonly marked: boolean; readonly number: number }> =
@@ -226,9 +239,7 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
       ? `E   ${line.slice(nodeIdOf(line).length).replace(/^ - /, '')}`
       : line.trimStart()
     const following = lines.slice(entry.at + 1, entries[index + 1]?.at ?? lines.length)
-    const below = PYTEST_SECTION.test(line)
-      ? following.filter((one) => PYTEST_SAID.test(one))
-      : following
+    const below = PYTEST_SECTION.test(line) ? pytestSaid(following) : following
     return {
       at: entry.at,
       marked: entry.marked,
@@ -250,25 +261,45 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
         entry.number === 0
           ? [entry.line]
           : entry.at > listAt
-            ? mochaTitle(lines, entry.at).map((title) => `${String(entry.number)}) ${title}`)
+            ? (mochaTitle(lines, entry.at, listIndent) ?? []).map(
+                (title) => `${String(entry.number)}) ${title}`,
+              )
             : [],
       ),
   }
 }
 
+/** What a pytest section says: its `E ` lines and trailers, or its native traceback's exception. */
+const pytestSaid = (section: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const said = section.filter((line) => PYTEST_SAID.test(line))
+  if (said.some((line) => /^E(?:\s|$)/.test(line))) return said
+  const captured = section.findIndex((line) => PYTEST_CAPTURED.test(line))
+  const own = captured < 0 ? section : section.slice(0, captured)
+  const last = own.findLastIndex((line) => PYTEST_TRACEBACK.test(line))
+  return last < 0 ? said : own.slice(last + 1).filter((line) => /^\S/.test(line))
+}
+
 /**
  * The lines of a mocha failure's title in its list, each without the `:` the last one ends with:
- * `1) exports` and `the invoices export as Markdown:` below it. Its line alone when no line
- * below ends the title.
+ * `1) exports` and `the invoices export as Markdown:` below it, each title below the first indented
+ * two more spaces than the one above (a describe's title may end with `:` too). Null when its last
+ * line does not end with `:`: a numbered line that is no failure's title.
  */
-const mochaTitle = (lines: ReadonlyArray<string>, at: number): ReadonlyArray<string> => {
+const mochaTitle = (
+  lines: ReadonlyArray<string>,
+  at: number,
+  indent: string,
+): ReadonlyArray<string> | null => {
   const title = [(lines[at] ?? '').replace(MOCHA_FAILURE, '')]
   for (const line of lines.slice(at + 1, at + 10)) {
-    if ((title.at(-1) ?? '').trimEnd().endsWith(':') || line.trim() === '') break
+    const depth = `${indent}   ${'  '.repeat(title.length)}`
+    if (!line.startsWith(depth) || /^\s/.test(line.slice(depth.length))) break
     title.push(line)
   }
-  if (!(title.at(-1) ?? '').trimEnd().endsWith(':')) return [title[0] ?? '']
-  return title.map((line) => line.trim().replace(/:$/, ''))
+  if (!(title.at(-1) ?? '').trimEnd().endsWith(':')) return null
+  return title.map((line, index) =>
+    index === title.length - 1 ? line.trim().replace(/:$/, '') : line.trim(),
+  )
 }
 
 const unescapeXml = (text: string): string =>
@@ -481,7 +512,7 @@ const namePattern = (name: string, cases = false): RegExp | null => {
       `(?:^test |^---- |${path})${named}(?= \\.\\.\\. | - should panic \\.\\.\\. | stdout ----)`,
       `(?:^|${path})${body}(?=\\[)`,
       `${path}${body}(?= - )`,
-      `^_{3,} (?:\\w+\\.)*${body}(?=\\[| _{3,}\\s*$)`,
+      `^_+ (?:\\w+\\.)*${body}(?=\\[| _+\\s*$)`,
     ].join('|'),
   )
 }
