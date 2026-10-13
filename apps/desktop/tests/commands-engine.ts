@@ -59,6 +59,7 @@ export function commandsEngine(
     | 'ticketSync'
     | 'building'
     | 'hostProcesses'
+    | 'runs'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
   /** The engine's fibers on a test clock the program moves (`TestClock.adjust`). */
@@ -74,8 +75,8 @@ export function commandsEngine(
             {
               backupFolders: [],
               reconciliationSteps: [],
-              runs: FAST,
               ...parts,
+              runs: { ...FAST, ...parts.runs },
               gh: parts.gh ?? NO_GH,
             },
             (line) => lines.push(line),
