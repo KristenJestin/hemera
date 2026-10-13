@@ -181,8 +181,17 @@ function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
       const real = yield* HostProcesses
       return {
         ...real,
-        commandLineOf: (pid: number) =>
-          Effect.succeed(lineUnknown ? null : (lines.get(pid) ?? null)),
+        commandLinesOf: (pids: ReadonlyArray<number>) =>
+          Effect.succeed(
+            new Map(
+              lineUnknown
+                ? []
+                : pids.flatMap((pid) => {
+                    const line = lines.get(pid)
+                    return line === undefined ? [] : [[pid, line] as const]
+                  }),
+            ),
+          ),
         killTree: (pid: number, grouped: boolean) =>
           Effect.andThen(
             Effect.sync(() => seen.killedTrees.push(pid)),
@@ -597,7 +606,7 @@ describe('The start does not wait on the left-over agents one after another', ()
         return {
           ...real,
           alive: (pid: number) => pids.includes(pid),
-          commandLineOf: () => Effect.never,
+          commandLinesOf: () => Effect.never,
           killTree: () => Effect.void,
         }
       }),
@@ -637,6 +646,57 @@ describe('The start does not wait on the left-over agents one after another', ()
     expect(settled).toBe(true)
     // Each orphan the bound cut is kept, as one whose command line is unknown.
     expect(orphans.map((one) => [one.root.pid, one.ended])).toEqual(pids.map((pid) => [pid, false]))
+  })
+})
+
+describe('The machine is asked once for every left-over agent', () => {
+  test('many orphans are looked up in one query of the machine, and each is ended', async () => {
+    const pids = Array.from({ length: 10 }, (_, index) => 91_000 + index)
+    const living = new Set(pids)
+    const asked: Array<ReadonlyArray<number>> = []
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => living.has(pid),
+          commandLinesOf: (wanted: ReadonlyArray<number>) =>
+            Effect.sync(() => {
+              asked.push(wanted)
+              return new Map(wanted.map((pid) => [pid, `${process.execPath} agent.mjs`]))
+            }),
+          killTree: (pid: number) => Effect.sync(() => living.delete(pid)),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const orphans = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        return yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('session'))
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(asked.map((one) => one.toSorted())).toEqual([pids])
+    expect(orphans.every((one) => one.ended)).toBe(true)
   })
 })
 
@@ -688,23 +748,30 @@ describe('A kept agent is followed until it is ended or gone', () => {
 
 describe('The machine says what a pid runs', () => {
   test(
-    'a living process is matched by what the system says it runs, within its bound',
+    'living processes are matched by what the system says they run, in one query within its bound',
     async () => {
-      const child = leftRunning([script(STAYS_UP), '--flag'])
-      const line = await Effect.runPromise(
+      const one = leftRunning([script(STAYS_UP), '--flag'])
+      const other = leftRunning([script(STAYS_UP), 'two words'])
+      const gone = leftRunning([script('')])
+      await goneWithin(gone.pid ?? -1)
+      const said = await Effect.runPromise(
         Effect.provide(
-          HostProcesses.use((host) => host.commandLineOf(child.pid ?? -1)),
+          HostProcesses.use((host) =>
+            host.commandLinesOf([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1]),
+          ),
           hostProcessesLayer,
         ),
       )
-      expect(line).not.toBeNull()
-      expect(
-        stillRuns(
-          { program: process.execPath, args: child.spawnargs.slice(1) },
-          line ?? '',
-          process.platform,
-        ),
-      ).toBe(true)
+      for (const child of [one, other]) {
+        expect(
+          stillRuns(
+            { program: process.execPath, args: child.spawnargs.slice(1) },
+            said.get(child.pid ?? -1) ?? '',
+            process.platform,
+          ),
+        ).toBe(true)
+      }
+      expect(said.has(gone.pid ?? -1)).toBe(false)
     },
     WINDOWS_COMMAND_LINE_MS + 10_000,
   )

@@ -14,8 +14,9 @@
  * A crash ends nothing, so the roots are also written to a durable registry while they run (their
  * pid, their program and arguments, what owns them, and the engine that started them). At the next
  * start, a root a previous engine left is ended as a tree if it is still alive and still the same
- * program; a pid now held by another program is not ours and is never touched. The roots left are
- * looked at side by side, so that many cost about the time of one. One that cannot be ended (what
+ * program; a pid now held by another program is not ours and is never touched. The machine is
+ * asked once what every root left runs, and the roots are ended side by side, so that many cost
+ * about the time of one. One that cannot be ended (what
  * it runs could not be said in time, or its kill did not end it) is kept: listed, watched until it
  * is gone, and tried again at the next start.
  *
@@ -137,8 +138,13 @@ export interface HostProcessesService {
   readonly killTree: (pid: number, grouped: boolean) => Effect.Effect<void>
   /** Whether a pid names a living process. */
   readonly alive: (pid: number) => boolean
-  /** The command line a living pid runs, as the system says it, or null when it cannot say. */
-  readonly commandLineOf: (pid: number) => Effect.Effect<string | null>
+  /**
+   * The command lines living pids run, as the system says them, asked once for all of them; a pid
+   * the system cannot say is not in the answer.
+   */
+  readonly commandLinesOf: (
+    pids: ReadonlyArray<number>,
+  ) => Effect.Effect<ReadonlyMap<number, string>>
 }
 
 export class HostProcesses extends Context.Service<HostProcesses, HostProcessesService>()(
@@ -212,38 +218,66 @@ const taskkill = (pid: number) =>
   })
 
 /**
- * How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow.
- * The orphans' sweep bounds every lookup by it, on every system: one cut is an unknown command line.
+ * How long Windows may take to say what pids run: PowerShell and its first CIM query are slow.
+ * The orphans' sweep bounds its one lookup by it, on every system: one cut is unknown command lines.
  */
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
-/** What Windows says a pid runs: PowerShell is the one program every Windows has that tells it. */
-const windowsCommandLine = (pid: number) =>
+/**
+ * What a program prints, once it ends or `millis` passed, or null when it printed nothing.
+ */
+export const outputOf = (program: string, args: ReadonlyArray<string>, millis: number) =>
   Effect.callback<string | null>((resume) => {
-    execFile(
+    execFile(program, [...args], { windowsHide: true, timeout: millis }, (_error, stdout) => {
+      const text = String(stdout).trim()
+      resume(Effect.succeed(text === '' ? null : text))
+    })
+  })
+
+/** `<pid> <command line>` lines, as the two lookups below print them; one without a line is left out. */
+const linesByPid = (text: string | null): ReadonlyMap<number, string> =>
+  new Map(
+    (text ?? '').split('\n').flatMap((row) => {
+      const found = /^\s*(\d+)\s+(\S.*)$/.exec(row.trimEnd())
+      return found === null ? [] : [[Number(found[1]), found[2] ?? ''] as const]
+    }),
+  )
+
+/**
+ * What Windows says the pids run, in one PowerShell for all of them: PowerShell is the one program
+ * every Windows has that tells it, and starting it is the slow part.
+ */
+const windowsCommandLines = (pids: ReadonlyArray<number>) =>
+  Effect.map(
+    outputOf(
       'powershell.exe',
       [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `(Get-CimInstance Win32_Process -Filter 'ProcessId=${String(pid)}').CommandLine`,
+        `Get-CimInstance Win32_Process -Filter '${pids.map((pid) => `ProcessId=${String(pid)}`).join(' OR ')}' | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`,
       ],
-      { windowsHide: true, timeout: WINDOWS_COMMAND_LINE_MS },
-      (error, stdout) => {
-        const line = String(stdout).trim()
-        resume(Effect.succeed(error !== null || line === '' ? null : line))
-      },
-    )
-  })
+      WINDOWS_COMMAND_LINE_MS,
+    ),
+    linesByPid,
+  )
 
-/** What macOS and the other POSIX systems say a pid runs. */
-const psCommandLine = (pid: number) =>
-  Effect.callback<string | null>((resume) => {
-    execFile('ps', ['-o', 'command=', '-p', String(pid)], (error, stdout) => {
-      const line = String(stdout).trim()
-      resume(Effect.succeed(error !== null || line === '' ? null : line))
-    })
-  })
+/** What macOS and the other POSIX systems say the pids run, in one `ps`. */
+const psCommandLines = (pids: ReadonlyArray<number>) =>
+  Effect.map(
+    outputOf('ps', ['-o', 'pid=,command=', '-p', pids.join(',')], WINDOWS_COMMAND_LINE_MS),
+    linesByPid,
+  )
+
+/** What Linux says a pid runs: the very words it was started with. */
+const procCommandLine = (pid: number): string | null => {
+  try {
+    const read = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8')
+    return read === '' ? null : read.replace(/\0$/, '').split('\0').join(' ')
+  } catch {
+    return null
+  }
+}
 
 /** The machine this engine runs on. */
 export const hostProcessesLayer = Layer.succeed(HostProcesses, {
@@ -307,19 +341,21 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
       return (cause as NodeJS.ErrnoException).code === 'EPERM'
     }
   },
-  commandLineOf: (pid) => {
-    if (process.platform === 'win32') return windowsCommandLine(pid)
+  commandLinesOf: (pids) => {
+    if (pids.length === 0) return Effect.succeed(new Map())
+    if (process.platform === 'win32') return windowsCommandLines(pids)
     if (process.platform === 'linux') {
-      return Effect.sync(() => {
-        try {
-          const read = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8')
-          return read === '' ? null : read.replace(/\0$/, '').split('\0').join(' ')
-        } catch {
-          return null
-        }
-      })
+      return Effect.sync(
+        () =>
+          new Map(
+            pids.flatMap((pid) => {
+              const line = procCommandLine(pid)
+              return line === null ? [] : [[pid, line] as const]
+            }),
+          ),
+      )
     }
-    return psCommandLine(pid)
+    return psCommandLines(pids)
   },
 })
 
@@ -722,18 +758,13 @@ export const processSupervisorLayer = Layer.effect(
       })
 
     /** One root left by a previous engine: ended, forgotten, or kept for the next start. */
-    const endOrphan = (root: RegisteredRoot) =>
+    const endOrphan = (root: RegisteredRoot, said: ReadonlyMap<number, string> | null) =>
       Effect.gen(function* () {
         let ours = false
         let gone = false
         const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
-        if (host.alive(root.pid)) {
-          const line = yield* host
-            .commandLineOf(root.pid)
-            .pipe(
-              Effect.timeoutOption(Duration.millis(WINDOWS_COMMAND_LINE_MS)),
-              Effect.map(Option.getOrNull),
-            )
+        if (said !== null) {
+          const line = said.get(root.pid) ?? null
           // Alive, and the system could not say what it runs in time (on Windows, PowerShell too
           // slow or failing): neither ended nor forgotten, so that the next start asks again.
           if (line === null) {
@@ -762,11 +793,27 @@ export const processSupervisorLayer = Layer.effect(
         return { root, ended: gone }
       })
 
-    // Side by side: N roots left cost about one root's worst case, not N of them.
+    // The machine is asked once what every living root runs (one PowerShell on Windows, however
+    // many), then the roots are ended side by side: N roots cost about one root's worst case.
     const endOrphans = (kind: ProcessOwner['kind']) =>
-      Effect.flatMap(registry.leftBy(kind, engine), (left) =>
-        Effect.forEach(left, endOrphan, { concurrency: 'unbounded' }),
-      )
+      Effect.gen(function* () {
+        const left = yield* registry.leftBy(kind, engine)
+        const living = new Set(left.filter((root) => host.alive(root.pid)).map((root) => root.pid))
+        const said =
+          living.size === 0
+            ? new Map<number, string>()
+            : yield* host
+                .commandLinesOf([...living])
+                .pipe(
+                  Effect.timeoutOption(Duration.millis(WINDOWS_COMMAND_LINE_MS)),
+                  Effect.map(Option.getOrElse(() => new Map<number, string>())),
+                )
+        return yield* Effect.forEach(
+          left,
+          (root) => endOrphan(root, living.has(root.pid) ? said : null),
+          { concurrency: 'unbounded' },
+        )
+      })
 
     return {
       engine,

@@ -908,8 +908,12 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
         const machine = yield* HostProcesses
         return {
           ...machine,
-          commandLineOf: (pid: number) =>
-            pid === orphan.pid ? Effect.succeed(orphanLine) : machine.commandLineOf(pid),
+          commandLinesOf: (pids: ReadonlyArray<number>) =>
+            Effect.map(machine.commandLinesOf(pids.filter((pid) => pid !== orphan.pid)), (said) =>
+              pids.includes(orphan.pid ?? 0)
+                ? new Map([...said, [orphan.pid ?? 0, orphanLine]])
+                : said,
+            ),
         }
       }),
     ).pipe(Layer.provide(hostProcessesLayer))
@@ -993,8 +997,10 @@ describe('An agent a start could not stop is shown on its mission (#320)', () =>
         const machine = yield* HostProcesses
         return {
           ...machine,
-          commandLineOf: (asked: number) =>
-            asked === pid ? Effect.succeed(line) : machine.commandLineOf(asked),
+          commandLinesOf: (asked: ReadonlyArray<number>) =>
+            Effect.map(machine.commandLinesOf(asked.filter((one) => one !== pid)), (said) =>
+              line !== null && asked.includes(pid) ? new Map([...said, [pid, line]]) : said,
+            ),
         }
       }),
     ).pipe(Layer.provide(hostProcessesLayer))
@@ -1095,8 +1101,8 @@ describe('An agent a start could not stop is shown on its mission (#320)', () =>
         return {
           ...machine,
           alive: (pid: number) => pids.includes(pid) || machine.alive(pid),
-          commandLineOf: (pid: number) =>
-            pids.includes(pid) ? Effect.never : machine.commandLineOf(pid),
+          commandLinesOf: (asked: ReadonlyArray<number>) =>
+            asked.some((pid) => pids.includes(pid)) ? Effect.never : machine.commandLinesOf(asked),
         }
       }),
     ).pipe(Layer.provide(hostProcessesLayer))
