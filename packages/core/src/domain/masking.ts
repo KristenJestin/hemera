@@ -59,6 +59,10 @@ const PREFIXED_TOKEN = new RegExp(
     String.raw`\bgithub_pat_[A-Za-z0-9_]{16,}`,
     String.raw`\bxox[abprs]-[A-Za-z0-9-]{8,}`,
     String.raw`\bglpat-[A-Za-z0-9_-]{16,}`,
+    // Bitbucket app passwords, Atlassian API tokens, Bitbucket Data Center HTTP access tokens.
+    String.raw`\bATBB[A-Za-z0-9]{16,}`,
+    String.raw`\bATATT[A-Za-z0-9_=-]{16,}`,
+    String.raw`\bBBDC-[A-Za-z0-9+/_=-]{16,}`,
     String.raw`\bAKIA[0-9A-Z]{16}`,
     String.raw`\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`,
   ].join('|'),

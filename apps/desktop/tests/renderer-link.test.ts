@@ -18,6 +18,7 @@ import {
   DiffRpcs,
   CheckRefused,
   DocRecipesRpcs,
+  ForgeRpcs,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -546,6 +547,12 @@ const main = async (engine: 'answers' | 'gone') => {
       'docRecipes.save': unused,
       'docRecipes.remove': unused,
       'docRecipes.move': unused,
+    }),
+    ForgeRpcs.toLayer({
+      'forge.status': unused,
+      'forge.checkAgain': unused,
+      'forge.setForced': unused,
+      'forge.changes': () => Stream.die('the window’s link is not asked for the forges here'),
     }),
     DiffRpcs.toLayer({
       'diff.live': unused,
