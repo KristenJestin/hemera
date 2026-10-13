@@ -178,7 +178,7 @@ export const BudgetEstimated: Story = {
     await expect(line).toHaveTextContent('0 of 8 launches')
     await userEvent.click(line)
     await waitFor(() => {
-      expect(canvas.getByText('≈ $3.10 · 0.9 M tokens')).toBeVisible()
+      expect(canvas.getByText('≈ $3.10 · 900 k tokens')).toBeVisible()
     })
     await expect(canvas.getByText('0 of 30 tries')).toBeVisible()
     await expect(canvas.getByText(/^Estimated:/)).toBeVisible()

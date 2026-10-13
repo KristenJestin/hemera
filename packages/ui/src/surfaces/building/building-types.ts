@@ -211,7 +211,8 @@ export interface BuildingMoment {
 
 /** What moved since the Freeze, as the check found it. */
 export interface Moved {
-  kind: 'target' | 'proof' | 'living' | 'ticket' | 'dirty'
+  /** `other`: a file no task targets, handed to the agent of the check. */
+  kind: 'target' | 'proof' | 'living' | 'ticket' | 'dirty' | 'other'
   /** A path, a requirement of the living spec, or the ticket. */
   what: string
   /** How it moved, in words: `+12 −3 in 2 commits`. */

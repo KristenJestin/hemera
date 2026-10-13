@@ -65,6 +65,7 @@ const MOVED_KIND: Record<Moved['kind'], string> = {
   living: 'A requirement of the living spec',
   ticket: 'The ticket',
   dirty: 'A file uncommitted at Freeze',
+  other: 'A file changed on the base',
 }
 
 /** A thing moved since the Freeze: what and how on its line; unfolded, the agent's verdict. */
@@ -104,14 +105,13 @@ function MovedLine({
               {moved.verdict.why}
             </p>
           )}
-          {onOpenDiff !== undefined &&
-            (moved.kind === 'target' || moved.kind === 'proof' || moved.kind === 'dirty') && (
-              <span>
-                <Button variant="link" size="sm" onClick={() => onOpenDiff(moved.what)}>
-                  What changed
-                </Button>
-              </span>
-            )}
+          {onOpenDiff !== undefined && moved.kind !== 'living' && moved.kind !== 'ticket' && (
+            <span>
+              <Button variant="link" size="sm" onClick={() => onOpenDiff(moved.what)}>
+                What changed
+              </Button>
+            </span>
+          )}
         </div>
       </Fold>
     </li>
