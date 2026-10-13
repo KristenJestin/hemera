@@ -1347,3 +1347,92 @@ describe('A red read from the failing names #260 still missed', () => {
     expect(validRed(run(output, 1, path), path, ['the invoices export as CSV'])).toBe(false)
   })
 })
+
+/** pytest 9.1: an older parametrised test fails on cases whose ids hold `::test_x[` and `::test_x - `; `test_x` passes. */
+const PYTEST_ID_INSIDE_OTHER_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 5 items
+
+tests/test_export.py FF...                                               [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_other[a::test_x[1]] ___________________________
+
+ref = 'a::test_x[1]'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "a::test_x - b", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x[1]' == 'b'
+E         
+E         - b
+E         + a::test_x[1]
+
+tests/test_export.py:6: AssertionError
+__________________________ test_other[a::test_x - b] ___________________________
+
+ref = 'a::test_x - b'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "a::test_x - b", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x - b' == 'b'
+E         
+E         - b
+E         + a::test_x - b
+
+tests/test_export.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_other[a::test_x[1]] - AssertionError: asser...
+FAILED tests/test_export.py::test_other[a::test_x - b] - AssertionError: asse...
+========================= 2 failed, 3 passed in 0.01s ==========================
+`
+
+/** pytest 9.1: the same, and `test_x[1]` fails. */
+const PYTEST_ID_INSIDE_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 4 items
+
+tests/test_export.py F.F.                                                [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_other[a::test_x[1]] ___________________________
+
+ref = 'a::test_x[1]'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x[1]' == 'b'
+E         
+E         - b
+E         + a::test_x[1]
+
+tests/test_export.py:6: AssertionError
+__________________________________ test_x[1] ___________________________________
+
+n = 1
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_x(n):
+>       assert n > 1
+E       assert 1 > 1
+
+tests/test_export.py:11: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_other[a::test_x[1]] - AssertionError: asser...
+FAILED tests/test_export.py::test_x[1] - assert 1 > 1
+========================= 2 failed, 2 passed in 0.01s ==========================
+`
+
+describe('A red read from the Go subtests and pytest ids #279 left', () => {
+  test('a pytest id inside another test’s case id is not that test', () => {
+    const path = 'tests/test_export.py'
+    expect(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path).failingLines).toHaveLength(2)
+    expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_x'])).toBe(false)
+    expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_other'])).toBe(true)
+    expect(validRed(run(PYTEST_ID_INSIDE_FAILS, 1, path), path, ['test_x'])).toBe(true)
+  })
+})

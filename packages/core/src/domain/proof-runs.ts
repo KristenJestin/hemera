@@ -311,7 +311,8 @@ const posix = (path: string): string => path.replace(/\\+/g, '/')
 /**
  * A test's declared name as a pattern matched whole: from the start of a line or after a
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
- * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. What
+ * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. A
+ * `::` is a node id's before its first `[`: a case id holding `::test_x[` is not `test_x`. What
  * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
  * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
  * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
@@ -325,7 +326,7 @@ const namePattern = (name: string, cases = false): RegExp | null => {
     .join('')
   const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
   return new RegExp(
-    `::${body}\\[|(?:^|[\\s>›]|::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `(?:^|\\s)[^\\s[]*::${body}\\[|(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
