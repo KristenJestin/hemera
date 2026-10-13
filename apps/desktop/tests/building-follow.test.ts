@@ -11,6 +11,7 @@ import {
   type BuildingChange,
   type BuildingView,
   type MemoryChanged,
+  type Run,
 } from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -146,6 +147,27 @@ const followed = (link: Link) => {
     () => NOW,
   )
   return { following, last: () => views.at(-1) }
+}
+
+/** A run of a service, as the engine announces it when its address is published. */
+const serveRun: Run = {
+  id: 'run-api',
+  projectId: 'acme',
+  workspaceId: 'w1',
+  commandId: 'cmd-api',
+  name: 'api',
+  type: 'serve',
+  line: 'pnpm --filter api dev',
+  folder: '/work/acme/api',
+  startedBy: 'user',
+  sessionId: null,
+  missionId: 'm12',
+  state: 'running',
+  exitCode: null,
+  url: 'http://127.0.0.1:41873',
+  portConflict: null,
+  startedAt: '2026-10-11T15:10:00.000Z',
+  endedAt: null,
 }
 
 describe('Launching from the Ready page', () => {
@@ -353,5 +375,25 @@ describe('Following the Building page', () => {
       'start cmd-mail',
       'dismiss run-worker',
     ])
+  })
+
+  test('a service shows its address once it publishes it, without a gesture', async () => {
+    let read = service({ state: 'starting', url: null })
+    const runListeners: Array<(run: Run) => void> = []
+    const { link, buildingListeners } = linkOf({
+      missionServices: () => Promise.resolve([read]),
+      onRunChanges: (listener) => {
+        runListeners.push(listener)
+        return () => undefined
+      },
+    })
+    const { last } = followed(link)
+    for (const listener of buildingListeners) listener(building())
+    await settled()
+    expect(last()?.moment?.services.map((one) => one.url)).toEqual([undefined])
+    read = service({ state: 'starting', url: 'http://127.0.0.1:41873' })
+    for (const listener of runListeners) listener(serveRun)
+    await settled()
+    expect(last()?.moment?.services.map((one) => one.url)).toEqual(['http://127.0.0.1:41873'])
   })
 })
