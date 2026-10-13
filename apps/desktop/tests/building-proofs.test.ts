@@ -1995,6 +1995,102 @@ describe('A proof waiting for an exclusive resource', () => {
     expect(fields.missing).toContain("R1.S2's proof could not run")
     expect(fields.missing).toContain('it waited 2s for the dev port, held elsewhere')
   })
+
+  test('a stale proof whose rerun at the refresh waits for a resource held elsewhere asks the user to free it, and its Retry runs it again, with no attempt for the Builder', async () => {
+    let proofCommand = ''
+    let held = false
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free until the refresh; from then on another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          held = true
+          writeFileSync(
+            join(yield* apiOf(mission.id), 'invoices.ts'),
+            'export const invoices = [2]\n',
+          )
+          yield* BuildDesk.use((desk) => desk.refreshProofs(mission.id))
+          const need = yield* needOf(mission.id, 'Environment')
+          const waiting = yield* proofOf(mission.id, 'R1.S2')
+          const attempts = yield* proofAttemptsOf('R1.S2')
+          held = false
+          yield* retryNeed(need.id)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { need, waiting, attempts, after: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    const fields = seen.need.fields
+    if (!Predicate.isTagged(fields, 'Environment')) throw new Error('not an environment need')
+    expect(fields.missing).toContain("R1.S2's proof could not run")
+    expect(fields.missing).toContain('it waited 2s for the dev port, held elsewhere')
+    expect(seen.waiting.state).toBe('held')
+    expect(seen.attempts).toEqual([])
+    expect(seen.after.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+      ['rerun', 'passed'],
+    ])
+  })
 })
 
 describe('A restart while a proof waits on its fix', () => {
