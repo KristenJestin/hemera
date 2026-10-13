@@ -182,11 +182,15 @@ const questionOf = (finding: ReviewFindingRow): string =>
     .filter((one) => one !== null)
     .join('\n')
 
-/** A special task born from a finding, added available when nothing holds it. */
+/**
+ * A special task born from a finding, added available when nothing holds it; with what the user
+ * wrote when they answered its contradiction in their own words.
+ */
 const specialTaskIn = (
   transaction: EngineTransaction,
   building: BuildingRow,
   finding: ReviewFindingRow,
+  written: string | null = null,
 ) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
@@ -194,7 +198,8 @@ const specialTaskIn = (
     const number = tasks.filter((one) => one.origin === 'review').length + 1
     const id = specialTaskId(number)
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
-    const written = specialTaskOf(finding)
+    const task = specialTaskOf(finding)
+    const result = written === null ? task.result : `${task.result}\nThe user answered: ${written}`
     const repository =
       finding.repository ??
       (finding.path === null ? null : (basesOf(building)[0]?.repository ?? null))
@@ -210,8 +215,8 @@ const specialTaskIn = (
         rank,
         origin: 'review',
         decisionId: null,
-        title: secrets.mask(written.title),
-        result: secrets.mask(written.result),
+        title: secrets.mask(task.title),
+        result: secrets.mask(result),
         requirements: '[]',
         scenarios: '[]',
         targets: secrets.mask(JSON.stringify(targets)),
@@ -232,7 +237,7 @@ const specialTaskIn = (
         task: id,
         finding: finding.number,
         reviewer: finding.reviewer,
-        title: written.title,
+        title: task.title,
       }),
     }
   })
@@ -1193,8 +1198,10 @@ export const buildingEndLayer = (log: Log) => {
               .pipe(Effect.mapError(refusedWhile('keeping a finding’s fate')))
             return events
           }
-          if (answer === SPEC_IS_RIGHT) {
-            events.push((yield* specialTaskIn(transaction, building, finding)).event)
+          // An answer in the user's own words asks the code to change, as they say: the Spec stands.
+          const written = Predicate.isTagged(answered.answer, 'Written') ? kept : null
+          if (answer === SPEC_IS_RIGHT || written !== null) {
+            events.push((yield* specialTaskIn(transaction, building, finding, written)).event)
             events.push(...(yield* settleIn(transaction, building)).events)
             return events
           }
