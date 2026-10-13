@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../../components/button/button.tsx'
-import { settled } from '../../blocks/planning/planning-play.ts'
+import { EDITOR_LOADED, settled } from '../../blocks/planning/planning-play.ts'
 import { type MomentName, PlanningScreen } from './planning-screen-fixture.tsx'
 
 /**
@@ -22,6 +22,8 @@ const meta = {
   title: 'Surfaces/Planning',
   component: PlanningScreen,
   parameters: { layout: 'fullscreen' },
+  // Its answers and discussions are mention fields: the editor is there before the first play.
+  loaders: EDITOR_LOADED,
   args: {
     moment: 'questionsWaiting',
     onAnswer: fn(() => Promise.resolve()),
@@ -367,6 +369,10 @@ export const Discussing: Story = {
     await userEvent.click(discuss)
     await expect(args.onDiscuss).toHaveBeenCalledWith({ kind: 'question', id: 'Q5' })
     const body = within(document.body)
+    // Its field is drawn ready, not a skeleton waiting on the editor's import.
+    await expect(
+      body.getByRole('textbox', { name: 'Your first message on Q5' }),
+    ).toBeInTheDocument()
     // The view is closed once it has finished coming in, its field holding the focus.
     await waitFor(() => {
       const field = body.getByRole('textbox', { name: 'Your first message on Q5' })

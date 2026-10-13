@@ -32,6 +32,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -52,6 +54,7 @@ import {
 } from '../storage/database.ts'
 import { fileContents, missions, snapshotChanges, snapshotFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { recordTreeIn } from './proof-store.ts'
 
 /** The folder of the data folder that holds the snapshot stores, one per Project. */
 export const SNAPSHOTS_FOLDER = 'snapshots'
@@ -84,6 +87,10 @@ export type SnapshotOwner =
   | { readonly kind: 'freeze'; readonly missionId: string; readonly freezeId: string }
   /** The last tree the detector of changes outside Hemera compared (#148). */
   | { readonly kind: 'outside'; readonly missionId: string; readonly buildingId: string }
+  /** The tree a Building left its end with, compared with its review checkpoint (#147). */
+  | { readonly kind: 'review_exit'; readonly missionId: string; readonly buildingId: string }
+  /** The Workspace as the live diff last read it (#249). */
+  | { readonly kind: 'live'; readonly missionId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -209,6 +216,16 @@ export interface SnapshotsService {
     toTree: string,
     path?: string,
   ) => Effect.Effect<ReadonlyArray<FileDiff>, SnapshotUnavailable | DatabaseError>
+  /**
+   * Writes a tree of the store into an empty folder, as files to read (#147: the reviewers' copy
+   * of a checkpoint): a sensitive file is its stand-in there, as in the tree.
+   */
+  readonly materialize: (
+    missionId: string,
+    repository: RepositoryPlace,
+    tree: string,
+    folder: string,
+  ) => Effect.Effect<void, SnapshotFailed>
   /** The refs and the copied rows of a mission, per repository: for diagnosis. */
   readonly diagnose: (
     missionId: string,
@@ -265,6 +282,10 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/freezes/${owner.freezeId}/${leaf}`
     case 'outside':
       return `${mission}/buildings/${owner.buildingId}/outside/${leaf}`
+    case 'review_exit':
+      return `${mission}/buildings/${owner.buildingId}/review-exit/${leaf}`
+    case 'live':
+      return `${mission}/live/${leaf}`
   }
 }
 
@@ -283,6 +304,10 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the Freeze ${owner.freezeId}`
     case 'outside':
       return `the Workspace compared for Building ${owner.buildingId}`
+    case 'review_exit':
+      return `the end of Building ${owner.buildingId}`
+    case 'live':
+      return 'the live diff'
   }
 }
 
@@ -727,6 +752,8 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
 
       const take = (repository: RepositoryPlace, owner: SnapshotOwner) =>
         Effect.gen(function* () {
+          // When it began: a snapshot that ends after a later one never makes its tree current.
+          const takenAt = new Date().toISOString()
           const store = yield* storeOf(owner.missionId)
           const objects = yield* objectsOf(repository.folder)
           const index = text(
@@ -816,6 +843,17 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           yield* run(store, ['update-ref', refOf(owner, repository.name), tree], 'read', {
             env: alternate,
           })
+          // The Workspace's current tree (#144, CT-38); a Freeze's is of the main checkout.
+          if (owner.kind !== 'freeze') {
+            yield* written(
+              mutate('recording the current tree', (transaction) =>
+                Effect.map(
+                  recordTreeIn(transaction, owner.missionId, repository.name, tree, takenAt),
+                  (stale) => ({ result: undefined, events: stale }),
+                ),
+              ),
+            )
+          }
           return tree
         }).pipe(
           Effect.mapError(failure(repository, ownerText(owner))),
@@ -871,10 +909,44 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
         )
       }
 
+      const materialize = (
+        missionId: string,
+        repository: RepositoryPlace,
+        tree: string,
+        folder: string,
+      ) =>
+        Effect.gen(function* () {
+          const store = yield* storeOf(missionId)
+          const borrowed = yield* borrowing(repository)
+          yield* Effect.acquireUseRelease(
+            Effect.try({
+              try: () => mkdtempSync(join(tmpdir(), 'hemera-materialize-')),
+              catch: (cause) => String(cause),
+            }),
+            (scratch) =>
+              Effect.gen(function* () {
+                const env = { ...borrowed, GIT_INDEX_FILE: join(scratch, 'index') }
+                yield* Effect.try({
+                  try: () => mkdirSync(folder, { recursive: true }),
+                  catch: String,
+                })
+                yield* run(store, ['read-tree', '--end-of-options', tree], 'work', { env })
+                yield* run(
+                  store,
+                  ['-c', 'core.bare=false', '--work-tree', folder, 'checkout-index', '-a', '-f'],
+                  'work',
+                  { env },
+                )
+              }),
+            (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
+          )
+        }).pipe(Effect.mapError(failure(repository, `a copy of ${tree}`)))
+
       const service: SnapshotsService = {
         take,
         changed,
         collect,
+        materialize,
         failed: recordFailure,
         capture: (missionId, repository, fromTree, toTree, files) =>
           Effect.gen(function* () {
@@ -1042,10 +1114,18 @@ function regularFile(path: string): boolean {
   }
 }
 
-/** The user's index copied to where the snapshot writes, or nothing when there is none yet. */
+/**
+ * The user's index copied to where the snapshot writes, or nothing when there is none yet. Git
+ * trusts an entry's stat only when it is older than the index (its racy check), so the copy must
+ * never be newer than the index, or a file rewritten at the same size in the second the index was
+ * written would read as unchanged. Its times are the index's floored to the second: older or equal
+ * whatever precision Git compares, where a `Date` rounds to the millisecond and can be newer.
+ */
 function copyIndex(from: string, to: string): void {
   try {
+    const { atimeNs, mtimeNs } = statSync(from, { bigint: true })
     copyFileSync(from, to)
+    utimesSync(to, Number(atimeNs / 1_000_000_000n), Number(mtimeNs / 1_000_000_000n))
   } catch (failure) {
     if (Predicate.hasProperty(failure, 'code') && failure.code === 'ENOENT') return
     throw failure

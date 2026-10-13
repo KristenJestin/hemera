@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (target/debug/deps/acme-75767ee0f6da9864)
+
+running 2 tests
+test tests::rejects_empty - should panic ... FAILED
+test tests::rejects_blank - should panic ... ok
+
+failures:
+
+---- tests::rejects_empty stdout ----
+note: test did not panic as expected at src/lib.rs:18:8
+
+failures:
+    tests::rejects_empty
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

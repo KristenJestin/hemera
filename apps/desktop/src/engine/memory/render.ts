@@ -52,6 +52,7 @@ export function nowText(now: Now): string {
   if (now.running.length > 0) {
     parts.push(`Running:\n${list(now.running.map((session) => roleSaid(session.role)))}`)
   }
+  if (now.end.length > 0) parts.push(`End of the Building:\n${list(now.end)}`)
   if (now.next !== null) parts.push(`Next: ${now.next.text}`)
   if (now.doing.length > 0) {
     parts.push(`Doing:\n${list(now.doing.map((line) => `${roleSaid(line.role)}: ${line.text}`))}`)

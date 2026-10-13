@@ -1,0 +1,16 @@
+F.
+======================================================================
+FAIL: test_exports_markdown (exports.tests.ExportTest.test_exports_markdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/exports/tests.py", line 13, in test_exports_markdown
+    self.assertEqual(to_markdown([]), "| total |")
+AssertionError: '' != '| total |'
++ | total |
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+FAILED (failures=1)
+Found 2 test(s).
+System check identified no issues (0 silenced).

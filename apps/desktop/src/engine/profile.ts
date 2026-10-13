@@ -33,7 +33,7 @@ import {
   Stream,
   SubscriptionRef,
 } from 'effect'
-import type { Scope } from 'effect'
+import type { Duration, Scope } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import { automaticBackups, backupFoldersLayer, writeBackup } from './backup.ts'
@@ -44,16 +44,20 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
-  tasksDoneEnd,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
+import { proofRunnerLayer } from './building/proof-runner.ts'
 import { projectTaskChecks } from './building/run-checks.ts'
 import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from './building/desk.ts'
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
+import { reviewDeskLayer } from './building/review-desk.ts'
+import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
+import { END_NEEDS, buildingEndLayer } from './building/end.ts'
+import { autoReviewLayer } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -92,8 +96,8 @@ import {
   runsLayer,
   runsRecipeRunnerLayer,
 } from './runs.ts'
-import { DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
-import { supervisorLayer } from './supervisor.ts'
+import { type Database, DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import { type HostProcesses, supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 import {
   type MissionParts,
@@ -175,6 +179,7 @@ import { FREEZE_MAPPERS } from './planning/freeze-store.ts'
 import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
+import { type Diffs, diffsLayer } from './review/diffs.ts'
 import {
   type OutsideChanges,
   type OutsideSettings,
@@ -263,6 +268,8 @@ export interface ProfileParts {
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** How the supervisor asks about and ends the machine's processes; this machine's otherwise. */
+  readonly hostProcesses?: Layer.Layer<HostProcesses> | undefined
   /**
    * Where a launched mission's Building starts (#139), how a finished task is judged and where the
    * end of the tasks goes (#141): the Builder, no check and `building.tasks_done` otherwise.
@@ -273,11 +280,14 @@ export interface ProfileParts {
         readonly verdict?: Layer.Layer<TaskVerdict>
         /** The checks a finished attempt is judged on (#142's port): the Project's (#143). */
         readonly checks?: Layer.Layer<TaskChecks>
-        readonly end?: Layer.Layer<BuildingEnd>
+        /** The end of the tasks (#147's sequence otherwise), on the profile's own services. */
+        readonly end?: Layer.Layer<BuildingEnd, never, Database | DomainEvents | Secrets>
         /** Where a suite holds the Builder between a check and its transaction. */
-        readonly hold?: BuilderHold
+        readonly hold?: BuilderHold | undefined
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
         readonly outside?: Partial<OutsideSettings>
+        /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */
+        readonly proofLimit?: Duration.Duration | undefined
       }
     | undefined
   /**
@@ -362,6 +372,7 @@ export type EngineServices =
   | BuildingStart
   | OutsideChanges
   | Checkpoints
+  | Diffs
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -455,6 +466,8 @@ export const startProfile = (
     const helperContext = yield* Layer.build(helperDeskLayer)
     // Where the gate reaches the documenter's report and its write guard (#146).
     const docsContext = yield* Layer.build(docsDeskLayer)
+    // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
+    const reviewContext = yield* Layer.build(reviewDeskLayer)
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
       databaseLayer(file),
@@ -470,6 +483,7 @@ export const startProfile = (
       Layer.succeedContext(buildContext),
       Layer.succeedContext(helperContext),
       Layer.succeedContext(docsContext),
+      Layer.succeedContext(reviewContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -499,6 +513,8 @@ export const startProfile = (
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
     const builder = builderLayer(log, parts.building?.hold)
+    // The end of a Building, and where the answers to the review's findings go (#147).
+    const ending = buildingEndLayer(log)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
     const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
     const wrapped = parts.snapshots
@@ -509,8 +525,14 @@ export const startProfile = (
             Snapshots,
             Snapshots.use((real) => Effect.succeed(wrapped(real))),
           ).pipe(Layer.provide(machineSnapshots))
+    // One documenter, for its desk and the end of a Building alike (#146, #147).
+    const documenter = documenterLayer({ log }).pipe(Layer.provide(snapshots))
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
+    // One store of the checkpoints: the review at the end of a Building, the live diff, the calls.
+    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+      Layer.provideMerge(snapshots),
+    )
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -522,6 +544,8 @@ export const startProfile = (
         [TICKET_WRITES, ticketWritesNeeds],
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
+        [REVIEW_NEEDS, ending.handler],
+        [END_NEEDS, ending.retry],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -617,7 +641,7 @@ export const startProfile = (
         ticketWritesLayer({ log }),
         checkRunsLayer({ log }),
         helpersLayer({ log, hold: parts.helpers?.hold }),
-        documenterLayer({ log }).pipe(Layer.provide(snapshots)),
+        documenter,
         launches.layer.pipe(
           Layer.provideMerge(
             parts.building?.start ??
@@ -625,12 +649,24 @@ export const startProfile = (
                 Layer.provide(
                   Layer.mergeAll(
                     parts.building?.verdict ?? checksVerdict,
-                    parts.building?.end ?? tasksDoneEnd,
+                    parts.building?.end ??
+                      ending.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            documenter,
+                            autoReviewLayer({ log }).pipe(Layer.provide(checkpoints)),
+                            checkpoints,
+                          ),
+                        ),
+                      ),
                     snapshots,
                     outside,
                   ).pipe(
                     Layer.provideMerge(
-                      parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                      Layer.mergeAll(
+                        parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+                        proofRunnerLayer(parts.building?.proofLimit),
+                      ),
                     ),
                   ),
                 ),
@@ -643,7 +679,10 @@ export const startProfile = (
       livingSpecLayer({ log, starts: parts.sessions?.livingSpecStarts ?? false }),
       agentOffersServed,
       outside,
-      checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(Layer.provideMerge(snapshots)),
+      checkpoints,
+      diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
+        Layer.provide(Layer.mergeAll(checkpoints, outside)),
+      ),
     ).pipe(
       Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
@@ -688,7 +727,7 @@ export const startProfile = (
       Layer.provideMerge(runsRecipeRunnerLayer),
       Layer.provideMerge(
         Layer.mergeAll(
-          supervisorLayer(log),
+          supervisorLayer(log, parts.hostProcesses),
           runsLayer(log, {
             agentConfigFolder: join(dataFolder, AGENT_CONFIG_FOLDER),
             ...parts.runs,

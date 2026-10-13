@@ -15,6 +15,7 @@ import {
   WindowRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  DiffRpcs,
   CheckRefused,
   DocRecipesRpcs,
   UnknownProject,
@@ -544,6 +545,13 @@ const main = async (engine: 'answers' | 'gone') => {
       'docRecipes.save': unused,
       'docRecipes.remove': unused,
       'docRecipes.move': unused,
+    }),
+    DiffRpcs.toLayer({
+      'diff.live': unused,
+      'diff.file': unused,
+      'diff.atCheckpoint': unused,
+      'diff.fileAtCheckpoint': unused,
+      'diff.changes': () => Stream.die('the window’s link is not asked for a diff here'),
     }),
   )
   const program = Effect.gen(function* () {
