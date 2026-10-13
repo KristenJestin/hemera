@@ -1249,6 +1249,28 @@ describe('A red read from the failing names #260 still missed', () => {
     expect(validRed(run(output, 101, path), path, ['exports'])).toBe(false)
   })
 
+  test('a cased Rust test does not take the failures of a module of the same name', () => {
+    const path = 'src/lib.rs'
+    const render = [{ function: 'render' }]
+    for (const line of [
+      'test render::tests::handles_empty ... FAILED',
+      '        FAIL [   0.004s] acme render::tests::handles_empty',
+      'test render::other ... FAILED',
+    ]) {
+      const output = [line, 'assertion `left == right` failed'].join('\n')
+      expect(run(output, 101, path).failingLines).toEqual([line])
+      expect(validRed(run(output, 101, path), path, render)).toBe(false)
+    }
+    for (const line of [
+      'test tests::render::case_1 ... FAILED',
+      'test tests::render::case_2_empty_rows ... FAILED',
+      '        FAIL [   0.004s] acme tests::render::test_case_1_with_no_rows',
+    ]) {
+      const output = [line, 'assertion `left == right` failed'].join('\n')
+      expect(validRed(run(output, 101, path), path, render)).toBe(true)
+    }
+  })
+
   test('jest’s file line with a project displayName is a failing line', () => {
     for (const [output, lines] of [
       [
