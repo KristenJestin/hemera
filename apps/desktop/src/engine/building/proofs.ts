@@ -1194,9 +1194,9 @@ export const buildingProofs = (parts: ProofParts) => {
       const row = yield* scenarioProofIn(database, building.id, scenario)
       if (row === null || stateOf(row) === 'not_reproducible') return run
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
-      // Kept from running (a port another mission holds): not the Builder's to fix (#306). One
-      // past the Project's limit is, as its code may never end.
-      if (run.classification === 'environment' && run.timedOutAfter === null) {
+      // Kept from running (a port another mission holds): not the Builder's to fix (#306). A run
+      // that started is, whatever its runner said: its code may never end, or never answer.
+      if (run.classification === 'environment' && !run.started) {
         yield* heldOnEnvironment(building, scenario, run, stateOf(row))
         return run
       }
