@@ -748,6 +748,23 @@ describe('A proof’s addition is merged three ways (#144)', () => {
     expect(merged.merged).toBe('one\r\nthree\r\n}\ntwo\r\n}\r\n')
   })
 
+  /** A file with mixed line endings whose `}` and empty lines repeat with both endings. */
+  const SEVERAL = 'one\r\n}\ntwo\r\n}\r\n\nthree\r\n\r\nfour\r\n'
+
+  test('two separate additions around a repeated line of a file with mixed line endings keep every untouched line’s ending', async () => {
+    const merged = await mergedInto(SEVERAL, `zero\r\n${SEVERAL}five\r\n`, SEVERAL)
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe(`zero\r\n${SEVERAL}five\r\n`)
+  })
+
+  test('several additions inside a file with mixed line endings keep the ending of every repeated line', async () => {
+    const changed = 'one\r\nalpha\r\n}\ntwo\r\n}\r\n\nbeta\r\nthree\r\n\r\nfour\r\n'
+    const merged = await mergedInto(SEVERAL, changed, SEVERAL)
+    expect(merged.clean).toBe(true)
+    // `beta` follows an empty line that ends in LF: a new line takes the ending of the line above.
+    expect(merged.merged).toBe('one\r\nalpha\r\n}\ntwo\r\n}\r\n\nbeta\nthree\r\n\r\nfour\r\n')
+  })
+
   test('a file with LF lines stays LF', async () => {
     const merged = await mergedInto('one\ntwo\n', 'one\ntwo\nthree\n', 'one\ntwo\n')
     expect(merged.clean).toBe(true)
