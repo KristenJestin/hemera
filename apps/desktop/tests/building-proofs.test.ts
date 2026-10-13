@@ -1577,6 +1577,70 @@ describe('The end never waits on a scenario nothing can move', () => {
   })
 })
 
+describe('A proof is stuck only once the Builder stopped acting on it', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  test('a turn that runs a command which rewrites the failing file, then ends: no question, and the proof is run again', async () => {
+    // Once held, the Builder's turns stay open until the test lets them end.
+    let held = false
+    let open: () => void = () => undefined
+    const gate = new Promise<void>((done) => {
+      open = done
+    })
+    const agents = (index: number): FakeScript =>
+      index === 0 ? READING : { ...QUIET, between: () => (held ? gate : Promise.resolve()) }
+    // A command that writes the fix where it runs: what a formatter or a codegen script does.
+    const fixer = join(scratch, 'fix.mjs')
+    writeFileSync(
+      fixer,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync('export.ts', ${JSON.stringify(RIGHT_EXPORT)})\n`,
+    )
+    const seen = await proofsEngine(data, undefined, undefined, agents).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          held = true
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* deliveredTo(mission.id, 'The end waits')
+          const ran = yield* call(grantId, 'commands_run', {
+            line: `"${process.execPath}" "${fixer}"`,
+            repository: 'api',
+          })
+          // The turn ends, having written through the command only.
+          open()
+          yield* until(endCalled(mission.id), 20_000)
+          return {
+            ran,
+            asked: yield* unprovenAsked,
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(seen.ran).toMatch(/exit code 0/)
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
+    expect(seen.proof.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+})
+
 describe('What the reviewers see of the red phase', () => {
   test('the Builder’s writes outside the proof files before a scenario’s red are recorded for the reviewers', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
