@@ -679,6 +679,8 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       ),
       conflicts: yield* conflictsIn(reader, building.id),
     }
+    const special = tasks.filter((task) => task.origin === 'review')
+    const ofSpec = tasks.filter((task) => task.origin !== 'review')
     const requirements = [...new Set(tasks.flatMap((task) => task.requirements))]
     const proofsOf = yield* requirementProofsIn(reader, building.missionId, building.id)
     const requirementViews = requirements.map((id) =>
@@ -698,14 +700,18 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       round: null,
       state: STATES.find((one) => one === building.state) ?? 'active',
       phase: building.phase,
+      // CT-41: the percentage counts the Spec's tasks and the special tasks, the counts apart.
       percent: percentDone(tasks),
       counts: {
-        tasksDone: tasks.filter((task) => task.state === 'done').length,
-        tasks: tasks.filter((task) => task.state !== 'skipped').length,
+        tasksDone: ofSpec.filter((task) => task.state === 'done').length,
+        tasks: ofSpec.filter((task) => task.state !== 'skipped').length,
         requirementsProven: requirementViews.filter((one) => one.proven).length,
         requirements: requirementViews.length,
       },
-      special: { done: 0, total: 0 },
+      special: {
+        done: special.filter((task) => task.state === 'done').length,
+        total: special.filter((task) => task.state !== 'skipped').length,
+      },
       elapsedSeconds: yield* elapsedIn(reader, building.id),
       startedAt: building.startedAt,
       endedAt: building.endedAt,
@@ -798,7 +804,8 @@ export const planLine = (task: TaskNow): string => `${taskText(task)} [${stateSa
 
 /**
  * What `spec_read` adds in Building: the decisions taken since the Freeze, then the effective
- * plan with its amendments, each linked to its decision. Null before the mission's first Building.
+ * plan with its amendments, each linked to its decision, then the special tasks of the automatic
+ * review. Null before the mission's first Building.
  */
 export const buildingPartOf = (missionId: string) =>
   Effect.gen(function* () {
@@ -808,6 +815,8 @@ export const buildingPartOf = (missionId: string) =>
         const building = yield* latestBuildingIn(transaction, missionId)
         if (building === null) return null
         const tasks = yield* tasksIn(transaction, building.id)
+        // The special tasks of the automatic review are listed apart, never as the Spec's (CT-41).
+        const special = tasks.filter((task) => task.origin === 'review')
         const decisions = (yield* decisionsIn(transaction, building.id)).map(decisionViewOf)
         const decided = decisions.map((one, at) =>
           [
@@ -832,12 +841,16 @@ export const buildingPartOf = (missionId: string) =>
           '## Effective plan',
           '',
           tasks
+            .filter((task) => task.origin !== 'review')
             .map((task) =>
               task.origin === 'amendment'
                 ? `${planLine(task)}${decisionOf(task.decisionId)}`
                 : planLine(task),
             )
             .join('\n'),
+          ...(special.length === 0
+            ? []
+            : ['', '## Special tasks', '', special.map(planLine).join('\n')]),
         ].join('\n')
       }),
     )

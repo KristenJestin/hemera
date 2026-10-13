@@ -228,8 +228,14 @@ describe('Each role has exactly its tools', () => {
         'spec_read',
       ],
     ],
-    ['spec-reviewer', ['search']],
-    ['code-reviewer', ['fs_read', 'search']],
+    [
+      'spec-reviewer',
+      ['checkpoint_read', 'evidence_read', 'fs_read', 'review_report', 'search', 'spec_read'],
+    ],
+    [
+      'code-reviewer',
+      ['checkpoint_read', 'evidence_read', 'fs_read', 'review_report', 'search', 'spec_read'],
+    ],
     [
       'chat',
       [
@@ -309,8 +315,10 @@ describe('The table says what each tool does to the world', () => {
   test('read-only tools carry readOnlyHint true, the others false', () => {
     expect(TOOL_NAMES.filter((name) => readOnlyHint(name)).sort()).toEqual([
       'build_read',
+      'checkpoint_read',
       'commands_list',
       'commands_output',
+      'evidence_read',
       'fs_list',
       'fs_read',
       'helper_read',
