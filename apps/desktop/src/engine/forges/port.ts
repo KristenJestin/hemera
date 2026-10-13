@@ -235,10 +235,13 @@ const bktServes = (
 const projectKey = (owner: string): string => owner.toUpperCase()
 
 /**
- * A plain word between single quotes: a shell expands a leading `~` (a Data Center personal
- * project, `~KRIS`) to a home folder, and a plain word holds no quote to close early.
+ * A plain word quoted for the platform's shell: a POSIX shell expands a leading `~` (a Data Center
+ * personal project, `~KRIS`) to a home folder unless it is between single quotes, and `cmd.exe`
+ * keeps single quotes as part of the word, but takes double quotes off (PowerShell takes off both).
+ * A plain word holds no quote to close early.
  */
-const quoted = (word: string): string => `'${word}'`
+const quoted = (word: string, platform: NodeJS.Platform): string =>
+  platform === 'win32' ? `"${word}"` : `'${word}'`
 
 /** A host, with its port at most: nothing a shell would read as more than a word. */
 const SAFE_HOST = /^[A-Za-z0-9.-]+(:\d+)?$/
@@ -249,20 +252,21 @@ const SAFE_HOST = /^[A-Za-z0-9.-]+(:\d+)?$/
  * copies it into a shell, and the owner comes from a remote's URL: a part that is not a plain word
  * is left out (the owner), or no line is given at all (the host).
  */
-const contextLine = (
+export const contextLine = (
   forge: ForgeName,
   host: string,
   key: string,
   owner: string | null,
+  platform: NodeJS.Platform = process.platform,
 ): string | null => {
   if (!SAFE_HOST.test(host) || !SAFE_HOST.test(key)) return null
   const named = owner !== null && SAFE_WORD.test(owner) ? owner : null
   const name = named === null ? hostName(host) : `${named.toLowerCase()}-${hostName(host)}`
-  const line = `bkt context create ${quoted(name)} --host ${key}`
+  const line = `bkt context create ${quoted(name, platform)} --host ${key}`
   if (named === null) return line
   return forge === 'bitbucket-cloud'
-    ? `${line} --workspace ${quoted(named)}`
-    : `${line} --project ${quoted(projectKey(named))}`
+    ? `${line} --workspace ${quoted(named, platform)}`
+    : `${line} --project ${quoted(projectKey(named), platform)}`
 }
 
 /** The CLI a forge is reached through, or none. */

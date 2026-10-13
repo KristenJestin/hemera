@@ -108,6 +108,9 @@ const withForge = <A, E>(
   )
 }
 
+/** A word of a line to copy, quoted as the shell of this platform needs it. */
+const q = (word: string): string => (process.platform === 'win32' ? `"${word}"` : `'${word}'`)
+
 const byPath = (statuses: ReadonlyArray<ForgeRepositoryStatus>) =>
   Object.fromEntries(statuses.map((status) => [status.path, status]))
 
@@ -956,7 +959,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['api']).toMatchObject({
       state: 'signed-out',
-      fix: "bkt context create 'acme-team-bitbucket.org' --host api.bitbucket.org --workspace 'acme-team'",
+      fix: `bkt context create ${q('acme-team-bitbucket.org')} --host api.bitbucket.org --workspace ${q('acme-team')}`,
     })
   })
 
@@ -972,7 +975,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['dc']).toMatchObject({
       state: 'signed-out',
-      fix: "bkt context create 'proj-git.acme.test' --host git.acme.test:7990 --project 'PROJ'",
+      fix: `bkt context create ${q('proj-git.acme.test')} --host git.acme.test:7990 --project ${q('PROJ')}`,
     })
   })
 
@@ -988,7 +991,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['dc']).toMatchObject({
       state: 'signed-out',
-      fix: "bkt context create '~kris-git.acme.test' --host git.acme.test:7990 --project '~KRIS'",
+      fix: `bkt context create ${q('~kris-git.acme.test')} --host git.acme.test:7990 --project ${q('~KRIS')}`,
     })
   })
 
@@ -1005,7 +1008,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
     )
     expect(byPath(statuses)['api']).toMatchObject({
       state: 'signed-out',
-      fix: "bkt context create 'bitbucket.org' --host api.bitbucket.org",
+      fix: `bkt context create ${q('bitbucket.org')} --host api.bitbucket.org`,
     })
   })
 
@@ -1025,7 +1028,7 @@ describe('A bkt write goes to the context of the repository’s host, never to t
       )
       expect(byPath(statuses)['api']).toMatchObject({
         state: 'signed-out',
-        fix: "bkt context create 'acme-team-bitbucket.org' --host api.bitbucket.org --workspace 'acme-team'",
+        fix: `bkt context create ${q('acme-team-bitbucket.org')} --host api.bitbucket.org --workspace ${q('acme-team')}`,
       })
     },
   )
