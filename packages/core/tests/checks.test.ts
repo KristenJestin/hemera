@@ -299,19 +299,19 @@ describe('A check is refused at the field it concerns', () => {
 })
 
 describe('How long a proof may run', () => {
-  test('a Project with no value keeps 10 minutes, at most 120', () => {
+  test('a Project with no value keeps 10 minutes, at most 1440 (24 hours)', () => {
     expect(DEFAULT_PROOF_MINUTES).toBe(10)
-    expect(MAX_PROOF_MINUTES).toBe(120)
+    expect(MAX_PROOF_MINUTES).toBe(1440)
     expect(proofLimitRefusal(1)).toBeNull()
     expect(proofLimitRefusal(DEFAULT_PROOF_MINUTES)).toBeNull()
     expect(proofLimitRefusal(MAX_PROOF_MINUTES)).toBeNull()
   })
 
   test('a refused value (0, negative, past the bound, not whole) is refused with its reason', () => {
-    expect([0, -5, 121, 2.5, Number.NaN].map(proofLimitRefusal)).toEqual([
+    expect([0, -5, 1441, 2.5, Number.NaN].map(proofLimitRefusal)).toEqual([
       'A proof needs at least 1 minute.',
       'A proof needs at least 1 minute.',
-      'A proof may run 120 minutes at most: a longer one holds the end of the Building for hours.',
+      'A proof may run 1440 minutes (24 hours) at most.',
       'Write a whole number of minutes.',
       'Write a whole number of minutes.',
     ])

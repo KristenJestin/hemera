@@ -300,9 +300,9 @@ export const ProofLimitRefused: Story = {
   play: async ({ canvasElement }) => {
     expect(await within(canvasElement).findByText('A proof needs at least 1 minute.')).toBeVisible()
     await userEvent.clear(limitField(canvasElement))
-    await userEvent.type(limitField(canvasElement), '300')
+    await userEvent.type(limitField(canvasElement), '1500')
     expect(
-      await within(canvasElement).findByText(/A proof may run 120 minutes at most/),
+      await within(canvasElement).findByText('A proof may run 1440 minutes (24 hours) at most.'),
     ).toBeVisible()
   },
 }

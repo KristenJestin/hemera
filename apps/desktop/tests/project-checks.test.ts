@@ -235,7 +235,7 @@ describe('How long a proof may run', () => {
         yield* setProofLimit(project.id, 30)
         const refused = (minutes: number) => Effect.flip(setProofLimit(project.id, minutes))
         return {
-          refusals: [yield* refused(0), yield* refused(-3), yield* refused(121)],
+          refusals: [yield* refused(0), yield* refused(-3), yield* refused(1441)],
           kept: yield* proofLimitOf(project.id),
         }
       }),
@@ -244,7 +244,7 @@ describe('How long a proof may run', () => {
     expect(seen.refusals.map((one) => one.message)).toEqual([
       'A proof needs at least 1 minute.',
       'A proof needs at least 1 minute.',
-      'A proof may run 120 minutes at most: a longer one holds the end of the Building for hours.',
+      'A proof may run 1440 minutes (24 hours) at most.',
     ])
     expect(seen.kept).toBe(30)
   })

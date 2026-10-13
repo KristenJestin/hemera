@@ -199,17 +199,17 @@ describe('A doc recipe, as its line shows it and its dialog writes it', () => {
 })
 
 describe('How long a proof may run, in its field', () => {
-  test('an empty field keeps the default; a whole number from 1 to 120 is written', () => {
+  test('an empty field keeps the default; a whole number from 1 to 1440 is written', () => {
     expect(proofLimitRefusalOf(null)).toBeUndefined()
     expect(proofLimitRefusalOf(' 25 ')).toBeUndefined()
-    expect(proofLimitRefusalOf('120')).toBeUndefined()
+    expect(proofLimitRefusalOf('1440')).toBeUndefined()
   })
 
   test('a refused value (0, negative, past the bound, not a number) is refused with its reason', () => {
-    expect(['0', '-3', '121', '2.5', 'ten'].map(proofLimitRefusalOf)).toEqual([
+    expect(['0', '-3', '1441', '2.5', 'ten'].map(proofLimitRefusalOf)).toEqual([
       'A proof needs at least 1 minute.',
       'A proof needs at least 1 minute.',
-      'A proof may run 120 minutes at most: a longer one holds the end of the Building for hours.',
+      'A proof may run 1440 minutes (24 hours) at most.',
       'Write a whole number of minutes.',
       'Write a whole number of minutes.',
     ])

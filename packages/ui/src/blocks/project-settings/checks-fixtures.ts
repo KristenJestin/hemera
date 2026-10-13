@@ -320,7 +320,5 @@ export function proofLimitRefusal(value: string | null): string | undefined {
   if (!/^-?\d+$/.test(typed)) return 'Write a whole number of minutes.'
   const minutes = Number(typed)
   if (minutes < 1) return 'A proof needs at least 1 minute.'
-  return minutes > 120
-    ? 'A proof may run 120 minutes at most: a longer one holds the end of the Building for hours.'
-    : undefined
+  return minutes > 1440 ? 'A proof may run 1440 minutes (24 hours) at most.' : undefined
 }
