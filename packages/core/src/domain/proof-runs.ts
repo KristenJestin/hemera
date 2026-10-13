@@ -83,8 +83,8 @@ export interface ProofRunClass {
   readonly failingLines: ReadonlyArray<string>
   /**
    * The lines a test's name is read on, among those of a failure whose own text says an assertion
-   * failed: a failing line, a pytest section heading, a Rust failure's stdout heading, mocha's
-   * numbered failure and the lines of its title.
+   * failed: a failing line, a pytest section heading, a Rust failure's stdout heading, and the
+   * lines of a mocha failure's title in its list, never its tree's line.
    */
   readonly assertionLines: ReadonlyArray<string>
 }
@@ -111,7 +111,7 @@ const BEFORE_TEST =
  * test's panic, a `#[should_panic]` test that did not).
  */
 const ASSERTION =
-  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E[ \t]+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b|\bFailed: DID NOT (?:RAISE|WARN)\b/m
+  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\([^\n]{0,200}?\)\.|^E[ \t]+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b[^\n]{0,200}?\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b|\bFailed: DID NOT (?:RAISE|WARN)\b/m
 /**
  * A line a known test runner starts with for a test that failed, never a mark in the middle of a
  * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading (not its `● Console` nor
@@ -130,8 +130,22 @@ const MOCHA_FAILING = /^\s*(\d+) failing\s*$/
 const FAILING_LINES = 500
 /** Each line is read up to this many characters: a name is never that long. */
 const LINE_CAP = 4_096
-/** pytest's heading of a test's section in its FAILURES (`____ test_x[md] ____`). */
-const PYTEST_SECTION = /^_{3,} \S.* _{3,}\s*$/
+/**
+ * pytest's heading of a test's section in its FAILURES (`____ test_x[md] ____`), padded with a
+ * single `_` when its name is long, never the `_ _ _ _` separator between a traceback's frames.
+ */
+const PYTEST_SECTION = /^(?!(?:_ )+_?\s*$)_+ \S.* _+\s*$/
+/**
+ * What a pytest section says, never the test's source it prints unnumbered above: its `E ` lines
+ * and its `file:line: Name` trailer.
+ */
+const PYTEST_SAID = /^E(?:\s|$)|^\S+:\d+: [\w.]*\s*$/
+/**
+ * With `--tb=native`, a section prints no `E ` line: what it says is the exception of its last
+ * traceback, at column 0 (its source and frames are indented), above what the test printed.
+ */
+const PYTEST_TRACEBACK = /^Traceback \(most recent call last\):\s*$/
+const PYTEST_CAPTURED = /^-+ Captured .* -+\s*$/
 /** pytest's summary line, `FAILED file::test - message`. */
 const PYTEST_SUMMARY = /^FAILED \S+::/
 /** libtest's heading of a failure's output, below its `failures:` line. */
@@ -171,12 +185,13 @@ const asserts = (output: string): boolean => {
 /**
  * The failing lines of an output, uncoloured and cut, and those a name is read on when their own
  * text says an assertion failed. A failure's text is its line and those below it, up to the next
- * failure's line; a pytest summary line's is its message, read as pytest's traceback prints it.
- * A numbered line is mocha's only when its number is at most its `N failing`, and twice at most:
- * its tree's, the last above that line, and its list's, the first below. A numbered log line is
- * not one, and cannot push a real failure past the cap. Its two
- * lines take the class of its list's text alone (its tree line's runs over the logs of the tests
- * after it), and the lines of its title in the list are read too.
+ * failure's line; a pytest summary line's is its message, read as pytest's traceback prints it;
+ * a pytest section's is what it says, never the source it prints. A numbered line is mocha's only
+ * when its number is at most its `N failing`, and twice at most: its tree's, the last above that
+ * line, and its list's, the first below at that line's indentation. A numbered log or diff line is
+ * not one, and cannot push a real failure past the cap. Its two lines take the class of its list's
+ * text alone (its tree line's runs over the logs of the tests after it), and a name is read on the
+ * lines of its title in the list alone (a log line can stand in for its tree line).
  */
 const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'assertionLines'> => {
   const lines = output.split(/\r?\n/).map((line) => uncoloured(line).slice(0, LINE_CAP))
@@ -187,6 +202,7 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     if (count > 0) listAt = at
     failing = Math.max(failing, count)
   }
+  const listIndent = /^\s*/.exec(lines[listAt] ?? '')?.[0] ?? ''
   const rustAt = lines.findIndex((line) => RUST_FAILURES.test(line))
   // Mocha's tree line of a number, the last above its `N failing`, and its list's, the first below.
   const tree = new Map<number, number>()
@@ -195,7 +211,12 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
     if (number < 1 || number > failing) continue
     if (at < listAt) tree.set(number, at)
-    else if (!list.has(number)) list.set(number, at)
+    else if (
+      !list.has(number) &&
+      line.startsWith(`${listIndent}${String(number)}) `) &&
+      mochaTitle(lines, at, listIndent) !== null
+    )
+      list.set(number, at)
   }
   const entries: Array<{ readonly at: number; readonly marked: boolean; readonly number: number }> =
     []
@@ -217,7 +238,8 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     const head = PYTEST_SUMMARY.test(line)
       ? `E   ${line.slice(nodeIdOf(line).length).replace(/^ - /, '')}`
       : line.trimStart()
-    const below = lines.slice(entry.at + 1, entries[index + 1]?.at ?? lines.length)
+    const following = lines.slice(entry.at + 1, entries[index + 1]?.at ?? lines.length)
+    const below = PYTEST_SECTION.test(line) ? pytestSaid(following) : following
     return {
       at: entry.at,
       marked: entry.marked,
@@ -236,26 +258,48 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     assertionLines: read
       .filter((entry) => (entry.number > 0 ? assertedNumbers.has(entry.number) : entry.asserts))
       .flatMap((entry) =>
-        entry.number > 0 && entry.at > listAt
-          ? mochaTitle(lines, entry.at).map((title) => `${String(entry.number)}) ${title}`)
-          : [entry.line],
+        entry.number === 0
+          ? [entry.line]
+          : entry.at > listAt
+            ? (mochaTitle(lines, entry.at, listIndent) ?? []).map(
+                (title) => `${String(entry.number)}) ${title}`,
+              )
+            : [],
       ),
   }
 }
 
+/** What a pytest section says: its `E ` lines and trailers, or its native traceback's exception. */
+const pytestSaid = (section: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const said = section.filter((line) => PYTEST_SAID.test(line))
+  if (said.some((line) => /^E(?:\s|$)/.test(line))) return said
+  const captured = section.findIndex((line) => PYTEST_CAPTURED.test(line))
+  const own = captured < 0 ? section : section.slice(0, captured)
+  const last = own.findLastIndex((line) => PYTEST_TRACEBACK.test(line))
+  return last < 0 ? said : own.slice(last + 1).filter((line) => /^\S/.test(line))
+}
+
 /**
  * The lines of a mocha failure's title in its list, each without the `:` the last one ends with:
- * `1) exports` and `the invoices export as Markdown:` below it. Its line alone when no line
- * below ends the title.
+ * `1) exports` and `the invoices export as Markdown:` below it, each title below the first indented
+ * two more spaces than the one above (a describe's title may end with `:` too). Null when its last
+ * line does not end with `:`: a numbered line that is no failure's title.
  */
-const mochaTitle = (lines: ReadonlyArray<string>, at: number): ReadonlyArray<string> => {
+const mochaTitle = (
+  lines: ReadonlyArray<string>,
+  at: number,
+  indent: string,
+): ReadonlyArray<string> | null => {
   const title = [(lines[at] ?? '').replace(MOCHA_FAILURE, '')]
   for (const line of lines.slice(at + 1, at + 10)) {
-    if ((title.at(-1) ?? '').trimEnd().endsWith(':') || line.trim() === '') break
+    const depth = `${indent}   ${'  '.repeat(title.length)}`
+    if (!line.startsWith(depth) || /^\s/.test(line.slice(depth.length))) break
     title.push(line)
   }
-  if (!(title.at(-1) ?? '').trimEnd().endsWith(':')) return [title[0] ?? '']
-  return title.map((line) => line.trim().replace(/:$/, ''))
+  if (!(title.at(-1) ?? '').trimEnd().endsWith(':')) return null
+  return title.map((line, index) =>
+    index === title.length - 1 ? line.trim().replace(/:$/, '') : line.trim(),
+  )
 }
 
 const unescapeXml = (text: string): string =>
@@ -388,8 +432,12 @@ export function classifyProofRun(run: {
   return { classification: wordsClass(run.output, run.testPath), ...none }
 }
 
-/** A failed run without a report, from its words. */
-const wordsClass = (output: string, testPath: string | null): ProofClass => {
+/** A failed run without a report, from its words, each line cut as a failure's is. */
+const wordsClass = (whole: string, testPath: string | null): ProofClass => {
+  const output = whole
+    .split('\n')
+    .map((line) => line.slice(0, LINE_CAP))
+    .join('\n')
   if (ASSERTION.test(output)) return 'assertion_failed'
   if (ENVIRONMENT.test(output)) return 'environment'
   if (BEFORE_TEST.test(output)) return 'error_before_test'
@@ -464,7 +512,7 @@ const namePattern = (name: string, cases = false): RegExp | null => {
       `(?:^test |^---- |${path})${named}(?= \\.\\.\\. | - should panic \\.\\.\\. | stdout ----)`,
       `(?:^|${path})${body}(?=\\[)`,
       `${path}${body}(?= - )`,
-      `^_{3,} (?:\\w+\\.)*${body}(?=\\[| _{3,}\\s*$)`,
+      `^_+ (?:\\w+\\.)*${body}(?=\\[| _+\\s*$)`,
     ].join('|'),
   )
 }
