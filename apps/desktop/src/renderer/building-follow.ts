@@ -531,6 +531,13 @@ export function followBuilding(
         },
         () => undefined,
       ),
+      // A service publishes its address, and is answered, after it started: the list is read again.
+      link.onRunChanges(
+        (run) => {
+          if (run.type === 'serve') void readServices()
+        },
+        () => undefined,
+      ),
     ]
     void quietly(link.spec(missionId), (read) => {
       spec = read
