@@ -817,7 +817,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }
             if (allStuck) {
               endWaits.delete(row.id)
-              yield* proofs.askUnproven(row, stuck)
+              yield* proofs.askUnproven(row, stuck, refreshing)
               return
             }
             const waits = red.join('\u0000')

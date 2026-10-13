@@ -1353,12 +1353,22 @@ export const buildingProofs = (parts: ProofParts) => {
       yield* withdrawNeed(asked.needId, 'What the end waited on moved since it was asked.')
     })
 
-  /** One need to the user naming the scenarios nothing moves: try again, or end without them. */
-  const askUnproven = (building: BuildingRow, scenarios: ReadonlyArray<string>) =>
+  /**
+   * One need to the user naming the scenarios nothing moves: try again, or end without them. At the
+   * end's refresh, it says why there (#306).
+   */
+  const askUnproven = (
+    building: BuildingRow,
+    scenarios: ReadonlyArray<string>,
+    refreshing = false,
+  ) =>
     Effect.gen(function* () {
       const named = scenarios.join(', ')
       const one = scenarios.length === 1
-      const question = `${named} ${one ? 'is' : 'are'} not proven, and nothing in the plan moves ${one ? 'it' : 'them'} any more: every task covering ${one ? 'it' : 'them'} was skipped, or ${one ? 'its' : 'their'} proof failed again after your answer. "${TRY_AGAIN}" runs ${one ? 'its proof' : 'their proofs'} again; "${END_WITHOUT}" ends the Building with ${named} recorded as not proven.`
+      const why = refreshing
+        ? `${one ? 'its' : 'their'} proof failed again at the end's refresh, and the Builder left ${one ? 'it' : 'them'}`
+        : `every task covering ${one ? 'it' : 'them'} was skipped, or ${one ? 'its' : 'their'} proof failed again after your answer`
+      const question = `${named} ${one ? 'is' : 'are'} not proven, and nothing in the plan moves ${one ? 'it' : 'them'} any more: ${why}. "${TRY_AGAIN}" runs ${one ? 'its proof' : 'their proofs'} again; "${END_WITHOUT}" ends the Building with ${named} recorded as not proven.`
       const options = [TRY_AGAIN, END_WITHOUT]
       const write = yield* createNeedIn(
         parts.needs,

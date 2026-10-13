@@ -2267,6 +2267,8 @@ describe('The refresh', () => {
       const fields = seen.asked.fields
       if (!Predicate.isTagged(fields, 'Decision')) throw new Error('not a decision')
       expect(fields.question).toContain('R1.S2 is not proven')
+      // Said as it is at the refresh: no task was skipped, and no answer came before.
+      expect(fields.question).toContain("its proof failed again at the end's refresh")
       expect(fields.options).toEqual(['Try again', 'End without it'])
       const proof = seen.view.requirements
         .flatMap((one) => one.scenarios)
