@@ -276,7 +276,10 @@ const stepOf = (check: PrelaunchView): string =>
   'Starts the check'
 
 /** Where the pre-launch check stands, as the Ready card says it. */
-export function launchCheckOf(read: ReadyRead, now: Date): Building.LaunchCheck {
+export function launchCheckOf(
+  read: Pick<ReadyRead, 'check' | 'checking' | 'expired' | 'things'>,
+  now: Date,
+): Building.LaunchCheck {
   const { check } = read
   if (read.expired) return { state: 'expired' }
   if (read.checking && check?.state !== 'running') {
