@@ -609,12 +609,12 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
       // Typed: it checks the repositories not known yet, and a check settles in turn.
       const settleNeeds = (projectId: string): Effect.Effect<void, never, ForgePortServices> =>
         Effect.gen(function* () {
-          const pending = yield* pendingNeeds(projectId)
-          if (pending.length === 0) return
+          if ((yield* pendingNeeds(projectId)).length === 0) return
           const project = yield* getProject(projectId)
           yield* statesOf(project)
           const known = yield* SubscriptionRef.get(memory)
-          for (const need of pending) {
+          // Read again: the check of a repository not known yet settled what it could in turn.
+          for (const need of yield* pendingNeeds(projectId)) {
             if (stillWaits(project, known, need.cli, need.host)) continue
             yield* withdrawNeed(need.id, `nothing waits on ${need.cli} for ${need.host} any more`)
             yield* forgetNeed(need.id)
