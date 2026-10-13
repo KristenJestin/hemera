@@ -74,7 +74,13 @@ import {
   GITHUB_HOST,
   identify,
 } from './identity.ts'
-import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
+import {
+  type ForgeAnswer,
+  type ForgeCall,
+  ForgeRunner,
+  type ForgeRunFailure,
+  type ForgeSettings,
+} from './runner.ts'
 import { type ParsedCommand, REPO_NAME, SAFE_WORD, parseCommand } from './shapes.ts'
 
 /** The service the forge's needs belong to. */
@@ -357,7 +363,7 @@ interface Known {
  * The port, and the handler its needs' Retry reaches. The layer stands on the needs, Git and the
  * runner.
  */
-export const forgePort = () => {
+export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
   let recheck: NeedHandler['recheck'] = undefined
 
   const handler: NeedHandler = {
@@ -924,6 +930,7 @@ export const forgePort = () => {
                   if (now.state === 'ready' || now.state === 'not-needed')
                     return Option.some(checked)
                   waitedIn = checked.project.id
+                  yield* settings.waitHold ?? Effect.void
                   yield* needFor(checked.project.id, now)
                   fresh = (yield* changed(repositoryId, now, events)) === 'event'
                   return Option.none()
@@ -935,6 +942,9 @@ export const forgePort = () => {
                 ),
               )
               if (Option.isNone(looked)) continue
+              // Its need may have been made after a check found the CLI ready, which then had
+              // nothing to withdraw: an operation that waited settles the needs once it runs.
+              if (waitedIn !== null) yield* settleNeeds(waitedIn)
               const { project, status: now, context: bktContext } = looked.value
               if (now.cli === null || now.host === null || now.state === 'not-needed') {
                 return yield* new ForgeRefused({

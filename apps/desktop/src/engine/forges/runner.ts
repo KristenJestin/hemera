@@ -46,6 +46,11 @@ export interface ForgeSettings {
    * None otherwise, and nothing is attached.
    */
   readonly attachable?: ((path: string) => string | null) | undefined
+  /**
+   * Where a suite holds an operation that found its CLI not ready, before it makes its need; never
+   * held otherwise. The port's, not the runner's.
+   */
+  readonly waitHold?: Effect.Effect<void> | undefined
 }
 
 /** One call: which CLI, for which forge and host, for which Project, with which arguments. */

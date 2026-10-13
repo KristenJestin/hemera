@@ -528,7 +528,7 @@ export const startProfile = (
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
     // The forge port, and where its needs' Retry goes (#253).
-    const forge = forgePort()
+    const forge = forgePort(parts.forge)
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).

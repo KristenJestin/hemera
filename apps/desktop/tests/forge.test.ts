@@ -28,7 +28,7 @@ import {
   ForgeTimeout,
   UnknownRepository,
 } from '@hemera/ipc'
-import { Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
@@ -635,6 +635,49 @@ describe('A check after a restart settles only the needs whose CLI and host it c
     )
     expect(kept).toBe('pending')
     expect(retried).toBe('withdrawn')
+  })
+})
+
+describe('A need made as its CLI turned ready does not stay pending', () => {
+  test('an operation found its CLI signed out, and Check again found it ready before the need was made: the need goes once the operation runs', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    const main = checkout({ shop: REMOTES.shop })
+    const { login, pending, rows } = await commandsEngine(data, {
+      forge: {
+        env: fake.env,
+        limits: { read: 2_000, write: 4_000 },
+        // Held once, between the operation's check and its need.
+        waitHold: Effect.andThen(Deferred.succeed(reached, undefined), Deferred.await(go)),
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(
+            port.currentUser(project.repositories[0]?.id ?? ''),
+          )
+          yield* Deferred.await(reached)
+          fake.answer(ghReady())
+          yield* port.checkAgain(project.id, null)
+          yield* Deferred.succeed(go, undefined)
+          return {
+            login: yield* Fiber.join(waiting),
+            pending: yield* pendingNeeds,
+            rows: yield* forgeNeedRows,
+          }
+        }),
+      ),
+    )
+    expect(login).toBe('octo')
+    expect(pending).toEqual([])
+    expect(rows).toEqual([])
   })
 })
 
