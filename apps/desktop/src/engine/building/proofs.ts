@@ -46,6 +46,7 @@ import {
   type ScenarioProofState,
   type ToolArguments,
   addedTestNames,
+  addedTests,
   insertedFiles,
   validRed,
 } from '@hemera/core/domain'
@@ -852,7 +853,7 @@ export const buildingProofs = (parts: ProofParts) => {
       const names =
         test === undefined
           ? []
-          : addedTestNames({
+          : addedTests({
               insertion: test.insertion,
               code: test.code,
               patch: test.patch ?? null,
