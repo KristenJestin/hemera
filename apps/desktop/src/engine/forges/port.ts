@@ -747,6 +747,18 @@ export const forgePort = () => {
           return { project, repository, status: known.status, context: known.context }
         })
 
+      /**
+       * A repository's state as last checked, by whichever operation or Check again; checked now
+       * when it never was.
+       */
+      const knownNow = (repositoryId: string) =>
+        Effect.gen(function* () {
+          const { project, repository } = yield* located(repositoryId)
+          const known = (yield* SubscriptionRef.get(memory)).get(repositoryId)
+          if (known === undefined) return yield* checkedNow(repositoryId)
+          return { project, repository, status: known.status, context: known.context }
+        })
+
       /** The Project's need for this CLI and host, made once however many operations wait. */
       const needFor = (projectId: string, waiting: ForgeRepositoryStatus) =>
         Semaphore.withPermits(
@@ -814,7 +826,9 @@ export const forgePort = () => {
        * (an unreachable forge's message) would have waiters wake each other forever. A state change
        * is read from the states alone, which this follows from the waiter's own check on: the event
        * that check wrote would wake it at once, and a forge flipping between two states would be
-       * checked back to back.
+       * checked back to back. Says what woke it: a state some check wrote, which the waiter reads
+       * without checking again (two waiters on a flipping forge would otherwise check in turn, each
+       * waking the other), or an event, after which it checks.
        */
       const changed = (
         repositoryId: string,
@@ -835,6 +849,7 @@ export const forgePort = () => {
             }),
             Stream.take(1),
             Stream.runDrain,
+            Effect.as('state' as const),
           ),
           events.pipe(
             Stream.filter(
@@ -843,6 +858,7 @@ export const forgePort = () => {
             ),
             Stream.take(1),
             Stream.runDrain,
+            Effect.as('event' as const),
           ),
         )
 
@@ -859,18 +875,22 @@ export const forgePort = () => {
         provided(
           Effect.gen(function* () {
             let waitedIn: string | null = null
+            // Checked at the start and after an event; read as it stands after a state change.
+            let fresh = true
             for (;;) {
               const looked = yield* Effect.scoped(
                 Effect.gen(function* () {
                   // Followed before the check, so that no change between the two is missed.
                   const events = yield* DomainEvents.use((domain) => domain.subscribe)
-                  const checked = yield* checkedNow(repositoryId)
+                  const checked = fresh
+                    ? yield* checkedNow(repositoryId)
+                    : yield* knownNow(repositoryId)
                   const now = checked.status
                   if (now.state === 'ready' || now.state === 'not-needed')
                     return Option.some(checked)
                   waitedIn = checked.project.id
                   yield* needFor(checked.project.id, now)
-                  yield* changed(repositoryId, now, events)
+                  fresh = (yield* changed(repositoryId, now, events)) === 'event'
                   return Option.none()
                 }),
               ).pipe(
