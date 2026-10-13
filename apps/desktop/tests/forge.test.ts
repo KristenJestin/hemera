@@ -17,7 +17,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 import { ProjectOwner } from '@hemera/core/domain'
 import {
@@ -1389,6 +1389,69 @@ describe('An image is attached from Hemera’s own screenshot folder only', () =
     expect(refused).toBeInstanceOf(ForgeCommandRefused)
     expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
   })
+
+  test.each([
+    [
+      'two # with a .. after the first',
+      () => `${join(data, 'screenshots', 'shot.png')}#x${sep}..${sep}..${sep}id_ed25519#alt`,
+    ],
+    [
+      'a .. segment that comes back inside the folder',
+      () => [data, 'screenshots', '..', 'screenshots', 'shot.png'].join(sep),
+    ],
+    ['a network path', () => String.raw`\\host\share\shot.png`],
+  ])('%s is refused before spawning, the screenshot there', async (_case, path) => {
+    const fake = fakeForge([...ghReady(), ATTACH_OK])
+    const refused = await withForge(
+      fake,
+      () =>
+        Effect.gen(function* () {
+          writeFileSync(join(work, 'id_ed25519'), 'secret')
+          mkdirSync(join(data, 'screenshots'), { recursive: true })
+          writeFileSync(join(data, 'screenshots', 'shot.png'), 'png')
+          return yield* attach(path())
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'gh is given the real path that was checked, not the one asked',
+    async () => {
+      const fake = fakeForge([...ghReady(), ATTACH_OK])
+      const folder = join(data, 'screenshots')
+      await withForge(
+        fake,
+        () =>
+          Effect.gen(function* () {
+            mkdirSync(folder, { recursive: true })
+            writeFileSync(join(folder, 'shot.png'), 'png')
+            symlinkSync(join(folder, 'shot.png'), join(folder, 'link.png'))
+            const forgeRunner = yield* ForgeRunner
+            return yield* forgeRunner.run({
+              cli: 'gh',
+              forge: 'github',
+              host: 'github.com',
+              projectId: 'p',
+              args: [
+                'pr',
+                'edit',
+                '7',
+                '--repo',
+                'github.com/acme/shop',
+                '--attach',
+                `${join(folder, 'link.png')}#The list`,
+              ],
+            })
+          }),
+        { shop: REMOTES.shop },
+      )
+      const edit = fake.calls().find((call) => call.args[0] === 'pr')
+      expect(edit?.args.at(-1)).toBe(`${realpathSync.native(join(folder, 'shot.png'))}#The list`)
+    },
+  )
 
   test.skipIf(process.platform === 'win32')(
     'a link in the folder to a file elsewhere is refused before spawning',
