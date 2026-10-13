@@ -193,25 +193,36 @@ describe('The header of a mission', () => {
   })
 })
 
-describe('An earlier agent a start could not stop (#320)', () => {
-  test('is said on the header with its program and pid, one line per agent', () => {
-    const markup = drawn({
-      mission: mission({ stage: 'building', frozen: true }),
-      kept: [
-        { program: 'claude', pid: 48213 },
-        { program: 'codex', pid: 48377 },
-      ],
-    })
-    expect(markup).toContain(
-      'Earlier claude (48213) still running · Hemera tries again at the next start',
-    )
-    expect(markup).toContain(
-      'Earlier codex (48377) still running · Hemera tries again at the next start',
-    )
+describe('An agent Hemera started before its last restart, still running (#320)', () => {
+  const kept = [
+    { program: 'claude', pid: 48213 },
+    { program: 'codex', pid: 48377 },
+  ]
+
+  test('is one chip per agent where the stage card stands, and nothing in the header', () => {
+    const markup = drawn({ mission: mission({ stage: 'building', frozen: true }), kept })
+    expect(markup).toContain('claude · pid 48213')
+    expect(markup).toContain('codex · pid 48377')
+    expect(markup).not.toContain('data-mark="kept"')
+    expect(markup).not.toContain('Earlier claude')
   })
 
-  test('is not said once none is kept', () => {
-    expect(drawn({ kept: [] })).not.toContain('still running')
+  test('is handed to the stage’s page, whose card shows it', () => {
+    const pages = {
+      Planning: ({ kept: handed, frame }: StagePageProps): ReactNode =>
+        frame({
+          base: createElement(
+            'p',
+            null,
+            handed.map((agent) => `${agent.program} ${String(agent.pid)}`).join(', '),
+          ),
+        }),
+    }
+    expect(drawn({ pages, kept })).toContain('claude 48213, codex 48377')
+  })
+
+  test('is not shown once none is kept', () => {
+    expect(drawn({ mission: mission({ stage: 'building' }), kept: [] })).not.toContain('pid ')
   })
 })
 

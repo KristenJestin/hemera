@@ -9,6 +9,7 @@ import {
   MissionFrame,
   MissionFrameBase,
   MissionFrameNeeds,
+  keptAgentChips,
   type AppSection,
   type MissionFrameState,
   type MissionView,
@@ -146,10 +147,7 @@ export function MissionPage({
         now={parts.now}
         onNow={parts.onNow}
         nowChip={parts.nowChip}
-        marks={[
-          ...line.marks,
-          ...kept.map(({ program, pid }) => ({ kind: 'kept' as const, program, pid })),
-        ]}
+        marks={line.marks}
         onOpenOutdated={'difference' in views ? () => actions.open('difference') : undefined}
         ticket={
           line.ticket === null
@@ -184,7 +182,14 @@ export function MissionPage({
     )
   }
   return Page === undefined
-    ? draw({ base: <MissionFrameBase stage={line.stage} /> })
+    ? draw({
+        base: (
+          <MissionFrameBase
+            stage={line.stage}
+            running={kept.length > 0 ? keptAgentChips(kept) : undefined}
+          />
+        ),
+      })
     : createElement(Page, {
         link,
         engineReady,
@@ -194,6 +199,7 @@ export function MissionPage({
         readiness,
         openChat: actions.openChat,
         refused,
+        kept,
         freeze,
         freezing,
         needs: { rows, on: answering },
