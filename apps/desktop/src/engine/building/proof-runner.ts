@@ -22,7 +22,7 @@ import {
 } from '@hemera/core/domain'
 import { HemeraAuthor } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer, Option, Result } from 'effect'
+import { Context, Deferred, Duration, Effect, Layer, Option, Result } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
 import { putEvidence } from '../memory/evidence.ts'
@@ -78,7 +78,14 @@ export class ProofRunner extends Context.Service<
   { readonly run: (asked: ProofAsked) => Effect.Effect<ProofRun> }
 >()('ProofRunner') {}
 
-const runProof = (asked: ProofAsked) =>
+/**
+ * How long a proof may run before Hemera ends it (#290): a test that never ends (a watch mode, a
+ * wait on the network) would otherwise hold the end of the Building for good. The checks have no
+ * limit of their own to take; ten minutes is far above a scenario's test.
+ */
+export const PROOF_LIMIT = Duration.minutes(10)
+
+const runProof = (asked: ProofAsked, limit: Duration.Duration) =>
   Effect.gen(function* () {
     const database = yield* Database
     const secrets = yield* Secrets
@@ -116,6 +123,8 @@ const runProof = (asked: ProofAsked) =>
       desk.checkRun(asked.missionId, `proof ${asked.scenario}`, repositories),
     )
     let trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }> = []
+    // Its limit counts from its launch, never while it waits for a permission or a reservation.
+    const started = Deferred.makeUnsafe<void>()
     const launched = yield* startRun({
       projectId: mission.projectId,
       workspaceId: building.workspaceId,
@@ -125,12 +134,14 @@ const runProof = (asked: ProofAsked) =>
       startedBy: 'hemera',
       sessionId: null,
       missionId: asked.missionId,
-      beforeLaunch:
+      beforeLaunch: Effect.andThen(
         watch === null
           ? Effect.void
           : Effect.map(watch.launch, (taken) => {
               trees = taken
             }),
+        Deferred.succeed(started, undefined),
+      ),
     }).pipe(Effect.result)
     let output = ''
     let exitCode: number | null = null
@@ -141,14 +152,27 @@ const runProof = (asked: ProofAsked) =>
       output = `It could not start: ${launched.failure.message}`
     } else {
       runId = launched.success.id
-      const ended = yield* awaitRun(launched.success.id).pipe(
+      const id = launched.success.id
+      const ended = yield* Effect.gen(function* () {
+        const waited = yield* Effect.raceFirst(
+          Effect.asSome(awaitRun(id)),
+          Effect.as(Effect.andThen(Deferred.await(started), Effect.sleep(limit)), Option.none()),
+        )
+        // Past its limit it is ended, its process tree with it: a red that timed out (#290).
+        if (Option.isSome(waited)) return { run: waited.value, timedOut: false }
+        return { run: yield* stopRun(id), timedOut: true }
+      }).pipe(
         // Started for this proof and judged by it: nobody else would stop it.
-        Effect.onInterrupt(() => stopRun(launched.success.id).pipe(Effect.ignore)),
-        Effect.ensuring(watch === null ? Effect.void : watch.finish(launched.success.id)),
+        Effect.onInterrupt(() => stopRun(id).pipe(Effect.ignore)),
+        Effect.ensuring(watch === null ? Effect.void : watch.finish(id)),
       )
-      output = (yield* runOutput(launched.success.id)).output
-      exitCode = ended.exitCode
-      line = ended.line
+      output = (yield* runOutput(id)).output
+      if (ended.timedOut) {
+        output = `${output}\nIt timed out after ${Duration.format(limit)}: Hemera ended it.`
+      }
+      // Ended by Hemera, it never exited on its own, whatever its runner said as it stopped.
+      exitCode = ended.timedOut ? null : ended.run.exitCode
+      line = ended.run.line
     }
     const classified = classifyProofRun({ output, exitCode, testPath: test?.path ?? null })
     const key = asked.proof.key_line
@@ -220,11 +244,14 @@ const runProof = (asked: ProofAsked) =>
     return run
   })
 
-/** The proofs, run by Hemera (#144). */
-export const proofRunnerLayer = Layer.effect(
-  ProofRunner,
-  Effect.gen(function* () {
-    const context = yield* Effect.context<Effect.Services<ReturnType<typeof runProof>>>()
-    return { run: (asked) => runProof(asked).pipe(Effect.provide(context), Effect.orDie) }
-  }),
-)
+/** The proofs, run by Hemera (#144), each ended at `limit` (#290). */
+export const proofRunnerLayer = (limit: Duration.Duration = PROOF_LIMIT) =>
+  Layer.effect(
+    ProofRunner,
+    Effect.gen(function* () {
+      const context = yield* Effect.context<Effect.Services<ReturnType<typeof runProof>>>()
+      return {
+        run: (asked) => runProof(asked, limit).pipe(Effect.provide(context), Effect.orDie),
+      }
+    }),
+  )

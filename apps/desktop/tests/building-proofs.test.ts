@@ -16,7 +16,7 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Deferred, Effect, Layer, Predicate, Schema } from 'effect'
+import { Deferred, Duration, Effect, Layer, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -69,11 +69,12 @@ const proofsEngine = (
   hold: BuilderHold = () => Effect.void,
   end?: Layer.Layer<BuildingEnd>,
   agents: (index: number) => FakeScript = builderAgents,
+  proofLimit?: Duration.Duration,
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
-    building: end === undefined ? { hold } : { hold, end },
+    building: end === undefined ? { hold, proofLimit } : { hold, end, proofLimit },
   })
 
 /**
@@ -1704,6 +1705,73 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     // Once the run failed again, the Builder still writing nothing, it is asked again.
     expect(seen.after).toEqual(['answered', 'pending'])
     expect(seen.runs).toBe(3)
+  })
+})
+
+describe('A proof run that never ends', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  test('a proof that never ends: its run ends at its limit as a red that timed out, and the question comes', async () => {
+    const log = join(scratch, 'runs.log')
+    const pid = join(scratch, 'pid')
+    // Red until export.ts exists; from then on it never ends, as a watch mode would not.
+    const hanging = () => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          [
+            `  appendFileSync(${JSON.stringify(log)}, 'ran\\n')`,
+            "  if (existsSync(new URL('../export.ts', import.meta.url))) {",
+            `    writeFileSync(${JSON.stringify(pid)}, String(process.pid))`,
+            '    await new Promise(() => setInterval(() => undefined, 1000))',
+            '  }',
+            "  assert.fail('export.ts exports nothing yet')",
+          ].join('\n'),
+          ["import { writeFileSync } from 'node:fs'"],
+        ),
+      ),
+    })
+    const seen = await proofsEngine(data, undefined, undefined, undefined, Duration.seconds(6)).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(hanging)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* until(
+              Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+              25_000,
+            )
+            return { proof: yield* proofOf(mission.id, 'R1.S2') }
+          }),
+        ),
+    )
+    const green = seen.proof.runs.at(-1)
+    expect(seen.proof.runs.map((one) => one.phase)).toEqual(['red', 'green'])
+    expect(green?.classification).toBe('environment')
+    expect(green?.outputTail).toMatch(/timed out after 6s/)
+    // The test's process, under the runner's, was ended with the run.
+    const ended = () => {
+      try {
+        process.kill(Number(readFileSync(pid, 'utf8')), 0)
+        return false
+      } catch {
+        return true
+      }
+    }
+    expect(ended()).toBe(true)
   })
 })
 
