@@ -224,13 +224,23 @@ const taskkill = (pid: number) =>
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
 /**
- * What a program prints, once it ends or `millis` passed, or null when it printed nothing.
+ * What a program prints, once it ends or `millis` passed, or null when it printed nothing. It is
+ * ended when the one waiting on it gives up first: a lookup the sweep's bound cuts leaves nothing
+ * running behind it.
  */
 export const outputOf = (program: string, args: ReadonlyArray<string>, millis: number) =>
   Effect.callback<string | null>((resume) => {
-    execFile(program, [...args], { windowsHide: true, timeout: millis }, (_error, stdout) => {
-      const text = String(stdout).trim()
-      resume(Effect.succeed(text === '' ? null : text))
+    const child = execFile(
+      program,
+      [...args],
+      { windowsHide: true, timeout: millis },
+      (_error, stdout) => {
+        const text = String(stdout).trim()
+        resume(Effect.succeed(text === '' ? null : text))
+      },
+    )
+    return Effect.sync(() => {
+      child.kill()
     })
   })
 

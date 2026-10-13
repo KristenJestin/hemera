@@ -13,7 +13,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { Effect, Fiber, Layer } from 'effect'
+import { Effect, Fiber, Layer, Option } from 'effect'
 import type { Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -27,6 +27,7 @@ import {
   WINDOWS_COMMAND_LINE_MS,
   databaseRegistryLayer,
   hostProcessesLayer,
+  outputOf,
   processSupervisorLayer,
   stillRuns,
 } from '../src/engine/supervisor.ts'
@@ -697,6 +698,23 @@ describe('The machine is asked once for every left-over agent', () => {
 
     expect(asked.map((one) => one.toSorted())).toEqual([pids])
     expect(orphans.every((one) => one.ended)).toBe(true)
+  })
+
+  test('a lookup cut by its bound ends the program it started', async () => {
+    const where = join(folder, 'lookup.pid')
+    const hangs = script(`
+import { writeFileSync } from 'node:fs'
+writeFileSync(process.argv[2], String(process.pid))
+${STAYS_UP}`)
+    const said = await Effect.runPromise(
+      outputOf(process.execPath, [hangs, where], WINDOWS_COMMAND_LINE_MS).pipe(
+        Effect.timeoutOption('1 second'),
+      ),
+    )
+    const [pid] = await pidsIn(where, 1)
+
+    expect(Option.isNone(said)).toBe(true)
+    expect(await goneWithin(pid ?? -1)).toBe(true)
   })
 })
 
