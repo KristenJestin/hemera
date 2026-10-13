@@ -14,7 +14,8 @@
  *  7. on `ask`: the single human question, which answers the agent at once;
  *  8. idempotency: the same call key in the same session gives the same outcome, one execution
  *     and one record, and a retry that arrives while the first call runs waits for it;
- *  9. the execution, whose effects outside the database record their intent and outcome;
+ *  9. the execution, whose effects outside the database record their intent and outcome, only
+ *     while the grant is still live, and counted until it ends (`ToolAccess.settled`);
  * 10. the record of the call: session, role, mission, tool, class, verdict and who gave it,
  *     outcome, duration; its reason masked, never a file's content.
  *
@@ -48,6 +49,7 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { getAgentSession } from '../agents/sessions.ts'
+import { getSession, sessionsOfLineage } from '../sessions/store.ts'
 import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
@@ -98,6 +100,7 @@ import { Git } from '../git.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import { BuildDesk } from '../building/desk.ts'
 import { HelperDesk } from '../building/helper-desk.ts'
+import { STOPPED_AT_THE_END } from '../building/helper-store.ts'
 import { DocsDesk } from '../building/docs-desk.ts'
 import { ReviewDesk } from '../building/review-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
@@ -992,12 +995,35 @@ export const toolGateLayer = (settings: GateSettings) =>
               return refusal(question.answer)
             }
           }
-          const answer = yield* execute(grant, prepared.success)
+          // A session ended while its call waited executes nothing: its owner may be settling.
+          const answer =
+            (yield* ToolAccess.use((access) =>
+              access.executing(grant.id, execute(grant, prepared.success)),
+            )) ?? refusal('refused: this session has ended')
           const notes = prepared.success.notes
           return notes.length === 0
             ? answer
             : { ...answer, text: [answer.text, ...notes].join('\n\n') }
         })
+
+      /**
+       * Whether the end of its Building stopped a session's lineage: an approved call of it runs
+       * nothing then. One replaced (a restart, a resume) acts on through its successor.
+       */
+      const stoppedAtTheEnd = (sessionId: string) =>
+        getSession(sessionId).pipe(
+          Effect.flatMap((session) =>
+            Effect.map(sessionsOfLineage(session.lineage), (lineage) =>
+              [session, ...lineage].reduce((latest, one) =>
+                one.epoch >= latest.epoch ? one : latest,
+              ),
+            ),
+          ),
+          Effect.map(
+            (latest) => latest.state === 'ended' && latest.stateReason === STOPPED_AT_THE_END,
+          ),
+          Effect.catchTag('UnknownSession', () => Effect.succeed(false)),
+        )
 
       /**
        * A call the user allowed, acted on by Hemera: its guards, its places and the refusals of the
@@ -1025,10 +1051,26 @@ export const toolGateLayer = (settings: GateSettings) =>
             if (refused !== null) {
               return { kind: 'changed', reason: `refused: ${refused}` } satisfies Performed
             }
-            const changed = yield* holds(judged)
-            if (changed !== null) return { kind: 'changed', reason: changed } satisfies Performed
-            const answer = yield* execute(grant, prepared.success)
-            return { kind: 'answered', answer } satisfies Performed
+            // Counted before its session is read: an exit that stops the session either finds the
+            // call counted and waits for it, or stopped the session first and nothing runs. One
+            // whose session ended before the exit is refused by the exit's mark.
+            const acted = yield* ToolAccess.use((access) =>
+              access.counted(
+                frozen.grant.missionId,
+                Effect.gen(function* () {
+                  if (yield* stoppedAtTheEnd(frozen.grant.sessionId)) {
+                    return { kind: 'changed', reason: STOPPED_AT_THE_END } satisfies Performed
+                  }
+                  const changed = yield* holds(judged)
+                  if (changed !== null) {
+                    return { kind: 'changed', reason: changed } satisfies Performed
+                  }
+                  const answer = yield* execute(grant, prepared.success)
+                  return { kind: 'answered', answer } satisfies Performed
+                }),
+              ),
+            )
+            return acted ?? ({ kind: 'changed', reason: STOPPED_AT_THE_END } satisfies Performed)
           }).pipe(
             Effect.catch((failed) =>
               Effect.succeed<Performed>({

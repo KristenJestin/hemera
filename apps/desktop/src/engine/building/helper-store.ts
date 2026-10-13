@@ -45,6 +45,9 @@ type Reader = Database['Service'] | EngineTransaction
 /** The folder of a mission's folder its Prototypers' throwaway folders live in. */
 export const PROTOTYPES_FOLDER = 'prototypes'
 
+/** Why the end of a Building stopped a helper still running at its exit: its failure, said. */
+export const STOPPED_AT_THE_END = 'the end of the Building stopped it'
+
 /** What a free helper is called on its chip. */
 export const FREE_HELPER_NAME = 'Helper'
 
