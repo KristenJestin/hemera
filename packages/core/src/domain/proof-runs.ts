@@ -290,10 +290,16 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
   return testPath === null ? 'assertion_failed' : 'error_before_test'
 }
 
-/** A Go subtest a proof adds: the test function it runs under, and its literal `t.Run` name. */
+/**
+ * A Go subtest a proof adds: the test function it runs under, its literal `t.Run` name, and the `t.Run` names it is nested in, outermost first (null for a
+ * name that is not a literal), as far as the code shows them: from the function's own body when
+ * `whole`, otherwise from a hunk that starts inside it.
+ */
 export interface GoSubtest {
   readonly parent: string
   readonly subtest: string
+  readonly nesting: ReadonlyArray<string | null>
+  readonly whole: boolean
 }
 /**
  * A Rust test with cases (`#[rstest]`, `#[test_case(…)]`): its function's name, which libtest
@@ -331,15 +337,17 @@ const namePattern = (name: string, cases = false): RegExp | null => {
 }
 
 /**
- * A Go subtest as `go test` prints it: its parent function, any subtests between, then its name
- * with each space turned into `_` (`TestExport/as_markdown/with_header`), on a `--- FAIL:` line or
- * as a report's test name.
+ * A Go subtest as `go test` prints it: its parent function, the subtests it is nested in, then its
+ * name, each space turned into `_` (`TestExport/as_markdown/with_header`), on a `--- FAIL:` line or
+ * as a report's test name. Any subtests may come before the nesting the code does not show whole.
  */
 const subtestPattern = (test: GoSubtest): RegExp => {
-  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const subtest = escape(test.subtest.replace(/\s/g, '_'))
+  const escape = (text: string) => text.replace(/\s/g, '_').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const path = [...test.nesting, test.subtest]
+    .map((name) => `/${name === null ? '[^\\s/]+' : escape(name)}`)
+    .join('')
   return new RegExp(
-    `^(?:\\s*--- FAIL: )?${escape(test.parent)}(?:/[^\\s/]+)*/${subtest}(?=\\s+\\(|\\s*$)`,
+    `^(?:\\s*--- FAIL: )?${escape(test.parent)}${test.whole ? '' : '(?:/[^\\s/]+)*'}${path}(?=\\s+\\(|\\s*$)`,
   )
 }
 
@@ -401,6 +409,10 @@ const EACH_NAME =
 const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
 const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
 const GO_SUBTEST_NAME = /\b\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/
+/** A `t.Run(` call, its name a literal or not. */
+const GO_RUN = /\b\w+\.Run\(/
+/** Go's strings, runes and comments, a raw string or a block comment across lines. */
+const GO_LITERAL = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
 /** The function a line of Go declares, or a hunk header names after its `@@`. */
 const GO_FUNCTION = /^(?:@@[^@]*@@\s*)?func\s/
 const RUST_NAME =
@@ -443,6 +455,7 @@ export const addedTests = (test: {
  * The literal names of the Go subtests a proof adds (`t.Run("…",`), each with the test function
  * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
  * function its `@@ … @@ func TestX(` header names. A subtest under no test function is not named.
+ * Its nesting is read from the braces of the lines above it, strings, runes and comments aside.
  */
 const subtestsOf = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -461,20 +474,62 @@ const subtestsOf = (test: {
               ? { text: line, added: false }
               : { text: line.slice(1), added: line.startsWith('+') },
           )
+  const code = goCode(lines.map((line) => line.text))
   const found: GoSubtest[] = []
   let parent: string | null = null
-  for (const line of lines) {
-    if (GO_FUNCTION.test(line.text)) {
-      parent =
-        new RegExp(GO_NAME.source).exec(line.text.replace(/^@@[^@]*@@\s*/, ''))?.groups?.['name'] ??
-        null
-      continue
+  let whole = true
+  // The `t.Run` blocks open above, each with the depth of braces inside it.
+  let open: Array<{ readonly name: string | null; readonly depth: number }> = []
+  let depth = 0
+  for (const [at, line] of lines.entries()) {
+    const isHeader = line.text.startsWith('@@')
+    if (GO_FUNCTION.test(line.text) || isHeader) {
+      parent = GO_FUNCTION.test(line.text)
+        ? (new RegExp(GO_NAME.source).exec(line.text.replace(/^@@[^@]*@@\s*/, ''))?.groups?.[
+            'name'
+          ] ?? null)
+        : null
+      whole = !isHeader
+      open = []
+      depth = 0
+      if (isHeader) continue
     }
-    if (line.text.startsWith('@@')) parent = null
     const subtest = GO_SUBTEST_NAME.exec(line.text)?.groups?.['name']
-    if (line.added && parent !== null && subtest !== undefined) found.push({ parent, subtest })
+    const nesting = open.map((block) => block.name)
+    if (line.added && parent !== null && subtest !== undefined)
+      found.push({ parent, subtest, nesting, whole })
+    const text = code[at] ?? ''
+    const before = depth
+    depth += (text.match(/\{/g) ?? []).length - (text.match(/\}/g) ?? []).length
+    if (depth > before && GO_RUN.test(text)) open.push({ name: subtest ?? null, depth })
+    open = open.filter((block) => block.depth <= depth)
   }
   return found
+}
+
+/**
+ * Lines of Go with their strings, runes and comments blanked, each hunk of a patch read apart (a
+ * header's words are not code).
+ */
+const goCode = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const blanked = (hunk: ReadonlyArray<string>) =>
+    hunk.length === 0
+      ? []
+      : hunk
+          .join('\n')
+          .replace(GO_LITERAL, (literal) => literal.replace(/[^\n]/g, ' '))
+          .split('\n')
+  const code: string[] = []
+  let hunk: string[] = []
+  for (const line of lines) {
+    if (!line.startsWith('@@')) {
+      hunk.push(line)
+      continue
+    }
+    code.push(...blanked(hunk), line)
+    hunk = []
+  }
+  return [...code, ...blanked(hunk)]
 }
 
 /** The literal names a proof's tests are declared with, as its code reads. */
