@@ -15,7 +15,13 @@
  * query string, a path, a longer token) through, so the rule is on the value, not on the match.
  */
 
-import { MAIN_CHECKOUT_NAME, type Masked, maskRecord, maskText } from '@hemera/core/domain'
+import {
+  MAIN_CHECKOUT_NAME,
+  type Masked,
+  maskKnownValues,
+  maskRecord,
+  maskText,
+} from '@hemera/core/domain'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Context, Effect } from 'effect'
 import type { Schema } from 'effect'
@@ -38,6 +44,8 @@ export interface SecretsRegistry {
   readonly values: () => ReadonlyArray<string>
   /** Text with every registered value masked, then the shapes of credentials. */
   readonly mask: (text: string) => Masked<string>
+  /** Text with every registered value masked, and nothing else: not masked yet, only less. */
+  readonly maskKnown: (text: string) => string
   /** A structured value with every string in it masked, and its credential fields whole. */
   readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
@@ -66,6 +74,7 @@ export function secretsRegistry(): SecretsRegistry {
     },
     values,
     mask: (text) => maskText(text, values()),
+    maskKnown: (text) => maskKnownValues(text, values()),
     maskRecord: (record) => maskRecord(record, values()),
   }
 }

@@ -63,11 +63,12 @@ export interface ForgeCall {
 
 /**
  * What a call answered: the command it ran, its exit code, what it printed and its standard error,
- * all three masked. An output that is JSON (any value: an object, a list, a string…) is read first
- * and masked value by value (`maskRecord`: every string, and a credential field whole), then
- * written back, so it stays JSON; NDJSON (`--jq`) is read so line by line. What is not JSON is
- * masked as text, each run of such lines as one, so a credential spread over lines (a private
- * key) goes whole.
+ * all three masked. The known values are masked over the whole output first. Then an output that
+ * is JSON (any value: an object, a list, a string…) is read and masked value by value
+ * (`maskRecord`: every string, and a credential field whole), then written back, so it stays
+ * JSON; NDJSON (`--jq`), every line of which is JSON, is read so line by line. Any other output is
+ * masked as one text, so a credential spread over its lines (a private key, a label and its value)
+ * goes whole.
  */
 export interface ForgeAnswer {
   readonly command: string
@@ -174,29 +175,27 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         JSON.stringify(secrets.maskRecord({ value }).value)
 
       /** What a CLI printed, masked: JSON value by value, NDJSON line by line, the rest as text. */
-      const maskOutput = (printed: string): string =>
-        Option.match(readJson(printed), {
-          onSome: maskJson,
-          onNone: () => {
-            const masked: string[] = []
-            let text: string[] = []
-            const flush = () => {
-              if (text.length > 0) masked.push(secrets.mask(text.join('\n')))
-              text = []
-            }
-            for (const line of printed.split('\n')) {
-              const json = line.trim() === '' ? Option.none() : readJson(line)
-              if (Option.isNone(json)) {
-                text.push(line)
-              } else {
-                flush()
-                masked.push(maskJson(json.value))
-              }
-            }
-            flush()
-            return masked.join('\n')
-          },
+      const maskOutput = (printed: string): string => {
+        // Known values first, over the raw text: one inside a string keeps the JSON readable; one
+        // that read JSON would split or never see as a string (a number, a key, a value that is
+        // JSON itself or spans lines) leaves the text unreadable as JSON, and so masked as text.
+        const known = secrets.maskKnown(printed)
+        const whole = readJson(known)
+        if (Option.isSome(whole)) return maskJson(whole.value)
+        let mixed = false
+        const lines = known.split('\n').map((line) => {
+          if (line.trim() === '') return line
+          const json = readJson(line)
+          if (Option.isSome(json)) return maskJson(json.value)
+          mixed = true
+          return line
         })
+        // A line that is not JSON among JSON ones: the whole is masked as text too, since read
+        // apart, a label and its value on the next line, or a private key around a line of digits,
+        // would be masked in pieces. Its JSON lines were masked as JSON first, where text masking
+        // misses a value between escaped quotes.
+        return mixed ? secrets.mask(lines.join('\n')) : lines.join('\n')
+      }
 
       const find = (cli: ForgeCli) =>
         Effect.sync(() =>

@@ -137,6 +137,14 @@ const maskKnown = (text: string, known: ReadonlyArray<string>): string => {
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
 
+/**
+ * Text with its known values masked, and nothing else: the shapes of credentials are left for a
+ * later pass, once the text has been read (the JSON a CLI printed, before its strings are masked).
+ */
+export function maskKnownValues(text: string, values: ReadonlyArray<string>): string {
+  return maskKnown(text, longestFirst(values))
+}
+
 /** Text with its known values masked, then the shapes of credentials. */
 export function maskText(text: string, values: ReadonlyArray<string>): Masked<string> {
   return maskedString(maskShapes(maskKnown(text, longestFirst(values))))

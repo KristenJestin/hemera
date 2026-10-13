@@ -38,6 +38,7 @@ import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts
 import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
+import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { forgeNeeds } from '../src/engine/storage/schema.ts'
 import { listActions } from '../src/engine/tools/actions.ts'
@@ -90,9 +91,10 @@ const withForge = <A, E>(
   }) => Effect.Effect<A, E, EngineServices>,
   remotes: Readonly<Record<string, string>> = REMOTES,
   limits = { read: 2_000, write: 4_000 },
+  secrets: SecretsRegistry = secretsRegistry(),
 ) => {
   const main = checkout(remotes)
-  return commandsEngine(data, { forge: { env: fake.env, limits } })(({ profile }) =>
+  return commandsEngine(data, { forge: { env: fake.env, limits }, secrets })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
         const project = yield* createProject({
@@ -996,8 +998,10 @@ describe('What a CLI prints and the command it ran are masked', () => {
 })
 
 describe('A JSON answer of any shape is masked value by value and stays JSON', () => {
-  /** What the runner gives back of `gh api … user` when the fake prints this. */
-  const printed = (stdout: string) => {
+  /** What the runner gives back of `gh api … user` when the fake prints this, these values known. */
+  const printed = (stdout: string, known: ReadonlyArray<string> = []) => {
+    const secrets = secretsRegistry()
+    secrets.register('known', [], known)
     const fake = fakeForge([{ cli: 'gh', when: ['api', 'user'], stdout }])
     return withForge(
       fake,
@@ -1012,6 +1016,8 @@ describe('A JSON answer of any shape is masked value by value and stays JSON', (
           }),
         ),
       { shop: REMOTES.shop },
+      undefined,
+      secrets,
     ).then((answer) => answer.stdout)
   }
 
@@ -1052,14 +1058,12 @@ describe('A JSON answer of any shape is masked value by value and stays JSON', (
     ])
   })
 
-  test('a line of NDJSON that is no JSON is masked as text', async () => {
+  test('JSON lines mixed with text are masked as one text: nothing of a secret is left', async () => {
     const stdout = await printed(
       `${JSON.stringify(item(1))}\nwarning: token=${token}\n${JSON.stringify(item(2))}\n`,
     )
-    const [first, text, last] = stdout.split('\n')
-    expect(JSON.parse(first ?? '')).toEqual(masked(1))
-    expect(text).toBe('warning: token=•••')
-    expect(JSON.parse(last ?? '')).toEqual(masked(2))
+    expect(stdout).not.toMatch(/plain-|x1|x2|ghp_/)
+    expect(stdout).toContain('warning: token=•••')
   })
 
   test('a private key printed as text is masked whole, across its lines', async () => {
@@ -1071,6 +1075,82 @@ describe('A JSON answer of any shape is masked value by value and stays JSON', (
     ]
     const stdout = await printed(`{"a": 1}\n${block.join('\n')}\n`)
     expect(stdout).toBe('{"a":1}\n•••')
+  })
+})
+
+describe('Masking an answer read as JSON loses nothing whole-text masking catches', () => {
+  const printed = (stdout: string, known: ReadonlyArray<string> = []) => {
+    const secrets = secretsRegistry()
+    secrets.register('known', [], known)
+    const fake = fakeForge([{ cli: 'gh', when: ['api', 'user'], stdout }])
+    return withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flatMap(runner, (forgeRunner) =>
+          forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId,
+            args: ['api', '--hostname', 'github.com', 'user', '--jq', '.login'],
+          }),
+        ),
+      { shop: REMOTES.shop },
+      undefined,
+      secrets,
+    ).then((answer) => answer.stdout)
+  }
+
+  const codes = '48213977\n55120934'
+  test.each([
+    ['after a label', `recovery codes:\n${codes}\n`, 'recovery codes:\n•••'],
+    ['alone', `${codes}\n`, '•••'],
+  ])(
+    'a known value over several lines, each a JSON number: %s',
+    async (_case, stdout, expected) => {
+      expect(await printed(stdout, [codes])).toBe(expected)
+    },
+  )
+
+  test('a known numeric value inside a gh --json list', async () => {
+    const stdout = await printed('[{"n":424242}]\n', ['424242'])
+    expect(stdout).not.toContain('424242')
+  })
+
+  const dockerConfig = JSON.stringify({ auths: { 'reg.acme.test': { auth: 'dXNlcjpodW50ZXIy' } } })
+
+  test('a known value that is itself JSON, among text', async () => {
+    expect(await printed(`config:\n${dockerConfig}\nend\n`, [dockerConfig])).toBe(
+      'config:\n•••\nend',
+    )
+  })
+
+  test('a known value that is itself JSON, inside a list', async () => {
+    expect(await printed(`[${dockerConfig}]\n`, [dockerConfig])).not.toContain('dXNlcjpodW50ZXIy')
+  })
+
+  test.each([
+    ['db:\n  password:\n    "hunter2xyz"\n', 'hunter2xyz'],
+    ['cookie:\n"sessionid=abcdef123"\n', 'abcdef123'],
+  ])('a label on one line, its quoted value on the next: %j', async (stdout, secret) => {
+    expect(await printed(stdout)).not.toContain(secret)
+  })
+
+  test('a private key block with a line of digits in its middle', async () => {
+    const block = [
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'b3BlbnNzaC1rZXktdjEAAAAA',
+      '12345678',
+      'QUJDREVG',
+      '-----END RSA PRIVATE KEY-----',
+    ]
+    expect(await printed(`${block.join('\n')}\n`)).toBe('•••')
+  })
+
+  test('a known value used as an object key', async () => {
+    const stdout = await printed('[{"s3cretKEYvalue":1}]\n', ['s3cretKEYvalue'])
+    expect(stdout).not.toContain('s3cretKEYvalue')
+    expect(JSON.parse(stdout)).toEqual([{ '•••': 1 }])
   })
 })
 
