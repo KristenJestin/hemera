@@ -1844,6 +1844,75 @@ describe('A proof run that never ends', () => {
   })
 })
 
+describe('A restart while a proof waits on its fix', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  test('a restart after the fix landed during the stop: the idle Builder is not judged stuck between the reds and the greens it runs again', async () => {
+    const builder = busyBuilder()
+    const first = await proofsEngine(data, undefined, undefined, builder.agents).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            // At work until the stop: nothing is stuck before it.
+            yield* builder.busy
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            return { mission, api: yield* apiOf(mission.id), asked: yield* unprovenAsked }
+          }),
+        ),
+    )
+    // The fix lands while Hemera is stopped.
+    writeFileSync(join(first.api, 'export.ts'), RIGHT_EXPORT)
+    const { hold, reached, go } = holdOnce('greens-due')
+    const seen = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // Between the reds and the greens of the start, the restored Builder idle and quiet.
+          yield* Deferred.await(reached)
+          // The detector compares the Workspace, as its timer does: the tree moved during the stop.
+          yield* OutsideChanges.use((outside) => outside.compare(first.mission.id, null))
+          yield* Effect.sleep('3 seconds')
+          const between = yield* unprovenAsked
+          yield* Deferred.succeed(go, undefined)
+          // The end called on the green, or the user asked.
+          yield* until(
+            Effect.zipWith(
+              endCalled(first.mission.id),
+              unprovenAsked,
+              (called, asked) => called || asked.length > 0,
+            ),
+            20_000,
+          )
+          return {
+            between,
+            asked: yield* unprovenAsked,
+            proof: yield* proofOf(first.mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(first.asked).toEqual([])
+    expect(seen.between).toEqual([])
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
+  })
+})
+
 describe('What the reviewers see of the red phase', () => {
   test('the Builder’s writes outside the proof files before a scenario’s red are recorded for the reviewers', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
