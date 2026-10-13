@@ -37,7 +37,8 @@ export interface BuildWork {
   readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
   /**
    * The mission's Builder, resumed when its session ended while its Building is still active:
-   * what #147's exit calls when a late write sends the end back to the Builder.
+   * what #147's exit calls when a late write sends the end back to the Builder. Never while a need
+   * about the Builder's sessions waits on the user (a start, a provider limit): its Retry does.
    */
   readonly ensureBuilder: (missionId: string) => Effect.Effect<void>
   /** The proofs and final checks whose repository moved since they ran, among these (R9). */

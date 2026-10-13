@@ -75,6 +75,7 @@ import {
   refusedWhile,
 } from '../storage/database.ts'
 import {
+  agentSessions,
   buildingActivity,
   buildingAttempts,
   buildingCheckRuns,
@@ -84,6 +85,8 @@ import {
   buildingTasks,
   buildings,
   missions,
+  needs,
+  sessionNeeds,
 } from '../storage/schema.ts'
 import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { EffectfulAction } from '../tools/actions.ts'
@@ -522,6 +525,32 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               said(`no Builder for ${building.missionId}: ${refused.message}`),
             ),
           )
+        })
+
+      /**
+       * Whether the mission's Builder waits on the user: a need about one of its sessions (a start
+       * that failed, a provider limit, a lineage that keeps failing) is pending, and its Retry is
+       * what starts it again.
+       */
+      const builderWaits = (missionId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const pending = yield* database
+            .select({ id: needs.id })
+            .from(sessionNeeds)
+            .innerJoin(needs, eq(needs.id, sessionNeeds.needId))
+            .innerJoin(agentSessions, eq(agentSessions.id, sessionNeeds.sessionId))
+            .where(
+              and(
+                eq(agentSessions.ownerKind, 'mission'),
+                eq(agentSessions.ownerId, missionId),
+                eq(agentSessions.role, 'builder'),
+                eq(needs.state, 'pending'),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.mapError(refusedWhile('reading the Builder’s needs')))
+          return pending.length > 0
         })
 
       /** The interval of this engine's time, opened for a Building. */
@@ -1533,7 +1562,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ensureBuilder: (missionId) =>
             Effect.gen(function* () {
               const building = yield* activeBuildingIn(yield* Database, missionId)
-              if (building !== null) yield* ensureBuilder(building)
+              if (building === null || (yield* builderWaits(missionId))) return
+              yield* ensureBuilder(building)
             }).pipe(provided, Effect.orDie),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
