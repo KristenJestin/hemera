@@ -43,6 +43,7 @@ import {
   PROOF_CLASSES,
   type ProofClass,
   type ProofPhase,
+  PROOF_PHASES,
   type ScenarioProofState,
   type ToolArguments,
   addedTestNames,
@@ -149,6 +150,13 @@ const waitsOn = (row: ScenarioProofRow, failing: ReadonlyArray<string>) => {
   const state = stateOf(row)
   return !SETTLED.includes(state) || (state === 'to_rerun' && failing.includes(row.scenario))
 }
+
+/** The state a proof held on a run's need goes back to at its Retry, by the run's phase. */
+const HELD_FROM = {
+  red: 'waiting_red',
+  green: 'red_recorded',
+  rerun: 'to_rerun',
+} satisfies Record<'red' | 'green' | 'rerun', ScenarioProofState>
 
 /** The kinds of the decisions a proof asks: kept on the Building's decisions. */
 export const PROOF_KINDS = [
@@ -805,7 +813,10 @@ export const buildingProofs = (parts: ProofParts) => {
       return [buildingEvent(building.missionId, 'building.red_recorded', { scenario })]
     })
 
-  /** A need on a scenario's red: the tasks covering it held until the user answers. */
+  /**
+   * A need on a scenario's run: the tasks covering it held until the user answers. A red's, or a
+   * green's the environment kept from running (`from`, the state it holds the proof from).
+   */
   const held = (
     building: BuildingRow,
     scenario: string,
@@ -817,13 +828,14 @@ export const buildingProofs = (parts: ProofParts) => {
       readonly options: ReadonlyArray<string>
       readonly event: NewEvent | null
     },
+    from: ScenarioProofState = 'waiting_red',
   ) =>
     Effect.gen(function* () {
       const write = yield* createNeedIn(parts.needs, yield* ownerOf(building), asked.fields)
       yield* mutate('holding a scenario on a need', (transaction) =>
         Effect.gen(function* () {
           const current = yield* scenarioProofIn(transaction, building.id, scenario)
-          if (current === null || stateOf(current) !== 'waiting_red')
+          if (current === null || stateOf(current) !== from)
             return { result: undefined, events: [] }
           if ((yield* activeBuildingIn(transaction, building.missionId))?.id !== building.id) {
             return { result: undefined, events: [] }
@@ -854,6 +866,33 @@ export const buildingProofs = (parts: ProofParts) => {
         }),
       )
     })
+
+  /** A run the environment kept from running: the user frees what it says, then Retries. */
+  const heldOnEnvironment = (
+    building: BuildingRow,
+    scenario: string,
+    run: ProofRun,
+    from: ScenarioProofState,
+  ) => {
+    const missing = `${scenario}'s proof could not run: the environment kept it from running.\n${fenced(run.outputTail)}`
+    return held(
+      building,
+      scenario,
+      run,
+      {
+        kind: 'proof_environment',
+        question: missing,
+        options: [],
+        fields: EnvironmentFields.make({
+          missing,
+          action: 'Fix what it says (a service, a port), then Retry: Hemera runs the proof again.',
+          settingsSection: null,
+        }),
+        event: null,
+      },
+      from,
+    )
+  }
 
   /** A red phase's run judged (CT-35): recorded, held on a need, or handed back to the Builder. */
   const judgeRed = (building: BuildingRow, scenario: string, proof: Proof, run: ProofRun) =>
@@ -893,19 +932,7 @@ export const buildingProofs = (parts: ProofParts) => {
         })
       }
       if (run.classification === 'environment') {
-        const missing = `${scenario}'s proof could not run: the environment kept it from running.\n${fenced(run.outputTail)}`
-        return yield* held(building, scenario, run, {
-          kind: 'proof_environment',
-          question: missing,
-          options: [],
-          fields: EnvironmentFields.make({
-            missing,
-            action:
-              'Fix what it says (a service, a port), then Retry: Hemera runs the proof again.',
-            settingsSection: null,
-          }),
-          event: null,
-        })
+        return yield* heldOnEnvironment(building, scenario, run, 'waiting_red')
       }
       const test = proof.test
       const names =
@@ -1167,6 +1194,12 @@ export const buildingProofs = (parts: ProofParts) => {
       const row = yield* scenarioProofIn(database, building.id, scenario)
       if (row === null || stateOf(row) === 'not_reproducible') return run
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
+      // Kept from running (a port another mission holds): not the Builder's to fix (#306). One
+      // past the Project's limit is, as its code may never end.
+      if (run.classification === 'environment' && run.timedOutAfter === null) {
+        yield* heldOnEnvironment(building, scenario, run, stateOf(row))
+        return run
+      }
       if (run.classification !== 'passed') {
         yield* failedGreen(building, scenario, run)
         yield* parts.background(parts.moved(building))
@@ -1577,25 +1610,36 @@ export const buildingProofs = (parts: ProofParts) => {
       return false
     })
 
-  /** An environment need's Retry: the scenario waits for its red again, and runs it now. */
+  /**
+   * An environment need's Retry: the scenario is back in the state it was held from, and the run it
+   * was held on runs again now, a red, or a green or a rerun (#306).
+   */
   const retried = (building: BuildingRow, scenario: string) =>
     Effect.gen(function* () {
-      yield* mutate('running a red again', (transaction) =>
+      const heldOn = yield* mutate('running a proof again', (transaction) =>
         Effect.gen(function* () {
           const row = yield* scenarioProofIn(transaction, building.id, scenario)
-          if (row !== null && stateOf(row) === 'held') {
-            yield* setProofIn(transaction, building.id, scenario, {
-              state: 'waiting_red',
-              needId: null,
-            })
-          }
-          return { result: undefined, events: [] }
+          if (row === null || stateOf(row) !== 'held') return { result: null, events: [] }
+          const run = (yield* proofRunsIn(transaction, building.id)).find(
+            (one) => one.id === row.heldRunId,
+          )
+          const found = PROOF_PHASES.find((one) => one === run?.phase)
+          const again = found === undefined || found === 'info' ? 'red' : found
+          yield* setProofIn(transaction, building.id, scenario, {
+            state: HELD_FROM[again],
+            needId: null,
+          })
+          return { result: again, events: [] }
         }),
       )
+      const phase = heldOn ?? 'red'
       yield* parts.background(
-        inTurn(building.missionId, redOf(building, scenario)).pipe(
+        inTurn(
+          building.missionId,
+          phase === 'red' ? redOf(building, scenario) : greenOf(building, scenario, phase),
+        ).pipe(
           Effect.asVoid,
-          Effect.catchCause((cause) => said(`a red was not run again: ${String(cause)}`)),
+          Effect.catchCause((cause) => said(`a proof was not run again: ${String(cause)}`)),
         ),
       )
     })
