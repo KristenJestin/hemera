@@ -782,10 +782,12 @@ export const buildingEndLayer = (log: Log) => {
        * The mission's whole tree stops: every session, children first, and every command its agents
        * started. Then the calls already executing end, and what one started meanwhile (a helper's
        * session, a command) is stopped in turn, and its calls waited for: nothing of theirs lands
-       * after this.
+       * after this. A call the user allowed runs no more from the first stop, whoever asked it, until
+       * a Builder works on the mission again.
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
+          yield* ToolAccess.use((access) => access.exiting(missionId))
           const once = Sessions.use((sessions) =>
             sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END),
           ).pipe(

@@ -85,7 +85,7 @@ import {
   buildings,
   missions,
 } from '../storage/schema.ts'
-import type { Grant } from '../tools/access.ts'
+import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { EffectfulAction } from '../tools/actions.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
 import type { GuardedCall } from '../tools/ports.ts'
@@ -192,6 +192,7 @@ type Needs =
   | ProjectServices
   | OutsideChanges
   | ProofNeeds
+  | ToolAccess
   | Effect.Services<ReturnType<typeof moveMission>>
 
 const NO_MISSION = refusal('refused: this session works for no mission')
@@ -493,10 +494,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       /**
        * The mission's Builder: opened when it never had one, its lineage started again when it
        * stopped (#40's resume: its leases and the resume block pass to the fresh one). A stuck one
-       * is #40's to replace.
+       * is #40's to replace. The calls the user allowed run again from here.
        */
       const ensureBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
+          yield* ToolAccess.use((access) => access.building(building.missionId))
           const owner = { kind: 'mission', missionId: building.missionId } as const
           const live = yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner)
           if (live.some((one) => one.role === 'builder')) return

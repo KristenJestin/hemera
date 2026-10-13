@@ -1052,8 +1052,9 @@ export const toolGateLayer = (settings: GateSettings) =>
               return { kind: 'changed', reason: `refused: ${refused}` } satisfies Performed
             }
             // Counted before its session is read: an exit that stops the session either finds the
-            // call counted and waits for it, or stopped the session first and nothing runs.
-            return yield* ToolAccess.use((access) =>
+            // call counted and waits for it, or stopped the session first and nothing runs. One
+            // whose session ended before the exit is refused by the exit's mark.
+            const acted = yield* ToolAccess.use((access) =>
               access.counted(
                 frozen.grant.missionId,
                 Effect.gen(function* () {
@@ -1069,6 +1070,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                 }),
               ),
             )
+            return acted ?? ({ kind: 'changed', reason: STOPPED_AT_THE_END } satisfies Performed)
           }).pipe(
             Effect.catch((failed) =>
               Effect.succeed<Performed>({

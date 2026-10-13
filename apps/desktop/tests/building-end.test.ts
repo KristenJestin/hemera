@@ -1397,6 +1397,122 @@ describe('The exit', () => {
     },
   )
   test(
+    'a helper’s write the user allows after the helper ended, as the end exits, is refused or seen: never after the snapshot unseen',
+    SLOW,
+    async () => {
+      const snapshotted = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            Effect.succeed<Verdict>(
+              asked.tool === 'fs_write' && asked.path?.named.endsWith('approved.ts') === true
+                ? { verdict: 'ask', reason: 'a file no task names', by: 'suite' }
+                : ALLOW,
+            ),
+          // Hemera acts on the allowed call once the exit looked at the Workspace: the latest it can.
+          refusal: () => Effect.as(Deferred.await(snapshotted), null),
+        }),
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real
+              .take(place, owner)
+              .pipe(
+                Effect.tap(() =>
+                  owner.kind === 'review_exit'
+                    ? Deferred.succeed(snapshotted, undefined)
+                    : Effect.void,
+                ),
+              ),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            const launch = yield* call(builder.grantId, 'helper_launch', {
+              brief: 'Tidy the export.',
+              writes: true,
+            })
+            if (launch.startsWith('refused')) return yield* Effect.die(new Error(launch))
+            const helper = yield* helperNumbered(mission.id, 1)
+            // The helper's agent is the last one started.
+            const helperAgent = world.agents.length - 1
+            const asked = yield* call(helper.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'approved.ts',
+              content: 'export const approved = true\n',
+            })
+            // The helper hands back its result: its lineage ends on its own, before the end.
+            const handed = yield* call(helper.grantId, 'helper_result', {
+              summary: 'The export is tidied.',
+              changed: [],
+              checked: ['Read the export by hand.'],
+              left: [],
+            })
+            if (!handed.includes('handed to your parent'))
+              return yield* Effect.die(new Error(handed))
+            // Its turn ends, and with it the helper's session.
+            world.release(helperAgent)
+            yield* until(
+              Effect.map(sessionsOfLineage(helper.row.lineage), (all) =>
+                all.every((one) => one.state === 'ended'),
+              ),
+              LONG,
+            )
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const database = yield* Database
+            const request = Effect.map(
+              database
+                .select()
+                .from(permissionRequests)
+                .where(eq(permissionRequests.missionId, mission.id)),
+              ([row]) => row,
+            )
+            // The end holds at its refresh on the question.
+            yield* until(
+              Effect.gen(function* () {
+                const view = yield* buildingNow(mission.id)
+                return view.phase === 'refresh' && (yield* getMission(mission.id)).needs.length > 0
+              }),
+              LONG,
+            )
+            const row = yield* request
+            if (row === undefined) return yield* Effect.die(new Error('no request'))
+            yield* answerNeed({
+              id: row.needId,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inReview(mission.id)
+            yield* until(
+              Effect.map(request, (one) => one?.state === 'ended'),
+              LONG,
+            )
+            const review = yield* autoReviewOf(mission.id)
+            return {
+              asked,
+              request: yield* request,
+              wrote: existsSync(join(api, 'approved.ts')),
+              seen: review?.changedAfter.map((one) => one.path) ?? [],
+            }
+          }),
+        ),
+      )
+      expect(seen.asked).toContain('request #1')
+      // Hemera acts on it after the snapshot: the exit's mark refuses it, so nothing lands unseen.
+      expect(seen.request).toMatchObject({ state: 'ended', result: 'not-executed' })
+      expect(seen.wrote).toBe(false)
+      expect(seen.seen).not.toContain('approved.ts')
+    },
+  )
+  test(
     'a write the user allows, acting as the tree stops, is waited for: the snapshot sees it',
     SLOW,
     async () => {
