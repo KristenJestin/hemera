@@ -1,0 +1,244 @@
+import { cn } from 'cn'
+import type { ReactNode } from 'react'
+
+import { Empty } from '../../components/empty/empty.tsx'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { Legend } from '../../components/tooltip/legend.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
+import { IconGitCompare, IconHistory, IconLayoutColumns, IconLayoutRows } from '../../icons.ts'
+import { type CommentAction, CommentCard, type NewComment, linesOf } from './comments.tsx'
+import { type DiffLayout, DiffStage, type StageTarget } from './stage.tsx'
+import { ChangesTree, idOf } from './tree.tsx'
+import type { DiffComment, DiffRepository, DiffSource } from './types.ts'
+
+/**
+ * The diff view of a mission, opened over its base (prototype screen E11): the tree of what
+ * changed on the left, every file in one scroll beside it. Its head holds the layout — split or
+ * stacked, one toggle — and, while a round writes, the mark that says the diff is live.
+ *
+ * Once the Workspace is gone (cleaned up, or the mission done), the diff is read from the last
+ * checkpoint, said in words above it, and nothing can be written on it.
+ */
+
+export interface DiffViewHandlers {
+  onAdd: (comment: NewComment) => void
+  onAction: (id: string, action: CommentAction) => void
+  onOpenVersion: (id: string) => void
+  onOpenForge: (url: string) => void
+  onFile: (id: string) => void
+  /** Open question 33's alternative: a comment chosen in the column beside the diff. */
+  onGo?: ((id: string) => void) | undefined
+}
+
+export interface DiffViewProps extends DiffViewHandlers {
+  repositories: readonly DiffRepository[]
+  comments: readonly DiffComment[]
+  source: DiffSource
+  layout: DiffLayout
+  loading?: boolean | undefined
+  target?: StageTarget | null | undefined
+  lit?: string | null | undefined
+  /** Open question 33's alternative: the comments listed again in a column of the view. */
+  column?: boolean | undefined
+}
+
+const TOGGLE =
+  'flex size-control-sm items-center justify-center rounded-md text-muted-foreground outline-none focus-ring hover:tinted hover-motion aria-pressed:bg-accent aria-pressed:text-foreground'
+
+/** The head's actions: the live mark while a round writes, then split or stacked. */
+export function DiffActions({
+  source,
+  layout,
+  onLayout,
+}: {
+  source: DiffSource
+  layout: DiffLayout
+  onLayout: (layout: DiffLayout) => void
+}): ReactNode {
+  return (
+    <>
+      {source.kind === 'live' && source.round !== undefined && (
+        <Legend label={`Live: round ${String(source.round)} is writing these files`}>
+          <StatusMark state="running" size="sm" />
+        </Legend>
+      )}
+      <div role="group" aria-label="Layout of the diff" className="flex gap-0.5">
+        {(
+          [
+            ['split', 'Split', <IconLayoutColumns key="split" size="sm" />],
+            ['stacked', 'Stacked', <IconLayoutRows key="stacked" size="sm" />],
+          ] as const
+        ).map(([value, name, icon]) => (
+          <Tooltip key={value} label={name}>
+            <button
+              type="button"
+              aria-pressed={layout === value}
+              aria-label={name}
+              className={TOGGLE}
+              onClick={() => onLayout(value)}
+            >
+              {icon}
+            </button>
+          </Tooltip>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** Where a diff read from a checkpoint comes from, in words. */
+function checkpointWords(source: Extract<DiffSource, { kind: 'checkpoint' }>): string {
+  const why =
+    source.why === 'cleanup'
+      ? 'the Workspace was cleaned up'
+      : 'the mission is done and its Workspace removed'
+  return `Read from the last checkpoint, ${source.at}: ${why}.`
+}
+
+/** The alternative to 33: every comment of the diff in a column, each sending to its lines. */
+function CommentsColumn({
+  comments,
+  lit,
+  onGo,
+}: {
+  comments: readonly DiffComment[]
+  lit: string | null
+  onGo: (id: string) => void
+}): ReactNode {
+  return (
+    <aside
+      aria-label="Comments"
+      className="flex w-diff-tree shrink-0 flex-col border-l border-border"
+    >
+      <h3 className="flex h-control-lg shrink-0 items-center px-3 text-sm font-semibold">
+        {`Comments · ${String(comments.length)}`}
+      </h3>
+      <ul aria-label="Comments of the diff" className="flex min-h-0 flex-1 flex-col overflow-auto">
+        {comments.map((comment) => (
+          <li key={comment.id}>
+            <button
+              type="button"
+              aria-current={lit === comment.id}
+              className="flex w-full min-w-0 flex-col gap-0.5 border-b border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-[current=true]:bg-primary-muted"
+              onClick={() => onGo(comment.id)}
+            >
+              <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
+                <span>{comment.id}</span>
+                <span className="min-w-0 truncate">
+                  {`${idOf(comment.place.repository, comment.place.path)} · ${linesOf(comment.place)}`}
+                </span>
+              </span>
+              <span className="line-clamp-2 break-words">{comment.text}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )
+}
+
+export function DiffView({
+  repositories,
+  comments,
+  source,
+  layout,
+  loading = false,
+  target = null,
+  lit = null,
+  column = false,
+  ...handlers
+}: DiffViewProps): ReactNode {
+  const empty = !loading && repositories.every((one) => one.files.length === 0)
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {source.kind === 'checkpoint' && (
+        <p className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          <span className="flex shrink-0">
+            <IconHistory size="sm" />
+          </span>
+          {checkpointWords(source)}
+        </p>
+      )}
+      {empty ? (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <Empty
+            icon={<IconGitCompare />}
+            title="Nothing changed yet"
+            description="The diff fills as the tasks write."
+          />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <div className={cn('flex w-diff-tree shrink-0 flex-col border-r border-border')}>
+            <ChangesTree repositories={repositories} loading={loading} onFile={handlers.onFile} />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <DiffStage
+              repositories={repositories}
+              comments={comments}
+              layout={layout}
+              writable={source.kind === 'live'}
+              loading={loading}
+              target={target}
+              lit={lit}
+              onAdd={handlers.onAdd}
+              onAction={handlers.onAction}
+              onOpenVersion={handlers.onOpenVersion}
+              onOpenForge={handlers.onOpenForge}
+            />
+          </div>
+          {column && handlers.onGo !== undefined && (
+            <CommentsColumn comments={comments} lit={lit} onGo={handlers.onGo} />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The commented version of an outdated comment: the file as it was, the comment on its lines. */
+export function CommentedVersion({
+  comment,
+  contents,
+  onOpenForge,
+}: {
+  comment: DiffComment
+  contents: string
+  onOpenForge: (url: string) => void
+}): ReactNode {
+  const lines = contents.trimEnd().split('\n')
+  // The lines it was written on, as this version numbers them: where its excerpt stands.
+  const excerpt = (comment.outdated?.excerpt ?? '').trimEnd().split('\n')
+  const first = lines.findIndex((line) => line === excerpt[0])
+  const written = first === -1 ? null : { start: first + 1, end: first + excerpt.length }
+  const marked = (at: number): boolean =>
+    written !== null && at + 1 >= written.start && at + 1 <= written.end
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <pre className="overflow-auto rounded-md border border-border bg-card py-2 font-mono text-xs">
+        {lines.map((line, at) => (
+          <span
+            key={`${String(at)}-${line}`}
+            className={cn('flex gap-3 px-3', marked(at) && 'bg-selection')}
+          >
+            <span className="w-6 shrink-0 text-right text-muted-foreground tabular-nums">
+              {String(at + 1)}
+            </span>
+            <span className="whitespace-pre-wrap">{line}</span>
+          </span>
+        ))}
+      </pre>
+      <CommentCard
+        comment={{
+          ...comment,
+          outdated: undefined,
+          place: { ...comment.place, lines: written },
+        }}
+        writable={false}
+        onAction={() => {}}
+        onOpenVersion={() => {}}
+        onOpenForge={onOpenForge}
+      />
+    </div>
+  )
+}
