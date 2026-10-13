@@ -62,7 +62,10 @@ function detailOf(task: Task, requirement: string): TaskDetail {
     TASK_DETAILS.get(task.id) ?? {
       task,
       requirement,
-      targets: task.repositories.map((repository) => `${repository}/src`),
+      targets: task.repositories.map((repository) => ({
+        path: `${repository}/src`,
+        intent: 'change' as const,
+      })),
       tries: [],
       files: [],
       verdicts: [],
@@ -71,7 +74,10 @@ function detailOf(task: Task, requirement: string): TaskDetail {
   )
 }
 
-function taskViews(moment: BuildingMoment, onOpenDiff: (what: string) => void): MissionView[] {
+function taskViews(
+  moment: BuildingMoment,
+  onOpenDiff: ((what: string) => void) | undefined,
+): MissionView[] {
   const groups = [
     ...moment.requirements.map((one) => ({ label: `${one.id} · ${one.title}`, tasks: one.tasks })),
     ...(moment.points ?? []).map((one) => ({
@@ -129,6 +135,8 @@ const crumbsOf = (
 
 export interface BuildingScreenProps extends BuildingHandlers {
   moment: MomentName
+  /** Whether the journal goes further back than its fixture. */
+  journalMore?: boolean | undefined
   loading?: boolean | undefined
   title?: string | undefined
   /** The views open as the story starts. */
@@ -141,15 +149,20 @@ export function BuildingScreen({
   loading = false,
   title = TITLE,
   initial = AT_BASE,
+  journalMore = false,
   ...handlers
 }: BuildingScreenProps): ReactNode {
-  const moment = MOMENTS[name]()
+  const moment = { ...MOMENTS[name](), journalMore }
   const views = useViews(initial)
   const [chosen, setChosen] = useState<string | undefined>(undefined)
-  const onOpenDiff = (what: string): void => {
-    handlers.onOpenDiff(what)
-    views.open('diff')
-  }
+  const asked = handlers.onOpenDiff
+  const onOpenDiff =
+    asked === undefined
+      ? undefined
+      : (what: string): void => {
+          asked(what)
+          views.open('diff')
+        }
   const all = [...taskViews(moment, onOpenDiff), ...commonViews()]
   const stage = stageWords('Building', moment.round)
   const marks: MissionMarkView[] = []
@@ -211,6 +224,7 @@ export function BuildingScreen({
             onOpenDiff={onOpenDiff}
             onService={handlers.onService}
             onRevoke={handlers.onRevoke}
+            onJournalMore={handlers.onJournalMore}
           />
         }
         views={all}
@@ -307,6 +321,8 @@ export function ReadyScreen({
               check()
             }}
             onModel={handlers.onModel}
+            onFavourite={() => undefined}
+            onHide={() => undefined}
             onOpenSpec={() => views.open('spec')}
             onOpenDiff={() => views.open('diff')}
             onRevoke={handlers.onRevoke}

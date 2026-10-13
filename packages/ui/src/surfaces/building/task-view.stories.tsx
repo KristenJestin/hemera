@@ -38,6 +38,9 @@ export const SecondTry: Story = {
       within(view.getByRole('region', { name: 'Tries' })).getAllByRole('listitem'),
     ).toHaveLength(2)
     await expect(view.getByText(/Unable to find role="progressbar"/)).toBeVisible()
+    // Each target says whether the task creates it or changes it.
+    await expect(view.getAllByRole('img', { name: 'Changed by the task' })).toHaveLength(2)
+    await expect(view.getByRole('img', { name: 'Created by the task' })).toBeVisible()
     await expect(
       within(canvasElement).getByRole('navigation', { name: 'Where you are' }),
     ).toHaveTextContent(/ACME-12.*Building.*T8/)

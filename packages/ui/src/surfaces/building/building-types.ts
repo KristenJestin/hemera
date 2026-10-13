@@ -2,12 +2,12 @@ import type { FaceState } from '../../components/face/states.ts'
 import type { MissionStage } from '../../blocks/mission/vocabulary.ts'
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import type { LiveState } from '../../components/live-chip/live-chip.tsx'
-import type { ModelChoice } from '../../components/model-picker/model-picker.tsx'
+import type { ModelChoice, PickerAgent } from '../../components/model-picker/model-picker.tsx'
 import type { MarkState } from '../../components/status-mark/status-mark.tsx'
 
 /**
- * What the Ready and Building pages draw, as #149 proposes them: plain values, by the words the
- * screens use. The engine's names stay in the RPCs the build ticket wires.
+ * What the Ready and Building pages draw, as #149 designed them: plain values, by the words the
+ * screens use. The engine's names stay in the RPCs; the renderer turns one into the other.
  */
 
 /** Where a task stands: done is said twice, verified by a check or not yet. */
@@ -27,10 +27,15 @@ export interface Task {
   repositories: readonly string[]
   /** How many tries ended red, when some did. */
   failures?: number | undefined
+  /** Why it is blocked, in words: the mark's tooltip. */
+  cause?: string | undefined
 }
 
-/** A scenario's proof: its red recorded before the code, then its green, or to run again. */
-export type ProofState = 'none' | 'red' | 'green' | 'rerun'
+/**
+ * A scenario's proof: its red recorded before the code, then its green, or to run again; a
+ * scenario verified by hand waits for the user once its code is written.
+ */
+export type ProofState = 'none' | 'red' | 'green' | 'rerun' | 'manual'
 
 export interface Scenario {
   id: string
@@ -75,23 +80,35 @@ export interface Change {
   outside?: boolean | undefined
 }
 
+/** A service the mission runs: its mark, its address once it published one. */
 export interface Service {
+  /** What its actions name it by: the run. */
+  id: string
   name: string
-  state: LiveState
-  startedAt: number
-  endedAt: number | null
+  /** Running, or failed while it does not answer. */
+  state: MarkState
   url?: string | undefined
   line: string
 }
 
-/** A service the mission can run but does not run now: declared by the Project, or offered by its catalogue. */
+/**
+ * A service the mission can run but does not run now: one it ran that stopped, or one the
+ * Project's catalogue offers.
+ */
 export interface IdleService {
+  /** What its actions name it by: the run that stopped, or the catalogue's command. */
+  id: string
   name: string
   line: string
+  /** Idle once stopped, failed when it ended badly. */
+  state?: MarkState | undefined
+  /** Whether it may leave the list: a service that stopped. */
+  dismissable?: boolean | undefined
 }
 
 /** What works beside the Builder: a chip each, never stopped by hand. */
 export interface Helper {
+  id: string
   name: string
   kind: 'helper' | 'documenter' | 'reviewer'
   state: LiveState
@@ -176,6 +193,8 @@ export interface BuildingMoment {
   catalogue: readonly IdleService[]
   helpers: readonly Helper[]
   journal: readonly JournalEvent[]
+  /** Whether the journal goes further back than what it shows. */
+  journalMore?: boolean | undefined
   needs: readonly NeedRow[]
   mission: MissionThings
   /** The repository changed outside Hemera, when one was. */
@@ -203,7 +222,19 @@ export type LaunchCheck =
   | { state: 'unfetched'; since: string; moved: readonly Moved[] }
   | { state: 'silent'; moved: readonly Moved[] }
   | { state: 'expired' }
+  | { state: 'failed'; reason: string }
   | { state: 'dependency'; dependency: Dependency }
+
+/** The Builder's model: the mission's own choice, or what it inherits, and the Planner's advice. */
+export interface BuilderModel {
+  agents: readonly PickerAgent[]
+  /** The user's choice for this mission; null while it inherits. */
+  value: ModelChoice | null
+  /** What Building runs on without a choice of the mission's own. */
+  fallback?: ModelChoice | undefined
+  /** The Planner's recommendation in words, `Opus · High`, and why. */
+  recommended?: { words: string; why: string } | undefined
+}
 
 export interface PreparationStep {
   name: string
@@ -216,11 +247,7 @@ export interface ReadyMoment {
   goal: string
   requirements: readonly { id: string; title: string; scenarios: number }[]
   frozenAt: string
-  /** The model the Planner recommends for Building, and why. */
-  model: ModelChoice
-  why: string
-  /** Whether the user changed the Planner's choice. */
-  overridden: boolean
+  model: BuilderModel
   check: LaunchCheck
   /** The recipe's steps, once the check let the launch through. */
   preparation: readonly PreparationStep[] | null
@@ -232,7 +259,8 @@ export interface ReadyMoment {
 export interface TaskDetail {
   task: Task
   requirement: string
-  targets: readonly string[]
+  /** What it aims at: a file it creates, or one it changes. */
+  targets: readonly { path: string; intent: 'create' | 'change' }[]
   tries: readonly {
     n: number
     runner: string

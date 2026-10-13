@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '../../components/button/button.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
-import { IconAlertTriangle } from '../../icons.ts'
+import { IconAlertTriangle, IconPencil, IconPlus } from '../../icons.ts'
 import { CODE, QUIET, ROW } from './building-parts.tsx'
 import type { TaskDetail } from './building-types.ts'
 
@@ -25,7 +25,8 @@ export function TaskView({
   onOpenDiff,
 }: {
   detail: TaskDetail
-  onOpenDiff: (path: string) => void
+  /** Opens the task's diff; left out while there is no diff to open it in. */
+  onOpenDiff?: ((path: string) => void) | undefined
 }): ReactNode {
   const outside = detail.files.filter((file) => file.outside).length
   return (
@@ -46,8 +47,15 @@ export function TaskView({
         <h3 className={HEADING}>Targets</h3>
         <ul className="flex flex-col">
           {detail.targets.map((target) => (
-            <li key={target} className={cn(ITEM, 'min-h-control-sm py-0.5 font-mono text-xs')}>
-              <span className="min-w-0 break-all">{target}</span>
+            <li key={target.path} className={cn(ITEM, 'min-h-control-sm py-0.5 font-mono text-xs')}>
+              <Legend
+                label={target.intent === 'create' ? 'Created by the task' : 'Changed by the task'}
+              >
+                <span className="flex shrink-0 text-muted-foreground">
+                  {target.intent === 'create' ? <IconPlus size="sm" /> : <IconPencil size="sm" />}
+                </span>
+              </Legend>
+              <span className="min-w-0 break-all">{target.path}</span>
             </li>
           ))}
         </ul>
@@ -92,11 +100,13 @@ export function TaskView({
               </li>
             ))}
           </ul>
-          <span className="px-6">
-            <Button variant="link" size="sm" onClick={() => onOpenDiff(detail.task.id)}>
-              The task’s diff
-            </Button>
-          </span>
+          {onOpenDiff !== undefined && (
+            <span className="px-6">
+              <Button variant="link" size="sm" onClick={() => onOpenDiff(detail.task.id)}>
+                The task’s diff
+              </Button>
+            </span>
+          )}
         </section>
       )}
 
