@@ -7,7 +7,7 @@
 import { realpathSync } from 'node:fs'
 
 import type { CheckDraft } from '@hemera/core/domain'
-import { CheckRefused, type CommandDraft } from '@hemera/ipc'
+import { CheckRefused, type CommandDraft, InvalidProofLimit } from '@hemera/ipc'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -16,9 +16,11 @@ import {
   acceptChecks,
   listChecks,
   moveCheck,
+  proofLimitOf,
   proposedChecks,
   removeCheck,
   saveCheck,
+  setProofLimit,
 } from '../src/engine/project-checks.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { atlas, atlasOnDisk, opened, workspaceEngine } from './workspace-engine.ts'
@@ -208,5 +210,42 @@ describe('A check written, moved and removed', () => {
     expect(seen.left.map((one) => [one.name, one.expect])).toEqual([
       ['coverage', { pattern: 'Coverage: ([0-9.]+)%', minimum: 70 }],
     ])
+  })
+})
+
+describe('How long a proof may run', () => {
+  test('a Project with no value keeps 10 minutes; a value is kept, and emptied back to the default', async () => {
+    const seen = await workspaceEngine(data)(
+      Effect.gen(function* () {
+        const project = yield* atlas(main)
+        const before = yield* proofLimitOf(project.id)
+        const set = yield* setProofLimit(project.id, 25)
+        const kept = yield* proofLimitOf(project.id)
+        const emptied = yield* setProofLimit(project.id, null)
+        return { before, set, kept, emptied, after: yield* proofLimitOf(project.id) }
+      }),
+    )
+    expect(seen).toEqual({ before: null, set: 25, kept: 25, emptied: null, after: null })
+  })
+
+  test('a refused value (0, negative, past the bound) is refused with its reason, and the limit stays', async () => {
+    const seen = await workspaceEngine(data)(
+      Effect.gen(function* () {
+        const project = yield* atlas(main)
+        yield* setProofLimit(project.id, 30)
+        const refused = (minutes: number) => Effect.flip(setProofLimit(project.id, minutes))
+        return {
+          refusals: [yield* refused(0), yield* refused(-3), yield* refused(121)],
+          kept: yield* proofLimitOf(project.id),
+        }
+      }),
+    )
+    expect(seen.refusals.every((one) => one instanceof InvalidProofLimit)).toBe(true)
+    expect(seen.refusals.map((one) => one.message)).toEqual([
+      'A proof needs at least 1 minute.',
+      'A proof needs at least 1 minute.',
+      'A proof may run 120 minutes at most: a longer one holds the end of the Building for hours.',
+    ])
+    expect(seen.kept).toBe(30)
   })
 })

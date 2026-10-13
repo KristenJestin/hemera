@@ -17,6 +17,7 @@ import {
   ChecksRpcs,
   DiffRpcs,
   CheckRefused,
+  InvalidProofLimit,
   DocRecipesRpcs,
   ForgeRpcs,
   UnknownProject,
@@ -539,6 +540,9 @@ const main = async (engine: 'answers' | 'gone') => {
         Effect.fail(new CheckRefused({ reason: '“|” is shell syntax.', field: 'line' })),
       'checks.remove': unused,
       'checks.move': unused,
+      'checks.proofLimit': () => Effect.succeed(null),
+      'checks.setProofLimit': () =>
+        Effect.fail(new InvalidProofLimit({ reason: 'A proof needs at least 1 minute.' })),
     }),
     DocRecipesRpcs.toLayer({
       'docRecipes.list': () => Effect.succeed([]),
@@ -648,6 +652,17 @@ describe('The window’s link, for components and hooks', () => {
       )
     expect(refusal).toBeInstanceOf(CheckRefused)
     expect(refusal).toMatchObject({ field: 'line', message: '“|” is shell syntax.' })
+  })
+
+  test('how long a proof may run is read, and a value the engine refuses rejects with its reason', async () => {
+    const { link } = await main('answers')
+    await expect(link.proofLimit('acme')).resolves.toBeNull()
+    const refusal = await link.setProofLimit('acme', 0).then(
+      () => new Error('the limit was not refused'),
+      (error: Error) => error,
+    )
+    expect(refusal).toBeInstanceOf(InvalidProofLimit)
+    expect(refusal.message).toBe('A proof needs at least 1 minute.')
   })
 
   test('a variable’s value is read on request, and the runs are followed as they change', async () => {

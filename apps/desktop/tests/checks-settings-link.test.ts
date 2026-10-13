@@ -13,6 +13,7 @@ import {
   DocRecipeRefused,
   EngineMainRpcs,
   fromMessagePort,
+  InvalidProofLimit,
   makeClientProtocol,
   makeServerProtocol,
   WindowRpcs,
@@ -233,6 +234,27 @@ describe('The checks of a Project, from the window', () => {
         )
         expect(refused).toBeInstanceOf(CheckRefused)
         expect(refused).toMatchObject({ field: 'minimum' })
+      }),
+    ))
+})
+
+describe('How long a proof may run, from the window', () => {
+  test('a Project with no value keeps the default; a value set is kept, a refused one arrives with its reason', () =>
+    run(
+      Effect.gen(function* () {
+        const window = yield* chain
+        const acme = yield* acmeOf(window)
+        expect(yield* window['checks.proofLimit']({ projectId: acme.id })).toBeNull()
+        expect(yield* window['checks.setProofLimit']({ projectId: acme.id, minutes: 20 })).toBe(20)
+        expect(yield* window['checks.proofLimit']({ projectId: acme.id })).toBe(20)
+        const refused = yield* Effect.flip(
+          window['checks.setProofLimit']({ projectId: acme.id, minutes: 0 }),
+        )
+        expect(refused).toBeInstanceOf(InvalidProofLimit)
+        expect(refused.message).toBe('A proof needs at least 1 minute.')
+        expect(yield* window['checks.setProofLimit']({ projectId: acme.id, minutes: null })).toBe(
+          null,
+        )
       }),
     ))
 })
