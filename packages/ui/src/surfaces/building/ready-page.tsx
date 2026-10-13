@@ -31,7 +31,8 @@ export interface ReadyHandlers {
   onModel: (choice: ModelChoice | null) => void
   onFavourite: (agent: string, model: string, favourite: boolean) => void
   onHide: (agent: string, model: string, hidden: boolean) => void
-  onOpenSpec: () => void
+  /** Opens the frozen Spec; left out while there is no view to open it in. */
+  onOpenSpec?: (() => void) | undefined
   /** Opens what changed in a file; left out while there is no diff to open it in. */
   onOpenDiff?: ((what: string) => void) | undefined
   onRevoke: (id: string) => void
@@ -393,7 +394,7 @@ export function SpecSummary({
   onOpenSpec,
 }: {
   moment: ReadyMoment
-  onOpenSpec: () => void
+  onOpenSpec: ReadyHandlers['onOpenSpec']
 }): ReactNode {
   const scenarios = moment.requirements.reduce((sum, one) => sum + one.scenarios, 0)
   return (
@@ -405,9 +406,11 @@ export function SpecSummary({
             title="The frozen Spec"
             description={`${String(moment.requirements.length)} requirements · ${String(scenarios)} scenarios, each with its proof`}
             action={
-              <Button variant="link" size="sm" onClick={onOpenSpec}>
-                Open the Spec
-              </Button>
+              onOpenSpec === undefined ? undefined : (
+                <Button variant="link" size="sm" onClick={onOpenSpec}>
+                  Open the Spec
+                </Button>
+              )
             }
           />
         }
