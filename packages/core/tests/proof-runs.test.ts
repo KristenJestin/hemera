@@ -970,9 +970,9 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
     ].join('\n')
     expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
       'TestExport',
-      { parent: 'TestExport', subtest: 'csv' },
-      { parent: 'TestExport', subtest: 'as markdown' },
-      { parent: 'TestExport', subtest: 'with header' },
+      { parent: 'TestExport', subtest: 'csv', nesting: [], whole: true },
+      { parent: 'TestExport', subtest: 'as markdown', nesting: [], whole: true },
+      { parent: 'TestExport', subtest: 'with header', nesting: ['as markdown'], whole: true },
     ])
     expect(addedTestNames({ insertion: 'new_file', code, patch: null })).toEqual([
       'TestExport',
@@ -987,7 +987,9 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
   test('a Go subtest the proof adds is read under the name Go prints, at any depth', () => {
     const path = 'export_test.go'
     const red = (subtest: string) =>
-      validRed(run(GO_SUBTEST_FAILS, 1, path), path, [{ parent: 'TestExport', subtest }])
+      validRed(run(GO_SUBTEST_FAILS, 1, path), path, [
+        { parent: 'TestExport', subtest, nesting: [], whole: false },
+      ])
     expect(red('with header')).toBe(true)
     expect(red('as markdown')).toBe(true)
     expect(red('empty')).toBe(false)
@@ -998,11 +1000,11 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
     const path = 'export_test.go'
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH })
     expect(names).toEqual([
-      { parent: 'TestExport', subtest: 'as markdown' },
-      { parent: 'TestExport', subtest: 'txt' },
+      { parent: 'TestExport', subtest: 'as markdown', nesting: [], whole: false },
+      { parent: 'TestExport', subtest: 'txt', nesting: [], whole: false },
     ])
     expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, names)).toBe(false)
-    const csv = [{ parent: 'TestExport', subtest: 'csv' }]
+    const csv = [{ parent: 'TestExport', subtest: 'csv', nesting: [], whole: false }]
     expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, csv)).toBe(true)
   })
 
@@ -1014,9 +1016,12 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       '}',
     ].join('\n')
     const names = addedTests({ insertion: 'new_file', code, patch: null })
-    expect(names).toEqual(['TestExport', { parent: 'TestExport', subtest: 'empty' }])
+    expect(names).toEqual([
+      'TestExport',
+      { parent: 'TestExport', subtest: 'empty', nesting: [], whole: true },
+    ])
     expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, names)).toBe(false)
-    const imported = [{ parent: 'TestImport', subtest: 'empty' }]
+    const imported = [{ parent: 'TestImport', subtest: 'empty', nesting: [], whole: false }]
     expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, imported)).toBe(true)
   })
 
@@ -1045,13 +1050,6 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
     const output = (line: string) => [line, 'AssertionError: no'].join('\n')
     expect(validRed(run(output('  × items[0] is defined'), 1, path), path, ['items'])).toBe(false)
     expect(validRed(run(output('  × as_markdown'), 1, path), path, ['as markdown'])).toBe(false)
-  })
-
-  test('a subtest whose parent the code does not say is not named', () => {
-    const patch = ['@@ -3,0 +4,3 @@', '+\tt.Run("empty", func(t *testing.T) {', '+\t})'].join('\n')
-    expect(addedTests({ insertion: 'addition', code: '', patch })).toEqual([])
-    const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
-    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([])
   })
 })
 
@@ -1345,5 +1343,246 @@ describe('A red read from the failing names #260 still missed', () => {
     expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(true)
     expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(false)
     expect(validRed(run(output, 1, path), path, ['the invoices export as CSV'])).toBe(false)
+  })
+})
+
+/** go test, Go 1.27: an older subtest `TestExport/csv/empty` fails; `TestExport/md/empty` passes. */
+const GO_OTHER_BRANCH_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/csv (0.00s)
+        --- FAIL: TestExport/csv/empty (0.00s)
+            export_test.go:8: got 1 rows, want 0
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+/** go test, Go 1.27: the subtest `TestExport/md/empty` fails. */
+const GO_BRANCH_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/md (0.00s)
+        --- FAIL: TestExport/md/empty (0.00s)
+            export_test.go:12: got "x", want ""
+FAIL
+FAIL	example.com/acme	0.002s
+FAIL
+`
+
+/** `git diff`: a subtest `md` with its own `empty`, added into an older TestExport. */
+const GO_BRANCH_PATCH = [
+  '@@ -8,4 +8,9 @@ func TestExport(t *testing.T) {',
+  ' \t\t\tt.Errorf("got %d rows, want 0", 1)',
+  ' \t\t})',
+  ' \t})',
+  '+\tt.Run("md", func(t *testing.T) {',
+  '+\t\tt.Run("empty", func(t *testing.T) {',
+  '+\t\t\tt.Errorf("got %q, want %q", "x", "")',
+  '+\t\t})',
+  '+\t})',
+  ' }',
+].join('\n')
+
+/** `git diff -U0`: git names the hunk after a raw string's line, not the function it is in. */
+const GO_PARENTLESS_PATCH = [
+  '@@ -13,0 +14,3 @@ name,total',
+  '+\tt.Run("md", func(t *testing.T) {',
+  '+\t\tt.Errorf("got %q, want %q", "", "| total |")',
+  '+\t})',
+].join('\n')
+
+/** go test, Go 1.27: the subtest that patch adds fails. */
+const GO_PARENTLESS_FAILS = `--- FAIL: TestExport (0.00s)
+    --- FAIL: TestExport/md (0.00s)
+        export_test.go:15: got "", want "| total |"
+FAIL
+FAIL	example.com/acme	0.002s
+FAIL
+`
+
+/** pytest 9.1: an older parametrised test fails on cases whose ids hold `::test_x[` and `::test_x - `; `test_x` passes. */
+const PYTEST_ID_INSIDE_OTHER_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 5 items
+
+tests/test_export.py FF...                                               [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_other[a::test_x[1]] ___________________________
+
+ref = 'a::test_x[1]'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "a::test_x - b", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x[1]' == 'b'
+E         
+E         - b
+E         + a::test_x[1]
+
+tests/test_export.py:6: AssertionError
+__________________________ test_other[a::test_x - b] ___________________________
+
+ref = 'a::test_x - b'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "a::test_x - b", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x - b' == 'b'
+E         
+E         - b
+E         + a::test_x - b
+
+tests/test_export.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_other[a::test_x[1]] - AssertionError: asser...
+FAILED tests/test_export.py::test_other[a::test_x - b] - AssertionError: asse...
+========================= 2 failed, 3 passed in 0.01s ==========================
+`
+
+/** pytest 9.1: the same, and `test_x[1]` fails. */
+const PYTEST_ID_INSIDE_FAILS = `============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 4 items
+
+tests/test_export.py F.F.                                                [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_other[a::test_x[1]] ___________________________
+
+ref = 'a::test_x[1]'
+
+    @pytest.mark.parametrize("ref", ["a::test_x[1]", "b"])
+    def test_other(ref):
+>       assert ref == "b"
+E       AssertionError: assert 'a::test_x[1]' == 'b'
+E         
+E         - b
+E         + a::test_x[1]
+
+tests/test_export.py:6: AssertionError
+__________________________________ test_x[1] ___________________________________
+
+n = 1
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_x(n):
+>       assert n > 1
+E       assert 1 > 1
+
+tests/test_export.py:11: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_other[a::test_x[1]] - AssertionError: asser...
+FAILED tests/test_export.py::test_x[1] - assert 1 > 1
+========================= 2 failed, 2 passed in 0.01s ==========================
+`
+
+/** `git diff`: a testify suite method and its subtest, added under an older suite. */
+const GO_SUITE_PATCH = [
+  '@@ -13,3 +13,9 @@ func (s *ExportSuite) Run(name string, f func()) {',
+  ' func TestExportSuite(t *testing.T) {',
+  ' \tt.Run("TestMarkdown", func(t *testing.T) { (&ExportSuite{t}).TestMarkdown() })',
+  ' }',
+  '+',
+  '+func (s *ExportSuite) TestMarkdown() {',
+  '+\ts.Run("empty", func() {',
+  '+\t\ts.t.Errorf("got %q, want %q", "| total |", "")',
+  '+\t})',
+  '+}',
+].join('\n')
+
+/** go test, Go 1.27: that method's subtest fails, under a suite run as testify runs one. */
+const GO_SUITE_FAILS = `--- FAIL: TestExportSuite (0.00s)
+    --- FAIL: TestExportSuite/TestMarkdown (0.00s)
+        --- FAIL: TestExportSuite/TestMarkdown/empty (0.00s)
+            export_test.go:19: got "| total |", want ""
+FAIL
+FAIL	example.com/acme	0.001s
+FAIL
+`
+
+describe('A red read from the Go subtests and pytest ids #279 left', () => {
+  test('a Go subtest under the same parent but another branch is not the red', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_BRANCH_PATCH })
+    expect(names).toEqual([
+      { parent: 'TestExport', subtest: 'md', nesting: [], whole: false },
+      { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: false },
+    ])
+    const empty = names.slice(1)
+    expect(validRed(run(GO_OTHER_BRANCH_FAILS, 1, path), path, empty)).toBe(false)
+    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
+  })
+
+  test('a Go subtest in a new file is read under its whole path, braces in strings and comments aside', () => {
+    const path = 'export_test.go'
+    const code = [
+      'func TestExport(t *testing.T) {',
+      '\twant := `{"rows": [',
+      '\t}`',
+      '\tt.Run("md", func(t *testing.T) { // {',
+      '\t\tif want == "}" || want == "{" || want == string(\'}\') {',
+      '\t\t\tt.Skip()',
+      '\t\t}',
+      '\t\t/* } */ t.Run("empty", func(t *testing.T) {})',
+      '\t})',
+      '\tfor _, tc := range cases {',
+      '\t\tt.Run(tc.name, func(t *testing.T) {',
+      '\t\t\tt.Run("empty", func(t *testing.T) {})',
+      '\t\t})',
+      '\t}',
+      '\tt.Run("empty", func(t *testing.T) {})',
+      '}',
+    ].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual([
+      'TestExport',
+      { parent: 'TestExport', subtest: 'md', nesting: [], whole: true },
+      { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: true },
+      { parent: 'TestExport', subtest: 'empty', nesting: [null], whole: true },
+      { parent: 'TestExport', subtest: 'empty', nesting: [], whole: true },
+    ])
+    const red = (output: string, at: number) =>
+      validRed(run(output, 1, path), path, names.slice(at, at + 1))
+    expect(red(GO_BRANCH_FAILS, 2)).toBe(true)
+    expect(red(GO_OTHER_BRANCH_FAILS, 2)).toBe(false)
+    expect(red(GO_OTHER_BRANCH_FAILS, 3)).toBe(true)
+    expect(red(GO_OTHER_BRANCH_FAILS, 4)).toBe(false)
+    expect(red(GO_OTHER_PARENT_FAILS, 4)).toBe(false)
+  })
+
+  test('a subtest seen with its parent unknown is decided by the key line when the proof has one', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH })
+    expect(names).toEqual([{ parent: null, subtest: 'md', nesting: [], whole: false }])
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(true)
+    const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
+    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([
+      { parent: null, subtest: 'empty', nesting: [], whole: true },
+    ])
+    // A report that names the file decides by the key line too; a named test keeps its own rule.
+    const junit = run(JUNIT_ASSERTION, 1)
+    expect(validRed(junit, 'tests/export.test.mjs', names, true)).toBe(true)
+    expect(validRed(junit, 'tests/export.test.mjs', names, false)).toBe(false)
+    expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], true)).toBe(false)
+  })
+
+  test('a testify suite method’s subtest is a red on its exit code when the proof has no key line, and not when its key line differs', () => {
+    const path = 'export_test.go'
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUITE_PATCH })
+    expect(names).toEqual([{ parent: null, subtest: 'empty', nesting: [], whole: true }])
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, null)).toBe(true)
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(validRed(run(JUNIT_ASSERTION, 1), 'tests/export.test.mjs', names, null)).toBe(true)
+  })
+
+  test('a pytest id inside another test’s case id is not that test', () => {
+    const path = 'tests/test_export.py'
+    expect(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path).failingLines).toHaveLength(2)
+    expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_x'])).toBe(false)
+    expect(validRed(run(PYTEST_ID_INSIDE_OTHER_FAILS, 1, path), path, ['test_other'])).toBe(true)
+    expect(validRed(run(PYTEST_ID_INSIDE_FAILS, 1, path), path, ['test_x'])).toBe(true)
   })
 })
