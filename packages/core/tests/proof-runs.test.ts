@@ -1744,6 +1744,15 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     }
   })
 
+  test('a failing line of 300 KB is read in well under a second', () => {
+    const path = 'src/a.test.ts'
+    const long = ` × src/a.test.ts > ${'[a] '.repeat(75_000)}> reads a file 3ms`
+    const output = `${long}\nAssertionError: expected false to be true // Object.is equality`
+    const started = performance.now()
+    expect(validRed(run(output, 1, path), path, ['reads a dir'])).toBe(false)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   test('a pytest id after a space in a case id, or in a summary line’s message, is not that test', () => {
     const path = 'tests/test_export.py'
     expect(run(PYTEST_SPACED_OTHER_FAILS, 1, path).failingLines).toHaveLength(2)
