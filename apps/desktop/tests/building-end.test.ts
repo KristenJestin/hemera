@@ -37,6 +37,7 @@ import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
 import { insideCopy } from '../src/engine/building/review.ts'
+import type { EndHold } from '../src/engine/building/end.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
@@ -153,6 +154,8 @@ const ending = (
     readonly attribution?: Layer.Layer<WriteAttribution>
     /** Where the Builder is held, when a test orders it against the end. */
     readonly hold?: BuilderHold
+    /** Where the end is held as it takes in a Builder's turn end. */
+    readonly endHold?: EndHold
     /** Where a session is held as it starts or fails, or its start failed. */
     readonly sessionHold?: SessionHold
   } = {},
@@ -183,6 +186,7 @@ const ending = (
         : { home: work, verdicts, taskStates, attribution: options.attribution },
     building: {
       hold: options.hold,
+      endHold: options.endHold,
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
           const said = checks(asked)
@@ -2633,6 +2637,80 @@ describe('The Builder while the end waits on it', () => {
       })
       expect(seen.whileTaken).toEqual(['red', null])
       expect(seen.after).toEqual(['red', 'red', null])
+    },
+  )
+
+  test(
+    'a turn end the end takes in late, once the red it left queued was taken, does not count as the turn on the red',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      // Once armed, the end takes in a Builder's turn end only when the test lets it.
+      let late: ReturnType<typeof held> | null = null
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+        endHold: () => {
+          const gate = late
+          return gate === null ? Effect.void : Effect.promise(() => gate.promise)
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* until(
+              Effect.sync(() => turns.length >= 1),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // The end of the turn that started before the red is taken in only once the next
+            // turn took the red.
+            const gate = held()
+            late = gate
+            turns[0]?.release()
+            yield* until(
+              Effect.sync(() => turns.length >= 2),
+              LONG,
+            )
+            late = null
+            gate.release()
+            // Long enough for a judgement on the late turn end to have run.
+            yield* Effect.sleep('1 second')
+            return { whileTaken: yield* endAttempts(mission.id) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        late?.release()
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
     },
   )
 
