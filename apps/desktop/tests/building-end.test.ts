@@ -22,6 +22,7 @@ import {
   SPEC_IS_RIGHT,
   START_AGAIN,
   TOOLS,
+  WrittenAnswer,
   toolsOf,
 } from '@hemera/core/domain'
 import { and, asc, eq, sql } from 'drizzle-orm'
@@ -64,6 +65,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import {
   agentSessions,
+  buildingTasks,
   buildings,
   checkpoints,
   permissionRequests,
@@ -861,6 +863,61 @@ describe('The findings and their fate', () => {
       expect(seen.toldAfter.join('\n')).toContain('RV1')
       const finding = seen.review?.findings[0]
       expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1', contradictsSpec: true })
+    },
+  )
+
+  test(
+    'a written answer to a contradicting finding is taken as "the Spec is right": its special task carries the user’s words',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer', [
+              {
+                severity: 'blocking',
+                requirement: 'R1',
+                repository: 'api',
+                path: 'invoices.ts',
+                text: 'The CSV has no header row, which the scenario R1.S1 asks for.',
+                contradicts_spec: true,
+                evidence: 'R1.S1: as CSV, it works; invoices.ts writes no header.',
+              },
+            ])
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            yield* answerNeed({
+              id: need?.id ?? '',
+              answer: WrittenAnswer.make({ text: 'Add the header, and keep the column order.' }),
+              key: 'written',
+            })
+            yield* specialAvailable(mission.id, 'RV1')
+            const database = yield* Database
+            return {
+              tasks: yield* database
+                .select({ id: buildingTasks.id, result: buildingTasks.result })
+                .from(buildingTasks)
+                .where(eq(buildingTasks.origin, 'review')),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.tasks).toHaveLength(1)
+      expect(seen.tasks[0]?.result).toContain('The CSV has no header row')
+      expect(seen.tasks[0]?.result).toContain('Add the header, and keep the column order.')
+      const finding = seen.review?.findings[0]
+      expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1' })
     },
   )
 
