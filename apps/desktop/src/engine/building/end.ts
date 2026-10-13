@@ -835,8 +835,9 @@ export const buildingEndLayer = (log: Log) => {
           const database = yield* Database
           const missionId = building.missionId
           yield* stopAll(missionId)
-          // A question a stopped call raised as the tree stopped holds the exit until answered.
-          if ((yield* getMission(missionId)).needs.length > 0) return false
+          // A question a stopped call raised as the tree stopped holds the exit until answered, with
+          // the Builder back to take its answer.
+          if ((yield* getMission(missionId)).needs.length > 0) return yield* withBuilder(missionId)
           const snapshots = yield* Snapshots
           const ends: Array<{ readonly base: BuildingBase; readonly tree: string }> = []
           for (const base of basesOf(building)) {

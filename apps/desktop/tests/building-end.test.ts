@@ -1896,6 +1896,107 @@ describe('The exit', () => {
       expect(seen.review?.changedAfter.map((one) => one.path)).toContain('held.ts')
     },
   )
+  test(
+    'a question raised as the tree stops holds the exit with the Builder back, to take its answer',
+    SLOW,
+    async () => {
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const asking = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        // The write to held.ts executes until the test lets it go: the exit settles on it.
+        attribution: Layer.succeed(WriteAttribution, {
+          written: () => () => Effect.void,
+          command: () => Effect.succeed(null),
+          holding: (file, write) =>
+            Effect.gen(function* () {
+              if (file.path.endsWith('held.ts')) {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              }
+              return { result: yield* write, waited: null }
+            }),
+        }),
+        // The write to question.ts becomes a question once the tree stopped.
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            asked.tool === 'fs_write' && asked.path?.named.endsWith('question.ts') === true
+              ? Effect.as(Deferred.await(asking), {
+                  verdict: 'ask',
+                  reason: 'a file no task names',
+                  by: 'suite',
+                } satisfies Verdict)
+              : Effect.succeed<Verdict>(ALLOW),
+          refusal: () => Effect.succeed(null),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const owner = { kind: 'mission', missionId: mission.id } as const
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'held.ts',
+              content: 'export const held = true\n',
+            }).pipe(Effect.forkDetach)
+            yield* Deferred.await(entered)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'question.ts',
+              content: 'export const question = true\n',
+            }).pipe(Effect.forkDetach)
+            // Once the Builder stopped, its call asks; once asked, the exit's settle ends.
+            yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(getSession(builder.session.id), (session) => session.state === 'ended'),
+                LONG,
+              )
+              yield* Deferred.succeed(asking, undefined)
+              yield* until(
+                Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+                LONG,
+              )
+              yield* Deferred.succeed(release, undefined)
+            }).pipe(Effect.forkDetach)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(release)
+            // The exit holds on the question, and the Builder works again meanwhile.
+            const liveBuilder = Effect.map(
+              sessionsIn(['starting', 'working', 'idle'], owner),
+              (rows) => rows.filter((row) => row.role === 'builder'),
+            )
+            yield* until(
+              Effect.map(liveBuilder, (rows) => rows.length > 0),
+              LONG,
+            )
+            const holding = yield* buildingNow(mission.id)
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inReview(mission.id)
+            return {
+              phase: holding.phase,
+              builders: yield* liveBuilder,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner),
+            }
+          }),
+        ),
+      )
+      expect(seen.phase).toBe('refresh')
+      // The exit that follows the answer stops it again: nothing of the tree runs in Review.
+      expect(seen.live).toEqual([])
+    },
+  )
 })
 
 describe('The refresh', () => {
