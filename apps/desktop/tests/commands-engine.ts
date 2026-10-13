@@ -58,6 +58,7 @@ export function commandsEngine(
     | 'ticketProviders'
     | 'ticketSync'
     | 'building'
+    | 'hostProcesses'
     | 'runs'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
