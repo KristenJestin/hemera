@@ -213,6 +213,18 @@ describe('What each card says', () => {
     expect(card.ask).not.toHaveProperty('action')
   })
 
+  test('a proof past its time limit: the link names the Checks of its Project’s settings', () => {
+    const fields = { ...ENVIRONMENT, settingsSection: 'checks' }
+    expect(cardOf(need(onMission('m1'), fields, '2026-10-05T10:00:00Z'), NOW).ask).toEqual({
+      kind: 'environment',
+      settings: 'Checks',
+    })
+    // A section of a Project's settings means nothing to a need of the application.
+    expect(cardOf(need(APP, fields, '2026-10-05T10:00:00Z'), NOW).ask).toEqual({
+      kind: 'environment',
+    })
+  })
+
   test('something a setting answers: the link names its section', () => {
     const fields = { ...ENVIRONMENT, settingsSection: 'models' }
     expect(cardOf(need(APP, fields, '2026-10-05T10:00:00Z'), NOW).ask).toEqual({
@@ -410,6 +422,21 @@ describe('What a card’s buttons do', () => {
       'Apply',
       ChosenAnswer.make({ option: 'Move the money helpers back into shared/src.' }),
     )
+  })
+
+  test('a proof past its time limit opens the Checks of its Project’s settings', () => {
+    const asked = need(
+      onMission('m1'),
+      { ...ENVIRONMENT, settingsSection: 'checks' },
+      NOW.toISOString(),
+    )
+    const on = tools()
+    handlersFor(asked, on).onSettings?.()
+    expect(on.openSettings).toHaveBeenCalledWith({ projectId: 'acme', section: 'checks' })
+    expect(
+      handlersFor(need(APP, { ...ENVIRONMENT, settingsSection: 'checks' }, NOW.toISOString()), on)
+        .onSettings,
+    ).toBeUndefined()
   })
 
   test('something missing is retried, and its link opens its settings section', () => {

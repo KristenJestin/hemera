@@ -10,7 +10,6 @@ import {
   MissionFrameBase,
   MissionFrameNeeds,
   keptAgentChips,
-  type AppSection,
   type MissionFrameState,
   type MissionView,
 } from '@hemera/ui'
@@ -29,6 +28,7 @@ import {
   repositoryNamer,
 } from './mission-header-model.ts'
 import { lineOf } from './missions.ts'
+import type { SettingsPlace } from './navigation.ts'
 import type { ShellActions } from './shell.tsx'
 import {
   MISSION_VIEWS,
@@ -57,7 +57,7 @@ export interface MissionRouteProps {
     openChat: (chatId: string) => void
     answer: ShellActions['answer']
     recheck: ShellActions['recheck']
-    openSettings: (section: AppSection) => void
+    openSettings: (place: SettingsPlace) => void
   }
 }
 

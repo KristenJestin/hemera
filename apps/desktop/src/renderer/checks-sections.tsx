@@ -4,9 +4,11 @@
  * before it is accepted), and the dialog that writes, mends or removes one, every refusal said in
  * the engine's words under the field it concerns. A check's free line is also asked about as it is
  * typed. A dialog's draft is held outside React's state, so its body and its foot read it in the
- * same render. No Effect here.
+ * same render. How long a proof may run (#321) stands under the checks, written once the typing
+ * settles, as the Cap and budget fields are. No Effect here.
  */
 
+import { DEFAULT_PROOF_MINUTES } from '@hemera/core/domain'
 import type {
   CheckDraft as EngineCheckDraft,
   Command,
@@ -28,6 +30,7 @@ import {
   type CheckRefusals,
   type DocRecipeDraft,
   type DocRecipeRefusals,
+  type ProofLimitField,
   type SettingsForm,
 } from '@hemera/ui'
 import { IconBook2, IconChecklist } from '@hemera/ui/icons'
@@ -42,12 +45,15 @@ import {
   docRecipeDraftOf,
   docRecipeFormOf,
   docRecipeRefusalsOf,
+  proofLimitRefusalOf,
+  proofLimitWordsOf,
   proposedChecksOf,
   proposedDocRecipesOf,
   settingsCheckOf,
   settingsDocRecipeOf,
 } from './checks-model.ts'
 import type { Link } from './link.ts'
+import { latestWrites } from './project-agents.ts'
 import {
   type ListOps,
   type ListState,
@@ -70,6 +76,9 @@ export interface ChecksPartProps {
 
 /** How long a reorder waits for the moving to settle before it is written. */
 const MOVING_SETTLES_MS = 600
+
+/** How long the time limit's field waits for the typing to settle before it is written. */
+const TYPING_SETTLES_MS = 600
 
 /** `{files}` is Hemera's to fill: the line is asked about without it. */
 const FILES = '{files}'
@@ -214,6 +223,75 @@ function CheckBody({
   )
 }
 
+/**
+ * How long a proof of the Project may run: read with the section, what is typed shown at once and
+ * written once the typing settles, if it can be; leaving the section writes it rather than drop it.
+ */
+function useProofLimit(link: Link, engineReady: boolean, projectId: string): ProofLimitField {
+  /** What the engine keeps: undefined while on its way, null for the default. */
+  const [kept, setKept] = useState<number | null | undefined>(undefined)
+  /** What the field holds while it is typed in, before it is written. */
+  const [typed, setTyped] = useState<{ value: string | null } | null>(null)
+  /** Why it could not be read or kept, in words. */
+  const [refused, setRefused] = useState<string | undefined>(undefined)
+  const [written] = useState(latestWrites)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pending = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    if (!engineReady) return undefined
+    let live = true
+    link.proofLimit(projectId).then(
+      (minutes) => {
+        if (live) setKept(minutes)
+      },
+      (failure: Error) => {
+        if (live) setRefused(`The time limit could not be read: ${failure.message}`)
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [link, engineReady, projectId])
+  const flush = (): void => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+    const write = pending.current
+    pending.current = null
+    write?.()
+  }
+  useEffect(() => () => flush(), [])
+  const value =
+    typed === null ? (kept === null || kept === undefined ? null : String(kept)) : typed.value
+  return {
+    value,
+    fallback: DEFAULT_PROOF_MINUTES,
+    error: proofLimitRefusalOf(value) ?? refused,
+    loading: kept === undefined && refused === undefined,
+    onChange: (next) => {
+      setTyped({ value: next })
+      setRefused(undefined)
+      pending.current =
+        proofLimitRefusalOf(next) !== undefined
+          ? null
+          : () =>
+              written(
+                () => link.setProofLimit(projectId, next === null ? null : Number(next.trim())),
+                (answer) => {
+                  setKept(answer)
+                  setTyped(null)
+                },
+                (failure) => {
+                  // The field goes back to what the engine keeps, and says why.
+                  setTyped(null)
+                  setRefused(proofLimitWordsOf(failure))
+                },
+              )
+      if (timer.current !== null) clearTimeout(timer.current)
+      timer.current = setTimeout(flush, TYPING_SETTLES_MS)
+    },
+  }
+}
+
 /** The checks of a Project: what Hemera runs to judge the work, and when. */
 export function ChecksPart({
   link,
@@ -234,6 +312,7 @@ export function ChecksPart({
     [link, projectId],
   )
   const { store, state, reorder } = useSettingsList(ops, engineReady)
+  const proofLimit = useProofLimit(link, engineReady, projectId)
   // A dialog left open over a section that is no longer shown closes with it.
   useEffect(() => () => show(null), [show])
   const places = (project?.repositories ?? []).map((one) => one.path).filter((one) => one !== '.')
@@ -273,6 +352,7 @@ export function ChecksPart({
       checks={checks ?? null}
       proposals={proposedChecksOf(state.proposals, catalogue)}
       error={state.error}
+      proofLimit={proofLimit}
       onOpen={open}
       onAdd={() => open(null)}
       onReorder={reorder}
