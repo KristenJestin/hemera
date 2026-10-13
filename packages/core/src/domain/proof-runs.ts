@@ -102,7 +102,7 @@ const BEFORE_TEST =
  * test's panic, a `#[should_panic]` test that did not).
  */
 const ASSERTION =
-  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b/m
+  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b/m
 /**
  * A line a known test runner starts with for a test that failed, never a mark in the middle of a
  * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading (not its `● Console` nor

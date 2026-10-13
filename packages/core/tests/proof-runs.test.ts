@@ -1202,6 +1202,15 @@ describe('A red read from the failing names #260 still missed', () => {
     expect(broken.failingLines.filter((line) => line.startsWith('==='))).toEqual([])
   })
 
+  test('a gotestsum === FAIL: line without its duration is not an assertion that failed', () => {
+    for (const line of [
+      '=== FAIL: . TestExportMarkdown (unknown)',
+      '=== FAIL: . TestExportMarkdown (re-run 1) (0.00s)',
+    ]) {
+      expect(run(line, 1, 'export_test.go').classification).not.toBe('assertion_failed')
+    }
+  })
+
   test('Rust tests under #[tokio::test(…)], #[rstest] and #[test_case(…)] are named', () => {
     expect(addedTestNames({ insertion: 'new_file', code: RUST_DECLARATIONS, patch: null })).toEqual(
       [
