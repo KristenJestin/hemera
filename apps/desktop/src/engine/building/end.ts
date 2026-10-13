@@ -453,8 +453,11 @@ export const buildingEndLayer = (log: Log) => {
       /**
        * Whether a red of the final checks waits on the Builder, from what is stored, so a restart
        * neither judges its fix early nor waits for a turn that already ended: the attempt the red
-       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder
-       * ended since it opened.
+       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder on
+       * that red ended yet. The red is delivered under the attempt's id: still queued, it waits;
+       * taken, it waits for a turn that ended after it was taken, so a turn that started before
+       * it is never counted. A red with no delivery kept (a stop between the two) waits for a
+       * turn that ended after the attempt opened.
        */
       const waitsOnBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -478,7 +481,14 @@ export const buildingEndLayer = (log: Log) => {
             building.id,
             (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
           )
-          return turned === null || turned < open.startedAt
+          const [red] = yield* database
+            .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
+            .from(sessionDeliveries)
+            .where(eq(sessionDeliveries.id, open.id))
+            .pipe(Effect.mapError(refusedWhile('reading the red delivered to the Builder')))
+          if (red?.state === 'queued') return true
+          const since = red?.sentAt ?? open.startedAt
+          return turned === null || turned < since
         })
 
       /** Whether the last result of a final check is red. */

@@ -329,7 +329,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         locks: writeLocks(),
         said,
         hold,
-        deliver: (building, target, kind, body) => deliverTo(building, target, kind, body),
+        deliver: (building, target, kind, body, id) => deliverTo(building, target, kind, body, id),
         ran: (building) => Effect.suspend(() => commitsLeft(building)),
       })
       /**
@@ -1655,20 +1655,25 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       // ---- What the Builder is told.
 
-      /** A delivery to a lineage of the mission, or to its Builder, kept until it is taken. */
+      /**
+       * A delivery to a lineage of the mission, or to its Builder, kept until it is taken; under
+       * `id` when one is given.
+       */
       function deliverTo(
         building: BuildingRow,
         target: { readonly lineage: string } | { readonly role: string },
         kind: string,
         body: string,
+        id?: string,
       ) {
+        const asked = {
+          owner: { kind: 'mission', missionId: building.missionId },
+          target,
+          kind,
+          body,
+        } as const
         return Sessions.use((sessions) =>
-          sessions.deliver({
-            owner: { kind: 'mission', missionId: building.missionId },
-            target,
-            kind,
-            body,
-          }),
+          sessions.deliver(id === undefined ? asked : { ...asked, id }),
         ).pipe(
           Effect.asVoid,
           Effect.catchTag('DeliveryKindRefused', (refused) => said(refused.message)),
