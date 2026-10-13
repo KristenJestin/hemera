@@ -2,9 +2,11 @@
  * The process supervisor: whatever Hemera starts, it stops as a whole tree, on Windows too, and
  * nothing outlives the engine, even one that crashed.
  *
- * Nothing is mocked: the children are real `node` processes running scripts this suite writes
- * into a temporary folder, and a process is gone when the system says so (`process.kill(pid, 0)`
- * failing), never because a `stop` returned. The registry is the data folder's own table.
+ * The children are real `node` processes running scripts this suite writes into a temporary
+ * folder, and a process is gone when the system says so (`process.kill(pid, 0)` failing), never
+ * because a `stop` returned. The registry is the data folder's own table. Only what a left-over
+ * pid runs is answered by the suite, as the system says it: the real query (PowerShell on
+ * Windows, up to `WINDOWS_COMMAND_LINE_MS`) has a test of its own.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
@@ -21,6 +23,7 @@ import {
   ProcessSupervisor,
   SpawnFailed,
   StderrSink,
+  WINDOWS_COMMAND_LINE_MS,
   databaseRegistryLayer,
   hostProcessesLayer,
   processSupervisorLayer,
@@ -35,6 +38,12 @@ let folder: string
 let data: string
 let scripts = 0
 const strays: ChildProcess[] = []
+/**
+ * What the machine says each process this suite left running runs, as the system would say it:
+ * the supervisor's lookup is answered from here, never by PowerShell, which may take up to
+ * `WINDOWS_COMMAND_LINE_MS` on a loaded runner (one test below asks the real machine, alone).
+ */
+const lines = new Map<number, string>()
 /** Processes a test leaves behind on purpose, ended after it. */
 const strayPids: number[] = []
 
@@ -45,6 +54,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  lines.clear()
   await Promise.all(strays.splice(0).map(endChild))
   const left = strayPids.splice(0).filter(alive)
   for (const pid of left) process.kill(pid, 'SIGKILL')
@@ -137,6 +147,18 @@ async function pidsIn(path: string, count: number): Promise<number[]> {
   return pids
 }
 
+/** A process a previous engine left running, its command line answered as the system says it. */
+function leftRunning(args: ReadonlyArray<string>, options: { readonly detached?: boolean } = {}) {
+  const child = spawn(process.execPath, [...args], {
+    detached: options.detached ?? !onWindows,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  strays.push(child)
+  lines.set(child.pid ?? -1, child.spawnargs.join(' '))
+  return child
+}
+
 /** What a run of the supervisor saw: the sink's lines, and the trees `taskkill` was asked for. */
 interface Seen {
   readonly sink: string[]
@@ -147,8 +169,9 @@ interface Seen {
  * The supervisor over the real machine, a sink and a spy on the tree kills, on `data`. With
  * `killLandsAfter`, a tree kill answers at once and only lands that many milliseconds later: a
  * `taskkill` that returns before the process has exited; with `NEVER`, it never lands (a `taskkill`
- * that hung past its bound, or whose `/F` was refused). With `lineUnknown`, the machine cannot
- * say what any pid runs: a PowerShell that did not answer in time.
+ * that hung past its bound, or whose `/F` was refused). What a pid runs is answered from `lines`;
+ * with `lineUnknown`, the machine cannot say what any pid runs: a PowerShell that did not answer in
+ * time.
  */
 function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
   const host = Layer.effect(
@@ -158,7 +181,7 @@ function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
       return {
         ...real,
         commandLineOf: (pid: number) =>
-          lineUnknown ? Effect.succeed(null) : real.commandLineOf(pid),
+          Effect.succeed(lineUnknown ? null : (lines.get(pid) ?? null)),
         killTree: (pid: number, grouped: boolean) =>
           Effect.andThen(
             Effect.sync(() => seen.killedTrees.push(pid)),
@@ -394,14 +417,9 @@ describe('The registry outlives a crash', () => {
     const tree = script(TREE_OF_THREE)
     const other = script(STAYS_UP)
     // What a crashed engine left: a tree it started in a group of its own, still running.
-    const left = spawn(process.execPath, [tree, where, '2'], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
+    const left = leftRunning([tree, where, '2'])
     // And a pid it registered that another program holds now.
-    const stranger = spawn(process.execPath, [other], { stdio: 'ignore', windowsHide: true })
-    strays.push(left, stranger)
+    const stranger = leftRunning([other], { detached: false })
     const pids = await pidsIn(where, 2)
 
     const orphans = await supervised(seen)(
@@ -449,12 +467,7 @@ describe('The registry outlives a crash', () => {
   })
   test('an orphan is said ended only once it is gone, even when the kill answers before it exits', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
 
     const [orphans, aliveWhenSaid, said] = await supervised(
@@ -482,12 +495,7 @@ describe('The registry outlives a crash', () => {
   })
   test('an orphan its kill did not end is kept for the next start, which ends it', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
     const leftNow = ProcessRegistry.use((registry) => registry.leftBy('run', 'another engine'))
 
@@ -532,12 +540,7 @@ describe('The registry outlives a crash', () => {
   })
   test('a live orphan whose command line is unknown is kept for the next start, which ends it', async () => {
     const seen = freshSeen()
-    const left = spawn(process.execPath, [script(STAYS_UP)], {
-      detached: !onWindows,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    strays.push(left)
+    const left = leftRunning([script(STAYS_UP)])
     const pid = left.pid ?? -1
     const root = {
       id: 'left',
@@ -580,6 +583,30 @@ describe('The registry outlives a crash', () => {
     expect(known.kept).toEqual([])
     expect(alive(pid)).toBe(false)
   })
+})
+
+describe('The machine says what a pid runs', () => {
+  test(
+    'a living process is matched by what the system says it runs, within its bound',
+    async () => {
+      const child = leftRunning([script(STAYS_UP), '--flag'])
+      const line = await Effect.runPromise(
+        Effect.provide(
+          HostProcesses.use((host) => host.commandLineOf(child.pid ?? -1)),
+          hostProcessesLayer,
+        ),
+      )
+      expect(line).not.toBeNull()
+      expect(
+        stillRuns(
+          { program: process.execPath, args: child.spawnargs.slice(1) },
+          line ?? '',
+          process.platform,
+        ),
+      ).toBe(true)
+    },
+    WINDOWS_COMMAND_LINE_MS + 10_000,
+  )
 })
 
 describe('A command line is matched before anything is ended', () => {
