@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+plugins: timeout-2.4.0
+timeout: 2.0s
+timeout method: signal
+timeout func_only: False
+collected 2 items
+
+tests/test_export.py FF                                                  [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:14: AssertionError
+____________________________ test_saves_the_invoice ____________________________
+
+    def test_saves_the_invoice():
+        page = object()
+>       expect(page).to_be_visible()
+
+tests/test_export.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_export._Locator object at 0x7f1a02b8d010>
+
+    def to_be_visible(self):
+>       time.sleep(10)
+E       Failed: Timeout (>2.0s) from pytest-timeout.
+
+tests/test_export.py:6: Failed
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_export.py::test_saves_the_invoice - Failed: Timeout (>2.0s)...
+============================== 2 failed in 2.02s ===============================
