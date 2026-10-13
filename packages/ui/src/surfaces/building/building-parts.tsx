@@ -139,20 +139,26 @@ function GrantLine({
 
 /** What the budget's line says: spent of cap, and whether that is measured or estimated. */
 export function budgetWords(budget: Budget): string {
-  const spent = budget.estimated ? `≈ ${budget.spent}` : budget.spent
-  return budget.cap === null ? `${spent} · no budget` : `${spent} of ${budget.cap}`
+  return budget.cap === null ? `${budget.spent} · no budget` : `${budget.spent} of ${budget.cap}`
 }
 
-/** The budget unfolded: the usage, and whether it is measured or an estimate. */
+/** The budget unfolded: each limit, then the usage, and whether it is measured or an estimate. */
 function BudgetBody({ budget }: { budget: Budget }): ReactNode {
   return (
     <div className="flex flex-col gap-1 px-4 pb-2 pl-10 text-sm">
-      <p>{budgetWords(budget)}</p>
-      <p className="text-xs text-muted-foreground">
-        {budget.estimated
-          ? 'Estimated: the agent does not report its usage, so Hemera counts it from the words exchanged.'
-          : 'Measured: what the agents reported.'}
-      </p>
+      {(budget.limits ?? [budgetWords(budget)]).map((limit) => (
+        <p key={limit}>{limit}</p>
+      ))}
+      {budget.usage !== undefined && (
+        <>
+          <p>{budget.estimated ? `≈ ${budget.usage}` : budget.usage}</p>
+          <p className="text-xs text-muted-foreground">
+            {budget.estimated
+              ? 'Estimated: the agent does not report its usage, so Hemera counts it from the words exchanged.'
+              : 'Measured: what the agents reported.'}
+          </p>
+        </>
+      )}
     </div>
   )
 }

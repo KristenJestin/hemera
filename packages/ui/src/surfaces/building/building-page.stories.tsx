@@ -158,9 +158,11 @@ export const BudgetSpent: Story = {
   args: { moment: 'refused' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/budget is spent: \$40 of \$40/)).toBeVisible()
+    await expect(canvas.getByText('The attempts budget of ACME-12 is spent')).toBeVisible()
     await expect(canvas.getByText(/usage limit is reached until 14:00/)).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /^Budget/ })).toHaveTextContent('$40.00 of $40')
+    await expect(canvas.getByRole('button', { name: /^Budget/ })).toHaveTextContent(
+      '30 of 30 tries',
+    )
   },
 }
 

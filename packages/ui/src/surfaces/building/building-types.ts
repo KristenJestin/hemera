@@ -139,13 +139,21 @@ export interface Grant {
   uses: number
 }
 
+/**
+ * The mission's budget: its limits (launches, tries, rounds), the one nearest its end on the line,
+ * and what the agents used, measured or estimated.
+ */
 export interface Budget {
-  /** What the mission may spend, in words: `$40`; none when no budget is set. */
+  /** The limit nearest its end, in words: `30 tries`; none when no limit is set. */
   cap: string | null
-  /** What it spent so far, in words: `$12.40`. */
+  /** What was used of it: `12`. */
   spent: string
-  /** How much of the budget is spent, 0 to 1; none without a budget. */
+  /** How much of that limit is used, 0 to 1; none without a limit. */
   share: number | null
+  /** Every limit, in words: `12 of 30 tries`. */
+  limits?: readonly string[] | undefined
+  /** What the agents used, in words: `$12.40 · 4.1 M tokens`; none before an agent ran. */
+  usage?: string | undefined
   /** Whether the usage is estimated rather than measured: an agent that does not report it. */
   estimated: boolean
 }

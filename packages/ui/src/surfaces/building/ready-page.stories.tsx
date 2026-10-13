@@ -170,6 +170,21 @@ export const CheckExpired: Story = {
   },
 }
 
+/** The budget unfolded: each limit of the mission, then the usage, marked as an estimate. */
+export const BudgetEstimated: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const line = canvas.getByRole('button', { name: /^Budget/ })
+    await expect(line).toHaveTextContent('0 of 8 launches')
+    await userEvent.click(line)
+    await waitFor(() => {
+      expect(canvas.getByText('≈ $3.10 · 0.9 M tokens')).toBeVisible()
+    })
+    await expect(canvas.getByText('0 of 30 tries')).toBeVisible()
+    await expect(canvas.getByText(/^Estimated:/)).toBeVisible()
+  },
+}
+
 /** The check could not finish: why, in words, and Check again; nothing launches. */
 export const CheckFailed: Story = {
   args: { moment: 'failed' },
