@@ -43,7 +43,8 @@ export type Reading =
   | null
 
 export function readingOf(repository: RepositoryInstructions, agent: AgentInstructions): Reading {
-  const own = agent.reads.find((file) => repository.files.includes(file))
+  const files = new Set(repository.files)
+  const own = agent.reads.find((file) => files.has(file))
   if (own !== undefined) return { by: 'agent', file: own }
   const sent = repository.files[0]
   return sent === undefined ? null : { by: 'hemera', file: sent }

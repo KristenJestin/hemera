@@ -23,7 +23,9 @@ import {
   dependantsOf,
   percentDone,
   promotable,
+  redPassed,
   requirementDone,
+  ScenarioProofState,
   settled,
   taskText,
 } from '@hemera/core/domain'
@@ -42,6 +44,7 @@ import { Effect, Option, Predicate, Schema, Stream } from 'effect'
 import { DomainEvents } from '../domain-events.ts'
 import { checkResultsOf, conflictsIn, unattributedIn } from './attempts.ts'
 import { passViewOf, passesIn } from './documenter-store.ts'
+import { requirementProofsIn } from './proof-store.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
 import { Secrets } from '../secrets.ts'
@@ -54,6 +57,7 @@ import {
   buildingTasks,
   buildings,
   runnerLeases,
+  scenarioProofs,
 } from '../storage/schema.ts'
 
 type Reader = EngineTransaction | Database['Service']
@@ -171,6 +175,42 @@ export const activeBuildings = Effect.gen(function* () {
     .where(eq(buildings.state, 'active'))
     .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
 })
+
+/**
+ * The automated scenarios of a Building whose red is not recorded yet (#144): the tasks covering
+ * them wait. A Building begun before the proofs has none.
+ */
+export const waitingRedIn = (reader: Reader, buildingId: string) =>
+  reader
+    .select({ scenario: scenarioProofs.scenario, state: scenarioProofs.state })
+    .from(scenarioProofs)
+    .where(and(eq(scenarioProofs.buildingId, buildingId), eq(scenarioProofs.mode, 'automated')))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the proofs')),
+      Effect.map(
+        (rows) =>
+          new Set(
+            rows
+              .filter((row) => {
+                const state = ScenarioProofState.literals.find((one) => one === row.state)
+                return state === undefined || !redPassed(state)
+              })
+              .map((row) => row.scenario),
+          ),
+      ),
+    )
+
+/** What a waiting task waits for among the reds not recorded yet (#144), or null. */
+export const waitsForRed = (
+  task: { readonly state: string; readonly scenarios: ReadonlyArray<string> },
+  reds: ReadonlySet<string>,
+): string | null => {
+  const own = task.state === 'waiting' ? task.scenarios.filter((one) => reds.has(one)) : []
+  if (own.length === 0) return null
+  const named =
+    own.length === 1 ? (own[0] ?? '') : `${own.slice(0, -1).join(', ')} and ${own.at(-1) ?? ''}`
+  return `waits for the red of ${named}`
+}
 
 /** The effective plan, in its order. */
 export const tasksIn = (reader: Reader, buildingId: string) =>
@@ -293,7 +333,7 @@ export const settleIn = (transaction: EngineTransaction, building: BuildingRow, 
       }
       if (freed) tasks = yield* tasksIn(transaction, building.id)
     }
-    const available = promotable(tasks)
+    const available = promotable(tasks, yield* waitingRedIn(transaction, building.id))
     for (const id of available) {
       const task = tasks.find((one) => one.id === id)
       if (task !== undefined) yield* moveIn(transaction, building.id, task, 'available')
@@ -583,6 +623,7 @@ const taskViewOf = (
   task: TaskNow,
   attempts: ReadonlyArray<AttemptRow>,
   extras: AttemptExtras,
+  reds: ReadonlySet<string>,
 ): BuildingTaskView => ({
   id: task.id,
   title: task.title,
@@ -596,6 +637,7 @@ const taskViewOf = (
   verified: task.verified,
   runner: task.runner,
   blockedBy: task.blockedBy === null ? null : causeSaid(task.blockedBy),
+  waiting: waitsForRed(task, reds),
   skippedReason: task.skippedReason,
   replacedBy: task.replacedBy,
   decisionId: task.decisionId,
@@ -629,6 +671,7 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
   Effect.gen(function* () {
     const tasks = yield* tasksIn(reader, building.id)
     const attempts = yield* attemptsIn(reader, building.id)
+    const reds = yield* waitingRedIn(reader, building.id)
     const extras: AttemptExtras = {
       checks: yield* checkResultsOf(
         reader,
@@ -636,7 +679,20 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       ),
       conflicts: yield* conflictsIn(reader, building.id),
     }
+    const special = tasks.filter((task) => task.origin === 'review')
+    const ofSpec = tasks.filter((task) => task.origin !== 'review')
     const requirements = [...new Set(tasks.flatMap((task) => task.requirements))]
+    const proofsOf = yield* requirementProofsIn(reader, building.missionId, building.id)
+    const requirementViews = requirements.map((id) =>
+      Object.assign(
+        {
+          id,
+          done: requirementDone(id, tasks),
+          tasks: tasks.filter((task) => task.requirements.includes(id)).map((task) => task.id),
+        },
+        proofsOf(id),
+      ),
+    )
     const view: BuildingView = {
       missionId: building.missionId,
       buildingId: building.id,
@@ -644,8 +700,18 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       round: null,
       state: STATES.find((one) => one === building.state) ?? 'active',
       phase: building.phase,
+      // CT-41: the percentage counts the Spec's tasks and the special tasks, the counts apart.
       percent: percentDone(tasks),
-      special: { done: 0, total: 0 },
+      counts: {
+        tasksDone: ofSpec.filter((task) => task.state === 'done').length,
+        tasks: ofSpec.filter((task) => task.state !== 'skipped').length,
+        requirementsProven: requirementViews.filter((one) => one.proven).length,
+        requirements: requirementViews.length,
+      },
+      special: {
+        done: special.filter((task) => task.state === 'done').length,
+        total: special.filter((task) => task.state !== 'skipped').length,
+      },
       elapsedSeconds: yield* elapsedIn(reader, building.id),
       startedAt: building.startedAt,
       endedAt: building.endedAt,
@@ -655,15 +721,12 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
         branch: base.branch,
         baseCommit: base.commit,
       })),
-      requirements: requirements.map((id) => ({
-        id,
-        done: requirementDone(id, tasks),
-        tasks: tasks.filter((task) => task.requirements.includes(id)).map((task) => task.id),
-      })),
-      tasks: tasks.map((task) => taskViewOf(task, attempts, extras)),
+      requirements: requirementViews,
+      tasks: tasks.map((task) => taskViewOf(task, attempts, extras, reds)),
       decisions: (yield* decisionsIn(reader, building.id)).map(decisionViewOf),
       scopes: attempts
-        .filter((one) => one.taskId === null)
+        // Hemera's writes of the proofs (#144) are its record, not an attempt anyone makes.
+        .filter((one) => one.taskId === null && !(one.scope === 'proof' && one.subject === null))
         .map((one) => attemptViewOf(one, extras)),
       unattributed: yield* unattributedIn(reader, building.id),
       documenter: (yield* passesIn(reader, building.id)).map(passViewOf),
@@ -741,7 +804,8 @@ export const planLine = (task: TaskNow): string => `${taskText(task)} [${stateSa
 
 /**
  * What `spec_read` adds in Building: the decisions taken since the Freeze, then the effective
- * plan with its amendments, each linked to its decision. Null before the mission's first Building.
+ * plan with its amendments, each linked to its decision, then the special tasks of the automatic
+ * review. Null before the mission's first Building.
  */
 export const buildingPartOf = (missionId: string) =>
   Effect.gen(function* () {
@@ -751,6 +815,8 @@ export const buildingPartOf = (missionId: string) =>
         const building = yield* latestBuildingIn(transaction, missionId)
         if (building === null) return null
         const tasks = yield* tasksIn(transaction, building.id)
+        // The special tasks of the automatic review are listed apart, never as the Spec's (CT-41).
+        const special = tasks.filter((task) => task.origin === 'review')
         const decisions = (yield* decisionsIn(transaction, building.id)).map(decisionViewOf)
         const decided = decisions.map((one, at) =>
           [
@@ -775,12 +841,16 @@ export const buildingPartOf = (missionId: string) =>
           '## Effective plan',
           '',
           tasks
+            .filter((task) => task.origin !== 'review')
             .map((task) =>
               task.origin === 'amendment'
                 ? `${planLine(task)}${decisionOf(task.decisionId)}`
                 : planLine(task),
             )
             .join('\n'),
+          ...(special.length === 0
+            ? []
+            : ['', '## Special tasks', '', special.map(planLine).join('\n')]),
         ].join('\n')
       }),
     )

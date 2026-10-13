@@ -157,6 +157,8 @@ const BODY = 'relative flex min-h-0 flex-1 flex-col overflow-hidden'
 
 const BASE = 'flex min-h-0 flex-1 flex-col overflow-auto'
 
+const NO_MARKS: readonly MissionMarkView[] = []
+
 export function MissionFrame({
   missionKey,
   title,
@@ -169,7 +171,7 @@ export function MissionFrame({
   now,
   onNow,
   nowChip,
-  marks = [],
+  marks = NO_MARKS,
   onOpenOutdated,
   ticket,
   branch,

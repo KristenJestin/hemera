@@ -138,6 +138,10 @@ export const TABLE_CLASSES = {
   building_check_results: 'permanent',
   building_check_runs: 'state',
   documenter_passes: 'permanent',
+  scenario_proofs: 'permanent',
+  proof_runs: 'permanent',
+  repository_trees: 'state',
+  writes_before_red: 'permanent',
   outside_watches: 'state',
   outside_changes: 'permanent',
   base_moves: 'permanent',
@@ -156,6 +160,10 @@ export const TABLE_CLASSES = {
   checkpoints: 'permanent',
   checkpoint_repositories: 'permanent',
   checkpoint_files: 'permanent',
+  // The automatic review (#147): what Review shows of it.
+  review_passes: 'permanent',
+  review_findings: 'permanent',
+  review_changed_after: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

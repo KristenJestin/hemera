@@ -23,6 +23,7 @@ import { PRELAUNCH_ROLE } from '../building/prelaunch-role.ts'
 import { BUILDER_ROLE } from '../building/builder-role.ts'
 import { HELPER_ROLE, PROTOTYPER_ROLE } from '../building/helper-role.ts'
 import { DOCUMENTER_ROLE } from '../building/documenter-role.ts'
+import { CODE_REVIEWER_ROLE, SPEC_REVIEWER_ROLE } from '../building/review-role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -103,6 +104,8 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   HELPER_ROLE,
   PROTOTYPER_ROLE,
   DOCUMENTER_ROLE,
+  SPEC_REVIEWER_ROLE,
+  CODE_REVIEWER_ROLE,
 ]
 
 /**

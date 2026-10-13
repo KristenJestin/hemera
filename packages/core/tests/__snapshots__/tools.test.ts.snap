@@ -2871,6 +2871,25 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Run a scenario's proof as Hemera runs it, and read how it ended: during the red phase it records the red; once the tasks covering it are done it judges its green; before that it only says where it stands. Refused for a scenario verified by hand, and before its test is in place.",
+      "properties": {
+        "scenario": {
+          "description": "The scenario whose proof to run (\`R1.S2\`).",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "scenario",
+      ],
+      "type": "object",
+    },
+    "name": "proof_run",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Write the final summary of the build, once Hemera says every task is done.",
       "properties": {
         "text": {
@@ -3135,6 +3154,132 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
       "type": "object",
     },
     "name": "docs_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Read the checkpoint of the result you review: the files changed per repository with their lines, or one file with its diff and content at the checkpoint. Never the live Workspace.",
+      "properties": {
+        "path": {
+          "description": "A file of the checkpoint: its diff from the base it branched from, and its content; the file list without it.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "repository": {
+          "description": "A repository of the checkpoint; every repository without it.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "checkpoint_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Read the evidence of the Building: the proof runs (red and green, classified, up to date or not), the final checks with their output, the manual scenarios, the documenter’s report, the files changed outside their targets and those written before the red.",
+      "properties": {
+        "check": {
+          "description": "One final check, by its name: its result and output.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "scenario": {
+          "description": "One scenario: its proof runs, red and green.",
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "evidence_read",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Report your pass once: every finding, each with its severity and evidence. Then end your turn.",
+      "properties": {
+        "findings": {
+          "description": "Every finding of your pass, once each; an empty list when you found nothing.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "contradicts_spec": {
+                "description": "True when fixing it would change what the Spec says.",
+                "type": "boolean",
+              },
+              "evidence": {
+                "description": "What you read that shows it: the Spec text, the file and lines, the check output. Required for a blocking finding.",
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "line": {
+                "description": "The line it is about, if any.",
+                "minimum": 1,
+                "type": "integer",
+              },
+              "path": {
+                "description": "The file it is about, relative to its repository, if any.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "repository": {
+                "description": "The repository of the file it is about, by its path in the Project.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+              "requirement": {
+                "description": "The requirement it is about (\`R2\`), if any.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string",
+              },
+              "scenario": {
+                "description": "The scenario it is about (\`R2.S1\`), if any.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string",
+              },
+              "severity": {
+                "description": "\`blocking\` (must change before Review), \`warning\` or \`suggestion\`.",
+                "enum": [
+                  "blocking",
+                  "warning",
+                  "suggestion",
+                ],
+                "type": "string",
+              },
+              "text": {
+                "description": "What is wrong and what should change, in the language of the user.",
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "severity",
+              "text",
+              "contradicts_spec",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "findings",
+      ],
+      "type": "object",
+    },
+    "name": "review_report",
   },
   {
     "inputSchema": {

@@ -160,7 +160,7 @@ export function SpecSettingsPart({
         link.setKeyPrefix(prefixEditOf(current.current, waiting)).catch(() => undefined)
       }
     }
-  }, [link, engineReady, projectId])
+  }, [link, engineReady, projectId, pending])
 
   const chooseMode = (choice: SpecModeChoice): void => {
     if (held.mode === null) return

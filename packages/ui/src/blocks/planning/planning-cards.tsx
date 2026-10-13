@@ -112,6 +112,7 @@ export function TicketCard({
                 <div className="flex flex-col text-sm break-words">
                   {change.difference.split('\n').map((line, index) =>
                     line.startsWith('- ') ? (
+                      // react-doctor-disable-next-line no-array-index-as-key -- a line of a fixed text: its place and words are its identity
                       <del key={`${String(index)}${line}`} className="text-muted-foreground">
                         {line.slice(2)}
                       </del>
