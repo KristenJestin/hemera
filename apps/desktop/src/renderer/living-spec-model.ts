@@ -222,11 +222,11 @@ export function followLivingSpec(
     link.livingSpecRequirements(projectId, domainId).then(
       (read) => {
         if (stopped || reads.get(domainId) !== mine) return
-        const before = requirements.get(domainId) ?? []
+        const before = new Map((requirements.get(domainId) ?? []).map((one) => [one.id, one]))
         requirements.set(domainId, read)
         // A requirement that changed while its history is shown has its history read again.
         for (const one of read) {
-          const was = before.find((other) => other.id === one.id)
+          const was = before.get(one.id)
           if (was !== undefined && was.version !== one.version && histories[one.id] !== undefined) {
             readHistory(one.id)
           }
@@ -287,8 +287,9 @@ export function followLivingSpec(
     const run = newest === undefined ? null : `${newest.id}:${newest.state}`
     if (before === null || run !== lastRun) readNeeds()
     lastRun = run
+    const domainsBefore = new Map(before?.domains.map((one) => [one.id, one]))
     for (const domain of next.domains) {
-      const was = before?.domains.find((one) => one.id === domain.id)
+      const was = domainsBefore.get(domain.id)
       const loaded = requirements.has(domain.id)
       const changed = was === undefined || JSON.stringify(was) !== JSON.stringify(domain)
       if (domain.id === shownDomain() ? !loaded || changed : loaded && changed) {
