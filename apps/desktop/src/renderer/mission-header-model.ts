@@ -6,7 +6,7 @@
  */
 
 import { outdatedReasonSaid } from '@hemera/core/domain'
-import type { FreezeReadiness, Mission, Project } from '@hemera/ipc'
+import type { FreezeReadiness, KeptAgent, Mission, Project } from '@hemera/ipc'
 import type { MissionStage, NeedRow } from '@hemera/ui'
 import { Predicate } from 'effect'
 
@@ -132,4 +132,17 @@ export function oneAtATime(
       onChange(false)
     })
   }
+}
+
+/**
+ * Follows the mission's earlier agents a start could not stop (#320): each list as the engine says
+ * it, then none once the follow ends or fails, so that a notice is never left standing on a list
+ * no longer followed. Answers the unsubscribe.
+ */
+export function followKept(
+  link: Pick<Link, 'onKeptAgents'>,
+  missionId: string,
+  show: (agents: ReadonlyArray<KeptAgent>) => void,
+): () => void {
+  return link.onKeptAgents(missionId, show, () => show([]))
 }

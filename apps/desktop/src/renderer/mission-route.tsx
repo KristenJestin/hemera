@@ -17,6 +17,7 @@ import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
 import {
+  followKept,
   freezeShown,
   frozenOf,
   headerOf,
@@ -247,7 +248,7 @@ export function MissionRoute({
   // The earlier agents a start could not stop, for as long as each runs (#320).
   useEffect(() => {
     if (!engineReady || id === undefined) return undefined
-    const unsubscribe = link.onKeptAgents(id, setKept, () => undefined)
+    const unsubscribe = followKept(link, id, setKept)
     return () => {
       unsubscribe()
       setKept(NONE_KEPT)
