@@ -75,7 +75,7 @@ describe('The commit-messages job on a push', () => {
 
   // A repository whose only remote branch, `origin/feature/1.0`, holds a squashed title that is
   // too long, as the real one does; the pushed branch adds `subjects` on top of it.
-  const pushOf = (subjects: string[]): { status: number | null; output: string } => {
+  const pushOf = (subjects: string[]) => {
     const folder = mkdtempSync(join(tmpdir(), 'hemera-ci-workflow-'))
     folders.push(folder)
     const git = (...args: string[]): string => {
