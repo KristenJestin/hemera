@@ -111,7 +111,7 @@ const BEFORE_TEST =
  * test's panic, a `#[should_panic]` test that did not).
  */
 const ASSERTION =
-  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b/m
+  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E[ \t]+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b|\bFailed: DID NOT (?:RAISE|WARN)\b/m
 /**
  * A line a known test runner starts with for a test that failed, never a mark in the middle of a
  * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading (not its `● Console` nor
@@ -138,10 +138,15 @@ const PYTEST_SUMMARY = /^FAILED \S+::/
 const RUST_STDOUT = /^---- \S+ stdout ----\s*$/
 const RUST_FAILURES = /^failures:\s*$/
 /**
- * The first error a failure's text says was thrown: JavaScript's and Python's (`TypeError: …`,
- * `E   NameError: …`, `AssertionError [ERR_ASSERTION]: …`) or Go's `panic: `.
+ * The first error a failure's text says was thrown: JavaScript's and Python's, its module before
+ * it or not (`TypeError: …`, `E   app.errors.NotFoundError: …`, `AssertionError [ERR_ASSERTION]:
+ * …`), jest's `thrown: ` for what is no error (its own timeout, `undefined`), or Go's `panic: `.
+ * Testify's `Error:` followed by its column of spaces is an assertion's report, not a throw.
  */
-const THROWN = /^\s*(?:E\s+)?(?:(?<error>(?:[A-Z]\w*)?(?:Error|Exception))(?: \[\w+\])?:|panic: )/m
+const THROWN =
+  /^[ \t]*(?:E[ \t]+)?(?:(?:[A-Za-z_]\w*\.)*(?<error>(?:[A-Z]\w*)?(?:Error|Exception))(?: \[\w+\])?:(?= \S|$)|thrown: |panic: )/m
+/** A line of the code frame jest and vitest print under an error (`> 4 |   expect(x)…`). */
+const CODE_FRAME = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|.*$/gm
 const ASSERTION_THROWN = /^Assertion(?:Failed)?Error$/
 /** Signs of a test file the runner did not find. */
 const NOT_FOUND =
@@ -154,9 +159,10 @@ const uncoloured = (line: string): string => line.replace(/\u001b\[[0-9;?]*[ -/]
 /**
  * Whether a failure's own text says an assertion failed: the first error it says was thrown when
  * there is one (an assertion's, or a `TypeError` whose code frame shows an `expect`), otherwise
- * the words of an assertion.
+ * the words of an assertion, never read in a code frame (the test's source, not what it said).
  */
-const asserts = (text: string): boolean => {
+const asserts = (output: string): boolean => {
+  const text = output.replace(CODE_FRAME, '')
   const thrown = THROWN.exec(text)
   if (thrown !== null) return ASSERTION_THROWN.test(thrown.groups?.['error'] ?? '')
   return ASSERTION.test(text)
@@ -166,9 +172,11 @@ const asserts = (text: string): boolean => {
  * The failing lines of an output, uncoloured and cut, and those a name is read on when their own
  * text says an assertion failed. A failure's text is its line and those below it, up to the next
  * failure's line; a pytest summary line's is its message, read as pytest's traceback prints it.
- * A numbered line is mocha's only below the `N failing` it ends with, and twice at most (its tree,
- * its list): a numbered log line is not one, and cannot push a real failure past the cap. Its two
- * lines take the class of its list's text, and the lines of its title in the list are read too.
+ * A numbered line is mocha's only when its number is at most its `N failing`, and twice at most:
+ * its tree's, the last above that line, and its list's, the first below. A numbered log line is
+ * not one, and cannot push a real failure past the cap. Its two
+ * lines take the class of its list's text alone (its tree line's runs over the logs of the tests
+ * after it), and the lines of its title in the list are read too.
  */
 const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'assertionLines'> => {
   const lines = output.split(/\r?\n/).map((line) => uncoloured(line).slice(0, LINE_CAP))
@@ -180,7 +188,15 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     failing = Math.max(failing, count)
   }
   const rustAt = lines.findIndex((line) => RUST_FAILURES.test(line))
-  const numbered = new Map<number, number>()
+  // Mocha's tree line of a number, the last above its `N failing`, and its list's, the first below.
+  const tree = new Map<number, number>()
+  const list = new Map<number, number>()
+  for (const [at, line] of lines.entries()) {
+    const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
+    if (number < 1 || number > failing) continue
+    if (at < listAt) tree.set(number, at)
+    else if (!list.has(number)) list.set(number, at)
+  }
   const entries: Array<{ readonly at: number; readonly marked: boolean; readonly number: number }> =
     []
   for (const [at, line] of lines.entries()) {
@@ -193,10 +209,8 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
       continue
     }
     const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
-    if (number < 1 || number > failing) continue
-    const seen = (numbered.get(number) ?? 0) + 1
-    numbered.set(number, seen)
-    if (seen <= 2) entries.push({ at, marked: true, number })
+    if (tree.get(number) === at || list.get(number) === at)
+      entries.push({ at, marked: true, number })
   }
   const read = entries.slice(0, FAILING_LINES).map((entry, index) => {
     const line = lines[entry.at] ?? ''
@@ -213,12 +227,14 @@ const failingLinesOf = (output: string): Pick<ProofRunClass, 'failingLines' | 'a
     }
   })
   const assertedNumbers = new Set(
-    read.filter((entry) => entry.number > 0 && entry.asserts).map((entry) => entry.number),
+    read
+      .filter((entry) => entry.number > 0 && entry.at > listAt && entry.asserts)
+      .map((entry) => entry.number),
   )
   return {
     failingLines: read.filter((entry) => entry.marked).map((entry) => entry.line),
     assertionLines: read
-      .filter((entry) => entry.asserts || assertedNumbers.has(entry.number))
+      .filter((entry) => (entry.number > 0 ? assertedNumbers.has(entry.number) : entry.asserts))
       .flatMap((entry) =>
         entry.number > 0 && entry.at > listAt
           ? mochaTitle(lines, entry.at).map((title) => `${String(entry.number)}) ${title}`)
@@ -439,10 +455,11 @@ const namePattern = (name: string, cases = false): RegExp | null => {
     '^=== FAIL: \\S+ ',
     '^\\s*FAIL \\[[^\\]]*\\] (?:\\(\\s*\\d+\\/\\d+\\) )?\\S+ ',
   ].join('|')
-  const anyRight = '\\s*$|\\s+\\(?\\d+(?:\\.\\d+)?\\s?m?s\\)?\\s*$'
+  const anyRight = '\\s*$|\\s+\\(\\d+(?:\\.\\d+)?\\s?m?s\\)\\s*$'
   return new RegExp(
     [
       `(?:${anyLeft})${named}(?=${anyRight})`,
+      `(?:^\\s*×\\s+|\\s>\\s)${named}(?=\\s\\d+(?:\\.\\d+)?ms\\s*$)`,
       `^FAIL: ${body}(?= \\(\\w+(?:\\.\\w+)+\\))`,
       `(?:^test |^---- |${path})${named}(?= \\.\\.\\. | - should panic \\.\\.\\. | stdout ----)`,
       `(?:^|${path})${body}(?=\\[)`,

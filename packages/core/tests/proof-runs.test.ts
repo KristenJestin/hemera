@@ -1987,3 +1987,157 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
     expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'], true)).toBe(false)
   })
 })
+
+/** jest 30, its own words: an older test fails on expect, the one the proof adds times out. */
+const JEST_TIMEOUT_WITH_FRAME = [
+  ' FAIL  tests/export.test.js',
+  '  export',
+  '    ✕ one is one (3 ms)',
+  '    ✕ the invoices export as Markdown (5003 ms)',
+  '',
+  '  ● export › one is one',
+  '',
+  '    expect(received).toBe(expected) // Object.is equality',
+  '',
+  '  ● export › the invoices export as Markdown',
+  '',
+  '    thrown: "Exceeded timeout of 5000 ms for a test.',
+  '    Add a timeout value to this test to increase the timeout, if this is a long-running test. See https://jestjs.io/docs/api#testname-fn-timeout."',
+  '',
+  "      2 | describe('export', () => {",
+  "    > 3 |   test('the invoices export as Markdown', async () => {",
+  '        |   ^',
+  '      4 |     expect(await toMarkdown()).toBe("| total |")',
+  '      5 |   })',
+  '',
+].join('\n')
+
+/** Go testify, its own words: assert.Equal failed in the test the proof adds. */
+const GO_TESTIFY_FAILS = [
+  '--- FAIL: TestExportMarkdown (0.00s)',
+  '    export_test.go:12: ',
+  '        \tError Trace:\t/work/acme/export_test.go:12',
+  '        \tError:      \tNot equal: ',
+  '        \t            \texpected: "| total |"',
+  '        \t            \tactual  : ""',
+  '        \tTest:       \tTestExportMarkdown',
+  'FAIL',
+  'FAIL\texample.com/acme\t0.01s',
+].join('\n')
+
+describe('A red read from what a runner prints around the error (#303, round 2)', () => {
+  test('a jest test the proof adds that timed out, its code frame holding an expect, is not a red', () => {
+    const path = 'tests/export.test.js'
+    expect(validRed(run(JEST_TIMEOUT_WITH_FRAME, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(JEST_TIMEOUT_WITH_FRAME, 1, path), path, ['one is one'])).toBe(true)
+  })
+
+  test('a jest test that threw an error not named Error, or threw undefined, its frame holding an expect, is not a red', () => {
+    const path = 'tests/export.test.js'
+    const custom = [
+      '  ● export › one is one',
+      '',
+      '    expect(received).toBe(expected)',
+      '',
+      '  ● export › the invoices export as Markdown',
+      '',
+      '    NotFound: no invoice',
+      '',
+      '    > 4 |     expect(await toMarkdown()).toBe("| total |")',
+    ].join('\n')
+    expect(validRed(run(custom, 1, path), path, SCENARIO)).toBe(false)
+    const undefinedThrown = [
+      '  ● one is one',
+      '    expect(received).toBe(1)',
+      '  ● the invoices export as Markdown',
+      '    thrown: undefined',
+      '    > 4 |     expect(toMarkdown()).toBe("| total |")',
+    ].join('\n')
+    expect(validRed(run(undefinedThrown, 1, path), path, SCENARIO)).toBe(false)
+  })
+
+  test('blank and space-only lines after a failure are read in linear time', () => {
+    const path = 'tests/export.test.ts'
+    const outputs = [
+      `× a\n${'\n'.repeat(40_000)}`,
+      `× a\n${`${' '.repeat(1_000)}\n`.repeat(5_000)}`,
+    ]
+    const started = performance.now()
+    for (const output of outputs) expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
+    // Generous, for a busy runner: quadratic, these took ten seconds and more.
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+
+  test('a Go testify assertion that failed in the test the proof adds is a red', () => {
+    const path = 'export_test.go'
+    expect(validRed(run(GO_TESTIFY_FAILS, 1, path), path, ['TestExportMarkdown'])).toBe(true)
+  })
+
+  test('a pytest.raises or pytest.warns that did not raise or warn is a red', () => {
+    const path = 'tests/test_export.py'
+    for (const what of ["DID NOT RAISE <class 'ValueError'>", 'DID NOT WARN']) {
+      const output = [
+        '___________________________ test_rejects_empty ___________________________',
+        '',
+        '    def test_rejects_empty():',
+        '        with pytest.raises(ValueError):',
+        '>           to_markdown([])',
+        `E           Failed: ${what}`,
+        '',
+        'tests/test_export.py:5: Failed',
+        `FAILED tests/test_export.py::test_rejects_empty - Failed: ${what}`,
+      ].join('\n')
+      expect(validRed(run(output, 1, path), path, ['test_rejects_empty'])).toBe(true)
+    }
+  })
+
+  test('a mocha test that threw is not a red because a later log line says AssertionError', () => {
+    const path = 'test/export.spec.js'
+    const output = [
+      '  export',
+      '    1) one is one',
+      '    2) the invoices export as Markdown',
+      'AssertionError: logged by a passing test',
+      '    ✔ reads it back',
+      '',
+      '  1 passing',
+      '  2 failing',
+      '',
+      '  1) export',
+      '       one is one:',
+      '     AssertionError [ERR_ASSERTION]: Expected values to be strictly equal',
+      '',
+      '  2) export',
+      '       the invoices export as Markdown:',
+      '     TypeError: toMarkdown is not a function',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+  })
+
+  test('a duration is only one a runner prints: debounces is not debounces 300ms, expires in is not expires in 30s', () => {
+    const path = 'tests/export.test.ts'
+    const jest = ['  ✕ debounces 300ms', '  ● debounces 300ms', '    expect(received).toBe(1)']
+    expect(validRed(run(jest.join('\n'), 1, path), path, ['debounces'])).toBe(false)
+    const vitest = [
+      ' × tests/export.test.ts > expires in 30s',
+      'AssertionError: expected 1 to be 2',
+    ]
+    expect(validRed(run(vitest.join('\n'), 1, path), path, ['expires in'])).toBe(false)
+    expect(validRed(run(vitest.join('\n'), 1, path), path, ['expires in 30s'])).toBe(true)
+  })
+
+  test('a Python exception named with its module is read as thrown, not as an assertion', () => {
+    const path = 'tests/test_export.py'
+    for (const error of [
+      'app.errors.ValidationError: assertion of schema failed',
+      'json.decoder.JSONDecodeError: Expecting value',
+    ]) {
+      const output = [
+        'FAILED tests/test_export.py::test_one_is_one - assert 1 == 2',
+        `FAILED tests/test_export.py::test_exports_markdown - ${error}`,
+      ].join('\n')
+      expect(validRed(run(output, 1, path), path, ['test_exports_markdown'])).toBe(false)
+    }
+  })
+})
