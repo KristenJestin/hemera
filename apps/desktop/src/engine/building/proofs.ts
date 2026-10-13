@@ -1382,6 +1382,9 @@ export const buildingProofs = (parts: ProofParts) => {
           if (building === null || (yield* failedGreens(building)).length === 0) return
           yield* snapshotNow(building, 'write')
           yield* greensDue(building)
+          // Judged again once what the write moved ran: a write that moved no tree runs nothing,
+          // and the Builder's turn is then watched from it, or it waits for good (#306).
+          yield* parts.moved(building)
         }).pipe(
           Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
           Effect.catchCause((cause) => said(`a failed green did not run again: ${String(cause)}`)),
