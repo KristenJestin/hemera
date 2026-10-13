@@ -26,7 +26,7 @@ import type { Database, DatabaseError } from '../storage/database.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
 import { actionDone, actionFailed, beginAction, settleActionIn } from '../tools/actions.ts'
 import { mutate, outsideTransaction } from '../transaction.ts'
-import { type CommandShape, aimsAt, shapeOf } from './shapes.ts'
+import { type CommandShape, type ParsedCommand, aimsAt, parseCommand } from './shapes.ts'
 
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
@@ -43,6 +43,8 @@ export interface ForgeSettings {
   readonly env?: Readonly<Record<string, string | undefined>> | undefined
   /** Shorter limits, for the suites. */
   readonly limits?: { readonly read: number; readonly write: number } | undefined
+  /** Whether a path names one of Hemera's own screenshots, the only files attached; none otherwise. */
+  readonly attachable?: ((path: string) => boolean) | undefined
 }
 
 /** One call: which CLI, for which forge and host, for which Project, with which arguments. */
@@ -102,6 +104,21 @@ export class ForgeRunner extends Context.Service<
     readonly run: (call: ForgeCall) => Effect.Effect<ForgeAnswer, ForgeRunFailure>
   }
 >()('ForgeRunner') {}
+
+/**
+ * Whether a command attaches only one of Hemera's own screenshots (`ForgeSettings.attachable`): any
+ * other file would be read and uploaded to the forge. A command that attaches nothing passes.
+ */
+const attachesOwnOnly = (
+  parsed: ParsedCommand,
+  attachable: ((path: string) => boolean) | undefined,
+): boolean => {
+  const value = parsed.flags.get('--attach')
+  if (value === undefined) return true
+  if (value === null || attachable === undefined) return false
+  // `path#caption`: the caption is the forge's, the path the file read.
+  return attachable(value.split('#')[0] ?? '')
+}
 
 /** What each CLI is told so that it never waits on a person nor decorates what it prints. */
 const QUIET: Readonly<Record<ForgeCli, Readonly<Record<string, string>>>> = {
@@ -291,11 +308,17 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
       const run = (call: ForgeCall): Effect.Effect<ForgeAnswer, ForgeRunFailure> =>
         Effect.gen(function* () {
           const command = secrets.mask([call.cli, ...call.args].join(' '))
-          const shape = shapeOf(call.cli, call.args)
-          // A command for another host than its call's would reach a forge it was not meant for.
-          if (shape === null || !aimsAt(call.cli, call.args, call.host)) {
+          const parsed = parseCommand(call.cli, call.args)
+          // A command for another host than its call's would reach a forge it was not meant for;
+          // an image from anywhere but Hemera's screenshots would upload a file of the user's.
+          if (
+            parsed === null ||
+            !aimsAt(call.cli, call.args, call.host) ||
+            !attachesOwnOnly(parsed, settings.attachable)
+          ) {
             return yield* new ForgeCommandRefused({ command })
           }
+          const { shape } = parsed
           const program = yield* find(call.cli)
           if (Option.isNone(program)) return yield* new ForgeCliMissing({ cli: call.cli })
           const limit = shape.class === 'read' ? limits.read : limits.write
