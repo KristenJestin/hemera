@@ -1,0 +1,11 @@
+✖  . (2ms)
+
+=== Skipped
+=== SKIP: . TestExportMarkdownSkipped (0.00s)
+    export_test.go:18: not yet
+
+=== Failed
+=== FAIL: . TestExportMarkdown (0.00s)
+    export_test.go:13: got "", want "| total |"
+
+DONE 3 tests, 1 skipped, 1 failure in 0.002s

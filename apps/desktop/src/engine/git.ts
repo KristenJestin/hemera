@@ -894,20 +894,39 @@ const mergeIn = (
 const lf = (text: string) => text.replaceAll('\r\n', '\n')
 
 /**
- * Merged lines given back the endings of the Workspace's file: a line it holds keeps its ending (a
- * repeated line, that of its last occurrence), any other line takes the ending of the line above.
+ * Merged lines given back the endings of the Workspace's file: the lines both share at its start
+ * and at its end keep their own endings, in place; between them, a line it holds keeps its ending
+ * (a repeated line, that of its last occurrence there), any other line takes the ending of the line
+ * above.
  */
 function withEndingsOf(ours: string, merged: string): string {
   if (!ours.includes('\r\n')) return merged
   const held = ours.split('\n').slice(0, -1)
-  const endings = new Map(
-    held.map((line) => (line.endsWith('\r') ? [line.slice(0, -1), '\r\n'] : [line, '\n'])),
-  )
-  let above = held[0]?.endsWith('\r') === true ? '\r\n' : '\n'
+  const textOf = (line: string) => (line.endsWith('\r') ? line.slice(0, -1) : line)
+  const endingOf = (line = '') => (line.endsWith('\r') ? '\r\n' : '\n')
   const lines = merged.split('\n')
   const last = lines.pop() ?? ''
-  const ended = lines.map((line) => {
-    above = endings.get(line) ?? above
+  let leading = 0
+  while (
+    leading < Math.min(held.length, lines.length) &&
+    textOf(held[leading] ?? '') === lines[leading]
+  )
+    leading += 1
+  let trailing = 0
+  while (
+    trailing < Math.min(held.length, lines.length) - leading &&
+    textOf(held[held.length - 1 - trailing] ?? '') === lines[lines.length - 1 - trailing]
+  )
+    trailing += 1
+  const endings = new Map(
+    held.slice(leading, held.length - trailing).map((line) => [textOf(line), endingOf(line)]),
+  )
+  let above = endingOf(held[0])
+  const ended = lines.map((line, at) => {
+    if (at < leading) above = endingOf(held[at])
+    else if (at >= lines.length - trailing)
+      above = endingOf(held[held.length - (lines.length - at)])
+    else above = endings.get(line) ?? above
     return `${line}${above}`
   })
   return `${ended.join('')}${last}`

@@ -735,6 +735,19 @@ describe('A proof’s addition is merged three ways (#144)', () => {
     expect(merged.merged).toBe('one\r\ntwo\nthree\r\nfour\r\n')
   })
 
+  /** A file with mixed line endings whose `}` ends once in LF, then in CRLF. */
+  const REPEATED = 'one\r\n}\ntwo\r\n}\r\n'
+
+  test('a repeated line of a file with mixed line endings keeps the ending of each of its occurrences', async () => {
+    const merged = await mergedInto(REPEATED, `${REPEATED}three\r\n`, REPEATED)
+    expect(merged.merged).toBe('one\r\n}\ntwo\r\n}\r\nthree\r\n')
+  })
+
+  test('a repeated line after an addition inside a file with mixed line endings keeps its own ending', async () => {
+    const merged = await mergedInto(REPEATED, 'one\r\nthree\r\n}\ntwo\r\n}\r\n', REPEATED)
+    expect(merged.merged).toBe('one\r\nthree\r\n}\ntwo\r\n}\r\n')
+  })
+
   test('a file with LF lines stays LF', async () => {
     const merged = await mergedInto('one\ntwo\n', 'one\ntwo\nthree\n', 'one\ntwo\n')
     expect(merged.clean).toBe(true)

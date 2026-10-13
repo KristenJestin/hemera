@@ -366,6 +366,16 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         quiet.delete(missionId)
         watching.delete(missionId)
       }
+      /**
+       * A write of the mission's sessions kept, a file tool's or a command's: counted, it wakes the
+       * Builder, and a failed green runs again on what it left (#144, #258).
+       */
+      const wrote = (missionId: string) =>
+        Effect.sync(() => {
+          writesIn.set(missionId, (writesIn.get(missionId) ?? 0) + 1)
+          awake(missionId)
+          Queue.offerUnsafe(settled, missionId)
+        })
       yield* Queue.take(settled).pipe(
         Effect.flatMap(proofs.afterWrite),
         Effect.forever,
@@ -728,6 +738,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             const red = yield* proofs.unproven(row)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
+            // A proof of the mission runs: the end is judged again once it ends (#258).
+            if (stuck === null) return
             const allStuck = red.length > 0 && stuck.length === red.length
             // The end never waits on a scenario nothing moves any more: the user is asked, once;
             // asked about scenarios that moved since, the question is withdrawn.
@@ -1527,7 +1539,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 .written(file)(transaction)
                 .pipe(Effect.andThen(proofs.writtenIn(transaction, file))),
             command: (asked) =>
-              loop.attribution.command(asked).pipe(
+              loop.attribution.command(asked, wrote(asked.missionId)).pipe(
                 provided,
                 Effect.catchCause((cause) =>
                   Effect.as(said(`a command was not watched: ${String(cause)}`), null),
@@ -1545,13 +1557,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
                   // Once the write and its outcome are kept, out of their transaction: a failed
                   // green runs again on what it left (#144).
-                  Effect.tap(() =>
-                    Effect.sync(() => {
-                      writesIn.set(file.missionId, (writesIn.get(file.missionId) ?? 0) + 1)
-                      awake(file.missionId)
-                      Queue.offerUnsafe(settled, file.missionId)
-                    }),
-                  ),
+                  Effect.tap(() => wrote(file.missionId)),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
