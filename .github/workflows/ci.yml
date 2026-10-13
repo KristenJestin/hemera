@@ -235,10 +235,20 @@ jobs:
         working-directory: source
         timeout-minutes: 30
         run: pnpm test --project repository --shard=${{ matrix.part == 'repository 1/2' && '1/2' || '2/2' }}
+      #
+      # The stall itself is not explained (#294). `@vitest/browser` waits on the iframe's `load`
+      # and, once the run is acknowledged, on `response:execute`, neither with a timer; which one
+      # never comes on the runner is not known. Its debug output says it: `VITEST_BROWSER_DEBUG`
+      # logs the orchestrator's lines (iframe created, loaded, the events it receives) and
+      # `DEBUG` adds the server's (the browser connecting, the heartbeats). Only the log changes:
+      # no cap, no retry, no skip.
       - name: Test the stories
         if: matrix.part == 'checks and stories'
         working-directory: source
         timeout-minutes: 15
+        env:
+          VITEST_BROWSER_DEBUG: 'true'
+          DEBUG: 'vitest:browser:*'
         run: pnpm test --project storybook-light --project storybook-dark
 
   # The check the branch rules require, under the name it had when one runner did it all.

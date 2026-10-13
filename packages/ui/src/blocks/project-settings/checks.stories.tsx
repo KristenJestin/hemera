@@ -63,13 +63,6 @@ function resolve(draft: CheckDraft, id: string): SettingsCheck {
 function Page(props: PageProps): ReactNode {
   const [checks, setChecks] = useState(props.checks)
   const [proposals, setProposals] = useState(props.proposals ?? [])
-  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
-  const [given, setGiven] = useState({ checks: props.checks, proposals: props.proposals })
-  if (given.checks !== props.checks || given.proposals !== props.proposals) {
-    setGiven({ checks: props.checks, proposals: props.proposals })
-    setChecks(props.checks)
-    setProposals(props.proposals ?? [])
-  }
   const [form, setForm] = useState<Open | null>(props.form ?? null)
   const draftFor = (open: Open | null): CheckDraft => {
     if (open === null) return NEW_CHECK
@@ -78,6 +71,23 @@ function Page(props: PageProps): ReactNode {
     return found === undefined ? NEW_CHECK : draftOf(found)
   }
   const [draft, setDraft] = useState<CheckDraft>(draftFor(props.form ?? null))
+  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
+  const [given, setGiven] = useState({
+    checks: props.checks,
+    proposals: props.proposals,
+    form: props.form,
+  })
+  if (
+    given.checks !== props.checks ||
+    given.proposals !== props.proposals ||
+    given.form !== props.form
+  ) {
+    setGiven({ checks: props.checks, proposals: props.proposals, form: props.form })
+    setChecks(props.checks)
+    setProposals(props.proposals ?? [])
+    setForm(props.form ?? null)
+    setDraft(draftFor(props.form ?? null))
+  }
   const open = (next: Open): void => {
     setDraft(draftFor(next))
     setForm(next)

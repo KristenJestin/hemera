@@ -30,7 +30,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
-import { Diffs } from '../src/engine/review/diffs.ts'
+import { Diffs, LARGE_BYTES } from '../src/engine/review/diffs.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingLaunches,
@@ -87,9 +87,9 @@ const moreOnBase = () =>
 /** A `.env` whose value must never leave the engine. */
 const SECRET = 'TOKEN=hunter2-not-a-real-one\n'
 
-const launchedOverBoth = () =>
+const launchedOverBoth = (onBase: () => Effect.Effect<void> = moreOnBase) =>
   Effect.gen(function* () {
-    const { mission } = yield* launched(work, moreOnBase, 'It touches api and web, nothing else.')
+    const { mission } = yield* launched(work, onBase, 'It touches api and web, nothing else.')
     const database = yield* Database
     const [launch] = yield* database
       .select({ workspaceId: buildingLaunches.workspaceId })
@@ -335,6 +335,91 @@ describe('A large change is loaded on request', () => {
     )
     expect(textOf(seen.forced, 'after')).toBe(`${lines}\n`)
     expect(entry(seen.diff, 'api', 'big.txt')?.generated).toBe(false)
+  })
+})
+
+/**
+ * A clean/smudge driver in the manner of git-lfs, run by Node: Git stores a short pointer text,
+ * the checkout holds the bytes, kept aside in `store` under their hash.
+ */
+const POINTER_DRIVER = `const { createHash } = require('node:crypto')
+const { existsSync, readFileSync, writeFileSync } = require('node:fs')
+const { join } = require('node:path')
+const [, , mode, store] = process.argv
+const input = readFileSync(0)
+if (mode === 'clean') {
+  const id = createHash('sha256').update(input).digest('hex')
+  writeFileSync(join(store, id), input)
+  process.stdout.write('pointer ' + id + ' size ' + input.length + '\\n')
+} else {
+  const id = /^pointer (\\w+)/.exec(input.toString('latin1'))?.[1]
+  const kept = id === undefined ? null : join(store, id)
+  process.stdout.write(kept !== null && existsSync(kept) ? readFileSync(kept) : input)
+}
+`
+
+/** A drawing as text. */
+const SVG = '<svg><circle r="1"/></svg>\n'
+
+/** The base of Acme's `api` with two drawings under the pointer driver, pushed. */
+const filteredOnBase = () =>
+  Effect.sync(() => {
+    const api = join(work, 'acme', 'api')
+    const store = join(work, 'pointer-store')
+    mkdirSync(store)
+    const script = join(work, 'pointer-driver.cjs')
+    writeFileSync(script, POINTER_DRIVER)
+    // Forward slashes: Git runs the command through its shell, on Windows too.
+    const quoted = (path: string) => `"${path.replaceAll('\\', '/')}"`
+    for (const mode of ['clean', 'smudge']) {
+      git(
+        api,
+        'config',
+        `filter.pointer.${mode}`,
+        `node ${quoted(script)} ${mode} ${quoted(store)}`,
+      )
+    }
+    writeFileSync(join(api, '.gitattributes'), '*.svg filter=pointer\n')
+    writeFileSync(join(api, 'logo.svg'), SVG)
+    writeFileSync(join(api, 'icon.svg'), SVG)
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'assets')
+    git(api, 'push', '-q', 'origin', 'HEAD')
+  })
+
+describe('A file under a filter driver is diffed in one form on both sides', () => {
+  test('a filtered file changed in the working tree shows its stored form on both sides, judged large on it; an unchanged one shows no change', async () => {
+    // A text past the size that makes a file large, as an LFS file can be and its pointer is not.
+    const drawn = `<svg>${'<g/>'.repeat(LARGE_BYTES / 4)}</svg>\n`
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth(filteredOnBase)
+          const checkedOut = readFileSync(join(api, 'icon.svg'), 'utf8')
+          writeFileSync(join(api, 'logo.svg'), drawn)
+          const diff = yield* live(missionId)
+          return { diff, checkedOut, contents: yield* fileOf(missionId, 'api', 'logo.svg') }
+        }),
+      ),
+    )
+    // The checkout holds the bytes, smudged by the driver: the scene is the one of git-lfs.
+    expect(seen.checkedOut).toBe(SVG)
+    expect(entry(seen.diff, 'api', 'icon.svg')).toBeUndefined()
+    expect(entry(seen.diff, 'api', 'logo.svg')).toMatchObject({
+      letter: 'M',
+      binary: false,
+      added: 1,
+      removed: 1,
+      large: false,
+    })
+    expect(textOf(seen.contents, 'before')).toMatch(
+      new RegExp(`^pointer \\w+ size ${String(SVG.length)}\\n$`),
+    )
+    expect(textOf(seen.contents, 'after')).toMatch(
+      new RegExp(`^pointer \\w+ size ${String(drawn.length)}\\n$`),
+    )
   })
 })
 

@@ -58,13 +58,6 @@ function accepted(proposal: SettingsDocRecipe): SettingsDocRecipe {
 function Page(props: PageProps): ReactNode {
   const [recipes, setRecipes] = useState(props.recipes)
   const [proposals, setProposals] = useState(props.proposals ?? [])
-  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
-  const [given, setGiven] = useState({ recipes: props.recipes, proposals: props.proposals })
-  if (given.recipes !== props.recipes || given.proposals !== props.proposals) {
-    setGiven({ recipes: props.recipes, proposals: props.proposals })
-    setRecipes(props.recipes)
-    setProposals(props.proposals ?? [])
-  }
   const [form, setForm] = useState<Open | null>(props.form ?? null)
   const draftFor = (open: Open | null): DocRecipeDraft => {
     if (open === null) return NEW_DOC_RECIPE
@@ -73,6 +66,23 @@ function Page(props: PageProps): ReactNode {
     return found === undefined ? NEW_DOC_RECIPE : recipeDraftOf(found)
   }
   const [draft, setDraft] = useState<DocRecipeDraft>(draftFor(props.form ?? null))
+  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
+  const [given, setGiven] = useState({
+    recipes: props.recipes,
+    proposals: props.proposals,
+    form: props.form,
+  })
+  if (
+    given.recipes !== props.recipes ||
+    given.proposals !== props.proposals ||
+    given.form !== props.form
+  ) {
+    setGiven({ recipes: props.recipes, proposals: props.proposals, form: props.form })
+    setRecipes(props.recipes)
+    setProposals(props.proposals ?? [])
+    setForm(props.form ?? null)
+    setDraft(draftFor(props.form ?? null))
+  }
   const open = (next: Open): void => {
     setDraft(draftFor(next))
     setForm(next)
