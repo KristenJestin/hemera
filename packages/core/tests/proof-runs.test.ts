@@ -2141,3 +2141,93 @@ describe('A red read from what a runner prints around the error (#303, round 2)'
     }
   })
 })
+
+describe('A red read from its own lines only (#331)', () => {
+  test('a pytest section’s source lines are not read as assertions: only its E lines and its trailer', () => {
+    const path = 'tests/test_export.py'
+    const names = ['test_saves_the_invoice']
+    // A test the proof adds that hit pytest-timeout on a Playwright-style expect, and one that
+    // raised an exception named without Error, beside an older test failing on assert.
+    for (const name of ['pytest-timeout-source', 'pytest-unsuffixed-error-source']) {
+      const output = captured(name)
+      expect(validRed(run(output, 1, path), path, names)).toBe(false)
+      expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+    }
+    const asserts = captured('pytest-timeout-source').replace(
+      'E       Failed: Timeout (>2.0s) from pytest-timeout.',
+      'E       AssertionError: the invoice is not saved',
+    )
+    expect(validRed(run(asserts, 1, path), path, names)).toBe(true)
+  })
+
+  test('a mocha log or diff line shaped like 1) name does not take a failure number’s place', () => {
+    const path = 'test/export.spec.js'
+    // A passing test that logs `  1) its name` below the tree, the older #1 asserting.
+    const logged = captured('mocha-numbered-log-line')
+    expect(validRed(run(logged, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(logged, 1, path), path, ['one is one'])).toBe(true)
+    // A diff line `2) its name` inside #1's text, the older #2 asserting, the test passing.
+    const diffed = captured('mocha-numbered-diff-line')
+    expect(validRed(run(diffed, 1, path), path, SCENARIO)).toBe(false)
+    expect(validRed(run(diffed, 1, path), path, ['one is one'])).toBe(true)
+    expect(validRed(run(diffed, 1, path), path, ['reads it back'])).toBe(true)
+  })
+
+  test('lines that repeat expect( or assertion without closing them are read in linear time', () => {
+    const path = 'tests/export.test.ts'
+    const outputs = [
+      `× a\n${`${'expect('.repeat(580)}\n`.repeat(1_000)}`,
+      `× a\n${'expect('.repeat(43_000)}`,
+      `× a\n${`${'assertion '.repeat(400)}\n`.repeat(1_000)}`,
+    ]
+    const started = performance.now()
+    for (const output of outputs) expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
+    // Generous, for a busy runner: quadratic, these took fifteen seconds and more.
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+})
+
+describe('A red read from its own lines only, the real reds kept (#331, round 2)', () => {
+  test('a pytest --tb=native section is read from its last traceback’s exception, its summary without a message', () => {
+    const path = 'tests/test_export_of_the_invoices_as_markdown_files.py'
+    const output = captured('pytest-native-long-path')
+    expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+    expect(
+      validRed(run(output, 1, path), path, ['test_the_invoices_export_as_markdown_with_headers']),
+    ).toBe(true)
+    // An assertion caught and a TypeError raised from it, a traceback printed by the test.
+    const chained = captured('pytest-native-chained')
+    const chainedPath = 'tests/test_export.py'
+    expect(validRed(run(chained, 1, chainedPath), chainedPath, ['test_saves_the_invoice'])).toBe(
+      false,
+    )
+    expect(validRed(run(chained, 1, chainedPath), chainedPath, ['test_one_is_one'])).toBe(true)
+  })
+
+  test('a pytest section heading padded with a single underscore is read, never its frame separator', () => {
+    const path = 'tests/test_export_of_the_invoices_as_markdown_files.py'
+    const output = captured('pytest-long-section-heading')
+    const names = ['test_the_invoices_export_as_markdown_with_headers']
+    expect(validRed(run(output, 1, path), path, names)).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+    const separated = captured('pytest-timeout-source')
+    const timedOut = run(separated, 1, 'tests/test_export.py')
+    expect(validRed(timedOut, 'tests/test_export.py', ['test_saves_the_invoice'])).toBe(false)
+  })
+
+  test('a mocha describe title ending with a colon keeps its test’s name', () => {
+    const path = 'test/invoices.spec.js'
+    const output = captured('mocha-describe-title-colon')
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+  })
+
+  test('an error message’s line shaped like a mocha list entry is not one: the real entry is read', () => {
+    const path = 'test/export.spec.js'
+    const output = captured('mocha-message-numbered-line')
+    expect(validRed(run(output, 1, path), path, ['reads it back'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+  })
+})

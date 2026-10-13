@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 2 items
+
+tests/test_export_of_the_invoices_as_markdown_files.py FF                [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export_of_the_invoices_as_markdown_files.py:3: AssertionError
+_ test_the_invoices_export_as_markdown_with_headers[markdown-with-a-rather-long-identifier] _
+
+fmt = 'markdown-with-a-rather-long-identifier'
+
+    @pytest.mark.parametrize("fmt", ["markdown-with-a-rather-long-identifier"])
+    def test_the_invoices_export_as_markdown_with_headers(fmt):
+>       assert fmt == "csv"
+E       AssertionError: assert 'markdown-wit...ng-identifier' == 'csv'
+E         
+E         - csv
+E         + markdown-with-a-rather-long-identifier
+
+tests/test_export_of_the_invoices_as_markdown_files.py:7: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_one_is_one
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_the_invoices_export_as_markdown_with_headers[markdown-with-a-rather-long-identifier]
+============================== 2 failed in 0.02s ===============================
