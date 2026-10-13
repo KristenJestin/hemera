@@ -22,11 +22,12 @@ import {
   toolsOf,
 } from '@hemera/core/domain'
 import { HelpersRpcs } from '@hemera/ipc'
-import { eq } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { and, eq } from 'drizzle-orm'
+import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
+import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { helperRowsOf, listHelpers } from '../src/engine/building/helper-store.ts'
 import { setProjectLimits, projectLimits, spendBudget } from '../src/engine/budget.ts'
 import { answerNeed, getNeed } from '../src/engine/needs.ts'
@@ -134,6 +135,25 @@ const claimRunners = (taskId: string) =>
       .where(eq(buildingClaims.taskId, taskId))
     return rows.map((row) => row.runner)
   })
+
+/** The deliveries stored for a lineage, of a kind. */
+const deliveriesTo = (lineage: string, kind: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select({ body: sessionDeliveries.body })
+      .from(sessionDeliveries)
+      .where(and(eq(sessionDeliveries.targetLineage, lineage), eq(sessionDeliveries.kind, kind)))
+  })
+
+const redCheck = (output: string): CheckResult => ({
+  name: 'unit tests',
+  place: 'api',
+  verdict: 'red',
+  detail: 'exit code 1',
+  outputTail: output,
+  runId: null,
+})
 
 const FREE_RESULT = {
   summary: 'The CSV export is written.',
@@ -252,6 +272,68 @@ describe('A free helper launched on a task runs it and hands its result to its p
     expect(seen.parentRefused).toMatch(/^refused/)
     expect(seen.afterEnd).toMatchObject({ sessionId: seen.builder.session.id, epoch: 2 })
     expect(seen.parentFinished).toMatch(/T1 is done/)
+  })
+
+  test('a red on the helper’s attempt goes to the helper; after it ended, the next red goes to the parent', async () => {
+    // Two reds, each with its own output tail, so each delivery says whose red it carries.
+    const reds = ['FAIL first red', 'FAIL second red']
+    let judged = 0
+    const checks = Layer.succeed(TaskChecks, {
+      run: () => Effect.sync(() => [redCheck(reds[judged++] ?? 'FAIL later red')]),
+    })
+    const { run } = helping({ building: { checks } })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const builder = yield* builderOf(mission.id)
+          yield* call(builder.grantId, 'task_start', { task: 'T1' })
+          yield* call(builder.grantId, 'helper_launch', {
+            brief: 'Write the CSV export.',
+            task: 'T1',
+          })
+          const helper = yield* helperNumbered(mission.id, 1)
+          const lineage = helper.row.lineage
+          // The helper finishes its task: the check is red and the red comes back to the helper.
+          const first = yield* call(helper.grantId, 'task_finished', {
+            task: 'T1',
+            summary: 'Done.',
+          })
+          const toHelper = yield* deliveriesTo(lineage, 'red')
+          const toParentFirst = yield* deliveriesTo(builder.session.lineage, 'red')
+          // The helper ends with its task not done: the task is its parent's again.
+          yield* call(helper.grantId, 'helper_result', { ...FREE_RESULT, left: ['The tests.'] })
+          yield* until(
+            Effect.map(eventsOf(mission.id, 'helper.ended'), (ended) => ended.length === 1),
+          )
+          // The parent finishes it: the next red is delivered to the parent alone.
+          const second = yield* call(builder.grantId, 'task_finished', {
+            task: 'T1',
+            summary: 'Done.',
+          })
+          return {
+            first,
+            second,
+            toHelper,
+            toParentFirst,
+            toHelperAfter: yield* deliveriesTo(lineage, 'red'),
+            toParentAfter: yield* deliveriesTo(builder.session.lineage, 'red'),
+          }
+        }),
+      ),
+    )
+    expect(seen.first).toMatch(/T1 is red: unit tests failed in api/)
+    expect(seen.toHelper).toHaveLength(1)
+    expect(seen.toHelper[0]?.body).toContain('FAIL first red')
+    expect(seen.toParentFirst).toHaveLength(0)
+    expect(seen.second).toMatch(/T1 is red: unit tests failed in api/)
+    expect(seen.toParentAfter).toHaveLength(1)
+    const body = seen.toParentAfter[0]?.body ?? ''
+    expect(body).toContain('unit tests')
+    expect(body).toContain('in api')
+    expect(body).toContain('FAIL second red')
+    expect(seen.toHelperAfter).toHaveLength(1)
   })
 
   test('a helper tied to a task starts no other task', async () => {
