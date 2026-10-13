@@ -72,6 +72,11 @@ export interface ProofRun extends ProofRunClass {
   readonly at: string
   /** The Project's limit it ran past, in minutes, when Hemera ended it there; null otherwise. */
   readonly timedOutAfter: number | null
+  /**
+   * Whether its command was launched: false when it could not start, or gave up waiting for a
+   * resource held elsewhere (#306). Known as it runs, never recorded.
+   */
+  readonly started: boolean
 }
 
 /** The proof's command: what runs its test, or the command with no test file. */
@@ -236,6 +241,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       trees,
       at: new Date().toISOString(),
       timedOutAfter: timedOut ? (mission.minutes ?? DEFAULT_PROOF_MINUTES) : null,
+      started: yield* Deferred.isDone(started),
     }
     yield* mutate('recording a proof run', (transaction) =>
       transaction

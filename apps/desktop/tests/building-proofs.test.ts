@@ -2093,6 +2093,89 @@ describe('A proof waiting for an exclusive resource', () => {
   })
 })
 
+describe('A proof whose run started and then met its environment', () => {
+  /**
+   * R1.S2's test: red while `api/export.ts` is missing; once it exists without `toMarkdown`, its
+   * code never answers and the runner gives up in its own words, an environment failure the
+   * Builder's code causes (#306).
+   */
+  const TIMING_OUT_TEST = testFile(
+    [
+      "  const file = new URL('../export.ts', import.meta.url)",
+      "  assert.ok(existsSync(file), 'export.ts exports nothing yet')",
+      "  if (!readFileSync(file, 'utf8').includes('toMarkdown')) throw new Error('Test timed out in 5000ms')",
+    ].join('\n'),
+  )
+  const timingOutProof = () => ({ 'R1.S2': automated(EXPORT_PATH, TIMING_OUT_TEST) })
+
+  /** The mission's environment needs. */
+  const environmentNeeds = (missionId: string) =>
+    Effect.map(getMission(missionId), (mission) =>
+      mission.needs.filter((need) => Predicate.isTagged(need.fields, 'Environment')),
+    )
+
+  test('a green whose started run says its test timed out goes to the Builder as an attempt, never to the user as an environment need', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(timingOutProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          const delivered = yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+          const failed = yield* proofOf(mission.id, 'R1.S2')
+          const needs = yield* environmentNeeds(mission.id)
+          const open = yield* proofAttemptsOf('R1.S2')
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { delivered, failed, needs, open }
+        }),
+      ),
+    )
+    expect(seen.failed.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'environment'],
+    ])
+    expect(seen.failed.state).toBe('red_recorded')
+    expect(seen.needs).toEqual([])
+    expect(seen.open.map((one) => [one.number, one.endedAt])).toEqual([[1, null]])
+    expect(seen.delivered).toContain('Test timed out in 5000ms')
+  })
+
+  test('a stale proof whose started rerun at the refresh says its test timed out goes to the Builder as an attempt, never to the user as an environment need', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(timingOutProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          // Broken since, out of any tool: the refresh finds it stale, and its rerun times out.
+          writeFileSync(join(yield* apiOf(mission.id), 'export.ts'), WRONG_EXPORT)
+          yield* BuildDesk.use((desk) => desk.refreshProofs(mission.id))
+          const failed = yield* proofOf(mission.id, 'R1.S2')
+          const needs = yield* environmentNeeds(mission.id)
+          const open = yield* proofAttemptsOf('R1.S2')
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { failed, needs, open }
+        }),
+      ),
+    )
+    expect(seen.failed.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+    ])
+    expect(seen.failed.state).toBe('to_rerun')
+    expect(seen.needs).toEqual([])
+    expect(seen.open.map((one) => [one.number, one.endedAt])).toEqual([[1, null]])
+  })
+})
+
 describe('A restart while a proof waits on its fix', () => {
   /** The decisions Hemera asked about the scenarios the end waits on. */
   const unprovenAsked = Effect.gen(function* () {
