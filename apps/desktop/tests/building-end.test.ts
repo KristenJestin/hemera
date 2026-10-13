@@ -2791,6 +2791,75 @@ describe('A restart in the middle of the end', () => {
   )
 
   test(
+    'a Builder resume that lands between the exit’s stops and its commit sends the commit back, and the exit runs again',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewing(mission.id)
+            return mission
+          }),
+        ),
+      )
+      // Started again, the Builder's resume reads the end's step while the reviewers run, then is
+      // held until the exit's stops are done: it brings the Builder back between them and the
+      // commit, and the exit's first look at the Workspace waits for it.
+      const stopped = held()
+      const resumed = held()
+      let exits = 0
+      const after = ending({
+        resumed: true,
+        hold: (at) => {
+          if (at === 'bringing') return Effect.promise(() => stopped.promise)
+          if (at === 'resumed') return Effect.sync(() => resumed.release())
+          return Effect.void
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind !== 'review_exit') return real.take(place, owner)
+            exits += 1
+            if (exits > 1) return real.take(place, owner)
+            stopped.release()
+            return Effect.andThen(
+              Effect.promise(() => resumed.promise),
+              real.take(place, owner),
+            )
+          },
+        }),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            return {
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.id,
+              }),
+              types: yield* typesOf(left.id),
+            }
+          }),
+        ),
+      )
+      // The commit went back once: the exit stopped the resumed Builder and looked again.
+      expect(exits).toBe(2)
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
+    },
+  )
+
+  test(
     'a restart after the Builder’s turn ended, while the final checks ran again, judges them once',
     SLOW,
     async () => {
