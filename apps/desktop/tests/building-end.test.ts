@@ -12,7 +12,7 @@
  */
 
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 
 import {
   ChosenAnswer,
@@ -35,6 +35,7 @@ import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
+import { insideCopy } from '../src/engine/building/review.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
@@ -751,6 +752,14 @@ describe('The reviewers', () => {
       expect(seen.folder).not.toBe(dirname(seen.api))
     },
   )
+
+  test('on Windows, a finding’s path on another drive is not inside the checkpoint', () => {
+    const root = 'C:\\Users\\someone\\hemera\\reviews\\b1\\api'
+    expect(insideCopy(root, 'src\\x.ts', win32)).toBe(true)
+    expect(insideCopy(root, '..\\web\\x.ts', win32)).toBe(false)
+    expect(insideCopy(root, 'D:\\secrets\\x.ts', win32)).toBe(false)
+    expect(insideCopy(root, 'D:x.ts', win32)).toBe(false)
+  })
 })
 
 describe('The findings and their fate', () => {
