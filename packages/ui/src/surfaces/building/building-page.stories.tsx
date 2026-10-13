@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE } from './fixtures.ts'
-import { tabTo } from './play.ts'
-import { BuildingScreen } from './screen.tsx'
+import { LONG_TITLE } from './building-fixtures.ts'
+import { tabTo } from './building-play.ts'
+import { BuildingScreen } from './building-screen-fixture.tsx'
 
 /**
  * The Building page of #149, recommended: the spine of requirements in the middle, each with its
@@ -14,7 +14,7 @@ import { BuildingScreen } from './screen.tsx'
  * things. The needs stand above the page, one row each, unfolded on demand.
  */
 const meta = {
-  title: 'Explorations/Building/Building',
+  title: 'Surfaces/Building',
   component: BuildingScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
