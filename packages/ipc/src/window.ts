@@ -18,7 +18,7 @@ export const WindowCoreRpcs = EngineCoreRpcs.merge(
 
 /**
  * The window's calls whole: main serves the groups of `EngineApartRpcs`, `EngineSettingsRpcs` and
- * `EngineReviewRpcs` as layers of their own.
+ * `EngineReviewRpcs` (the live diff, the automatic review) as layers of their own.
  */
 export const WindowRpcs = WindowCoreRpcs.merge(
   EngineApartRpcs,

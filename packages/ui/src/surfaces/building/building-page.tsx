@@ -2,19 +2,24 @@ import { cn } from 'cn'
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
 import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
-import { Button } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { Popover } from '../../components/popover/popover.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import {
+  MARK_LEGENDS,
+  type MarkState,
+  StatusMark,
+} from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconAlertTriangle,
   IconChecklist,
   IconChevronRight,
+  IconCopy,
   IconGitCompare,
   IconHistory,
   IconPlayerPlay,
@@ -25,7 +30,17 @@ import {
   IconTerminal,
   IconX,
 } from '../../icons.ts'
-import { CHEVRON, CODE, Fold, ID, LINE, MissionFolds, QUIET, ROW, Unfolding } from './parts.tsx'
+import {
+  CHEVRON,
+  CODE,
+  Fold,
+  ID,
+  LINE,
+  MissionFolds,
+  QUIET,
+  ROW,
+  Unfolding,
+} from './building-parts.tsx'
 import type {
   BuildingMoment,
   Check,
@@ -35,7 +50,7 @@ import type {
   Scenario,
   Task,
   TaskState,
-} from './types.ts'
+} from './building-types.ts'
 
 /**
  * The Building page as #149 proposes it, in the language of the Planning page's rail (#193): the
@@ -49,11 +64,17 @@ import type {
  * repository was changed outside Hemera.
  */
 
+/** What a service's row can do with it, by its id. */
+export type ServiceAction = 'start' | 'stop' | 'restart' | 'copy' | 'open' | 'dismiss'
+
 export interface BuildingHandlers {
   onOpenTask: (id: string) => void
-  onOpenDiff: (repository: string) => void
-  onService: (name: string, action: 'start' | 'stop' | 'restart' | 'copy' | 'open') => void
+  /** Opens the diff of a repository; left out while there is no diff to open it in. */
+  onOpenDiff?: ((repository: string) => void) | undefined
+  onService: (id: string, action: ServiceAction) => void
   onRevoke: (id: string) => void
+  /** Reads the journal further back. */
+  onJournalMore?: (() => void) | undefined
 }
 
 export interface BuildingPageProps extends BuildingHandlers {
@@ -181,7 +202,7 @@ export function BuildingCard({
           <>
             {moment.helpers.map((helper) => (
               <LiveChip
-                key={helper.name}
+                key={helper.id}
                 name={helper.name}
                 icon={<LetterAvatar name={helper.name} others={names} />}
                 state={helper.state}
@@ -224,7 +245,7 @@ function CataloguePicker({
   const current = Math.min(active, Math.max(0, found.length - 1))
   const start = (service: BuildingMoment['catalogue'][number] | undefined): void => {
     if (service === undefined) return
-    onService(service.name, 'start')
+    onService(service.id, 'start')
     setOpen(false)
   }
   const walk = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -267,7 +288,7 @@ function CataloguePicker({
             aria-expanded="true"
             aria-controls={`${id}-list`}
             aria-activedescendant={
-              found[current] === undefined ? undefined : `${id}-${found[current].name}`
+              found[current] === undefined ? undefined : `${id}-${found[current].id}`
             }
             aria-autocomplete="list"
             placeholder="Search the catalogue"
@@ -293,8 +314,8 @@ function CataloguePicker({
           >
             {found.map((service, index) => (
               <div
-                key={service.name}
-                id={`${id}-${service.name}`}
+                key={service.id}
+                id={`${id}-${service.id}`}
                 role="option"
                 aria-selected={index === current}
                 data-active={index === current}
@@ -345,17 +366,44 @@ function Services({
       <div className="flex flex-col pb-1 pl-6">
         <ul aria-label="Services" className="flex flex-col">
           {moment.services.map((service) => (
-            <li key={service.name} className={ROW}>
-              <StatusMark state="running" size="sm" legend />
+            <li key={service.id} className={ROW}>
+              <StatusMark state={service.state} size="sm" legend />
               <span className="shrink-0 font-medium">{service.name}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-                {service.url ?? service.line}
-              </span>
+              {service.url === undefined ? (
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                  {service.line}
+                </span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    aria-label={`Open ${service.name} at ${service.url}`}
+                    className="min-w-0 flex-1 truncate rounded-sm text-left font-mono text-xs text-muted-foreground outline-none hover:text-foreground hover:underline focus-ring hover-motion"
+                    onClick={() => onService(service.id, 'open')}
+                  >
+                    {service.url}
+                  </button>
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Copy the address of ${service.name}`}
+                    icon={<IconCopy size="sm" />}
+                    onClick={() => onService(service.id, 'copy')}
+                  />
+                </>
+              )}
+              <IconButton
+                variant="ghost"
+                size="sm"
+                aria-label={`Restart ${service.name}`}
+                icon={<IconRefresh size="sm" />}
+                onClick={() => onService(service.id, 'restart')}
+              />
               <Button
                 variant="ghost"
                 size="sm"
                 aria-label={`Stop ${service.name}`}
-                onClick={() => onService(service.name, 'stop')}
+                onClick={() => onService(service.id, 'stop')}
               >
                 <IconPlayerStop size="sm" />
                 Stop
@@ -363,8 +411,8 @@ function Services({
             </li>
           ))}
           {moment.idle.map((service) => (
-            <li key={service.name} className={ROW}>
-              <StatusMark state="idle" size="sm" legend />
+            <li key={service.id} className={ROW}>
+              <StatusMark state={service.state ?? 'idle'} size="sm" legend />
               <span className="shrink-0 font-medium">{service.name}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                 {service.line}
@@ -373,11 +421,20 @@ function Services({
                 variant="secondary"
                 size="sm"
                 aria-label={`Start ${service.name}`}
-                onClick={() => onService(service.name, 'start')}
+                onClick={() => onService(service.id, 'start')}
               >
                 <IconPlayerPlay size="sm" />
                 Start
               </Button>
+              {service.dismissable === true && (
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Remove ${service.name} from the list`}
+                  icon={<IconX size="sm" />}
+                  onClick={() => onService(service.id, 'dismiss')}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -458,7 +515,7 @@ function Changes({
   onOpenDiff,
 }: {
   changes: BuildingMoment['changes']
-  onOpenDiff: (repository: string) => void
+  onOpenDiff: BuildingHandlers['onOpenDiff']
 }): ReactNode {
   if (changes.length === 0) return null
   const added = changes.reduce((sum, change) => sum + change.added, 0)
@@ -492,14 +549,16 @@ function Changes({
             <span className={QUIET}>{plural(change.files, 'file', 'files')}</span>
             <span className="shrink-0 text-xs text-success-muted-foreground tabular-nums">{`+${String(change.added)}`}</span>
             <span className="shrink-0 text-xs text-destructive-muted-foreground tabular-nums">{`−${String(change.deleted)}`}</span>
-            <Button
-              variant="link"
-              size="sm"
-              aria-label={`Diff of ${change.repository}`}
-              onClick={() => onOpenDiff(change.repository)}
-            >
-              Diff
-            </Button>
+            {onOpenDiff !== undefined && (
+              <Button
+                variant="link"
+                size="sm"
+                aria-label={`Diff of ${change.repository}`}
+                onClick={() => onOpenDiff(change.repository)}
+              >
+                Diff
+              </Button>
+            )}
           </li>
         ))}
       </ul>
@@ -508,7 +567,15 @@ function Changes({
 }
 
 /** The journal, folded: its meaningful events only, the newest first. */
-function Journal({ journal }: { journal: BuildingMoment['journal'] }): ReactNode {
+function Journal({
+  journal,
+  more,
+  onMore,
+}: {
+  journal: BuildingMoment['journal']
+  more: boolean
+  onMore: BuildingHandlers['onJournalMore']
+}): ReactNode {
   if (journal.length === 0) return null
   return (
     <Fold
@@ -527,6 +594,13 @@ function Journal({ journal }: { journal: BuildingMoment['journal'] }): ReactNode
           </li>
         ))}
       </ol>
+      {more && onMore !== undefined && (
+        <span className="flex pb-1 pl-10">
+          <Button variant="link" size="sm" onClick={onMore}>
+            Earlier events
+          </Button>
+        </span>
+      )}
     </Fold>
   )
 }
@@ -550,7 +624,13 @@ function TaskRow({
         className={cn(LINE, 'pl-10', chosen && 'tinted')}
         onClick={() => onOpen(task.id)}
       >
-        <StatusMark state={TASK_MARK[task.state]} size="sm" legend />
+        {task.cause === undefined ? (
+          <StatusMark state={TASK_MARK[task.state]} size="sm" legend />
+        ) : (
+          <Legend label={`${MARK_LEGENDS[TASK_MARK[task.state]]}: ${task.cause}`}>
+            <StatusMark state={TASK_MARK[task.state]} size="sm" />
+          </Legend>
+        )}
         <span className={ID}>{task.id}</span>
         <span
           className={cn(
@@ -575,7 +655,7 @@ function TaskRow({
 }
 
 /** Where a scenario's proof ends after its red: green, to run again, or not green yet. */
-function ProofEnd({ proof }: { proof: Exclude<ProofState, 'none'> }): ReactNode {
+function ProofEnd({ proof }: { proof: Exclude<ProofState, 'none' | 'manual'> }): ReactNode {
   switch (proof) {
     case 'green':
       return (
@@ -602,6 +682,13 @@ function ProofEnd({ proof }: { proof: Exclude<ProofState, 'none'> }): ReactNode 
 
 /** A scenario's proof as marks: its red recorded, then its green, or to run again. */
 function ProofMarks({ scenario }: { scenario: Scenario }): ReactNode {
+  if (scenario.proof === 'manual') {
+    return (
+      <Legend label="To verify by hand">
+        <StatusMark state="waiting" size="sm" />
+      </Legend>
+    )
+  }
   if (scenario.proof === 'none') {
     return (
       <Legend label="Red not recorded yet">
@@ -864,6 +951,7 @@ export function BuildingPage({
   onOpenDiff,
   onService,
   onRevoke,
+  onJournalMore,
 }: BuildingPageProps): ReactNode {
   return (
     <div className={COLUMNS} data-stage="building">
@@ -874,7 +962,11 @@ export function BuildingPage({
             <Services moment={moment} onService={onService} />
             <Checks checks={moment.checks} />
             <Changes changes={moment.changes} onOpenDiff={onOpenDiff} />
-            <Journal journal={moment.journal} />
+            <Journal
+              journal={moment.journal}
+              more={moment.journalMore === true}
+              onMore={onJournalMore}
+            />
           </div>
         )}
         <MissionFolds mission={moment.mission} workspace={moment.workspace} onRevoke={onRevoke} />

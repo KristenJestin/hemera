@@ -198,6 +198,23 @@ export {
   type DiscussionThreadProps,
 } from './blocks/planning/discussion-thread.tsx'
 export { ProbeReport } from './blocks/planning/probes.tsx'
+/** The values the Ready and Building pages draw, by the words they use: `Building.Task`. */
+export * as Building from './surfaces/building/building-types.ts'
+export {
+  ReadyPage,
+  blockerOf,
+  launchable,
+  type ReadyHandlers,
+  type ReadyPageProps,
+} from './surfaces/building/ready-page.tsx'
+export {
+  BuildingPage,
+  measuresOf,
+  type BuildingHandlers,
+  type BuildingPageProps,
+  type ServiceAction,
+} from './surfaces/building/building-page.tsx'
+export { TaskView } from './surfaces/building/task-view.tsx'
 export * from './blocks/project-settings/ticket-providers.tsx'
 export * from './blocks/project-settings/spec-fields.tsx'
 export * from './blocks/project-settings/exclusive-resources.tsx'

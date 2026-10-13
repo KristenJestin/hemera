@@ -15,6 +15,7 @@ import {
   WindowRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  AutoReviewRpcs,
   DiffRpcs,
   CheckRefused,
   DocRecipesRpcs,
@@ -552,6 +553,10 @@ const main = async (engine: 'answers' | 'gone') => {
       'diff.atCheckpoint': unused,
       'diff.fileAtCheckpoint': unused,
       'diff.changes': () => Stream.die('the window’s link is not asked for a diff here'),
+    }),
+    AutoReviewRpcs.toLayer({
+      'autoReview.read': unused,
+      'autoReview.changed': () => Stream.die('the window’s link is not asked for a review here'),
     }),
   )
   const program = Effect.gen(function* () {
