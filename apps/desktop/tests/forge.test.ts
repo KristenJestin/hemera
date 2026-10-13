@@ -24,6 +24,7 @@ import {
   ForgeError,
   ForgeRefused,
   type ForgeRepositoryStatus,
+  type Need,
   ForgeTimeout,
   UnknownRepository,
 } from '@hemera/ipc'
@@ -469,6 +470,161 @@ describe('A waiting operation survives a restart and wakes on any change', () =>
     )
     expect(failure).toBeInstanceOf(UnknownRepository)
     expect(after).toEqual([])
+  })
+})
+
+/** What each pending need says is missing. */
+const missingOf = (pending: ReadonlyArray<Need>) =>
+  pending.map((need) =>
+    Predicate.isTagged(need.fields, 'Environment') ? need.fields.missing : null,
+  )
+
+/**
+ * Two openings of the engine over one data folder: the first leaves an operation waiting on each
+ * repository given, then stops; the second runs the program with its start held before its own
+ * recheck of the environment needs, so that the forge port knows only what the program checks.
+ */
+const restartedWith = async <A, E>(
+  fake: FakeForge,
+  remotes: Readonly<Record<string, string>>,
+  needsLeft: number,
+  program: (atlas: {
+    readonly projectId: string
+    readonly repository: (path: string) => string
+  }) => Effect.Effect<A, E, EngineServices>,
+) => {
+  const main = checkout(remotes)
+  const forgeParts = { env: fake.env, limits: { read: 2_000, write: 4_000 } }
+  const { projectId, ids } = await commandsEngine(data, { forge: forgeParts })(({ profile }) =>
+    profile.use(
+      Effect.gen(function* () {
+        const project = yield* createProject({
+          name: 'Atlas',
+          mainCheckout: main,
+          repositories: Object.keys(remotes),
+        })
+        const port = yield* forge
+        for (const one of project.repositories) yield* Effect.forkChild(port.currentUser(one.id))
+        yield* pendingNeeds.pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced('50 millis'),
+            until: (pending) => pending.length >= needsLeft,
+          }),
+        )
+        return {
+          projectId: project.id,
+          ids: new Map(project.repositories.map((one) => [one.path, one.id])),
+        }
+      }),
+    ),
+  )
+  const repository = (path: string) => ids.get(path) ?? ''
+  return commandsEngine(data, {
+    forge: forgeParts,
+    // The start's chain waits here, before it checks the environment needs again.
+    sessions: { rebuildHold: Effect.never },
+  })(({ profile }) => profile.use(program({ projectId, repository })))
+}
+
+const BKT_SIGNED_OUT = bktReady([], [])
+const TWO_ON_GITHUB = { shop: REMOTES.shop, web: 'https://github.com/acme/web.git' }
+
+describe('A check after a restart settles only the needs whose CLI and host it checked', () => {
+  test('two repositories on two hosts each wait behind a need; checking one leaves the other’s need', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...BKT_SIGNED_OUT])
+    const { afterShop, afterApi } = await restartedWith(
+      fake,
+      REMOTES,
+      2,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          fake.answer([...ghReady(), ...BKT_SIGNED_OUT])
+          yield* port.checkAgain(projectId, repository('shop'))
+          const shopChecked = yield* pendingNeeds
+          fake.answer([...ghReady(), ...bktReady()])
+          yield* port.checkAgain(projectId, repository('api'))
+          return { afterShop: shopChecked, afterApi: yield* pendingNeeds }
+        }),
+    )
+    expect(missingOf(afterShop)).toEqual(['bkt signed in on bitbucket.org'])
+    expect(afterApi).toEqual([])
+  })
+
+  test('the need pending, its repository still signed out: checking it keeps the need', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const pending = await restartedWith(fake, TWO_ON_GITHUB, 1, ({ projectId, repository }) =>
+      Effect.gen(function* () {
+        const port = yield* forge
+        yield* port.checkAgain(projectId, repository('shop'))
+        return yield* pendingNeeds
+      }),
+    )
+    expect(missingOf(pending)).toEqual(['gh signed in on github.com'])
+  })
+
+  test('forced to none while another repository not checked since the restart still waits: the need stays, then goes with the last', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { oneForced, bothForced } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          const first = yield* pendingNeeds
+          yield* port.setForced(projectId, repository('web'), 'none', null)
+          return { oneForced: first, bothForced: yield* pendingNeeds }
+        }),
+    )
+    expect(missingOf(oneForced)).toEqual(['gh signed in on github.com'])
+    expect(bothForced).toEqual([])
+  })
+
+  test('an operation waiting after the restart, its repository removed: the need stays for the other', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { failure, pending } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.checkAgain(projectId, repository('shop'))
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          const project = yield* getProject(projectId)
+          yield* removeRepository({ id: repository('shop'), version: project.version })
+          return { failure: yield* Fiber.join(waiting), pending: yield* pendingNeeds }
+        }),
+    )
+    expect(failure).toBeInstanceOf(UnknownRepository)
+    expect(missingOf(pending)).toEqual(['gh signed in on github.com'])
+  })
+
+  test('both repositories removed after the restart: Retry withdraws the need', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { kept, retried } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          yield* removeRepository({
+            id: repository('shop'),
+            version: (yield* getProject(projectId)).version,
+          })
+          const [need] = yield* pendingNeeds
+          const stays = yield* retryNeed(need?.id ?? '')
+          yield* removeRepository({
+            id: repository('web'),
+            version: (yield* getProject(projectId)).version,
+          })
+          return { kept: stays.state, retried: (yield* retryNeed(need?.id ?? '')).state }
+        }),
+    )
+    expect(kept).toBe('pending')
+    expect(retried).toBe('withdrawn')
   })
 })
 

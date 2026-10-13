@@ -578,12 +578,19 @@ export const forgePort = () => {
       /**
        * The Project's needs nothing waits on any more withdrawn: their CLI is ready for their host,
        * or no repository of the Project reaches that host through it now (forced elsewhere, gone).
+       * After a restart the states known are only those checked since, and a repository not known
+       * yet may still wait on any of them: each such one is checked first, so a need is settled on
+       * the states of all the Project's repositories.
        */
-      const settleNeeds = (projectId: string) =>
+      // Typed: it checks the repositories not known yet, and a check settles in turn.
+      const settleNeeds = (projectId: string): Effect.Effect<void, never, ForgePortServices> =>
         Effect.gen(function* () {
+          const pending = yield* pendingNeeds(projectId)
+          if (pending.length === 0) return
           const project = yield* getProject(projectId)
+          yield* statesOf(project)
           const known = yield* SubscriptionRef.get(memory)
-          for (const need of yield* pendingNeeds(projectId)) {
+          for (const need of pending) {
             if (stillWaits(project, known, need.cli, need.host)) continue
             yield* withdrawNeed(need.id, `nothing waits on ${need.cli} for ${need.host} any more`)
           }
