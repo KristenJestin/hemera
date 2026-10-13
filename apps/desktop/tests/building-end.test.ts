@@ -30,6 +30,7 @@ import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from '
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
@@ -141,6 +142,8 @@ const ending = (
     readonly taskStates?: Layer.Layer<TaskStates>
     /** Where the writes are attributed, when a test holds one as it executes. */
     readonly attribution?: Layer.Layer<WriteAttribution>
+    /** Where the Builder is held, when a test orders it against the end. */
+    readonly hold?: BuilderHold
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -167,6 +170,7 @@ const ending = (
         ? { home: work, verdicts, taskStates }
         : { home: work, verdicts, taskStates, attribution: options.attribution },
     building: {
+      hold: options.hold,
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
           const said = checks(asked)
@@ -2346,6 +2350,86 @@ describe('A restart in the middle of the end', () => {
       )
       expect(seen.waited).toEqual(['red', null])
       expect(seen.judged).toEqual(['red', 'green'])
+    },
+  )
+
+  test(
+    'a restart in the middle of the exit does not bring the Builder back: nothing of its tree runs in Review',
+    SLOW,
+    async () => {
+      const stopped = held()
+      const before = ending({
+        snapshots: (real) => ({
+          ...real,
+          // The engine stops as the exit looks at the Workspace: the tree is stopped already.
+          take: (place, owner) =>
+            owner.kind === 'review_exit'
+              ? Effect.andThen(
+                  Effect.sync(() => stopped.release()),
+                  Effect.never,
+                )
+              : real.take(place, owner),
+        }),
+      })
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewed(before.world, mission.id, 'spec-reviewer')
+            yield* reviewed(before.world, mission.id, 'code-reviewer')
+            yield* Effect.promise(() => stopped.promise)
+            return mission
+          }),
+        ),
+      )
+      // Started again, the Builder's resume is held until the exit looks at the Workspace once
+      // more, and that look until the resume went past the Builder: the resume lands inside the
+      // exit, after its stops.
+      const looking = held()
+      const resumed = held()
+      let first = true
+      const after = ending({
+        resumed: true,
+        hold: (at) => {
+          if (at === 'resuming') return Effect.promise(() => looking.promise)
+          if (at === 'resumed') return Effect.sync(() => resumed.release())
+          return Effect.void
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind !== 'review_exit' || !first) return real.take(place, owner)
+            first = false
+            looking.release()
+            return Effect.andThen(
+              Effect.promise(() => resumed.promise),
+              real.take(place, owner),
+            )
+          },
+        }),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* inReview(left.id)
+            yield* Effect.promise(() => resumed.promise)
+            return {
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.id,
+              }),
+              mission: yield* getMission(left.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.mission.needs).toEqual([])
     },
   )
 

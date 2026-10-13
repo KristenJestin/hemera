@@ -263,7 +263,8 @@ const answerOf = (need: Need): string | null => {
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
  * a green run and its record, between the proofs written and a conflict handed over, between the
- * reds a start runs and its greens. Never held otherwise.
+ * reds a start runs and its greens; once a start's resume went past the Builder. Never held
+ * otherwise.
  */
 export type BuilderHold = (
   at:
@@ -277,6 +278,7 @@ export type BuilderHold = (
     | 'writing'
     | 'requirements'
     | 'resuming'
+    | 'resumed'
     | 'proving'
     | 'greening'
     | 'greens-due'
@@ -1930,7 +1932,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* proofs.resumed(building)
           if (building.tasksDoneAt !== null && building.endCalledAt === null)
             yield* endIfReady(building)
-          yield* ensureBuilder(building)
+          // At the end's last step the Builder is the end's to bring back: resumed from here, it
+          // could land inside the exit, after its stops, and write after its snapshot unseen.
+          const current = yield* activeBuildingIn(yield* Database, building.missionId)
+          if (current !== null && current.phase !== 'refresh') yield* ensureBuilder(current)
+          yield* hold('resumed')
         }
       })
 

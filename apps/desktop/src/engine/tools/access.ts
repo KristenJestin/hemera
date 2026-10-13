@@ -95,6 +95,8 @@ export class ToolAccess extends Context.Service<
     readonly exiting: (missionId: string) => Effect.Effect<void>
     /** A Builder works on the mission again: the calls the user allowed run again. */
     readonly building: (missionId: string) => Effect.Effect<void>
+    /** Whether a mission's Building is marked as exiting still. */
+    readonly isExiting: (missionId: string) => Effect.Effect<boolean>
     /** Waits until no call of a mission's grants is executing. */
     readonly settled: (missionId: string) => Effect.Effect<void>
   }
@@ -195,6 +197,7 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
         ),
       exiting: (missionId) => Effect.sync(() => exits.add(missionId)),
       building: (missionId) => Effect.sync(() => exits.delete(missionId)),
+      isExiting: (missionId) => Effect.sync(() => exits.has(missionId)),
       settled: (missionId) =>
         Effect.suspend(() => {
           if (!executions.has(missionId)) return Effect.void
