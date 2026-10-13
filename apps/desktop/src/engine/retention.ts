@@ -160,6 +160,10 @@ export const TABLE_CLASSES = {
   checkpoints: 'permanent',
   checkpoint_repositories: 'permanent',
   checkpoint_files: 'permanent',
+  // The automatic review (#147): what Review shows of it.
+  review_passes: 'permanent',
+  review_findings: 'permanent',
+  review_changed_after: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

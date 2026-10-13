@@ -448,16 +448,19 @@ export const BuildingView = Schema.Struct({
   ),
   state: Schema.Literals(['active', 'ended', 'cancelled']),
   phase: Schema.String,
-  /** Open question 24: done and skipped tasks over the effective plan, in %. */
+  /**
+   * Open question 24: done and skipped tasks over the effective plan, in %; the special tasks
+   * count in it (CT-41).
+   */
   percent: Schema.Number,
-  /** The tasks done and the requirements proven (#144), each over its total. */
+  /** The Spec's tasks done and the requirements proven (#144), each over its total. */
   counts: Schema.Struct({
     tasksDone: Schema.Number,
     tasks: Schema.Number,
     requirementsProven: Schema.Number,
     requirements: Schema.Number,
   }),
-  /** The special tasks, counted apart (CT-41): none until the end sequence adds them. */
+  /** The special tasks of the automatic review, counted apart (CT-41). */
   special: Schema.Struct({ done: Schema.Number, total: Schema.Number }),
   /** Open question 28: the time the engine ran since the start, in seconds. */
   elapsedSeconds: Schema.Number,

@@ -573,6 +573,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 endedAt: null,
                 tasksDoneAt: null,
                 endCalledAt: null,
+                reviewCheckpointId: null,
+                builderTurnedAt: null,
                 summary: null,
               }
               yield* transaction
@@ -1510,6 +1512,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           summary: answering(summary),
           proofRun: answering(proofs.proofRun),
           refreshProofs: (missionId) => proofs.refresh(missionId).pipe(provided, Effect.orDie),
+          ensureBuilder: (missionId) =>
+            Effect.gen(function* () {
+              const building = yield* activeBuildingIn(yield* Database, missionId)
+              if (building !== null) yield* ensureBuilder(building)
+            }).pipe(provided, Effect.orDie),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,

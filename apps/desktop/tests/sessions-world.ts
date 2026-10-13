@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AgentProvider } from '@hemera/core/domain'
-import { AgentNotSignedIn } from '@hemera/ipc'
+import { AgentNotSignedIn, type LaunchFailed } from '@hemera/ipc'
 import { Duration, Effect, Layer } from 'effect'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
@@ -111,7 +111,7 @@ export const sessionsEngine = (
     readonly sessions?: Omit<SessionsParts, 'roles' | 'starter' | 'timings'>
     readonly missions?: Omit<Partial<MissionParts>, 'guards'>
     /** Runs as each agent starts, after its child and before the agent answers. */
-    readonly starting?: () => Effect.Effect<void>
+    readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
     /** Bounds other than `FAST`, for a suite whose turns are held longer. */
     readonly timings?: Partial<SessionTimings>
     /** The ports of the tools' gate a suite fills (a judge, the home folder). */
@@ -153,7 +153,7 @@ export const sessionsEngine = (
                 .pipe(Effect.orDie)
               world.pids.push(child.pid)
             }
-            if (options.starting !== undefined) yield* options.starting()
+            if (options.starting !== undefined) yield* options.starting(sessionId)
             const agent = fakeAgent(scriptOf(world.agents.length))
             world.agents.push(agent)
             return agent.process

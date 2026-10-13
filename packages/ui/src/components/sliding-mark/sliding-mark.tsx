@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 import { motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 
 import { arrival, instant, useTransition } from '../../motion.ts'
 
@@ -101,17 +101,18 @@ export function SlidingMark({ target, preset = arrival, shape }: SlidingMarkProp
   useLayoutEffect(measure)
 
   // And whatever moves an item without a render: a width, a scroll.
+  const moved = useEffectEvent(measure)
   useEffect(() => {
     const room = holder.current?.offsetParent
     if (!(room instanceof HTMLElement)) return
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(moved)
     observer.observe(room)
     for (const item of room.querySelectorAll('[data-mark]')) observer.observe(item)
     // Captured: a scroll does not bubble, and the one that moves the item is inside the list.
-    room.addEventListener('scroll', measure, { capture: true, passive: true })
+    room.addEventListener('scroll', moved, { capture: true, passive: true })
     return () => {
       observer.disconnect()
-      room.removeEventListener('scroll', measure, { capture: true })
+      room.removeEventListener('scroll', moved, { capture: true })
     }
   }, [target])
 
