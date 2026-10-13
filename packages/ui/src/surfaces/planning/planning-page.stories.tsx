@@ -33,6 +33,7 @@ const meta = {
     onDismissProposed: fn(() => Promise.resolve()),
     onDiscuss: fn(),
     onOpenProbe: fn(),
+    onJudgePrototype: fn(() => Promise.resolve()),
     onDismissFinding: fn(() => Promise.resolve()),
     onRunColdRead: fn(() => Promise.resolve()),
     onDecideDependency: fn(() => Promise.resolve()),
@@ -77,6 +78,9 @@ const leadOf = (canvasElement: HTMLElement, name: string): number =>
 /** Whether the rest's folded lines start on the same left edge as For you's own. */
 const alignedWithForYou = (canvasElement: HTMLElement): boolean =>
   Math.abs(leadOf(canvasElement, 'Everything else') - leadOf(canvasElement, 'For you')) <= 1
+/** Where a line starts: the left edge of its first mark or word. */
+const startOf = (line: HTMLElement): number =>
+  line.firstElementChild?.getBoundingClientRect().left ?? Number.NaN
 /** The ids of the questions a list holds, in its order: its own items, not their options'. */
 const questionIds = (list: HTMLElement): string[] =>
   [...list.querySelectorAll(':scope > li')].map((item) => item.textContent?.slice(0, 2) ?? '')
@@ -563,6 +567,102 @@ export const ProbeNotReproduced: Story = {
     const body = within(document.body)
     await waitFor(() => expect(body.getByText('Not reproduced')).toBeVisible())
     await expect(body.getByText(/a title of emoji gives a file of the same name/)).toBeVisible()
+  },
+}
+
+/**
+ * A Prototyper the Planner launched: its chip in the stage card, like a Probe's, its step in its
+ * glance. Nothing to read of it yet: the rest has no Prototypes line.
+ */
+export const PrototyperRunning: Story = {
+  args: { moment: 'prototyping' },
+  play: async ({ canvasElement }) => {
+    await expect(rest(canvasElement).queryByRole('button', { name: /^Prototypes/ })).toBeNull()
+    const chip = card(canvasElement).getByRole('button', { name: /^Prototyper H1/ })
+    await userEvent.click(chip)
+    await expect(
+      await within(document.body).findByText('Renders a note of 2 000 words beside its preview'),
+    ).toBeVisible()
+  },
+}
+
+/**
+ * A Prototyper's result to look at: For you's line unfolds to it, its item to what it built, where
+ * it is, and Validate. Validated, it leaves For you and stays readable under the rest, with its
+ * verdict beside the one validated earlier.
+ */
+export const PrototypeToLookAt: Story = {
+  args: { moment: 'prototypeToLookAt' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    const line = waiting.getByRole('button', { name: /A prototype to look at/ })
+    await expect(line).toHaveTextContent('1 · H1')
+    await userEvent.click(line)
+    const list = await waiting.findByRole('list', { name: 'Prototypes to look at' })
+    const item = within(list).getByRole('button', { name: /^H1 · Does a preview/ })
+    // The item's line starts where its fold's does: nothing unfolds to the right.
+    await expect(Math.abs(startOf(item) - startOf(line))).toBeLessThanOrEqual(1)
+    await userEvent.click(item)
+    await expect(await within(list).findByText(/a preview pane in web/)).toBeVisible()
+    await expect(
+      within(list).getByText('~/.local/share/hemera/missions/ACME-12/prototypes/1'),
+    ).toBeVisible()
+    await userEvent.click(within(list).getByRole('button', { name: 'Validate H1' }))
+    await expect(args.onJudgePrototype).toHaveBeenCalledWith('h1', 'validated', null)
+    await waitFor(() =>
+      expect(waiting.queryByRole('button', { name: /A prototype to look at/ })).toBeNull(),
+    )
+    const others = rest(canvasElement)
+    const ended = others.getByRole('button', { name: /^Prototypes/ })
+    await expect(ended).toHaveTextContent('2 validated')
+    await userEvent.click(ended)
+    const judged = await others.findByRole('list', { name: 'Prototypes' })
+    await userEvent.click(within(judged).getByRole('button', { name: /^H1 · / }))
+    await expect(await within(judged).findByText(/a preview pane in web/)).toBeVisible()
+  },
+}
+
+/** Set aside, with what the user says of it: sent with the verdict, and it leaves For you. */
+export const PrototypeSetAside: Story = {
+  args: { moment: 'prototypeToLookAt' },
+  play: async ({ canvasElement, args }) => {
+    const waiting = forYou(canvasElement)
+    await userEvent.click(waiting.getByRole('button', { name: /A prototype to look at/ }))
+    const list = await waiting.findByRole('list', { name: 'Prototypes to look at' })
+    await userEvent.click(within(list).getByRole('button', { name: /^H1 · / }))
+    const aside = await within(list).findByRole('button', { name: 'Set aside H1' })
+    await userEvent.click(aside)
+    await expect(aside).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.type(
+      await within(list).findByRole('textbox', { name: 'Why you set it aside' }),
+      'Images first: a preview without them misleads.',
+    )
+    await userEvent.click(within(list).getByRole('button', { name: 'Send' }))
+    await expect(args.onJudgePrototype).toHaveBeenCalledWith(
+      'h1',
+      'set-aside',
+      'Images first: a preview without them misleads.',
+    )
+    await waitFor(() =>
+      expect(waiting.queryByRole('button', { name: /A prototype to look at/ })).toBeNull(),
+    )
+    await expect(
+      rest(canvasElement).getByRole('button', { name: /^Prototypes/ }),
+    ).toHaveTextContent('1 validated · 1 set aside')
+  },
+}
+
+/** Ready to freeze with a prototype nobody judged: it holds nothing, Freeze is enabled. */
+export const ReadyToFreezeWithAnUnjudgedPrototype: Story = {
+  args: { moment: 'readyWithUnjudgedPrototype' },
+  play: async ({ canvasElement, args }) => {
+    await expect(
+      forYou(canvasElement).getByRole('button', { name: /A prototype to look at/ }),
+    ).toBeVisible()
+    const freeze = page(canvasElement).getByRole('button', { name: 'Freeze' })
+    await expect(freeze).toBeEnabled()
+    await userEvent.click(freeze)
+    await expect(args.onFreeze).toHaveBeenCalled()
   },
 }
 

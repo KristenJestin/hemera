@@ -6,6 +6,7 @@ import { IconEye } from '../../icons.ts'
 import type { Attention } from './attention.ts'
 import type { PlanningData } from './planning-types.ts'
 import { ProbeChip } from './probes.tsx'
+import { PrototypeChip } from './prototypes.tsx'
 
 export interface PlanningStageCardProps {
   attention: Attention
@@ -15,7 +16,8 @@ export interface PlanningStageCardProps {
 
 /**
  * Planning's stage card, at the top of the rail: the face, the line that says what happens or
- * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes.
+ * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes, the
+ * Prototypers.
  */
 export function PlanningStageCard({
   attention,
@@ -28,6 +30,7 @@ export function PlanningStageCard({
   const probes = data.probes.filter(
     (probe) => probe.state === 'running' || probe.state === 'preparing',
   )
+  const prototypes = data.prototypes.filter((prototype) => prototype.state === 'running')
   return (
     <StageCard
       stage="Planning"
@@ -35,7 +38,7 @@ export function PlanningStageCard({
       line={attention.now}
       progress={attention.progress}
       running={
-        reading || probes.length > 0 ? (
+        reading || probes.length > 0 || prototypes.length > 0 ? (
           <>
             {reading && (
               <LiveChip
@@ -56,6 +59,9 @@ export function PlanningStageCard({
             )}
             {probes.map((probe) => (
               <ProbeChip key={probe.id} probe={probe} onOpen={onOpenProbe} />
+            ))}
+            {prototypes.map((prototype) => (
+              <PrototypeChip key={prototype.id} prototype={prototype} />
             ))}
           </>
         ) : undefined

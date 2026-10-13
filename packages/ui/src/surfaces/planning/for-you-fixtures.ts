@@ -407,6 +407,7 @@ function base(): PlanningData {
     questions: [],
     discussions: [],
     probes: [],
+    prototypes: [],
     passes: [],
     freshness: { current: true, changes: [] },
     dependencies: [],

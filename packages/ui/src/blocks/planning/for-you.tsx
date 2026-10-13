@@ -7,19 +7,28 @@ import type { NeedsYouListProps } from '../need/needs-you-list.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import { IconCheck, IconClockPause, IconEye, IconHelpCircle, IconShieldLock } from '../../icons.ts'
+import {
+  IconCheck,
+  IconClockPause,
+  IconEye,
+  IconFlask,
+  IconHelpCircle,
+  IconShieldLock,
+} from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type Attention, findingsToSettle } from './attention.ts'
 import { TicketCard, TriageCard } from './planning-cards.tsx'
 import { SeverityMark } from './planning-marks.tsx'
 import { leftToAnswer, targetId } from './planning-progress.ts'
-import type {
-  Finding,
-  PlanningData,
-  PlanningHandlers,
-  PlanningNeed,
-  Question,
+import {
+  type Finding,
+  type PlanningData,
+  type PlanningHandlers,
+  type PlanningNeed,
+  type Question,
+  toLookAt,
 } from './planning-types.ts'
+import { PrototypeLine } from './prototypes.tsx'
 import { QuestionCard } from './question-card.tsx'
 import { Fold, LINE, QUIET, Unfolding } from './rail-fold.tsx'
 import { SendButton } from './sending.tsx'
@@ -264,7 +273,7 @@ export interface ForYouProps {
 
 /**
  * What waits for the user, the agents blocked first: the needs, the questions, the findings to
- * settle, each kind one line until the user opens it — but the questions, which stand open
+ * settle, the Prototypers' results to look at, each kind one line until the user opens it — but the questions, which stand open
  * because answering them is the work of the page. The Planner's triage and a change of the
  * ticket, rare and urgent, stand whole above them. "Nothing waits for you" when nothing does,
  * "Only Freeze is left" when only Freeze is, a line that starts where a framed line would.
@@ -281,7 +290,8 @@ export function ForYou({
   const asked = data.questions.some(waits)
   const pass = data.passes.at(-1)
   const permissions = needs.every((need) => need.need.ask.kind === 'permission')
-  const lines = needs.length > 0 || asked || findings.length > 0
+  const prototypes = data.prototypes.filter(toLookAt)
+  const lines = needs.length > 0 || asked || findings.length > 0 || prototypes.length > 0
   const empty = !lines && data.triage === null && data.ticket === null
   return (
     <section aria-label="For you" className="flex flex-col gap-3">
@@ -350,6 +360,23 @@ export function ForYou({
                       key={finding.id}
                       finding={finding}
                       onDismiss={handlers.onDismissFinding}
+                    />
+                  ))}
+                </ul>
+              </Fold>
+            )}
+            {prototypes.length > 0 && (
+              <Fold
+                glyph={<IconFlask size="sm" />}
+                title={prototypes.length === 1 ? 'A prototype to look at' : 'Prototypes to look at'}
+                detail={`${String(prototypes.length)} · ${prototypes.map((one) => one.label).join(', ')}`}
+              >
+                <ul aria-label="Prototypes to look at" className="flex flex-col pb-1">
+                  {prototypes.map((prototype) => (
+                    <PrototypeLine
+                      key={prototype.id}
+                      prototype={prototype}
+                      onJudge={handlers.onJudgePrototype}
                     />
                   ))}
                 </ul>

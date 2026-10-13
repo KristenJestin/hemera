@@ -5,6 +5,7 @@ import type {
   PlanningData,
   PlanningNeed,
   ProbeDetail,
+  Prototype,
   Question,
   Requirement,
   SpecChange,
@@ -525,6 +526,62 @@ export const EMOJI_PROBE: ProbeDetail = {
   failure: null,
 }
 
+/** A Prototyper at work: its step on its chip. */
+const PREVIEW_PROTOTYPE: Prototype = {
+  id: 'h1',
+  label: 'H1',
+  question: 'Does a preview of the Markdown beside the note read well in web?',
+  state: 'running',
+  stuck: false,
+  startedAt: NOW - 95 * SECONDS,
+  endedAt: null,
+  step: 'Renders a note of 2 000 words beside its preview',
+  result: null,
+  folder: '~/.local/share/hemera/missions/ACME-12/prototypes/1',
+  failure: null,
+  verdict: null,
+  verdictNote: null,
+}
+
+/** The same Prototyper once it handed its result back, which waits for the user's verdict. */
+export const PREVIEW_RESULT: Prototype = {
+  ...PREVIEW_PROTOTYPE,
+  state: 'done',
+  step: undefined,
+  endedAt: NOW - 30 * SECONDS,
+  result: [
+    'Tried: a preview pane in web that renders the exported Markdown beside the note, as it is typed.',
+    'Works:',
+    '- The preview follows the note within a frame, for a note of 2 000 words',
+    '- The front matter shows as a small table above the text',
+    'Does not work:',
+    '- An image attached to the note shows as a broken link: the export points to a file not written yet',
+    'Files, kept as evidence: missions/ACME-12/evidence/prototype-1',
+  ].join('\n'),
+}
+
+/** A Prototyper validated earlier, with what the user said. */
+const SLUG_PROTOTYPE: Prototype = {
+  id: 'h0',
+  label: 'H0',
+  question: 'Can shared turn every title into a file name the three systems accept?',
+  state: 'done',
+  stuck: false,
+  startedAt: NOW - 1500 * SECONDS,
+  endedAt: NOW - 1380 * SECONDS,
+  result: [
+    'Tried: a slug function in shared, run on the 4 000 titles of the workspace “Large”.',
+    'Works:',
+    '- Every title gives a name Linux, macOS and Windows accept',
+    'Does not work: nothing.',
+    'Files, kept as evidence: missions/ACME-12/evidence/prototype-0',
+  ].join('\n'),
+  folder: '~/.local/share/hemera/missions/ACME-12/prototypes/0',
+  failure: null,
+  verdict: 'validated',
+  verdictNote: 'Keep the slug in shared, api and web both need it.',
+}
+
 export const CHANGES: readonly SpecChange[] = [
   {
     item: 'R2',
@@ -693,6 +750,7 @@ function base(): PlanningData {
     questions: QUESTIONS,
     discussions: [],
     probes: [chip(SLASH_PROBE)],
+    prototypes: [],
     passes: [],
     freshness: { current: true, changes: [] },
     dependencies: DEPENDENCIES,
@@ -834,6 +892,19 @@ export function probing(): PlanningMoment {
   return scene({
     data: { ...base(), probes: [chip(SLASH_PROBE), chip(SIZE_PROBE), chip(EMOJI_PROBE)] },
     head: { ...YOUR_TURN, now: 'Waits for Probe #2 before writing R3' },
+  })
+}
+
+/** A Prototyper the Planner launched runs while the user answers: its chip in the stage card. */
+export function prototyping(): PlanningMoment {
+  return scene({ data: { ...base(), prototypes: [PREVIEW_PROTOTYPE] }, head: YOUR_TURN })
+}
+
+/** The Prototyper handed its result back: For you holds it to look at; an earlier one was validated. */
+export function prototypeToLookAt(): PlanningMoment {
+  return scene({
+    data: { ...base(), prototypes: [SLUG_PROTOTYPE, PREVIEW_RESULT] },
+    head: YOUR_TURN,
   })
 }
 
@@ -987,6 +1058,12 @@ export function readyToFreeze(): PlanningMoment {
     },
     head: { ...YOUR_TURN, declared: true },
   })
+}
+
+/** Ready to freeze with a prototype nobody judged: it holds nothing, Freeze stays possible. */
+export function readyWithUnjudgedPrototype(): PlanningMoment {
+  const ready = readyToFreeze()
+  return scene({ data: { ...ready.data, prototypes: [PREVIEW_RESULT] }, head: ready.head })
 }
 
 /** Q7 made moot by a discussion closed on its decision, which its question opens again. */

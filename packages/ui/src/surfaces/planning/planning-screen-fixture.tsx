@@ -6,6 +6,8 @@ import type {
   DiscussionItem,
   Finding,
   PlanningHandlers,
+  Prototype,
+  PrototypeVerdict,
   Question,
 } from '../../blocks/planning/planning-types.ts'
 import { FreezeButton, FreezeNote } from '../../blocks/planning/freeze.tsx'
@@ -34,6 +36,9 @@ const MOMENTS = {
   plannerSilent: moments.plannerSilent,
   discussing: moments.discussing,
   probing: moments.probing,
+  prototyping: moments.prototyping,
+  prototypeToLookAt: moments.prototypeToLookAt,
+  readyWithUnjudgedPrototype: moments.readyWithUnjudgedPrototype,
   coldReadRunning: moments.coldReadRunning,
   coldReadFailed: moments.coldReadFailed,
   dependencyProposed: moments.dependencyProposed,
@@ -66,10 +71,12 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
 
 type Given = { optionId: string } | { text: string }
 
+type Judged = { verdict: PrototypeVerdict; note: string | null }
+
 /**
  * A moment as the story's engine left it: each answer it took sent and not yet read by the
  * Planner, each question put on hold waiting, each permission answered gone, each finding
- * dismissed settled.
+ * dismissed settled, each prototype judged with its verdict.
  */
 function played(
   moment: moments.PlanningMoment,
@@ -77,6 +84,7 @@ function played(
   held: ReadonlyMap<string, string | null>,
   allowed: ReadonlySet<string>,
   dismissed: ReadonlySet<string>,
+  judged: ReadonlyMap<string, Judged>,
 ): moments.PlanningMoment {
   const answer = (question: Question): Question => {
     const given = taken.get(question.id)
@@ -106,6 +114,12 @@ function played(
   }
   const dismiss = (finding: Finding): Finding =>
     dismissed.has(finding.id) ? Object.assign({}, finding, { fate: 'dismissed' as const }) : finding
+  const judge = (prototype: Prototype): Prototype => {
+    const given = judged.get(prototype.id)
+    return given === undefined
+      ? prototype
+      : Object.assign({}, prototype, { verdict: given.verdict, verdictNote: given.note })
+  }
   return Object.assign({}, moment, {
     needs: moment.needs.filter((one) => !allowed.has(one.id)),
     data: Object.assign({}, moment.data, {
@@ -113,6 +127,7 @@ function played(
       passes: moment.data.passes.map((pass) =>
         Object.assign({}, pass, { findings: pass.findings.map(dismiss) }),
       ),
+      prototypes: moment.data.prototypes.map(judge),
     }),
   })
 }
@@ -121,7 +136,7 @@ function played(
  * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
  * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
  * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
- * engine takes the answers, the permissions and the dismissals.
+ * engine takes the answers, the permissions, the dismissals and the verdicts.
  */
 export function PlanningScreen({
   moment,
@@ -139,10 +154,11 @@ export function PlanningScreen({
   const [held, setHeld] = useState<ReadonlyMap<string, string | null>>(new Map())
   const [allowed, setAllowed] = useState<ReadonlySet<string>>(new Set())
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
+  const [judged, setJudged] = useState<ReadonlyMap<string, Judged>>(new Map())
   const shown =
     moment === 'loading' || moment === 'error'
       ? null
-      : played(MOMENTS[moment](), taken, held, allowed, dismissed)
+      : played(MOMENTS[moment](), taken, held, allowed, dismissed, judged)
   const answer: PlanningHandlers['onAnswer'] = (questionId, given) =>
     handlers.onAnswer(questionId, given).then(() => {
       setTaken((before) => new Map(before).set(questionId, given))
@@ -154,6 +170,10 @@ export function PlanningScreen({
   const dismissFinding: PlanningHandlers['onDismissFinding'] = (findingId) =>
     handlers.onDismissFinding(findingId).then(() => {
       setDismissed((before) => new Set(before).add(findingId))
+    })
+  const judgePrototype: PlanningHandlers['onJudgePrototype'] = (id, verdict, note) =>
+    handlers.onJudgePrototype(id, verdict, note).then(() => {
+      setJudged((before) => new Map(before).set(id, { verdict, note }))
     })
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
@@ -224,6 +244,7 @@ export function PlanningScreen({
           onAnswer={answer}
           onWaitOnSomeone={waitOnSomeone}
           onDismissFinding={dismissFinding}
+          onJudgePrototype={judgePrototype}
           onDiscuss={discuss}
           onOpenProbe={openProbe}
         />

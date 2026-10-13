@@ -7,6 +7,7 @@
  */
 
 import {
+  PROTOTYPE_RESULT_NOTE,
   ROLE_NAMES,
   ROLES,
   TICKET_EVENT_SAID,
@@ -197,6 +198,30 @@ export const probeDetailOf = (one: EngineProbeDetail): Planning.ProbeDetail => (
   failure: one.failure,
 })
 
+/**
+ * A Prototyper as the page draws it: its chip, and once read, what it was asked, what it handed
+ * back (without the line its result ends on for the Planner), its folder and the verdict given
+ * with what was said of it.
+ */
+export const prototypeOf = (
+  chip: HelperChip,
+  detail: HelperDetail | null | undefined,
+): Planning.Prototype => ({
+  id: chip.id,
+  label: chip.label,
+  question: detail?.brief ?? null,
+  state: chip.state,
+  stuck: chip.stuck,
+  step: chip.step ?? undefined,
+  startedAt: Date.parse(chip.startedAt),
+  endedAt: chip.endedAt === null ? null : Date.parse(chip.endedAt),
+  result: detail?.result?.replace(`\n${PROTOTYPE_RESULT_NOTE}`, '') ?? null,
+  folder: detail?.folder ?? null,
+  failure: detail?.failure ?? null,
+  verdict: chip.verdict,
+  verdictNote: chip.verdict === null ? null : (detail?.verdictNote ?? null),
+})
+
 export const passOf = (one: EnginePass): Planning.ColdReadPass => ({
   id: one.id,
   label: one.label,
@@ -271,6 +296,9 @@ export interface PlanningRead {
   readonly visions: ReadonlyArray<PlanningVision>
   readonly discussions: ReadonlyArray<EngineDiscussion>
   readonly probes: ReadonlyArray<ProbeChip>
+  readonly prototypes: ReadonlyArray<HelperChip>
+  /** What was read of each Prototyper: null while it is read. */
+  readonly prototypeResults: ReadonlyMap<string, HelperDetail | null>
   readonly passes: ReadonlyArray<EnginePass>
   readonly freshness: ColdReadFreshness
   readonly dependencies: MissionDependencies
@@ -313,6 +341,7 @@ export function planningDataOf(read: PlanningRead, now: Date): PlanningData {
     questions: questionsOf(read.waves, now),
     discussions: read.discussions.map((one) => discussionOf(one, now)),
     probes: read.probes.map(probeOf),
+    prototypes: read.prototypes.map((one) => prototypeOf(one, read.prototypeResults.get(one.id))),
     passes: read.passes.map(passOf),
     freshness: freshnessOf(read.freshness, now),
     dependencies: read.dependencies.dependsOn.map((one) => ({
@@ -417,6 +446,10 @@ export function planningNeedOf(row: NeedRow): Planning.PlanningNeed {
   }
 }
 
+/** Whether a Prototyper's chip says more than what was read of it: another state or verdict. */
+const moved = (held: HelperDetail, chip: HelperChip): boolean =>
+  held.state !== chip.state || held.verdict !== chip.verdict
+
 /** What the page shows of the follower. */
 export interface PlanningView {
   readonly data: PlanningData | null
@@ -431,10 +464,7 @@ export interface PlanningView {
   readonly mentionables: ReadonlyArray<Mentionable>
   /** The report of each Probe opened: null while it is read. */
   readonly reports: ReadonlyMap<string, Planning.ProbeDetail | null>
-  /**
-   * The mission's Prototypers (#222), the first launched first: each one's chip, as the engine
-   * gives it, until the Planning design (#193) places them.
-   */
+  /** The mission's Prototypers (#222), the first launched first: each one's chip, as the engine gives it. */
   readonly prototypes: ReadonlyArray<HelperChip>
   /** The result of each Prototyper opened: null while it is read. */
   readonly prototypeResults: ReadonlyMap<string, HelperDetail | null>
@@ -593,6 +623,8 @@ export function followPlanning(
                 ...around,
                 discussions,
                 probes,
+                prototypes,
+                prototypeResults,
                 passes,
                 living,
                 titles,
@@ -725,9 +757,14 @@ export function followPlanning(
         missionId,
         (heard) => {
           prototypes = heard
-          // A result open while its Prototyper moves is read again.
-          for (const id of prototypeResults.keys()) {
-            if (prototypes.some((one) => one.id === id)) readPrototype(id)
+          // Each Prototyper is read once heard, for its question and its result, and again when
+          // its state or its verdict moves; one being read is not asked again.
+          for (const chip of heard) {
+            const held = prototypeResults.get(chip.id)
+            if (held === undefined || (held !== null && moved(held, chip))) {
+              prototypeResults = new Map([...prototypeResults, [chip.id, null]])
+              readPrototype(chip.id)
+            }
           }
           emit()
         },
