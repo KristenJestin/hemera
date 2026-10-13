@@ -325,9 +325,10 @@ export const buildingLoop = (parts: LoopParts) => {
 
   /**
    * A writing command of a mission's session, watched: nothing is held until its launch, which
-   * takes its lock and the snapshots before it; its finish attributes and lets the lock go.
+   * takes its lock and the snapshots before it; its finish attributes and lets the lock go, then
+   * runs `wrote` when the command changed a file (#258).
    */
-  const command = (asked: CommandAsked) =>
+  const command = (asked: CommandAsked, wrote: Effect.Effect<void> = Effect.void) =>
     Effect.gen(function* () {
       // A command that writes nothing takes no lock and gets no snapshot pair; nor does a
       // service, which runs until it is stopped and would hold its repository all that time.
@@ -454,7 +455,17 @@ export const buildingLoop = (parts: LoopParts) => {
             if (closed) return
             closed = true
             if (runId !== null && before !== null) {
-              yield* afterCommand(building, task, session, name, globs, watchId, runId, before)
+              const changed = yield* afterCommand(
+                building,
+                task,
+                session,
+                name,
+                globs,
+                watchId,
+                runId,
+                before,
+              )
+              if (changed) yield* wrote
             }
           }),
         ).pipe(
@@ -590,7 +601,10 @@ export const buildingLoop = (parts: LoopParts) => {
       ),
     )
 
-  /** What a command changed, attributed to its task; a held file of another task is a conflict. */
+  /**
+   * What a command changed, attributed to its task; a held file of another task is a conflict.
+   * Answers whether it changed a file.
+   */
   const afterCommand = (
     building: BuildingRow,
     task: TaskNow | null,
@@ -720,6 +734,7 @@ export const buildingLoop = (parts: LoopParts) => {
         }
         yield* outside.compare(building.missionId, base.repository)
       }
+      return changes.some((one) => one.files.length > 0)
     })
 
   /**
