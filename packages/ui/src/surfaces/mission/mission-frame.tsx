@@ -322,9 +322,24 @@ export function MissionFrameNeeds(props: NeedsYouListProps): ReactNode {
 }
 
 /** The base of a stage no page is registered for: its place, with the stage's name. */
-export function MissionFrameBase({ stage }: { stage: MissionStage }): ReactNode {
+export function MissionFrameBase({
+  stage,
+  running,
+}: {
+  stage: MissionStage
+  /**
+   * The chips of what runs, until the stage's page brings its stage card: an agent Hemera started
+   * before its last restart and could not stop.
+   */
+  running?: ReactNode
+}): ReactNode {
   return (
     <div className="mx-auto flex w-full max-w-page flex-col gap-3 px-8 py-6">
+      {running !== undefined && (
+        <section aria-label={stage} className="flex flex-wrap gap-1.5">
+          {running}
+        </section>
+      )}
       <Frame>
         <p className="px-4 py-12 text-center text-sm text-muted-foreground">The {stage} page</p>
       </Frame>

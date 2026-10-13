@@ -1,6 +1,8 @@
 import { type ReactNode, useState } from 'react'
 
 import type { Ball } from '../../blocks/ball/ball-mark.tsx'
+import { KeptAgentChip } from '../../blocks/mission/kept-agent-chip.tsx'
+import { StageCard } from '../../blocks/mission/stage-card.tsx'
 import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import { Button } from '../../components/button/button.tsx'
@@ -316,6 +318,8 @@ interface CastMission {
   cancel: boolean
   /** The needs above the page; on Planning they are the page's own, under For you. */
   needs?: readonly [string, string][]
+  /** Agents Hemera started before its last restart, still running: chips in the stage card. */
+  kept?: readonly { program: string; pid: number }[]
 }
 
 const CAST = {
@@ -401,8 +405,9 @@ const CAST = {
     frozen: true,
     type: 'feature',
     ball: 'agent',
-    marks: [{ kind: 'kept', program: 'claude', pid: 48213 }],
+    marks: [],
     cancel: true,
+    kept: [{ program: 'claude', pid: 48213 }],
   },
   'ACME-9': {
     title: 'Export the movements',
@@ -546,7 +551,23 @@ export function MissionStageFixture({
             />
           )
         }
-        base={<MissionFrameBase stage={found.stage} />}
+        base={
+          found.kept === undefined ? (
+            <MissionFrameBase stage={found.stage} />
+          ) : (
+            <div className="mx-auto flex w-full max-w-page flex-col gap-3 px-8 py-6">
+              <StageCard
+                stage={found.stage}
+                face="running"
+                line="Builds T2, the reminder's schedule"
+                progress={{ step: 'Tasks', detail: '1 of 4 done' }}
+                running={found.kept.map((agent) => (
+                  <KeptAgentChip key={agent.pid} program={agent.program} pid={agent.pid} />
+                ))}
+              />
+            </div>
+          )
+        }
         views={views}
         open={state.open}
         shown={state.shown}

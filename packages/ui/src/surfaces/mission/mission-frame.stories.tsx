@@ -383,18 +383,15 @@ export const MissionLongCauses: Story = {
 }
 
 /**
- * Building, with an agent an earlier start of Hemera could not stop: its program and pid are on
- * the line, with the next start that tries again, until it is ended or gone.
+ * Building, with an agent Hemera started before its last restart still running: its chip in the
+ * stage card, under the progress line, and nothing about it in the header.
  */
 export const MissionKeptAgent: Story = {
   render: () => <MissionStageFixture missionKey="ACME-22" />,
   play: async ({ canvasElement }) => {
-    expect(
-      says(
-        canvasElement,
-        'Earlier claude (48213) still running · Hemera tries again at the next start',
-      ),
-    ).toBe(true)
+    const card = within(within(canvasElement).getByRole('region', { name: 'Building' }))
+    expect(card.getByRole('button', { name: /^claude · pid 48213,/ })).toBeVisible()
+    expect(canvasElement.querySelector('[data-mark="kept"]')).toBeNull()
   },
 }
 

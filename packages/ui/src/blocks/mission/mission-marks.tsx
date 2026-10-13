@@ -10,7 +10,6 @@ import {
   IconListCheck,
   IconLock,
   IconRefresh,
-  IconTerminal,
 } from '../../icons.ts'
 import { type MissionMarkView, SPELLED_MARKS, markWords } from './vocabulary.ts'
 
@@ -21,7 +20,6 @@ const MARK_TONE: Record<MissionMarkView['kind'], string> = {
   outdated: 'flex text-warning',
   outside: 'flex text-info',
   fixing: 'flex text-build',
-  kept: 'flex text-warning',
 }
 
 function markIcon(mark: MissionMarkView): ReactNode {
@@ -38,8 +36,6 @@ function markIcon(mark: MissionMarkView): ReactNode {
       return <IconGitCompare size="sm" />
     case 'fixing':
       return <IconBug size="sm" />
-    case 'kept':
-      return <IconTerminal size="sm" />
   }
 }
 
