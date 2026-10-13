@@ -39,6 +39,8 @@ import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
+import { saveCommand } from '../src/engine/catalogue.ts'
+import { Runs } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingAttempts,
@@ -1913,6 +1915,83 @@ describe('A proof run that never ends', () => {
       }
     }
     expect(ended()).toBe(true)
+  })
+})
+
+describe('A proof waiting for an exclusive resource', () => {
+  test('a proof whose command waits for a resource held elsewhere ends at the Project’s limit as an environment red that says what it waited for', async () => {
+    let proofCommand = ''
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(EXPORT_PATH),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // The port of another mission's service holds it, and is never given back.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          return {
+            need: yield* needOf(mission.id, 'Environment'),
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(seen.proof.runs.map((one) => one.classification)).toEqual(['environment'])
+    const fields = seen.need.fields
+    if (!Predicate.isTagged(fields, 'Environment')) throw new Error('not an environment need')
+    expect(fields.missing).toContain("R1.S2's proof could not run")
+    expect(fields.missing).toContain('it waited 2s for the dev port, held elsewhere')
   })
 })
 
