@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path'
 
 import {
   ChosenAnswer,
+  PermissionAnswer,
   type DocRecipeDraft,
   SESSION_STATES,
   SPEC_IS_RIGHT,
@@ -41,6 +42,7 @@ import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
 import { getRun } from '../src/engine/runs.ts'
+import { TaskStates, everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
 import {
   MEMORY_TOOLS,
@@ -58,6 +60,7 @@ import {
 import { Database } from '../src/engine/storage/database.ts'
 import {
   checkpoints,
+  permissionRequests,
   documenterPasses,
   domainEvents,
   proofRuns,
@@ -71,7 +74,7 @@ import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
-import { WriteAttribution } from '../src/engine/tools/ports.ts'
+import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -132,6 +135,10 @@ const ending = (
     readonly snapshots?: (real: SnapshotsService) => SnapshotsService
     /** Runs as each agent starts: a failure there is an agent that cannot start. */
     readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
+    /** The verdicts on the calls, when not every call is allowed. */
+    readonly verdicts?: Layer.Layer<Verdicts>
+    /** Whether a task still holds, as Hemera checks an allowed call again before it acts. */
+    readonly taskStates?: Layer.Layer<TaskStates>
     /** Where the writes are attributed, when a test holds one as it executes. */
     readonly attribution?: Layer.Layer<WriteAttribution>
   } = {},
@@ -149,15 +156,16 @@ const ending = (
   const first: ReadonlyArray<FakeScript> =
     options.resumed === true ? [] : [READING, options.builder ?? QUIET]
   const checks = options.checks ?? (() => [])
-  const verdicts = verdictsSaying(() => ALLOW).layer
+  const verdicts = options.verdicts ?? verdictsSaying(() => ALLOW).layer
+  const taskStates = options.taskStates ?? everyTaskHolds
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
     starting: options.starting ?? (() => Effect.void),
     snapshots: options.snapshots ?? ((real) => real),
     tools:
       options.attribution === undefined
-        ? { home: work, verdicts }
-        : { home: work, verdicts, attribution: options.attribution },
+        ? { home: work, verdicts, taskStates }
+        : { home: work, verdicts, taskStates, attribution: options.attribution },
     building: {
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
@@ -1296,6 +1304,208 @@ describe('The exit', () => {
       expect(seen.needs).toEqual([])
       expect(seen.helper).toMatchObject({ state: 'failed', failure: STOPPED_AT_THE_END })
       expect(seen.review?.changedAfter.map((one) => one.path)).not.toContain('helper.ts')
+    },
+  )
+  test(
+    'a write the user allows as the end exits is done before the snapshot and seen, or refused: never after it unseen',
+    SLOW,
+    async () => {
+      const snapshotted = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            Effect.succeed<Verdict>(
+              asked.tool === 'fs_write' && asked.path?.named.endsWith('approved.ts') === true
+                ? { verdict: 'ask', reason: 'a file no task names', by: 'suite' }
+                : ALLOW,
+            ),
+          // Hemera acts on the allowed call once the exit looked at the Workspace: the latest it can.
+          refusal: () => Effect.as(Deferred.await(snapshotted), null),
+        }),
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real
+              .take(place, owner)
+              .pipe(
+                Effect.tap(() =>
+                  owner.kind === 'review_exit'
+                    ? Deferred.succeed(snapshotted, undefined)
+                    : Effect.void,
+                ),
+              ),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* builtAll(builder.grantId)
+            const asked = yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'approved.ts',
+              content: 'export const approved = true\n',
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const database = yield* Database
+            const request = Effect.map(
+              database
+                .select()
+                .from(permissionRequests)
+                .where(eq(permissionRequests.missionId, mission.id)),
+              ([row]) => row,
+            )
+            // The end holds at its refresh on the question.
+            yield* until(
+              Effect.gen(function* () {
+                const view = yield* buildingNow(mission.id)
+                return view.phase === 'refresh' && (yield* getMission(mission.id)).needs.length > 0
+              }),
+              LONG,
+            )
+            const row = yield* request
+            if (row === undefined) return yield* Effect.die(new Error('no request'))
+            yield* answerNeed({
+              id: row.needId,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inReview(mission.id)
+            yield* until(
+              Effect.map(request, (one) => one?.state === 'ended'),
+              LONG,
+            )
+            return {
+              asked,
+              request: yield* request,
+              wrote: existsSync(join(api, 'approved.ts')),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.asked).toContain('request #1')
+      // Its session stopped at the exit: the approved write is not done, and says so.
+      expect(seen.request).toMatchObject({ state: 'ended', result: 'not-executed' })
+      expect(seen.wrote).toBe(false)
+      expect(seen.review?.changedAfter.map((one) => one.path)).not.toContain('approved.ts')
+    },
+  )
+  test(
+    'a write the user allows, acting as the tree stops, is waited for: the snapshot sees it',
+    SLOW,
+    async () => {
+      const acting = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            Effect.succeed<Verdict>(
+              asked.tool === 'fs_write' &&
+                ['approved.ts', 'denied.ts'].some((name) => asked.path?.named.endsWith(name))
+                ? { verdict: 'ask', reason: 'a file no task names', by: 'suite' }
+                : ALLOW,
+            ),
+          refusal: () => Effect.succeed(null),
+        }),
+        // Hemera's last check of the allowed call holds it, its session read live, until let go.
+        taskStates: Layer.succeed(TaskStates, {
+          holds: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(acting, undefined)
+              yield* Deferred.await(release)
+              return true
+            }),
+        }),
+        // An exit that does not wait looks at the Workspace first, and only then lets it go.
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real
+              .take(place, owner)
+              .pipe(
+                Effect.tap(() =>
+                  owner.kind === 'review_exit' ? Deferred.succeed(release, undefined) : Effect.void,
+                ),
+              ),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* builtAll(builder.grantId)
+            for (const path of ['approved.ts', 'denied.ts']) {
+              yield* call(builder.grantId, 'fs_write', {
+                repository: 'api',
+                path,
+                content: 'export const asked = true\n',
+              })
+            }
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const database = yield* Database
+            const requests = database
+              .select()
+              .from(permissionRequests)
+              .where(eq(permissionRequests.missionId, mission.id))
+              .orderBy(asc(permissionRequests.number))
+            // The end holds at its refresh on both questions.
+            yield* until(
+              Effect.gen(function* () {
+                const view = yield* buildingNow(mission.id)
+                return view.phase === 'refresh' && (yield* getMission(mission.id)).needs.length > 1
+              }),
+              LONG,
+            )
+            const [approved, denied] = yield* requests
+            if (approved === undefined || denied === undefined) {
+              return yield* Effect.die(new Error('no requests'))
+            }
+            const answer = (needId: string, choice: 'allow-once' | 'deny') =>
+              answerNeed({
+                id: needId,
+                answer: PermissionAnswer.make({ choice }),
+                key: crypto.randomUUID(),
+              })
+            yield* answer(approved.needId, 'allow-once')
+            // Allowed while the Builder still runs: the second question holds the end meanwhile.
+            yield* Deferred.await(acting)
+            // Let go a second after the Builder stopped: long after an exit that did not wait.
+            yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(getSession(builder.session.id), (session) => session.state === 'ended'),
+                LONG,
+              )
+              yield* Effect.sleep('1 second')
+              yield* Deferred.succeed(release, undefined)
+            }).pipe(Effect.forkDetach)
+            yield* answer(denied.needId, 'deny')
+            yield* inReview(mission.id)
+            yield* until(
+              Effect.map(requests, ([one]) => one?.state === 'ended'),
+              LONG,
+            )
+            return {
+              request: (yield* requests)[0],
+              wrote: existsSync(join(api, 'approved.ts')),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.request).toMatchObject({ state: 'ended', result: 'done' })
+      expect(seen.wrote).toBe(true)
+      expect(seen.review?.changedAfter.map((one) => one.path)).toContain('approved.ts')
     },
   )
   test(

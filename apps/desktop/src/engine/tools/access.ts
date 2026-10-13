@@ -80,6 +80,14 @@ export class ToolAccess extends Context.Service<
       grantId: string,
       execution: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A | null, E, R>
+    /**
+     * Runs a call the user allowed, counted against its mission until it ends: Hemera acts on it
+     * with no grant of its own, so the call checks inside that its session was not stopped.
+     */
+    readonly counted: <A, E, R>(
+      missionId: string | null,
+      execution: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>
     /** Waits until no call of a mission's grants is executing. */
     readonly settled: (missionId: string) => Effect.Effect<void>
   }
@@ -104,6 +112,9 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
     /** The calls executing, by mission, and who waits for them to end. */
     const executions = new Map<string, number>()
     const waiting = new Map<string, Array<Deferred.Deferred<void>>>()
+
+    const begun = (missionId: string) =>
+      executions.set(missionId, (executions.get(missionId) ?? 0) + 1)
 
     const ended = (missionId: string) =>
       Effect.suspend(() => {
@@ -155,11 +166,19 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
           Effect.sync(() => {
             const grant = byDigest.get(grantId) ?? null
             const missionId = grant?.missionId ?? null
-            if (missionId !== null) executions.set(missionId, (executions.get(missionId) ?? 0) + 1)
+            if (missionId !== null) begun(missionId)
             return { live: grant !== null, missionId }
           }),
           ({ live }) => (live ? execution : Effect.succeed(null)),
           ({ missionId }) => (missionId === null ? Effect.void : ended(missionId)),
+        ),
+      counted: (missionId, execution) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => {
+            if (missionId !== null) begun(missionId)
+          }),
+          () => execution,
+          () => (missionId === null ? Effect.void : ended(missionId)),
         ),
       settled: (missionId) =>
         Effect.suspend(() => {
