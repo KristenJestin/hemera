@@ -147,7 +147,7 @@ import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
 import { FORGE_NEEDS, type ForgePort, forgePort } from './forges/port.ts'
-import { isScreenshotIn, screenshotsFolder } from './screenshots.ts'
+import { screenshotIn, screenshotsFolder } from './screenshots.ts'
 import { type ForgeRunner, type ForgeSettings, forgeRunnerLayer } from './forges/runner.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
@@ -744,7 +744,7 @@ export const startProfile = (
       // Images are attached from Hemera's own screenshot folder only (#253).
       Layer.provideMerge(
         forgeRunnerLayer({
-          attachable: isScreenshotIn(screenshotsFolder(dataFolder)),
+          attachable: screenshotIn(screenshotsFolder(dataFolder)),
           ...parts.forge,
         }),
       ),

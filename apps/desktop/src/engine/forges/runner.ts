@@ -43,8 +43,11 @@ export interface ForgeSettings {
   readonly env?: Readonly<Record<string, string | undefined>> | undefined
   /** Shorter limits, for the suites. */
   readonly limits?: { readonly read: number; readonly write: number } | undefined
-  /** Whether a path names one of Hemera's own screenshots, the only files attached; none otherwise. */
-  readonly attachable?: ((path: string) => boolean) | undefined
+  /**
+   * The real path of the screenshot of Hemera's a path names, or null: the only files attached.
+   * None otherwise, and nothing is attached.
+   */
+  readonly attachable?: ((path: string) => string | null) | undefined
 }
 
 /** One call: which CLI, for which forge and host, for which Project, with which arguments. */
@@ -108,18 +111,25 @@ export class ForgeRunner extends Context.Service<
 >()('ForgeRunner') {}
 
 /**
- * Whether a command attaches only one of Hemera's own screenshots (`ForgeSettings.attachable`): any
- * other file would be read and uploaded to the forge. A command that attaches nothing passes.
+ * The arguments to run, an attachment named by the real path checked; null when the command
+ * attaches anything but one of Hemera's own screenshots (`ForgeSettings.attachable`), which would
+ * read and upload a file of the user's. `path#caption` holds one `#` at most: the CLI might split
+ * on another one than the check did.
  */
-const attachesOwnOnly = (
+const withOwnAttachment = (
+  args: ReadonlyArray<string>,
   parsed: ParsedCommand,
-  attachable: ((path: string) => boolean) | undefined,
-): boolean => {
+  attachable: ((path: string) => string | null) | undefined,
+): ReadonlyArray<string> | null => {
   const value = parsed.flags.get('--attach')
-  if (value === undefined) return true
-  if (value === null || attachable === undefined) return false
-  // `path#caption`: the caption is the forge's, the path the file read.
-  return attachable(value.split('#')[0] ?? '')
+  if (value === undefined) return args
+  if (value === null || attachable === undefined) return null
+  const [path = '', caption, ...more] = value.split('#')
+  if (more.length > 0) return null
+  const real = attachable(path)
+  if (real === null) return null
+  const at = args.indexOf('--attach', parsed.shape.words.length) + 1
+  return args.with(at, caption === undefined ? real : `${real}#${caption}`)
 }
 
 /** Whether a bkt write names the context its call carries, the one chosen for the host. */
@@ -317,26 +327,31 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
 
       const run = (call: ForgeCall): Effect.Effect<ForgeAnswer, ForgeRunFailure> =>
         Effect.gen(function* () {
-          const command = secrets.mask([call.cli, ...call.args].join(' '))
+          const asked = secrets.mask([call.cli, ...call.args].join(' '))
           const parsed = parseCommand(call.cli, call.args)
           // A command for another host than its call's would reach a forge it was not meant for,
           // and so would a bkt write through another context than the one chosen for the host; an
           // image from anywhere but Hemera's screenshots would upload a file of the user's.
+          const args =
+            parsed === null ? null : withOwnAttachment(call.args, parsed, settings.attachable)
           if (
             parsed === null ||
+            args === null ||
             !aimsAt(call.cli, call.args, call.host) ||
-            !throughItsContext(call, parsed) ||
-            !attachesOwnOnly(parsed, settings.attachable)
+            !throughItsContext(call, parsed)
           ) {
-            return yield* new ForgeCommandRefused({ command })
+            return yield* new ForgeCommandRefused({ command: asked })
           }
+          // What runs, and is recorded: an attachment by the real path checked.
+          const ran: ForgeCall = { ...call, args }
+          const command = secrets.mask([ran.cli, ...ran.args].join(' '))
           const { shape } = parsed
-          const program = yield* find(call.cli)
-          if (Option.isNone(program)) return yield* new ForgeCliMissing({ cli: call.cli })
+          const program = yield* find(ran.cli)
+          if (Option.isNone(program)) return yield* new ForgeCliMissing({ cli: ran.cli })
           const limit = shape.class === 'read' ? limits.read : limits.write
-          const answered = spawned(call, program.value, limit, command)
-          const done = shape.class === 'read' ? answered : recorded(call, shape, command, answered)
-          return yield* outsideTransaction(`run ${call.cli} ${call.args[0] ?? ''}`, done).pipe(
+          const answered = spawned(ran, program.value, limit, command)
+          const done = shape.class === 'read' ? answered : recorded(ran, shape, command, answered)
+          return yield* outsideTransaction(`run ${ran.cli} ${ran.args[0] ?? ''}`, done).pipe(
             Effect.catchTag('SideEffectInTransaction', (refused) => Effect.die(refused)),
           )
         }).pipe(
