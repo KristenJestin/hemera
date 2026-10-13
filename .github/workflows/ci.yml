@@ -3,7 +3,15 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'feature/**']
+
+# One run per ref at a time: a newer push to a branch, or to a pull request's branch, cancels the
+# run of the older one still in progress. A push to a branch and the pull request opened from it
+# are two refs (`refs/heads/x`, `refs/pull/n/merge`), so neither cancels the other. A cancelled
+# run cannot leave the required `verify (windows-latest)` green: see `windows-result` below.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   commit-messages:
@@ -15,16 +23,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.21.0
-      # The first push of a branch has no `before` (GitHub sends forty zeros): every commit the
-      # branch holds is checked then, which for the first push of the repository is its first.
+      # The first push of a branch has no `before` (GitHub sends forty zeros). The branch is then
+      # checked against the other branch of the repository it is closest to, so it answers for
+      # the commits it brings and not for the history it was cut from: that history holds
+      # squashed pull request titles from before this check, and a new `feature/<topic>` would
+      # fail on them. With no other branch (the first push of the repository), every commit.
       - name: Check the Angular commit convention
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           head="${{ github.event.pull_request.head.sha || github.sha }}"
-          if [ -z "${base//0/}" ]; then
+          if [ -n "${base//0/}" ]; then
+            node tools/commit-message.ts --range "$base..$head"
+            exit
+          fi
+          closest=""
+          fewest=""
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
+            case "$ref" in origin/HEAD | "origin/$BRANCH") continue ;; esac
+            ahead=$(git rev-list --count "$head" --not "$ref")
+            if [ -z "$fewest" ] || [ "$ahead" -lt "$fewest" ]; then
+              closest="$ref"
+              fewest="$ahead"
+            fi
+          done
+          if [ -z "$closest" ]; then
             node tools/commit-message.ts --range "$head"
           else
-            node tools/commit-message.ts --range "$base..$head"
+            node tools/commit-message.ts --range "$closest..$head"
           fi
 
   # React Doctor, the React-specific check: on a pull request it reads only the files the change
@@ -252,6 +279,10 @@ jobs:
         run: pnpm test --project storybook-light --project storybook-dark
 
   # The check the branch rules require, under the name it had when one runner did it all.
+  #
+  # `always()` is what keeps it honest: on a run that is cancelled (by a newer push, or by hand)
+  # the job still runs, `needs.windows.result` reads `cancelled`, and the step fails. With
+  # `!cancelled()` the job would be skipped, and GitHub counts a skipped required check as passed.
   windows-result:
     name: verify (windows-latest)
     needs: windows
