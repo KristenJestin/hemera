@@ -18,6 +18,20 @@ jobs:
   shape:
     runs-on: ubuntu-latest
     steps:
+      # The description carries no Claude attribution: a squash merge copies it into the commit,
+      # and GitHub adds a Co-authored-by for every co-author it finds. This runs for every pull
+      # request, housekeeping included, with the rule of the commit-msg hook (tools/commit-message.ts).
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Refuse Claude attribution in the description
+        env:
+          # Read through the environment, never interpolated into the script.
+          DESCRIPTION: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$DESCRIPTION" > "$RUNNER_TEMP/description.md"
+          node tools/commit-message.ts --description "$RUNNER_TEMP/description.md"
       - uses: actions/github-script@v7
         with:
           script: |
