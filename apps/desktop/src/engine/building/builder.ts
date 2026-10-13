@@ -101,7 +101,7 @@ import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
-import { PROOF_KINDS, type ProofNeeds, buildingProofs } from './proofs.ts'
+import { END_WITHOUT, PROOF_KINDS, type ProofNeeds, buildingProofs } from './proofs.ts'
 import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
 import { OutsideChanges } from './outside.ts'
@@ -1897,6 +1897,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             return
           }
           const amendment = Option.getOrNull(readString(payload['amendment']))
+          // Ended without, once the end was called: the summary is told here, not by the end (#306).
+          const asked = Option.getOrNull(readString(payload['subject']))?.split(',') ?? []
+          const left =
+            payload['kind'] === 'proofs_unproven' &&
+            payload['answer'] === END_WITHOUT &&
+            building.endCalledAt !== null
+              ? (yield* proofs.notProven(building)).filter((one) => asked.includes(one))
+              : []
           yield* deliver(
             building,
             'answer',
@@ -1904,6 +1912,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               `The user answered: ${String(payload['answer'] ?? '')}`,
               `Your request: ${String(payload['question'] ?? '')}`,
               amendment === null ? null : `The plan changed: ${amendment}`,
+              left.length === 0
+                ? null
+                : `The user ended without proving ${listed(left)}: say so in the summary.`,
             ]
               .filter((part) => part !== null)
               .join('\n'),

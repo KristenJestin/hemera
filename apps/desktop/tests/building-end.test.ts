@@ -2270,6 +2270,8 @@ describe('The refresh', () => {
       // Said as it is at the refresh: no task was skipped, and no answer came before.
       expect(fields.question).toContain("its proof failed again at the end's refresh")
       expect(fields.options).toEqual(['Try again', 'End without it'])
+      // The end was called already: the summary it asked for is told what was left out.
+      expect(seen.told.some((one) => one.includes('say so in the summary'))).toBe(true)
       const proof = seen.view.requirements
         .flatMap((one) => one.scenarios)
         .find((one) => one.scenario === 'R1.S2')
