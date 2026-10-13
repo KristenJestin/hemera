@@ -768,7 +768,9 @@ describe('The green runs', () => {
       ),
     )
     expect(seen.fresh.finalChecks.map((one) => [one.name, one.upToDate])).toEqual([['build', true]])
-    expect(seen.refreshed).toEqual({ proofs: ['R1.S2'], checks: ['build'] })
+    expect(seen.refreshed).toMatchObject({ proofs: ['R1.S2'], checks: ['build'] })
+    // The trees its own snapshot took first, which the end keeps (#306).
+    expect(seen.refreshed.trees.map((one) => one.repository)).toEqual(['api'])
     const s2 = seen.after.scenarios.find((one) => one.scenario === 'R1.S2')
     expect(s2?.state).toBe('green')
     expect(s2?.runs.map((one) => one.phase)).toEqual(['red', 'green', 'rerun'])
