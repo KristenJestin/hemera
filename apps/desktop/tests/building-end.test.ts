@@ -30,6 +30,7 @@ import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from '
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
@@ -59,10 +60,12 @@ import {
 } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  agentSessions,
   checkpoints,
   permissionRequests,
   documenterPasses,
   domainEvents,
+  needs,
   proofRuns,
   reviewPasses,
   runnerLeases,
@@ -73,6 +76,7 @@ import { QUIET, READING, call, eventsOf, grantOf, says } from './building-world.
 import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
+import { ToolAccess } from '../src/engine/tools/access.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -141,6 +145,8 @@ const ending = (
     readonly taskStates?: Layer.Layer<TaskStates>
     /** Where the writes are attributed, when a test holds one as it executes. */
     readonly attribution?: Layer.Layer<WriteAttribution>
+    /** Where the Builder is held, when a test orders it against the end. */
+    readonly hold?: BuilderHold
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -167,6 +173,7 @@ const ending = (
         ? { home: work, verdicts, taskStates }
         : { home: work, verdicts, taskStates, attribution: options.attribution },
     building: {
+      hold: options.hold,
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
           const said = checks(asked)
@@ -1119,6 +1126,38 @@ describe('What the review saw, and what changed after it', () => {
 
 describe('The exit', () => {
   test(
+    'once the Building ended, a call the user allows runs again for a session born after the exit, never for its tree',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // What Hemera does on a call the user allowed, as Review's own session would ask it.
+            const allowed = (lineage: string) =>
+              ToolAccess.use((access) =>
+                access.counted({ missionId: mission.id, lineage }, Effect.succeed('ran')),
+              )
+            return {
+              born: yield* allowed(crypto.randomUUID()),
+              builder: yield* allowed(builder.session.lineage),
+            }
+          }),
+        ),
+      )
+      expect(seen.born).toBe('ran')
+      expect(seen.builder).toBeNull()
+    },
+  )
+  test(
     'a write that lands after the last checks, as the end exits, is checked before Review',
     SLOW,
     async () => {
@@ -1180,6 +1219,82 @@ describe('The exit', () => {
         .find((one) => one.scenario === 'R1.S2')
       expect(proof).toMatchObject({ state: 'green', upToDate: true })
       expect(seen.review?.changedAfter.map((one) => one.path)).toContain('src/late.ts')
+    },
+  )
+  test(
+    'a Builder the exit sends back after a late write is handed what was queued for it before the exit',
+    SLOW,
+    async () => {
+      let late: (() => void) | null = null
+      let holding = false
+      const turn = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => (holding ? turn.promise : Promise.resolve()),
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind === 'review_exit' && late !== null) {
+              late()
+              late = null
+            }
+            return real.take(place, owner)
+          },
+        }),
+      })
+      const QUEUED = 'ACME-12 is to be named in the changelog.'
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            late = () => writtenInWorkspace(api, 'src/late.ts', 'export const late = true\n')
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            // The Builder is in a turn that does not end: what is delivered to it now waits.
+            holding = true
+            const owner = { kind: 'mission', missionId: mission.id } as const
+            const target = { lineage: builder.session.lineage }
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({ owner, target, kind: 'note', body: 'One more thing.' }),
+            )
+            yield* until(
+              Effect.map(getSession(builder.session.id), (one) => one.state === 'working'),
+              LONG,
+            )
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({ owner, target, kind: 'note', body: QUEUED }),
+            )
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return {
+              late,
+              handed: world.agents
+                .slice(2)
+                .some((agent) => agent.answers.prompts.some((one) => text(one).includes(QUEUED))),
+              lineage: yield* sessionsOfLineage(builder.session.lineage),
+            }
+          }),
+        ),
+      ).finally(() => turn.release())
+      expect(seen.late).toBeNull()
+      // The exit went back once: the Builder's lineage was resumed, and its successor had it.
+      expect(seen.lineage.length).toBeGreaterThan(1)
+      expect(seen.handed).toBe(true)
     },
   )
   test(
@@ -1394,6 +1509,91 @@ describe('The exit', () => {
       expect(seen.request).toMatchObject({ state: 'ended', result: 'not-executed' })
       expect(seen.wrote).toBe(false)
       expect(seen.review?.changedAfter.map((one) => one.path)).not.toContain('approved.ts')
+    },
+  )
+  test(
+    'a call the user allowed and the end refused tells the agent and the user that the end of the Building stopped it',
+    SLOW,
+    async () => {
+      const snapshotted = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            Effect.succeed<Verdict>(
+              asked.tool === 'fs_write' && asked.path?.named.endsWith('approved.ts') === true
+                ? { verdict: 'ask', reason: 'a file no task names', by: 'suite' }
+                : ALLOW,
+            ),
+          // Hemera acts on the allowed call once the exit looked at the Workspace: the latest it can.
+          refusal: () => Effect.as(Deferred.await(snapshotted), null),
+        }),
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real
+              .take(place, owner)
+              .pipe(
+                Effect.tap(() =>
+                  owner.kind === 'review_exit'
+                    ? Deferred.succeed(snapshotted, undefined)
+                    : Effect.void,
+                ),
+              ),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'approved.ts',
+              content: 'export const approved = true\n',
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const database = yield* Database
+            const request = Effect.map(
+              database
+                .select()
+                .from(permissionRequests)
+                .where(eq(permissionRequests.missionId, mission.id)),
+              ([row]) => row,
+            )
+            // The end holds at its refresh on the question.
+            yield* until(
+              Effect.gen(function* () {
+                const view = yield* buildingNow(mission.id)
+                return view.phase === 'refresh' && (yield* getMission(mission.id)).needs.length > 0
+              }),
+              LONG,
+            )
+            const row = yield* request
+            if (row === undefined) return yield* Effect.die(new Error('no request'))
+            yield* answerNeed({
+              id: row.needId,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inReview(mission.id)
+            yield* until(
+              Effect.map(request, (one) => one?.state === 'ended'),
+              LONG,
+            )
+            const [need] = yield* database.select().from(needs).where(eq(needs.id, row.needId))
+            return { request: yield* request, need }
+          }),
+        ),
+      )
+      expect(seen.request).toMatchObject({ state: 'ended', result: 'not-executed' })
+      expect(seen.request?.resultText).toBe(
+        `Request #1 (fs_write) was not executed: ${STOPPED_AT_THE_END}.`,
+      )
+      expect(seen.need).toMatchObject({ state: 'expired', endedReason: STOPPED_AT_THE_END })
     },
   )
   test(
@@ -1697,6 +1897,107 @@ describe('The exit', () => {
       expect(seen.review?.changedAfter.map((one) => one.path)).toContain('held.ts')
     },
   )
+  test(
+    'a question raised as the tree stops holds the exit with the Builder back, to take its answer',
+    SLOW,
+    async () => {
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const asking = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        // The write to held.ts executes until the test lets it go: the exit settles on it.
+        attribution: Layer.succeed(WriteAttribution, {
+          written: () => () => Effect.void,
+          command: () => Effect.succeed(null),
+          holding: (file, write) =>
+            Effect.gen(function* () {
+              if (file.path.endsWith('held.ts')) {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              }
+              return { result: yield* write, waited: null }
+            }),
+        }),
+        // The write to question.ts becomes a question once the tree stopped.
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            asked.tool === 'fs_write' && asked.path?.named.endsWith('question.ts') === true
+              ? Effect.as(Deferred.await(asking), {
+                  verdict: 'ask',
+                  reason: 'a file no task names',
+                  by: 'suite',
+                } satisfies Verdict)
+              : Effect.succeed<Verdict>(ALLOW),
+          refusal: () => Effect.succeed(null),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const owner = { kind: 'mission', missionId: mission.id } as const
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'held.ts',
+              content: 'export const held = true\n',
+            }).pipe(Effect.forkDetach)
+            yield* Deferred.await(entered)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'question.ts',
+              content: 'export const question = true\n',
+            }).pipe(Effect.forkDetach)
+            // Once the Builder stopped, its call asks; once asked, the exit's settle ends.
+            yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(getSession(builder.session.id), (session) => session.state === 'ended'),
+                LONG,
+              )
+              yield* Deferred.succeed(asking, undefined)
+              yield* until(
+                Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+                LONG,
+              )
+              yield* Deferred.succeed(release, undefined)
+            }).pipe(Effect.forkDetach)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(release)
+            // The exit holds on the question, and the Builder works again meanwhile.
+            const liveBuilder = Effect.map(
+              sessionsIn(['starting', 'working', 'idle'], owner),
+              (rows) => rows.filter((row) => row.role === 'builder'),
+            )
+            yield* until(
+              Effect.map(liveBuilder, (rows) => rows.length > 0),
+              LONG,
+            )
+            const holding = yield* buildingNow(mission.id)
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inReview(mission.id)
+            return {
+              phase: holding.phase,
+              builders: yield* liveBuilder,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner),
+            }
+          }),
+        ),
+      )
+      expect(seen.phase).toBe('refresh')
+      // The exit that follows the answer stops it again: nothing of the tree runs in Review.
+      expect(seen.live).toEqual([])
+    },
+  )
 })
 
 describe('The refresh', () => {
@@ -1869,6 +2170,66 @@ describe('The refresh', () => {
       const [need] = seen.needs
       if (need !== undefined && Predicate.isTagged(need.fields, 'Error')) {
         expect(need.fields.failed).toContain('R1.S2')
+        expect(need.fields.proposals).toEqual(['Retry'])
+      }
+    },
+  )
+  test(
+    'a stale final check the refresh cannot run again is refreshed once and holds the end on an error need instead of looping',
+    SLOW,
+    async () => {
+      // The end's check answers once, on a tree the Workspace has moved past; run again, the
+      // Project has it no more.
+      let ends = 0
+      const { world, run } = ending({
+        checks: ({ scope }) => {
+          if (scope !== 'end') return []
+          ends += 1
+          return ends === 1
+            ? [{ ...GREEN, trees: [{ repository: 'api', tree: '0'.repeat(40) }] }]
+            : []
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const refreshes = eventsOf(mission.id, 'building.proofs_refreshed')
+            const errorNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* errorNeeds).length > 0 || (yield* refreshes).length >= 3
+              }),
+              LONG,
+            )
+            // Long enough for a loop to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              refreshes: yield* refreshes,
+              needs: yield* errorNeeds,
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+              ends,
+            }
+          }),
+        ),
+      )
+      expect(seen.refreshes).toHaveLength(1)
+      expect(seen.ends).toBe(2)
+      expect(seen.stage).toBe('building')
+      expect(seen.view.phase).toBe('refresh')
+      expect(seen.needs).toHaveLength(1)
+      const [need] = seen.needs
+      if (need !== undefined && Predicate.isTagged(need.fields, 'Error')) {
+        expect(need.fields.failed).toContain('unit tests · api')
         expect(need.fields.proposals).toEqual(['Retry'])
       }
     },
@@ -2350,6 +2711,86 @@ describe('A restart in the middle of the end', () => {
   )
 
   test(
+    'a restart in the middle of the exit does not bring the Builder back: nothing of its tree runs in Review',
+    SLOW,
+    async () => {
+      const stopped = held()
+      const before = ending({
+        snapshots: (real) => ({
+          ...real,
+          // The engine stops as the exit looks at the Workspace: the tree is stopped already.
+          take: (place, owner) =>
+            owner.kind === 'review_exit'
+              ? Effect.andThen(
+                  Effect.sync(() => stopped.release()),
+                  Effect.never,
+                )
+              : real.take(place, owner),
+        }),
+      })
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewed(before.world, mission.id, 'spec-reviewer')
+            yield* reviewed(before.world, mission.id, 'code-reviewer')
+            yield* Effect.promise(() => stopped.promise)
+            return mission
+          }),
+        ),
+      )
+      // Started again, the Builder's resume is held until the exit looks at the Workspace once
+      // more, and that look until the resume went past the Builder: the resume lands inside the
+      // exit, after its stops.
+      const looking = held()
+      const resumed = held()
+      let first = true
+      const after = ending({
+        resumed: true,
+        hold: (at) => {
+          if (at === 'resuming') return Effect.promise(() => looking.promise)
+          if (at === 'resumed') return Effect.sync(() => resumed.release())
+          return Effect.void
+        },
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind !== 'review_exit' || !first) return real.take(place, owner)
+            first = false
+            looking.release()
+            return Effect.andThen(
+              Effect.promise(() => resumed.promise),
+              real.take(place, owner),
+            )
+          },
+        }),
+      })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* inReview(left.id)
+            yield* Effect.promise(() => resumed.promise)
+            return {
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.id,
+              }),
+              mission: yield* getMission(left.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.mission.needs).toEqual([])
+    },
+  )
+
+  test(
     'a restart after the Builder’s turn ended, while the final checks ran again, judges them once',
     SLOW,
     async () => {
@@ -2395,6 +2836,98 @@ describe('A restart in the middle of the end', () => {
       )
       expect(seen.judged).toEqual(['red', 'green'])
       expect(seen.mission.needs).toEqual([])
+    },
+  )
+
+  test(
+    'a Builder resume that reaches the sessions once the exit moved the mission to Review starts nothing',
+    SLOW,
+    async () => {
+      const engine = ending()
+      const seen = await engine.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(engine.world, mission.id)
+            yield* reviewed(engine.world, mission.id, 'spec-reviewer')
+            yield* reviewed(engine.world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // A start-up resume that read the Building before the exit's stops reaches the
+            // sessions only now: the exit's commit is in.
+            const rows = yield* sessionsOfLineage(builder.session.lineage)
+            const resumed = yield* Sessions.use((sessions) =>
+              sessions.resume(rows.at(-1)?.id ?? ''),
+            )
+            return {
+              resumed,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: mission.id,
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.resumed).toBeNull()
+      expect(seen.live.map((one) => one.role)).toEqual([])
+    },
+  )
+
+  test(
+    'a restart that finds the Builder live once the mission is in Review ends it and starts no successor',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewed(before.world, mission.id, 'spec-reviewer')
+            yield* reviewed(before.world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // What a restart reads when it took the live sessions before the exit stopped the
+            // tree, and replaces them only after the exit's commit: the Builder still live.
+            const rows = yield* sessionsOfLineage(builder.session.lineage)
+            const database = yield* Database
+            yield* database
+              .update(agentSessions)
+              .set({ state: 'idle', stateReason: null, endedAt: null })
+              .where(eq(agentSessions.id, rows.at(-1)?.id ?? ''))
+            return { mission, lineage: builder.session.lineage, sessions: rows.length }
+          }),
+        ),
+      )
+      const after = ending({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const lineage = sessionsOfLineage(left.lineage)
+            yield* until(
+              Effect.map(lineage, (rows) =>
+                rows.every((one) => !['starting', 'working', 'idle', 'stuck'].includes(one.state)),
+              ),
+              LONG,
+            )
+            return {
+              lineage: yield* lineage,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.mission.id,
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.lineage).toHaveLength(left.sessions)
     },
   )
 })

@@ -283,7 +283,7 @@ export interface ProfileParts {
         /** The end of the tasks (#147's sequence otherwise), on the profile's own services. */
         readonly end?: Layer.Layer<BuildingEnd, never, Database | DomainEvents | Secrets>
         /** Where a suite holds the Builder between a check and its transaction. */
-        readonly hold?: BuilderHold
+        readonly hold?: BuilderHold | undefined
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
         readonly outside?: Partial<OutsideSettings>
         /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */

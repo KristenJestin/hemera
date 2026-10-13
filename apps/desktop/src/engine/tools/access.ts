@@ -12,8 +12,8 @@
  *
  * A call is executed only while its grant is live, and counted against its mission until it ends:
  * once a mission's sessions are stopped, `settled` waits for the calls that were already executing.
- * A call the user allowed is refused once its mission's Building is exiting, until a Builder works
- * on it again.
+ * A call the user allowed is refused once its mission's Building is exiting, for a session of the
+ * tree the exit stops, until a Builder works on the mission again.
  *
  * A refused access is answered generically by the server and written here, at most 20 lines a
  * minute, naming the session the token once served when it is known and never the token.
@@ -85,16 +85,22 @@ export class ToolAccess extends Context.Service<
     /**
      * Runs a call the user allowed, counted against its mission until it ends: Hemera acts on it
      * with no grant of its own, so the call checks inside that its session was not stopped. Null,
-     * with nothing run, when its mission's Building is exiting.
+     * with nothing run, when its mission's Building is exiting and its lineage is of the tree (or
+     * unknown).
      */
     readonly counted: <A, E, R>(
-      missionId: string | null,
+      call: { readonly missionId: string | null; readonly lineage: string | null },
       execution: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A | null, E, R>
-    /** Marks a mission's Building as exiting: the calls the user allowed run no more. */
-    readonly exiting: (missionId: string) => Effect.Effect<void>
+    /**
+     * Marks a mission's Building as exiting: the calls the user allowed for its tree, the lineages
+     * it had then, run no more. A session born after it (Review's own) is not of the tree.
+     */
+    readonly exiting: (missionId: string, lineages: ReadonlyArray<string>) => Effect.Effect<void>
     /** A Builder works on the mission again: the calls the user allowed run again. */
     readonly building: (missionId: string) => Effect.Effect<void>
+    /** Whether a mission's Building is marked as exiting still. */
+    readonly isExiting: (missionId: string) => Effect.Effect<boolean>
     /** Waits until no call of a mission's grants is executing. */
     readonly settled: (missionId: string) => Effect.Effect<void>
   }
@@ -119,8 +125,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
     /** The calls executing, by mission, and who waits for them to end. */
     const executions = new Map<string, number>()
     const waiting = new Map<string, Array<Deferred.Deferred<void>>>()
-    /** The missions whose Building is exiting. */
-    const exits = new Set<string>()
+    /** The missions whose Building is exiting, with the lineages of the tree it stops. */
+    const exits = new Map<string, ReadonlySet<string>>()
 
     const begun = (missionId: string) =>
       executions.set(missionId, (executions.get(missionId) ?? 0) + 1)
@@ -181,20 +187,23 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
           ({ live }) => (live ? execution : Effect.succeed(null)),
           ({ missionId }) => (missionId === null ? Effect.void : ended(missionId)),
         ),
-      counted: (missionId, execution) =>
+      counted: ({ missionId, lineage }, execution) =>
         Effect.acquireUseRelease(
           // Counted, then the mark read, at once: an exit either finds the call counted and waits
           // for it, or was marked first and the call runs nothing.
           Effect.sync(() => {
             if (missionId === null) return true
             begun(missionId)
-            return !exits.has(missionId)
+            // A session it cannot name is of the tree.
+            const tree = exits.get(missionId)
+            return tree === undefined || (lineage !== null && !tree.has(lineage))
           }),
           (runs) => (runs ? execution : Effect.succeed(null)),
           () => (missionId === null ? Effect.void : ended(missionId)),
         ),
-      exiting: (missionId) => Effect.sync(() => exits.add(missionId)),
+      exiting: (missionId, lineages) => Effect.sync(() => exits.set(missionId, new Set(lineages))),
       building: (missionId) => Effect.sync(() => exits.delete(missionId)),
+      isExiting: (missionId) => Effect.sync(() => exits.has(missionId)),
       settled: (missionId) =>
         Effect.suspend(() => {
           if (!executions.has(missionId)) return Effect.void
