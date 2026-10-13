@@ -79,7 +79,7 @@ import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
 import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
 import { STOPPED_AT_THE_END } from './helper-store.ts'
-import { finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
+import { currentTreesIn, finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
   REVIEW_NEEDS,
@@ -249,8 +249,8 @@ export const buildingEndLayer = (log: Log) => {
       const running = new Map<string, boolean>()
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
-      /** The Buildings whose proofs this engine refreshed. */
-      const refreshed = new Set<string>()
+      /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
+      const refreshed = new Map<string, string>()
 
       const buildingRow = (buildingId: string) =>
         Effect.gen(function* () {
@@ -631,9 +631,22 @@ export const buildingEndLayer = (log: Log) => {
             }
             case 'refresh': {
               if (yield* waitsOnBuilder(building)) return false
-              if (!refreshed.has(building.id) || (yield* staleLeft(building))) {
-                refreshed.add(building.id)
-                yield* BuildDesk.use((desk) => desk.refreshProofs(missionId))
+              const last = refreshed.get(building.id)
+              const stale = last === undefined ? [] : yield* staleLeft(building)
+              if (
+                last === undefined ||
+                (stale.length > 0 && last !== (yield* treesOf(missionId)))
+              ) {
+                yield* refresh(building)
+              } else if (stale.length > 0) {
+                // Refreshed on these trees already: nothing will run it again on its own, so the
+                // user is asked, and Retry refreshes once more.
+                refreshed.delete(building.id)
+                yield* raise(
+                  building,
+                  `The proofs could not all be run again: ${stale.join(', ')} stayed stale after the refresh.`,
+                )
+                return false
               } else if (yield* checksRed(building)) {
                 yield* BuildDesk.use((desk) => desk.judgeScope(missionId, 'end', null))
               }
@@ -712,8 +725,8 @@ export const buildingEndLayer = (log: Log) => {
         })
 
       /**
-       * Whether something stale waits for no one: an automated proof made stale with no failed
-       * run waiting for its fix, or a final check that is not red but ran on an older tree.
+       * What is stale and waits for no one: each automated proof made stale with no failed run
+       * waiting for its fix, and each final check that is not red but ran on an older tree.
        */
       const staleLeft = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -721,16 +734,35 @@ export const buildingEndLayer = (log: Log) => {
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
-          const proof = (yield* scenarioProofsIn(database, building.id)).some(
-            (row) =>
-              modeOf(row) === 'automated' &&
-              stateOf(row) === 'to_rerun' &&
-              !fixing.includes(row.scenario),
-          )
-          if (proof) return true
-          return (yield* finalChecksIn(database, building.missionId, building.id)).some(
-            (one) => one.verdict !== 'red' && !one.upToDate,
-          )
+          const proofs = (yield* scenarioProofsIn(database, building.id))
+            .filter(
+              (row) =>
+                modeOf(row) === 'automated' &&
+                stateOf(row) === 'to_rerun' &&
+                !fixing.includes(row.scenario),
+            )
+            .map((row) => row.scenario)
+          const checks = (yield* finalChecksIn(database, building.missionId, building.id))
+            .filter((one) => one.verdict !== 'red' && !one.upToDate)
+            .map((one) => (one.place === '' ? one.name : `${one.name} · ${one.place}`))
+          return [...proofs, ...checks]
+        })
+
+      /** The mission's current trees, as one key: a snapshot that saw a change changes it. */
+      const treesOf = (missionId: string) =>
+        Effect.gen(function* () {
+          const current = yield* currentTreesIn(yield* Database, missionId)
+          return JSON.stringify([...current].toSorted(([a], [b]) => a.localeCompare(b)))
+        })
+
+      /**
+       * The stale proofs and final checks run again, once per tree: the trees are read before the
+       * refresh, so a write that lands during it makes the next step refresh again.
+       */
+      const refresh = (building: BuildingRow) =>
+        Effect.gen(function* () {
+          refreshed.set(building.id, yield* treesOf(building.missionId))
+          yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
         })
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
@@ -789,7 +821,7 @@ export const buildingEndLayer = (log: Log) => {
           if (yield* unsettled(building)) {
             yield* said('a write landed after the last checks: they run again before Review')
             yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
-            yield* BuildDesk.use((desk) => desk.refreshProofs(missionId))
+            yield* refresh(building)
             return
           }
           const changed: Array<typeof reviewChangedAfter.$inferInsert> = []

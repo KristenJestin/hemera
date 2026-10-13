@@ -59,6 +59,7 @@ import {
   reviewPasses,
   runnerLeases,
   sessionDeliveries,
+  specProofs,
 } from '../src/engine/storage/schema.ts'
 import { QUIET, READING, call, eventsOf, grantOf, says } from './building-world.ts'
 import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
@@ -1382,6 +1383,83 @@ describe('The refresh', () => {
         .flatMap((one) => one.scenarios)
         .find((one) => one.scenario === 'R1.S2')
       expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+
+  test(
+    'a stale proof the refresh cannot run is refreshed once, said once, and holds the end on an error need instead of looping',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Export a function, not a flag.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // The proof is no longer in the Spec: nothing can run it again once RV1 makes it stale.
+            const database = yield* Database
+            yield* database
+              .delete(specProofs)
+              .where(and(eq(specProofs.missionId, mission.id), eq(specProofs.scenarioId, 'R1.S2')))
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => ""\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const refreshes = eventsOf(mission.id, 'building.proofs_refreshed')
+            const errorNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            // The end asks, or loops: each turn of a loop refreshes again.
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* errorNeeds).length > 0 || (yield* refreshes).length >= 3
+              }),
+              LONG,
+            )
+            // Long enough for a loop to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              refreshes: yield* refreshes,
+              journal: yield* journalOf(mission.id),
+              needs: yield* errorNeeds,
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+            }
+          }),
+        ),
+      )
+      expect(seen.refreshes).toHaveLength(1)
+      expect(
+        seen.journal.filter((line) => line.includes('The proofs were refreshed')),
+      ).toHaveLength(1)
+      expect(seen.stage).toBe('building')
+      expect(seen.view.phase).toBe('refresh')
+      expect(seen.needs).toHaveLength(1)
+      const [need] = seen.needs
+      if (need !== undefined && Predicate.isTagged(need.fields, 'Error')) {
+        expect(need.fields.failed).toContain('R1.S2')
+        expect(need.fields.proposals).toEqual(['Retry'])
+      }
     },
   )
 })
