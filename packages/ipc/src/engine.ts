@@ -194,8 +194,11 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
  */
 export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 
-/** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
-export const EngineReviewRpcs = DiffRpcs
+/**
+ * The live diff of a mission (#249) and its automatic review (#147), which the Building page reads
+ * (#151): each a layer of its own in the engine and in main (TS2589).
+ */
+export const EngineReviewRpcs = DiffRpcs.merge(AutoReviewRpcs)
 
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
@@ -204,8 +207,7 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
 )
 
 /**
- * Everything the engine serves: what main asks, and the proofs (#144) and the automatic review
- * (#147), served apart until their screens (R1, R10) forward them; their handlers are layers of
- * their own (TS2589).
+ * Everything the engine serves: what main asks, and the proofs (#144), served apart until their
+ * screen (R1) forwards them; their handlers are a layer of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs)
