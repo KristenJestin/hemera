@@ -2414,6 +2414,13 @@ export const buildings = sqliteTable(
     /** When `BuildingEnd` returned: a start finds a Building whose tasks are done without it. */
     endCalledAt: text('end_called_at'),
     summary: text('summary').$type<Masked<string>>(),
+    /** The checkpoint the automatic review read (#147); null before its end took it. */
+    reviewCheckpointId: text('review_checkpoint_id'),
+    /**
+     * When the Builder last ended a turn during the end (#147): a red of the final checks waits
+     * for a turn ended after the attempt it opened, across a restart.
+     */
+    builderTurnedAt: text('builder_turned_at'),
   },
   (table) => [
     uniqueIndex('building_active_of_mission')
@@ -2672,6 +2679,114 @@ export const documenterPasses = sqliteTable(
   ],
 )
 
+/**
+ * Where each scenario's proof stands in a Building (#144): `mode` (`automated`, `by_hand`), its
+ * requirement, its state (`waiting_red`, `red_recorded`, `held`, `not_reproducible`, `green`,
+ * `to_rerun`; `to_verify`, `validated`, `refused` by hand), the red and green runs that set it, the
+ * need that holds it, and for a manual proof the user's verdict: who, when, the note and the trees
+ * evaluated (JSON `[{ repository, tree }]`).
+ */
+export const scenarioProofs = sqliteTable(
+  'scenario_proofs',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    scenario: text('scenario').notNull(),
+    requirement: text('requirement').notNull(),
+    /** Its place in the Spec. */
+    rank: integer('rank').notNull(),
+    mode: text('mode').notNull(),
+    state: text('state').notNull(),
+    redRunId: text('red_run_id'),
+    greenRunId: text('green_run_id'),
+    /** The run a need holds it on: a red unlike Planning's, or a proof that already passes. */
+    heldRunId: text('held_run_id'),
+    needId: text('need_id'),
+    judgedBy: text('judged_by'),
+    judgedAt: text('judged_at'),
+    note: text('note').$type<Masked<string>>(),
+    trees: text('trees'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.scenario] })],
+)
+
+/**
+ * One run of a scenario's proof (#144): its phase (`red`, `green`, `rerun`), the line run, the test
+ * path and its sha256 then, the exit code and its classification (CT-35), the failing test and
+ * assertion, whether Planning's key line was found, the end of the output (masked), the whole
+ * output and the test as they were kept as evidence, the run, and the trees it ran on (JSON).
+ */
+export const proofRuns = sqliteTable(
+  'proof_runs',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    scenario: text('scenario').notNull(),
+    phase: text('phase').notNull(),
+    line: text('line').$type<Masked<string>>().notNull(),
+    testPath: text('test_path'),
+    testSha256: text('test_sha256'),
+    exitCode: integer('exit_code'),
+    classification: text('classification').notNull(),
+    failingTest: text('failing_test').$type<Masked<string>>(),
+    assertion: text('assertion').$type<Masked<string>>(),
+    keyLineMatched: integer('key_line_matched', { mode: 'boolean' }),
+    outputTail: text('output_tail').$type<Masked<string>>().notNull(),
+    evidenceId: text('evidence_id'),
+    testEvidenceId: text('test_evidence_id'),
+    runId: text('run_id'),
+    trees: text('trees').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('proof_runs_of_scenario').on(table.buildingId, table.scenario)],
+)
+
+/**
+ * The current tree of each repository of a mission's Workspace (#144, CT-38): the last #140
+ * snapshot taken of it, and when that snapshot began. What tells a proof or a check up to date.
+ */
+export const repositoryTrees = sqliteTable(
+  'repository_trees',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    tree: text('tree').notNull(),
+    takenAt: text('taken_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repository] })],
+)
+
+/**
+ * A write of a mission's session made before the red of some automated scenario was recorded, out
+ * of every proof's files (#144): the reviewers see it as "written before the red". `scenarios` the
+ * scenarios still waiting for their red then (JSON).
+ */
+export const writesBeforeRed = sqliteTable(
+  'writes_before_red',
+  {
+    id: text('id').primaryKey(),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    taskId: text('task_id'),
+    sessionId: text('session_id').notNull(),
+    scenarios: text('scenarios').notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('writes_before_red_of_building').on(table.buildingId)],
+)
+
 /** The files a running task holds, from its targets: one holder per file of a Building. */
 export const buildingClaims = sqliteTable(
   'building_claims',
@@ -2875,4 +2990,94 @@ export const dismissedServices = sqliteTable(
     at: text('at').notNull(),
   },
   (table) => [primaryKey({ columns: [table.missionId, table.runId] })],
+)
+
+/**
+ * A pass of one reviewer of the automatic review at the end of a Building (#147): its checkpoint,
+ * its lineage, where it stands (`waiting` for a slot, `running`, `done`, `failed`), the session it
+ * last reminded to report, and why it failed.
+ */
+export const reviewPasses = sqliteTable(
+  'review_passes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    checkpointId: text('checkpoint_id').notNull(),
+    reviewer: text('reviewer').notNull(),
+    lineage: text('lineage').notNull(),
+    state: text('state').notNull(),
+    remindedSession: text('reminded_session'),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    // A failed pass the user retried is followed by another of the same reviewer.
+    index('review_passes_of_building').on(table.buildingId, table.reviewer),
+    uniqueIndex('review_pass_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * A finding of a reviewer's pass (#147), in its order: its severity, what it is about, its text and
+ * evidence (masked), whether it contradicts the Spec, and its fate: a decision need (`need_id`, then
+ * the user's answer), a special task (`task_id`), recorded as a decision, or dismissed.
+ */
+export const reviewFindings = sqliteTable(
+  'review_findings',
+  {
+    id: text('id').primaryKey(),
+    passId: text('pass_id')
+      .notNull()
+      .references(() => reviewPasses.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    reviewer: text('reviewer').notNull(),
+    severity: text('severity').notNull(),
+    requirement: text('requirement'),
+    scenario: text('scenario'),
+    repository: text('repository'),
+    path: text('path'),
+    line: integer('line'),
+    text: text('text').$type<Masked<string>>().notNull(),
+    contradictsSpec: integer('contradicts_spec', { mode: 'boolean' }).notNull(),
+    evidence: text('evidence').$type<Masked<string>>(),
+    fate: text('fate'),
+    needId: text('need_id'),
+    answer: text('answer').$type<Masked<string>>(),
+    taskId: text('task_id'),
+  },
+  (table) => [uniqueIndex('review_findings_of_building').on(table.buildingId, table.number)],
+)
+
+/**
+ * A file that differs between the review's checkpoint and the final tree of its repository, taken
+ * at the exit of a Building (#147): its status and lines, and who wrote it after the review (a
+ * special task, `documenter`), null when no writer is known. Review shows it as "changed after the
+ * automatic review, covered only by the checks".
+ */
+export const reviewChangedAfter = sqliteTable(
+  'review_changed_after',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+    writtenBy: text('written_by'),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
 )

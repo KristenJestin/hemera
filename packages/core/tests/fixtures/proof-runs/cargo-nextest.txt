@@ -1,0 +1,97 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+────────────
+ Nextest run ID 09914094-b1a9-4717-9918-98c3272f228f with nextest profile: default
+    Starting 10 tests across 1 binary
+        PASS [   0.005s] ( 1/10) acme tests::reads_rows::test_case_1_with_one_row
+        PASS [   0.005s] ( 2/10) acme tests::rejects_blank
+        PASS [   0.005s] ( 3/10) acme tests::one_is_one
+        FAIL [   0.006s] ( 4/10) acme tests::exports_cases::case_1
+  stdout ───
+
+    running 1 test
+    test tests::exports_cases::case_1 ... FAILED
+
+    failures:
+
+    failures:
+        tests::exports_cases::case_1
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::exports_cases::case_1' (1510136) panicked at src/lib.rs:42:9:
+    assertion `left == right` failed
+      left: ""
+     right: "a"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.007s] ( 5/10) acme tests::exports_cases::case_2
+        FAIL [   0.007s] ( 6/10) acme tests::exports_async
+  stdout ───
+
+    running 1 test
+    test tests::exports_async ... FAILED
+
+    failures:
+
+    failures:
+        tests::exports_async
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::exports_async' (1510128) panicked at src/lib.rs:30:9:
+    assertion `left == right` failed
+      left: ""
+     right: "| total |"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.007s] ( 7/10) acme tests::exports_markdown::test_case_2_with_one_row
+        FAIL [   0.008s] ( 8/10) acme tests::exports_markdown::test_case_1_with_no_rows
+  stdout ───
+
+    running 1 test
+    test tests::exports_markdown::test_case_1_with_no_rows ... FAILED
+
+    failures:
+
+    failures:
+        tests::exports_markdown::test_case_1_with_no_rows
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::exports_markdown::test_case_1_with_no_rows' (1510150) panicked at src/lib.rs:48:9:
+    assertion `left == right` failed
+      left: ""
+     right: "| total |"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.008s] ( 9/10) acme tests::rejects_empty
+  stdout ───
+
+    running 1 test
+    test tests::rejects_empty - should panic ... FAILED
+
+    failures:
+
+    ---- tests::rejects_empty stdout ----
+    note: test did not panic as expected at src/lib.rs:18:8
+
+    failures:
+        tests::rejects_empty
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+
+        PASS [   0.008s] (10/10) acme tests::reads_plain
+────────────
+     Summary [   0.008s] 10 tests run: 6 passed, 4 failed, 0 skipped
+        FAIL [   0.006s] ( 4/10) acme tests::exports_cases::case_1
+        FAIL [   0.007s] ( 6/10) acme tests::exports_async
+        FAIL [   0.008s] ( 8/10) acme tests::exports_markdown::test_case_1_with_no_rows
+        FAIL [   0.008s] ( 9/10) acme tests::rejects_empty
+error: test run failed

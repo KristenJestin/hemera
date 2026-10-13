@@ -1,0 +1,35 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/work/acme/api[39m
+
+ [31m❯[39m tests/export.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m1 skipped[39m[2m)[22m[32m 5[2mms[22m[39m
+   [31m❯[39m exports [2m(3)[22m
+     [32m✓[39m one is one[32m 1[2mms[22m[39m
+[31m     [31m×[31m the invoices export as Markdown[39m[32m 3[2mms[22m[39m
+     [2m[90m↓[39m[22m the invoices export as CSV
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/export.test.ts[2m > [22mexports[2m > [22mthe invoices export as Markdown
+[31m[1mAssertionError[22m: expected '' to be '| total |' // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- | total |[39m
+
+[36m [2m❯[22m tests/export.test.ts:[2m10:26[22m[39m
+    [90m  8|[39m   })
+    [90m  9|[39m   test('the invoices export as Markdown', () => {
+    [90m 10|[39m     expect(toMarkdown()).toBe('| total |')
+    [90m   |[39m                          [31m^[39m
+    [90m 11|[39m   })
+    [90m 12|[39m   test.skip('the invoices export as CSV', () => {})
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (3)[39m
+[2m   Start at [22m 00:07:42
+[2m   Duration [22m 101ms[2m (transform 45%, import 26%, tests 19%, worker 9%)[22m
+

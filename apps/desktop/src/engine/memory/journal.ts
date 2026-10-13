@@ -29,8 +29,9 @@ import { Effect, Match, Option, Schema } from 'effect'
 
 import type { DomainEvents } from '../domain-events.ts'
 import { type DomainEvent, type EventPayload, readEvents } from '../journal.ts'
+import { REVIEW_NEEDS } from '../building/review-store.ts'
 import { getNeed } from '../needs.ts'
-import { needSentence } from './now.ts'
+import { FINDING_HELD, needSentence } from './now.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
 import { memoryJournal, missions, projectionCursors } from '../storage/schema.ts'
@@ -126,6 +127,11 @@ const answerSaid = (need: Need): string | null =>
           Permission: (answer) => answer.choice,
         }),
       )
+
+/** A finding of the automatic review that contradicts the Spec, asked of the user (#147). */
+const heldFinding = (event: DomainEvent): boolean =>
+  stringOf(event.payload, 'service') === REVIEW_NEEDS &&
+  stringOf(event.payload, 'kind') === 'Decision'
 
 const needLine =
   (
@@ -318,7 +324,7 @@ export const DEFAULT_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map<strin
     'need.created',
     needLine(
       (event, need) =>
-        `A ${needSaid(event)} waits on the user${need === null ? '' : `: ${needSentence(need)}`}`,
+        `A ${needSaid(event)} waits on the user${need === null ? '' : `: ${heldFinding(event) ? FINDING_HELD : needSentence(need)}`}`,
       () => HEMERA,
     ),
   ],

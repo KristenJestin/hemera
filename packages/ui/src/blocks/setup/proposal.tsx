@@ -287,10 +287,12 @@ function OtherScripts({
   )
 }
 
+const LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' })
+
 /** A language tag as its English name: `fr` is French; a tag it cannot name stays as it is. */
 function languageName(tag: string): string {
   try {
-    return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag) ?? tag
+    return LANGUAGE_NAMES.of(tag) ?? tag
   } catch {
     return tag
   }

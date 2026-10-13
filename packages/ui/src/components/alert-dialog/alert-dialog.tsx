@@ -47,6 +47,7 @@ export function AlertDialog({
   const [open, setOpen] = useState(false)
   return (
     <>
+      {/* react-doctor-disable-next-line click-events-have-key-events -- a key that presses the control inside fires this click too */}
       <span
         className="contents"
         onClickCapture={(event) => {

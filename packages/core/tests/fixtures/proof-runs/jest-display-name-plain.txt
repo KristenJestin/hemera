@@ -1,0 +1,43 @@
+FAIL unit tests/export.test.js
+  ● Console
+
+    console.log
+      rows read
+
+      at Object.log (tests/export.test.js:5:13)
+
+  ● exports › the invoices export as Markdown
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "| total |"
+    Received: ""
+
+      4 |   test('the invoices export as Markdown', () => {
+      5 |     console.log('rows read')
+    > 6 |     expect(toMarkdown()).toBe('| total |')
+        |                          ^
+      7 |   })
+      8 | })
+      9 |
+
+      at Object.toBe (tests/export.test.js:6:26)
+
+FAIL unit tests/broken.test.js
+  ● Test suite failed to run
+
+    Cannot find module './missing-module' from 'tests/broken.test.js'
+
+    > 1 | require('./missing-module')
+        | ^
+      2 | test('never runs', () => {})
+      3 |
+
+      at Resolver._throwModNotFoundError (node_modules/.pnpm/jest-resolve@30.2.0/node_modules/jest-resolve/build/index.js:863:11)
+      at Object.require (tests/broken.test.js:1:1)
+
+Test Suites: 2 failed, 2 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.172 s, estimated 1 s
+Ran all test suites.

@@ -20,7 +20,7 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -370,6 +370,19 @@ export interface GitService {
    */
   readonly patchShape: (folder: string, patch: string) => Effect.Effect<PatchShape, GitRefusal>
   /**
+   * A proof's addition merged into a file of the Workspace (#144, CT-37): the file at `commit` is
+   * the base, `ours` the Workspace's version, and the base with `patch` applied theirs; `git
+   * merge-file` merges them, nothing written anywhere but a scratch folder. Answers the three
+   * versions and the merge, conflict markers included when it is not clean.
+   */
+  readonly mergeAddition: (
+    folder: string,
+    commit: string,
+    path: string,
+    patch: string,
+    ours: string,
+  ) => Effect.Effect<MergedAddition, GitRefusal>
+  /**
    * Commits only these paths, each as the worktree has it, with the user's own identity and
    * configuration (#142): every other change of the working tree and of the index is left as it
    * is, and a path neither on disk nor tracked is left out. Answers the commit, or null when
@@ -380,6 +393,15 @@ export interface GitService {
     paths: ReadonlyArray<string>,
     message: string,
   ) => Effect.Effect<string | null, GitRefusal>
+}
+
+/** A three-way merge of a proof's addition: its three versions and what the merge gave. */
+export interface MergedAddition {
+  readonly base: string
+  readonly ours: string
+  readonly theirs: string
+  readonly merged: string
+  readonly clean: boolean
 }
 
 /** A file that differs between two commits. */
@@ -769,6 +791,8 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         ],
         'read',
       ).pipe(Effect.map((printed) => printed !== '')),
+    mergeAddition: (folder, commit, path, patch, ours) =>
+      mergeIn(run, folder, commit, path, patch, ours),
     patchShape: (folder, patch) =>
       withPatchFile(patch, (file) =>
         Effect.gen(function* () {
@@ -803,6 +827,110 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
         }),
       ),
   })
+
+/** The three versions of an addition merged in a scratch folder, `ours` rewritten by the merge. */
+const mergeIn = (
+  run: GitSpawn,
+  folder: string,
+  commit: string,
+  path: string,
+  patch: string,
+  ours: string,
+) =>
+  withPatchFile(patch, (file) =>
+    Effect.gen(function* () {
+      const scratch = dirname(file)
+      const base = yield* run(folder, ['show', `${commit}:${path}`], 'read')
+      // The patch applied to the base in a repository of its own that borrows these objects.
+      const objects = yield* run(
+        folder,
+        ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
+        'read',
+      )
+      const repository = join(scratch, 'repository')
+      mkdirSync(repository)
+      yield* run(repository, ['init', '--quiet'], 'read')
+      const borrowed = join(repository, '.git', 'objects', 'info')
+      mkdirSync(borrowed, { recursive: true })
+      writeFileSync(join(borrowed, 'alternates'), `${objects.trim()}\n`)
+      yield* run(repository, ['read-tree', '--end-of-options', commit], 'read')
+      yield* run(repository, ['apply', '--cached', file], 'read')
+      const theirs = yield* run(repository, ['show', `:${path}`], 'read')
+      const sides = {
+        ours: join(scratch, 'ours'),
+        base: join(scratch, 'base'),
+        theirs: join(scratch, 'theirs'),
+      }
+      // Line endings differ between a checkout and its blobs (Git for Windows' autocrlf, a file
+      // committed with CRLF): the three sides are merged with LF lines, then given the checkout's.
+      writeFileSync(sides.ours, lf(ours))
+      writeFileSync(sides.base, lf(base))
+      writeFileSync(sides.theirs, lf(theirs))
+      // Git answers the number of conflicts as its exit code: the merge is read from the file.
+      const clean = yield* run(
+        scratch,
+        [
+          'merge-file',
+          '-L',
+          'workspace',
+          '-L',
+          'freeze',
+          '-L',
+          'proof',
+          sides.ours,
+          sides.base,
+          sides.theirs,
+        ],
+        'work',
+      ).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitFailed', () => Effect.succeed(false)),
+      )
+      const merged = withEndingsOf(ours, readFileSync(sides.ours, 'utf8'))
+      return { base, ours, theirs, merged, clean: clean && !merged.includes('<<<<<<< workspace') }
+    }),
+  )
+
+const lf = (text: string) => text.replaceAll('\r\n', '\n')
+
+/**
+ * Merged lines given back the endings of the Workspace's file: the lines both share at its start
+ * and at its end keep their own endings, in place; between them, a line it holds keeps its ending
+ * (a repeated line, that of its last occurrence there), any other line takes the ending of the line
+ * above.
+ */
+function withEndingsOf(ours: string, merged: string): string {
+  if (!ours.includes('\r\n')) return merged
+  const held = ours.split('\n').slice(0, -1)
+  const textOf = (line: string) => (line.endsWith('\r') ? line.slice(0, -1) : line)
+  const endingOf = (line = '') => (line.endsWith('\r') ? '\r\n' : '\n')
+  const lines = merged.split('\n')
+  const last = lines.pop() ?? ''
+  let leading = 0
+  while (
+    leading < Math.min(held.length, lines.length) &&
+    textOf(held[leading] ?? '') === lines[leading]
+  )
+    leading += 1
+  let trailing = 0
+  while (
+    trailing < Math.min(held.length, lines.length) - leading &&
+    textOf(held[held.length - 1 - trailing] ?? '') === lines[lines.length - 1 - trailing]
+  )
+    trailing += 1
+  const endings = new Map(
+    held.slice(leading, held.length - trailing).map((line) => [textOf(line), endingOf(line)]),
+  )
+  let above = endingOf(held[0])
+  const ended = lines.map((line, at) => {
+    if (at < leading) above = endingOf(held[at])
+    else if (at >= lines.length - trailing)
+      above = endingOf(held[held.length - (lines.length - at)])
+    else above = endings.get(line) ?? above
+    return `${line}${above}`
+  })
+  return `${ended.join('')}${last}`
+}
 
 /** A patch written to a scratch file for the time of a use, then removed. */
 const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>

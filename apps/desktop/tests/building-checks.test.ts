@@ -18,7 +18,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect, Fiber, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { BuilderHold } from '../src/engine/building/builder.ts'
+import { type BuilderHold, tasksDoneEnd } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { removeCommand, saveCommand } from '../src/engine/catalogue.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
@@ -59,7 +59,8 @@ const checksEngine = (dataFolder: string, hold: BuilderHold = () => Effect.void)
   sessionsEngine(dataFolder, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
-    building: { hold },
+    // The end of a Building is #147's suite: here the tasks' end only says they are done.
+    building: { hold, end: tasksDoneEnd },
   })
 
 /**

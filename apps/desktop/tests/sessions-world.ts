@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AgentProvider } from '@hemera/core/domain'
-import { AgentNotSignedIn } from '@hemera/ipc'
+import { AgentNotSignedIn, type LaunchFailed } from '@hemera/ipc'
 import { Duration, Effect, Layer } from 'effect'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
@@ -111,7 +111,7 @@ export const sessionsEngine = (
     readonly sessions?: Omit<SessionsParts, 'roles' | 'starter' | 'timings'>
     readonly missions?: Omit<Partial<MissionParts>, 'guards'>
     /** Runs as each agent starts, after its child and before the agent answers. */
-    readonly starting?: () => Effect.Effect<void>
+    readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
     /** Bounds other than `FAST`, for a suite whose turns are held longer. */
     readonly timings?: Partial<SessionTimings>
     /** The ports of the tools' gate a suite fills (a judge, the home folder). */
@@ -132,6 +132,8 @@ export const sessionsEngine = (
     readonly building?: ProfileParts['building']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
+    /** The machine's processes as the supervisor sees them, when a suite answers for some. */
+    readonly hostProcesses?: ProfileParts['hostProcesses']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [] }
@@ -151,7 +153,7 @@ export const sessionsEngine = (
                 .pipe(Effect.orDie)
               world.pids.push(child.pid)
             }
-            if (options.starting !== undefined) yield* options.starting()
+            if (options.starting !== undefined) yield* options.starting(sessionId)
             const agent = fakeAgent(scriptOf(world.agents.length))
             world.agents.push(agent)
             return agent.process
@@ -161,6 +163,7 @@ export const sessionsEngine = (
   )
   const parts = {
     gh: options.gh,
+    hostProcesses: options.hostProcesses,
     ticketProviders: options.ticketProviders,
     ticketSync: options.ticketSync,
     building: options.building,
@@ -214,8 +217,11 @@ export const acmeIn = (work: string) =>
     return { project, mission, main, owner: { kind: 'mission' as const, missionId: mission.id } }
   })
 
-/** Waits, on the real clock, until a check holds; fails after `boundMillis`, five seconds. */
-export const until = <E, R>(check: Effect.Effect<boolean, E, R>, boundMillis = 5_000) =>
+/** How long `until` waits unless told: five seconds. */
+export const UNTIL_MS = 5_000
+
+/** Waits, on the real clock, until a check holds; fails after `boundMillis`, `UNTIL_MS`. */
+export const until = <E, R>(check: Effect.Effect<boolean, E, R>, boundMillis = UNTIL_MS) =>
   Effect.gen(function* () {
     for (let tries = 0; tries < boundMillis / 20; tries += 1) {
       if (yield* check) return
