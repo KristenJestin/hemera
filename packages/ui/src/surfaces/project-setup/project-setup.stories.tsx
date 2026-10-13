@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
+import { foldedOut } from '../../exit-play.ts'
 import type { SetupCardEntry } from './project-setup.tsx'
 import { SetupFixture } from './setup-fixture.tsx'
 import { ProjectTasks, SetupTask, type SetupTaskProps } from './setup-task.tsx'
@@ -552,6 +553,43 @@ export const TaskSummary: Story = {
     )
     await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
     expect(await within(said).findByText('Commands', { selector: 'strong' })).toBeVisible()
+  },
+}
+
+/** The summary folded with the earlier messages open inside it: they fold with it. */
+async function foldWithEarlier(): Promise<HTMLElement> {
+  const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+  const said = await within(details).findByRole('region', { name: 'What the agent said' })
+  await waitFor(() => expect(said).toBeVisible())
+  await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
+  await userEvent.click(await within(said).findByRole('button', { name: /Earlier messages/ }))
+  const earlier = await within(said).findByRole('list', { name: 'Earlier messages' })
+  await userEvent.click(within(said).getByRole('button', { name: 'Fold the summary' }))
+  await waitFor(() => expect(within(said).queryByText(/Reading/)).toBeNull())
+  expect(within(said).queryByRole('button', { name: /Earlier messages/ })).toBeNull()
+  return earlier
+}
+
+/** Folding the summary with the earlier messages open: their list folds with the summary. */
+export const TaskSummaryFoldedWithEarlier: Story = {
+  render: () => (
+    <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+  ),
+  play: async () => {
+    await foldedOut(await foldWithEarlier())
+  },
+}
+
+/** The same with reduced motion: the summary and the earlier messages are gone at once. */
+export const TaskSummaryFoldedWithEarlierReducedMotion: Story = {
+  render: () => (
+    <MotionConfig reducedMotion="always">
+      <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+    </MotionConfig>
+  ),
+  play: async () => {
+    const earlier = await foldWithEarlier()
+    await waitFor(() => expect(earlier).not.toBeInTheDocument())
   },
 }
 
