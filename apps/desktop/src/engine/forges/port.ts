@@ -75,7 +75,7 @@ import {
   identify,
 } from './identity.ts'
 import { type ForgeAnswer, type ForgeCall, ForgeRunner, type ForgeRunFailure } from './runner.ts'
-import { REPO_NAME, SAFE_WORD, shapeOf } from './shapes.ts'
+import { type ParsedCommand, REPO_NAME, SAFE_WORD, parseCommand } from './shapes.ts'
 
 /** The service the forge's needs belong to. */
 export const FORGE_NEEDS = needService('forge')
@@ -267,6 +267,14 @@ export const contextLine = (
   return forge === 'bitbucket-cloud'
     ? `${line} --workspace ${quoted(named, platform)}`
     : `${line} --project ${quoted(projectKey(named), platform)}`
+}
+
+/** Whether a command carries each flag of a place with its value: it names its own repository. */
+const carries = (parsed: ParsedCommand, place: ReadonlyArray<string>): boolean => {
+  for (let at = 0; at < place.length; at += 2) {
+    if (parsed.flags.get(place[at] ?? '') !== place[at + 1]) return false
+  }
+  return true
 }
 
 /** The CLI a forge is reached through, or none. */
@@ -942,15 +950,33 @@ export const forgePort = () => {
                 place,
               }
               const run = (args: ReadonlyArray<string>, input?: string) => {
-                // Without its place, a write matches no shape: anything but a read is refused.
-                if (place.length === 0 && shapeOf(cli, args)?.class !== 'read') {
-                  return Effect.fail(
-                    new ForgeRefused({
-                      reason: 'The remote of this repository names no repository on its forge.',
-                    }),
-                  )
+                const parsed = parseCommand(cli, args)
+                if (parsed?.shape.class !== 'read') {
+                  // Without its place, a write matches no shape: anything but a read is refused.
+                  if (place.length === 0) {
+                    return Effect.fail(
+                      new ForgeRefused({
+                        reason: 'The remote of this repository names no repository on its forge.',
+                      }),
+                    )
+                  }
+                  // A write goes to its own repository only, never another of the same host.
+                  if (parsed !== null && !carries(parsed, place)) {
+                    return Effect.fail(
+                      new ForgeRefused({
+                        reason: 'This write names another repository than the one it is for.',
+                      }),
+                    )
+                  }
                 }
-                const plain: ForgeCall = { cli, forge, host, projectId: project.id, args }
+                const plain: ForgeCall = {
+                  cli,
+                  forge,
+                  host,
+                  projectId: project.id,
+                  args,
+                  context: bktContext,
+                }
                 const call: ForgeCall = input === undefined ? plain : { ...plain, input }
                 return runner.run(call).pipe(
                   Effect.catchTags({

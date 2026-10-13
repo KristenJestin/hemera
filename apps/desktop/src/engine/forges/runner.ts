@@ -54,6 +54,8 @@ export interface ForgeCall {
   readonly host: string
   readonly projectId: string
   readonly args: ReadonlyArray<string>
+  /** The bkt context the port chose for the host, which a bkt write must name; none otherwise. */
+  readonly context?: string | null
   /** Written on the standard input, then closed. */
   readonly input?: string
 }
@@ -119,6 +121,14 @@ const attachesOwnOnly = (
   // `path#caption`: the caption is the forge's, the path the file read.
   return attachable(value.split('#')[0] ?? '')
 }
+
+/** Whether a bkt write names the context its call carries, the one chosen for the host. */
+const throughItsContext = (call: ForgeCall, parsed: ParsedCommand): boolean =>
+  call.cli !== 'bkt' ||
+  parsed.shape.class === 'read' ||
+  (call.context !== undefined &&
+    call.context !== null &&
+    parsed.flags.get('--context') === call.context)
 
 /** What each CLI is told so that it never waits on a person nor decorates what it prints. */
 const QUIET: Readonly<Record<ForgeCli, Readonly<Record<string, string>>>> = {
@@ -309,11 +319,13 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         Effect.gen(function* () {
           const command = secrets.mask([call.cli, ...call.args].join(' '))
           const parsed = parseCommand(call.cli, call.args)
-          // A command for another host than its call's would reach a forge it was not meant for;
-          // an image from anywhere but Hemera's screenshots would upload a file of the user's.
+          // A command for another host than its call's would reach a forge it was not meant for,
+          // and so would a bkt write through another context than the one chosen for the host; an
+          // image from anywhere but Hemera's screenshots would upload a file of the user's.
           if (
             parsed === null ||
             !aimsAt(call.cli, call.args, call.host) ||
+            !throughItsContext(call, parsed) ||
             !attachesOwnOnly(parsed, settings.attachable)
           ) {
             return yield* new ForgeCommandRefused({ command })
