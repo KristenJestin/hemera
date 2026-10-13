@@ -177,6 +177,7 @@ const now = (more: Partial<Now> = {}): Now => ({
   waiting: [],
   running: [],
   slotWait: null,
+  end: [],
   next: null,
   doing: [],
   ...more,

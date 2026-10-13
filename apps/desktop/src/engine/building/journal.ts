@@ -1,9 +1,11 @@
 /**
  * The pre-launch check's and the launch's lines in a mission's Journal (#139), and the Building's
- * (#141) with its attempts and their verdicts (#142), its checks (#143) and its proofs (#144): each the projection of the domain event written in the same transaction as what it
- * records.
+ * (#141) with its attempts and their verdicts (#142), its checks (#143), its proofs (#144) and its
+ * end with the automatic review (#147): each the projection of the domain event written in the same
+ * transaction as what it records.
  */
 
+import { REVIEWERS, REVIEWER_NAMES, REVIEW_SEVERITIES } from '@hemera/core/domain'
 import { AgentAuthor, HemeraAuthor, type MemoryAuthor, UserAuthor } from '@hemera/ipc'
 import { Effect, Option, Schema } from 'effect'
 
@@ -52,6 +54,34 @@ const documentedSaid = (payload: EventPayload): string => {
   const whys = stringsOf(payload, 'whys')
   const files = stringsOf(payload, 'files').map((file, at) => `${file} (${whys[at] ?? ''})`)
   return `The documenter updated ${files.join(', ')}.`
+}
+
+/** The reviewer an event of the automatic review names. */
+const reviewerSaid = (payload: EventPayload): string => {
+  const reviewer = REVIEWERS.find((one) => one === payload['reviewer'])
+  return reviewer === undefined ? 'a reviewer' : REVIEWER_NAMES[reviewer]
+}
+
+/** What a reviewer's pass ended on: its failure, or its findings counted by severity. */
+const passEndedSaid = (payload: EventPayload): string => {
+  const failed = stringOf(payload, 'failed')
+  if (failed !== '') return `The ${reviewerSaid(payload)}'s pass failed: ${failed}.`
+  const counts = REVIEW_SEVERITIES.flatMap((severity) => {
+    const count = numberOf(payload, severity)
+    if (count === 0) return []
+    return [`${String(count)} ${severity}${severity === 'blocking' || count === 1 ? '' : 's'}`]
+  })
+  return `The ${reviewerSaid(payload)} reported ${counts.length === 0 ? 'no finding' : counts.join(', ')}.`
+}
+
+/** The verdict of the end's final checks, as the end sequence judged them. */
+const finalChecksSaid = (payload: EventPayload): string => {
+  const checks = stringsOf(payload, 'checks')
+  if (checks.length > 0) return `Final checks: ${checks.join(', ')}.`
+  const verdict = stringOf(payload, 'verdict')
+  if (verdict === 'green') return 'The final checks are green.'
+  if (verdict === 'red') return 'The final checks are red: the Builder fixes them.'
+  return 'The final checks: none ran.'
 }
 
 /** What an attempt is on: a task, or a requirement's or the end's checks. */
@@ -277,9 +307,71 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
       return `${stringOf(payload, 'check')} waits for ${waiting === 'permission' ? 'your permission' : waiting}.`
     }),
   ],
+  ['building.final_checks', lineOf(byHemera, finalChecksSaid)],
   [
-    'building.final_checks',
-    lineOf(byHemera, (payload) => `Final checks: ${stringsOf(payload, 'checks').join(', ')}.`),
+    'building.end_started',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The end of ${stringOf(payload, 'label')} started: documentation, final checks, then the automatic review.`,
+    ),
+  ],
+  [
+    'review.checkpoint_taken',
+    lineOf(byHemera, () => 'The checkpoint of the automatic review is taken.'),
+  ],
+  [
+    'review.pass_waiting',
+    lineOf(byHemera, (payload) => `The ${reviewerSaid(payload)} waits for a free agent slot.`),
+  ],
+  [
+    'review.pass_started',
+    lineOf(byHemera, (payload) => `The ${reviewerSaid(payload)} started its pass.`),
+  ],
+  ['review.pass_ended', lineOf(agentOrHemera, passEndedSaid)],
+  [
+    'review.finding_need',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Finding ${String(numberOf(payload, 'finding'))} of the ${reviewerSaid(payload)} contradicts the Spec: the user decides.`,
+    ),
+  ],
+  [
+    'review.finding_answered',
+    lineOf(
+      byUser,
+      (payload) =>
+        `The user answered finding ${String(numberOf(payload, 'finding'))}: ${stringOf(payload, 'answer')}.`,
+    ),
+  ],
+  [
+    'review.special_task',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'task')}, a special task from finding ${String(numberOf(payload, 'finding'))} of the ${reviewerSaid(payload)}: ${stringOf(payload, 'title')}.`,
+    ),
+  ],
+  [
+    'building.end_retried',
+    lineOf(byUser, () => 'The user asked the end of the Building to try its step again.'),
+  ],
+  [
+    'building.documenter_delta',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `The special tasks changed ${stringsOf(payload, 'files').join(', ')} outside the doc recipes: the documenter runs again on them.`,
+    ),
+  ],
+  [
+    'building.ended',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `${stringOf(payload, 'label')} ended: the mission moves to Review; ${String(numberOf(payload, 'changedAfter'))} file(s) changed after the automatic review.`,
+    ),
   ],
   [
     'mission.changed_outside',

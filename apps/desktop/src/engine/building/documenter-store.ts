@@ -57,9 +57,11 @@ export const reportedFiles = json(Schema.Array(ReportedFile))
 export const filesOfPass = (row: PassRow): ReadonlyArray<PassFile> =>
   Option.getOrElse(passFiles.read(row.files), () => [])
 
-/** Why one more pass cannot run in a Building that has these. */
+/** Why one more pass cannot run in a Building that has these: a failed pass counts for nothing. */
 export const passesSpent = (passes: ReadonlyArray<PassRow>): string | null =>
-  passes.length >= DOCUMENTER_PASSES ? 'the documenter already ran twice in this Building' : null
+  passes.filter((one) => one.state !== 'failed').length >= DOCUMENTER_PASSES
+    ? 'the documenter already ran twice in this Building'
+    : null
 
 /** The passes of a Building, in their order. */
 export const passesIn = (reader: Reader, buildingId: string) =>
