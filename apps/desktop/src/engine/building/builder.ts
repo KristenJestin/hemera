@@ -738,6 +738,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             const red = yield* proofs.unproven(row)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
+            // A proof of the mission runs: the end is judged again once it ends (#258).
+            if (stuck === null) return
             const allStuck = red.length > 0 && stuck.length === red.length
             // The end never waits on a scenario nothing moves any more: the user is asked, once;
             // asked about scenarios that moved since, the question is withdrawn.

@@ -10,7 +10,7 @@
  * Workspace, and real `node --test` files as the proofs.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
@@ -1587,6 +1587,21 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
       .where(eq(buildingDecisions.kind, 'proofs_unproven'))
   })
 
+  /** R1.S2's test, which waits for `release` to exist before it checks `export.ts`. */
+  const heldProof = (log: string, release: string) => () => ({
+    'R1.S2': automated(
+      EXPORT_PATH,
+      testFile(
+        [
+          `  appendFileSync(${JSON.stringify(log)}, 'ran\\n')`,
+          `  while (!existsSync(${JSON.stringify(release)})) await new Promise((done) => setTimeout(done, 20))`,
+          "  const file = new URL('../export.ts', import.meta.url)",
+          "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'export.ts has no toMarkdown')",
+        ].join('\n'),
+      ),
+    ),
+  })
+
   test('a turn that runs a command which rewrites the failing file, then ends: no question, and the proof is run again', async () => {
     // Once held, the Builder's turns stay open until the test lets them end.
     let held = false
@@ -1638,6 +1653,57 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
       ['green', 'assertion_failed'],
       ['green', 'passed'],
     ])
+  })
+
+  test('Try again, then a Builder turn that writes nothing while the proof runs: the question does not come back before the run ends', async () => {
+    const log = join(scratch, 'runs.log')
+    const release = join(scratch, 'release')
+    writeFileSync(release, '')
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(heldProof(log, release))
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          // The failed green, which the quiet Builder no longer acts on: the user is asked.
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+            20_000,
+          )
+          const needId = (yield* unprovenAsked)[0]?.needId ?? ''
+          rmSync(release)
+          yield* answerNeed({
+            id: needId,
+            answer: ChosenAnswer.make({ option: TRY_AGAIN }),
+            key: 'b',
+          })
+          yield* until(Effect.sync(() => runsIn(log) === 3))
+          // The Builder's turn on the answer ends, writing nothing, while the proof still runs.
+          yield* deliveredTo(mission.id, `The user answered: ${TRY_AGAIN}`)
+          yield* Effect.sleep('2 seconds')
+          const during = yield* unprovenAsked
+          writeFileSync(release, '')
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.length === 2),
+            20_000,
+          )
+          return {
+            during: during.map((one) => one.state),
+            after: (yield* unprovenAsked).map((one) => one.state),
+            runs: (yield* proofOf(mission.id, 'R1.S2')).runs.length,
+          }
+        }),
+      ),
+    )
+    expect(seen.during).toEqual(['answered'])
+    // Once the run failed again, the Builder still writing nothing, it is asked again.
+    expect(seen.after).toEqual(['answered', 'pending'])
+    expect(seen.runs).toBe(3)
   })
 })
 
