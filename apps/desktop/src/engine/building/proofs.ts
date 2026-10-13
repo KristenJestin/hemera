@@ -349,6 +349,8 @@ export const buildingProofs = (parts: ProofParts) => {
   const proving = new Map<string, number>()
   /** The Buildings whose stuck scenarios were not judged while a proof ran: judged once it ends. */
   const unjudged = new Map<string, BuildingRow>()
+  /** Each mission's scenarios an environment need's Retry runs again, until recorded (#306). */
+  const retrying = new Map<string, ReadonlyArray<string>>()
   const begin = (missionId: string) =>
     Effect.sync(() => {
       proving.set(missionId, (proving.get(missionId) ?? 0) + 1)
@@ -1626,6 +1628,16 @@ export const buildingProofs = (parts: ProofParts) => {
    */
   const retried = (building: BuildingRow, scenario: string) =>
     Effect.gen(function* () {
+      const { missionId } = building
+      // Said as running before it leaves `held`, and until its run is recorded, whose events drive
+      // the end again: the end never takes it meanwhile for a stale proof nothing runs.
+      const over = Effect.sync(() => {
+        const left = [...(retrying.get(missionId) ?? [])]
+        left.splice(left.indexOf(scenario), 1)
+        if (left.length === 0) retrying.delete(missionId)
+        else retrying.set(missionId, left)
+      })
+      retrying.set(missionId, [...(retrying.get(missionId) ?? []), scenario])
       const heldOn = yield* mutate('running a proof again', (transaction) =>
         Effect.gen(function* () {
           const row = yield* scenarioProofIn(transaction, building.id, scenario)
@@ -1641,18 +1653,22 @@ export const buildingProofs = (parts: ProofParts) => {
           })
           return { result: again, events: [] }
         }),
-      )
+      ).pipe(Effect.onError(() => over))
       const phase = heldOn ?? 'red'
       yield* parts.background(
         inTurn(
-          building.missionId,
+          missionId,
           phase === 'red' ? redOf(building, scenario) : greenOf(building, scenario, phase),
         ).pipe(
           Effect.asVoid,
           Effect.catchCause((cause) => said(`a proof was not run again: ${String(cause)}`)),
+          Effect.ensuring(over),
         ),
       )
     })
+
+  /** The scenarios an environment need's Retry runs again now, their run not recorded yet. */
+  const rerunning = (missionId: string) => Effect.sync(() => retrying.get(missionId) ?? [])
 
   // ---- proof_run.
 
@@ -1821,6 +1837,7 @@ export const buildingProofs = (parts: ProofParts) => {
     answeredIn,
     afterAnswer,
     retried,
+    rerunning,
     proofRun,
     refresh,
     touched,

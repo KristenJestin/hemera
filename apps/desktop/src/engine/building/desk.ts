@@ -43,6 +43,11 @@ export interface BuildWork {
    */
   readonly refreshProofs: (missionId: string) => Effect.Effect<Refreshed>
   /**
+   * The mission's scenarios an environment need's Retry runs again now, their result not recorded
+   * yet: the end waits for it rather than taking them for stale proofs nothing runs (#306).
+   */
+  readonly rerunning: (missionId: string) => Effect.Effect<ReadonlyArray<string>>
+  /**
    * The mission's Builder, resumed when its session ended while its Building is still active:
    * what #147's end calls while it waits on the Builder. Never while a need about the Builder's
    * sessions waits on the user (a start, a provider limit): its Retry does; nor before this
@@ -131,6 +136,7 @@ export const buildDeskLayer = Layer.effect(
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
       proofRun: (grant, args) => Effect.flatMap(work, (one) => one.proofRun(grant, args)),
       refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
+      rerunning: (missionId) => Effect.flatMap(work, (one) => one.rerunning(missionId)),
       ensureBuilder: (missionId) => Effect.flatMap(work, (one) => one.ensureBuilder(missionId)),
       builderNow: (missionId) => Effect.flatMap(work, (one) => one.builderNow(missionId)),
       resumed: Effect.flatMap(work, (one) => one.resumed),
