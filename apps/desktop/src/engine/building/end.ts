@@ -34,6 +34,7 @@ import {
   REVIEWER_NAMES,
   RESULT_IS_RIGHT,
   ROOT_REPOSITORY,
+  SESSION_STATES,
   SPEC_IS_RIGHT,
   specialTaskId,
   specialTaskOf,
@@ -54,7 +55,7 @@ import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
 import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
-import { getSession } from '../sessions/store.ts'
+import { getSession, sessionsIn } from '../sessions/store.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   agentSessions,
@@ -801,7 +802,12 @@ export const buildingEndLayer = (log: Log) => {
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
-          yield* ToolAccess.use((access) => access.exiting(missionId))
+          // The tree is every lineage the mission has had: one that ended on its own before the exit
+          // is of it too. One born later is stopped by the stops, or is born after the exit.
+          const lineages = (yield* sessionsIn(SESSION_STATES, { kind: 'mission', missionId })).map(
+            (one) => one.lineage,
+          )
+          yield* ToolAccess.use((access) => access.exiting(missionId, lineages))
           const once = Sessions.use((sessions) =>
             sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END),
           ).pipe(

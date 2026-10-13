@@ -74,6 +74,7 @@ import { QUIET, READING, call, eventsOf, grantOf, says } from './building-world.
 import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
+import { ToolAccess } from '../src/engine/tools/access.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -1122,6 +1123,38 @@ describe('What the review saw, and what changed after it', () => {
 })
 
 describe('The exit', () => {
+  test(
+    'once the Building ended, a call the user allows runs again for a session born after the exit, never for its tree',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // What Hemera does on a call the user allowed, as Review's own session would ask it.
+            const allowed = (lineage: string) =>
+              ToolAccess.use((access) =>
+                access.counted({ missionId: mission.id, lineage }, Effect.succeed('ran')),
+              )
+            return {
+              born: yield* allowed(crypto.randomUUID()),
+              builder: yield* allowed(builder.session.lineage),
+            }
+          }),
+        ),
+      )
+      expect(seen.born).toBe('ran')
+      expect(seen.builder).toBeNull()
+    },
+  )
   test(
     'a write that lands after the last checks, as the end exits, is checked before Review',
     SLOW,
