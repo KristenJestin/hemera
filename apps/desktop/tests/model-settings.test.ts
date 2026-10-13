@@ -67,6 +67,7 @@ describe('Models by role', () => {
       'helper',
       'prototyper',
       'documenter',
+      'spec-reviewer',
       'code-reviewer',
     ])
     expect(roles.find((role) => role.role === 'builder')).toEqual({

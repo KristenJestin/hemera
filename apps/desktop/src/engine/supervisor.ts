@@ -184,12 +184,24 @@ function linesOf(stream: Readable, read: (line: string) => void, done?: () => vo
   })
 }
 
-/** `taskkill` on the tree of a pid; it answers once the kill was asked. */
+/**
+ * How long `taskkill` may take to ask for a tree's end. Whoever kills waits for the kill to
+ * answer (the start's orphan sweep, before any session is rebuilt): a `taskkill` that hung would
+ * hold them for ever. Past it, the pid is watched as after any kill, and said alive if it is.
+ */
+export const TASKKILL_MS = 5_000
+
+/** `taskkill` on the tree of a pid; it answers once the kill was asked, or `TASKKILL_MS` passed. */
 const taskkill = (pid: number) =>
   Effect.callback<void>((resume) => {
-    execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {
-      resume(Effect.void)
-    })
+    execFile(
+      'taskkill',
+      ['/PID', String(pid), '/T', '/F'],
+      { windowsHide: true, timeout: TASKKILL_MS },
+      () => {
+        resume(Effect.void)
+      },
+    )
   })
 
 /** How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow. */
@@ -442,7 +454,8 @@ export class ProcessSupervisor extends Context.Service<
     ) => Effect.Effect<Supervised, never, Scope.Scope>
     /**
      * The roots of `kind` a previous engine left: each still alive and still the same program is
-     * ended as a tree; every one is forgotten.
+     * ended as a tree; every one is forgotten, but one alive whose program the system could not
+     * say, or that its kill did not end, which is kept for the next start.
      */
     readonly endOrphans: (kind: ProcessOwner['kind']) => Effect.Effect<ReadonlyArray<Orphan>>
   }
@@ -674,20 +687,34 @@ export const processSupervisorLayer = Layer.effect(
         for (const root of left) {
           let ours = false
           let gone = false
+          const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
           if (host.alive(root.pid)) {
             const line = yield* host.commandLineOf(root.pid)
-            ours = line !== null && stillRuns(root, line, host.platform)
+            // Alive, and the system could not say what it runs (on Windows, PowerShell too slow or
+            // failing): neither ended nor forgotten, so that the next start asks again.
+            if (line === null) {
+              yield* sink.write(
+                `kept ${which}: what it runs could not be read, asked again at the next start`,
+              )
+              orphans.push({ root, ended: false })
+              continue
+            }
+            ours = stillRuns(root, line, host.platform)
           }
           if (ours) {
             yield* host.killTree(root.pid, host.platform !== 'win32')
             // Said ended only once the system says the pid is gone, not when the kill was asked.
             gone = yield* goneWithin(root.pid)
-            const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
-            yield* sink.write(
-              gone
-                ? `ended ${which}`
-                : `could not end ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed`,
-            )
+            // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
+            // forgotten either, so that the next start kills it again.
+            if (!gone) {
+              yield* sink.write(
+                `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
+              )
+              orphans.push({ root, ended: false })
+              continue
+            }
+            yield* sink.write(`ended ${which}`)
           }
           yield* registry.remove(root.id)
           orphans.push({ root, ended: gone })
@@ -699,11 +726,17 @@ export const processSupervisorLayer = Layer.effect(
   }),
 )
 
-/** The supervisor over this machine and the data folder's registry, its stderr into `write`. */
-export const supervisorLayer = (write: (line: string) => void) => {
+/**
+ * The supervisor over this machine (or the `host` a suite stands in for it) and the data folder's
+ * registry, its stderr into `write`.
+ */
+export const supervisorLayer = (
+  write: (line: string) => void,
+  host: Layer.Layer<HostProcesses> = hostProcessesLayer,
+) => {
   const sink = Layer.succeed(StderrSink, { write: (line) => Effect.sync(() => write(line)) })
   return processSupervisorLayer.pipe(
     Layer.provideMerge(databaseRegistryLayer),
-    Layer.provideMerge(Layer.merge(hostProcessesLayer, sink)),
+    Layer.provideMerge(Layer.merge(host, sink)),
   )
 }

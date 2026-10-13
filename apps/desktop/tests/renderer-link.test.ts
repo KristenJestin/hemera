@@ -15,6 +15,7 @@ import {
   WindowRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  DiffRpcs,
   CheckRefused,
   DocRecipesRpcs,
   ForgeRpcs,
@@ -551,6 +552,13 @@ const main = async (engine: 'answers' | 'gone') => {
       'forge.checkAgain': unused,
       'forge.setForced': unused,
       'forge.changes': () => Stream.die('the window’s link is not asked for the forges here'),
+    }),
+    DiffRpcs.toLayer({
+      'diff.live': unused,
+      'diff.file': unused,
+      'diff.atCheckpoint': unused,
+      'diff.fileAtCheckpoint': unused,
+      'diff.changes': () => Stream.die('the window’s link is not asked for a diff here'),
     }),
   )
   const program = Effect.gen(function* () {

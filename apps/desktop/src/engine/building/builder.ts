@@ -75,6 +75,7 @@ import {
   refusedWhile,
 } from '../storage/database.ts'
 import {
+  agentSessions,
   buildingActivity,
   buildingAttempts,
   buildingCheckRuns,
@@ -84,8 +85,10 @@ import {
   buildingTasks,
   buildings,
   missions,
+  needs,
+  sessionNeeds,
 } from '../storage/schema.ts'
-import type { Grant } from '../tools/access.ts'
+import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { EffectfulAction } from '../tools/actions.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
 import type { GuardedCall } from '../tools/ports.ts'
@@ -192,6 +195,7 @@ type Needs =
   | ProjectServices
   | OutsideChanges
   | ProofNeeds
+  | ToolAccess
   | Effect.Services<ReturnType<typeof moveMission>>
 
 const NO_MISSION = refusal('refused: this session works for no mission')
@@ -261,8 +265,9 @@ const answerOf = (need: Need): string | null => {
 /**
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
- * a green run and its record, between the proofs written and a conflict handed over. Never held
- * otherwise.
+ * a green run and its record, between the proofs written and a conflict handed over, between the
+ * reds a start runs and its greens; once a start's resume read the end's step, before it brings
+ * the Builder back; once it went past the Builder. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -276,8 +281,11 @@ export type BuilderHold = (
     | 'writing'
     | 'requirements'
     | 'resuming'
+    | 'bringing'
+    | 'resumed'
     | 'proving'
     | 'greening'
+    | 'greens-due'
     | 'handing',
 ) => Effect.Effect<void>
 
@@ -366,6 +374,16 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         quiet.delete(missionId)
         watching.delete(missionId)
       }
+      /**
+       * A write of the mission's sessions kept, a file tool's or a command's: counted, it wakes the
+       * Builder, and a failed green runs again on what it left (#144, #258).
+       */
+      const wrote = (missionId: string) =>
+        Effect.sync(() => {
+          writesIn.set(missionId, (writesIn.get(missionId) ?? 0) + 1)
+          awake(missionId)
+          Queue.offerUnsafe(settled, missionId)
+        })
       yield* Queue.take(settled).pipe(
         Effect.flatMap(proofs.afterWrite),
         Effect.forever,
@@ -483,10 +501,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       /**
        * The mission's Builder: opened when it never had one, its lineage started again when it
        * stopped (#40's resume: its leases and the resume block pass to the fresh one). A stuck one
-       * is #40's to replace.
+       * is #40's to replace. The calls the user allowed run again from here.
        */
       const ensureBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
+          yield* ToolAccess.use((access) => access.building(building.missionId))
           const owner = { kind: 'mission', missionId: building.missionId } as const
           const live = yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner)
           if (live.some((one) => one.role === 'builder')) return
@@ -506,6 +525,32 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               said(`no Builder for ${building.missionId}: ${refused.message}`),
             ),
           )
+        })
+
+      /**
+       * Whether the mission's Builder waits on the user: a need about one of its sessions (a start
+       * that failed, a provider limit, a lineage that keeps failing) is pending, and its Retry is
+       * what starts it again.
+       */
+      const builderWaits = (missionId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const pending = yield* database
+            .select({ id: needs.id })
+            .from(sessionNeeds)
+            .innerJoin(needs, eq(needs.id, sessionNeeds.needId))
+            .innerJoin(agentSessions, eq(agentSessions.id, sessionNeeds.sessionId))
+            .where(
+              and(
+                eq(agentSessions.ownerKind, 'mission'),
+                eq(agentSessions.ownerId, missionId),
+                eq(agentSessions.role, 'builder'),
+                eq(needs.state, 'pending'),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.mapError(refusedWhile('reading the Builder’s needs')))
+          return pending.length > 0
         })
 
       /** The interval of this engine's time, opened for a Building. */
@@ -573,6 +618,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 endedAt: null,
                 tasksDoneAt: null,
                 endCalledAt: null,
+                reviewCheckpointId: null,
+                builderTurnedAt: null,
                 summary: null,
               }
               yield* transaction
@@ -726,6 +773,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             const red = yield* proofs.unproven(row)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
+            // A proof of the mission runs: the end is judged again once it ends (#258).
+            if (stuck === null) return
             const allStuck = red.length > 0 && stuck.length === red.length
             // The end never waits on a scenario nothing moves any more: the user is asked, once;
             // asked about scenarios that moved since, the question is withdrawn.
@@ -1510,6 +1559,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           summary: answering(summary),
           proofRun: answering(proofs.proofRun),
           refreshProofs: (missionId) => proofs.refresh(missionId).pipe(provided, Effect.orDie),
+          ensureBuilder: (missionId) =>
+            Effect.gen(function* () {
+              const building = yield* activeBuildingIn(yield* Database, missionId)
+              if (building === null || (yield* builderWaits(missionId))) return
+              yield* ensureBuilder(building)
+            }).pipe(provided, Effect.orDie),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
@@ -1520,7 +1575,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 .written(file)(transaction)
                 .pipe(Effect.andThen(proofs.writtenIn(transaction, file))),
             command: (asked) =>
-              loop.attribution.command(asked).pipe(
+              loop.attribution.command(asked, wrote(asked.missionId)).pipe(
                 provided,
                 Effect.catchCause((cause) =>
                   Effect.as(said(`a command was not watched: ${String(cause)}`), null),
@@ -1538,13 +1593,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
                   // Once the write and its outcome are kept, out of their transaction: a failed
                   // green runs again on what it left (#144).
-                  Effect.tap(() =>
-                    Effect.sync(() => {
-                      writesIn.set(file.missionId, (writesIn.get(file.missionId) ?? 0) + 1)
-                      awake(file.missionId)
-                      Queue.offerUnsafe(settled, file.missionId)
-                    }),
-                  ),
+                  Effect.tap(() => wrote(file.missionId)),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
@@ -1907,13 +1956,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             yield* judge(building, taskId, last?.id ?? '')
           }
           yield* hold('resuming')
-          if (building.tasksDoneAt !== null && building.endCalledAt === null)
-            yield* endIfReady(building)
           // A stop between a task's done and its commit: the commit is made now.
           yield* commitsLeft(building)
-          // The reds a stop left, and the greens due (#144).
+          // The reds a stop left, and the greens due (#144), counted as running before the end is
+          // judged: nothing is stuck until they ran again on what moved during the stop (#290).
           yield* proofs.resumed(building)
-          yield* ensureBuilder(building)
+          if (building.tasksDoneAt !== null && building.endCalledAt === null)
+            yield* endIfReady(building)
+          // At the end's last step the Builder is the end's to bring back: resumed from here, it
+          // could land inside the exit, after its stops, and write after its snapshot unseen.
+          const current = yield* activeBuildingIn(yield* Database, building.missionId)
+          yield* hold('bringing')
+          if (current !== null && current.phase !== 'refresh') yield* ensureBuilder(current)
+          yield* hold('resumed')
         }
       })
 

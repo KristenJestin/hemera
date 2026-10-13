@@ -46,6 +46,7 @@ import {
   type ScenarioProofState,
   type ToolArguments,
   addedTestNames,
+  addedTests,
   insertedFiles,
   validRed,
 } from '@hemera/core/domain'
@@ -164,7 +165,7 @@ export type ProofNeeds =
 export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
-  readonly hold: (at: 'greening' | 'handing') => Effect.Effect<void>
+  readonly hold: (at: 'greening' | 'handing' | 'greens-due') => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
@@ -323,12 +324,38 @@ export const buildingProofs = (parts: ProofParts) => {
   // One proof of a mission judged at a time: a state is read and moved without another run of
   // the same mission in between.
   const turns = new Map<string, Semaphore.Semaphore>()
-  const inTurn = <A, E, R>(missionId: string, effect: Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      const turn = turns.get(missionId) ?? Semaphore.makeUnsafe(1)
-      turns.set(missionId, turn)
-      return Semaphore.withPermits(turn, 1)(effect)
+  /** Each mission's proofs running or waiting for their turn: none is stuck meanwhile (#258). */
+  const proving = new Map<string, number>()
+  /** The Buildings whose stuck scenarios were not judged while a proof ran: judged once it ends. */
+  const unjudged = new Map<string, BuildingRow>()
+  const begin = (missionId: string) =>
+    Effect.sync(() => {
+      proving.set(missionId, (proving.get(missionId) ?? 0) + 1)
     })
+  const done = (missionId: string) =>
+    Effect.suspend(() => {
+      const left = (proving.get(missionId) ?? 1) - 1
+      if (left > 0) {
+        proving.set(missionId, left)
+        return Effect.void
+      }
+      proving.delete(missionId)
+      const building = unjudged.get(missionId)
+      if (building === undefined) return Effect.void
+      unjudged.delete(missionId)
+      return parts.background(parts.moved(building))
+    })
+  const inTurn = <A, E, R>(missionId: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      begin(missionId),
+      () =>
+        Effect.suspend(() => {
+          const turn = turns.get(missionId) ?? Semaphore.makeUnsafe(1)
+          turns.set(missionId, turn)
+          return Semaphore.withPermits(turn, 1)(effect)
+        }),
+      () => done(missionId),
+    )
 
   /** The Proof block of a scenario, as the Spec keeps it, or null. */
   const proofOf = (missionId: string, scenario: string) =>
@@ -852,7 +879,7 @@ export const buildingProofs = (parts: ProofParts) => {
       const names =
         test === undefined
           ? []
-          : addedTestNames({
+          : addedTests({
               insertion: test.insertion,
               code: test.code,
               patch: test.patch ?? null,
@@ -1202,10 +1229,15 @@ export const buildingProofs = (parts: ProofParts) => {
    * Among the scenarios the end waits on, those nothing moves any more: no need of the user's
    * holds them, and either every task covering them was skipped, or the attempt open on them (a
    * failed green, which a write runs again) is one the Builder no longer acts on: `quiet`, it ended
-   * its turn while the end waited, writing nothing since.
+   * its turn while the end waited, writing nothing since. Null while one of the mission's proofs
+   * runs, which may move them: they are judged once it ends (#258).
    */
   const stuckOf = (building: BuildingRow, scenarios: ReadonlyArray<string>, quiet: boolean) =>
     Effect.gen(function* () {
+      if (proving.has(building.missionId)) {
+        unjudged.set(building.missionId, building)
+        return null
+      }
       const database = yield* Database
       const tasks = yield* tasksIn(database, building.id)
       const decisions = yield* decisionsIn(database, building.id)
@@ -1438,25 +1470,30 @@ export const buildingProofs = (parts: ProofParts) => {
       if (building === null) return false
       if (kind === 'already_passes' && answer === CANCEL_MISSION) return true
       if (kind === 'proofs_unproven') {
-        // Each proof run again, then the end judged again, out of the turn the end may take.
+        // Each proof run again, then the end judged again, out of the turn the end may take. Counted
+        // as running from now: the Builder's turn on the answer judges nothing before it ends.
+        if (answer === TRY_AGAIN) yield* begin(missionId)
         const again =
           answer !== TRY_AGAIN
             ? Effect.void
-            : inTurn(
-                missionId,
-                Effect.forEach(
-                  scenario.split(',').filter((one) => one !== ''),
-                  (one) =>
-                    Effect.gen(function* () {
-                      const row = yield* scenarioProofIn(database, building.id, one)
-                      if (row === null) return
-                      const state = stateOf(row)
-                      if (state === 'waiting_red') yield* redOf(building, one)
-                      else if (state === 'red_recorded') yield* greenOf(building, one, 'green')
-                      else if (state === 'to_rerun') yield* greenOf(building, one, 'rerun')
-                    }),
-                  { discard: true },
+            : Effect.ensuring(
+                inTurn(
+                  missionId,
+                  Effect.forEach(
+                    scenario.split(',').filter((one) => one !== ''),
+                    (one) =>
+                      Effect.gen(function* () {
+                        const row = yield* scenarioProofIn(database, building.id, one)
+                        if (row === null) return
+                        const state = stateOf(row)
+                        if (state === 'waiting_red') yield* redOf(building, one)
+                        else if (state === 'red_recorded') yield* greenOf(building, one, 'green')
+                        else if (state === 'to_rerun') yield* greenOf(building, one, 'rerun')
+                      }),
+                    { discard: true },
+                  ),
                 ),
+                done(missionId),
               )
         yield* parts.background(
           Effect.andThen(again, parts.moved(building)).pipe(
@@ -1661,9 +1698,15 @@ export const buildingProofs = (parts: ProofParts) => {
         Effect.andThen(handOverLeft(building)),
         Effect.catchCause((cause) => said(`the proofs were not written: ${String(cause)}`)),
       )
+      // Counted once from here to the end of the greens: between the reds and the greens, which
+      // run again on trees that may have moved during the stop, nothing is stuck (#290).
+      yield* begin(building.missionId)
       yield* parts.background(
-        Effect.andThen(redPhase(building), greensDue(building)).pipe(
+        redPhase(building).pipe(
+          Effect.andThen(parts.hold('greens-due')),
+          Effect.andThen(greensDue(building)),
           Effect.catchCause((cause) => said(`the proofs did not resume: ${String(cause)}`)),
+          Effect.ensuring(done(building.missionId)),
         ),
       )
     })

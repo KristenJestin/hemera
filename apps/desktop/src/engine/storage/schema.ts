@@ -2442,6 +2442,13 @@ export const buildings = sqliteTable(
     /** When `BuildingEnd` returned: a start finds a Building whose tasks are done without it. */
     endCalledAt: text('end_called_at'),
     summary: text('summary').$type<Masked<string>>(),
+    /** The checkpoint the automatic review read (#147); null before its end took it. */
+    reviewCheckpointId: text('review_checkpoint_id'),
+    /**
+     * When the Builder last ended a turn during the end (#147): a red of the final checks waits
+     * for a turn ended after the attempt it opened, across a restart.
+     */
+    builderTurnedAt: text('builder_turned_at'),
   },
   (table) => [
     uniqueIndex('building_active_of_mission')
@@ -3011,4 +3018,94 @@ export const dismissedServices = sqliteTable(
     at: text('at').notNull(),
   },
   (table) => [primaryKey({ columns: [table.missionId, table.runId] })],
+)
+
+/**
+ * A pass of one reviewer of the automatic review at the end of a Building (#147): its checkpoint,
+ * its lineage, where it stands (`waiting` for a slot, `running`, `done`, `failed`), the session it
+ * last reminded to report, and why it failed.
+ */
+export const reviewPasses = sqliteTable(
+  'review_passes',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    checkpointId: text('checkpoint_id').notNull(),
+    reviewer: text('reviewer').notNull(),
+    lineage: text('lineage').notNull(),
+    state: text('state').notNull(),
+    remindedSession: text('reminded_session'),
+    failure: text('failure').$type<Masked<string>>(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    // A failed pass the user retried is followed by another of the same reviewer.
+    index('review_passes_of_building').on(table.buildingId, table.reviewer),
+    uniqueIndex('review_pass_of_lineage').on(table.lineage),
+  ],
+)
+
+/**
+ * A finding of a reviewer's pass (#147), in its order: its severity, what it is about, its text and
+ * evidence (masked), whether it contradicts the Spec, and its fate: a decision need (`need_id`, then
+ * the user's answer), a special task (`task_id`), recorded as a decision, or dismissed.
+ */
+export const reviewFindings = sqliteTable(
+  'review_findings',
+  {
+    id: text('id').primaryKey(),
+    passId: text('pass_id')
+      .notNull()
+      .references(() => reviewPasses.id, { onDelete: 'cascade' }),
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    reviewer: text('reviewer').notNull(),
+    severity: text('severity').notNull(),
+    requirement: text('requirement'),
+    scenario: text('scenario'),
+    repository: text('repository'),
+    path: text('path'),
+    line: integer('line'),
+    text: text('text').$type<Masked<string>>().notNull(),
+    contradictsSpec: integer('contradicts_spec', { mode: 'boolean' }).notNull(),
+    evidence: text('evidence').$type<Masked<string>>(),
+    fate: text('fate'),
+    needId: text('need_id'),
+    answer: text('answer').$type<Masked<string>>(),
+    taskId: text('task_id'),
+  },
+  (table) => [uniqueIndex('review_findings_of_building').on(table.buildingId, table.number)],
+)
+
+/**
+ * A file that differs between the review's checkpoint and the final tree of its repository, taken
+ * at the exit of a Building (#147): its status and lines, and who wrote it after the review (a
+ * special task, `documenter`), null when no writer is known. Review shows it as "changed after the
+ * automatic review, covered only by the checks".
+ */
+export const reviewChangedAfter = sqliteTable(
+  'review_changed_after',
+  {
+    buildingId: text('building_id')
+      .notNull()
+      .references(() => buildings.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+    writtenBy: text('written_by'),
+  },
+  (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
 )

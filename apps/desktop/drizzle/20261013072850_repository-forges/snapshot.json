@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "1b7061d2-ae1d-40ee-9a85-8690db2a1aba",
-  "prevIds": ["aaa282f8-89fd-4506-8392-1be76d1857f8"],
+  "id": "8e55e535-6166-4334-89ff-58f45cb19952",
+  "prevIds": ["eac51bee-c914-4c22-a2c4-8f81c27d7b06"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -346,6 +346,18 @@
     },
     {
       "name": "resource_claims",
+      "entityType": "tables"
+    },
+    {
+      "name": "review_changed_after",
+      "entityType": "tables"
+    },
+    {
+      "name": "review_findings",
+      "entityType": "tables"
+    },
+    {
+      "name": "review_passes",
       "entityType": "tables"
     },
     {
@@ -2281,6 +2293,26 @@
       "default": null,
       "generated": null,
       "name": "summary",
+      "entityType": "columns",
+      "table": "buildings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_checkpoint_id",
+      "entityType": "columns",
+      "table": "buildings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "builder_turned_at",
       "entityType": "columns",
       "table": "buildings"
     },
@@ -9280,6 +9312,376 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "added",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "removed",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "written_by",
+      "entityType": "columns",
+      "table": "review_changed_after"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pass_id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "number",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewer",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "severity",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requirement",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scenario",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "text",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "contradicts_spec",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evidence",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fate",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "need_id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answer",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "review_findings"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "building_id",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "checkpoint_id",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reviewer",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lineage",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reminded_session",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_at",
+      "entityType": "columns",
+      "table": "review_passes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "level",
       "entityType": "columns",
       "table": "role_models"
@@ -13494,6 +13896,72 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_review_changed_after_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "review_changed_after"
+    },
+    {
+      "columns": ["pass_id"],
+      "tableTo": "review_passes",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_review_findings_pass_id_review_passes_id_fk",
+      "entityType": "fks",
+      "table": "review_findings"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_review_findings_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "review_findings"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_review_findings_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "review_findings"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_review_passes_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "review_passes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_review_passes_building_id_buildings_id_fk",
+      "entityType": "fks",
+      "table": "review_passes"
+    },
+    {
+      "columns": ["building_id"],
+      "tableTo": "buildings",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_scenario_proofs_building_id_buildings_id_fk",
       "entityType": "fks",
       "table": "scenario_proofs"
@@ -13978,6 +14446,13 @@
       "name": "repository_trees_pk",
       "entityType": "pks",
       "table": "repository_trees"
+    },
+    {
+      "columns": ["building_id", "repository", "path"],
+      "nameExplicit": false,
+      "name": "review_changed_after_pk",
+      "entityType": "pks",
+      "table": "review_changed_after"
     },
     {
       "columns": ["level", "scope_id", "role"],
@@ -14502,6 +14977,20 @@
       "nameExplicit": false,
       "name": "resource_claims_pk",
       "table": "resource_claims",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "review_findings_pk",
+      "table": "review_findings",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "review_passes_pk",
+      "table": "review_passes",
       "entityType": "pks"
     },
     {
@@ -15637,6 +16126,56 @@
       "name": "one_holder_per_resource",
       "entityType": "indexes",
       "table": "resource_claims"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "review_findings_of_building",
+      "entityType": "indexes",
+      "table": "review_findings"
+    },
+    {
+      "columns": [
+        {
+          "value": "building_id",
+          "isExpression": false
+        },
+        {
+          "value": "reviewer",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "review_passes_of_building",
+      "entityType": "indexes",
+      "table": "review_passes"
+    },
+    {
+      "columns": [
+        {
+          "value": "lineage",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "review_pass_of_lineage",
+      "entityType": "indexes",
+      "table": "review_passes"
     },
     {
       "columns": [

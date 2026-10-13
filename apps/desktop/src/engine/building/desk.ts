@@ -35,6 +35,12 @@ export interface BuildWork {
    * (#144, CT-38): #147's end sequence calls it before the mission leaves Building.
    */
   readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
+  /**
+   * The mission's Builder, resumed when its session ended while its Building is still active:
+   * what #147's exit calls when a late write sends the end back to the Builder. Never while a need
+   * about the Builder's sessions waits on the user (a start, a provider limit): its Retry does.
+   */
+  readonly ensureBuilder: (missionId: string) => Effect.Effect<void>
   /** The proofs and final checks whose repository moved since they ran, among these (R9). */
   readonly touchedProofs: (
     missionId: string,
@@ -108,6 +114,7 @@ export const buildDeskLayer = Layer.effect(
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
       proofRun: (grant, args) => Effect.flatMap(work, (one) => one.proofRun(grant, args)),
       refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
+      ensureBuilder: (missionId) => Effect.flatMap(work, (one) => one.ensureBuilder(missionId)),
       touchedProofs: (missionId, repositories) =>
         Effect.flatMap(work, (one) => one.touchedProofs(missionId, repositories)),
       // Only a mission's write to a path is a claim's business: nothing else waits for the desk.

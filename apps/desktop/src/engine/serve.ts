@@ -9,8 +9,10 @@
 import {
   ChatRefused,
   ChecksRpcs,
+  DiffRpcs,
   DocRecipesRpcs,
   ProofsRpcs,
+  AutoReviewRpcs,
   EngineApartRpcs,
   ForgeRpcs,
   EngineMainCoreRpcs,
@@ -25,6 +27,7 @@ import { Effect } from 'effect'
 
 import { observed, observedStream, type Log } from '../main/diagnostic.ts'
 import { Agents, machineAgentsLayer } from './agents/service.ts'
+import { autoReviewChanges, autoReviewOf } from './building/review-store.ts'
 import {
   backToPlanningFromCheck,
   checkMission,
@@ -33,6 +36,7 @@ import {
 } from './building/check.ts'
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
+import { Diffs } from './review/diffs.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
 import {
@@ -854,8 +858,11 @@ export const engineHandlers = (
       use(
         Effect.andThen(
           OutsideChanges.use((outside) => outside.focused),
-          // The forge CLIs not ready are checked again when the window regains the focus (#253).
-          ForgePort.use((forge) => forge.focused),
+          Effect.andThen(
+            Diffs.use((diffs) => diffs.focused),
+            // The forge CLIs not ready are checked again when the window regains the focus (#253).
+            ForgePort.use((forge) => forge.focused),
+          ),
         ),
       ).pipe(observed('mission.focused', log)),
     'mission.changed': () =>
@@ -869,7 +876,9 @@ export const engineHandlers = (
     checksHandlers(profile, log),
     docRecipesHandlers(profile, log),
     forgeHandlers(profile, log),
+    diffHandlers(profile, log),
     proofsHandlers(profile, log),
+    autoReviewHandlers(profile, log),
   )
 }
 
@@ -886,6 +895,17 @@ const proofsHandlers = (profile: StartedProfile, log: Log) => {
       use(judgeManual(missionId, scenarioId, 'refused', note)).pipe(
         observed('proofs.refuseManual', log),
       ),
+  })
+}
+
+/** The automatic review (#147), a layer of its own (see `EngineServedRpcs`). */
+const autoReviewHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return AutoReviewRpcs.toLayer({
+    'autoReview.read': ({ missionId, buildingId }) =>
+      use(autoReviewOf(missionId, buildingId)).pipe(observed('autoReview.read', log)),
+    'autoReview.changed': ({ missionId }) =>
+      follow(autoReviewChanges(missionId)).pipe(observedStream('autoReview.changed', log)),
   })
 }
 
@@ -943,6 +963,31 @@ const forgeHandlers = (profile: StartedProfile, log: Log) => {
     'forge.changes': ({ projectId }) =>
       follow(Stream.unwrap(ForgePort.useSync((forge) => forge.changes(projectId)))).pipe(
         observedStream('forge.changes', log),
+      ),
+  })
+}
+
+/** The live diff of a mission (#249), a layer of its own (see `EngineReviewRpcs`). */
+const diffHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return DiffRpcs.toLayer({
+    'diff.live': ({ missionId }) =>
+      use(Diffs.use((diffs) => diffs.live(missionId))).pipe(observed('diff.live', log)),
+    'diff.file': ({ missionId, repository, path, force }) =>
+      use(Diffs.use((diffs) => diffs.file(missionId, repository, path, force ?? false))).pipe(
+        observed('diff.file', log),
+      ),
+    'diff.atCheckpoint': ({ checkpointId }) =>
+      use(Diffs.use((diffs) => diffs.atCheckpoint(checkpointId))).pipe(
+        observed('diff.atCheckpoint', log),
+      ),
+    'diff.fileAtCheckpoint': ({ checkpointId, repository, path }) =>
+      use(Diffs.use((diffs) => diffs.fileAtCheckpoint(checkpointId, repository, path))).pipe(
+        observed('diff.fileAtCheckpoint', log),
+      ),
+    'diff.changes': ({ missionId }) =>
+      follow(Stream.unwrap(Diffs.useSync((diffs) => diffs.changes(missionId)))).pipe(
+        observedStream('diff.changes', log),
       ),
   })
 }

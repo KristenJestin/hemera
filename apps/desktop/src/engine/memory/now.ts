@@ -9,16 +9,35 @@
  * history, which the Journal leaves out.
  */
 
-import { type Masked, type NeedFields, ROLE_NAMES, mainRoleOf } from '@hemera/core/domain'
+import {
+  type Masked,
+  type NeedFields,
+  REVIEWERS,
+  ROLE_NAMES,
+  mainRoleOf,
+} from '@hemera/core/domain'
 import type { Mission, Need, Now } from '@hemera/ipc'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, notInArray } from 'drizzle-orm'
 import { Effect, Match } from 'effect'
 
 import type { EventPayload, NewEvent } from '../journal.ts'
 import { getMission } from '../missions.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
-import { memoryNext, memoryNowLines } from '../storage/schema.ts'
+import {
+  buildingTasks,
+  buildings,
+  memoryNext,
+  memoryNowLines,
+  reviewFindings,
+  reviewPasses,
+} from '../storage/schema.ts'
 import { RunningSessions, SlotWaits } from './ports.ts'
+
+/**
+ * What Now and the Journal say of a finding of the automatic review that contradicts the Spec
+ * (#147): never its text, which reaches no agent before the user's answer.
+ */
+export const FINDING_HELD = 'a finding of the automatic review contradicts the Spec'
 
 /** What a need waits on, in one sentence of its own fields. */
 export const needSentence = (need: Need): string =>
@@ -40,6 +59,49 @@ const needKind = Match.type<NeedFields>().pipe(
   }),
 )
 
+/**
+ * Where the end of the mission's Building stands (#147): the reviewers done while the automatic
+ * review runs, then the special tasks not done yet.
+ */
+const endLinesOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [building] = yield* database
+      .select({ id: buildings.id, phase: buildings.phase })
+      .from(buildings)
+      .where(and(eq(buildings.missionId, missionId), eq(buildings.state, 'active')))
+      .pipe(Effect.mapError(refusedWhile('reading Now')))
+    if (building === undefined) return []
+    const lines: string[] = []
+    if (building.phase === 'review') {
+      const passes = yield* database
+        .select({ state: reviewPasses.state })
+        .from(reviewPasses)
+        .where(eq(reviewPasses.buildingId, building.id))
+        .pipe(Effect.mapError(refusedWhile('reading Now')))
+      if (passes.length > 0) {
+        const done = passes.filter((one) => one.state === 'done').length
+        lines.push(
+          `Automatic review: ${String(done)} of ${String(REVIEWERS.length)} reviewers done`,
+        )
+      }
+    }
+    const special = yield* database
+      .select({ id: buildingTasks.id })
+      .from(buildingTasks)
+      .where(
+        and(
+          eq(buildingTasks.buildingId, building.id),
+          eq(buildingTasks.origin, 'review'),
+          notInArray(buildingTasks.state, ['done', 'skipped']),
+        ),
+      )
+      .orderBy(asc(buildingTasks.rank))
+      .pipe(Effect.mapError(refusedWhile('reading Now')))
+    if (special.length > 0) lines.push(`Special tasks: ${special.map((one) => one.id).join(', ')}`)
+    return lines
+  })
+
 /** Now, as the mission and its sessions' lines stand. */
 export const nowOf = (mission: Mission) =>
   Effect.gen(function* () {
@@ -58,6 +120,11 @@ export const nowOf = (mission: Mission) =>
     const running = yield* RunningSessions.use((sessions) => sessions(mission.id))
     const slotWait = yield* SlotWaits.use((waits) => waits(mission.id))
     const main = mainRoleOf(mission.stage)
+    const held = (yield* database
+      .select({ needId: reviewFindings.needId })
+      .from(reviewFindings)
+      .where(eq(reviewFindings.missionId, mission.id))
+      .pipe(Effect.mapError(refusedWhile('reading Now')))).map((one) => one.needId)
     const doing = lines.map((line) => ({
       sessionId: line.sessionId,
       role: line.role,
@@ -75,10 +142,11 @@ export const nowOf = (mission: Mission) =>
       waiting: mission.needs.map((need) => ({
         needId: need.id,
         kind: needKind(need.fields),
-        sentence: needSentence(need),
+        sentence: held.includes(need.id) ? FINDING_HELD : needSentence(need),
       })),
       running: running.map((session) => ({ sessionId: session.sessionId, role: session.role })),
       slotWait,
+      end: yield* endLinesOf(mission.id),
       next:
         next === undefined
           ? null

@@ -9,7 +9,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
@@ -146,22 +146,27 @@ interface Seen {
 /**
  * The supervisor over the real machine, a sink and a spy on the tree kills, on `data`. With
  * `killLandsAfter`, a tree kill answers at once and only lands that many milliseconds later: a
- * `taskkill` that returns before the process has exited.
+ * `taskkill` that returns before the process has exited; with `NEVER`, it never lands (a `taskkill`
+ * that hung past its bound, or whose `/F` was refused). With `lineUnknown`, the machine cannot
+ * say what any pid runs: a PowerShell that did not answer in time.
  */
-function supervised(seen: Seen, killLandsAfter?: number) {
+function supervised(seen: Seen, killLandsAfter?: number, lineUnknown = false) {
   const host = Layer.effect(
     HostProcesses,
     Effect.gen(function* () {
       const real = yield* HostProcesses
       return {
         ...real,
+        commandLineOf: (pid: number) =>
+          lineUnknown ? Effect.succeed(null) : real.commandLineOf(pid),
         killTree: (pid: number, grouped: boolean) =>
           Effect.andThen(
             Effect.sync(() => seen.killedTrees.push(pid)),
             killLandsAfter === undefined
               ? real.killTree(pid, grouped)
               : Effect.sync(() => {
-                  setTimeout(() => Effect.runFork(real.killTree(pid, grouped)), killLandsAfter)
+                  if (Number.isFinite(killLandsAfter))
+                    setTimeout(() => Effect.runFork(real.killTree(pid, grouped)), killLandsAfter)
                 }),
           ),
       }
@@ -180,6 +185,9 @@ function supervised(seen: Seen, killLandsAfter?: number) {
 }
 
 const freshSeen = (): Seen => ({ sink: [], killedTrees: [] })
+
+/** A tree kill that is asked and never lands. */
+const NEVER = Number.POSITIVE_INFINITY
 
 const owner = { kind: 'run', id: 'run-1' } as const
 
@@ -471,6 +479,106 @@ describe('The registry outlives a crash', () => {
     expect(orphans.map((one) => one.ended)).toEqual([true])
     expect(said).toEqual([expect.stringContaining(`(${String(pid)})`)])
     expect(aliveWhenSaid).toBe(false)
+  })
+  test('an orphan its kill did not end is kept for the next start, which ends it', async () => {
+    const seen = freshSeen()
+    const left = spawn(process.execPath, [script(STAYS_UP)], {
+      detached: !onWindows,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    strays.push(left)
+    const pid = left.pid ?? -1
+    const leftNow = ProcessRegistry.use((registry) => registry.leftBy('run', 'another engine'))
+
+    // A start whose kill does not end it: the pid is said alive, and not forgotten.
+    const survived = await supervised(
+      seen,
+      NEVER,
+    )(
+      Effect.gen(function* () {
+        yield* ProcessRegistry.use((registry) =>
+          registry.add({
+            id: 'left',
+            pid,
+            program: process.execPath,
+            args: left.spawnargs.slice(1),
+            owner: { kind: 'run', id: 'run-left' },
+            engine: 'crashed',
+          }),
+        )
+        const orphans = yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('run'))
+        return { orphans, kept: yield* leftNow }
+      }),
+    )
+    expect(survived.orphans.map((one) => one.ended)).toEqual([false])
+    expect(survived.kept.map((one) => one.id)).toEqual(['left'])
+    expect(seen.killedTrees).toEqual([pid])
+    expect(alive(pid)).toBe(true)
+    expect(seen.sink).toEqual([
+      expect.stringContaining(`kept ${basename(process.execPath)} (${String(pid)})`),
+    ])
+
+    // The next start's kill lands: the orphan is ended, then forgotten.
+    const known = await supervised(freshSeen())(
+      Effect.gen(function* () {
+        const orphans = yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('run'))
+        return { orphans, kept: yield* leftNow }
+      }),
+    )
+    expect(known.orphans.map((one) => one.ended)).toEqual([true])
+    expect(known.kept).toEqual([])
+    expect(alive(pid)).toBe(false)
+  })
+  test('a live orphan whose command line is unknown is kept for the next start, which ends it', async () => {
+    const seen = freshSeen()
+    const left = spawn(process.execPath, [script(STAYS_UP)], {
+      detached: !onWindows,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    strays.push(left)
+    const pid = left.pid ?? -1
+    const root = {
+      id: 'left',
+      pid,
+      program: process.execPath,
+      args: left.spawnargs.slice(1),
+      owner: { kind: 'run', id: 'run-left' },
+      engine: 'crashed',
+    } as const
+    const leftNow = ProcessRegistry.use((registry) => registry.leftBy('run', 'another engine'))
+
+    // A start whose machine cannot say what the pid runs: the pid is not touched, nor forgotten.
+    const unknown = await supervised(
+      seen,
+      undefined,
+      true,
+    )(
+      Effect.gen(function* () {
+        yield* ProcessRegistry.use((registry) => registry.add(root))
+        const orphans = yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('run'))
+        return { orphans, kept: yield* leftNow }
+      }),
+    )
+    expect(unknown.orphans.map((one) => one.ended)).toEqual([false])
+    expect(unknown.kept.map((one) => one.id)).toEqual(['left'])
+    expect(seen.killedTrees).toEqual([])
+    expect(alive(pid)).toBe(true)
+    expect(seen.sink).toEqual([
+      expect.stringContaining(`kept ${basename(process.execPath)} (${String(pid)})`),
+    ])
+
+    // The next start can say it: the orphan is ended, then forgotten.
+    const known = await supervised(seen)(
+      Effect.gen(function* () {
+        const orphans = yield* ProcessSupervisor.use((supervisor) => supervisor.endOrphans('run'))
+        return { orphans, kept: yield* leftNow }
+      }),
+    )
+    expect(known.orphans.map((one) => one.ended)).toEqual([true])
+    expect(known.kept).toEqual([])
+    expect(alive(pid)).toBe(false)
   })
 })
 
