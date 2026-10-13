@@ -165,7 +165,7 @@ export type ProofNeeds =
 export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
-  readonly hold: (at: 'greening' | 'handing') => Effect.Effect<void>
+  readonly hold: (at: 'greening' | 'handing' | 'greens-due') => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
@@ -1698,9 +1698,15 @@ export const buildingProofs = (parts: ProofParts) => {
         Effect.andThen(handOverLeft(building)),
         Effect.catchCause((cause) => said(`the proofs were not written: ${String(cause)}`)),
       )
+      // Counted once from here to the end of the greens: between the reds and the greens, which
+      // run again on trees that may have moved during the stop, nothing is stuck (#290).
+      yield* begin(building.missionId)
       yield* parts.background(
-        Effect.andThen(redPhase(building), greensDue(building)).pipe(
+        redPhase(building).pipe(
+          Effect.andThen(parts.hold('greens-due')),
+          Effect.andThen(greensDue(building)),
           Effect.catchCause((cause) => said(`the proofs did not resume: ${String(cause)}`)),
+          Effect.ensuring(done(building.missionId)),
         ),
       )
     })

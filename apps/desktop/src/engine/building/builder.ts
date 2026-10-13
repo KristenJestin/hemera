@@ -262,8 +262,8 @@ const answerOf = (need: Need): string | null => {
 /**
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
- * a green run and its record, between the proofs written and a conflict handed over. Never held
- * otherwise.
+ * a green run and its record, between the proofs written and a conflict handed over, between the
+ * reds a start runs and its greens. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -279,6 +279,7 @@ export type BuilderHold = (
     | 'resuming'
     | 'proving'
     | 'greening'
+    | 'greens-due'
     | 'handing',
 ) => Effect.Effect<void>
 
@@ -1922,12 +1923,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             yield* judge(building, taskId, last?.id ?? '')
           }
           yield* hold('resuming')
-          if (building.tasksDoneAt !== null && building.endCalledAt === null)
-            yield* endIfReady(building)
           // A stop between a task's done and its commit: the commit is made now.
           yield* commitsLeft(building)
-          // The reds a stop left, and the greens due (#144).
+          // The reds a stop left, and the greens due (#144), counted as running before the end is
+          // judged: nothing is stuck until they ran again on what moved during the stop (#290).
           yield* proofs.resumed(building)
+          if (building.tasksDoneAt !== null && building.endCalledAt === null)
+            yield* endIfReady(building)
           yield* ensureBuilder(building)
         }
       })

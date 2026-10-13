@@ -16,13 +16,14 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Deferred, Effect, Layer, Predicate, Schema } from 'effect'
+import { Deferred, Duration, Effect, Layer, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { BuildingEnd, type BuilderHold } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
+import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
 import {
   ACCEPT_RED,
   CANCEL_MISSION,
@@ -69,11 +70,21 @@ const proofsEngine = (
   hold: BuilderHold = () => Effect.void,
   end?: Layer.Layer<BuildingEnd>,
   agents: (index: number) => FakeScript = builderAgents,
+  more: {
+    /** How long a proof may run (#290). */
+    readonly proofLimit?: Duration.Duration
+    /** The snapshot service as the suite sees it, wrapped around the real one. */
+    readonly snapshots?: (real: SnapshotsService) => SnapshotsService
+  } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
-    building: end === undefined ? { hold } : { hold, end },
+    snapshots: more.snapshots ?? ((real) => real),
+    building:
+      end === undefined
+        ? { hold, proofLimit: more.proofLimit }
+        : { hold, end, proofLimit: more.proofLimit },
   })
 
 /**
@@ -1655,6 +1666,64 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     ])
   })
 
+  test('a command whose changes are known but whose attribution then fails: its write still counts, no question, and the proof is run again', async () => {
+    let held = false
+    let open: () => void = () => undefined
+    const gate = new Promise<void>((done) => {
+      open = done
+    })
+    const agents = (index: number): FakeScript =>
+      index === 0 ? READING : { ...QUIET, between: () => (held ? gate : Promise.resolve()) }
+    const fixer = join(scratch, 'fix.mjs')
+    writeFileSync(
+      fixer,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync('export.ts', ${JSON.stringify(RIGHT_EXPORT)})\n`,
+    )
+    // Once the command ran, copying its changes fails: what follows the changes known never ends.
+    let failing = false
+    const snapshots = (real: SnapshotsService): SnapshotsService => ({
+      ...real,
+      capture: (missionId, place, from, to, files) =>
+        failing
+          ? Effect.fail(
+              new SnapshotFailed({ repository: place.name, owner: 'run', said: 'disk full' }),
+            )
+          : real.capture(missionId, place, from, to, files),
+    })
+    const seen = await proofsEngine(data, undefined, undefined, agents, { snapshots }).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            held = true
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            failing = true
+            const ran = yield* call(grantId, 'commands_run', {
+              line: `"${process.execPath}" "${fixer}"`,
+              repository: 'api',
+            })
+            open()
+            yield* until(endCalled(mission.id), 20_000)
+            return {
+              ran,
+              asked: yield* unprovenAsked,
+              proof: yield* proofOf(mission.id, 'R1.S2'),
+            }
+          }),
+        ),
+    )
+    expect(seen.ran).toMatch(/exit code 0/)
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
+  })
+
   test('Try again, then a Builder turn that writes nothing while the proof runs: the question does not come back before the run ends', async () => {
     const log = join(scratch, 'runs.log')
     const release = join(scratch, 'release')
@@ -1704,6 +1773,143 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     // Once the run failed again, the Builder still writing nothing, it is asked again.
     expect(seen.after).toEqual(['answered', 'pending'])
     expect(seen.runs).toBe(3)
+  })
+})
+
+describe('A proof run that never ends', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  test('a proof that never ends: its run ends at its limit as a red that timed out, and the question comes', async () => {
+    const log = join(scratch, 'runs.log')
+    const pid = join(scratch, 'pid')
+    // Red until export.ts exists; from then on it never ends, as a watch mode would not.
+    const hanging = () => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          [
+            `  appendFileSync(${JSON.stringify(log)}, 'ran\\n')`,
+            "  if (existsSync(new URL('../export.ts', import.meta.url))) {",
+            `    writeFileSync(${JSON.stringify(pid)}, String(process.pid))`,
+            '    await new Promise(() => setInterval(() => undefined, 1000))',
+            '  }',
+            "  assert.fail('export.ts exports nothing yet')",
+          ].join('\n'),
+          ["import { writeFileSync } from 'node:fs'"],
+        ),
+      ),
+    })
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofLimit: Duration.seconds(6),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(hanging)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+            25_000,
+          )
+          return { proof: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    const green = seen.proof.runs.at(-1)
+    expect(seen.proof.runs.map((one) => one.phase)).toEqual(['red', 'green'])
+    expect(green?.classification).toBe('environment')
+    expect(green?.outputTail).toMatch(/timed out after 6s/)
+    // The test's process, under the runner's, was ended with the run.
+    const ended = () => {
+      try {
+        process.kill(Number(readFileSync(pid, 'utf8')), 0)
+        return false
+      } catch {
+        return true
+      }
+    }
+    expect(ended()).toBe(true)
+  })
+})
+
+describe('A restart while a proof waits on its fix', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  test('a restart after the fix landed during the stop: the idle Builder is not judged stuck between the reds and the greens it runs again', async () => {
+    const builder = busyBuilder()
+    const first = await proofsEngine(data, undefined, undefined, builder.agents).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            // At work until the stop: nothing is stuck before it.
+            yield* builder.busy
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            return { mission, api: yield* apiOf(mission.id), asked: yield* unprovenAsked }
+          }),
+        ),
+    )
+    // The fix lands while Hemera is stopped.
+    writeFileSync(join(first.api, 'export.ts'), RIGHT_EXPORT)
+    const { hold, reached, go } = holdOnce('greens-due')
+    const seen = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // Between the reds and the greens of the start, the restored Builder idle and quiet.
+          yield* Deferred.await(reached)
+          // The detector compares the Workspace, as its timer does: the tree moved during the stop.
+          yield* OutsideChanges.use((outside) => outside.compare(first.mission.id, null))
+          yield* Effect.sleep('3 seconds')
+          const between = yield* unprovenAsked
+          yield* Deferred.succeed(go, undefined)
+          // The end called on the green, or the user asked.
+          yield* until(
+            Effect.zipWith(
+              endCalled(first.mission.id),
+              unprovenAsked,
+              (called, asked) => called || asked.length > 0,
+            ),
+            20_000,
+          )
+          return {
+            between,
+            asked: yield* unprovenAsked,
+            proof: yield* proofOf(first.mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(first.asked).toEqual([])
+    expect(seen.between).toEqual([])
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
   })
 })
 
