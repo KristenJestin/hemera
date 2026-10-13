@@ -315,6 +315,24 @@ const projectOf = (owner: SessionOwner) =>
     return mission?.projectId ?? ''
   })
 
+/** Why a Builder's lineage is not started again: its mission left the Building. */
+const NOT_BUILDING = 'the Building of its mission ended'
+
+/**
+ * Whether a lineage's successor would be a Builder outside the Building. Read in the transaction
+ * that would insert it, so it is ordered against the exit's commit that moves the mission on.
+ */
+const builderOutOfStage = (transaction: EngineTransaction, session: RoleSession) =>
+  Effect.gen(function* () {
+    if (session.role !== 'builder' || session.owner.kind !== 'mission') return false
+    const [mission] = yield* transaction
+      .select({ stage: missions.stage })
+      .from(missions)
+      .where(eq(missions.id, session.owner.missionId))
+      .pipe(Effect.mapError(refusedWhile('reading a mission')))
+    return mission?.stage !== 'building'
+  })
+
 /** What a replacement says in the Journal, from the role's own name. */
 const capitalized = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 
@@ -806,12 +824,16 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       /**
        * Stops a session and opens its successor in one transaction: the old one kept, replaced,
        * the new one of the same role, lineage and owner at the next epoch, its leases passed, and
-       * the Journal's line.
+       * the Journal's line. A Builder whose mission left the Building is ended instead: null.
        */
       const succeed = (session: RoleSession, reason: string) =>
         Effect.gen(function* () {
-          const [successor, leased] = yield* mutate('replacing a session', (transaction) =>
+          const replaced = yield* mutate('replacing a session', (transaction) =>
             Effect.gen(function* () {
+              if (yield* builderOutOfStage(transaction, session)) {
+                const ended = yield* endSession(transaction, session, 'ended', NOT_BUILDING)
+                return { result: null, events: [ended] }
+              }
               const stopped = yield* endSession(transaction, session, 'replaced', reason)
               const next = yield* insertSession(transaction, successorOf(session))
               const passed = yield* passLeasesIn(transaction, session, next)
@@ -830,6 +852,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               }
             }),
           )
+          if (replaced === null) {
+            yield* cap.release(session.lineage)
+            yield* addToThread(session.id, 'state', `ended: ${NOT_BUILDING}`)
+            return null
+          }
+          const [successor, leased] = replaced
           yield* revokeIfLeased(session, leased)
           return successor
         })
@@ -866,6 +894,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             if (driver !== undefined) yield* letGo(driver)
             else yield* runtime.release(sessionId)
             const successor = yield* succeed(session, reason)
+            if (successor === null) return null
             yield* addToThread(session.id, 'state', `replaced: ${reason}`)
             yield* said(`replaced ${session.id} by ${successor.id}: ${reason}`)
             const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
@@ -1105,6 +1134,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             continue
           }
           const successor = yield* succeed(session, RESTARTED)
+          if (successor === null) continue
           rebuilt.push(successor)
           starts.push(() =>
             start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
@@ -1136,8 +1166,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             const live = yield* sessionsIn([...LIVE_OR_STUCK], session.owner)
             if (live.some((one) => one.lineage === session.lineage)) return null
             if (!(yield* active(session.owner))) return null
-            const [successor, leased] = yield* mutate('starting a lineage again', (transaction) =>
+            const started = yield* mutate('starting a lineage again', (transaction) =>
               Effect.gen(function* () {
+                if (yield* builderOutOfStage(transaction, session))
+                  return { result: null, events: [] }
                 const next = yield* insertSession(transaction, successorOf(session))
                 const passed = yield* passLeasesIn(transaction, session, next)
                 return {
@@ -1149,6 +1181,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
                 }
               }),
             )
+            if (started === null) return null
+            const [successor, leased] = started
             yield* revokeIfLeased(session, leased)
             yield* said(`started ${session.lineage} again with ${successor.id}`)
             yield* start(successor, {

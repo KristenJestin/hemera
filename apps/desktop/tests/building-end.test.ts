@@ -60,6 +60,7 @@ import {
 } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  agentSessions,
   checkpoints,
   permissionRequests,
   documenterPasses,
@@ -2835,6 +2836,98 @@ describe('A restart in the middle of the end', () => {
       )
       expect(seen.judged).toEqual(['red', 'green'])
       expect(seen.mission.needs).toEqual([])
+    },
+  )
+
+  test(
+    'a Builder resume that reaches the sessions once the exit moved the mission to Review starts nothing',
+    SLOW,
+    async () => {
+      const engine = ending()
+      const seen = await engine.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(engine.world, mission.id)
+            yield* reviewed(engine.world, mission.id, 'spec-reviewer')
+            yield* reviewed(engine.world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // A start-up resume that read the Building before the exit's stops reaches the
+            // sessions only now: the exit's commit is in.
+            const rows = yield* sessionsOfLineage(builder.session.lineage)
+            const resumed = yield* Sessions.use((sessions) =>
+              sessions.resume(rows.at(-1)?.id ?? ''),
+            )
+            return {
+              resumed,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: mission.id,
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.resumed).toBeNull()
+      expect(seen.live.map((one) => one.role)).toEqual([])
+    },
+  )
+
+  test(
+    'a restart that finds the Builder live once the mission is in Review ends it and starts no successor',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* reviewed(before.world, mission.id, 'spec-reviewer')
+            yield* reviewed(before.world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            // What a restart reads when it took the live sessions before the exit stopped the
+            // tree, and replaces them only after the exit's commit: the Builder still live.
+            const rows = yield* sessionsOfLineage(builder.session.lineage)
+            const database = yield* Database
+            yield* database
+              .update(agentSessions)
+              .set({ state: 'idle', stateReason: null, endedAt: null })
+              .where(eq(agentSessions.id, rows.at(-1)?.id ?? ''))
+            return { mission, lineage: builder.session.lineage, sessions: rows.length }
+          }),
+        ),
+      )
+      const after = ending({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const lineage = sessionsOfLineage(left.lineage)
+            yield* until(
+              Effect.map(lineage, (rows) =>
+                rows.every((one) => !['starting', 'working', 'idle', 'stuck'].includes(one.state)),
+              ),
+              LONG,
+            )
+            return {
+              lineage: yield* lineage,
+              live: yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], {
+                kind: 'mission',
+                missionId: left.mission.id,
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.live.map((one) => one.role)).toEqual([])
+      expect(seen.lineage).toHaveLength(left.sessions)
     },
   )
 })
