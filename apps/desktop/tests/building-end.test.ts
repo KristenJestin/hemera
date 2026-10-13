@@ -49,7 +49,12 @@ import {
   roleNamed,
 } from '../src/engine/sessions/roles.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
-import { type RoleSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
+import {
+  type RoleSession,
+  getSession,
+  sessionsIn,
+  sessionsOfLineage,
+} from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   checkpoints,
@@ -66,6 +71,7 @@ import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
+import { WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -126,6 +132,8 @@ const ending = (
     readonly snapshots?: (real: SnapshotsService) => SnapshotsService
     /** Runs as each agent starts: a failure there is an agent that cannot start. */
     readonly starting?: (sessionId: string) => Effect.Effect<void, LaunchFailed>
+    /** Where the writes are attributed, when a test holds one as it executes. */
+    readonly attribution?: Layer.Layer<WriteAttribution>
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -141,11 +149,15 @@ const ending = (
   const first: ReadonlyArray<FakeScript> =
     options.resumed === true ? [] : [READING, options.builder ?? QUIET]
   const checks = options.checks ?? (() => [])
+  const verdicts = verdictsSaying(() => ALLOW).layer
   const engine = sessionsEngine(options.folder ?? data, (index) => first[index] ?? working(index), {
     roles: [HELPER],
     starting: options.starting ?? (() => Effect.void),
     snapshots: options.snapshots ?? ((real) => real),
-    tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    tools:
+      options.attribution === undefined
+        ? { home: work, verdicts }
+        : { home: work, verdicts, attribution: options.attribution },
     building: {
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
@@ -1284,6 +1296,79 @@ describe('The exit', () => {
       expect(seen.needs).toEqual([])
       expect(seen.helper).toMatchObject({ state: 'failed', failure: STOPPED_AT_THE_END })
       expect(seen.review?.changedAfter.map((one) => one.path)).not.toContain('helper.ts')
+    },
+  )
+  test(
+    'a write still executing as the tree stops is waited for: the snapshot sees what it wrote',
+    SLOW,
+    async () => {
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        // The write to held.ts executes until the test lets it go.
+        attribution: Layer.succeed(WriteAttribution, {
+          written: () => () => Effect.void,
+          command: () => Effect.succeed(null),
+          holding: (file, write) =>
+            Effect.gen(function* () {
+              if (file.path.endsWith('held.ts')) {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              }
+              return { result: yield* write, waited: null }
+            }),
+        }),
+        // An exit that does not wait looks at the Workspace first, and only then lets it go.
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) =>
+            real
+              .take(place, owner)
+              .pipe(
+                Effect.tap(() =>
+                  owner.kind === 'review_exit' ? Deferred.succeed(release, undefined) : Effect.void,
+                ),
+              ),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* builtAll(builder.grantId)
+            const writing = yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'held.ts',
+              content: 'export const held = true\n',
+            }).pipe(Effect.forkDetach)
+            yield* Deferred.await(entered)
+            // Let go a second after the Builder stopped: long after an exit that did not wait.
+            yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(getSession(builder.session.id), (session) => session.state === 'ended'),
+                LONG,
+              )
+              yield* Effect.sleep('1 second')
+              yield* Deferred.succeed(release, undefined)
+            }).pipe(Effect.forkDetach)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            return {
+              written: yield* Fiber.join(writing),
+              wrote: existsSync(join(api, 'held.ts')),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.written).not.toContain('refused')
+      expect(seen.wrote).toBe(true)
+      expect(seen.review?.changedAfter.map((one) => one.path)).toContain('held.ts')
     },
   )
 })
