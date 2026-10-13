@@ -13,8 +13,9 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -582,6 +583,60 @@ describe('The registry outlives a crash', () => {
     expect(known.orphans.map((one) => one.ended)).toEqual([true])
     expect(known.kept).toEqual([])
     expect(alive(pid)).toBe(false)
+  })
+})
+
+describe('The start does not wait on the left-over agents one after another', () => {
+  test('three orphans whose lookups each take the worst case are handled in about one worst case', async () => {
+    // Three pids alive, whose lookup never answers: on Windows, a PowerShell past its bound.
+    const pids = [90_001, 90_002, 90_003]
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => pids.includes(pid),
+          commandLineOf: () => Effect.never,
+          killTree: () => Effect.void,
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const [settled, orphans] = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        const sweep = yield* ProcessSupervisor.use((supervisor) =>
+          supervisor.endOrphans('session'),
+        ).pipe(Effect.forkChild)
+        // One worst case of a lookup on the test clock: every orphan's bound passes at once.
+        yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+        yield* Effect.yieldNow
+        const done = sweep.pollUnsafe() !== undefined
+        return [done, done ? yield* Fiber.join(sweep) : []] as const
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+    expect(settled).toBe(true)
+    // Each orphan the bound cut is kept, as one whose command line is unknown.
+    expect(orphans.map((one) => [one.root.pid, one.ended])).toEqual(pids.map((pid) => [pid, false]))
   })
 })
 

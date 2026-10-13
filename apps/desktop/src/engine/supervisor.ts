@@ -14,7 +14,9 @@
  * A crash ends nothing, so the roots are also written to a durable registry while they run (their
  * pid, their program and arguments, what owns them, and the engine that started them). At the next
  * start, a root a previous engine left is ended as a tree if it is still alive and still the same
- * program; a pid now held by another program is not ours and is never touched.
+ * program; a pid now held by another program is not ours and is never touched. The roots left are
+ * looked at side by side, so that many cost about the time of one. One that cannot be ended (what
+ * it runs could not be said in time, or its kill did not end it) is kept for the next start.
  *
  * A child can also be started elsewhere and handed over by its pid (main forks the agents'
  * processes for the engine): the same policy applies to it. What a child writes on its standard
@@ -198,7 +200,10 @@ const taskkill = (pid: number) =>
     )
   })
 
-/** How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow. */
+/**
+ * How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow.
+ * The orphans' sweep bounds every lookup by it, on every system: one cut is an unknown command line.
+ */
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
 /** What Windows says a pid runs: PowerShell is the one program every Windows has that tells it. */
@@ -674,47 +679,52 @@ export const processSupervisorLayer = Layer.effect(
       )
     }
 
-    const endOrphans = (kind: ProcessOwner['kind']) =>
+    /** One root left by a previous engine: ended, forgotten, or kept for the next start. */
+    const endOrphan = (root: RegisteredRoot) =>
       Effect.gen(function* () {
-        const left = yield* registry.leftBy(kind, engine)
-        const orphans: Orphan[] = []
-        for (const root of left) {
-          let ours = false
-          let gone = false
-          const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
-          if (host.alive(root.pid)) {
-            const line = yield* host.commandLineOf(root.pid)
-            // Alive, and the system could not say what it runs (on Windows, PowerShell too slow or
-            // failing): neither ended nor forgotten, so that the next start asks again.
-            if (line === null) {
-              yield* sink.write(
-                `kept ${which}: what it runs could not be read, asked again at the next start`,
-              )
-              orphans.push({ root, ended: false })
-              continue
-            }
-            ours = stillRuns(root, line, host.platform)
+        let ours = false
+        let gone = false
+        const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
+        if (host.alive(root.pid)) {
+          const line = yield* host
+            .commandLineOf(root.pid)
+            .pipe(
+              Effect.timeoutOption(Duration.millis(WINDOWS_COMMAND_LINE_MS)),
+              Effect.map(Option.getOrNull),
+            )
+          // Alive, and the system could not say what it runs in time (on Windows, PowerShell too
+          // slow or failing): neither ended nor forgotten, so that the next start asks again.
+          if (line === null) {
+            yield* sink.write(
+              `kept ${which}: what it runs could not be read, asked again at the next start`,
+            )
+            return { root, ended: false }
           }
-          if (ours) {
-            yield* host.killTree(root.pid, host.platform !== 'win32')
-            // Said ended only once the system says the pid is gone, not when the kill was asked.
-            gone = yield* goneWithin(root.pid)
-            // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
-            // forgotten either, so that the next start kills it again.
-            if (!gone) {
-              yield* sink.write(
-                `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
-              )
-              orphans.push({ root, ended: false })
-              continue
-            }
-            yield* sink.write(`ended ${which}`)
-          }
-          yield* registry.remove(root.id)
-          orphans.push({ root, ended: gone })
+          ours = stillRuns(root, line, host.platform)
         }
-        return orphans
+        if (ours) {
+          yield* host.killTree(root.pid, host.platform !== 'win32')
+          // Said ended only once the system says the pid is gone, not when the kill was asked.
+          gone = yield* goneWithin(root.pid)
+          // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
+          // forgotten either, so that the next start kills it again.
+          if (!gone) {
+            yield* sink.write(
+              `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
+            )
+            return { root, ended: false }
+          }
+          yield* sink.write(`ended ${which}`)
+        }
+        yield* registry.remove(root.id)
+        return { root, ended: gone }
       })
+
+    // Side by side: N roots left cost about one root's worst case, not N of them.
+    const endOrphans = (kind: ProcessOwner['kind']) =>
+      Effect.flatMap(registry.leftBy(kind, engine), (left) =>
+        Effect.forEach(left, endOrphan, { concurrency: 'unbounded' }),
+      )
 
     return { engine, start, adopt, endOrphans }
   }),

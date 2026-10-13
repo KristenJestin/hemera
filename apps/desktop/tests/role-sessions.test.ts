@@ -11,6 +11,7 @@ import { realpathSync } from 'node:fs'
 import { deliveryBlock } from '@hemera/core/domain'
 
 import { Deferred, Effect, Fiber, Layer } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
@@ -37,6 +38,7 @@ import {
   HostProcesses,
   ORPHAN_EXIT_MS,
   TASKKILL_MS,
+  WINDOWS_COMMAND_LINE_MS,
   hostProcessesLayer,
 } from '../src/engine/supervisor.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
@@ -978,6 +980,71 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       expect.stringContaining('[hemera:resume]'),
       expect.stringContaining('[hemera:resume]'),
     ])
+  })
+})
+
+describe('The left-over agents hold the rebuild back once, side by side (#320)', () => {
+  test('three orphans whose lookups each take the worst case hold the rebuild back for one worst case, not three', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const pids = [90_001, 90_002, 90_003]
+    const before = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const builder = yield* opened(owner, main)
+          yield* settled(builder.id)
+          const database = yield* Database
+          for (const pid of pids) {
+            yield* database.insert(supervisedProcesses).values({
+              id: `left-${String(pid)}`,
+              pid,
+              program: process.execPath,
+              args: JSON.stringify(['agent.mjs']),
+              ownerKind: 'session',
+              ownerId: builder.id,
+              engine: 'a previous engine',
+              startedAt: new Date().toISOString(),
+            })
+          }
+          return { owner, builder }
+        }),
+      ),
+    )
+    // Alive, and what they run is never said: on Windows, a PowerShell past its bound each time.
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const machine = yield* HostProcesses
+        return {
+          ...machine,
+          alive: (pid: number) => pids.includes(pid) || machine.alive(pid),
+          commandLineOf: (pid: number) =>
+            pids.includes(pid) ? Effect.never : machine.commandLineOf(pid),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const after = engine(() => ({ steps: [{ does: 'says', text: 'resumed' }] }), {
+      hostProcesses: host,
+      testClock: true,
+    })
+    const [heldBack, replaced] = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const replacedNow = Effect.map(getSession(before.builder.id), (one) => one.state)
+          // The sweep holds the rebuild while the lookups wait on the clock.
+          yield* TestClock.withLive(Effect.sleep('300 millis'))
+          const waiting = yield* replacedNow
+          // One worst case of a lookup passes: every orphan's bound passes with it.
+          yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+          yield* TestClock.withLive(until(Effect.map(replacedNow, (state) => state === 'replaced')))
+          return [waiting, yield* replacedNow] as const
+        }),
+      ),
+    )
+    expect(heldBack).not.toBe('replaced')
+    expect(replaced).toBe('replaced')
   })
 })
 
