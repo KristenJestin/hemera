@@ -351,6 +351,74 @@ describe('A linked worktree is snapshotted through its own index', () => {
   })
 })
 
+/** Every file of a repository's Git folders (its own, and the one it shares), by path. */
+function gitFolderFiles(cwd: string): ReadonlyArray<string> {
+  const folders = ['--absolute-git-dir', '--git-common-dir'].map((flag) =>
+    git(cwd, 'rev-parse', '--path-format=absolute', flag),
+  )
+  return [...new Set(folders.flatMap(filesUnder))].sort()
+}
+
+describe('A snapshot of a repository with a split index', () => {
+  /** A snapshot of `worktree`, and the files its Git folders held before and after it. */
+  const snapshotAround = (main: string, worktree: string) => {
+    const before = gitFolderFiles(worktree)
+    return commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const tree = yield* snapshots.take(
+            { name: 'acme', folder: worktree },
+            attempt(missionId, 'start'),
+          )
+          return { tree, before, after: gitFolderFiles(worktree) }
+        }),
+      ),
+    )
+  }
+
+  /** Enough tracked files that changing them all is more than a split index keeps in its own file. */
+  const manyFiles = (main: string, worktree: string) => {
+    for (let n = 0; n < 20; n++) writeFileSync(join(main, `file-${n}.txt`), `${n}\n`)
+    git(main, 'add', '.')
+    git(main, 'commit', '-q', '-m', 'many')
+    git(worktree, 'merge', '-q', 'main')
+    for (let n = 0; n < 20; n++) writeFileSync(join(worktree, `file-${n}.txt`), `changed ${n}\n`)
+  }
+
+  test('a snapshot of a repository with core.splitIndex set writes nothing into its Git folder', async () => {
+    const { main, worktree } = workspace()
+    manyFiles(main, worktree)
+    // Set once the index exists, whole: the first write to a copy of it is the one that splits it.
+    git(worktree, 'config', 'core.splitIndex', 'true')
+    writeFileSync(join(worktree, 'untracked.txt'), 'loose\n')
+    const before = observed(worktree)
+
+    const seen = await snapshotAround(main, worktree)
+
+    expect(seen.after).toEqual(seen.before)
+    expect(seen.after.filter((path) => path.includes('sharedindex'))).toEqual([])
+    expect(observed(worktree)).toEqual(before)
+    expect(seen.tree).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  test('a snapshot of a repository whose index is already split writes nothing into its Git folder', async () => {
+    const { main, worktree } = workspace()
+    manyFiles(main, worktree)
+    git(worktree, 'update-index', '--split-index')
+    // Many files Git has not seen: more than a split index keeps in its own file asks for a new one.
+    for (let n = 0; n < 40; n++) writeFileSync(join(worktree, `new-${n}.txt`), `${n}\n`)
+    const before = observed(worktree)
+
+    const seen = await snapshotAround(main, worktree)
+
+    expect(seen.after).toEqual(seen.before)
+    expect(observed(worktree)).toEqual(before)
+    expect(seen.tree).toMatch(/^[0-9a-f]{40}$/)
+  })
+})
+
 describe('A repository with no commit and no index yet is snapshotted', () => {
   test('its files are the tree, and it is left with no index, no commit and no ref', async () => {
     const fresh = join(work, 'fresh')
