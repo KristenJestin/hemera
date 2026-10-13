@@ -72,6 +72,7 @@ import {
   SensitivePlaces,
 } from '../tools/ports.ts'
 import { fingerprintFile } from '../tools/read.ts'
+import { STOPPED_AT_THE_END } from '../building/helper-store.ts'
 import { Delivery } from './delivery.ts'
 import { grantWritten } from './grants.ts'
 import { callIdentity } from './identity.ts'
@@ -709,14 +710,20 @@ export const approvalsLayer = (settings: RequestsSettings) =>
           yield* mutate('recording what a request did', (transaction) =>
             Effect.gen(function* () {
               if (performed.kind === 'changed') {
+                // The end of a Building is said as itself; anything else changed is said generically.
+                const atTheEnd = performed.reason === STOPPED_AT_THE_END
                 const events = yield* endedWith(
                   transaction,
                   row,
                   ['running'],
                   'not-executed',
-                  maskText(SITUATION_CHANGED, []),
+                  maskText(atTheEnd ? STOPPED_AT_THE_END : SITUATION_CHANGED, []),
                 )
-                const expired = yield* expireNeedIn(transaction, row.needId, CHANGED_SINCE_ALLOWED)
+                const expired = yield* expireNeedIn(
+                  transaction,
+                  row.needId,
+                  atTheEnd ? STOPPED_AT_THE_END : CHANGED_SINCE_ALLOWED,
+                )
                 return { result: undefined, events: [...events, ...expired] }
               }
               const { answer } = performed

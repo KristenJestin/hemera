@@ -320,6 +320,16 @@ const triaged = (event: DomainEvent) =>
     })
   })
 
+/**
+ * A mission Hemera moved into Review (#147): the end of its Building, or of a round's. A move the
+ * user made is not told back to them.
+ */
+const movedToReview = (event: DomainEvent) =>
+  Option.getOrNull(readText(event.payload['to'])) === 'review' &&
+  Option.getOrNull(readText(event.payload['actor'])) === 'hemera'
+    ? triaged(event)
+    : Effect.succeed(Option.none<TriageFacts>())
+
 interface LivingSpecFacts extends Facts {
   readonly project: NoticeProject
 }
@@ -599,6 +609,33 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     source: 'building.workspace_failed',
     facts: triaged,
     words: (facts) => ({ subject: facts.title, what: 'the preparation of its Workspace failed' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  defineKind({
+    id: 'building-finished',
+    label: 'A mission’s Building finished: the automatic review passed',
+    byDefault: true,
+    sound: 'done',
+    importance: IMPORTANCE.done,
+    tone: 'done',
+    source: 'building.ended',
+    facts: triaged,
+    words: (facts) => ({ subject: facts.title, what: 'its Building finished' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  // Off by default: at the end of a Building it comes with the kind above.
+  defineKind({
+    id: 'review-waiting',
+    label: 'A mission waits for your Review',
+    byDefault: false,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'you',
+    source: 'mission.moved',
+    facts: movedToReview,
+    words: (facts) => ({ subject: facts.title, what: 'it waits for your Review' }),
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),

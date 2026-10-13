@@ -1055,7 +1055,13 @@ describe('Dependencies between missions', () => {
             const version = yield* settledSpec(one.mission.id, one.grantId)
             const frozen = yield* freezeMission(one.mission.id, version)
             const committed = yield* DomainEvents.use((events) => events.subscribe)
-            const told = yield* Stream.take(noticesOf(REGISTRY, committed), 1).pipe(
+            // ACME-1's own move to Review notifies too: what is told about ACME-2 is the point.
+            const aboutOthers = Stream.filter(
+              noticesOf(REGISTRY, committed),
+              (feed) =>
+                !Predicate.isTagged(feed, 'NoticeRaised') || feed.notice.kind !== 'review-waiting',
+            )
+            const told = yield* Stream.take(aboutOthers, 1).pipe(
               Stream.runCollect,
               Effect.forkScoped,
             )

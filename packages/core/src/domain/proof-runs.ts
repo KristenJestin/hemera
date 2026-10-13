@@ -14,7 +14,7 @@
  *   colours removed, paths, durations, addresses and numbers masked.
  */
 
-import { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 
 /** How a proof run ended, as Hemera classifies it (CT-35). */
 export const PROOF_CLASSES = [
@@ -76,7 +76,7 @@ export interface ProofRunClass {
     readonly file: string | null
     readonly assertion: boolean
   }>
-  /** The lines of the whole output a runner marks as failing (`×`, `FAIL`, `FAILED`, `--- FAIL`). */
+  /** The lines of the whole output that start with a known runner's failure mark, uncoloured. */
   readonly failingLines: ReadonlyArray<string>
 }
 
@@ -98,17 +98,58 @@ const BEFORE_TEST =
   /\b(SyntaxError|ReferenceError|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_REQUIRE_ESM)\b|Cannot find (module|package)|error TS\d+|does not provide an export named/
 /**
  * Signs of an assertion that failed: JavaScript's, pytest's (`E   assert …`, `FAILED file::test`),
- * Go's (`--- FAIL:`) and Rust's (`assertion … failed`, a test's panic).
+ * Go's (`--- FAIL:`, gotestsum's `=== FAIL: pkg TestX (…)`) and Rust's (`assertion … failed`, a
+ * test's panic, a `#[should_panic]` test that did not).
  */
 const ASSERTION =
-  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |\bassertion\b.*\bfailed\b|\bpanicked at\b/m
-/** A line a test runner prints for a test that failed. */
-const FAILING_LINE = /[×✕✗✖●]|\bFAIL(ED)?\b|^\s*not ok \d+/
+  /\b(ERR_ASSERTION|AssertionError|AssertionFailedError)\b|\bexpect\(.*\)\.|^E\s+assert\b|^FAILED \S+::|^--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|\bassertion\b.*\bfailed\b|\bpanicked at\b|\btest did not panic as expected\b/m
+/**
+ * A line a known test runner starts with for a test that failed, never a mark in the middle of a
+ * line: vitest, jest and node:test's `×`, `✕`, `✖`; jest's `●` heading (not its `● Console` nor
+ * its `● Test suite failed to run`); vitest and jest's `FAIL <file>`, jest's with a project's
+ * `displayName` before a test file; TAP's `not ok n`; pytest's `FAILED file::test`; unittest's
+ * and Django's `FAIL: test_x (module.Class.test_x)`; Go's `--- FAIL: TestX`, gotestsum's
+ * `=== FAIL: pkg TestX (0.00s)`; Rust's `test x ... FAILED` (`test x - should panic ... FAILED`),
+ * cargo-nextest's `FAIL [ 0.004s] (1/2) crate x`. Mocha's `1) name` is read apart.
+ */
+const FAILING_LINE =
+  /^\s*[×✕✖]\s|^\s*●\s(?!(?:Console|Test suite failed to run)\s*$)|^\s*FAIL\s+(?:\|[^|]*\|\s+)?\S+\.\w+(?:\s|$)|^\s*FAIL\s+\S.*?\s(?:\S+\.(?:test|spec)\.\w+|\S*__tests__\/\S+)(?:\s+\(\d+(?:\.\d+)? m?s\))?\s*$|^\s*not ok \d+|^FAILED \S+::|^FAIL: test\w* \(\w+(?:\.\w+)+\)(?: .*)?$|^\s*--- FAIL: |^=== FAIL: \S+ Test\S* \(\d+(?:\.\d+)?s\)\s*$|^test \S+(?: - should panic)? \.\.\. FAILED\s*$|^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?\S+ \S+\s*$/
+/** Mocha's numbered failure, `1) name`, in its tree and again in its list after `N failing`. */
+const MOCHA_FAILURE = /^\s*(\d+)\) /
+const MOCHA_FAILING = /^\s*(\d+) failing\s*$/
 /** At most this many failing lines are kept. */
 const FAILING_LINES = 500
 /** Signs of a test file the runner did not find. */
 const NOT_FOUND =
   /Could not find '|No test files? found|no tests? (were )?found|ENOENT[^\n]*\.test\./i
+
+/** A line without its ANSI colours and cursor moves. */
+// oxlint-disable-next-line no-control-regex -- the escape character is what is matched
+const uncoloured = (line: string): string => line.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
+
+/**
+ * The lines of an output that mark a failing test, uncoloured, up to the cap. A numbered line is
+ * mocha's only below the `N failing` it ends with, and twice at most (its tree, its list): a
+ * numbered log line is not one, and cannot push a real failure past the cap.
+ */
+const failingLinesOf = (output: string): ReadonlyArray<string> => {
+  const lines = output.split(/\r?\n/).map(uncoloured)
+  const failing = lines.reduce(
+    (most, line) => Math.max(most, Number(MOCHA_FAILING.exec(line)?.[1] ?? 0)),
+    0,
+  )
+  const numbered = new Map<number, number>()
+  return lines
+    .filter((line) => {
+      if (FAILING_LINE.test(line)) return true
+      const number = Number(MOCHA_FAILURE.exec(line)?.[1] ?? 0)
+      if (number < 1 || number > failing) return false
+      const seen = (numbered.get(number) ?? 0) + 1
+      numbered.set(number, seen)
+      return seen <= 2
+    })
+    .slice(0, FAILING_LINES)
+}
 
 const unescapeXml = (text: string): string =>
   text
@@ -199,10 +240,7 @@ export function classifyProofRun(run: {
   readonly exitCode: number | null
   readonly testPath: string | null
 }): ProofRunClass {
-  const failingLines = run.output
-    .split(/\r?\n/)
-    .filter((line) => FAILING_LINE.test(line))
-    .slice(0, FAILING_LINES)
+  const failingLines = failingLinesOf(run.output)
   const none = { failingTest: null, assertion: null, failingFile: null, failures: [], failingLines }
   if (run.exitCode === null) return { classification: 'environment', ...none }
   const report = junitOf(run.output) ?? tapOf(run.output)
@@ -252,30 +290,96 @@ const wordsClass = (output: string, testPath: string | null): ProofClass => {
   return testPath === null ? 'assertion_failed' : 'error_before_test'
 }
 
+/**
+ * A Go subtest a proof adds: the test function it runs under (null when the code does not say),
+ * its literal `t.Run` name, and the `t.Run` names it is nested in, outermost first (null for a
+ * name that is not a literal), as far as the code shows them: from the function's own body when
+ * `whole`, otherwise from a hunk that starts inside it.
+ */
+export interface GoSubtest {
+  readonly parent: string | null
+  readonly subtest: string
+  readonly nesting: ReadonlyArray<string | null>
+  readonly whole: boolean
+}
+/**
+ * A Rust test with cases (`#[rstest]`, `#[test_case(…)]`): its function's name, which libtest
+ * prints alone or with each case under it (`tests::exports::case_1`).
+ */
+export interface RustCasedTest {
+  readonly function: string
+}
+/** A test a proof adds: its declared name, a Go subtest under its parent, or a Rust cased test. */
+export type TestName = string | GoSubtest | RustCasedTest
+
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
 
 /**
  * A test's declared name as a pattern matched whole: from the start of a line or after a
  * separator (`>`, `›`, `::`, a space), up to the end of the line or what a runner prints after a
- * name (a duration, `(`, `[`, ` - `, ` ...`). What `%s`, `$name` or `${…}` stand for (`each`, a
- * template literal) matches words within a name; a name made of placeholders alone is none.
+ * name (a duration, `(`, `[`, ` - `, ` ...`), or after pytest's `::` up to a case's `[id]`. A
+ * `::` is a node id's before its first `[`: a case id holding `::test_x[` is not `test_x`. What
+ * `%s`, `$name` or `${…}` stand for (`each`, a template literal) matches words within a name; a
+ * name made of placeholders alone is none. A Rust cased test's name may go on with its cases,
+ * shaped as rstest's `::case_1` or test_case's `::test_case_1_…`: never another test of a module
+ * named the same.
  */
-const namePattern = (name: string): RegExp | null => {
+const namePattern = (name: string, cases = false): RegExp | null => {
   const parts = name.split(/(%[sdifjoOp#%]|\$\{[^}]*\}|\$\w+)/)
   if (parts.every((part, at) => at % 2 === 1 || part.trim() === '')) return null
   const body = parts
     .map((part, at) => (at % 2 === 1 ? '[^\\n>›]+?' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .join('')
+  const named = cases ? `${body}(?:::(?:test_)?case_\\d+\\w*)*` : body
   return new RegExp(
-    `(?:^|[\\s>›]|::)${body}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
+    `(?:^|\\s)[^\\s[]*::${body}\\[|(?:^|[\\s>›]|(?:^|\\s)[^\\s[]*::)${named}(?=\\s*$|\\s+\\d+(?:\\.\\d+)?\\s?m?s\\b|\\s+\\(|\\s+\\[|\\s+-\\s|\\s+\\.\\.\\.)`,
   )
 }
 
-const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<string>): boolean =>
+/**
+ * A Go subtest as `go test` prints it: its parent function, the subtests it is nested in, then its
+ * name, each space turned into `_` (`TestExport/as_markdown/with_header`), on a `--- FAIL:` line or
+ * as a report's test name. Any subtests may come before the nesting the code does not show whole.
+ * A subtest whose parent is unknown is none.
+ */
+const subtestPattern = (test: GoSubtest): RegExp | null => {
+  if (test.parent === null) return null
+  const escape = (text: string) => text.replace(/\s/g, '_').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const path = [...test.nesting, test.subtest]
+    .map((name) => `/${name === null ? '[^\\s/]+' : escape(name)}`)
+    .join('')
+  return new RegExp(
+    `^(?:\\s*--- FAIL: )?${escape(test.parent)}${test.whole ? '' : '(?:/[^\\s/]+)*'}${path}(?=\\s+\\(|\\s*$)`,
+  )
+}
+
+/**
+ * A pytest summary line's node id, without the message after its first ` - ` outside a case id's
+ * brackets (`FAILED a.py::test_y - AssertionError: a.py::test_x[1] failed`), and with what its
+ * case ids hold blanked (`test_other[a b::test_x[1]]`); any other line whole.
+ */
+const nodeIdOf = (text: string): string => {
+  if (!/^FAILED \S+::/.test(text)) return text
+  let brackets = 0
+  let id = ''
+  for (const [at, char] of text.split('').entries()) {
+    if (brackets <= 0 && text.startsWith(' - ', at)) return id
+    if (char === ']') brackets -= 1
+    id += brackets > 0 ? ' ' : char
+    if (char === '[') brackets += 1
+  }
+  return id
+}
+
+const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<TestName>): boolean =>
   names.some((name) => {
-    const pattern = namePattern(name)
-    return pattern !== null && texts.some((text) => pattern.test(text))
+    const pattern = Predicate.isString(name)
+      ? namePattern(name)
+      : Predicate.hasProperty(name, 'function')
+        ? namePattern(name.function, true)
+        : subtestPattern(name)
+    return pattern !== null && texts.some((text) => pattern.test(nodeIdOf(text)))
   })
 
 /**
@@ -285,48 +389,74 @@ const named = (texts: ReadonlyArray<string>, names: ReadonlyArray<string>): bool
  * (no report, or JUnit's `classname` only), a test the proof adds must be named whole among the
  * failures (a report's failing tests, or the lines the runner marks as failing in the whole
  * output); failing that, the key line decides, never the exit code alone. A proof whose code names
- * no test, or a command with no test file, is red by its exit code, the key line its guard.
+ * no test, or a command with no test file, is red by its exit code, the key line its guard. A Go
+ * subtest whose parent is unknown is a test the proof adds without a name: alone, the key line
+ * decides when the proof has one, and the exit code when it has none.
  */
 export const validRed = (
   run: ProofRunClass,
   testPath: string | null,
-  testNames: ReadonlyArray<string> = [],
+  testNames: ReadonlyArray<TestName> = [],
   keyLineMatched: boolean | null = null,
 ): boolean => {
   if (run.classification !== 'assertion_failed') return false
   if (testPath === null) return true
   const located = run.failures.filter((one) => one.file !== null)
+  const unnamed =
+    testNames.length > 0 &&
+    testNames.every((name) => Predicate.hasProperty(name, 'parent') && name.parent === null)
+  const names = unnamed && keyLineMatched === null ? [] : testNames
   if (located.length > 0) {
     return located.some(
       (one) =>
         one.assertion &&
         posix(one.file ?? '').endsWith(posix(testPath)) &&
-        (testNames.length === 0 || named([one.test], testNames)),
+        (names.length === 0 || named([one.test], names) || (unnamed && keyLineMatched === true)),
     )
   }
-  if (testNames.length === 0) return true
+  if (names.length === 0) return true
   const failing =
     run.failures.length > 0
       ? run.failures.filter((one) => one.assertion).map((one) => one.test)
       : run.failingLines
-  return named(failing, testNames) || keyLineMatched === true
+  return named(failing, names) || keyLineMatched === true
 }
 
-/** The name a test is declared with, as `test('…'` or `it("…"` declares it. */
-const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])((?:(?!\1).)+)\1/g
+/**
+ * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`
+ * (its pytest cases, `test_…[id]`, are its own), a Go `func TestX(t *testing.T)` and the literal
+ * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test(…)]`),
+ * and a Rust cased test under `#[rstest]` or `#[test_case(…)]`.
+ */
+const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
 /** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
 const EACH_NAME =
-  /\b(?:test|it)(?:\.\w+)*\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*\(\s*(['"`])((?:(?!\1).)+)\1/g
+  /\b(?:test|it)(?:\.\w+)*\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
+
+const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
+const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
+/** A `t.Run(` call's literal name, read where the call starts, across lines. */
+const GO_SUBTEST_NAME = /\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/y
+/** A `t.Run(` call, its name a literal or not. */
+const GO_RUN = /\b\w+\.Run\(/g
+/** Go's strings, runes and comments, a raw string or a block comment across lines. */
+const GO_LITERAL = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
+/** The function a line of Go declares, or a hunk header names after its `@@`. */
+const GO_FUNCTION = /^(?:@@[^@]*@@\s*)?func\s/
+const RUST_NAME =
+  /#\[(?:\w+::)*test(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
+const RUST_CASED_NAME =
+  /#\[(?:\w+::)*(?:rstest|test_case)(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 
 /**
  * The tests a proof adds: every test its new file declares, or those the lines its patch adds
- * declare; none when the code names none.
+ * declare, a Go subtest with the function it runs under; none when the code names none.
  */
-export const addedTestNames = (test: {
+export const addedTests = (test: {
   readonly insertion: 'new_file' | 'addition'
   readonly code: string
   readonly patch: string | null
-}): ReadonlyArray<string> => {
+}): ReadonlyArray<TestName> => {
   const added =
     test.insertion === 'new_file'
       ? test.code
@@ -335,11 +465,142 @@ export const addedTestNames = (test: {
           .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
           .map((line) => line.slice(1))
           .join('\n')
-  return [...added.matchAll(TEST_NAME), ...added.matchAll(EACH_NAME)]
-    .toSorted((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map((found) => found[2] ?? '')
-    .filter((name) => name !== '')
+  const declared = [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME, RUST_CASED_NAME]
+    .flatMap((pattern) =>
+      Array.from(added.matchAll(pattern), (found) => ({
+        at: found.index,
+        name: found.groups?.['name'] ?? '',
+        cased: pattern === RUST_CASED_NAME,
+      })),
+    )
+    .filter((found) => found.name !== '')
+    .toSorted((a, b) => a.at - b.at)
+    .map((found): TestName => (found.cased ? { function: found.name } : found.name))
+  return [...declared, ...subtestsOf(test)]
 }
+
+/**
+ * The literal names of the Go subtests a proof adds (`t.Run("…",`), each with the test function
+ * it runs under: the last `func` above it in the new file, or in a patch its hunk's lines and the
+ * function its `@@ … @@ func TestX(` header names, null when it is under no test function. Its
+ * nesting is read from the braces above it in their order, strings, runes and comments aside: a
+ * `t.Run` opens a level at its function's own brace, the first one inside its call (a closure
+ * that a wrapper call takes, `withDB(func(t *testing.T) {`, as well).
+ */
+const subtestsOf = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<GoSubtest> => {
+  const lines =
+    test.insertion === 'new_file'
+      ? test.code.split('\n').map((line) => ({ text: line, added: true }))
+      : (test.patch ?? '')
+          .split('\n')
+          .filter((line) => !line.startsWith('---') && !line.startsWith('+++'))
+          .filter((line) => !line.startsWith('-'))
+          .map((line) =>
+            line.startsWith('@@')
+              ? { text: line, added: false }
+              : { text: line.slice(1), added: line.startsWith('+') },
+          )
+  const code = goCode(lines.map((line) => line.text))
+  const raw = lines.map((line) => line.text).join('\n')
+  const found: GoSubtest[] = []
+  let parent: string | null = null
+  let whole = true
+  // The `t.Run` blocks open above, each with the depth of braces inside it, and the calls still
+  // waiting for their function's brace, each with the depth of parentheses inside it.
+  let open: Array<{ readonly name: string | null; readonly depth: number }> = []
+  let calls: Array<{ readonly name: string | null; readonly parens: number }> = []
+  let depth = 0
+  let parens = 0
+  let offset = 0
+  for (const [at, line] of lines.entries()) {
+    const start = offset
+    offset += line.text.length + 1
+    const isHeader = line.text.startsWith('@@')
+    if (GO_FUNCTION.test(line.text) || isHeader) {
+      parent = GO_FUNCTION.test(line.text)
+        ? (new RegExp(GO_NAME.source).exec(line.text.replace(/^@@[^@]*@@\s*/, ''))?.groups?.[
+            'name'
+          ] ?? null)
+        : null
+      whole = !isHeader
+      open = []
+      calls = []
+      depth = 0
+      parens = 0
+      if (isHeader) continue
+    }
+    const text = code[at] ?? ''
+    const runs = new Set(Array.from(text.matchAll(GO_RUN), (run) => run.index))
+    for (const [column, char] of text.split('').entries()) {
+      if (runs.has(column)) {
+        GO_SUBTEST_NAME.lastIndex = start + column
+        const subtest = GO_SUBTEST_NAME.exec(raw)?.groups?.['name']
+        const nesting = open.map((block) => block.name)
+        if (line.added && subtest !== undefined) found.push({ parent, subtest, nesting, whole })
+        calls.push({ name: subtest ?? null, parens: parens + 1 })
+      }
+      if (char === '(') parens += 1
+      if (char === ')') {
+        parens -= 1
+        calls = calls.filter((call) => call.parens <= parens)
+      }
+      if (char === '{') {
+        depth += 1
+        const call = calls.findLast((one) => one.parens <= parens)
+        if (call !== undefined) open.push({ name: call.name, depth })
+        calls = calls.filter((one) => one !== call)
+      }
+      if (char === '}') {
+        depth -= 1
+        open = open.filter((block) => block.depth <= depth)
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * Lines of Go with their strings, runes and comments blanked, each hunk of a patch read apart (a
+ * header's words are not code).
+ */
+const goCode = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const blanked = (hunk: ReadonlyArray<string>) =>
+    hunk.length === 0
+      ? []
+      : hunk
+          .join('\n')
+          .replace(GO_LITERAL, (literal) => literal.replace(/[^\n]/g, ' '))
+          .split('\n')
+  const code: string[] = []
+  let hunk: string[] = []
+  for (const line of lines) {
+    if (!line.startsWith('@@')) {
+      hunk.push(line)
+      continue
+    }
+    code.push(...blanked(hunk), line)
+    hunk = []
+  }
+  return [...code, ...blanked(hunk)]
+}
+
+/** The literal names a proof's tests are declared with, as its code reads. */
+export const addedTestNames = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<string> =>
+  addedTests(test).map((name) =>
+    Predicate.isString(name)
+      ? name
+      : Predicate.hasProperty(name, 'function')
+        ? name.function
+        : name.subtest,
+  )
 
 /** An output with what changes from one run to the next masked, line by line. */
 export const normalisedOutput = (text: string): string =>

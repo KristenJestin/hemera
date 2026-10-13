@@ -19,10 +19,12 @@
  *   journalled, the attempt ends with its files, and the session ends.
  * - **Health.** A turn that ends without the report is reminded once; a second one fails the pass
  *   with "the documenter gave no report". A session that stops for good fails it too.
- * - **The limit.** At most two passes per Building (CT-39); a third is refused. `deltaNeeded` says
- *   what changed since the last pass outside the recipes' files: #147 runs the delta pass on it.
- * - **A stop.** A pass a stopped engine left waiting or running fails at the next start: its caller
- *   is gone with the engine, and decides again from the Building.
+ * - **The limit.** At most two passes per Building (CT-39), a failed one not counted; a third is
+ *   refused. `deltaNeeded` says what changed since the last pass outside the recipes' files: #147
+ *   runs the delta pass on it.
+ * - **A stop.** A pass a stopped engine left waiting or running fails at the next start
+ *   (`STOPPED_DURING_PASS`): its caller is gone with the engine, and decides again from the
+ *   Building.
  */
 
 import { createHash } from 'node:crypto'
@@ -105,6 +107,16 @@ import {
   now,
   writeTrees,
 } from './tasks.ts'
+
+/** Why a pass a stopped engine left fails at the next start. */
+export const STOPPED_DURING_PASS = 'Hemera stopped during the pass'
+
+/** Why a pass fails when its caller stops waiting, as it does when Hemera stops. */
+export const CALLER_STOPPED = 'its caller stopped waiting'
+
+/** Whether a pass failed only because Hemera stopped: its caller runs it again. */
+export const stoppedByHemera = (why: string | null): boolean =>
+  why === STOPPED_DURING_PASS || why === CALLER_STOPPED
 
 /** What a pass is asked to look at: the whole Building, or the files the special tasks changed. */
 export type DocumenterMode =
@@ -517,9 +529,7 @@ export const documenterLayer = (settings: DocumenterSettings) =>
           // A caller that stops, while the pass waits for a slot, opens its session or runs, fails
           // it: its slot and its session go with it.
           return yield* Effect.andThen(starting, Deferred.await(outcome)).pipe(
-            Effect.onInterrupt(() =>
-              failGoing(recorded.id, 'its caller stopped waiting').pipe(Effect.ignore),
-            ),
+            Effect.onInterrupt(() => failGoing(recorded.id, CALLER_STOPPED).pipe(Effect.ignore)),
           )
         }).pipe(
           provided,
@@ -896,7 +906,7 @@ export const documenterLayer = (settings: DocumenterSettings) =>
         const database = yield* Database
         for (const row of yield* passesGoing(database)) {
           if (outcomes.has(row.id)) continue
-          yield* fail(row.id, 'Hemera stopped during the pass')
+          yield* fail(row.id, STOPPED_DURING_PASS)
         }
       })
 
