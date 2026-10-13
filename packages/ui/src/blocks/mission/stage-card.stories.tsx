@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { IconTerminal } from '../../icons.ts'
+import { KeptAgentChip, KEPT_AGENT_WORDS } from './kept-agent-chip.tsx'
 import { StageCard } from './stage-card.tsx'
 
 /**
@@ -111,6 +112,65 @@ export const Building: Story = {
     const building = card(canvasElement, 'Building')
     await expect(building.getByRole('status')).toHaveTextContent(/^Builds T3/)
     await expect(building.getByText('2 of 6 done')).toBeVisible()
+  },
+}
+
+/** Hovers a chip and reads its legend. */
+async function legendOf(chip: HTMLElement): Promise<string> {
+  await userEvent.hover(chip)
+  const tip = await waitFor(() => within(document.body).getByRole('tooltip'))
+  const said = tip.textContent ?? ''
+  await userEvent.unhover(chip)
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('tooltip')).toBeNull()
+  })
+  return said
+}
+
+const BUILDING = {
+  stage: 'Building',
+  face: 'running',
+  line: 'Builds T3, the front matter of an exported note',
+  progress: { step: 'Tasks', detail: '2 of 6 done' },
+} as const
+
+/**
+ * Building, with an agent Hemera started before its last restart still running: its chip under
+ * the progress line, the bell in the warning tone, its program and pid, no duration; its legend
+ * says what it is in plain words.
+ */
+export const BuildingKeptAgent: Story = {
+  args: { ...BUILDING, running: <KeptAgentChip program="claude" pid={48213} /> },
+  play: async ({ canvasElement }) => {
+    const chip = card(canvasElement, 'Building').getByRole('button', {
+      name: /^claude · pid 48213,/,
+    })
+    await expect(chip).toBeVisible()
+    await expect(chip).toHaveTextContent(/^claude · pid 48213$/)
+    expect(await legendOf(chip)).toBe(`claude · pid 48213 · ${KEPT_AGENT_WORDS}`)
+    await expect(KEPT_AGENT_WORDS).toBe(
+      'An agent Hemera started before its last restart is still running. Hemera could not stop it, and stops it the next time Hemera starts.',
+    )
+  },
+}
+
+/** Two such agents: two chips, side by side as the card lays out what runs. */
+export const BuildingKeptAgents: Story = {
+  args: {
+    ...BUILDING,
+    running: (
+      <>
+        <KeptAgentChip program="claude" pid={48213} />
+        <KeptAgentChip program="codex" pid={48377} />
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const building = card(canvasElement, 'Building')
+    await expect(building.getByRole('button', { name: /^claude · pid 48213,/ })).toBeVisible()
+    const codex = building.getByRole('button', { name: /^codex · pid 48377,/ })
+    await expect(codex).toBeVisible()
+    expect(await legendOf(codex)).toBe(`codex · pid 48377 · ${KEPT_AGENT_WORDS}`)
   },
 }
 

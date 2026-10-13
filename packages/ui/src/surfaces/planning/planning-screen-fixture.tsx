@@ -1,3 +1,4 @@
+import type { KeptAgentView } from '../../blocks/mission/kept-agent-chip.tsx'
 import { type ReactNode, useState } from 'react'
 
 import type { PermissionChoice } from '../../blocks/need/need-card.tsx'
@@ -59,6 +60,8 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   opened?: string | undefined
   /** Why the page stopped following the engine after it was drawn. */
   failure?: string | undefined
+  /** Agents Hemera started before its last restart and could not stop. */
+  kept?: readonly KeptAgentView[] | undefined
   onPermission: (id: string, choice: PermissionChoice) => void
   onFreeze: () => void
   onRetry: () => void
@@ -127,6 +130,7 @@ export function PlanningScreen({
   moment,
   opened,
   failure,
+  kept,
   onFreeze,
   onRetry,
   onPermission,
@@ -210,6 +214,7 @@ export function PlanningScreen({
           data={data}
           error={moment === 'error' ? 'The engine did not answer in time.' : failure}
           planner={shown?.planner}
+          kept={kept}
           declaredComplete={shown?.declaredComplete}
           needs={shown?.needs}
           onNeed={(id) => ({

@@ -34,6 +34,7 @@ export function PlanningStage({
   readiness,
   openChat,
   refused,
+  kept,
   freeze,
   freezing,
   needs,
@@ -61,6 +62,7 @@ export function PlanningStage({
       <PlanningPage
         data={data}
         planner={view.planner}
+        kept={kept}
         declaredComplete={view.declaredComplete}
         needs={needs.rows.map(planningNeedOf)}
         onNeed={needs.on}

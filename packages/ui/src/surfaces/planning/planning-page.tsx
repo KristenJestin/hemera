@@ -6,6 +6,7 @@ import { EverythingElse } from '../../blocks/planning/everything-else.tsx'
 import { ForYou } from '../../blocks/planning/for-you.tsx'
 import { ChangedMark } from '../../blocks/planning/planning-marks.tsx'
 import type { Planner } from '../../blocks/planning/planning-progress.ts'
+import type { KeptAgentView } from '../../blocks/mission/kept-agent-chip.tsx'
 import { PlanningStageCard } from '../../blocks/planning/planning-stage-card.tsx'
 import { SendButton } from '../../blocks/planning/sending.tsx'
 import {
@@ -65,6 +66,8 @@ export interface PlanningPageProps extends PlanningHandlers {
   planner?: Planner | undefined
   /** Whether the Planner declared the Spec complete. */
   declaredComplete?: boolean | undefined
+  /** The mission's agents Hemera started before its last restart and could not stop: chips in the card. */
+  kept?: readonly KeptAgentView[] | undefined
   /** The mission's needs that wait, For you's first line: most often its agents' permissions. */
   needs?: readonly PlanningNeed[] | undefined
   /** Every answer a need's card gives, with the need it answers. */
@@ -190,7 +193,12 @@ export function PlanningPage(props: PlanningPageProps): ReactNode {
           />
         </section>
         <aside aria-label="What calls for you" className={RAIL}>
-          <PlanningStageCard attention={attention} data={data} onOpenProbe={props.onOpenProbe} />
+          <PlanningStageCard
+            attention={attention}
+            data={data}
+            onOpenProbe={props.onOpenProbe}
+            kept={props.kept}
+          />
           {!data.frozen && (
             <ForYou
               attention={attention}

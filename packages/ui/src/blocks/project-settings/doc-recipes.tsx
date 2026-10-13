@@ -338,84 +338,115 @@ export function DocRecipesSection({
         }
       />
       <SectionRefusal error={error} />
-      {(error === undefined || !empty) && (
-        <Frame>
-          {empty ? (
-            <Empty
-              face="asleep"
-              title="No recipe yet"
-              description="The documenter keeps in line only the files a recipe names."
-              action={add}
-            />
-          ) : (
-            <>
-              <ColumnsHead />
-              {loading ? (
-                <ul aria-label="Recipes" aria-busy="true" className="flex flex-col">
-                  <DocRecipeRowSkeleton />
-                  <DocRecipeRowSkeleton />
-                  <DocRecipeRowSkeleton />
-                </ul>
-              ) : (
-                <AnimatePresence initial={false}>
-                  {kept.length > 0 && (
-                    <motion.div
-                      key="kept"
-                      className="overflow-hidden"
-                      initial={collapse}
-                      animate={expand}
-                      exit={collapse}
-                      transition={folding}
-                    >
-                      <Reorder.Group
-                        axis="y"
-                        values={ids}
-                        onReorder={onReorder}
-                        aria-label="Recipes"
-                        className="flex flex-col"
-                      >
-                        <AnimatePresence initial={false}>
-                          {kept.map((recipe, index) => (
-                            <DocRecipeRow
-                              key={recipe.id}
-                              recipe={recipe}
-                              first={index === 0}
-                              last={index === kept.length - 1}
-                              onOpen={() => onOpen(recipe.id)}
-                              onMove={(by) => move(recipe.id, by)}
-                            />
-                          ))}
-                        </AnimatePresence>
-                      </Reorder.Group>
-                    </motion.div>
-                  )}
-                  {proposals.length > 0 && (
-                    <motion.ul
-                      key="proposed"
-                      aria-label="Proposed recipes"
-                      className="flex flex-col overflow-hidden border-t border-border first:border-t-0"
-                      initial={collapse}
-                      animate={expand}
-                      exit={collapse}
-                      transition={folding}
-                    >
-                      <AnimatePresence initial={false}>
-                        {proposals.map((proposal) => (
-                          <ProposedDocRecipeRow
-                            key={proposal.id}
-                            recipe={proposal}
-                            onAccept={() => onAccept(proposal.id)}
-                          />
-                        ))}
+      {/* Presences that outlive what they hold: the last line folds out with its list while the
+          empty state grows in, and a refusal with nothing to show folds the frame away. */}
+      <AnimatePresence initial={false}>
+        {(error === undefined || !empty) && (
+          <motion.div
+            key="frame"
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <Frame>
+              <AnimatePresence initial={false} propagate>
+                {empty ? (
+                  <motion.div
+                    key="empty"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <Empty
+                      face="asleep"
+                      title="No recipe yet"
+                      description="The documenter keeps in line only the files a recipe names."
+                      action={add}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="list"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <ColumnsHead />
+                    {loading ? (
+                      <ul aria-label="Recipes" aria-busy="true" className="flex flex-col">
+                        <DocRecipeRowSkeleton />
+                        <DocRecipeRowSkeleton />
+                        <DocRecipeRowSkeleton />
+                      </ul>
+                    ) : (
+                      <AnimatePresence initial={false} propagate>
+                        {kept.length > 0 && (
+                          <motion.div
+                            key="kept"
+                            className="overflow-hidden"
+                            initial={collapse}
+                            animate={expand}
+                            exit={collapse}
+                            transition={folding}
+                          >
+                            <Reorder.Group
+                              axis="y"
+                              values={ids}
+                              onReorder={onReorder}
+                              aria-label="Recipes"
+                              className="flex flex-col"
+                            >
+                              <AnimatePresence initial={false} propagate>
+                                {kept.map((recipe, index) => (
+                                  <DocRecipeRow
+                                    key={recipe.id}
+                                    recipe={recipe}
+                                    first={index === 0}
+                                    last={index === kept.length - 1}
+                                    onOpen={() => onOpen(recipe.id)}
+                                    onMove={(by) => move(recipe.id, by)}
+                                  />
+                                ))}
+                              </AnimatePresence>
+                            </Reorder.Group>
+                          </motion.div>
+                        )}
+                        {proposals.length > 0 && (
+                          <motion.ul
+                            key="proposed"
+                            aria-label="Proposed recipes"
+                            className="flex flex-col overflow-hidden border-t border-border first:border-t-0"
+                            initial={collapse}
+                            animate={expand}
+                            exit={collapse}
+                            transition={folding}
+                          >
+                            <AnimatePresence initial={false} propagate>
+                              {proposals.map((proposal) => (
+                                <ProposedDocRecipeRow
+                                  key={proposal.id}
+                                  recipe={proposal}
+                                  onAccept={() => onAccept(proposal.id)}
+                                />
+                              ))}
+                            </AnimatePresence>
+                          </motion.ul>
+                        )}
                       </AnimatePresence>
-                    </motion.ul>
-                  )}
-                </AnimatePresence>
-              )}
-            </>
-          )}
-        </Frame>
-      )}
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Frame>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <p className={NOTE}>
         {proposals.length > 0 &&
           'Hemera found these in the main checkout. Nothing is kept until you accept it. '}

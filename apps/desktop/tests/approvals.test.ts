@@ -25,7 +25,7 @@ import { join } from 'node:path'
 import { NeverProgram, PermissionAnswer, type PermissionChoice } from '@hemera/core/domain'
 import type { CommandDraft } from '@hemera/ipc'
 import { asc, eq } from 'drizzle-orm'
-import { Effect, Layer, Predicate, Schema } from 'effect'
+import { Deferred, Effect, Layer, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
@@ -788,12 +788,14 @@ describe('Grants are listed with who gave them, when, and how often they were us
         }),
       ),
     )
-    const again = await engine()(
+    // The start's rebuild would replace the session: held until the call is answered.
+    const rebuilt = Deferred.makeUnsafe<void>()
+    const again = await engine({ sessions: { rebuildHold: Deferred.await(rebuilt) } })(
       inEngine(
         Effect.gen(function* () {
           const grantId = yield* grantAgain(world.builder.sessionId)
           return yield* callTool(grantId, 'commands_run', { line: nodeLine(appender, out) })
-        }),
+        }).pipe(Effect.ensuring(Deferred.succeed(rebuilt, undefined))),
       ),
     )
     expect(again.ok).toBe(true)

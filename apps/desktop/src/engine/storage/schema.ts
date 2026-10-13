@@ -147,6 +147,34 @@ export const projectRepositories = sqliteTable(
 )
 
 /**
+ * The forge a repository is forced to (#253), with its host where the forge has no fixed one: a
+ * repository without a row has its forge detected from its remote.
+ */
+export const repositoryForges = sqliteTable('repository_forges', {
+  repositoryId: text('repository_id')
+    .primaryKey()
+    .references(() => projectRepositories.id, { onDelete: 'cascade' }),
+  forge: text('forge').notNull(),
+  host: text('host'),
+})
+
+/**
+ * What each pending need of the forge port waits for (#253): the CLI and host whose check, once
+ * passed, withdraws it. Kept beside the need so that an engine restarted while an operation waited
+ * finds it, rather than making a second one.
+ */
+export const forgeNeeds = sqliteTable('forge_needs', {
+  needId: text('need_id')
+    .primaryKey()
+    .references(() => needs.id, { onDelete: 'cascade' }),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cli: text('cli').notNull(),
+  host: text('host').notNull(),
+})
+
+/**
  * The Workspaces: a Project's isolated folders, one worktree per chosen repository. `branch` is
  * the branch its worktrees were made on, or null for worktrees on a detached HEAD. A removed
  * Workspace's row goes with its folder; the journal keeps that it was.

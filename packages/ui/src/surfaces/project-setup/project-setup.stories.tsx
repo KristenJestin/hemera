@@ -555,6 +555,48 @@ export const TaskSummary: Story = {
   },
 }
 
+/** The summary folded with the earlier messages open inside it: they fold with it. */
+async function foldWithEarlier(): Promise<HTMLElement> {
+  const details = await within(document.body).findByRole('dialog', { name: 'Setup of Acme' })
+  const said = await within(details).findByRole('region', { name: 'What the agent said' })
+  await waitFor(() => expect(said).toBeVisible())
+  await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
+  await userEvent.click(await within(said).findByRole('button', { name: /Earlier messages/ }))
+  const earlier = await within(said).findByRole('list', { name: 'Earlier messages' })
+  await userEvent.click(within(said).getByRole('button', { name: 'Fold the summary' }))
+  await waitFor(() => expect(within(said).queryByText(/Reading/)).toBeNull())
+  expect(within(said).queryByRole('button', { name: /Earlier messages/ })).toBeNull()
+  return earlier
+}
+
+/**
+ * Folding the summary with the earlier messages open: their list folds with the summary. The
+ * stories run asking for less movement, where that fold takes no time and its last frame may be
+ * dropped as the summary leaves, so the play reads where it lands; the fold is read on frames.
+ */
+export const TaskSummaryFoldedWithEarlier: Story = {
+  render: () => (
+    <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+  ),
+  play: async () => {
+    const earlier = await foldWithEarlier()
+    await waitFor(() => expect(earlier).not.toBeInTheDocument())
+  },
+}
+
+/** The same with reduced motion: the summary and the earlier messages are gone at once. */
+export const TaskSummaryFoldedWithEarlierReducedMotion: Story = {
+  render: () => (
+    <MotionConfig reducedMotion="always">
+      <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+    </MotionConfig>
+  ),
+  play: async () => {
+    const earlier = await foldWithEarlier()
+    await waitFor(() => expect(earlier).not.toBeInTheDocument())
+  },
+}
+
 /** In the chip's menu a message is one plain line: its first, without Markdown marks. */
 export const TaskSummaryGlance: Story = {
   render: () => <Held {...BASE} messages={['Reading **api**', SUMMARY]} />,

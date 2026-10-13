@@ -1,8 +1,15 @@
-import { FreezeRefused, type FreezeReadiness, type Mission, type Project } from '@hemera/ipc'
+import {
+  FreezeRefused,
+  type FreezeReadiness,
+  type KeptAgent,
+  type Mission,
+  type Project,
+} from '@hemera/ipc'
 import {
   MissionFrame,
   MissionFrameBase,
   MissionFrameNeeds,
+  keptAgentChips,
   type AppSection,
   type MissionFrameState,
   type MissionView,
@@ -11,6 +18,7 @@ import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
 import {
+  followKept,
   freezeShown,
   frozenOf,
   headerOf,
@@ -63,6 +71,8 @@ export interface MissionPageProps extends Omit<MissionRouteProps, 'projectId' | 
   notice?: string | undefined
   /** Why the last Freeze was refused, each reason in words, for the page to list. */
   refused?: ReadonlyArray<string> | undefined
+  /** The mission's earlier agents a start could not stop, still running (#320). */
+  kept?: ReadonlyArray<KeptAgent> | undefined
   freeze: () => void
   /** Whether a Freeze is in flight: Freeze is then not offered again. */
   freezing?: boolean | undefined
@@ -87,6 +97,8 @@ function viewsOf(
   }))
 }
 
+const NONE_KEPT: ReadonlyArray<KeptAgent> = []
+
 /** A mission's page, drawn: its frame, with the base of its stage and the views over it. */
 export function MissionPage({
   link,
@@ -96,6 +108,7 @@ export function MissionPage({
   readiness,
   notice,
   refused,
+  kept = NONE_KEPT,
   now,
   frame,
   actions,
@@ -169,7 +182,14 @@ export function MissionPage({
     )
   }
   return Page === undefined
-    ? draw({ base: <MissionFrameBase stage={line.stage} /> })
+    ? draw({
+        base: (
+          <MissionFrameBase
+            stage={line.stage}
+            running={kept.length > 0 ? keptAgentChips(kept) : undefined}
+          />
+        ),
+      })
     : createElement(Page, {
         link,
         engineReady,
@@ -179,6 +199,7 @@ export function MissionPage({
         readiness,
         openChat: actions.openChat,
         refused,
+        kept,
         freeze,
         freezing,
         needs: { rows, on: answering },
@@ -201,6 +222,7 @@ export function MissionRoute({
   const [readiness, setReadiness] = useState<FreezeReadiness | null>(null)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [refused, setRefused] = useState<ReadonlyArray<string> | undefined>(undefined)
+  const [kept, setKept] = useState<ReadonlyArray<KeptAgent>>(NONE_KEPT)
   const [freezing, setFreezing] = useState(false)
   const [once] = useState(() => oneAtATime(setFreezing))
   const mission =
@@ -227,6 +249,16 @@ export function MissionRoute({
   useEffect(() => {
     if (!engineReady || id === undefined) return
     link.missionOpened(id).catch(() => undefined)
+  }, [link, engineReady, id])
+
+  // The earlier agents a start could not stop, for as long as each runs (#320).
+  useEffect(() => {
+    if (!engineReady || id === undefined) return undefined
+    const unsubscribe = followKept(link, id, setKept)
+    return () => {
+      unsubscribe()
+      setKept(NONE_KEPT)
+    }
   }, [link, engineReady, id])
 
   useEffect(() => {
@@ -278,6 +310,7 @@ export function MissionRoute({
       readiness={readiness}
       notice={notice}
       refused={refused}
+      kept={kept}
       now={now}
       frame={frame}
       actions={actions}

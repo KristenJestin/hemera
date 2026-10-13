@@ -179,7 +179,7 @@ function AgentSaid({ messages }: { messages: readonly string[] }): ReactNode {
                     Earlier messages
                     <span className="tabular-nums">{earlier.length}</span>
                   </button>
-                  <AnimatePresence initial={false}>
+                  <AnimatePresence initial={false} propagate>
                     {earlierOpen && (
                       <motion.ol
                         key="earlier"

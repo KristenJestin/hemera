@@ -18,6 +18,7 @@ import {
   ChecksRpcs,
   DiffRpcs,
   DocRecipesRpcs,
+  ForgeRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -907,6 +908,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           streamClosedAs(gone),
           observedStream('mission.changed', log),
         ),
+      'mission.keptAgents': (request) =>
+        engine['mission.keptAgents'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('mission.keptAgents', log),
+        ),
     }),
     // The Project's checks (#143) and doc recipes (#146), each a layer of its own.
     ChecksRpcs.toLayer({
@@ -945,6 +951,20 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         ),
       'docRecipes.move': (request) =>
         engine['docRecipes.move'](request).pipe(closedAs(gone), observed('docRecipes.move', log)),
+    }),
+    // The forge of each repository (#253), a layer of its own.
+    ForgeRpcs.toLayer({
+      'forge.status': (request) =>
+        engine['forge.status'](request).pipe(closedAs(gone), observed('forge.status', log)),
+      'forge.checkAgain': (request) =>
+        engine['forge.checkAgain'](request).pipe(closedAs(gone), observed('forge.checkAgain', log)),
+      'forge.setForced': (request) =>
+        engine['forge.setForced'](request).pipe(closedAs(gone), observed('forge.setForced', log)),
+      'forge.changes': (request) =>
+        engine['forge.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('forge.changes', log),
+        ),
     }),
     // The live diff of a mission (#249), a layer of its own.
     DiffRpcs.toLayer({
