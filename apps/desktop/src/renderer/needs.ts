@@ -138,6 +138,42 @@ function optionsOf(
   ]
 }
 
+/** A block of output in a question, fenced as Markdown fences it. */
+const FENCED = /```[^\n]*\n([\s\S]*?)\n?```/g
+
+const paragraphsOf = (text: string): string[] =>
+  text
+    .split(/\n{2,}/)
+    .map((one) => one.trim())
+    .filter((one) => one !== '')
+
+/** A decision's question split around the outputs it carries. */
+interface QuestionOutputs {
+  readonly title: string
+  readonly rest: string | undefined
+  readonly outputs: ReadonlyArray<{ readonly what: string; readonly output: string }>
+}
+
+/**
+ * A decision's question that carries the outputs it rests on (a red that differs from Planning's,
+ * a scenario that already passes): its first paragraph is the question, each output is said under
+ * the paragraph before it, and what follows the last output is the card's text.
+ */
+function outputsIn(question: string): QuestionOutputs {
+  const outputs: Array<{ what: string; output: string }> = []
+  let title: string | undefined
+  let from = 0
+  for (const fence of question.matchAll(FENCED)) {
+    const before = paragraphsOf(question.slice(from, fence.index))
+    title ??= before[0]
+    const label = before.length > (outputs.length === 0 ? 1 : 0) ? before.at(-1) : undefined
+    outputs.push({ what: (label ?? 'Output').replace(/:$/, ''), output: fence[1] ?? '' })
+    from = fence.index + fence[0].length
+  }
+  const rest = paragraphsOf(question.slice(from)).join('\n\n')
+  return { title: title ?? question, rest: rest === '' ? undefined : rest, outputs }
+}
+
 /** What the card of a need says, its title and text first, then what its kind asks. */
 const wordsOf = (
   need: Need,
@@ -156,10 +192,16 @@ const wordsOf = (
               : { kind: 'environment' as const, settings: label },
         }
       },
-      Decision: (fields) => ({
-        title: fields.question,
-        ask: { kind: 'decision' as const, options: optionsOf(fields) },
-      }),
+      Decision: (fields) => {
+        const said = outputsIn(fields.question)
+        const ask = { kind: 'decision' as const, options: optionsOf(fields) }
+        if (said.outputs.length === 0) return { title: fields.question, ask }
+        return {
+          title: said.title,
+          text: said.rest,
+          ask: { ...ask, evidence: said.outputs },
+        }
+      },
       Error: (fields) => {
         const [proposed] = fields.proposals
         return {
