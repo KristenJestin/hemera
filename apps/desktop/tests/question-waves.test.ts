@@ -43,6 +43,7 @@ import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  answers as answerRows,
   domainEvents,
   memoryJournal,
   memoryNext,
@@ -1615,5 +1616,45 @@ describe('A question’s options are masked as JSON (#397)', () => {
     const shown = JSON.stringify(seen.waves[0]?.questions[0]?.options)
     expect(shown).not.toContain('a b')
     expect(shown).not.toContain(KNOWN_SECRET)
+  })
+})
+
+describe('A written answer holding JSON after a sentence is masked as JSON (#401)', () => {
+  test('the stored answer keeps nothing of a quoted credential or a known value, and its JSON still parses', async () => {
+    const { run } = planning(() => QUIET)
+    const before = 'The user answered: '
+    const json = `{\n  "a": ${JSON.stringify(QUOTED_SECRET)},\n  "b": "key ${KNOWN_SECRET}"\n}`
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const project = yield* acme
+          const { mission, planner } = yield* missionPlanned(project.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          const writer = { sessionId: planner.id, role: 'planner', missionId: mission.id }
+          yield* askWave(writer, [
+            {
+              text: 'Which account signs the export?',
+              why: 'The export depends on it.',
+              options: [
+                { label: 'The team account', detail: '' },
+                { label: 'Ask the team', detail: '' },
+              ],
+              recommended: 1,
+              recommendedReason: 'Nothing says otherwise.',
+            },
+          ])
+          yield* answerQuestion(mission.id, 'Q1', { text: `${before}${json}` })
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ text: answerRows.text })
+            .from(answerRows)
+            .where(eq(answerRows.missionId, mission.id))
+          return row?.text
+        }),
+      ),
+    )
+    expect(seen?.startsWith(before), seen ?? '').toBe(true)
+    expectMaskedJson(seen?.slice(before.length))
   })
 })

@@ -143,6 +143,36 @@ describe('The registry masks a JSON text as JSON (#397)', () => {
   })
 })
 
+describe('The registry masks a JSON string written inside a text as a JSON string (#401)', () => {
+  const registry = () => {
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', [KNOWN_SECRET, 'se"same-4417'])
+    return secrets
+  }
+  // Each: the prose before the JSON, the JSON, and what must not be left.
+  const texts: ReadonlyArray<readonly [string, string, ReadonlyArray<string>]> = [
+    ['The user answered: ', '{\n  "a": "password=\\"a b\\""\n}', ['a b']],
+    ['The user answered: ', '[\n  "password=\\"a b\\"",\n  "token: \\"c d\\""\n]', ['a b', 'c d']],
+    ['The user answered: ', JSON.stringify({ a: QUOTED_SECRET, b: KNOWN_SECRET }), ['a b']],
+    ['Said: ', '{\n  "h": "Authorization: Bearer \\"a b\\" tail"\n}', ['a b', 'tail']],
+    ['Note: ', '{"a":"x se\\"same-4417 y"}', ['same-4417']],
+  ]
+
+  test('JSON after a sentence keeps nothing of a quoted credential or a known value, and still parses', async () => {
+    const secrets = registry()
+    const after = '\nthat is all'
+    const written = texts.map(([before, json]) => `${before}${json}${after}`)
+    const paced = await Effect.runPromise(Effect.forEach(written, secrets.maskPaced))
+    texts.forEach(([before, , kept], index) => {
+      const masked = secrets.mask(written[index] ?? '')
+      expect(paced[index]).toBe(masked)
+      expect(masked.startsWith(before) && masked.endsWith(after), masked).toBe(true)
+      for (const secret of [...kept, KNOWN_SECRET]) expect(masked).not.toContain(secret)
+      expect(() => JSON.parse(masked.slice(before.length, -after.length)), masked).not.toThrow()
+    })
+  })
+})
+
 describe('Every line written through the diagnostic sink is masked', () => {
   test('no registered value survives a line of the diagnostic', () => {
     fc.assert(
