@@ -3121,6 +3121,62 @@ describe('What the user answers on a red', () => {
     expect(seen.delivered).toContain('total is wrong in')
   })
 
+  test('"send it back" answered a second time right before a stop opens its own attempt after the start, and asks nothing again', async () => {
+    const stop = stoppedOnAnswer()
+    let stopping = false
+    const hold: BuilderHold = (at) => (stopping ? stop.hold(at) : Effect.void)
+    const first = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(mismatch)
+          const once = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: once.id,
+            answer: ChosenAnswer.make({ option: SEND_BACK }),
+            key: 'answer-1',
+          })
+          yield* deliveredTo(mission.id, 'the user sent this red back')
+          // The Builder runs the proof again: the same red, asked about again.
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          const pendingDecision = Effect.map(getMission(mission.id), (one) =>
+            one.needs.find((need) => Predicate.isTagged(need.fields, 'Decision')),
+          )
+          yield* until(Effect.map(pendingDecision, (found) => found !== undefined))
+          const twice = yield* pendingDecision
+          if (twice === undefined) return yield* Effect.die(new Error('not asked again'))
+          stopping = true
+          yield* answerNeed({
+            id: twice.id,
+            answer: ChosenAnswer.make({ option: SEND_BACK }),
+            key: 'answer-2',
+          })
+          yield* Deferred.await(stop.answering.reached)
+          return { mission, before: yield* proofAttemptsOf('R1.S2') }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* actedOrAsked(
+            first.mission.id,
+            Effect.map(proofAttemptsOf('R1.S2'), (rows) => rows.length > first.before.length),
+          )
+          return {
+            attempts: yield* proofAttemptsOf('R1.S2'),
+            mission: yield* getMission(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.attempts).toHaveLength(first.before.length + 1)
+    expect(seen.attempts.at(-1)?.verdict).toBe('red')
+    expect(seen.mission.needs).toEqual([])
+  })
+
   test('"more information" answered right before a stop reaches the Builder after the start', async () => {
     const stop = stoppedOnAnswer()
     const first = await proofsEngine(data, stop.hold).run(({ profile }) =>

@@ -1656,11 +1656,19 @@ export const buildingProofs = (parts: ProofParts) => {
       const decisions = yield* decisionsIn(database, building.id)
       for (const row of yield* scenarioProofsIn(database, building.id)) {
         if (stateOf(row) !== 'waiting_red') continue
-        if (attempts.some((one) => one.scope === 'proof' && one.subject === row.scenario)) continue
         const last = decisions.findLast(
           (one) => one.scope === 'proof' && one.subject === row.scenario,
         )
         if (last?.kind !== 'red_mismatch' || last.state !== 'answered') continue
+        // By the answer: an attempt opened on the proof since it was given, never an earlier one.
+        const since = last.answeredAt ?? ''
+        if (
+          attempts.some(
+            (one) =>
+              one.scope === 'proof' && one.subject === row.scenario && one.startedAt >= since,
+          )
+        )
+          continue
         yield* afterAnswer(building.missionId, last.kind, row.scenario, last.answer ?? '')
       }
     })
