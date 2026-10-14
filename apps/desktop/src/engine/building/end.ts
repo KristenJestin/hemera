@@ -22,7 +22,9 @@
  * (the last green's, which holds the proofs' turn).
  */
 
-import { existsSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, relative, resolve } from 'node:path'
 
 import {
   CONTRADICTION_OPTIONS,
@@ -36,6 +38,7 @@ import {
   ROOT_REPOSITORY,
   SESSION_STATES,
   SPEC_IS_RIGHT,
+  sensitivePlace,
   specialTaskId,
   specialTaskOf,
 } from '@hemera/core/domain'
@@ -100,7 +103,7 @@ import {
   stateOf,
   upToDate,
 } from './proof-store.ts'
-import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
+import { AutoReview, insideCopy, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
   REVIEW_NEEDS,
   type ReviewFindingRow,
@@ -178,6 +181,25 @@ const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
 const placeOf = (base: BuildingBase) => ({ name: base.repository, folder: base.folder })
+
+/**
+ * What no reviewer reads in a copy of the checkpoint, whichever tool reaches it: a sensitive
+ * file's content (a `.env` committed on the branch) and a link leading out of the copy, each
+ * replaced by a line saying so.
+ */
+const withheldIn = (copy: string) => {
+  const machine = { home: homedir(), platform: process.platform }
+  for (const entry of readdirSync(copy, { recursive: true, withFileTypes: true })) {
+    if (entry.isDirectory()) continue
+    const path = join(entry.parentPath, entry.name)
+    const named = relative(copy, path).replaceAll('\\', '/')
+    const leaves =
+      entry.isSymbolicLink() && !insideCopy(copy, resolve(entry.parentPath, readlinkSync(path)))
+    if (!leaves && sensitivePlace(named, machine, { reading: true }) === null) continue
+    rmSync(path, { force: true })
+    writeFileSync(path, `content withheld: ${named}\n`)
+  }
+}
 
 const answerOf = (need: Need): string | null => {
   const answer = need.answer
@@ -424,6 +446,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             )
           }
           yield* Effect.sync(() => {
+            withheldIn(partial)
             rmSync(folder, { recursive: true, force: true })
             // A copy is whole or absent: one stopped half-way is made again.
             renameSync(partial, folder)

@@ -11,7 +11,7 @@
  * lets it go, once it reported. The checks are a fake `TaskChecks`: none unless a test says.
  */
 
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, win32 } from 'node:path'
 
 import {
@@ -101,6 +101,7 @@ import { ToolAccess } from '../src/engine/tools/access.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
+import { git } from './repositories.ts'
 
 let data: string
 let work: string
@@ -935,6 +936,108 @@ describe('The reviewers', () => {
       expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
         [{ repository: 'web', path: 'page.ts', intent: 'change' }],
       ])
+    },
+  )
+
+  test(
+    'a .env of the checkpoint, read through the copy with fs_read or search, with or without a glob: content withheld, none of its lines printed',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            // Written and left uncommitted: the checkpoint keeps a stand-in for it.
+            writtenInWorkspace(api, '.env', 'TOKEN=left-in-the-workspace\n')
+            // Committed: the checkpoint's tree holds its content as it is.
+            writtenInWorkspace(api, 'config/.env.production', 'TOKEN=committed-to-the-branch\n')
+            git(api, 'add', '-f', 'config/.env.production')
+            git(api, 'commit', '-q', '-m', 'production settings')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) =>
+              call(reviewer.grantId, 'fs_read', { repository: 'api', path })
+            const asked = { repository: 'api', pattern: 'TOKEN' }
+            const search = (glob: string | null) =>
+              call(reviewer.grantId, 'search', glob === null ? asked : { ...asked, glob })
+            return {
+              reads: [yield* read('.env'), yield* read('config/.env.production')],
+              searches: [
+                yield* search(null),
+                yield* search('**/.env*'),
+                yield* search('.env'),
+                yield* search('.env.production'),
+              ],
+              checkpoint: yield* call(reviewer.grantId, 'checkpoint_read', {
+                repository: 'api',
+                path: 'config/.env.production',
+              }),
+            }
+          }),
+        ),
+      )
+      for (const answer of seen.reads) {
+        expect(answer).toContain('content withheld')
+      }
+      for (const answer of [...seen.reads, ...seen.searches, seen.checkpoint]) {
+        expect(answer).not.toContain('TOKEN=')
+        expect(answer).not.toContain('left-in-the-workspace')
+        expect(answer).not.toContain('committed-to-the-branch')
+      }
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link in the copy of the checkpoint to its .env, or to a file outside it, read with fs_read or search: content withheld, none of its lines printed',
+    SLOW,
+    async () => {
+      const outside = join(work, 'outside-secret.txt')
+      writeFileSync(outside, 'TOKEN=outside-the-copy\n')
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, 'config/.env.production', 'TOKEN=committed-to-the-branch\n')
+            symlinkSync('config/.env.production', join(api, 'settings.txt'))
+            symlinkSync(outside, join(api, 'elsewhere.txt'))
+            git(api, 'add', '-f', 'config/.env.production', 'settings.txt', 'elsewhere.txt')
+            git(api, 'commit', '-q', '-m', 'linked settings')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) =>
+              call(reviewer.grantId, 'fs_read', { repository: 'api', path })
+            return {
+              answers: [
+                yield* read('settings.txt'),
+                yield* read('elsewhere.txt'),
+                yield* call(reviewer.grantId, 'search', { repository: 'api', pattern: 'TOKEN' }),
+                yield* call(reviewer.grantId, 'search', {
+                  repository: 'api',
+                  pattern: 'TOKEN',
+                  glob: '*.txt',
+                }),
+              ],
+            }
+          }),
+        ),
+      )
+      expect(seen.answers[0]).toContain('content withheld: api/settings.txt')
+      expect(seen.answers[1]).toContain('content withheld: api/elsewhere.txt')
+      for (const answer of seen.answers) {
+        expect(answer).not.toContain('TOKEN=')
+        expect(answer).not.toContain('committed-to-the-branch')
+        expect(answer).not.toContain('outside-the-copy')
+      }
     },
   )
 
