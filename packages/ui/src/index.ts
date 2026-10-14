@@ -198,6 +198,7 @@ export {
 export { ProbeReport } from './blocks/planning/probes.tsx'
 export * from './blocks/project-settings/provider-model.ts'
 export * from './blocks/project-settings/ticket-providers.tsx'
+export * from './blocks/project-settings/spec-fields-model.ts'
 export * from './blocks/project-settings/spec-fields.tsx'
 export * from './blocks/project-settings/exclusive-resources.tsx'
 export {
