@@ -4,15 +4,14 @@ import { Skeleton } from '../loading/loading.tsx'
 import { loadMentionEditor, mentionEditorArrived } from './load-mention-editor.ts'
 import { AREA, FieldBox, type MentionFieldProps } from './mention-parts.tsx'
 
+export { MentionBadge, type MentionFieldProps } from './mention-parts.tsx'
 export {
   kindOf,
-  MentionBadge,
   type Mentionable,
-  type MentionFieldProps,
   type MentionKind,
   type MentionRef,
   mentionsFor,
-} from './mention-parts.tsx'
+} from './mention-model.tsx'
 
 /**
  * The mention field: where a message is written — the Chat's composer, Discuss, an answer, a
