@@ -11,7 +11,7 @@
  * string takes that type, so a string that skipped masking does not type-check.
  */
 
-import { Brand, Option, Predicate, Schema } from 'effect'
+import { Brand, Predicate, Schema } from 'effect'
 
 /** What a secret becomes. */
 export const MASK = '•••'
@@ -303,7 +303,21 @@ const hiddenSpans = (text: string, known: ReadonlyArray<string>): ReadonlyArray<
   return merged(pieces.filter((piece) => !piece.copied).map((piece) => [piece.from, piece.to]))
 }
 
-const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+/**
+ * Whether a text is JSON. Only whether: a decoder would build a report of each failure, and most
+ * lines of a text are not JSON.
+ */
+const isJson = (text: string): boolean => {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** How a line that is JSON begins: a line that does not is not read as JSON at all. */
+const JSON_FIRST = /^\s*[[{"\-\d]|^\s*(?:true|false|null)\b/
 
 /** The spans, in order and apart, that touch this stretch. */
 const touchingSpans = (
@@ -337,8 +351,9 @@ const jsonLines = (text: string, hidden: ReadonlyArray<Span>): ReadonlyArray<Spa
   let start = 0
   for (const line of text.split('\n')) {
     if (line.trim() !== '') {
-      if (Option.isSome(readJson(line))) lines.push([start, start + line.length])
-      else mixed = true
+      if (JSON_FIRST.test(line) && isJson(line)) {
+        lines.push([start, start + line.length])
+      } else mixed = true
     }
     start += line.length + 1
   }
@@ -517,9 +532,7 @@ export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked
     if (!quiet && touching(start, end).length > 0) edits.push({ start, end, by: QUOTED_MASK })
     return end
   }
-  const units: ReadonlyArray<Span> = Option.isSome(readJson(text))
-    ? [[0, text.length]]
-    : jsonLines(text, hidden)
+  const units: ReadonlyArray<Span> = isJson(text) ? [[0, text.length]] : jsonLines(text, hidden)
   for (const [start] of units) value(start, '', false)
   for (const [start, end] of outside(hidden, units)) {
     if (text.slice(start, end).trim() !== '') edits.push({ start, end, by: MASK })
