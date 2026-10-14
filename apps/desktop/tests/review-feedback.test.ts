@@ -21,7 +21,13 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 
-import { CodeAnchorAsked, REVIEW_HOLD, type RoundState, SpecAnchorAsked } from '@hemera/core/domain'
+import {
+  CodeAnchorAsked,
+  REVIEW_HOLD,
+  type RoundState,
+  STAGE_UNREAD,
+  SpecAnchorAsked,
+} from '@hemera/core/domain'
 import {
   AnchorCurrent,
   AnchorMoved,
@@ -55,7 +61,7 @@ import { createMission, getMission, moveIn, moveMission } from '../src/engine/mi
 import { Diffs } from '../src/engine/review/diffs.ts'
 import { Review, type ReviewHold } from '../src/engine/review/feedback.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
-import { Database } from '../src/engine/storage/database.ts'
+import { Database, DatabaseError, type EngineDatabase } from '../src/engine/storage/database.ts'
 import {
   buildingLaunches,
   memoryEvidence,
@@ -97,6 +103,25 @@ const engine = (
     review: { hold },
     snapshots,
   })
+
+/** The database whose read of a mission's stage alone fails while `armed` says so. */
+const stageUnreadable =
+  (armed: () => boolean) =>
+  (real: EngineDatabase): EngineDatabase =>
+    new Proxy(real, {
+      get: (target, key, receiver) => {
+        if (key !== 'select') return Reflect.get(target, key, receiver)
+        return (fields?: Parameters<EngineDatabase['select']>[0]) => {
+          if (armed() && fields !== undefined && Object.keys(fields).join() === 'stage') {
+            const refused = Effect.fail(
+              new DatabaseError({ doing: 'reading the mission', reason: 'disk I/O error' }),
+            )
+            return { from: () => ({ where: () => refused }) }
+          }
+          return fields === undefined ? target.select() : target.select(fields)
+        }
+      },
+    })
 
 /** Snapshots whose checkpoint takes fail while `broken` says so, each attempt counted. */
 const checkpointsFailing = (broken: () => boolean) => {
@@ -1427,6 +1452,47 @@ describe('Images', () => {
 })
 
 describe('The agents do not write during Review', () => {
+  test(
+    'a mission whose stage cannot be read holds fs_write, fs_edit and commands_run before any judge: the hold fails closed',
+    async () => {
+      let armed = false
+      const verdicts = verdictsSaying(() => ALLOW)
+      const { run } = sessionsEngine(data, builderAgents, {
+        roles: [HELPER],
+        tools: { home: work, verdicts: verdicts.layer },
+        building: { outside: QUIET_TIMERS },
+        database: stageUnreadable(() => armed),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            const { grantId } = yield* builderOf(missionId)
+            const judged = verdicts.asked.length
+            armed = true
+            const written = yield* callTool(grantId, 'fs_write', {
+              repository: 'api',
+              path: 'held.md',
+              content: 'no\n',
+            })
+            const read = yield* callTool(grantId, 'fs_read', {
+              repository: 'api',
+              path: 'notes.ts',
+            })
+            armed = false
+            return { written, read: read.ok, judged: verdicts.asked.length - judged }
+          }),
+        ),
+      )
+      expect(seen.written.ok).toBe(false)
+      expect(seen.written.text).toBe(`refused: ${STAGE_UNREAD}`)
+      expect(seen.read).toBe(true)
+      expect(seen.judged).toBe(1)
+    },
+    SLOW,
+  )
+
   test(
     'during Review, fs_write, fs_edit and commands_run from any mission session are refused with the reason, before any judge; fs_read goes through; in Building · round N they are not held',
     async () => {

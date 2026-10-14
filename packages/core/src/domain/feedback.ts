@@ -120,12 +120,19 @@ export const REVIEW_HOLD =
 /** The tools held while the user reviews: what writes in the Workspace or runs there. */
 const HELD_IN_REVIEW: ReadonlySet<ToolName> = new Set(['fs_write', 'fs_edit', 'commands_run'])
 
+/** Why the held tools are refused when the mission's stage cannot be read: the hold fails closed. */
+export const STAGE_UNREAD =
+  "the mission's stage could not be read, so nothing is written or run: try again."
+
 /**
  * Why a session of a mission in `stage` may not call `tool`, or null. Only Review holds: in
- * "Building · round N" the round's agents work.
+ * "Building · round N" the round's agents work. A stage that could not be read (`unread`) holds
+ * the same tools: a guard that cannot tell refuses.
  */
-export function reviewToolRefusal(stage: Stage, tool: ToolName): string | null {
-  return stage === 'review' && HELD_IN_REVIEW.has(tool) ? `refused: ${REVIEW_HOLD}` : null
+export function reviewToolRefusal(stage: Stage | 'unread', tool: ToolName): string | null {
+  if (!HELD_IN_REVIEW.has(tool)) return null
+  if (stage === 'unread') return `refused: ${STAGE_UNREAD}`
+  return stage === 'review' ? `refused: ${REVIEW_HOLD}` : null
 }
 
 /** An image's size in pixels. */

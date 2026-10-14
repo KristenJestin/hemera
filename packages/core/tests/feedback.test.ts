@@ -113,6 +113,14 @@ describe('During Review the agents do not write', () => {
   test('in Building · round N nothing is held', () => {
     expect(reviewToolRefusal('building', 'fs_write')).toBeNull()
   })
+  test('a stage that cannot be read holds the three tools, and only them: the hold fails closed', () => {
+    for (const tool of ['fs_write', 'fs_edit', 'commands_run'] as const) {
+      expect(reviewToolRefusal('unread', tool)).toBe(
+        "refused: the mission's stage could not be read, so nothing is written or run: try again.",
+      )
+    }
+    expect(reviewToolRefusal('unread', 'fs_read')).toBeNull()
+  })
 })
 
 describe('An image says its pixel size', () => {

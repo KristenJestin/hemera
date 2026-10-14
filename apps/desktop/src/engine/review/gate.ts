@@ -50,12 +50,14 @@ export const reviewHeld = (missionId: string | null, tool: ToolName) =>
   Effect.gen(function* () {
     if (missionId === null) return null
     const database = yield* Database
-    const [mission] = yield* database
+    const read = yield* database
       .select({ stage: missions.stage })
       .from(missions)
       .where(eq(missions.id, missionId))
-      .pipe(Effect.orElseSucceed(() => []))
-    return mission?.stage === 'review' ? reviewToolRefusal('review', tool) : null
+      .pipe(Effect.option)
+    // A stage that cannot be read holds the held tools: the hold fails closed.
+    if (Option.isNone(read)) return reviewToolRefusal('unread', tool)
+    return read.value[0]?.stage === 'review' ? reviewToolRefusal('review', tool) : null
   })
 
 /**

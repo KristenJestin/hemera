@@ -96,7 +96,13 @@ import {
   runsLayer,
   runsRecipeRunnerLayer,
 } from './runs.ts'
-import { type Database, DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import {
+  Database,
+  DatabaseError,
+  type EngineDatabase,
+  databaseLayer,
+  refusedWhile,
+} from './storage/database.ts'
 import { type HostProcesses, supervisorLayer } from './supervisor.ts'
 import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
 import {
@@ -276,6 +282,8 @@ export interface ProfileParts {
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
   readonly review?: { readonly hold?: ReviewHold | undefined } | undefined
+  /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
+  readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
@@ -493,9 +501,22 @@ export const startProfile = (
     const docsContext = yield* Layer.build(docsDeskLayer)
     // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
     const reviewContext = yield* Layer.build(reviewDeskLayer)
+    // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
+    const realDatabase = databaseLayer(file)
+    const wrapDatabase = parts.database
+    const databases =
+      wrapDatabase === undefined
+        ? realDatabase
+        : Layer.merge(
+            realDatabase,
+            Layer.effect(
+              Database,
+              Database.use((real) => Effect.succeed(wrapDatabase(real))),
+            ).pipe(Layer.provide(realDatabase)),
+          )
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
-      databaseLayer(file),
+      databases,
       domainEventsLayer,
       automationGateLayer,
       backupFoldersLayer(parts.backupFolders),
