@@ -26,7 +26,7 @@ import {
   IconPlayerPlay,
   IconShieldLock,
 } from '../../icons.ts'
-import { languagesOffered } from '../project-settings/spec-fields.tsx'
+import { languagesOffered } from '../project-settings/spec-fields-model.ts'
 
 /**
  * The sections of the application's settings: Appearance, Agents, Models by role, Hemera Auto,
