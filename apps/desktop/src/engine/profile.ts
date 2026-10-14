@@ -341,6 +341,8 @@ export interface SessionsParts {
   readonly rebuildHold?: Effect.Effect<void>
   /** Where a suite holds a session as it starts or fails, or fails its start. */
   readonly sessionHold?: SessionHold
+  /** Where a suite holds the health sweep, as each look begins (CT-12). */
+  readonly sweepHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
   /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
@@ -748,6 +750,7 @@ export const startProfile = (
           timings: parts.sessions?.timings,
           rebuildHold: parts.sessions?.rebuildHold,
           sessionHold: parts.sessions?.sessionHold,
+          sweepHold: parts.sessions?.sweepHold,
         }),
       ),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),

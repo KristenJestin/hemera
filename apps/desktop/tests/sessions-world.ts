@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import type { AgentProvider } from '@hemera/core/domain'
 import { AgentNotSignedIn, type LaunchFailed } from '@hemera/ipc'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Queue } from 'effect'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
 import { Discovery } from '../src/engine/agents/discovery.ts'
@@ -25,7 +25,7 @@ import type {
 import { createProject } from '../src/engine/projects.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { SESSION_TIMINGS, type SessionTimings } from '../src/engine/sessions/service.ts'
-import { ProcessSupervisor } from '../src/engine/supervisor.ts'
+import { ProcessSupervisor, type Supervised } from '../src/engine/supervisor.ts'
 import { STAYS_UP, commandsEngine, script } from './commands-engine.ts'
 import { repository } from './repositories.ts'
 import { TEST_ROLE } from './test-role.ts'
@@ -70,10 +70,36 @@ export const FAST = {
 /** The silence bound of the suites about silence (CT-12): a turn held past 400 ms is stuck. */
 export const SILENCE = { stuckAfter: Duration.millis(400) }
 
+/**
+ * The health sweep held by the suite (CT-12): the sessions are looked at only when it says, one
+ * look per `swept`, which returns once that look has ended. On its own timer, a sweep under load
+ * finds a turn silent while its agent still starts, and replaces it under the suite.
+ */
+export const heldSweeps = () => {
+  const arrived = Effect.runSync(Queue.unbounded<void>())
+  const go = Effect.runSync(Queue.unbounded<void>())
+  let waiting = false
+  return {
+    /** The bounds of `SILENCE`, each look waiting at the hold as soon as the last one ended. */
+    timings: { ...SILENCE, sweepEvery: Duration.zero },
+    sessions: { sweepHold: Effect.andThen(Queue.offer(arrived, undefined), Queue.take(go)) },
+    swept: Effect.gen(function* () {
+      // The first look waits at the hold from the engine's start.
+      if (!waiting) yield* Queue.take(arrived)
+      waiting = true
+      yield* Queue.offer(go, undefined)
+      // The next one waits there: this one has ended.
+      yield* Queue.take(arrived)
+    }),
+  }
+}
+
 /** What a world started: one fake agent per process, and the real children of some. */
 export interface World {
   readonly agents: FakeAgent[]
   readonly pids: number[]
+  /** Those children, whose ends the supervisor saw. */
+  readonly children: Supervised[]
 }
 
 /** Every agent found, each started as the fake one, but those named, which are not signed in. */
@@ -140,7 +166,7 @@ export const sessionsEngine = (
     readonly hostProcesses?: ProfileParts['hostProcesses']
   } = {},
 ) => {
-  const world: World = { agents: [], pids: [] }
+  const world: World = { agents: [], pids: [], children: [] }
   const starter = Layer.effect(
     AgentStarter,
     Effect.gen(function* () {
@@ -156,6 +182,7 @@ export const sessionsEngine = (
                 })
                 .pipe(Effect.orDie)
               world.pids.push(child.pid)
+              world.children.push(child)
             }
             if (options.starting !== undefined) yield* options.starting(sessionId)
             const agent = fakeAgent(scriptOf(world.agents.length))
@@ -226,8 +253,11 @@ export const acmeIn = (work: string) =>
     return { project, mission, main, owner: { kind: 'mission' as const, missionId: mission.id } }
   })
 
-/** How long `until` waits unless told: five seconds. */
-export const UNTIL_MS = 5_000
+/**
+ * How long `until` waits unless told: ten seconds, a guard against a hang only. The longest wait
+ * of the role sessions' suite measured 622 ms on a machine at load 39 (#383): at least ten times it.
+ */
+export const UNTIL_MS = 10_000
 
 /** Waits, on the real clock, until a check holds; fails after `boundMillis`, `UNTIL_MS`. */
 export const until = <E, R>(check: Effect.Effect<boolean, E, R>, boundMillis = UNTIL_MS) =>
