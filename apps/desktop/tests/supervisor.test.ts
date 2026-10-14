@@ -6,7 +6,7 @@
  * folder, and a process is gone when the system says so (`process.kill(pid, 0)` failing), never
  * because a `stop` returned. The registry is the data folder's own table. Only what a left-over
  * pid runs is answered by the suite, as the system says it: the real query (PowerShell on
- * Windows, up to `WINDOWS_COMMAND_LINE_MS`) has a test of its own.
+ * Windows, slow on a loaded runner) has a test of its own, under a wider bound.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
@@ -27,6 +27,7 @@ import {
   WINDOWS_COMMAND_LINE_MS,
   databaseRegistryLayer,
   hostProcessesLayer,
+  machineCommandLines,
   outputOf,
   processSupervisorLayer,
   stillRuns,
@@ -46,6 +47,12 @@ const strays: ChildProcess[] = []
  * `WINDOWS_COMMAND_LINE_MS` on a loaded runner (one test below asks the real machine, alone).
  */
 const lines = new Map<number, string>()
+/**
+ * How long the real query of the machine may take in this suite: a PowerShell on a loaded Windows
+ * runner was seen past the engine's `WINDOWS_COMMAND_LINE_MS` (20 s); this is six times that, and
+ * more than ten times the few seconds it takes on an idle machine.
+ */
+const MACHINE_QUERY_MS = 120_000
 /** Processes a test leaves behind on purpose, ended after it. */
 const strayPids: number[] = []
 
@@ -857,19 +864,16 @@ describe('A kept agent is followed until it is ended or gone', () => {
 
 describe('The machine says what a pid runs', () => {
   test(
-    'living processes are matched by what the system says they run, in one query within its bound',
+    'living processes are matched by what the system says they run, in one query',
     async () => {
       const one = leftRunning([script(STAYS_UP), '--flag'])
       const other = leftRunning([script(STAYS_UP), 'two words'])
       const gone = leftRunning([script('')])
       await goneWithin(gone.pid ?? -1)
+      // The engine's own query, under a bound wide enough for a loaded runner: past the engine's
+      // bound, its answer is unknown, and what the engine does then has tests of its own above.
       const said = await Effect.runPromise(
-        Effect.provide(
-          HostProcesses.use((host) =>
-            host.commandLinesOf([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1]),
-          ),
-          hostProcessesLayer,
-        ),
+        machineCommandLines([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1], MACHINE_QUERY_MS),
       )
       for (const child of [one, other]) {
         expect(
@@ -882,7 +886,7 @@ describe('The machine says what a pid runs', () => {
       }
       expect(said.has(gone.pid ?? -1)).toBe(false)
     },
-    WINDOWS_COMMAND_LINE_MS + 10_000,
+    MACHINE_QUERY_MS + 10_000,
   )
 })
 
