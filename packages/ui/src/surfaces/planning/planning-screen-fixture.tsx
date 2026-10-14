@@ -6,6 +6,7 @@ import type {
   DiscussionHandlers,
   DiscussionItem,
   Finding,
+  PlanningData,
   PlanningHandlers,
   Question,
 } from '../../blocks/planning/planning-types.ts'
@@ -120,25 +121,8 @@ function played(
   })
 }
 
-/**
- * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
- * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
- * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
- * engine takes the answers, the permissions and the dismissals.
- */
-export function PlanningScreen({
-  moment,
-  opened,
-  failure,
-  kept,
-  onFreeze,
-  onRetry,
-  onPermission,
-  onSay,
-  onAccept,
-  onClose,
-  ...handlers
-}: PlanningScreenProps): ReactNode {
+/** The moment played: what the user answered, held, allowed and dismissed is taken into it. */
+function usePlayed(moment: PlanningScreenProps['moment'], handlers: PlanningHandlers) {
   const [taken, setTaken] = useState<ReadonlyMap<string, Given>>(new Map())
   const [held, setHeld] = useState<ReadonlyMap<string, string | null>>(new Map())
   const [allowed, setAllowed] = useState<ReadonlySet<string>>(new Set())
@@ -159,18 +143,23 @@ export function PlanningScreen({
     handlers.onDismissFinding(findingId).then(() => {
       setDismissed((before) => new Set(before).add(findingId))
     })
+  const allow = (needId: string): void => setAllowed((before) => new Set(before).add(needId))
+  return { shown, answer, waitOnSomeone, dismissFinding, allow }
+}
+
+/** The views over the page: which are open, a discussion about to start, and a Probe's report. */
+function useFrame(
+  opened: PlanningScreenProps['opened'],
+  discussions: PlanningData['discussions'] | undefined,
+  handlers: PlanningHandlers,
+) {
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
   )
   const [starting, setStarting] = useState<DiscussionItem | null>(null)
-  const data = shown?.data ?? null
-  const head = shown?.head ?? { now: null, frozen: false }
-  const line = shown === null ? null : planningNow(shown)
-  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
-
   const discuss = (item: DiscussionItem): void => {
     handlers.onDiscuss(item)
-    if (!data?.discussions.some((one) => one.item.kind === item.kind && one.item.id === item.id)) {
+    if (!discussions?.some((one) => one.item.kind === item.kind && one.item.id === item.id)) {
       setStarting(item)
     }
     setFrame((now) => openView(now, discussionViewId(item)))
@@ -179,6 +168,45 @@ export function PlanningScreen({
     handlers.onOpenProbe(id)
     setFrame((now) => openView(now, probeViewId(id)))
   }
+  return { frame, setFrame, starting, discuss, openProbe }
+}
+
+/** What the mission frame says above the page: its head, the Freeze it offers, and the ball. */
+function headingOf(shown: ReturnType<typeof usePlayed>['shown']) {
+  const head = shown?.head ?? { now: null, frozen: false }
+  const line = shown === null ? null : planningNow(shown)
+  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
+  const ball = (shown?.needs.length ?? 0) > 0 ? ('you' as const) : (line?.ball ?? 'idle')
+  return { head, freeze, ball }
+}
+
+/**
+ * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
+ * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
+ * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
+ * engine takes the answers, the permissions and the dismissals.
+ */
+export function PlanningScreen({
+  moment,
+  opened,
+  failure,
+  kept,
+  onFreeze,
+  onRetry,
+  onPermission,
+  onSay,
+  onAccept,
+  onClose,
+  ...handlers
+}: PlanningScreenProps): ReactNode {
+  const { shown, answer, waitOnSomeone, dismissFinding, allow } = usePlayed(moment, handlers)
+  const data = shown?.data ?? null
+  const { frame, setFrame, starting, discuss, openProbe } = useFrame(
+    opened,
+    data?.discussions,
+    handlers,
+  )
+  const { head, freeze, ball } = headingOf(shown)
 
   const views = planningViews({
     discussions: data?.discussions ?? [],
@@ -198,7 +226,7 @@ export function PlanningScreen({
       stage={head.frozen ? 'Ready' : 'Planning'}
       frozen={head.frozen}
       type="feature"
-      ball={(shown?.needs.length ?? 0) > 0 ? 'you' : (line?.ball ?? 'idle')}
+      ball={ball}
       ballFace={false}
       marks={head.outdated === true ? [{ kind: 'outdated' }] : []}
       ticket={{ key: 'acme/shop#41' }}
@@ -220,7 +248,7 @@ export function PlanningScreen({
           onNeed={(id) => ({
             onPermission: (choice) => {
               onPermission(id, choice)
-              setAllowed((before) => new Set(before).add(id))
+              allow(id)
             },
           })}
           mentionables={MENTIONABLES}
