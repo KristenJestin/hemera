@@ -114,7 +114,8 @@ const readAuthor = Schema.decodeUnknownOption(EventAuthor)
  * written: a payload this version cannot read is an empty one, a source or an author it does not
  * know is the system's, and the event is still read for its type, date and entity.
  */
-function eventOf(row: typeof domainEvents.$inferSelect): DomainEvent {
+/** An event as the journal's row holds it. */
+export function eventOf(row: typeof domainEvents.$inferSelect): DomainEvent {
   return {
     sequence: row.sequence,
     type: row.type,

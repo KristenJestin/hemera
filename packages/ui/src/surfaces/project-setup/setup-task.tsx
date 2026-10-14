@@ -1,24 +1,26 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, use, useEffect, useState } from 'react'
 
 import { Prose } from '../../blocks/planning/prose.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
-import { durationOf, useNow } from '../../components/live-chip/live-chip.tsx'
+import { useNow } from '../../components/live-chip/live-chip.tsx'
+import { durationOf } from '../../components/live-chip/live-words.ts'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconCheck, IconChevronDown, IconChevronRight, IconClockPause } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { MissionField } from '../project/project-page.tsx'
+import { MissionField } from '../project/mission-field.ts'
 import {
   AgentMark,
   type ProjectSetupProps,
   SetupBody,
   type SetupBodyProps,
   type SetupCardEntry,
-  shownCards,
 } from './project-setup.tsx'
+import { shownCards } from './setup-cards.ts'
 
 /**
  * The Project's tasks, on its page under the field that starts a mission: what Hemera does for

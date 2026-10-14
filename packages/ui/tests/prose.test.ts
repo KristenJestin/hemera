@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import { blocksOf } from '../src/blocks/planning/prose.tsx'
+import { blocksOf } from '../src/blocks/planning/prose-blocks.ts'
 
 describe('A section read as Markdown', () => {
   test('paragraphs are cut at blank lines, their lines joined', () => {

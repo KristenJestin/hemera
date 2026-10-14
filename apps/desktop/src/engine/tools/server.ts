@@ -180,7 +180,14 @@ export const toolServerLayer = (log: Log, version: string) =>
               }),
               { signal: call.mcpReq.signal },
             ).catch(() => ({ ok: false, text: 'the call was stopped before it ended' }))
-            return { content: [{ type: 'text', text: answer.text }], isError: !answer.ok }
+            const image =
+              'image' in answer && answer.image !== undefined
+                ? [{ type: 'image' as const, ...answer.image }]
+                : []
+            return {
+              content: [{ type: 'text' as const, text: answer.text }, ...image],
+              isError: !answer.ok,
+            }
           })
           return server
         },

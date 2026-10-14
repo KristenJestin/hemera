@@ -168,6 +168,11 @@ export const TABLE_CLASSES = {
   review_passes: 'permanent',
   review_findings: 'permanent',
   review_changed_after: 'permanent',
+  review_rounds: 'permanent',
+  review_checkpoints: 'permanent',
+  review_feedback: 'permanent',
+  review_feedback_versions: 'permanent',
+  review_feedback_images: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

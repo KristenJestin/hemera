@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { SPEC_MODE_WORDS, SpecFields } from './spec-fields.tsx'
+import { SpecFields } from './spec-fields.tsx'
+import { SPEC_MODE_WORDS } from './spec-fields-model.ts'
 
 /**
  * The frame under the ticket providers: where Specs live (Local or Linked, with what the mode does

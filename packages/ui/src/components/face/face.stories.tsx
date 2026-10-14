@@ -4,7 +4,8 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../button/button.tsx'
-import { FACE_SIZES, Face } from './face.tsx'
+import { Face } from './face.tsx'
+import { FACE_SIZES } from './face-sizes.ts'
 import { TONE_CLASSES } from './pose.ts'
 import { EXPRESSIONS, FACE_STATES, type FaceState } from './states.ts'
 

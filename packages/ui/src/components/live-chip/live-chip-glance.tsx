@@ -10,7 +10,9 @@ import {
   IconRefresh,
 } from '../../icons.ts'
 import { Button, IconButton } from '../button/button.tsx'
-import { type MarkState, StatusMark } from '../status-mark/status-mark.tsx'
+import { StatusMark } from '../status-mark/status-mark.tsx'
+import { type MarkState } from '../status-mark/mark-legends.ts'
+import { glanceWordsOf } from './live-words.ts'
 import type { LiveState } from './tint.tsx'
 
 /**
@@ -65,15 +67,6 @@ const MARKS: Record<Exclude<LiveState, 'stuck'>, MarkState> = {
   stopped: 'skipped',
 }
 
-/** The state and how long, in words. */
-export function glanceWordsOf(state: LiveState, time: string): string {
-  if (state === 'running') return `Running for ${time}`
-  if (state === 'stuck') return `No activity for 5 minutes · ${time}`
-  if (state === 'finished') return `Done in ${time}`
-  if (state === 'failed') return `Failed after ${time}`
-  return `Stopped after ${time}`
-}
-
 const PANEL = 'flex w-glance max-w-full flex-col gap-3'
 
 const HEAD = 'flex items-center gap-2 text-sm text-muted-foreground'
@@ -109,6 +102,121 @@ export interface LiveChipGlanceProps {
   glance: LiveGlance
 }
 
+interface GlanceHeadProps {
+  state: LiveState
+  time: string
+  onDetails: LiveGlance['onDetails']
+}
+
+/** The state with its mark and how long, in words; ⓘ at the end opens the details. */
+function GlanceHead({ state, time, onDetails }: GlanceHeadProps): ReactNode {
+  return (
+    <div className={HEAD} data-glance-head="">
+      {state === 'stuck' ? (
+        <span className="flex text-warning">
+          <IconClockPause size="sm" aria-hidden="true" />
+        </span>
+      ) : (
+        <StatusMark state={MARKS[state]} size="sm" />
+      )}
+      <span>{glanceWordsOf(state, time)}</span>
+      {onDetails !== undefined && (
+        <span className="ml-auto flex">
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<IconInfoCircle size="sm" />}
+            aria-label="Details"
+            onClick={onDetails}
+          />
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** A service's address, with copy and open. */
+function GlanceAddress({ glance }: { glance: LiveGlance }): ReactNode {
+  if (glance.url === undefined) return null
+  return (
+    <div className={ADDRESS}>
+      <span className="min-w-0 flex-1 truncate">{glance.url}</span>
+      {glance.onCopyUrl !== undefined && (
+        <IconButton
+          variant="ghost"
+          size="sm"
+          icon={<IconCopy size="sm" />}
+          aria-label="Copy the address"
+          onClick={glance.onCopyUrl}
+        />
+      )}
+      {glance.onOpenUrl !== undefined && (
+        <IconButton
+          variant="ghost"
+          size="sm"
+          icon={<IconExternalLink size="sm" />}
+          aria-label="Open the address"
+          onClick={glance.onOpenUrl}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The last lines it printed, a short tail with the newest at the bottom. */
+function GlanceOutput({ output }: { output: LiveGlance['output'] }): ReactNode {
+  if (output === undefined || output.length === 0) return null
+  return (
+    <div className={OUTPUT} data-output="">
+      {output.slice(-TAIL).map((line, at) => (
+        // Lines of output repeat; where they stand is what tells them apart.
+        // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
+        <span key={at} className={LINE}>
+          {line}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+type GlanceActionsProps = Pick<LiveGlance, 'ask'> & {
+  restart: (() => void) | undefined
+  stop: (() => void) | undefined
+  again: (() => void) | undefined
+}
+
+/** What can be done about it, by kind and state: what it asks first, then Restart, Stop, Run again. */
+function GlanceActions({ ask, restart, stop, again }: GlanceActionsProps): ReactNode {
+  if ((ask ?? restart ?? stop ?? again) === undefined) return null
+  return (
+    <div className={ACTIONS}>
+      {ask !== undefined && (
+        <Button size="sm" variant="primary" onClick={ask.onPress}>
+          {ask.label}
+        </Button>
+      )}
+      {restart !== undefined && (
+        <Button size="sm" onClick={restart}>
+          <IconRefresh size="sm" />
+          Restart
+        </Button>
+      )}
+      {stop !== undefined && (
+        <Button size="sm" onClick={stop}>
+          <IconPlayerStop size="sm" />
+          Stop
+        </Button>
+      )}
+      {again !== undefined && (
+        <Button size="sm" onClick={again}>
+          <IconPlayerPlay size="sm" />
+          Run again
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProps): ReactNode {
   const { kind, ask, onRestart, onStop, onRunAgain, onDetails } = glance
   const stoppable = kind === 'run' || kind === 'service'
@@ -117,93 +225,15 @@ export function LiveChipGlance({ name, state, time, glance }: LiveChipGlanceProp
   const again = (kind === 'run' || kind === 'probe') && !working(state) ? onRunAgain : undefined
   return (
     <div className={PANEL} data-glance={kind}>
-      <div className={HEAD} data-glance-head="">
-        {state === 'stuck' ? (
-          <span className="flex text-warning">
-            <IconClockPause size="sm" aria-hidden="true" />
-          </span>
-        ) : (
-          <StatusMark state={MARKS[state]} size="sm" />
-        )}
-        <span>{glanceWordsOf(state, time)}</span>
-        {onDetails !== undefined && (
-          <span className="ml-auto flex">
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconInfoCircle size="sm" />}
-              aria-label="Details"
-              onClick={onDetails}
-            />
-          </span>
-        )}
-      </div>
+      <GlanceHead state={state} time={time} onDetails={onDetails} />
       <div className="flex flex-col gap-0.5">
         <span className={NAME}>{name}</span>
         <span className={TYPE}>{glance.type}</span>
       </div>
-      {glance.url !== undefined && (
-        <div className={ADDRESS}>
-          <span className="min-w-0 flex-1 truncate">{glance.url}</span>
-          {glance.onCopyUrl !== undefined && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconCopy size="sm" />}
-              aria-label="Copy the address"
-              onClick={glance.onCopyUrl}
-            />
-          )}
-          {glance.onOpenUrl !== undefined && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconExternalLink size="sm" />}
-              aria-label="Open the address"
-              onClick={glance.onOpenUrl}
-            />
-          )}
-        </div>
-      )}
+      <GlanceAddress glance={glance} />
       {glance.step !== undefined && <p className="text-sm text-foreground">{glance.step}</p>}
-      {glance.output !== undefined && glance.output.length > 0 && (
-        <div className={OUTPUT} data-output="">
-          {glance.output.slice(-TAIL).map((line, at) => (
-            // Lines of output repeat; where they stand is what tells them apart.
-            // oxlint-disable-next-line react/no-array-index-key -- the order is the identity
-            <span key={at} className={LINE}>
-              {line}
-            </span>
-          ))}
-        </div>
-      )}
-      {(ask ?? restart ?? stop ?? again) !== undefined && (
-        <div className={ACTIONS}>
-          {ask !== undefined && (
-            <Button size="sm" variant="primary" onClick={ask.onPress}>
-              {ask.label}
-            </Button>
-          )}
-          {restart !== undefined && (
-            <Button size="sm" onClick={restart}>
-              <IconRefresh size="sm" />
-              Restart
-            </Button>
-          )}
-          {stop !== undefined && (
-            <Button size="sm" onClick={stop}>
-              <IconPlayerStop size="sm" />
-              Stop
-            </Button>
-          )}
-          {again !== undefined && (
-            <Button size="sm" onClick={again}>
-              <IconPlayerPlay size="sm" />
-              Run again
-            </Button>
-          )}
-        </div>
-      )}
+      <GlanceOutput output={glance.output} />
+      <GlanceActions ask={ask} restart={restart} stop={stop} again={again} />
     </div>
   )
 }

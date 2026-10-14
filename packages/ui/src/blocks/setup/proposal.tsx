@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
@@ -16,74 +17,19 @@ import {
   IconChevronRight,
   IconCopy,
   IconFolder,
-  IconGitBranch,
   IconHandStop,
   IconLink,
-  IconListNumbers,
   IconPlus,
   IconSearch,
   IconTerminal,
-  IconVariable,
   IconWorld,
   IconX,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CommandType, typeIcon } from '../project-settings/command-types.tsx'
-import { KIND_WORDS, type StepKind } from '../project-settings/recipe.tsx'
+import { KIND_WORDS, type StepKind } from '../project-settings/recipe-model.ts'
 import { MASK } from '../project-settings/variables.tsx'
-
-/**
- * What the setup agent proposes for a new Project, one kind per card: the repositories, the
- * commands with their roles, the preparation recipe, the variables, and the commands never to
- * run. Each kind is drawn here twice — in short, as the card shows it, and as the lines of its
- * inline editor — and once more as its skeleton while the agent is still reading.
- *
- * In short means one line per thing, in the faces the settings use for it: a path or a line in
- * the mono face, a value always masked, a role as its glyph. A repository the agent found deeper
- * in the folder than Hemera looked carries the search glyph, with its legend.
- */
-export type SetupKind =
-  | 'repositories'
-  | 'commands'
-  | 'preparation'
-  | 'variables'
-  | 'specLanguage'
-  | 'never'
-
-export const SETUP_KINDS: readonly SetupKind[] = [
-  'repositories',
-  'commands',
-  'preparation',
-  'variables',
-  'specLanguage',
-  'never',
-]
-
-export const SETUP_TITLES: Record<SetupKind, string> = {
-  repositories: 'Repositories',
-  commands: 'Commands',
-  preparation: 'Preparation',
-  variables: 'Variables',
-  specLanguage: 'Spec language',
-  never: 'Never run',
-}
-
-export function setupIcon(kind: SetupKind): ReactNode {
-  switch (kind) {
-    case 'repositories':
-      return <IconGitBranch size="sm" />
-    case 'commands':
-      return <IconTerminal size="sm" />
-    case 'preparation':
-      return <IconListNumbers size="sm" />
-    case 'variables':
-      return <IconVariable size="sm" />
-    case 'specLanguage':
-      return <IconBook2 size="sm" />
-    case 'never':
-      return <IconBan size="sm" />
-  }
-}
+import { type SetupKind, SETUP_TITLES, setupIcon } from './setup-kinds.tsx'
 
 export interface ProposedRepository {
   id: string
