@@ -371,7 +371,14 @@ describe('A valid red', () => {
       '})',
     ].join('\n')
     const names = addedTests({ insertion: 'new_file', code, patch: null })
-    expect(names).toEqual([{ template: 'writes ${kind}' }])
+    expect(names).toEqual([
+      {
+        title: { template: 'writes ${kind}' },
+        scope: [{ template: 'exports %s' }],
+        twin: false,
+        clash: false,
+      },
+    ])
     const output =
       ' FAIL  tests/export.test.ts > exports md > writes md\nAssertionError: expected 1 to be 2'
     expect(validRed(run(output, 1), 'tests/export.test.ts', names)).toBe(true)
@@ -1291,22 +1298,27 @@ describe('A red read from the failing names #260 still missed', () => {
   test('a cased Rust test does not take the failures of a module of the same name', () => {
     const path = 'src/lib.rs'
     const render = [{ function: 'render' }]
+    // Each test's panic, named by its thread, as libtest and cargo-nextest print it.
+    const failed = (line: string) =>
+      [
+        line,
+        `thread '${line.replace(/^.* (\S+::\S+)(?: \.\.\. FAILED)?$/, '$1')}' panicked at src/lib.rs:9:5:`,
+        'assertion `left == right` failed',
+      ].join('\n')
     for (const line of [
       'test render::tests::handles_empty ... FAILED',
       '        FAIL [   0.004s] acme render::tests::handles_empty',
       'test render::other ... FAILED',
     ]) {
-      const output = [line, 'assertion `left == right` failed'].join('\n')
-      expect(run(output, 101, path).failingLines).toEqual([line])
-      expect(validRed(run(output, 101, path), path, render)).toBe(false)
+      expect(run(failed(line), 101, path).failingLines).toEqual([line])
+      expect(validRed(run(failed(line), 101, path), path, render)).toBe(false)
     }
     for (const line of [
       'test tests::render::case_1 ... FAILED',
       'test tests::render::case_2_empty_rows ... FAILED',
       '        FAIL [   0.004s] acme tests::render::test_case_1_with_no_rows',
     ]) {
-      const output = [line, 'assertion `left == right` failed'].join('\n')
-      expect(validRed(run(output, 101, path), path, render)).toBe(true)
+      expect(validRed(run(failed(line), 101, path), path, render)).toBe(true)
     }
   })
 
@@ -1590,7 +1602,9 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     const junit = run(JUNIT_ASSERTION, 1)
     expect(validRed(junit, 'tests/export.test.mjs', names, true)).toBe(true)
     expect(validRed(junit, 'tests/export.test.mjs', names, false)).toBe(false)
-    expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], true)).toBe(false)
+    // A test the proof adds that the report does not name leaves it to the key line (#342).
+    expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], true)).toBe(true)
+    expect(validRed(junit, 'tests/export.test.mjs', [...names, 'exports as TSV'], null)).toBe(false)
   })
 
   test('a testify suite method’s subtest is a red on its exit code when the proof has no key line, and not when its key line differs', () => {
@@ -2571,10 +2585,11 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       code: "test('charges $5 for shipping', () => {})\ntest.each([[5]])('charges $amount', () => {})\ntest(`charges ${amount}`, () => {})\n",
       patch: null,
     })
+    const topLevel = { scope: [], twin: false, clash: false }
     expect(declared).toEqual([
-      'charges $5 for shipping',
-      { template: 'charges $amount' },
-      { template: 'charges ${amount}' },
+      { title: 'charges $5 for shipping', ...topLevel },
+      { title: { template: 'charges $amount' }, ...topLevel },
+      { title: { template: 'charges ${amount}' }, ...topLevel },
     ])
     expect(validRed(run(output, 1, path), path, declared.slice(1, 2))).toBe(true)
     // Written as a plain string, a name holding `$amount` is that name, never a template.
@@ -2631,5 +2646,322 @@ describe('A red read block by block, a test vetoed by any block that is no asser
     // 190 s with a pattern built from the name; matched piece by piece, a line eight times longer
     // costs about eight times more.
     expect(growth(output, 100, read)).toBeLessThan(24)
+  })
+})
+
+/** A patch adding the lines `from` to `to` (from 1) of a test file's code, as `git diff -U0` does. */
+const addition = (code: string, from: number, to: number) => ({
+  insertion: 'addition' as const,
+  code,
+  patch: [
+    '--- a/test',
+    '+++ b/test',
+    `@@ -${String(from - 1)},0 +${String(from)},${String(to - from + 1)} @@`,
+    ...code
+      .split('\n')
+      .slice(from - 1, to)
+      .map((line) => `+${line}`),
+  ].join('\n'),
+})
+
+const VITEST_SAME_TITLE_SOURCE = [
+  "import { describe, expect, test } from 'vite-plus/test'",
+  "describe('export', () => {",
+  "  test('saves', () => { throw { code: 42 } })",
+  "  test('rejects', () => { expect(() => { throw new TypeError('Error: x is not a function') }).toThrow('not found') })",
+  "  test('rejects async', async () => { await expect(Promise.reject(new Error('TypeError: boom'))).rejects.toThrow('nope') })",
+  '})',
+  "describe('import', () => {",
+  "  test('saves', () => { expect(1).toBe(2) })",
+  '})',
+  "describe('archive', () => {",
+  "  test('keeps', () => { expect(1).toBe(1) })",
+  '})',
+  "describe('restore', () => {",
+  "  test('keeps', () => { expect(1).toBe(2) })",
+  '})',
+].join('\n')
+
+const NODE_SAME_TITLE_SOURCE = [
+  "import { test, describe } from 'node:test'",
+  "import assert from 'node:assert'",
+  "describe('export', () => { test('saves', () => { throw 'not implemented' }) })",
+  "describe('import', () => { test('saves', () => { assert.strictEqual(1, 2) }) })",
+].join('\n')
+
+const PYTEST_SAME_TITLE_SOURCE = [
+  'class TestExport:',
+  '    def test_saves(self):',
+  '        raise {}["x"] if False else ValueError("not implemented")',
+  '',
+  'class TestImport:',
+  '    def test_saves(self):',
+  '        assert 1 == 2',
+  '',
+  'class TestArchive:',
+  '    def test_keeps(self):',
+  '        assert 1 == 1',
+  '',
+  'class TestRestore:',
+  '    def test_keeps(self):',
+  '        assert 1 == 2',
+].join('\n')
+
+const RUST_PANICS = {
+  asserts: ['eq', 'plain_assert', 'eq_msg'],
+  errs: ['uses_todo', 'uses_unimplemented', 'unwraps', 'index'],
+  says_nothing: ['assert_msg', 'expects', 'panics'],
+}
+
+describe('A red read by its test’s path, its errors and its panics, the key line deciding what they leave open (#342, round 3)', () => {
+  test('a vitest test the proof adds is not another describe’s test of the same title', () => {
+    const path = 'export.test.ts'
+    const output = run(captured('vitest-same-title'), 1, path)
+    // archive > keeps passes, restore > keeps fails on an assertion.
+    const keeps = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 10, 12))
+    expect(validRed(output, path, keeps)).toBe(false)
+    expect(validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 13, 15)))).toBe(
+      true,
+    )
+    // export > saves threw an object, import > saves failed on an assertion.
+    const saves = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 3, 3))
+    expect(validRed(output, path, saves)).toBe(false)
+    expect(validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 7, 9)))).toBe(true)
+  })
+
+  test('a node:test test whose title another describe repeats is named by nothing its list prints: the key line decides', () => {
+    const path = 'b.test.mjs'
+    const output = run(captured('node-same-title'), 1, path)
+    const saves = addedTests(addition(NODE_SAME_TITLE_SOURCE, 3, 3))
+    expect(validRed(output, path, saves)).toBe(false)
+    const imports = addedTests(addition(NODE_SAME_TITLE_SOURCE, 4, 4))
+    expect(validRed(output, path, imports)).toBe(false)
+    expect(validRed(output, path, imports, true)).toBe(true)
+  })
+
+  test('a pytest test the proof adds is not another class’s test of the same name', () => {
+    const path = 'tests/test_dup.py'
+    const output = run(captured('pytest-same-title'), 1, path)
+    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 1, 3)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 9, 11)))).toBe(
+      false,
+    )
+    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 13, 15)))).toBe(
+      true,
+    )
+  })
+
+  test('two tests declared with the same path are named by nothing: the key line decides', () => {
+    const path = 'tests/export.test.ts'
+    const code = ["test('keeps', () => {})", "test('keeps', () => {})"].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    for (const printed of [' × keeps 3ms', ' FAIL  tests/export.test.ts > keeps']) {
+      const output = run(`${printed}\nAssertionError: expected 1 to be 2`, 1, path)
+      expect(validRed(output, path, names)).toBe(false)
+      expect(validRed(output, path, names, true)).toBe(true)
+    }
+  })
+
+  test('a jest, mocha or unittest test whose title another describe or class repeats is told apart by the path its runner prints', () => {
+    const js = [
+      "describe('export', () => {",
+      "  test('saves', () => { toMarkdown() })",
+      '})',
+      "describe('import', () => {",
+      "  test('saves', () => { expect(1).toBe(2) })",
+      '})',
+    ].join('\n')
+    const jest = [
+      '  ● export › saves',
+      '',
+      '    TypeError: toMarkdown is not a function',
+      '',
+      '  ● import › saves',
+      '',
+      '    expect(received).toBe(expected) // Object.is equality',
+    ].join('\n')
+    const mocha = [
+      '  0 passing (4ms)',
+      '  2 failing',
+      '',
+      '  1) export',
+      '       saves:',
+      '     TypeError: toMarkdown is not a function',
+      '',
+      '  2) import',
+      '       saves:',
+      '     AssertionError [ERR_ASSERTION]: Expected values to be strictly equal',
+    ].join('\n')
+    for (const [path, output] of [
+      ['tests/export.test.js', jest],
+      ['test/export.spec.js', mocha],
+    ] as const) {
+      expect(validRed(run(output, 1, path), path, addedTests(addition(js, 4, 6)))).toBe(true)
+      expect(validRed(run(output, 1, path), path, addedTests(addition(js, 1, 3)))).toBe(false)
+    }
+    const python = [
+      'import unittest',
+      'class Export(unittest.TestCase):',
+      '    def test_saves(self):',
+      '        to_markdown([])',
+      'class Import(unittest.TestCase):',
+      '    def test_saves(self):',
+      '        self.assertEqual(1, 2)',
+    ].join('\n')
+    const unittest = [
+      'ERROR: test_saves (test_export.Export.test_saves)',
+      '----------------------------------------------------------------------',
+      "NameError: name 'to_markdown' is not defined",
+      '',
+      'FAIL: test_saves (test_export.Import.test_saves)',
+      '----------------------------------------------------------------------',
+      'AssertionError: 1 != 2',
+    ].join('\n')
+    const path = 'test_export.py'
+    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 5, 7)))).toBe(true)
+    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 2, 4)))).toBe(false)
+  })
+
+  test('a unittest test with an ERROR beside its FAIL is not a red, a subTest’s or a cleanup’s', () => {
+    const path = 'test_ut2.py'
+    const output = run(captured('unittest-error-subtest'), 1, path)
+    expect(validRed(output, path, ['test_sub'])).toBe(false)
+    expect(validRed(output, path, ['test_teardown'])).toBe(false)
+    expect(validRed(output, path, ['test_sub'], true)).toBe(false)
+  })
+
+  test('a Rust panic is an assertion only when its message says one, a known runtime error is not, any other leaves it to the key line', () => {
+    const path = 'src/lib.rs'
+    for (const name of ['cargo-test-panics', 'cargo-test-panics-nocapture-v']) {
+      const output = run(captured(name), 101, path)
+      for (const one of RUST_PANICS.asserts) {
+        expect([name, one, validRed(output, path, [one])]).toEqual([name, one, true])
+      }
+      for (const one of RUST_PANICS.errs) {
+        expect([name, one, validRed(output, path, [one], true)]).toEqual([name, one, false])
+      }
+      for (const one of RUST_PANICS.says_nothing) {
+        expect([name, one, validRed(output, path, [one])]).toEqual([name, one, false])
+        expect([name, one, validRed(output, path, [one], true)]).toEqual([name, one, true])
+      }
+    }
+    // A test that returned `Err` says so under its own heading; with --nocapture, its `Error:`
+    // line is no test's, and the key line decides.
+    const headed = run(captured('cargo-test-panics'), 101, path)
+    expect(validRed(headed, path, ['returns_err'], true)).toBe(false)
+    const nocapture = run(captured('cargo-test-panics-nocapture-v'), 101, path)
+    expect(validRed(nocapture, path, ['returns_err'])).toBe(false)
+  })
+
+  test('a Rust panic printed with --nocapture is its thread’s test’s, wherever its result line lands', () => {
+    const path = 'src/lib.rs'
+    const output = run(captured('cargo-test-panics-nocapture'), 101, path)
+    for (const one of RUST_PANICS.asserts) {
+      expect([one, validRed(output, path, [one])]).toEqual([one, true])
+    }
+    for (const one of ['uses_todo', 'uses_unimplemented', 'unwraps', 'index']) {
+      expect([one, validRed(output, path, [one], true)]).toEqual([one, false])
+    }
+    expect(validRed(output, path, ['assert_msg'])).toBe(false)
+  })
+
+  test('a cargo-nextest test that hit todo!() is not a red', () => {
+    const path = 'src/lib.rs'
+    const output = captured('cargo-nextest').replace(
+      [
+        "    thread 'tests::exports_async' (1510128) panicked at src/lib.rs:30:9:",
+        '    assertion `left == right` failed',
+      ].join('\n'),
+      [
+        "    thread 'tests::exports_async' (1510128) panicked at src/lib.rs:1:48:",
+        '    not yet implemented',
+      ].join('\n'),
+    )
+    expect(validRed(run(output, 100, path), path, ['exports_async'], true)).toBe(false)
+    expect(validRed(run(output, 100, path), path, ['rejects_empty'])).toBe(true)
+  })
+
+  test('a TAP report where another test errors still names the red of the test the proof adds', () => {
+    const path = 'tests/export.test.mjs'
+    const output = [
+      'TAP version 13',
+      '# Subtest: one is one',
+      'not ok 1 - one is one',
+      '  ---',
+      "  location: '/work/acme/api/tests/export.test.mjs:3:1'",
+      "  failureType: 'testCodeFailure'",
+      "  error: 'x is not a function'",
+      "  code: 'ERR_TEST_FAILURE'",
+      "  name: 'TypeError'",
+      '  ...',
+      '# Subtest: saves',
+      'not ok 2 - saves',
+      '  ---',
+      "  location: '/work/acme/api/tests/export.test.mjs:9:1'",
+      "  failureType: 'testCodeFailure'",
+      "  error: 'Expected values to be strictly equal'",
+      "  code: 'ERR_ASSERTION'",
+      "  name: 'AssertionError'",
+      '  ...',
+      '1..2',
+      '# tests 2',
+      '# fail 2',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['one is one'], true)).toBe(false)
+  })
+
+  test('a jest-junit report naming its case by describe and title leaves it to the key line', () => {
+    const path = 'tests/export.test.js'
+    const output = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<testsuites name="jest tests" tests="1" failures="1">',
+      '  <testsuite name="tests/export.test.js" tests="1" failures="1">',
+      '    <testcase classname="export saves" name="export saves" time="0.003" file="tests/export.test.js">',
+      '      <failure>Error: expect(received).toBe(expected) // Object.is equality',
+      'Expected: 2',
+      'Received: 1</failure>',
+      '    </testcase>',
+      '  </testsuite>',
+      '</testsuites>',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['saves'], true)).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(false)
+  })
+
+  test('a jest test that called fewer assertions than expect.assertions asked is a red', () => {
+    const path = 'tests/a.test.js'
+    const output = (said: string) =>
+      [
+        '  ● saves',
+        '',
+        `    ${said}`,
+        '',
+        '      at Object.<anonymous> (tests/a.test.js:3:10)',
+      ].join('\n')
+    for (const said of [
+      'expect.assertions(1)\n\n    Expected one assertion to be called but received zero assertion calls.',
+      'expect.hasAssertions()\n\n    Expected at least one assertion to be called but received none.',
+    ]) {
+      expect(validRed(run(output(said), 1, path), path, ['saves'])).toBe(true)
+    }
+  })
+
+  test('a file’s tests are read with their describes in linear time, nested as deep as they go', () => {
+    const code = (size: number) => `${"describe('a', () => {\n".repeat(size)}test('b', () => {})\n`
+    const read = (text: string) => {
+      addedTests({ insertion: 'new_file', code: text, patch: null })
+    }
+    expect(addedTests({ insertion: 'new_file', code: code(3), patch: null })).toEqual([
+      { title: 'b', scope: ['a', 'a', 'a'], twin: false, clash: false },
+    ])
+    expect(growth(code, 400, read)).toBeLessThan(24)
+  })
+
+  test('a test the proof adds whose own failure is another error is not a red, whatever the key line', () => {
+    const path = 't.py'
+    const output =
+      'E   assert 1 == 2\nFAILED t.py::test_one - assert 1 == 2\nFAILED t.py::test_new - NameError'
+    expect(validRed(run(output, 1, path), path, ['test_new'], true)).toBe(false)
   })
 })

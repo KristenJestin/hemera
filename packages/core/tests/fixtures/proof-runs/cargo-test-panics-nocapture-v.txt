@@ -1,0 +1,70 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/acme-d5b7551ab0e24432)
+
+running 11 tests
+
+thread 'tests::assert_msg' (3390736) panicked at src/lib.rs:10:31:
+the total is missing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tests::eq' (3390737) panicked at src/lib.rs:8:23:
+assertion `left == right` failed
+  left: 1
+ right: 2
+
+thread 'tests::eq_msg' (3390739) panicked at src/lib.rs:11:27:
+assertion `left == right` failed: the total is missing
+  left: 1
+ right: 2
+test tests::eq ... 
+thread 'tests::expects' (3390740) panicked at src/lib.rs:15:36:
+row 1 exists
+FAILED
+test tests::assert_msg ... FAILED
+
+thread 'tests::index' (3390744) panicked at src/lib.rs:18:64:
+index out of bounds: the len is 0 but the index is 0
+test tests::eq_msg ... FAILED
+
+thread 'tests::panics' (3390746) panicked at src/lib.rs:16:27:
+boom
+test tests::expects ... FAILED
+
+thread 'tests::plain_assert' (3390748) panicked at src/lib.rs:9:33:
+assertion failed: 1 > 2
+test tests::index ... FAILED
+Error: "not found"
+test tests::panics ... FAILED
+
+thread 'tests::unwraps' (3390751) panicked at src/lib.rs:14:47:
+called `Option::unwrap()` on a `None` value
+test tests::plain_assert ... FAILED
+
+thread 'tests::uses_todo' (3390753) panicked at src/lib.rs:1:48:
+not yet implemented
+test tests::returns_err ... FAILED
+test tests::unwraps ... FAILED
+
+thread 'tests::uses_unimplemented' (3390755) panicked at src/lib.rs:3:23:
+not implemented
+test tests::uses_todo ... FAILED
+test tests::uses_unimplemented ... FAILED
+
+failures:
+
+failures:
+    tests::assert_msg
+    tests::eq
+    tests::eq_msg
+    tests::expects
+    tests::index
+    tests::panics
+    tests::plain_assert
+    tests::returns_err
+    tests::unwraps
+    tests::uses_todo
+    tests::uses_unimplemented
+
+test result: FAILED. 0 passed; 11 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

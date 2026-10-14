@@ -1,0 +1,91 @@
+
+running 11 tests
+tests::assert_msg --- FAILED
+tests::eq --- FAILED
+tests::eq_msg --- FAILED
+tests::expects --- FAILED
+tests::panics --- FAILED
+tests::plain_assert --- FAILED
+tests::index --- FAILED
+tests::returns_err --- FAILED
+tests::unwraps --- FAILED
+tests::uses_todo --- FAILED
+tests::uses_unimplemented --- FAILED
+
+failures:
+
+---- tests::assert_msg stdout ----
+
+thread 'tests::assert_msg' (3390671) panicked at src/lib.rs:10:31:
+the total is missing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::eq stdout ----
+
+thread 'tests::eq' (3390672) panicked at src/lib.rs:8:23:
+assertion `left == right` failed
+  left: 1
+ right: 2
+
+---- tests::eq_msg stdout ----
+
+thread 'tests::eq_msg' (3390673) panicked at src/lib.rs:11:27:
+assertion `left == right` failed: the total is missing
+  left: 1
+ right: 2
+
+---- tests::expects stdout ----
+
+thread 'tests::expects' (3390674) panicked at src/lib.rs:15:36:
+row 1 exists
+
+---- tests::panics stdout ----
+
+thread 'tests::panics' (3390676) panicked at src/lib.rs:16:27:
+boom
+
+---- tests::plain_assert stdout ----
+
+thread 'tests::plain_assert' (3390677) panicked at src/lib.rs:9:33:
+assertion failed: 1 > 2
+
+---- tests::index stdout ----
+
+thread 'tests::index' (3390675) panicked at src/lib.rs:18:64:
+index out of bounds: the len is 0 but the index is 0
+
+---- tests::returns_err stdout ----
+Error: "not found"
+
+---- tests::unwraps stdout ----
+
+thread 'tests::unwraps' (3390679) panicked at src/lib.rs:14:47:
+called `Option::unwrap()` on a `None` value
+
+---- tests::uses_todo stdout ----
+
+thread 'tests::uses_todo' (3390680) panicked at src/lib.rs:1:48:
+not yet implemented
+
+---- tests::uses_unimplemented stdout ----
+
+thread 'tests::uses_unimplemented' (3390681) panicked at src/lib.rs:3:23:
+not implemented
+
+
+failures:
+    tests::assert_msg
+    tests::eq
+    tests::eq_msg
+    tests::expects
+    tests::index
+    tests::panics
+    tests::plain_assert
+    tests::returns_err
+    tests::unwraps
+    tests::uses_todo
+    tests::uses_unimplemented
+
+test result: FAILED. 0 passed; 11 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
