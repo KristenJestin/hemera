@@ -797,6 +797,30 @@ describe('A forge need’s row is deleted when its need ends', () => {
     expect(after).toEqual([])
   })
 
+  test('withdrawn outside the port, as Retry does when the CLI turns ready after its own check: the row goes at once', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const [need] = yield* someNeed
+          yield* withdrawNeed(need?.id ?? '', 'the CLI turned ready')
+          return yield* forgeNeedRows.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (rows) => rows.length === 0,
+            }),
+            Effect.timeoutOption('2 seconds'),
+            Effect.andThen(forgeNeedRows),
+          )
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
   test('withdrawn by Retry', async () => {
     const fake = fakeForge(ghSignedOut())
     const after = await withForge(

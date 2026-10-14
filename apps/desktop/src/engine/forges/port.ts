@@ -1170,6 +1170,17 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
         Effect.forkScoped,
       )
 
+      // A need ended elsewhere: Retry and the recheck withdraw it themselves when the CLI turned
+      // ready after their own check had kept it. Its row goes now, not at the next start.
+      const ended = yield* DomainEvents.use((domain) => domain.subscribe)
+      yield* ended.pipe(
+        Stream.filter((event) => event.type === 'need.withdrawn' || event.type === 'need.expired'),
+        Stream.runForEach((event) =>
+          provided(forgetNeed(event.entityId)).pipe(Effect.catch(() => Effect.void)),
+        ),
+        Effect.forkScoped,
+      )
+
       // The rows of needs that ended another way (kept by an engine before #262, or left by a stop
       // between a need's end and its row's deletion) wait for nothing: they go at the start. One
       // that cannot go is harmless, since only a pending need's row is ever read.
