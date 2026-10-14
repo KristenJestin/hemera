@@ -1023,6 +1023,192 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
   })
 })
 
+/**
+ * A text masked by every function that masks text, at once and paced: none leaves a marker
+ * (`Sx<n>Zq`), and paced masking gives what masking at once gives.
+ */
+const leavesNoMarkerIn = async (text: string, known: ReadonlyArray<string>): Promise<void> => {
+  const forms = [
+    maskText(text, known),
+    maskRecord({ body: text }, known)['body'],
+    maskAction({ note: text }, known)?.['note'],
+    maskPrinted(text, known),
+    maskPrinted(JSON.stringify({ body: text }), known),
+    maskPrinted(JSON.stringify([text, { text }]), known),
+    await Effect.runPromise(maskTextPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(JSON.stringify({ body: text }), known, 0)),
+  ]
+  for (const masked of forms) expect(masked, text).not.toMatch(/sx\d+zq/i)
+  expect(forms[6], text).toBe(forms[0])
+  expect(forms[7], text).toBe(forms[3])
+  expect(forms[8], text).toBe(forms[4])
+}
+
+/**
+ * An outer shape whose value runs on to a space or a quote: what stands before its value, and what
+ * it needs after it.
+ */
+const OUTERS: ReadonlyArray<readonly [head: string, tail: string]> = [
+  ['password=', ''],
+  ['DB_PASSWORD=', ''],
+  ['api_key: ', ''],
+  ['cookie=', ''],
+  ['Cookie: ', ''],
+  ['Authorization: ', ''],
+  ['set-cookie=', ''],
+  ['https://u:', '@h.test'],
+  ['git remote https://bob:', '@h.test/r'],
+]
+
+/** The names of an inner shape whose value is quoted: labels, and headers. */
+const INNER_NAMES = ['token', 'api_key', 'password', 'secret', 'cookie', 'Authorization'] as const
+
+/** Quoted values that hold a space, the other quote, or an escaped quote. */
+const QUOTED_VALUES = ['"a b"', "'a b'", `'a"b'`, String.raw`"a\"b c"`, `"a'b"`] as const
+
+/** What may stand in the outer value before the inner shape. */
+const BEFORE_INNER = ['', 'pw-', 'a.'] as const
+
+/** What may stand before the outer shape, taking its name in a value of its own. */
+const BEFORE_OUTER = ['', 'Bearer ', 'Basic '] as const
+
+/** An outer shape whose value holds an inner one with a quoted value, a marker glued after it. */
+const quotedInside = (
+  before: string,
+  outer: readonly [head: string, tail: string],
+  inValue: string,
+  name: string,
+  separator: string,
+  quoted: string,
+  mark: string,
+): string => `${before}${outer[0]}${inValue}${name}${separator}${quoted}${mark}${outer[1]}`
+
+describe('What follows a quoted value inside another value stays hidden', () => {
+  // A label's quoted value is hidden by itself; the outer value (a label's bare value, a header's,
+  // a URL's password) stopped at its quote or its space, and what follows it stayed readable.
+  const leaks: ReadonlyArray<readonly [string, string, string]> = [
+    ["a label's value through a quoted label value", 'password=token="a b"Sx6Zq', 'Sx6Zq'],
+    [
+      "a label's value through a quoted api key",
+      'DB_PASSWORD=api_key="x y"tailSECRET',
+      'tailSECRET',
+    ],
+    ["a URL's password through a quoted label value", 'https://u:token="a b"Sx7Zq@h.test', 'Sx7Zq'],
+    [
+      "a remote's password through a quoted label value",
+      'git remote https://bob:token="p q"S3cret@h.test/r',
+      'S3cret',
+    ],
+    ['a cookie through a label value quoted around a quote', `cookie=password='a"b'Sx8Zq`, 'Sx8Zq'],
+  ]
+  for (const [what, text, secret] of leaks) {
+    test(`${what}: ${text} leaves nothing of what follows it`, async () => {
+      const json = JSON.stringify({ body: text })
+      for (const masked of [
+        maskText(text, []),
+        maskShapes(text),
+        maskRecord({ body: text }, [])['body'],
+        maskAction({ note: text }, [])?.['note'],
+        maskPrinted(text, []),
+        maskPrinted(json, []),
+        await Effect.runPromise(maskTextPaced(text, [], 0)),
+        await Effect.runPromise(maskPrintedPaced(text, [], 0)),
+        await Effect.runPromise(maskPrintedPaced(json, [], 0)),
+      ]) {
+        expect(masked, text).toBeTypeOf('string')
+        expect(masked, text).not.toContain(secret)
+      }
+      await hidesAtLeastTheOracle(text, [])
+      await hidesAtLeastTheOracle(json, [])
+    })
+  }
+
+  test('a label after a Bearer or Basic credential reads on through a quoted value', async () => {
+    // The credential's value takes the label's name, and the label's value still reads on.
+    await leavesNoMarkerIn('Bearer password=token="a b"Sx1Zq', [])
+    await leavesNoMarkerIn('Basic password=token="a b"Sx2Zq', [])
+    await leavesNoMarkerIn('Bearer a/password=token="a b"Sx3Zq', [])
+  })
+
+  test('a private key or a known value after the quoted value is read through too', async () => {
+    // Each holds a space, and the value around them reads on through both.
+    const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
+    await leavesNoMarkerIn(`password=token="a b"${pem}Sx1Zq`, [])
+    await hidesAtLeastTheOracle(`password=token="a b"${pem}Sx1Zq`, [])
+    await leavesNoMarkerIn('password=token="a b"k n0wnSx2Zq', ['k n0wn'])
+    await hidesAtLeastTheOracle('password=token="a b"k n0wnSx2Zq', ['k n0wn'])
+  })
+
+  test('a quoted value only the shapes in turn find is read through too', async () => {
+    // Glued to a known value, the header begins no word until the value is written over.
+    await leavesNoMarkerIn('Authorization: kn0wnCookie: "a b"Sx1Zq', ['kn0wn'])
+    await hidesAtLeastTheOracle('Authorization: kn0wnCookie: "a b"Sx1Zq', ['kn0wn'])
+  })
+
+  test('every outer shape around every quoted inner one, at every position, leaves no marker', async () => {
+    const texts = BEFORE_OUTER.flatMap((before) =>
+      OUTERS.flatMap((outer) =>
+        BEFORE_INNER.flatMap((inValue) =>
+          INNER_NAMES.flatMap((name) =>
+            ['=', ':'].flatMap((separator) =>
+              QUOTED_VALUES.map((quoted) =>
+                quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+    // Run at once, the paced maskings take turns with one another.
+    await Promise.all(
+      texts.map(async (text) => {
+        await leavesNoMarkerIn(text, [])
+        await hidesAtLeastTheOracle(text, [])
+      }),
+    )
+  })
+
+  test('the same with quoted values and markers of any kind, 5,000 samples', async () => {
+    const units = (quote: string) =>
+      quote === '"'
+        ? fc.constantFrom('a', ' ', "'", String.raw`\"`, '\\\\', '@', '/', ':', '=')
+        : fc.constantFrom('a', ' ', '"', '\\', '@', '/', ':', '=')
+    const quoted = fc
+      .constantFrom('"', "'")
+      .chain((quote) =>
+        fc
+          .array(units(quote), { maxLength: 6 })
+          .map((parts) => `${quote}${parts.join('')}${quote}`),
+      )
+    const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
+    const after = fc.constantFrom('', ' and more', '\nnext', ';', ',x')
+    const text = fc
+      .tuple(
+        fc.constantFrom(...BEFORE_OUTER),
+        fc.constantFrom(...OUTERS),
+        fc.constantFrom(...BEFORE_INNER),
+        fc.constantFrom(...INNER_NAMES),
+        fc.constantFrom('=', ':'),
+        quoted,
+        mark,
+        after,
+      )
+      .map(
+        ([before, outer, inValue, name, separator, value, marker, rest]) =>
+          `${quotedInside(before, outer, inValue, name, separator, value, marker)}${rest}`,
+      )
+    const known = ['kn0wnAAA1']
+    await fc.assert(
+      fc.asyncProperty(text, async (written) => {
+        await leavesNoMarkerIn(written, known)
+        await hidesAtLeastTheOracle(written, known)
+      }),
+      { numRuns: 5_000 },
+    )
+  })
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => string, times: number): number => {
   const start = performance.now()
@@ -1072,6 +1258,24 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       'labels nested in labels (password=a.token="b")',
       (size) => 'password=a.token="b" '.repeat(size / 21),
       text,
+      4_000,
+    ],
+    [
+      'labels read through quoted labels (password=token="a b"x)',
+      (size) => 'password=token="a b"x '.repeat(size / 22),
+      text,
+      4_000,
+    ],
+    [
+      'tokens with no space or quote between them',
+      (size) => `${token},`.repeat(size / 25),
+      text,
+      64_000,
+    ],
+    [
+      'a JSON string of URLs read through quoted labels',
+      (size) => JSON.stringify({ body: 'https://u:token="a b"x@h '.repeat(size / 25) }),
+      printed,
       4_000,
     ],
     [

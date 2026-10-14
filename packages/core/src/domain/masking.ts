@@ -263,21 +263,27 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
 
 /**
  * The stretches of a text that masking hides: every occurrence of a known value, and every
- * stretch a shape hides, those that overlap or touch made one. They are the union of two readings:
+ * stretch a shape hides, those that overlap or touch made one. They are the union of three readings:
  *
  * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
  *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
  * - the shapes in turn, as masking used to read them: each on the text where the known values and
  *   all the shapes before it found are written over. A value that stops at a space, a quote or a
  *   line end then runs on through what an earlier shape hid, and hides what is glued after it
- *   (`password=<private key>x`).
+ *   (`password=<private key>x`);
+ * - each shape once more, on the text where the known values, and every stretch the two readings
+ *   found that holds a space or a quote, are written over. A value hidden by itself, quoted or
+ *   spaced, no longer stops the value it stands in (`password=token="a b"x`, `https://u:token="a
+ *   b"x@h`), whichever shape found it. A stretch with neither is left as it is: it stops no value
+ *   that stops at a space or a quote, and the names in it stay readable (`Bearer password=…`).
  *
- * The union hides at least what either reading hides, and its cost is two scans of each shape.
+ * The union hides at least what any reading hides, and its cost is three scans of each shape.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
   const knownHidden = yield* knownSpans(text, known)
   let spans = knownHidden
   let inTurn = knownHidden
+  let closed = knownHidden
   // Written over only once something is hidden: until then, the shapes in turn read the text.
   let view = text
   let written = false
@@ -288,14 +294,40 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
   for (const pattern of SHAPES) {
     const found = yield* shapeSpans(text, pattern)
     spans = yield* union(spans, found)
+    closed = yield* union(closed, yield* closedSpans(text, found))
     const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
     if (foundInTurn.length > 0) {
       inTurn = yield* union(inTurn, foundInTurn)
+      if (foundInTurn !== found)
+        closed = yield* union(closed, yield* closedSpans(text, foundInTurn))
       view = yield* writtenOver(view, foundInTurn)
       written = true
     }
   }
-  return yield* union(spans, inTurn)
+  spans = yield* union(spans, inTurn)
+  // Nothing closed: the third reading would read the text as the first did.
+  if (closed.length === 0) return spans
+  const opened = yield* writtenOver(text, closed)
+  for (const pattern of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, pattern))
+  return spans
+}
+
+/** What stops a value read to the next space or quote. */
+const STOPS = /[\s"']/g
+
+/**
+ * The stretches, in order of their starts, that hold a space or a quote. Where the next one stands
+ * is searched once from each start past the last one found, so the text is crossed once.
+ */
+function* closedSpans(text: string, spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  const closed: Span[] = []
+  let stop = -1
+  for (const span of spans) {
+    if (stop < span[0]) stop = matchFrom(STOPS, text, span[0])?.index ?? Number.POSITIVE_INFINITY
+    if (stop < span[1]) closed.push(span)
+    if (due()) yield
+  }
+  return closed
 }
 
 /** What a hidden stretch is written over by, one for each of its characters. */
