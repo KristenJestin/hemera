@@ -194,7 +194,9 @@ export type ProofNeeds =
 export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
-  readonly hold: (at: 'greening' | 'handing' | 'greens-due' | 'retrying') => Effect.Effect<void>
+  readonly hold: (
+    at: 'greening' | 'handing' | 'greens-due' | 'retrying' | 'proof-called',
+  ) => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
@@ -1211,9 +1213,12 @@ export const buildingProofs = (parts: ProofParts) => {
       const row = yield* scenarioProofIn(database, building.id, scenario)
       if (row === null || stateOf(row) === 'not_reproducible') return run
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
-      // Stopped by the exit of the Building, it says nothing of the code: the exit's snapshot
-      // judges what it left (#309).
-      if (run.stopped && (yield* ToolAccess.use((access) => access.isExiting(building.missionId))))
+      // Stopped by the exit of the Building, or refused by it before it started, it says nothing
+      // of the code: the exit's snapshot judges what it left (#309).
+      if (
+        (run.stopped || !run.started) &&
+        (yield* ToolAccess.use((access) => access.isExiting(building.missionId)))
+      )
         return run
       // Kept from running (a port another mission holds): not the Builder's to fix (#306). A run
       // that started is, whatever its runner said: its code may never end, or never answer.
@@ -1772,6 +1777,7 @@ export const buildingProofs = (parts: ProofParts) => {
   /** The Builder, or a helper tied to a task covering the scenario, runs a proof itself. */
   const proofRun = (grant: Grant, args: ToolArguments<'proof_run'>) =>
     Effect.gen(function* () {
+      yield* parts.hold('proof-called')
       if (grant.missionId === null) return refusal('refused: this session works for no mission')
       const database = yield* Database
       const building = yield* activeBuildingIn(database, grant.missionId)

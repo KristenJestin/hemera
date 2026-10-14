@@ -2812,6 +2812,109 @@ describe('A run a call started, as the exit begins', () => {
       expect(seen.after).toEqual(seen.before)
     },
   )
+  test(
+    'two proof_run calls, the second queued behind the first as the exit begins: the exit reaches Review within the stop grace, and no run of theirs starts after it began',
+    SLOW,
+    async () => {
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      // Each proof_run call, as it begins to execute.
+      let called = 0
+      const { world, run } = ending({
+        hold: (at) =>
+          Effect.sync(() => {
+            if (at === 'proof-called') called += 1
+          }),
+        endHold: (at) =>
+          at === 'exiting' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+      })
+      // While this file is there, every run of the proof notes it started, and never ends.
+      const hang = join(data, 'hang')
+      const started = join(data, 'started')
+      const hanging = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { appendFileSync, existsSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', async () => {",
+        `  if (existsSync(${JSON.stringify(hang)})) {`,
+        `    appendFileSync(${JSON.stringify(started)}, 'started\\n')`,
+        '    for (;;) await new Promise((resolve) => setTimeout(resolve, 50))',
+        '  }',
+        "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
+        '})',
+        '',
+      ].join('\n')
+      const startedRuns = () =>
+        existsSync(started) ? readFileSync(started, 'utf8').trim().split('\n').length : 0
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  ...exportProof()['R1.S2'],
+                  test: { ...exportProof()['R1.S2'].test, code: hanging },
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            arming = true
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(reached)
+            writeFileSync(hang, '')
+            // The first call's run hangs; the second call executes, queued behind it.
+            yield* Effect.forkChild(call(builder.grantId, 'proof_run', { scenario: 'R1.S2' }))
+            yield* until(
+              Effect.sync(() => startedRuns() === 1),
+              LONG,
+            )
+            yield* Effect.forkChild(call(builder.grantId, 'proof_run', { scenario: 'R1.S2' }))
+            yield* until(
+              Effect.sync(() => called === 2),
+              LONG,
+            )
+            const released = Date.now()
+            yield* Deferred.succeed(go, undefined)
+            yield* inReview(mission.id)
+            const runs = yield* Runs
+            return {
+              after: Date.now() - released,
+              going: [...runs.live.values()].filter((one) => one.run.missionId === mission.id),
+              view: yield* buildingNow(mission.id),
+            }
+          }),
+        ),
+      )
+      // Within the stop's grace and the calls' own ends, far from the proof's limit.
+      expect(seen.after).toBeLessThan(LONG)
+      expect(seen.going).toEqual([])
+      // Only the first run ever started: the second call's was refused as the exit stood.
+      expect(startedRuns()).toBe(1)
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
 })
 
 describe('The refresh', () => {

@@ -285,7 +285,8 @@ const answerOf = (need: Need): string | null => {
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
- * event follower takes in an answer, before it acts on it. Never held otherwise.
+ * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute.
+ * Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -306,6 +307,7 @@ export type BuilderHold = (
     | 'greens-due'
     | 'handing'
     | 'retrying'
+    | 'proof-called'
     | 'releasing'
     | 'answering'
     | 'telling',

@@ -55,7 +55,7 @@ const cancelEngine = (
       at: 'opening' | 'written' | 'refused',
       asked: OpenAsked,
     ) => Effect.Effect<void>
-    readonly runHold?: (at: 'recording' | 'launched') => Effect.Effect<void>
+    readonly runHold?: (at: 'recording' | 'recorded' | 'launched') => Effect.Effect<void>
     readonly stoppers?: ReadonlyArray<Stopper>
   } = {},
 ) => {
@@ -364,7 +364,7 @@ describe('Work under way never undoes a cancel', () => {
       const reached = Deferred.makeUnsafe<void>()
       const go = Deferred.makeUnsafe<void>()
       let armed = false
-      const runHold = (at: 'recording' | 'launched') =>
+      const runHold = (at: 'recording' | 'recorded' | 'launched') =>
         at === 'recording' && armed
           ? Effect.gen(function* () {
               armed = false
