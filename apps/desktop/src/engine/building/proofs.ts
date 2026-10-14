@@ -1024,8 +1024,10 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * The red phase: each scenario waiting for its red, its proof in place and not handed to the
-   * Builder, run in the Spec's order. One handed to the Builder (a conflict, a red that was not
-   * one) runs again only when the Builder calls `proof_run`.
+   * Builder, run in the Spec's order. One handed to the Builder since it began to wait (a conflict,
+   * a red that was not one, a red sent back, more information on a red that already passed) runs
+   * again only when the Builder calls `proof_run`. One handed over before, then held on its
+   * environment and retried, is run here: nothing else would run it (#378).
    */
   const redPhase = (building: BuildingRow) =>
     inTurn(
@@ -1033,10 +1035,21 @@ export const buildingProofs = (parts: ProofParts) => {
       Effect.gen(function* () {
         const database = yield* Database
         const attempts = yield* attemptsIn(database, building.id)
+        const decisions = yield* decisionsIn(database, building.id)
         for (const row of yield* scenarioProofsIn(database, building.id)) {
           if (modeOf(row) !== 'automated' || stateOf(row) !== 'waiting_red') continue
-          if (attempts.some((one) => one.scope === 'proof' && one.subject === row.scenario))
-            continue
+          const handed = attempts.some(
+            (one) =>
+              one.scope === 'proof' &&
+              one.subject === row.scenario &&
+              (one.endedAt === null || one.startedAt >= row.updatedAt),
+          )
+          if (handed) continue
+          // More information sets a red that already passed waiting again, for the Builder.
+          const last = decisions.findLast(
+            (one) => one.scope === 'proof' && one.subject === row.scenario,
+          )
+          if (last?.kind === 'already_passes' && last.state === 'answered') continue
           if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return
           yield* redOf(building, row.scenario)
         }

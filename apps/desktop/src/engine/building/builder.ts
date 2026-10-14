@@ -300,6 +300,7 @@ export type BuilderHold = (
     | 'retrying'
     | 'releasing'
     | 'answering'
+    | 'telling'
     | 'cancelling',
 ) => Effect.Effect<void>
 

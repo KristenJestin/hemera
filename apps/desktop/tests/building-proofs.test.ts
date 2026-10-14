@@ -211,14 +211,19 @@ const proofIn = (missionId: string, scenario: string, state: string) =>
     20_000,
   )
 
-/** The attempts on a scenario's proof, as Hemera keeps them. */
-const proofAttemptsOf = (scenario: string) =>
+/** The attempts on a scenario's proof, as Hemera keeps them; on every proof for null. */
+const proofAttemptsOf = (scenario: string | null) =>
   Effect.gen(function* () {
     const database = yield* Database
     return yield* database
       .select()
       .from(buildingAttempts)
-      .where(and(eq(buildingAttempts.scope, 'proof'), eq(buildingAttempts.subject, scenario)))
+      .where(
+        and(
+          eq(buildingAttempts.scope, 'proof'),
+          scenario === null ? undefined : eq(buildingAttempts.subject, scenario),
+        ),
+      )
   })
 
 /** Everything delivered to the mission's sessions (the Builder), once something says `start`. */
@@ -993,6 +998,59 @@ const holdOnce = (point: string) => {
       : Effect.void
   return { hold, reached, go }
 }
+
+/** A start's red phase over, its sent-back reds and its reds run: the start's hold before its greens. */
+const redsRun = () => {
+  const over = Deferred.makeUnsafe<void>()
+  const hold: BuilderHold = (at) =>
+    at === 'greens-due' ? Effect.asVoid(Deferred.succeed(over, undefined)) : Effect.void
+  return { hold, over }
+}
+
+/** Everything stored for the mission's sessions (the Builder), as text. */
+const deliveriesOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const rows = yield* database
+      .select({ body: sessionDeliveries.body })
+      .from(sessionDeliveries)
+      .where(eq(sessionDeliveries.ownerId, missionId))
+    return rows.map((row) => row.body).join('\n')
+  })
+
+/**
+ * The scenarios waiting for their red that nothing stored will move: no attempt on the proof left
+ * open, no decision on it pending, and nothing said to the Builder about it since it began to wait.
+ */
+const unmovedOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const building = yield* activeBuildingIn(database, missionId)
+    if (building === null) return []
+    const waiting = yield* database
+      .select()
+      .from(scenarioProofs)
+      .where(
+        and(eq(scenarioProofs.buildingId, building.id), eq(scenarioProofs.state, 'waiting_red')),
+      )
+    const attempts = yield* proofAttemptsOf(null)
+    const decisions = yield* decisionsIn(database, building.id)
+    const told = yield* database
+      .select()
+      .from(sessionDeliveries)
+      .where(eq(sessionDeliveries.ownerId, missionId))
+    return waiting
+      .filter(
+        (row) =>
+          !attempts.some((one) => one.subject === row.scenario && one.endedAt === null) &&
+          !decisions.some(
+            (one) =>
+              one.scope === 'proof' && one.subject === row.scenario && one.state === 'pending',
+          ) &&
+          !told.some((one) => one.createdAt >= row.updatedAt && one.body.includes(row.scenario)),
+      )
+      .map((row) => row.scenario)
+  })
 
 /** Writes a file of `api` through the Builder's tools, read first. */
 const writes = (grantId: string, path: string, content: string, repository = 'api') =>
@@ -3119,6 +3177,7 @@ describe('What the user answers on a red', () => {
             attempts: yield* proofAttemptsOf('R1.S2'),
             mission: yield* getMission(first.mission.id),
             delivered: yield* deliveredTo(first.mission.id, 'the user sent this red back'),
+            unmoved: yield* unmovedOf(first.mission.id),
           }
         }),
       ),
@@ -3126,6 +3185,7 @@ describe('What the user answers on a red', () => {
     expect(seen.attempts.map((one) => one.verdict)).toEqual(['red'])
     expect(seen.mission.needs).toEqual([])
     expect(seen.delivered).toContain('total is wrong in')
+    expect(seen.unmoved).toEqual([])
   })
 
   test('"send it back" answered a second time right before a stop opens its own attempt after the start, and asks nothing again', async () => {
@@ -3175,6 +3235,7 @@ describe('What the user answers on a red', () => {
           return {
             attempts: yield* proofAttemptsOf('R1.S2'),
             mission: yield* getMission(first.mission.id),
+            unmoved: yield* unmovedOf(first.mission.id),
           }
         }),
       ),
@@ -3182,6 +3243,7 @@ describe('What the user answers on a red', () => {
     expect(seen.attempts).toHaveLength(first.before.length + 1)
     expect(seen.attempts.at(-1)?.verdict).toBe('red')
     expect(seen.mission.needs).toEqual([])
+    expect(seen.unmoved).toEqual([])
   })
 
   test('"more information" answered right before a stop reaches the Builder after the start', async () => {
@@ -3221,11 +3283,12 @@ describe('What the user answers on a red', () => {
             first.mission.id,
             Effect.map(bodies, (all) => all.includes(told)),
           )
-          return yield* bodies
+          return { bodies: yield* bodies, unmoved: yield* unmovedOf(first.mission.id) }
         }),
       ),
     )
-    expect(seen).toContain(`${told}: It fails on the March invoices only.`)
+    expect(seen.bodies).toContain(`${told}: It fails on the March invoices only.`)
+    expect(seen.unmoved).toEqual([])
   })
 
   test('"cancel the mission" answered right before a stop cancels the mission and its Building after the start', async () => {
@@ -3265,6 +3328,202 @@ describe('What the user answers on a red', () => {
     expect(seen.mission.stage).toBe('cancelled')
     expect(seen.mission.unstopped).toEqual([])
     expect(seen.building?.state).toBe('cancelled')
+  })
+
+  test('"more information" told to the Builder, then a stop before its proof_run: after the start the proof waits for the Builder, and nothing is asked again', async () => {
+    const first = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(EXPORT_PATH, testFile("  assert.equal(1, 1, 'it passes')")),
+          }))
+          const need = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: need.id,
+            answer: WrittenAnswer.make({ text: 'It fails on the March invoices only.' }),
+            key: 'answer-1',
+          })
+          yield* deliveredTo(mission.id, 'R1.S2 already passes, and the user says more')
+          return { mission, runs: (yield* proofOf(mission.id, 'R1.S2')).runs.length }
+        }),
+      ),
+    )
+    const start = redsRun()
+    const seen = await proofsEngine(data, start.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* Deferred.await(start.over)
+          return {
+            mission: yield* getMission(first.mission.id),
+            proof: yield* proofOf(first.mission.id, 'R1.S2'),
+            unmoved: yield* unmovedOf(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.mission.needs).toEqual([])
+    expect(seen.proof.state).toBe('waiting_red')
+    expect(seen.proof.runs).toHaveLength(first.runs)
+    expect(seen.unmoved).toEqual([])
+  })
+
+  test('"send it back" whose attempt is opened right before a stop, the Builder not told yet: after the start the Builder is told, and nothing is asked again', async () => {
+    const telling = holdOnce('telling')
+    const hold: BuilderHold = (at) =>
+      at === 'telling' ? Effect.andThen(telling.hold(at), Effect.never) : Effect.void
+    const first = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(mismatch)
+          const need = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: need.id,
+            answer: ChosenAnswer.make({ option: SEND_BACK }),
+            key: 'answer-1',
+          })
+          yield* Deferred.await(telling.reached)
+          return { mission }
+        }),
+      ),
+    )
+    const start = redsRun()
+    const seen = await proofsEngine(data, start.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* Deferred.await(start.over)
+          return {
+            mission: yield* getMission(first.mission.id),
+            delivered: yield* deliveriesOf(first.mission.id),
+            attempts: yield* proofAttemptsOf('R1.S2'),
+            unmoved: yield* unmovedOf(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.delivered).toContain('the user sent this red back')
+    expect(seen.delivered).toContain('total is wrong in')
+    expect(seen.attempts.map((one) => one.verdict)).toEqual(['red'])
+    expect(seen.mission.needs).toEqual([])
+    expect(seen.unmoved).toEqual([])
+  })
+
+  test('a third red of a proof opened right before a stop, its need not raised yet: after the start the user is asked', async () => {
+    let tellings = 0
+    const third = Deferred.makeUnsafe<void>()
+    const hold: BuilderHold = (at) =>
+      at === 'telling' && ++tellings === 3
+        ? Effect.andThen(Deferred.succeed(third, undefined), Effect.never)
+        : Effect.void
+    const first = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(EXPORT_PATH, testFile('  const = 1')),
+          }))
+          yield* deliveredTo(mission.id, 'Fix the setup')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          yield* Effect.forkChild(call(grantId, 'proof_run', { scenario: 'R1.S2' }))
+          yield* Deferred.await(third)
+          return { mission }
+        }),
+      ),
+    )
+    const start = redsRun()
+    const seen = await proofsEngine(data, start.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* Deferred.await(start.over)
+          return {
+            mission: yield* getMission(first.mission.id),
+            attempts: yield* proofAttemptsOf('R1.S2'),
+            unmoved: yield* unmovedOf(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.attempts).toHaveLength(3)
+    expect(seen.mission.needs).toHaveLength(1)
+    expect(
+      seen.mission.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+    ).toHaveLength(1)
+    expect(seen.unmoved).toEqual([])
+  })
+
+  test('a Retry of the Builder’s environment need after a red sent back, stopped before its follower: after the start the red runs again', async () => {
+    const port = await closedPort()
+    const log = join(scratch, 'runs.log')
+    // The red unlike Planning's, then the Builder's run kept from running, then that red again.
+    const spec = (api: string) => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          [
+            `  appendFileSync(${JSON.stringify(log)}, 'ran\\n')`,
+            `  if (readFileSync(${JSON.stringify(log)}, 'utf8').trim().split('\\n').length === 2)`,
+            `    await new Promise((done, fail) => connect(${String(port)}, '127.0.0.1').on('connect', done).on('error', fail))`,
+            '  assert.fail(`total is wrong in ${fileURLToPath(import.meta.url)} after 12ms`)',
+          ].join('\n'),
+          ["import { connect } from 'node:net'", "import { fileURLToPath } from 'node:url'"],
+        ),
+        {
+          seen_today: true,
+          observed: `not ok 1 - the scenario holds\n  ${line}`,
+          key_line: line,
+          base_commit: [{ repository: 'api', commit: git(api, 'rev-parse', 'HEAD').trim() }],
+        },
+      ),
+    })
+    const releasing = holdOnce('releasing')
+    let stopping = false
+    const hold: BuilderHold = (at) =>
+      stopping && at === 'releasing'
+        ? Effect.andThen(releasing.hold(at), Effect.never)
+        : Effect.void
+    const first = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(spec)
+          const asked = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: asked.id,
+            answer: ChosenAnswer.make({ option: SEND_BACK }),
+            key: 'answer-1',
+          })
+          yield* deliveredTo(mission.id, 'the user sent this red back')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          const need = yield* needOf(mission.id, 'Environment')
+          stopping = true
+          yield* retryNeed(need.id)
+          yield* Deferred.await(releasing.reached)
+          return { mission }
+        }),
+      ),
+    )
+    const start = redsRun()
+    const seen = await proofsEngine(data, start.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* Deferred.await(start.over)
+          return {
+            proof: yield* proofOf(first.mission.id, 'R1.S2'),
+            unmoved: yield* unmovedOf(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(runsIn(log)).toBe(3)
+    expect(seen.proof.state).toBe('held')
+    expect(seen.unmoved).toEqual([])
   })
 
   test('touched names the proofs and the final checks whose repository changed', async () => {
