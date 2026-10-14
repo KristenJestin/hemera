@@ -11,7 +11,13 @@ import { join } from 'node:path'
 
 import type { DeliveryRulesDraft, RepositoryWaves } from '@hemera/core/domain'
 import { defaultDeliveryRules } from '@hemera/core/domain'
-import { type CommandDraft, DeliveryRulesRefused, StaleVersion } from '@hemera/ipc'
+import {
+  type CommandDraft,
+  DeliveryRulesRefused,
+  DeliveryRulesUnreadable,
+  StaleVersion,
+} from '@hemera/ipc'
+import { eq } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Ref } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -30,6 +36,8 @@ import { readEvents } from '../src/engine/journal.ts'
 import { createMission } from '../src/engine/missions.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { createProject } from '../src/engine/projects.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { deliveryRuleCopies, deliveryRules } from '../src/engine/storage/schema.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { git } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -265,6 +273,65 @@ describe('The rules are saved on their version', () => {
   })
 })
 
+describe('A stored document that no longer reads', () => {
+  test('rules that no longer decode are a named state, never a defect, and a save replaces them', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        yield* saveDeliveryRules(world.projectId, chain(world), 0)
+        const database = yield* Database
+        // As a later release would find a field it no longer knows.
+        yield* database
+          .update(deliveryRules)
+          .set({ document: '{"version":1,"savedAt":null,"policy":"merge"}' })
+          .where(eq(deliveryRules.projectId, world.projectId))
+        const unreadable = yield* Effect.flip(readDeliveryRules(world.projectId))
+        const replaced = yield* saveDeliveryRules(world.projectId, chain(world), 1)
+        const again = yield* readDeliveryRules(world.projectId)
+        return { world, unreadable, replaced, again }
+      }),
+    )
+    expect(seen.unreadable).toBeInstanceOf(DeliveryRulesUnreadable)
+    expect(seen.unreadable).toMatchObject({
+      projectId: seen.world.projectId,
+      document: 'rules',
+      missionId: null,
+      section: null,
+      version: 1,
+    })
+    expect(seen.replaced.rules.version).toBe(2)
+    expect(seen.again.rules.version).toBe(2)
+  })
+
+  test('a mission’s copy that no longer decodes is a named state, never a defect', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        const mission = yield* createMission({
+          projectId: world.projectId,
+          idea: { sentence: 'Export the ledger as CSV', ticket: null },
+        })
+        yield* copySection(mission.id, 'end')
+        const database = yield* Database
+        yield* database
+          .update(deliveryRuleCopies)
+          .set({ document: '{"section":"end"}' })
+          .where(eq(deliveryRuleCopies.missionId, mission.id))
+        const unreadable = yield* Effect.flip(missionCopies(mission.id))
+        return { world, missionId: mission.id, unreadable }
+      }),
+    )
+    expect(seen.unreadable).toBeInstanceOf(DeliveryRulesUnreadable)
+    expect(seen.unreadable).toMatchObject({
+      projectId: seen.world.projectId,
+      document: 'copy',
+      missionId: seen.missionId,
+      section: 'end',
+      version: 0,
+    })
+  })
+})
+
 describe('Repository dependencies', () => {
   test('the dependency proposal from two package.json files finds the edge; nothing is saved without accept', async () => {
     const seen = await engine(
@@ -296,6 +363,26 @@ describe('Repository dependencies', () => {
     ])
     expect(seen.saved).toHaveLength(1)
   })
+  test('accepted dependencies naming a repository the Project does not have are refused', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        const refused = yield* Effect.flip(
+          acceptDependencies(world.projectId, [
+            { repositoryId: world.id('api'), deliversAfter: 'mobile' },
+          ]),
+        )
+        const after = yield* readDeliveryRules(world.projectId)
+        return { refused, after }
+      }),
+    )
+    expect(seen.refused).toBeInstanceOf(DeliveryRulesRefused)
+    expect(seen.refused.message).toBe(
+      'A dependency names a repository that is not in this Project.',
+    )
+    expect(seen.after.rules.version).toBe(0)
+  })
+
   test('accepted dependencies that make a cycle are refused, and nothing is written', async () => {
     const seen = await engine(
       Effect.gen(function* () {

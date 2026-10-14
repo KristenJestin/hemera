@@ -28,6 +28,7 @@ import {
   ROOT_REPOSITORY,
   SectionCopy,
   decodeDeliveryRules,
+  dependencyProblems,
   defaultDeliveryRules,
   effectiveRepositories,
   preparationDifferences,
@@ -38,6 +39,7 @@ import {
 } from '@hemera/core/domain'
 import {
   DeliveryRulesRefused,
+  DeliveryRulesUnreadable,
   type DeliveryRulesView,
   type PreparationChange,
   type Project,
@@ -110,7 +112,13 @@ const rulesIn = (reader: EngineTransaction, projectId: string) =>
     }
     const read = decodeDeliveryRules(row.document)
     if (Result.isFailure(read)) {
-      return yield* Effect.fail(refusedWhile('reading the delivery rules')(read.failure))
+      return yield* new DeliveryRulesUnreadable({
+        projectId,
+        document: 'rules',
+        missionId: null,
+        section: null,
+        version: row.version,
+      })
     }
     return read.success
   })
@@ -230,6 +238,8 @@ export const acceptDependencies = (projectId: string, edges: ReadonlyArray<Deliv
     const delivery = yield* deliveryProjectOf(project)
     const rules = yield* mutate('accepting the proposed dependencies', (transaction) =>
       Effect.gen(function* () {
+        const unknown = dependencyProblems(edges, delivery)
+        if (unknown.length > 0) return yield* new DeliveryRulesRefused({ problems: unknown })
         const current = yield* rulesIn(transaction, projectId)
         const draft = withDependencies(current, delivery, edges)
         const problems = validateRules(draft, delivery)
@@ -248,7 +258,7 @@ const reading = <A, E, R>(read: (reader: EngineTransaction) => Effect.Effect<A, 
     return yield* database.transaction(read)
   })
 
-const copiesIn = (reader: EngineTransaction, missionId: string) =>
+const copiesIn = (reader: EngineTransaction, projectId: string, missionId: string) =>
   reader
     .select()
     .from(deliveryRuleCopies)
@@ -260,7 +270,16 @@ const copiesIn = (reader: EngineTransaction, missionId: string) =>
           DELIVERY_SECTIONS.flatMap((section) => rows.filter((row) => row.section === section)),
           (row) =>
             readCopy(row.document).pipe(
-              Effect.mapError(refusedWhile('reading a delivery rules copy')),
+              Effect.mapError(
+                () =>
+                  new DeliveryRulesUnreadable({
+                    projectId,
+                    document: 'copy',
+                    missionId,
+                    section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
+                    version: row.version,
+                  }),
+              ),
             ),
         ),
       ),
@@ -284,7 +303,7 @@ export const copySection = (
     yield* hold
     return yield* mutate('copying the delivery rules into a mission', (transaction) =>
       Effect.gen(function* () {
-        const kept = (yield* copiesIn(transaction, missionId)).find(
+        const kept = (yield* copiesIn(transaction, project.id, missionId)).find(
           (copy) => copy.section === section,
         )
         if (kept !== undefined) return { result: kept, events: [] }
@@ -316,8 +335,8 @@ export const copySection = (
 /** The sections the mission copied, in the order of the rules. */
 export const missionCopies = (missionId: string) =>
   Effect.gen(function* () {
-    yield* getMission(missionId)
-    return yield* reading((reader) => copiesIn(reader, missionId))
+    const mission = yield* getMission(missionId)
+    return yield* reading((reader) => copiesIn(reader, mission.projectId, missionId))
   })
 
 /**
@@ -329,7 +348,7 @@ export const preparationChangedSinceCopy = (missionId: string) =>
     const mission = yield* getMission(missionId)
     const [copy, rules] = yield* reading((reader) =>
       Effect.all([
-        Effect.map(copiesIn(reader, missionId), (copies) =>
+        Effect.map(copiesIn(reader, mission.projectId, missionId), (copies) =>
           copies.find((one) => one.section === 'preparation'),
         ),
         rulesIn(reader, mission.projectId),

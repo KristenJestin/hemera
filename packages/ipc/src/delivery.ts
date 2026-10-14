@@ -12,6 +12,7 @@ import {
   DeliveryProblem,
   DeliveryRules,
   DeliveryRulesDraft,
+  DeliverySection,
   EffectiveRepository,
   PreparationDifference,
   SectionCopy,
@@ -63,6 +64,29 @@ export class DeliveryRulesRefused extends Schema.TaggedError<DeliveryRulesRefuse
   }
 }
 
+/**
+ * A stored document of the delivery rules that no longer reads (a later release changed a field):
+ * which Project, which document, at which version. Nothing is lost: the document stays as it was,
+ * and a save of the rules replaces it.
+ */
+export class DeliveryRulesUnreadable extends Schema.TaggedError<DeliveryRulesUnreadable>()(
+  'DeliveryRulesUnreadable',
+  {
+    projectId: Schema.String,
+    document: Schema.Literals(['rules', 'copy']),
+    /** The mission whose copy it is; null for the Project's rules. */
+    missionId: Schema.NullOr(Schema.String),
+    section: Schema.NullOr(DeliverySection),
+    version: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return this.document === 'rules'
+      ? `This Project’s delivery rules, saved at version ${String(this.version)}, can no longer be read: save them again to replace them.`
+      : `This mission’s copy of the ${this.section ?? ''} section, taken at version ${String(this.version)}, can no longer be read.`
+  }
+}
+
 const failing = <const Errors extends ReadonlyArray<Schema.Top>>(...errors: Errors) =>
   Schema.Union(errors)
 
@@ -73,7 +97,7 @@ export const DeliveryRulesRpcs = RpcGroup.make(
   Rpc.make('deliveryRules.read', {
     payload: { projectId: Schema.String },
     success: DeliveryRulesView,
-    error: failing(...always, UnknownProject),
+    error: failing(...always, UnknownProject, DeliveryRulesUnreadable),
   }),
   /** Every reason a draft would be refused; none when it can be saved. */
   Rpc.make('deliveryRules.validate', {
@@ -91,13 +115,13 @@ export const DeliveryRulesRpcs = RpcGroup.make(
   Rpc.make('deliveryRules.acceptDependencies', {
     payload: { projectId: Schema.String, edges: Schema.Array(DeliveryDependency) },
     success: DeliveryRulesView,
-    error: failing(...always, UnknownProject, DeliveryRulesRefused),
+    error: failing(...always, UnknownProject, DeliveryRulesRefused, DeliveryRulesUnreadable),
   }),
   /** The sections a mission copied, each with the version of the rules it was copied at. */
   Rpc.make('deliveryRules.missionCopies', {
     payload: { missionId: Schema.String },
     success: Schema.Array(SectionCopy),
-    error: failing(...always, UnknownMission),
+    error: failing(...always, UnknownMission, DeliveryRulesUnreadable),
   }),
   /**
    * Whether the Project's preparation differs from the mission's copy, with the differences; null
@@ -106,6 +130,6 @@ export const DeliveryRulesRpcs = RpcGroup.make(
   Rpc.make('deliveryRules.preparationChangedSinceCopy', {
     payload: { missionId: Schema.String },
     success: Schema.NullOr(PreparationChange),
-    error: failing(...always, UnknownMission, UnknownProject),
+    error: failing(...always, UnknownMission, UnknownProject, DeliveryRulesUnreadable),
   }),
 )
