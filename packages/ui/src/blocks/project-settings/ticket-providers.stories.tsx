@@ -17,10 +17,9 @@ import {
   type JiraDraft,
   type ProviderDeployment,
   ProviderDetails,
-  ProviderMark,
-  TicketProviders,
   TokenField,
-} from './ticket-providers.tsx'
+} from './provider-forms.tsx'
+import { ProviderMark, TicketProviders } from './ticket-providers.tsx'
 import {
   type ProviderKind,
   type ProviderView,

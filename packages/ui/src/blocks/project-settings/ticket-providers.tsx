@@ -10,8 +10,6 @@ import { Section, SectionRefusal } from './parts.tsx'
 import { ProviderGlyph } from './provider-forms.tsx'
 import { type ProviderKind, type ProviderView, providerTroubled } from './provider-model.ts'
 
-export * from './provider-forms.tsx'
-
 /** The props of the providers list. */
 export interface TicketProvidersProps {
   /** Null: the list is on its way. */
