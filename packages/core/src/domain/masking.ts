@@ -38,18 +38,23 @@ const PRIVATE_KEY =
  */
 const QUOTED_OR_BARE = String.raw`"(?:[^"\\]|\\.)*"|'[^']*'`
 
+/*
+ * Each shape below hides all it matches but its group `keep`, which begins the match: what names
+ * the credential (a header's name, a scheme, a label) stays readable.
+ */
+
 /**
  * A header whose whole value is a credential, its scheme with its token: as a header line writes
  * it (to the end of the line or of the quotes around it), or as JSON writes it.
  */
 const CREDENTIAL_HEADER = new RegExp(
-  String.raw`\b(authorization|proxy-authorization|cookie|set-cookie)(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
+  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
   'gi',
 )
 
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
-const BEARER = /\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi
-const BASIC = /\b(Basic)\s+[A-Za-z0-9+/]{8,}={0,2}/g
+const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
+const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
 
 /** Tokens recognised by their prefix alone, wherever they stand. */
 const PREFIXED_TOKEN = new RegExp(
@@ -81,10 +86,10 @@ const PREFIXED_TOKEN = new RegExp(
  * once (a lookahead read back), since if a token does not follow it, none follows a later one.
  */
 const WEB_TOKEN =
-  /(?<![A-Za-z0-9_-])(?=((?:[A-Za-z0-9_-]*?-)??)eyJ)\1eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g
+  /(?<![A-Za-z0-9_-])(?=((?:[A-Za-z0-9_-]*?-)??)eyJ)(?<keep>\1)eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g
 
 /** The password in a URL's user information; the scheme, the user and the host stay. */
-const URL_PASSWORD = /((?<![a-z0-9+.-])[a-z0-9+.-]+:\/\/[^\s:/@]+:)[^\s@/]+@/gi
+const URL_PASSWORD = /(?<keep>(?<![a-z0-9+.-])[a-z0-9+.-]+:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi
 
 /**
  * A credential given a value in text, by name: `password=…`, `token: …`, `api_key=…`, and the
@@ -94,7 +99,7 @@ const URL_PASSWORD = /((?<![a-z0-9+.-])[a-z0-9+.-]+:\/\/[^\s:/@]+:)[^\s@/]+@/gi
  * once (a lookahead read back), never given back a character at a time.
  */
 const LABELLED_CREDENTIAL = new RegExp(
-  String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-]|(?![A-Za-z0-9_-])))(?=([A-Za-z0-9_-]+))\1(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
+  String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-]|(?![A-Za-z0-9_-])))(?=([A-Za-z0-9_-]+))(?<keep>\1["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
   'gi',
 )
 
@@ -192,21 +197,19 @@ function* applied(text: string, edits: ReadonlyArray<Edit>): Steps<string> {
   return out + text.slice(from)
 }
 
-/** A shape of credential, and what a match becomes given its groups: what names it, then `•••`. */
-type Shape = readonly [pattern: RegExp, by: (groups: ReadonlyArray<string>) => string]
-
-/** The shapes, in the order they are masked. */
-const SHAPES: ReadonlyArray<Shape> = [
-  [PRIVATE_KEY, () => MASK],
-  [CREDENTIAL_HEADER, ([name = '', separator = '']) => `${name}${separator}${MASK}`],
-  [BEARER, ([scheme = '']) => `${scheme} ${MASK}`],
-  [BASIC, ([scheme = '']) => `${scheme} ${MASK}`],
-  // A web token before the prefixed ones: one of them can start inside it, and masked first it
-  // would leave the token's header and payload readable.
-  [WEB_TOKEN, ([before = '']) => `${before}${MASK}`],
-  [PREFIXED_TOKEN, () => MASK],
-  [URL_PASSWORD, ([before = '']) => `${before}${MASK}@`],
-  [LABELLED_CREDENTIAL, ([label = '', separator = '']) => `${label}${separator}${MASK}`],
+/**
+ * The shapes, each matched on the text as it was given: none ever sees what another masked, so a
+ * shape that takes the first word of another cannot hide the rest of it, whatever their order.
+ */
+const SHAPES: ReadonlyArray<RegExp> = [
+  PRIVATE_KEY,
+  CREDENTIAL_HEADER,
+  BEARER,
+  BASIC,
+  WEB_TOKEN,
+  PREFIXED_TOKEN,
+  URL_PASSWORD,
+  LABELLED_CREDENTIAL,
 ]
 
 /**
@@ -221,37 +224,124 @@ const matchFrom = (pattern: RegExp, text: string, from: number): RegExpExecArray
   return pattern.exec(text)
 }
 
-/** What one shape replaces in a text. */
-function* shapeEdits(text: string, [pattern, by]: Shape): Steps<ReadonlyArray<Edit>> {
-  const edits: Edit[] = []
+/** What stands between a name and its value: quotes, spaces, `:` and `=`. */
+const BETWEEN = /["'\s:=]/
+
+/** A character of a name. */
+const NAME = /[\w-]/
+
+/**
+ * Where a shape's search goes on after a match. A match of the same shape that starts inside this
+ * one and runs past its end has its name, and what stands before its value, at the end of this one
+ * (`password=a.token="b c"`, the first value stopped by the quote): the search goes on from the
+ * last name of the match. Only that word is crossed again, so the search stays linear.
+ */
+const resumeAt = (text: string, start: number, hiddenFrom: number, end: number): number => {
+  let at = end
+  while (at > hiddenFrom && BETWEEN.test(text.charAt(at - 1))) at -= 1
+  while (at > hiddenFrom && NAME.test(text.charAt(at - 1))) at -= 1
+  return at > start ? at : end
+}
+
+/** The stretches one shape hides in a text, in order. */
+function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> {
+  const spans: Span[] = []
   let from = 0
   for (;;) {
     const match = matchFrom(pattern, text, from)
     if (match === null) break
-    // No shape matches nothing: the next search starts past this match.
-    from = match.index + match[0].length
-    edits.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      by: by(match.slice(1).map((group) => group ?? '')),
-    })
+    const end = match.index + match[0].length
+    const hiddenFrom = match.index + (match.groups?.['keep']?.length ?? 0)
+    spans.push([hiddenFrom, end])
+    from = resumeAt(text, match.index, hiddenFrom, end)
     if (due()) yield
   }
   // A step at the end: the pattern may have crossed the whole text without a match.
   yield
-  return edits
+  return spans
+}
+
+/**
+ * The stretches of a text that masking hides: every occurrence of a known value, and every
+ * stretch a shape hides, those that overlap or touch made one. They are the union of two readings:
+ *
+ * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
+ *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
+ * - the shapes in turn, as masking used to read them: each on the text where the known values and
+ *   all the shapes before it found are written over. A value that stops at a space, a quote or a
+ *   line end then runs on through what an earlier shape hid, and hides what is glued after it
+ *   (`password=<private key>x`).
+ *
+ * The union hides at least what either reading hides, and its cost is two scans of each shape.
+ */
+function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
+  const knownHidden = yield* knownSpans(text, known)
+  let spans = knownHidden
+  let inTurn = knownHidden
+  // Written over only once something is hidden: until then, the shapes in turn read the text.
+  let view = text
+  let written = false
+  if (knownHidden.length > 0) {
+    view = yield* writtenOver(text, knownHidden)
+    written = true
+  }
+  for (const pattern of SHAPES) {
+    const found = yield* shapeSpans(text, pattern)
+    spans = yield* union(spans, found)
+    const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
+    if (foundInTurn.length > 0) {
+      inTurn = yield* union(inTurn, foundInTurn)
+      view = yield* writtenOver(view, foundInTurn)
+      written = true
+    }
+  }
+  return yield* union(spans, inTurn)
+}
+
+/** What a hidden stretch is written over by, one for each of its characters. */
+const BLANK = MASK.charAt(0)
+
+/**
+ * A text with each of the stretches, in order, written over by as many `•`: every pattern matches
+ * there as it matched around `•••`, and every stretch it finds is where it is in the text.
+ */
+function* writtenOver(text: string, spans: ReadonlyArray<Span>): Steps<string> {
+  // Joined a step at a time, then once: a string added to piece by piece is a rope of millions
+  // of pieces, and the next pattern flattens it in one go, the engine held meanwhile.
+  const joined: string[] = []
+  let pieces: string[] = []
+  let from = 0
+  for (const [start, end] of spans) {
+    if (end <= from) continue
+    const begin = Math.max(start, from)
+    pieces.push(text.slice(from, begin), BLANK.repeat(end - begin))
+    from = end
+    if (due()) {
+      joined.push(pieces.join(''))
+      pieces = []
+      yield
+    }
+  }
+  pieces.push(text.slice(from))
+  joined.push(pieces.join(''))
+  return joined.join('')
+}
+
+/** Text with each of the stretches, in order and apart, masked. */
+function* maskedOver(text: string, spans: ReadonlyArray<Span>): Steps<string> {
+  let out = ''
+  let from = 0
+  for (const [start, end] of spans) {
+    out += text.slice(from, start) + MASK
+    from = end
+    if (due()) yield
+  }
+  return out + text.slice(from)
 }
 
 /** Credentials recognised by their shape, masked without knowing their value. */
 export function maskShapes(text: string): string {
-  return doneOrMask(() => shapesMasked(text))
-}
-
-function* shapesMasked(text: string): Steps<string> {
-  if (yield* untouched(text, [])) return text
-  let masked = text
-  for (const shape of SHAPES) masked = yield* applied(masked, yield* shapeEdits(masked, shape))
-  return masked
+  return doneOrMask(() => textMasked(text, []))
 }
 
 /**
@@ -312,21 +402,10 @@ function* union(
   }
 }
 
-function* knownMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
-  const spans = yield* knownSpans(text, known)
-  return yield* applied(
-    text,
-    spans.map(([start, end]) => ({ start, end, by: MASK })),
-  )
-}
-
-const maskKnown = (text: string, known: ReadonlyArray<string>): string =>
-  doneOrMask(() => knownMasked(text, known))
-
-/** Text with its known values masked, then the shapes of credentials. */
+/** Text with its known values and the shapes of credentials masked. */
 function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
   if (yield* untouched(text, known)) return text
-  return yield* shapesMasked(yield* knownMasked(text, known))
+  return yield* maskedOver(text, yield* hiddenSpans(text, known))
 }
 
 /**
@@ -335,7 +414,7 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
  */
 function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
   if (known.some((value) => text.includes(value))) return false
-  for (const [pattern] of SHAPES) {
+  for (const pattern of SHAPES) {
     if (matchFrom(pattern, text, 0) !== null) return false
     // A step after each pattern on a long text: each crosses all of it.
     if (text.length > CHARACTERS_A_STEP) yield
@@ -346,7 +425,7 @@ function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> 
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
 
-/** Text with its known values masked, then the shapes of credentials. */
+/** Text with its known values and the shapes of credentials masked. */
 export function maskText(text: string, values: ReadonlyArray<string>): Masked<string> {
   return maskedString(doneOrMask(() => textMasked(text, longestFirst(values))))
 }
@@ -364,119 +443,6 @@ export const maskTextPaced = (
     paced(() => textMasked(text, longestFirst(values)), slice),
     maskedString,
   )
-
-/**
- * A stretch of the text being masked, and the stretch of the text first given that it stands
- * for: itself when it was copied, all that a mask replaced otherwise.
- */
-interface Piece {
-  readonly length: number
-  readonly from: number
-  readonly to: number
-  readonly copied: boolean
-}
-
-/** The pieces once the edits are made: each edit stands for all that the pieces it took stood for. */
-function* edited(
-  pieces: ReadonlyArray<Piece>,
-  edits: ReadonlyArray<Edit>,
-): Steps<ReadonlyArray<Piece>> {
-  const next: Piece[] = []
-  let at = 0
-  let index = 0
-  let taken: Span | null = null
-  for (const piece of pieces) {
-    // A mask narrowed to nothing (its match ended in an earlier mask) still stands for what it
-    // hid: kept as it is, or taken into the edit it stands in.
-    if (piece.length === 0) {
-      if (taken === null) next.push(piece)
-      else taken = [Math.min(taken[0], piece.from), Math.max(taken[1], piece.to)]
-      continue
-    }
-    let offset = 0
-    while (offset < piece.length) {
-      const edit = edits[index]
-      const here = at + offset
-      if (edit !== undefined && here >= edit.start) {
-        const take = Math.min(piece.length - offset, edit.end - here)
-        const from = piece.copied ? piece.from + offset : piece.from
-        const to = piece.copied ? piece.from + offset + take : piece.to
-        taken = taken === null ? [from, to] : [Math.min(taken[0], from), Math.max(taken[1], to)]
-        offset += take
-        if (here + take === edit.end) {
-          next.push({ length: edit.by.length, from: taken[0], to: taken[1], copied: false })
-          taken = null
-          index += 1
-        }
-      } else {
-        const stop = edit === undefined ? piece.length : Math.min(piece.length, edit.start - at)
-        next.push(
-          piece.copied
-            ? {
-                length: stop - offset,
-                from: piece.from + offset,
-                to: piece.from + stop,
-                copied: true,
-              }
-            : { ...piece, length: stop - offset },
-        )
-        offset = stop
-      }
-      if (due()) yield
-    }
-    at += piece.length
-  }
-  return next
-}
-
-/** An edit narrowed to what it changes: what its match and its replacement share at either end stays. */
-const narrowed = (text: string, edit: Edit): Edit => {
-  const match = text.slice(edit.start, edit.end)
-  let head = 0
-  while (head < match.length && head < edit.by.length && match[head] === edit.by[head]) head += 1
-  let tail = 0
-  while (
-    tail < match.length - head &&
-    tail < edit.by.length - head &&
-    match[match.length - 1 - tail] === edit.by[edit.by.length - 1 - tail]
-  ) {
-    tail += 1
-  }
-  return {
-    start: edit.start + head,
-    end: edit.end - tail,
-    by: edit.by.slice(head, edit.by.length - tail),
-  }
-}
-
-/** The stretches of a text that masking it whole (`maskText`) hides, in that text. */
-function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
-  let current = text
-  let pieces: ReadonlyArray<Piece> = [
-    { length: text.length, from: 0, to: text.length, copied: true },
-  ]
-  function* make(edits: ReadonlyArray<Edit>): Steps<void> {
-    pieces = yield* edited(pieces, edits)
-    current = yield* applied(current, edits)
-  }
-  const spans = yield* knownSpans(text, known)
-  yield* make(spans.map(([start, end]) => ({ start, end, by: MASK })))
-  for (const shape of SHAPES) {
-    const edits: Edit[] = []
-    for (const edit of yield* shapeEdits(current, shape)) {
-      const narrow = narrowed(current, edit)
-      if (narrow.end > narrow.start) edits.push(narrow)
-      if (due()) yield
-    }
-    yield* make(edits)
-  }
-  const hid: Span[] = []
-  for (const piece of pieces) {
-    if (!piece.copied) hid.push([piece.from, piece.to])
-    if (due()) yield
-  }
-  return yield* union(hid, [])
-}
 
 /** What a JSON string escapes, by the letter after its backslash. */
 const ESCAPED = new Map([
@@ -893,13 +859,37 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
     ? [[0, text.length]]
     : yield* jsonLines(text, hidden)
   for (const [start] of units) yield* value(start)
+  const outsideJson: Edit[] = []
   for (const [start, end] of yield* outside(hidden, units)) {
-    if (text.slice(start, end).trim() !== '') edits.push({ start, end, by: MASK })
+    if (text.slice(start, end).trim() !== '') outsideJson.push({ start, end, by: MASK })
+    if (due()) yield
   }
-  return yield* applied(
-    text,
-    edits.toSorted((a, b) => a.start - b.start),
-  )
+  return yield* applied(text, yield* inOrder(edits, outsideJson))
+}
+
+/**
+ * Two lists of edits, each in order, as one in order: in one pass and in steps, where sorting
+ * them together would hold the engine on an output with millions of masks.
+ */
+function* inOrder(
+  first: ReadonlyArray<Edit>,
+  second: ReadonlyArray<Edit>,
+): Steps<ReadonlyArray<Edit>> {
+  const out: Edit[] = []
+  let inFirst = 0
+  let inSecond = 0
+  for (;;) {
+    const fromFirst = first[inFirst]
+    const fromSecond = second[inSecond]
+    const takeFirst =
+      fromFirst !== undefined && (fromSecond === undefined || fromFirst.start <= fromSecond.start)
+    const edit = takeFirst ? fromFirst : fromSecond
+    if (edit === undefined) return out
+    if (takeFirst) inFirst += 1
+    else inSecond += 1
+    out.push(edit)
+    if (due()) yield
+  }
 }
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */
@@ -962,9 +952,15 @@ export function maskAction(
   const known = longestFirst(values)
   let lostDestination = false
   const masked = visitFields(action, (text, field) => {
-    const withoutKnown = maskKnown(text, known)
-    if (DESTINATION_FIELD.test(field) && withoutKnown !== text) lostDestination = true
-    return maskShapes(withoutKnown)
+    const destination = DESTINATION_FIELD.test(field)
+    if (destination && known.some((value) => text.includes(value))) lostDestination = true
+    try {
+      return done(textMasked(text, known))
+    } catch {
+      // A destination that could not be masked is gone whole: the action would be sent in part.
+      if (destination) lostDestination = true
+      return MASK
+    }
   })
   return lostDestination ? null : maskedRecord(masked)
 }
