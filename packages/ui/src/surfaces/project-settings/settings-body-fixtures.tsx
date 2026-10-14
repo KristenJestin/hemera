@@ -26,8 +26,8 @@ import {
   READERS,
   limitRefusal,
 } from '../../blocks/project-settings/agent-settings-fixtures.ts'
-import { draftOfCommand, draftOfRepository, draftOfStep } from './settings-fixture-state.ts'
-import type { FixtureState, SettingsFixtureProps } from './settings-fixture-state.ts'
+import { draftOfCommand, draftOfRepository, draftOfStep } from './settings-state-fixtures.ts'
+import type { FixtureState, SettingsFixtureProps } from './settings-state-fixtures.ts'
 import type { SettingsSection } from './project-settings.tsx'
 
 type Fixture = Pick<SettingsFixtureProps, 'loading' | 'empty' | 'project'>

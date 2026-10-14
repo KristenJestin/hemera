@@ -4,9 +4,9 @@ import { ContentHeader } from '../../shell/content-header.tsx'
 import { SystemControls } from '../../shell/shell-fixtures.tsx'
 import { IconSettings } from '../../icons.ts'
 import { ProjectSettings } from './project-settings.tsx'
-import { fixtureBodyOf } from './settings-fixture-body.tsx'
+import { fixtureBodyOf } from './settings-body-fixtures.tsx'
 import { fixtureFormOf } from './settings-fixture-forms.tsx'
-import { type SettingsFixtureProps, useFixtureState } from './settings-fixture-state.ts'
+import { type SettingsFixtureProps, useFixtureState } from './settings-state-fixtures.ts'
 import { LATER_SECTIONS, SECTIONS } from './settings-sections.tsx'
 import {
   LONG_PATH,

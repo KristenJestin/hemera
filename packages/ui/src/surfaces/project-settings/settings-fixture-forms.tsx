@@ -16,7 +16,7 @@ import {
 import { neverRefusal } from '../../blocks/project-settings/agent-settings-fixtures.ts'
 import { IconBan, IconGitBranch, IconListNumbers, IconVariable } from '../../icons.ts'
 import type { SettingsForm } from './project-settings.tsx'
-import type { FixtureState, FormState } from './settings-fixture-state.ts'
+import type { FixtureState, FormState } from './settings-state-fixtures.ts'
 
 type Of<Kind extends FormState['kind']> = Extract<FormState, { readonly kind: Kind }>
 
