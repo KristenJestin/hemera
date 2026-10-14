@@ -189,7 +189,7 @@ export {
   type PlanningTarget,
 } from './blocks/planning/planning-progress.ts'
 export { FreezeButton, FreezeNote } from './blocks/planning/freeze.tsx'
-export { answerStepOf, type AnswerStep } from './blocks/planning/planning-marks.tsx'
+export { answerStepOf, type AnswerStep } from './blocks/planning/answer-step.ts'
 export { planningViews, type PlanningViewsOf } from './surfaces/planning/planning-views.tsx'
 export {
   DiscussionThread,
