@@ -14,7 +14,7 @@
  * file is, and its outcome after.
  */
 
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'node:path'
 
 import {
@@ -33,6 +33,7 @@ import { sessionFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
+import { MORE_THAN_ONE_NAME, NotJudged, THROUGH_A_LINK, openJudged, stillJudged } from './judged.ts'
 import { WriteAttribution } from './ports.ts'
 import { type Page, fingerprintOf, numbered, readPage } from './read.ts'
 import { type SearchResult, searchIn } from './search.ts'
@@ -174,6 +175,15 @@ export const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
     catch: (cause) => (cause instanceof Error ? said(cause) : String(cause)),
   })
 
+/**
+ * What a failed use of a judged path answers: a refusal when the path is no longer the file that
+ * was judged (`./judged.ts`), a failure otherwise.
+ */
+const failedOn = (reason: string, text: string): ToolAnswer =>
+  reason === THROUGH_A_LINK || reason === MORE_THAN_ONE_NAME
+    ? refusal(`refused: ${text}`)
+    : failure(text)
+
 /** A page of a file as an agent reads it: its numbered lines, where it stands in the file, and the range. */
 export const pageSaid = (value: Page): string => {
   const range = JSON.stringify({
@@ -194,7 +204,9 @@ export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
     const offset = args.range?.offset ?? 0
     const length = args.range?.length ?? READ_PAGE_BYTES
     const page = yield* attempt(() => readPage(call.path, offset, length)).pipe(Effect.result)
-    if (Result.isFailure(page)) return failure(`could not read ${call.named}: ${page.failure}`)
+    if (Result.isFailure(page)) {
+      return failedOn(page.failure, `could not read ${call.named}: ${page.failure}`)
+    }
     const value = page.success
     yield* keepFingerprint(call.sessionId, call.path, value.fingerprint)
     if (value.offset === 0 && value.next === null)
@@ -205,15 +217,25 @@ export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
 
 type Entry = { readonly line: string }
 
-/** The entries of a folder to a depth, naming what could not be read. */
+/**
+ * The entries of a folder to a depth, naming what could not be read. Each folder is read, then
+ * checked to be still the one judged (`./judged.ts`): the folder asked for refuses the whole
+ * listing, one under it is named as not read. A link is named, never followed nor measured.
+ */
 const listed = async (folder: string, depth: number): Promise<ReadonlyArray<Entry>> => {
   const lines: Entry[] = []
   const walk = async (current: string, level: number): Promise<void> => {
     if (lines.length >= LIST_ENTRIES_MAX) return
-    const entries = await readdir(current, { withFileTypes: true }).catch((cause: Error) => {
-      lines.push({ line: `${shown(folder, current)}/  could not be read: ${said(cause)}` })
-      return null
-    })
+    const entries = await readdir(current, { withFileTypes: true })
+      .then(async (found) => {
+        await stillJudged(current)
+        return found
+      })
+      .catch((cause: Error) => {
+        if (current === folder && cause instanceof NotJudged) throw cause
+        lines.push({ line: `${shown(folder, current)}/  could not be read: ${said(cause)}` })
+        return null
+      })
     if (entries === null) return
     for (const entry of [...entries].sort((left, right) => (left.name < right.name ? -1 : 1))) {
       if (lines.length >= LIST_ENTRIES_MAX) return
@@ -225,8 +247,12 @@ const listed = async (folder: string, depth: number): Promise<ReadonlyArray<Entr
         continue
       }
       const kind = entry.isFile() ? 'file' : entry.isSymbolicLink() ? 'link' : 'other'
+      if (kind === 'link') {
+        lines.push({ line: `${shown(folder, path)}  link` })
+        continue
+      }
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time, in order, within the bound
-      const size = await stat(path).then(
+      const size = await lstat(path).then(
         (found) => String(found.size),
         (cause: Error) => `size unknown: ${said(cause)}`,
       )
@@ -245,7 +271,9 @@ const shown = (root: string, path: string): string => {
 export const fsList = (call: FileCall, args: ToolArguments<'fs_list'>) =>
   Effect.gen(function* () {
     const found = yield* attempt(() => listed(call.path, args.depth ?? 1)).pipe(Effect.result)
-    if (Result.isFailure(found)) return failure(`could not list ${call.named}: ${found.failure}`)
+    if (Result.isFailure(found)) {
+      return failedOn(found.failure, `could not list ${call.named}: ${found.failure}`)
+    }
     const lines = found.success.map((entry) => entry.line)
     if (lines.length === 0) return answered(`${call.named} is empty`)
     const more =
@@ -283,6 +311,7 @@ export const search = (call: FileCall, args: ToolArguments<'search'>) =>
     const found = yield* attempt((signal) =>
       searchIn({
         root: call.path,
+        judged: call.path,
         query: args.pattern,
         glob: args.glob ?? null,
         cursor: args.cursor ?? null,
@@ -296,16 +325,23 @@ export const search = (call: FileCall, args: ToolArguments<'search'>) =>
 /**
  * Writes a file by replacing it: a new file beside it, renamed over it. Whatever sits under the
  * name (a link planted after the path was judged, a hard link shared with a file elsewhere) is
- * replaced, not written through; the mode of the file it replaces is kept.
+ * replaced, not written through; the mode of the file it replaces is kept. The new file is
+ * created, then checked to sit in the folder judged (`./judged.ts`) before anything is written in
+ * it: a folder swapped for a link or a junction since receives nothing.
  */
 export async function replaceFile(path: string, content: string): Promise<void> {
-  const mode = await stat(path).then(
-    (found) => found.mode,
+  const mode = await lstat(path).then(
+    (found) => (found.isFile() ? found.mode : undefined),
     () => undefined,
   )
   const beside = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.hemera`)
   try {
-    await writeFile(beside, content, { encoding: 'utf8', mode })
+    const handle = await openJudged(beside, { flags: 'wx', mode })
+    try {
+      await handle.writeFile(content, 'utf8')
+    } finally {
+      await handle.close()
+    }
     await rename(beside, path)
   } catch (cause) {
     await rm(beside, { force: true })
@@ -376,17 +412,24 @@ const versionRefusal = (
     )
   })
 
-/** The file as it is now: its text and fingerprint, or nothing when there is none. */
+/**
+ * The file as it is now: its text and fingerprint, or nothing when there is none. Read from the
+ * file judged only (`./judged.ts`): what a link planted since leads to is never read, nor shown.
+ */
 const currentOf = (path: string) =>
-  attempt(() =>
-    readFile(path).then(
-      (bytes) => ({ fingerprint: fingerprintOf(bytes), text: bytes.toString('utf8') }),
-      (cause: Error) => {
-        if (codeOf(cause) === 'ENOENT') return { fingerprint: null, text: null }
-        throw cause
-      },
-    ),
-  )
+  attempt(async () => {
+    const handle = await openJudged(path).catch((cause: Error) => {
+      if (codeOf(cause) === 'ENOENT') return null
+      throw cause
+    })
+    if (handle === null) return { fingerprint: null, text: null }
+    try {
+      const bytes = await handle.readFile()
+      return { fingerprint: fingerprintOf(bytes), text: bytes.toString('utf8') }
+    } finally {
+      await handle.close()
+    }
+  })
 
 /** A whole new content written over the version read, with its intent and its outcome. */
 const writeVersion = (call: FileCall, before: string | null, content: string) =>
@@ -405,7 +448,10 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
     }).pipe(Effect.result)
     if (Result.isFailure(written)) {
       yield* actions.failed(intent, written.failure)
-      return failure(`could not write ${call.named}: ${written.failure}; the file is as it was`)
+      return failedOn(
+        written.failure,
+        `could not write ${call.named}: ${written.failure}; the file is as it was`,
+      )
     }
     // In the outcome's own transaction, a mission's write is attributed to its task (#142).
     const attributed =
@@ -431,8 +477,12 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
 export const fsWrite = (call: FileCall, args: ToolArguments<'fs_write'>) =>
   Effect.gen(function* () {
     const current = yield* currentOf(call.path).pipe(Effect.result)
-    if (Result.isFailure(current))
-      return failure(`could not read ${call.named}: ${current.failure}; nothing was written`)
+    if (Result.isFailure(current)) {
+      return failedOn(
+        current.failure,
+        `could not read ${call.named}: ${current.failure}; nothing was written`,
+      )
+    }
     const refused = yield* versionRefusal(call, current.success)
     if (refused !== null) return refused
     const failed = yield* writeVersion(call, current.success.fingerprint, args.content)
@@ -452,8 +502,12 @@ const occurrences = (text: string, anchor: string): number => {
 export const fsEdit = (call: FileCall, args: ToolArguments<'fs_edit'>) =>
   Effect.gen(function* () {
     const current = yield* currentOf(call.path).pipe(Effect.result)
-    if (Result.isFailure(current))
-      return failure(`could not read ${call.named}: ${current.failure}; nothing was written`)
+    if (Result.isFailure(current)) {
+      return failedOn(
+        current.failure,
+        `could not read ${call.named}: ${current.failure}; nothing was written`,
+      )
+    }
     if (current.success.text === null) {
       return refusal(`refused: there is no file ${call.named} to edit; write it with fs_write`)
     }

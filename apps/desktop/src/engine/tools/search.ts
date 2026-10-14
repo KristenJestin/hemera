@@ -9,7 +9,12 @@
  * The walk is streamed: one folder is read at a time, a file is read in chunks, and the budget is
  * checked after every chunk, so a call stops where its budget ends rather than after a whole file
  * or a whole tree has been listed. A file the search passes over — one that looks binary, or one
- * it could not read — is named in the result rather than silently left out.
+ * it could not read, or one that is not the file it was listed as — is named in the result rather
+ * than silently left out.
+ *
+ * A file is read only as the file found under the folder searched (`./judged.ts`): opened once,
+ * then checked to be at its real path with no link or junction on the way, and to have a single
+ * name; one that is not is passed over as linked.
  *
  * `.gitignore` is respected from the workspace root, and `.git` never is: what the user told Git
  * to ignore is not what they told an agent to read. Only the root's file is read, and only its
@@ -17,11 +22,12 @@
  * because it understood a niche syntax would be worse than one that is documented.
  */
 
-import { createReadStream } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, realpath } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
 import { SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, SEARCH_SKIPS_LISTED } from '@hemera/core/domain'
+
+import { NotJudged, openJudged } from './judged.ts'
 
 /** What a search hit is: where it is, and the line as it was found. */
 export interface SearchHit {
@@ -30,10 +36,13 @@ export interface SearchHit {
   readonly text: string
 }
 
-/** A file a search did not read, and why: what looks binary, or what could not be read. */
+/**
+ * A file a search did not read, and why: what looks binary, what could not be read, or what is
+ * reached through a link or has a second name.
+ */
 export interface SearchSkip {
   readonly path: string
-  readonly reason: 'binary' | 'unreadable'
+  readonly reason: 'binary' | 'unreadable' | 'linked'
 }
 
 /** Which of the two limits stopped a search. */
@@ -55,6 +64,11 @@ export interface SearchResult {
 /** What a search was asked for: where, what, and where to continue from. */
 export interface SearchRequest {
   readonly root: string
+  /**
+   * The real path the gate judged the root at, which the files read must still be under; the
+   * root's own real path, as it is when the search starts, when there is none.
+   */
+  readonly judged?: string
   readonly query: string
   /** Only the files whose path under the root matches this glob. */
   readonly glob?: string | null
@@ -92,6 +106,8 @@ interface Progress {
  */
 export async function searchIn(request: SearchRequest): Promise<SearchResult> {
   const ignored = await ignoredPatterns(request.root)
+  // A root that is not there is said file by file, as a file that could not be read.
+  const real = request.judged ?? (await realpath(request.root).catch(() => request.root))
   const start = request.root
   const only =
     request.glob === null || request.glob === undefined ? null : globMatcher(request.glob)
@@ -128,6 +144,7 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
     // The cursor names the last line the previous call examined, so this one starts after it.
     const ended = await scanFile(
       file,
+      join(real, relative(request.root, file)),
       rel,
       rel === resumePath ? resumeLine : 0,
       query,
@@ -170,6 +187,7 @@ function skip(progress: Progress, path: string, reason: SearchSkip['reason']): v
  */
 async function scanFile(
   file: string,
+  real: string,
   rel: string,
   from: number,
   query: string,
@@ -190,7 +208,13 @@ async function scanFile(
     if (progress.hits.length >= SEARCH_MATCH_LIMIT) progress.stoppedBy = 'matches'
   }
 
-  const stream = createReadStream(file, { encoding: 'utf8', highWaterMark: CHUNK_BYTES })
+  const handle = await openJudged(file, { real }).catch((cause: Error) => {
+    signal?.throwIfAborted()
+    skip(progress, rel, cause instanceof NotJudged ? 'linked' : 'unreadable')
+    return null
+  })
+  if (handle === null) return true
+  const stream = handle.createReadStream({ encoding: 'utf8', highWaterMark: CHUNK_BYTES })
   try {
     for await (const chunk of stream) {
       signal?.throwIfAborted()
