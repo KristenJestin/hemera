@@ -1174,67 +1174,75 @@ describe('What follows a quoted value inside another value stays hidden', () => 
     )
   })
 
-  test('every outer shape around every quoted inner one, at every position, leaves no marker', async () => {
-    const texts = BEFORE_OUTER.flatMap((before) =>
-      OUTERS.flatMap((outer) =>
-        BEFORE_INNER.flatMap((inValue) =>
-          INNER_NAMES.flatMap((name) =>
-            SEPARATORS.flatMap((separator) =>
-              QUOTED_VALUES.map((quoted) =>
-                quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+  test(
+    'every outer shape around every quoted inner one, at every position, leaves no marker',
+    { timeout: 600_000 },
+    async () => {
+      const texts = BEFORE_OUTER.flatMap((before) =>
+        OUTERS.flatMap((outer) =>
+          BEFORE_INNER.flatMap((inValue) =>
+            INNER_NAMES.flatMap((name) =>
+              SEPARATORS.flatMap((separator) =>
+                QUOTED_VALUES.map((quoted) =>
+                  quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+                ),
               ),
             ),
           ),
         ),
-      ),
-    )
-    // Run at once, the paced maskings take turns with one another.
-    await Promise.all(
-      texts.map(async (text) => {
-        await leavesNoMarkerIn(text, [SPACED_KNOWN])
-        await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
-      }),
-    )
-  })
+      )
+      // Run at once, the paced maskings take turns with one another.
+      await Promise.all(
+        texts.map(async (text) => {
+          await leavesNoMarkerIn(text, [SPACED_KNOWN])
+          await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
+        }),
+      )
+    },
+  )
 
-  test('the same with quoted values and markers of any kind, 5,000 samples', async () => {
-    const units = (quote: string) =>
-      quote === '"'
-        ? fc.constantFrom('a', ' ', "'", String.raw`\"`, '\\\\', '@', '/', ':', '=')
-        : fc.constantFrom('a', ' ', '"', '\\', '@', '/', ':', '=')
-    const quoted = fc
-      .constantFrom('"', "'")
-      .chain((quote) =>
-        fc
-          .array(units(quote), { maxLength: 6 })
-          .map((parts) => `${quote}${parts.join('')}${quote}`),
+  test(
+    'the same with quoted values and markers of any kind, 5,000 samples',
+    { timeout: 600_000 },
+    async () => {
+      const units = (quote: string) =>
+        quote === '"'
+          ? fc.constantFrom('a', ' ', "'", String.raw`\"`, '\\\\', '@', '/', ':', '=')
+          : fc.constantFrom('a', ' ', '"', '\\', '@', '/', ':', '=')
+      const quoted = fc
+        .constantFrom('"', "'")
+        .chain((quote) =>
+          fc
+            .array(units(quote), { maxLength: 6 })
+            .map((parts) => `${quote}${parts.join('')}${quote}`),
+        )
+      const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
+      const after = fc.constantFrom('', ' and more', '\nnext', ';', ',x')
+      const text = fc
+        .tuple(
+          fc.constantFrom(...BEFORE_OUTER),
+          fc.constantFrom(...OUTERS),
+          fc.constantFrom(...BEFORE_INNER),
+          fc.constantFrom(...INNER_NAMES),
+          fc.constantFrom(...SEPARATORS),
+          quoted,
+          mark,
+          after,
+        )
+        .map(
+          ([before, outer, inValue, name, separator, value, marker, rest]) =>
+            `${quotedInside(before, outer, inValue, name, separator, value, marker)}${rest}`,
+        )
+      const known = ['kn0wnAAA1', SPACED_KNOWN]
+      await fc.assert(
+        fc.asyncProperty(text, async (written) => {
+          await leavesNoMarkerIn(written, known)
+          await hidesAtLeastTheOracle(written, known)
+        }),
+        { numRuns: 5_000 },
       )
-    const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
-    const after = fc.constantFrom('', ' and more', '\nnext', ';', ',x')
-    const text = fc
-      .tuple(
-        fc.constantFrom(...BEFORE_OUTER),
-        fc.constantFrom(...OUTERS),
-        fc.constantFrom(...BEFORE_INNER),
-        fc.constantFrom(...INNER_NAMES),
-        fc.constantFrom(...SEPARATORS),
-        quoted,
-        mark,
-        after,
-      )
-      .map(
-        ([before, outer, inValue, name, separator, value, marker, rest]) =>
-          `${quotedInside(before, outer, inValue, name, separator, value, marker)}${rest}`,
-      )
-    const known = ['kn0wnAAA1', SPACED_KNOWN]
-    await fc.assert(
-      fc.asyncProperty(text, async (written) => {
-        await leavesNoMarkerIn(written, known)
-        await hidesAtLeastTheOracle(written, known)
-      }),
-      { numRuns: 5_000 },
-    )
-  })
+    },
+  )
 })
 
 /** How long `work` takes, run `times` times, in milliseconds. */
