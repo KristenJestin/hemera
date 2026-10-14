@@ -25,11 +25,12 @@ import {
   type MissionDiff,
 } from '@hemera/ipc'
 import { asc, desc, eq } from 'drizzle-orm'
-import { Effect, Fiber, Predicate, Ref, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Ref, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
+import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { Diffs, LARGE_BYTES } from '../src/engine/review/diffs.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
@@ -59,12 +60,29 @@ const QUIET_TIMERS: Partial<OutsideSettings> = {
   baseEveryMillis: 3_600_000,
 }
 
-const engine = () =>
+const engine = (snapshots: (real: SnapshotsService) => SnapshotsService = (real) => real) =>
   sessionsEngine(data, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: { outside: QUIET_TIMERS },
+    snapshots,
   })
+
+/**
+ * The live diff's snapshots of one repository held while `held` is set, until `release`: the test
+ * decides which repository is computed last.
+ */
+const holding = (repository: string) => {
+  const hold = { held: false, release: Deferred.makeUnsafe<void>() }
+  const wrap = (real: SnapshotsService): SnapshotsService => ({
+    ...real,
+    take: (place, owner) =>
+      hold.held && owner.kind === 'live' && place.name === repository
+        ? Effect.andThen(Deferred.await(hold.release), real.take(place, owner))
+        : real.take(place, owner),
+  })
+  return { hold, wrap }
+}
 
 /** A few bytes no text holds: the start of a PNG. */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 1, 2, 3])
@@ -209,7 +227,13 @@ describe('Two repositories with a file of the same name are told apart', () => {
         }),
       ),
     )
-    expect(seen.repositories.map((one) => one.repository)).toEqual(['api', 'web'])
+    // A repository Git could not read would list nothing: say so rather than miss a file.
+    expect(
+      seen.repositories.map(({ repository, unreadable }) => ({ repository, unreadable })),
+    ).toEqual([
+      { repository: 'api', unreadable: null },
+      { repository: 'web', unreadable: null },
+    ])
     const readmes = seen.repositories.flatMap((one) =>
       one.files.filter((file) => file.path === 'README.md'),
     )
@@ -234,8 +258,15 @@ describe('Two repositories with a file of the same name are told apart', () => {
       ),
     )
     const web = seen.repositories.find((one) => one.repository === 'web')
-    expect(web).toMatchObject({ files: [], added: 0, removed: 0, changedOutside: false })
+    expect(web).toMatchObject({
+      files: [],
+      added: 0,
+      removed: 0,
+      changedOutside: false,
+      unreadable: null,
+    })
     expect(seen.repositories.find((one) => one.repository === 'api')).toMatchObject({
+      unreadable: null,
       branch: expect.stringContaining('/'),
       baseBranch: 'origin/main',
       added: 1,
@@ -527,7 +558,9 @@ describe('The diff follows the Workspace live', () => {
   })
 
   test('a change B10 reports, then one seen when the window regains the focus, each bump the sequence once', async () => {
-    const { run } = engine()
+    // The repositories are computed side by side: `web` is held to tell its change first.
+    const { hold, wrap } = holding('api')
+    const { run } = engine(wrap)
     const seen = await run(({ profile }) =>
       within(
         profile,
@@ -546,7 +579,12 @@ describe('The diff follows the Workspace live', () => {
           yield* until(Effect.map(Ref.get(heard), (all) => all.length > 0))
           rmSync(join(api, 'stray.md'))
           writeFileSync(join(web, 'notes.md'), 'mine\n')
+          hold.held = true
           yield* Diffs.use((diffs) => diffs.focused)
+          yield* until(
+            Effect.map(Ref.get(heard), (all) => all.some((one) => one.repository === 'web')),
+          )
+          yield* Deferred.succeed(hold.release, undefined)
           yield* until(Effect.map(Ref.get(heard), (all) => all.length > 2))
           yield* Effect.sleep('1 second')
           yield* Fiber.interrupt(listening)
@@ -556,17 +594,22 @@ describe('The diff follows the Workspace live', () => {
     )
     const sequenceOf = (repository: string) =>
       seen.before.repositories.find((one) => one.repository === repository)?.sequence ?? -1
-    expect(
-      seen.heard.map(({ repository, sequence, files, gone }) => ({
-        repository,
-        sequence,
-        files: files.map((one) => one.path),
-        gone,
-      })),
-    ).toEqual([
-      { repository: 'api', sequence: sequenceOf('api') + 1, files: ['stray.md'], gone: [] },
-      { repository: 'api', sequence: sequenceOf('api') + 2, files: [], gone: ['stray.md'] },
-      { repository: 'web', sequence: sequenceOf('web') + 1, files: ['notes.md'], gone: [] },
+    // Each repository's changes in the order of its sequence; two repositories in any order.
+    const heardIn = (repository: string) =>
+      seen.heard
+        .filter((one) => one.repository === repository)
+        .map(({ sequence, files, gone }) => ({
+          sequence,
+          files: files.map((one) => one.path),
+          gone,
+        }))
+    expect(seen.heard).toHaveLength(3)
+    expect(heardIn('api')).toEqual([
+      { sequence: sequenceOf('api') + 1, files: ['stray.md'], gone: [] },
+      { sequence: sequenceOf('api') + 2, files: [], gone: ['stray.md'] },
+    ])
+    expect(heardIn('web')).toEqual([
+      { sequence: sequenceOf('web') + 1, files: ['notes.md'], gone: [] },
     ])
   })
 

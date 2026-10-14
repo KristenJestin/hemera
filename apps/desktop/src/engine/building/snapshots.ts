@@ -23,7 +23,7 @@
  */
 
 import { isUtf8 } from 'node:buffer'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
@@ -31,6 +31,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -595,7 +596,25 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           const store = join(folder, `${row.projectId}.git`)
           if (!existsSync(join(store, 'HEAD'))) {
             mkdirSync(folder, { recursive: true })
-            yield* run(folder, ['init', '--bare', '--quiet', store], 'read')
+            // Made aside, then moved into place: Git refuses an `init` over one still writing, so
+            // two snapshots that create the store at once each make their own, and the one moved
+            // second gives way to the other's (#369).
+            const aside = `${store}.${randomUUID()}`
+            yield* run(folder, ['init', '--bare', '--quiet', aside], 'read').pipe(
+              Effect.andThen(
+                Effect.try({
+                  try: () => {
+                    try {
+                      renameSync(aside, store)
+                    } catch (lost) {
+                      if (!existsSync(join(store, 'HEAD'))) throw lost
+                    }
+                  },
+                  catch: String,
+                }),
+              ),
+              Effect.ensuring(Effect.sync(() => rmSync(aside, { recursive: true, force: true }))),
+            )
           }
           return store
         })

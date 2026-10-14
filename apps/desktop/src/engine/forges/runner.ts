@@ -31,10 +31,6 @@ import { type CommandShape, type ParsedCommand, aimsAt, parseCommand } from './s
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
 
-const readJsonObject = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
-)
-
 /** How much of what a CLI prints is read before the call is cut. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
@@ -48,6 +44,16 @@ export interface ForgeSettings {
    * None otherwise, and nothing is attached.
    */
   readonly attachable?: ((path: string) => string | null) | undefined
+  /**
+   * Where a suite holds an operation that found its CLI not ready, before it makes its need; never
+   * held otherwise. The port's, not the runner's.
+   */
+  readonly waitHold?: Effect.Effect<void> | undefined
+  /**
+   * Where a suite holds a settle of the needs between the states it read and the needs it reads;
+   * never held otherwise. The port's, not the runner's.
+   */
+  readonly settleHold?: Effect.Effect<void> | undefined
 }
 
 /** One call: which CLI, for which forge and host, for which Project, with which arguments. */
@@ -65,9 +71,9 @@ export interface ForgeCall {
 
 /**
  * What a call answered: the command it ran, its exit code, what it printed and its standard error,
- * all three masked. An output that is a JSON object is read first and masked value by value
- * (`maskRecord`: every string, and a credential field whole), then written back, so its structure
- * stays readable; any other output is masked as text.
+ * all three masked. What it printed is masked at least as much as masking it whole as text would,
+ * and stays JSON where it was JSON, whole or line by line (`maskPrinted`): a string or a number
+ * such masking touches goes whole, a credential field too, and the rest is left as printed.
  */
 export interface ForgeAnswer {
   readonly command: string
@@ -165,13 +171,6 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
         }
         return { ...given, ...QUIET[cli] }
       }
-
-      /** What a CLI printed, masked: a JSON object value by value, any other text as text. */
-      const maskOutput = (printed: string): string =>
-        Option.match(readJsonObject(printed), {
-          onNone: () => secrets.mask(printed),
-          onSome: (object) => JSON.stringify(secrets.maskRecord(object)),
-        })
 
       const find = (cli: ForgeCli) =>
         Effect.sync(() =>
@@ -271,8 +270,8 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
             return {
               command,
               code: exit.code,
-              stdout: maskOutput(out.join('\n')),
-              stderr: secrets.mask(err.join('\n').trim()),
+              stdout: yield* secrets.maskPrinted(out.join('\n')),
+              stderr: yield* secrets.maskPaced(err.join('\n').trim()),
             } satisfies ForgeAnswer
           }),
         )

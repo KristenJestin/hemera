@@ -171,6 +171,12 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     ],
     [NUMBER],
   ),
+  // bkt takes a pull request's description in `--description` only: as read in its source at
+  // `5068ddc` (#253), `pr create` and `pr edit` have no standard input and no file for it, unlike
+  // gh's `--body-file -`. So the description travels in the arguments: anyone listing the
+  // machine's processes sees it while bkt runs, and the command recorded keeps it, masked like the
+  // rest of the command. Through a `.cmd` shim, `cmd.exe` also cuts it at its first newline (cut,
+  // never injected: every metacharacter is escaped). Move it to the standard input if bkt gains one.
   shape(
     'bkt',
     'network-write',

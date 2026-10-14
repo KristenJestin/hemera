@@ -83,7 +83,7 @@ import type { Delivery } from './permissions/delivery.ts'
 import type { HemeraAuto } from './permissions/hemera-auto.ts'
 import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
-import { SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
+import { type GitBytesSpawn, SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
 import { Secrets, type SecretsRegistry, secretsRegistry, registerAllVariables } from './secrets.ts'
 import { resumeInterrupted } from './preparation.ts'
@@ -286,6 +286,8 @@ export interface ProfileParts {
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
+  /** The snapshots' Git as a suite sees it, wrapped around the machine's (#369): itself otherwise. */
+  readonly snapshotsGit?: (real: GitBytesSpawn) => GitBytesSpawn
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
   /** Where the forge CLIs are found, in which environment, and their limits (#253); this machine's otherwise. */
@@ -558,7 +560,7 @@ export const startProfile = (
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
     // The forge port, and where its needs' Retry goes (#253).
-    const forge = forgePort()
+    const forge = forgePort(parts.forge)
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
@@ -566,7 +568,8 @@ export const startProfile = (
     // The end of a Building, and where the answers to the review's findings go (#147).
     const ending = buildingEndLayer(log, parts.building?.endHold)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
-    const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
+    const snapshotsGit = spawnGitBytes(SYSTEM_GIT, secrets.mask)
+    const machineSnapshots = snapshotsLayer(parts.snapshotsGit?.(snapshotsGit) ?? snapshotsGit)
     const wrapped = parts.snapshots
     const snapshots =
       wrapped === undefined
