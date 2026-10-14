@@ -502,9 +502,11 @@ describe('A check on an exclusive resource', () => {
           const finishing = yield* Effect.forkChild(
             call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }),
           )
+          // The check says it waits, and the reservations mark the mission: two writes, either first.
           yield* until(
             Effect.map(eventsOf(mission.id, 'building.check_waiting'), (rows) => rows.length > 0),
           )
+          yield* until(Effect.map(getMission(mission.id), (one) => one.marks.length > 0))
           const marks = (yield* getMission(mission.id)).marks.map((one) => one.sentence)
           const ranWhileHeld = ranIn('db.log').length
           const waiting = yield* eventsOf(mission.id, 'building.check_waiting')
