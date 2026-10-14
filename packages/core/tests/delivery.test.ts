@@ -30,8 +30,10 @@ import {
   rowsOf,
   sectionOf,
   stepsOfRepository,
+  validateCopies,
   validateRules,
   withDependencies,
+  dependencyProblems,
 } from '../src/domain/index.ts'
 
 const repository = (
@@ -515,6 +517,7 @@ describe('Inconsistent rules are refused with their reason', () => {
         code: 'unknown-template-variable',
         repositoryId: 'api',
         stepId: null,
+        field: 'pullRequestTitle',
         sentence: 'The pull request title of api uses an unknown variable: {titel}.',
       },
     ])
@@ -605,6 +608,133 @@ describe('Inconsistent rules are refused with their reason', () => {
     )
     expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
   })
+
+  test('validating any overrides of the Project’s repositories never throws', async () => {
+    const drawn = Arbitrary.map(Arbitrary.schema(Schema.toType(DeliveryRules)), onAcme)
+    const result = await Effect.runPromise(
+      Arbitrary.checkEffect(drawn, (rules) => {
+        effectiveRepositories(rules, ACME)
+        const named = validateRules(rules, ACME).map((one) => one.repositoryId)
+        return named.every((id) => id === null || ACME.repositories.some((one) => one.id === id))
+      }),
+    )
+    expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
+  })
+})
+
+describe('Steps are addressed by their id', () => {
+  const adding = (repositoryId: string, added: Overrides<WaveStep>['added']) =>
+    rulesWith([waves(repositoryId, 'application', { steps: { off: [], changed: [], added } })])
+
+  test('an added step placed after itself is refused, never thrown', () => {
+    const rules = adding('web', [
+      { after: 'look', step: { id: 'look', kind: 'confirm', mode: 'click', what: 'it works' } },
+    ])
+    expect(validateRules(rules, only(repository('web')))).toEqual([
+      {
+        code: 'step-placed-after-itself',
+        repositoryId: 'web',
+        stepId: 'look',
+        sentence: 'web places its step “look” after itself: look → look.',
+      },
+    ])
+  })
+
+  test('two added steps placed after each other are refused, never thrown', () => {
+    const rules = adding('web', [
+      { after: 'b', step: { id: 'a', kind: 'confirm', mode: 'click', what: 'one' } },
+      { after: 'a', step: { id: 'b', kind: 'confirm', mode: 'click', what: 'two' } },
+    ])
+    expect(sentences(rules, only(repository('web')))).toEqual([
+      'web places its step “a” after itself: a → b → a.',
+    ])
+  })
+
+  test('an added step with the id of another, placed after it, is refused, never thrown', () => {
+    const rules = adding('web', [
+      { after: 'ci', step: { id: 'ci', kind: 'confirm', mode: 'click', what: 'it works' } },
+    ])
+    expect(sentences(rules, only(repository('web')))).toEqual([
+      'web has two steps with the id “ci”: each step needs its own.',
+    ])
+    const pair = adding('web', [
+      { after: 'merge', step: { id: 'a', kind: 'confirm', mode: 'click', what: 'one' } },
+      { after: 'a', step: { id: 'merge', kind: 'confirm', mode: 'click', what: 'two' } },
+    ])
+    expect(sentences(pair, only(repository('web')))).toEqual([
+      'web has two steps with the id “merge”: each step needs its own.',
+    ])
+  })
+
+  test('a duplicate step id is refused', () => {
+    const base = defaultDeliveryRules()
+    const rules: DeliveryRulesDraft = {
+      ...base,
+      preparation: {
+        ...base.preparation,
+        pushSteps: [
+          ...base.preparation.pushSteps,
+          { id: 'push', kind: 'push', mode: 'auto', placement: 'waves' },
+        ],
+      },
+      waves: {
+        ...base.waves,
+        presets: {
+          ...base.waves.presets,
+          application: [...base.waves.presets.application, { id: 'ci', kind: 'ci', mode: 'auto' }],
+        },
+        repositories: [
+          waves('web', 'local', {
+            steps: {
+              off: [],
+              changed: [],
+              added: [
+                {
+                  after: null,
+                  step: { id: 'merge', kind: 'confirm', mode: 'click', what: 'merged' },
+                },
+              ],
+            },
+          }),
+        ],
+      },
+      end: {
+        ...base.end,
+        cleanup: [
+          ...base.end.cleanup,
+          { id: 'stop-services', kind: 'stop-services', mode: 'click' },
+        ],
+      },
+    }
+    expect(
+      validateRules(rules, only(repository('web', 'none'))).map((one) => [
+        one.code,
+        one.repositoryId,
+        one.sentence,
+      ]),
+    ).toEqual([
+      [
+        'duplicate-step-id',
+        null,
+        'The push steps have two steps with the id “push”: each step needs its own.',
+      ],
+      [
+        'duplicate-step-id',
+        null,
+        'The Application preset has two steps with the id “ci”: each step needs its own.',
+      ],
+      [
+        'duplicate-step-id',
+        'web',
+        'web has two steps with the id “merge”: each step needs its own.',
+      ],
+      [
+        'duplicate-step-id',
+        null,
+        'Cleanup has two steps with the id “stop-services”: each step needs its own.',
+      ],
+    ])
+  })
 })
 
 describe('Closing cannot be removed', () => {
@@ -641,6 +771,32 @@ describe('Repository dependencies', () => {
     const accepted = withDependencies(rules, ACME, proposed)
     expect(effectiveOf(accepted, ACME, 'api').deliversAfter).toEqual(['shared'])
     expect(effectiveOf(accepted, ACME, 'shared').deliversAfter).toEqual([])
+  })
+
+  test('a repository delivering after one the Project does not have is refused', () => {
+    const rules = rulesWith([waves('web', 'application', { deliversAfter: ['mobile'] })])
+    expect(validateRules(rules, only(repository('web')))).toEqual([
+      {
+        code: 'unknown-repository',
+        repositoryId: 'web',
+        stepId: null,
+        sentence: 'web delivers after a repository that is not in this Project.',
+      },
+    ])
+    expect(
+      dependencyProblems(
+        [{ repositoryId: 'mobile', deliversAfter: 'web' }],
+        only(repository('web')),
+      ),
+    ).toEqual([
+      {
+        code: 'unknown-repository',
+        repositoryId: null,
+        stepId: null,
+        sentence: 'A dependency names a repository that is not in this Project.',
+      },
+    ])
+    expect(dependencyProblems([{ repositoryId: 'api', deliversAfter: 'shared' }], ACME)).toEqual([])
   })
 
   test('the repositories in the order they deliver: each after those it depends on', () => {
@@ -732,3 +888,92 @@ describe('The sections a mission copies', () => {
     expect(end.closing).toBe('merge-spec')
   })
 })
+
+describe('The two copies a mission holds at Ship are checked together', () => {
+  const at = '2026-10-14T10:00:00.000Z'
+
+  test('copies of one version are consistent together', () => {
+    const rules = { ...ACME_CHAIN, version: 1, savedAt: null }
+    const preparation = sectionOf(rules, ACME, 'preparation', at)
+    const copied = sectionOf(rules, ACME, 'waves', at)
+    if (preparation.section !== 'preparation' || copied.section !== 'waves')
+      throw new Error('section')
+    expect(validateCopies(preparation, copied)).toEqual([])
+  })
+
+  test('a preparation copied under Local and waves copied under Application: a merge without a pull request across both is refused', () => {
+    const local = { ...rulesWith([waves('api', 'local')]), version: 1, savedAt: null }
+    const application = { ...rulesWith([waves('api', 'application')]), version: 2, savedAt: null }
+    const project = only(repository('api'))
+    const preparation = sectionOf(local, project, 'preparation', at)
+    const copied = sectionOf(application, project, 'waves', at)
+    if (preparation.section !== 'preparation' || copied.section !== 'waves')
+      throw new Error('section')
+    expect(validateCopies(preparation, copied)).toEqual([
+      {
+        code: 'merge-without-pull-request',
+        repositoryId: 'api',
+        stepId: 'merge',
+        sentence: 'Merge needs a pull request: api has no pull request step.',
+      },
+    ])
+  })
+
+  test('a pull request copied in the waves without its push is refused across both', () => {
+    const rules = {
+      ...preparedWith(rulesWith([waves('api', 'application')]), 'api', {
+        pushSteps: { off: ['push'], changed: [], added: [] },
+      }),
+      version: 1,
+      savedAt: null,
+    }
+    const project = only(repository('api'))
+    const preparation = sectionOf(rules, project, 'preparation', at)
+    const copied = sectionOf(rules, project, 'waves', at)
+    if (preparation.section !== 'preparation' || copied.section !== 'waves')
+      throw new Error('section')
+    expect(validateCopies(preparation, copied).map((one) => one.code)).toEqual([
+      'pull-request-without-push',
+    ])
+  })
+})
+
+/** Rules drawn at random, put on Acme's repositories and on a few step ids, so overrides meet. */
+function onAcme(rules: DeliveryRules): DeliveryRules {
+  const ids = ACME.repositories.map((one) => one.id)
+  const STEP_IDS = ['merge', 'ci', 'bump', 'push', 'pull-request', 'a', 'b']
+  const pick = (text: string, from: ReadonlyArray<string>) => from[text.length % from.length] ?? ''
+  const repo = (id: string) => pick(id, ids)
+  const step = <S extends { readonly id: string }>(one: S): S => ({
+    ...one,
+    id: pick(one.id, STEP_IDS),
+  })
+  const overrides = <S extends { readonly id: string }>(one: Overrides<S>): Overrides<S> => ({
+    off: one.off.map((id) => pick(id, STEP_IDS)),
+    changed: one.changed.map(step),
+    added: one.added.map((added) => ({
+      after: added.after === null ? null : pick(added.after, STEP_IDS),
+      step: step(added.step),
+    })),
+  })
+  return {
+    ...rules,
+    preparation: {
+      ...rules.preparation,
+      repositories: rules.preparation.repositories.map((one) => ({
+        ...one,
+        repositoryId: repo(one.repositoryId),
+        pushSteps: overrides(one.pushSteps),
+      })),
+    },
+    waves: {
+      ...rules.waves,
+      repositories: rules.waves.repositories.map((one) => ({
+        ...one,
+        repositoryId: repo(one.repositoryId),
+        deliversAfter: one.deliversAfter.map(repo),
+        steps: overrides(one.steps),
+      })),
+    },
+  }
+}

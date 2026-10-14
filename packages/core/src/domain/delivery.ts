@@ -22,6 +22,10 @@
  * no forge, Application otherwise.
  *
  * Pure rules: the engine stores them, reads the forges and the catalogue, and copies the sections.
+ *
+ * The rules and the copies are stored documents, read strictly: a field added later (S2's manifest
+ * path, S4's ref and variables) is a `Schema.optionalKey` with a default, so what was stored still
+ * reads; a field renamed, removed or made required ships a data migration of both tables.
  */
 
 import { Option, Schema } from 'effect'
@@ -400,10 +404,14 @@ export function applyOverrides<S extends { readonly id: string }>(
     ...base.map((step) => step.id),
     ...overrides.added.map((one) => one.step.id),
   ])
+  // Each added step is placed once: one anchored on itself, or on a step of its own id, cannot
+  // loop (the validation refuses both).
+  const placed = new Set<number>()
   const after = (anchor: string | null): S[] => {
     const steps: S[] = []
-    for (const one of overrides.added) {
-      if (one.after !== anchor) continue
+    for (const [index, one] of overrides.added.entries()) {
+      if (one.after !== anchor || placed.has(index)) continue
+      placed.add(index)
       steps.push(one.step)
       steps.push(...after(one.step.id))
     }
@@ -800,13 +808,21 @@ export const DELIVERY_PROBLEM_CODES = [
   'unknown-template-variable',
   'unknown-command',
   'local-merge-outside-local',
+  'duplicate-step-id',
+  'step-placed-after-itself',
+  'unknown-repository',
 ] as const
+
+/** The templates of a repository's preparation, which a problem may be about. */
+export const TEMPLATE_FIELDS = ['commitTemplate', 'pullRequestTitle', 'pullRequestBody'] as const
 
 /** One reason the rules cannot be saved: the repository and the step it is about, its sentence. */
 export const DeliveryProblem = Schema.Struct({
   code: Schema.Literals(DELIVERY_PROBLEM_CODES),
   repositoryId: Schema.NullOr(Schema.String),
   stepId: Schema.NullOr(Schema.String),
+  /** The template it is about, so an editor shows it beside that field. */
+  field: Schema.optionalKey(Schema.Literals(TEMPLATE_FIELDS)),
   sentence: Schema.String,
 })
 export type DeliveryProblem = typeof DeliveryProblem.Type
@@ -866,6 +882,97 @@ const REMOTE_ACTIONS: Readonly<
   },
 }
 
+/** Refusals 1 and 2 of one repository, apart, so each list keeps the order of the refusals. */
+interface SequenceProblems {
+  readonly merge: DeliveryProblem[]
+  readonly push: DeliveryProblem[]
+}
+
+/** Refusals 1 and 2 for one repository's push steps and recipe, wherever they were read from. */
+function sequenceProblems(
+  repositoryId: string,
+  name: string,
+  pushSteps: ReadonlyArray<PreparationStep>,
+  steps: ReadonlyArray<WaveStep>,
+): SequenceProblems {
+  // Review runs before the waves, whatever the order of the list.
+  const all = [
+    ...pushSteps.filter((step) => step.placement === 'review'),
+    ...pushSteps.filter((step) => step.placement === 'waves'),
+    ...steps,
+  ]
+  const merging = steps.find((step) => step.kind === 'merge' && step.method !== 'local')
+  const pullRequest = all.find((step) => step.kind === 'pull-request')
+  const merge: DeliveryProblem[] = []
+  const push: DeliveryProblem[] = []
+  if (merging !== undefined) {
+    const at = pullRequest === undefined ? -1 : all.indexOf(pullRequest)
+    if (at === -1 || at > all.indexOf(merging)) {
+      merge.push({
+        code: 'merge-without-pull-request',
+        repositoryId,
+        stepId: merging.id,
+        sentence: `Merge needs a pull request: ${name} has no pull request step.`,
+      })
+    }
+  }
+  if (pullRequest !== undefined) {
+    const pushed = all.findIndex((step) => step.kind === 'push')
+    if (pushed === -1 || pushed > all.indexOf(pullRequest)) {
+      push.push({
+        code: 'pull-request-without-push',
+        repositoryId,
+        stepId: pullRequest.id,
+        sentence: `A pull request needs a push: ${name} has no push step before its pull request step.`,
+      })
+    }
+  }
+  return { merge, push }
+}
+
+/** The ids met more than once, each once, in the order first met. */
+const duplicated = (ids: ReadonlyArray<string>): string[] => [
+  ...new Set(ids.filter((id, index) => ids.indexOf(id) !== index)),
+]
+
+/**
+ * The added steps placed after themselves, through added steps only (a step of the base ends a
+ * chain), each loop once, named from its first step: `a → b → a`.
+ */
+function anchorLoops<S extends { readonly id: string }>(
+  base: ReadonlyArray<S>,
+  overrides: Overrides<S>,
+): string[][] {
+  const baseIds = new Set(base.map((step) => step.id))
+  const loops: string[][] = []
+  const seen = new Set<string>()
+  for (const one of overrides.added) {
+    const chain = [one.step.id]
+    let anchor = one.after
+    while (anchor !== null && !baseIds.has(anchor)) {
+      if (anchor === one.step.id) {
+        const key = [...chain].toSorted().join('\u0000')
+        if (!seen.has(key)) {
+          seen.add(key)
+          loops.push([...chain, anchor])
+        }
+        break
+      }
+      const next = overrides.added.find((other) => other.step.id === anchor)
+      if (next === undefined || chain.includes(anchor)) break
+      chain.push(anchor)
+      anchor = next.after
+    }
+  }
+  return loops
+}
+
+const PRESET_NAMES: Readonly<Record<DeliveryPreset, string>> = {
+  library: 'Library',
+  application: 'Application',
+  local: 'Local',
+}
+
 /**
  * Every reason the rules cannot be saved, by refusal in the order of the ticket, then by
  * repository in the Project's order. Pure: the forges and the catalogue come with the Project.
@@ -885,13 +992,6 @@ export function validateRules(
     stepId: string | null,
     sentence: string,
   ): DeliveryProblem => ({ code, repositoryId, stepId, sentence })
-  // Review runs before the waves, whatever the order of the list.
-  const sequence = (resolved: EffectiveRepository) => [
-    ...resolved.pushSteps.filter((step) => step.placement === 'review'),
-    ...resolved.pushSteps.filter((step) => step.placement === 'waves'),
-    ...resolved.steps,
-  ]
-  const forgeMerge = (step: WaveStep) => step.kind === 'merge' && step.method !== 'local'
   const publishes = (id: string) =>
     effective
       .find((one) => one.repositoryId === id)
@@ -899,40 +999,12 @@ export function validateRules(
   const known = (commandId: string) => project.commandIds.includes(commandId)
 
   const problems: DeliveryProblem[] = []
-  // 1. A merge through a pull request needs one.
-  for (const { repository, resolved } of facts) {
-    const merge = resolved.steps.find(forgeMerge)
-    if (merge === undefined) continue
-    const all = sequence(resolved)
-    const pullRequest = all.findIndex((step) => step.kind === 'pull-request')
-    if (pullRequest === -1 || pullRequest > all.indexOf(merge)) {
-      problems.push(
-        problem(
-          'merge-without-pull-request',
-          repository.id,
-          merge.id,
-          `Merge needs a pull request: ${repository.name} has no pull request step.`,
-        ),
-      )
-    }
-  }
-  // 2. A pull request needs a push before it.
-  for (const { repository, resolved } of facts) {
-    const all = sequence(resolved)
-    const pullRequest = all.find((step) => step.kind === 'pull-request')
-    if (pullRequest === undefined) continue
-    const push = all.findIndex((step) => step.kind === 'push')
-    if (push === -1 || push > all.indexOf(pullRequest)) {
-      problems.push(
-        problem(
-          'pull-request-without-push',
-          repository.id,
-          pullRequest.id,
-          `A pull request needs a push: ${repository.name} has no push step before its pull request step.`,
-        ),
-      )
-    }
-  }
+  // 1 and 2. A merge through a pull request needs one, and a pull request a push before it.
+  const sequences = facts.map(({ repository, resolved }) =>
+    sequenceProblems(repository.id, repository.name, resolved.pushSteps, resolved.steps),
+  )
+  problems.push(...sequences.flatMap((one) => one.merge))
+  problems.push(...sequences.flatMap((one) => one.push))
   // 3. No cycle between repositories.
   const names = new Map(project.repositories.map((one) => [one.id, one.name]))
   for (const cycle of cyclesOf(effective)) {
@@ -1016,14 +1088,13 @@ export function validateRules(
   for (const { repository, resolved } of facts) {
     for (const [field, words] of TEMPLATES) {
       for (const name of unknownVariables(resolved.preparation[field])) {
-        problems.push(
-          problem(
-            'unknown-template-variable',
-            repository.id,
-            null,
-            `The ${words} of ${repository.name} uses an unknown variable: {${name}}.`,
-          ),
-        )
+        problems.push({
+          code: 'unknown-template-variable',
+          repositoryId: repository.id,
+          stepId: null,
+          field,
+          sentence: `The ${words} of ${repository.name} uses an unknown variable: {${name}}.`,
+        })
       }
     }
   }
@@ -1072,7 +1143,88 @@ export function validateRules(
       ),
     )
   }
+  // 11. Each step has an id of its own: overrides and plans address steps by id.
+  const twice = (where: string, id: string) =>
+    `${where} two steps with the id “${id}”: each step needs its own.`
+  for (const id of duplicated(rules.preparation.pushSteps.map((step) => step.id))) {
+    problems.push(problem('duplicate-step-id', null, id, twice('The push steps have', id)))
+  }
+  for (const preset of DELIVERY_PRESETS) {
+    for (const id of duplicated(rules.waves.presets[preset].map((step) => step.id))) {
+      problems.push(
+        problem('duplicate-step-id', null, id, twice(`The ${PRESET_NAMES[preset]} preset has`, id)),
+      )
+    }
+  }
+  for (const { repository, resolved } of facts) {
+    const waves = wavesOf(rules, repository)
+    const preparation = preparationOf(rules, repository.id)
+    const pushBase = resolved.preset === 'local' ? [] : rules.preparation.pushSteps
+    // A base's own duplicates are said once, above; here what the repository adds meets.
+    const ids = [
+      ...new Set(pushBase.map((step) => step.id)),
+      ...preparation.pushSteps.added.map((one) => one.step.id),
+      ...new Set(rules.waves.presets[waves.preset].map((step) => step.id)),
+      ...waves.steps.added.map((one) => one.step.id),
+    ]
+    for (const id of duplicated(ids)) {
+      problems.push(
+        problem('duplicate-step-id', repository.id, id, twice(`${repository.name} has`, id)),
+      )
+    }
+  }
+  for (const id of duplicated(rules.end.cleanup.map((step) => step.id))) {
+    problems.push(problem('duplicate-step-id', null, id, twice('Cleanup has', id)))
+  }
+  // 12. An added step is placed after something that is not itself.
+  for (const { repository, resolved } of facts) {
+    const waves = wavesOf(rules, repository)
+    const preparation = preparationOf(rules, repository.id)
+    const pushBase = resolved.preset === 'local' ? [] : rules.preparation.pushSteps
+    const loops = [
+      ...anchorLoops(pushBase, preparation.pushSteps),
+      ...anchorLoops(rules.waves.presets[waves.preset], waves.steps),
+    ]
+    for (const loop of loops) {
+      problems.push(
+        problem(
+          'step-placed-after-itself',
+          repository.id,
+          loop[0] ?? null,
+          `${repository.name} places its step “${loop[0] ?? ''}” after itself: ${loop.join(' → ')}.`,
+        ),
+      )
+    }
+  }
+  // 13. A repository delivers after repositories of the Project.
+  for (const { repository, resolved } of facts) {
+    if (resolved.deliversAfter.every((id) => names.has(id))) continue
+    problems.push(
+      problem(
+        'unknown-repository',
+        repository.id,
+        null,
+        `${repository.name} delivers after a repository that is not in this Project.`,
+      ),
+    )
+  }
   return problems
+}
+
+/** Dependencies to accept that name a repository the Project does not have. */
+export function dependencyProblems(
+  edges: ReadonlyArray<DeliveryDependency>,
+  project: DeliveryProject,
+): DeliveryProblem[] {
+  const known = (id: string) => project.repositories.some((one) => one.id === id)
+  return edges
+    .filter((edge) => !known(edge.repositoryId) || !known(edge.deliversAfter))
+    .map(() => ({
+      code: 'unknown-repository',
+      repositoryId: null,
+      stepId: null,
+      sentence: 'A dependency names a repository that is not in this Project.',
+    }))
 }
 
 // ——— The sections a mission copies (CT-47) ———
@@ -1113,6 +1265,7 @@ export const WavesCopy = Schema.Struct({
     }),
   ),
 })
+export type WavesCopy = typeof WavesCopy.Type
 
 /** The End as a mission copied it, at Ship. */
 export const EndCopy = Schema.Struct({
@@ -1233,4 +1386,22 @@ export function preparationDifferences(
     }
   }
   return differences
+}
+
+/**
+ * The two copies a mission holds at Ship, checked together (R9 calls it at Ship): the preparation,
+ * copied at the first push or pull request, and the waves, copied at Ship, may be of different
+ * versions, each consistent alone. Refusals 1 and 2 are read across both.
+ */
+export function validateCopies(preparation: PreparationCopy, waves: WavesCopy): DeliveryProblem[] {
+  const sequences = waves.repositories.map((repository) =>
+    sequenceProblems(
+      repository.repositoryId,
+      repository.name,
+      preparation.repositories.find((one) => one.repositoryId === repository.repositoryId)
+        ?.pushSteps ?? [],
+      repository.steps,
+    ),
+  )
+  return [...sequences.flatMap((one) => one.merge), ...sequences.flatMap((one) => one.push)]
 }
