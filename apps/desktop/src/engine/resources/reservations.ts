@@ -910,7 +910,7 @@ export const exclusiveReservations = (log: Log) => {
                 Effect.fail(new ReservationLost({ reason: failure.message })),
               ),
             )
-          return { wait } satisfies RunReservation
+          return { names: declared.map((one) => one.name), wait } satisfies RunReservation
         }).pipe(Effect.provide(context))
 
       const holders = Effect.gen(function* () {

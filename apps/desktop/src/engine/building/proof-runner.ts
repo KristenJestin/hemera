@@ -72,6 +72,11 @@ export interface ProofRun extends ProofRunClass {
   readonly at: string
   /** The Project's limit it ran past, in minutes, when Hemera ended it there; null otherwise. */
   readonly timedOutAfter: number | null
+  /**
+   * Whether its command was launched: false when it could not start, or gave up waiting for a
+   * resource held elsewhere (#306). Known as it runs, never recorded.
+   */
+  readonly started: boolean
 }
 
 /** The proof's command: what runs its test, or the command with no test file. */
@@ -143,7 +148,8 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       desk.checkRun(asked.missionId, `proof ${asked.scenario}`, repositories),
     )
     let trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }> = []
-    // Its limit counts from its launch, never while it waits for a permission or a reservation.
+    // Its limit counts from its launch, never while it waits for a permission; a reservation held
+    // elsewhere is waited for that long at most, then the run fails unstarted (#306).
     const started = Deferred.makeUnsafe<void>()
     const launched = yield* startRun({
       projectId: mission.projectId,
@@ -154,6 +160,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       startedBy: 'hemera',
       sessionId: null,
       missionId: asked.missionId,
+      waitLimit: limit,
       beforeLaunch: Effect.andThen(
         watch === null
           ? Effect.void
@@ -234,6 +241,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       trees,
       at: new Date().toISOString(),
       timedOutAfter: timedOut ? (mission.minutes ?? DEFAULT_PROOF_MINUTES) : null,
+      started: yield* Deferred.isDone(started),
     }
     yield* mutate('recording a proof run', (transaction) =>
       transaction

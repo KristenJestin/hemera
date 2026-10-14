@@ -16,11 +16,11 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Deferred, Duration, Effect, Layer, Predicate, Schema } from 'effect'
+import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
-import { BuildingEnd, type BuilderHold } from '../src/engine/building/builder.ts'
+import { BuildingEnd, type BuilderHold, builderLayer } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
 import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
@@ -39,7 +39,11 @@ import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
+import { saveCommand } from '../src/engine/catalogue.ts'
+import { Runs } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { mutate } from '../src/engine/transaction.ts'
+import { activeBuildingIn, decisionsIn, tasksIn } from '../src/engine/building/tasks.ts'
 import {
   buildingAttempts,
   buildingDecisions,
@@ -499,6 +503,87 @@ describe('The red phase (CT-35)', () => {
     expect(seen.view.tasks.find((task) => task.id === 'T2')?.state).toBe('blocked')
   })
 
+  test('a stop between an environment need’s Retry and its decision leaves nothing behind the withdrawn need: after the start, the proof is run again and asked about anew', async () => {
+    const port = await closedPort()
+    const spec = () => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          `  await new Promise((done, fail) => connect(${String(port)}, '127.0.0.1').on('connect', done).on('error', fail))`,
+          ["import { connect } from 'node:net'"],
+        ),
+      ),
+    })
+    // The engine stops once the need is withdrawn, before anything else of the Retry is done.
+    const stop = holdOnce('releasing')
+    const first = await proofsEngine(data, stop.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(spec)
+          const need = yield* needOf(mission.id, 'Environment')
+          yield* retryNeed(need.id)
+          yield* Deferred.await(stop.reached)
+          return { mission, need }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const again = yield* needOf(first.mission.id, 'Environment')
+          const database = yield* Database
+          const building = yield* activeBuildingIn(database, first.mission.id)
+          if (building === null) return yield* Effect.die(new Error('no Building'))
+          const decision = (yield* decisionsIn(database, building.id)).find(
+            (one) => one.needId === first.need.id,
+          )
+          const cause = (yield* tasksIn(database, building.id)).find(
+            (one) => one.id === 'T2',
+          )?.blockedBy
+          const blockedOn = Predicate.isTagged(cause, 'Need') ? cause.needId : null
+          return { again, decision: decision?.state, blockedOn }
+        }),
+      ),
+    )
+    expect(seen.again.id).not.toBe(first.need.id)
+    expect(seen.decision).toBe('withdrawn')
+    expect(seen.blockedOn).toBe(seen.again.id)
+  })
+
+  test('a Retry that reaches the Builder’s needs before the Builder runs is refused, never taken without moving its proof', async () => {
+    const port = await closedPort()
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(
+              EXPORT_PATH,
+              testFile(
+                `  await new Promise((done, fail) => connect(${String(port)}, '127.0.0.1').on('connect', done).on('error', fail))`,
+                ["import { connect } from 'node:net'"],
+              ),
+            ),
+          }))
+          const need = yield* needOf(mission.id, 'Environment')
+          // The handler of a Builder whose layer is not built yet, as at the engine's start.
+          const early = builderLayer(() => undefined).handler.retriedIn
+          if (early === undefined) return yield* Effect.die(new Error('no Retry hook'))
+          return Exit.isFailure(
+            yield* Effect.exit(
+              mutate('a Retry before the Builder runs', (transaction) =>
+                Effect.map(early(need, transaction), (events) => ({ result: undefined, events })),
+              ),
+            ),
+          )
+        }),
+      ),
+    )
+    expect(seen).toBe(true)
+  })
+
   /** A bug seen today: what Planning observed, its key line, and where it was seen. */
   const seenToday = (api: string, observed: string, keyLine: string): Schema.JsonObject =>
     automated(
@@ -766,7 +851,9 @@ describe('The green runs', () => {
       ),
     )
     expect(seen.fresh.finalChecks.map((one) => [one.name, one.upToDate])).toEqual([['build', true]])
-    expect(seen.refreshed).toEqual({ proofs: ['R1.S2'], checks: ['build'] })
+    expect(seen.refreshed).toMatchObject({ proofs: ['R1.S2'], checks: ['build'] })
+    // The trees its own snapshot took first, which the end keeps (#306).
+    expect(seen.refreshed.trees.map((one) => one.repository)).toEqual(['api'])
     const s2 = seen.after.scenarios.find((one) => one.scenario === 'R1.S2')
     expect(s2?.state).toBe('green')
     expect(s2?.runs.map((one) => one.phase)).toEqual(['red', 'green', 'rerun'])
@@ -1264,6 +1351,92 @@ describe('A failed green', () => {
     )
     expect(seen.before).toBe(false)
     expect(seen.waits).toContain("The end waits: R1.S2's proof is not green.")
+  })
+
+  test('a proof held on its environment need is not named to the Builder as one the end waits on: only the user’s Retry moves it', async () => {
+    let proofCommand = ''
+    let held = false
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free for the red; from the green on, another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S1': automated(
+                'tests/invoices.test.mjs',
+                testFile(
+                  "  assert.ok(readFileSync(new URL('../invoices.ts', import.meta.url), 'utf8').includes('[1'), 'no invoice yet')",
+                ),
+              ),
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          yield* proofIn(mission.id, 'R1.S1', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          held = true
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* needOf(mission.id, 'Environment')
+          // R1.S1's green fails: the Builder's to fix, beside R1.S2 held on the user.
+          yield* builds(grantId, 'T1', [['invoices.ts', 'export const invoices = [2]\n']])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          return yield* deliveredTo(mission.id, 'The end waits')
+        }),
+      ),
+    )
+    expect(seen).toContain("The end waits: R1.S1's proof is not green.")
+    expect(seen).not.toContain("R1.S2's proof is not green")
   })
 })
 
@@ -1916,6 +2089,482 @@ describe('A proof run that never ends', () => {
   })
 })
 
+describe('A proof waiting for an exclusive resource', () => {
+  test('a proof whose command waits for a resource held elsewhere ends at the Project’s limit as an environment red that says what it waited for', async () => {
+    let proofCommand = ''
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(EXPORT_PATH),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // The port of another mission's service holds it, and is never given back.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          return {
+            need: yield* needOf(mission.id, 'Environment'),
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+          }
+        }),
+      ),
+    )
+    expect(seen.proof.runs.map((one) => one.classification)).toEqual(['environment'])
+    const fields = seen.need.fields
+    if (!Predicate.isTagged(fields, 'Environment')) throw new Error('not an environment need')
+    expect(fields.missing).toContain("R1.S2's proof could not run")
+    expect(fields.missing).toContain('it waited 2s for the dev port, held elsewhere')
+  })
+
+  test('a stale proof whose rerun at the refresh waits for a resource held elsewhere asks the user to free it, and its Retry runs it again, with no attempt for the Builder', async () => {
+    let proofCommand = ''
+    let held = false
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free until the refresh; from then on another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          held = true
+          writeFileSync(
+            join(yield* apiOf(mission.id), 'invoices.ts'),
+            'export const invoices = [2]\n',
+          )
+          yield* BuildDesk.use((desk) => desk.refreshProofs(mission.id))
+          const need = yield* needOf(mission.id, 'Environment')
+          const waiting = yield* proofOf(mission.id, 'R1.S2')
+          const attempts = yield* proofAttemptsOf('R1.S2')
+          held = false
+          yield* retryNeed(need.id)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { need, waiting, attempts, after: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    const fields = seen.need.fields
+    if (!Predicate.isTagged(fields, 'Environment')) throw new Error('not an environment need')
+    expect(fields.missing).toContain("R1.S2's proof could not run")
+    expect(fields.missing).toContain('it waited 2s for the dev port, held elsewhere')
+    expect(seen.waiting.state).toBe('held')
+    expect(seen.attempts).toEqual([])
+    expect(seen.after.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+      ['rerun', 'passed'],
+    ])
+  })
+
+  test('a Retry whose own write fails leaves the environment need open and its proof held, and the next Retry runs it again', async () => {
+    let proofCommand = ''
+    let held = false
+    // The Retry's write of the proof, refused once by the data folder.
+    let refusing = false
+    const seen = await proofsEngine(
+      data,
+      (at) =>
+        at === 'retrying' && refusing
+          ? Effect.suspend(() => {
+              refusing = false
+              return Effect.die(new Error('the data folder refused the write'))
+            })
+          : Effect.void,
+      undefined,
+      undefined,
+      { proofMinute: Duration.seconds(2) },
+    ).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free for the red; from the green on, another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          held = true
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          const need = yield* needOf(mission.id, 'Environment')
+          held = false
+          refusing = true
+          const failed = Exit.isFailure(yield* Effect.exit(retryNeed(need.id)))
+          const left = {
+            need: (yield* getNeed(need.id)).state,
+            proof: (yield* proofOf(mission.id, 'R1.S2')).state,
+          }
+          // Withdrawn, the need has no Retry left: nothing would run the proof again.
+          if (left.need !== 'pending') return { failed, left, need: left.need }
+          yield* retryNeed(need.id)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { failed, left, need: (yield* getNeed(need.id)).state }
+        }),
+      ),
+    )
+    expect(seen.failed).toBe(true)
+    expect(seen.left).toEqual({ need: 'pending', proof: 'held' })
+    expect(seen.need).toBe('withdrawn')
+  })
+
+  test('a stale proof the Builder runs while a resource held elsewhere keeps it from running is stale again at its Retry, never back to its red', async () => {
+    let proofCommand = ''
+    let held = false
+    // The Retry's run, held once it ran and before it is judged.
+    let arming = false
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    let taking: SnapshotsService | null = null
+    const seen = await proofsEngine(
+      data,
+      (at) =>
+        at === 'greening' && arming
+          ? Effect.gen(function* () {
+              arming = false
+              yield* Deferred.succeed(reached, undefined)
+              yield* Deferred.await(go)
+            })
+          : Effect.void,
+      undefined,
+      undefined,
+      {
+        proofMinute: Duration.seconds(2),
+        snapshots: (real) => {
+          taking = real
+          return real
+        },
+      },
+    ).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free until the Builder runs the stale proof; then another mission's service
+                // holds the port, until the user frees it.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          // A change a snapshot sees makes the proof stale.
+          const api = yield* apiOf(mission.id)
+          writeFileSync(join(api, 'invoices.ts'), 'export const invoices = [2]\n')
+          if (taking === null) return yield* Effect.die(new Error('no snapshots'))
+          yield* taking.take(
+            { name: 'api', folder: api },
+            { kind: 'run', missionId: mission.id, runId: crypto.randomUUID(), side: 'before' },
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'to_rerun')
+          held = true
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          const need = yield* needOf(mission.id, 'Environment')
+          held = false
+          arming = true
+          yield* retryNeed(need.id)
+          yield* Deferred.await(reached)
+          const retried = yield* proofOf(mission.id, 'R1.S2')
+          yield* Deferred.succeed(go, undefined)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { retried, after: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    expect(seen.retried.state).toBe('to_rerun')
+    expect(seen.after.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+      ['rerun', 'passed'],
+    ])
+  })
+})
+
+describe('A proof whose run started and then met its environment', () => {
+  /**
+   * R1.S2's test: red while `api/export.ts` is missing; once it exists without `toMarkdown`, its
+   * code never answers and the runner gives up in its own words, an environment failure the
+   * Builder's code causes (#306).
+   */
+  const TIMING_OUT_TEST = testFile(
+    [
+      "  const file = new URL('../export.ts', import.meta.url)",
+      "  assert.ok(existsSync(file), 'export.ts exports nothing yet')",
+      "  if (!readFileSync(file, 'utf8').includes('toMarkdown')) throw new Error('Test timed out in 5000ms')",
+    ].join('\n'),
+  )
+  const timingOutProof = () => ({ 'R1.S2': automated(EXPORT_PATH, TIMING_OUT_TEST) })
+
+  /** The mission's environment needs. */
+  const environmentNeeds = (missionId: string) =>
+    Effect.map(getMission(missionId), (mission) =>
+      mission.needs.filter((need) => Predicate.isTagged(need.fields, 'Environment')),
+    )
+
+  test('a green whose started run says its test timed out goes to the Builder as an attempt, never to the user as an environment need', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(timingOutProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          const delivered = yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+          const failed = yield* proofOf(mission.id, 'R1.S2')
+          const needs = yield* environmentNeeds(mission.id)
+          const open = yield* proofAttemptsOf('R1.S2')
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { delivered, failed, needs, open }
+        }),
+      ),
+    )
+    expect(seen.failed.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'environment'],
+    ])
+    expect(seen.failed.state).toBe('red_recorded')
+    expect(seen.needs).toEqual([])
+    expect(seen.open.map((one) => [one.number, one.endedAt])).toEqual([[1, null]])
+    expect(seen.delivered).toContain('Test timed out in 5000ms')
+  })
+
+  test('a stale proof whose started rerun at the refresh says its test timed out goes to the Builder as an attempt, never to the user as an environment need', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(timingOutProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          // Broken since, out of any tool: the refresh finds it stale, and its rerun times out.
+          writeFileSync(join(yield* apiOf(mission.id), 'export.ts'), WRONG_EXPORT)
+          yield* BuildDesk.use((desk) => desk.refreshProofs(mission.id))
+          const failed = yield* proofOf(mission.id, 'R1.S2')
+          const needs = yield* environmentNeeds(mission.id)
+          const open = yield* proofAttemptsOf('R1.S2')
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { failed, needs, open }
+        }),
+      ),
+    )
+    expect(seen.failed.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+    ])
+    expect(seen.failed.state).toBe('to_rerun')
+    expect(seen.needs).toEqual([])
+    expect(seen.open.map((one) => [one.number, one.endedAt])).toEqual([[1, null]])
+  })
+})
+
 describe('A restart while a proof waits on its fix', () => {
   /** The decisions Hemera asked about the scenarios the end waits on. */
   const unprovenAsked = Effect.gen(function* () {
@@ -2013,6 +2662,84 @@ describe('What the reviewers see of the red phase', () => {
     expect(
       seen.writtenBeforeRed.map((one) => [one.repository, one.path, one.task, one.scenarios]),
     ).toEqual([['api', 'invoices.ts', 'T1', ['R1.S2']]])
+  })
+
+  test('a green held on its environment is no red to wait for: the Builder’s writes meanwhile are not recorded as written before it', async () => {
+    let proofCommand = ''
+    let held = false
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      proofMinute: Duration.seconds(2),
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free for the red; from the green on, another mission's service holds the port.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          held = true
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* needOf(mission.id, 'Environment')
+          const waiting = (yield* proofOf(mission.id, 'R1.S2')).state
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* writes(grantId, 'invoices.ts', 'export const invoices = [1]\n')
+          return { waiting, view: yield* proofsOf(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.waiting).toBe('held')
+    expect(seen.view.writtenBeforeRed).toEqual([])
   })
 
   test('the detector of changes outside Hemera does not report Hemera’s proof writes', async () => {
