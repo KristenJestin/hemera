@@ -19,6 +19,7 @@ import {
   AnchorMoved,
   AnchorOutdated,
   AnchorUnread,
+  type DiffChange,
   FeedbackForge,
   FeedbackUser,
   type FeedbackView,
@@ -27,7 +28,7 @@ import {
   UserAuthor,
 } from '@hemera/ipc'
 import { asc, desc, eq } from 'drizzle-orm'
-import { Deferred, Effect, Fiber, Predicate, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Ref, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { ImageBlock } from '../src/engine/agents/client.ts'
@@ -38,6 +39,7 @@ import { Memory } from '../src/engine/memory/index.ts'
 import { putEvidence } from '../src/engine/memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../src/engine/memory/files.ts'
 import { createMission, getMission, moveIn, moveMission } from '../src/engine/missions.ts'
+import { Diffs } from '../src/engine/review/diffs.ts'
 import { Review, type ReviewHold } from '../src/engine/review/feedback.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -790,6 +792,71 @@ describe('Code comments follow their lines', () => {
 })
 
 describe('Changes made outside Hemera', () => {
+  test('a change made outside Hemera stays marked until the next Review checkpoint takes it in (open question 29)', async () => {
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth()
+          const outside = yield* OutsideChanges
+          const marked = (path: string) =>
+            Effect.map(
+              Diffs.use((diffs) => diffs.live(missionId)),
+              (diff) =>
+                diff.repositories
+                  .find((one) => one.repository === 'api')
+                  ?.files.find((file) => file.path === path)?.changedOutside ?? null,
+            )
+          // The Building's base snapshots are taken as its Builder starts: written after.
+          yield* builderOf(missionId)
+          writeFileSync(join(api, 'early.md'), 'mine\n')
+          yield* outside.compare(missionId, null)
+          const inBuilding = yield* marked('early.md')
+          yield* inReview(missionId)
+          const afterEntry = yield* marked('early.md')
+          writeFileSync(join(api, 'late.md'), 'mine too\n')
+          yield* outside.compare(missionId, null)
+          const inReviewMarked = yield* marked('late.md')
+          const heard = yield* Ref.make<ReadonlyArray<DiffChange>>([])
+          const listening = yield* Effect.forkChild(
+            Stream.runForEach(
+              Stream.unwrap(Diffs.use((diffs) => Effect.succeed(diffs.changes(missionId)))),
+              (change) => Ref.update(heard, (all) => [...all, change]),
+            ),
+          )
+          yield* add(missionId, remark('The export button is grey.'))
+          yield* moveRound(missionId, 1, 'grilling')
+          yield* moveRound(missionId, 1, 'building')
+          yield* moved(missionId, 'fix')
+          yield* moved(missionId, 'endBuilding')
+          // The window is told, with no other change in the Workspace to move the diff.
+          yield* until(
+            Effect.map(Ref.get(heard), (all) =>
+              all.some((change) =>
+                change.files.some(
+                  (file) => file.path === 'late.md' && file.changedOutside === null,
+                ),
+              ),
+            ),
+            30_000,
+          )
+          yield* Fiber.interrupt(listening)
+          return {
+            inBuilding,
+            afterEntry,
+            inReviewMarked,
+            afterRound: yield* marked('late.md'),
+          }
+        }),
+      ),
+    )
+    expect(seen.inBuilding).toEqual(expect.any(String))
+    expect(seen.afterEntry).toBeNull()
+    expect(seen.inReviewMarked).toEqual(expect.any(String))
+    expect(seen.afterRound).toBeNull()
+  })
+
   test('a change made outside Hemera (written by the test, flagged by B10) re-anchors and blocks nothing', async () => {
     const { run } = engine()
     const seen = await run(({ profile }) =>

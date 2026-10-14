@@ -8,13 +8,15 @@
  *   to what would be pushed".
  * - **Each file** carries Git's letter, its counts or its binary sizes, and whether it is
  *   untracked, generated (Git's attributes or a lockfile's name), large (the two constants below),
- *   changed outside Hemera (#148's result, read and never decided here) or withheld (a sensitive
+ *   changed outside Hemera (#148's result, read and never decided here; found since the mission's
+ *   last Review checkpoint, which takes in what was found before it, #341) or withheld (a sensitive
  *   place: listed, its content never sent). The list carries no content; `file` answers both sides
  *   of one file, masked, and a large one's only when forced.
  * - **Live.** A repository is computed again when the detector of #148 reports a change in the
- *   mission, when a Hemera write or command of the mission ends, and when the window regains the
- *   focus: 250 ms after the last of them, never twice at once. A computation that moves the list
- *   bumps the repository's sequence and is told on `changes`, with only what moved.
+ *   mission, when a Hemera write or command of the mission ends, when a Review checkpoint is
+ *   recorded, and when the window regains the focus: 250 ms after the last of them, never twice
+ *   at once. A computation that moves the list bumps the repository's sequence and is told on
+ *   `changes`, with only what moved.
  * - **Without the Workspace** (cleaned up, or a mission Done or Cancelled), the diff is read from
  *   the mission's latest checkpoint (#140), from the database alone, and marked as such.
  */
@@ -67,6 +69,7 @@ import {
   commandRuns,
   effectfulActions,
   missions,
+  reviewCheckpoints,
   workspaceRepositories,
   workspaces,
 } from '../storage/schema.ts'
@@ -418,10 +421,20 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
       const outsideOf = (missionId: string) =>
         Effect.gen(function* () {
           const listed = yield* outside.list(missionId)
+          // A Review checkpoint takes in what was found before it (#341, open question 29).
+          const [reviewed] = yield* database
+            .select({ takenAt: checkpoints.takenAt })
+            .from(reviewCheckpoints)
+            .innerJoin(checkpoints, eq(checkpoints.id, reviewCheckpoints.checkpointId))
+            .where(eq(reviewCheckpoints.missionId, missionId))
+            .orderBy(desc(reviewCheckpoints.round))
+            .limit(1)
+            .pipe(Effect.mapError(refusedWhile('reading the Review checkpoints')))
           const since = new Map<string, string>()
           for (const repository of listed) {
             for (const change of repository.changes) {
               if (change.overwrittenBy !== null) continue
+              if (reviewed !== undefined && change.detectedAt < reviewed.takenAt) continue
               const key = keyOf(repository.repository, change.path)
               const first = since.get(key)
               if (first === undefined || change.detectedAt < first)
@@ -816,6 +829,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
       /** The missions a committed event concerns: a write or a command that ended. */
       const missionsOf = (type: string, entityId: string) =>
         Effect.gen(function* () {
+          if (type === 'review.checkpoint_recorded') return [entityId]
           if (type === 'action.done' || type === 'action.failed') {
             const [action] = yield* database
               .select({ ownerKind: effectfulActions.ownerKind, ownerId: effectfulActions.ownerId })
