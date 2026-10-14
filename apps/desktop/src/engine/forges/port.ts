@@ -211,6 +211,14 @@ const BktStatus = Schema.fromJsonString(
 )
 const readBktStatus = Schema.decodeUnknownOption(BktStatus)
 
+/**
+ * What a need's text asks the user to do, read from its masked JSON: it changes with the state and
+ * the fix, never with the wording of an unreachable forge's message.
+ */
+const readAction = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ action: Schema.String })),
+)
+
 /** The Project a `repository.removed` event names. */
 const readRemoved = Schema.decodeUnknownOption(Schema.Struct({ projectId: Schema.String }))
 
@@ -636,14 +644,17 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
           )
 
       /**
-       * A pending need's text rewritten when it no longer says what its CLI lacks now (#362): a gh
-       * the user installed, as the need said, is signed out, not missing.
+       * A pending need's text rewritten when what it asks the user to do no longer fits what its
+       * CLI lacks now (#362): a gh the user installed, as the need said, is signed out, not
+       * missing. Only the state and the fix count: an unreachable forge whose message changes at
+       * each check would otherwise write a revision, kept for good, at every check of an outage.
        */
       const revised = (
         need: { readonly id: string; readonly fields: string },
         fields: NeedFields,
       ) =>
-        maskedJson(secrets.maskRecord(fields)) === need.fields
+        Option.getOrNull(readAction(maskedJson(secrets.maskRecord(fields))))?.action ===
+        Option.getOrNull(readAction(need.fields))?.action
           ? Effect.void
           : mutate('revising a forge need', (transaction) =>
               Effect.map(reviseNeedIn(transaction, need.id, fields), (events) => ({

@@ -2459,3 +2459,40 @@ describe('The window regaining the focus wakes an operation waiting on its CLI',
     expect(login).toBe('octo')
   })
 })
+
+describe('A long outage writes no revision while what to do stays the same', () => {
+  test('ten checks of an unreachable forge whose message changes each time revise nothing; the sign-in after it revises once', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        // A round-robin address, as DNS gives: the message differs at each check.
+        stderr: 'dial tcp 140.82.112.{call}:443: i/o timeout\n',
+        code: 1,
+      },
+    ])
+    const { during, after, text } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const revisions = Effect.map(
+            readEvents({ limit: 1_000 }),
+            ({ events }) => events.filter((event) => event.type === 'need.revised').length,
+          )
+          for (let check = 0; check < 10; check += 1) yield* port.checkAgain(projectId, null)
+          const outage = yield* revisions
+          fake.answer(ghSignedOut())
+          yield* port.checkAgain(projectId, null)
+          return { during: outage, after: yield* revisions, text: yield* needText }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(during).toBe(0)
+    expect(after).toBe(1)
+    expect(text.map((one) => one.missing)).toEqual(['gh signed in on github.com'])
+  })
+})
