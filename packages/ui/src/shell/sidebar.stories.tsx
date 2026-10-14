@@ -5,11 +5,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { ContentHeader } from './content-header.tsx'
 import { CHATS, MISSION } from './shell-fixtures.tsx'
 import { LONG_NAME, MANY_PROJECTS, MARKED_PROJECTS, PROJECTS } from './shell-data.ts'
-import {
-  SIDEBAR_MISSIONS,
-  type SidebarMissionEntry,
-  SidebarMissionGroups,
-} from './sidebar-shell-fixture.tsx'
+import { SidebarMissionGroups } from './sidebar-shell-fixture.tsx'
+import { SIDEBAR_MISSIONS, type SidebarMissionEntry } from './sidebar-missions.ts'
 import { Sidebar, SidebarChatRow, type SidebarChatRowProps, type SidebarPlace } from './sidebar.tsx'
 
 /**
