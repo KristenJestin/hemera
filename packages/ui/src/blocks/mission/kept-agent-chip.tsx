@@ -12,9 +12,13 @@ export interface KeptAgentView {
 
 /** The kept agents of a stage card's chips, one chip each. */
 export function KeptAgentChips({ kept }: { kept: readonly KeptAgentView[] }): ReactNode {
-  return kept.map((agent) => (
-    <KeptAgentChip key={agent.pid} program={agent.program} pid={agent.pid} />
-  ))
+  return (
+    <>
+      {kept.map((agent) => (
+        <KeptAgentChip key={agent.pid} program={agent.program} pid={agent.pid} />
+      ))}
+    </>
+  )
 }
 
 export interface KeptAgentChipProps {
