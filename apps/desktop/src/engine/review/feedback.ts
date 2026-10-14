@@ -1571,15 +1571,20 @@ export const reviewLayer = (settings: ReviewSettings) =>
             )
             return
           }
+          // Ship closes the rounds first: a checkpoint Git refuses never keeps them open.
+          if (event.payload.move === 'ship') yield* closeAll(event.entityId)
           if (event.payload.from === 'review') {
-            // Never out of Review without the archive of the round it leaves.
+            // Never out of Review without the archive of the round it leaves, when Git allows it.
             const round = Option.getOrElse(readRound(event.payload.round), () => 0)
             yield* recordCheckpoint(
               event.entityId,
               event.payload.move === 'fix' ? round - 1 : round,
+            ).pipe(
+              Effect.catchCause((cause) =>
+                said(`the checkpoint ${event.entityId} left was not taken: ${String(cause)}`),
+              ),
             )
           }
-          if (event.payload.move === 'ship') return yield* closeAll(event.entityId)
         })
 
       /** What a stop left: a mission in Review without its round's checkpoint, a refusal unwritten. */

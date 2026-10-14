@@ -758,6 +758,39 @@ describe('Rounds as data', () => {
 
 describe('Ship closes the rounds, even across a stop', () => {
   test(
+    'Ship closes the rounds even when the checkpoint of the round it leaves cannot be taken',
+    async () => {
+      let broken = false
+      const failing = checkpointsFailing(() => broken)
+      const { run } = engine(undefined, undefined, failing.wrap)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            // Git refuses every checkpoint from the entry into Review on, Ship's too.
+            broken = true
+            yield* moved(missionId, 'endBuilding')
+            yield* add(missionId, { kind: 'question', body: 'Why?', anchor: null, images: [] })
+            yield* moved(missionId, 'ship')
+            yield* until(
+              Effect.map(stateOf(missionId), (state) =>
+                state.rounds.every((one) => one.state === 'closed'),
+              ),
+              30_000,
+            )
+            const state = yield* stateOf(missionId)
+            return { rounds: state.rounds.map((one) => one.state), checkpoints: state.checkpoints }
+          }),
+        ),
+      )
+      expect(seen.rounds).toEqual(['closed'])
+      expect(seen.checkpoints).toEqual([])
+    },
+    SLOW,
+  )
+
+  test(
     'an engine stopped between Ship and the closing of the rounds closes them at its next start',
     async () => {
       const { run } = engine()
