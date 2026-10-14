@@ -10,7 +10,8 @@ import {
   IconRefresh,
 } from '../../icons.ts'
 import { Button, IconButton } from '../button/button.tsx'
-import { type MarkState, StatusMark } from '../status-mark/status-mark.tsx'
+import { StatusMark } from '../status-mark/status-mark.tsx'
+import { type MarkState } from '../status-mark/mark-legends.ts'
 import { glanceWordsOf } from './live-words.ts'
 import type { LiveState } from './tint.tsx'
 

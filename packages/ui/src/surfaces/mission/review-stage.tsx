@@ -6,7 +6,8 @@ import { Button } from '../../components/button/button.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../../components/frame/frame.tsx'
 import { LiveChip, type LiveState } from '../../components/live-chip/live-chip.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { type MarkState } from '../../components/status-mark/mark-legends.ts'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconChevronRight,

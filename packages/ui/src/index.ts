@@ -119,12 +119,11 @@ export {
   type SlidingMarkProps,
 } from './components/sliding-mark/sliding-mark.tsx'
 export {
-  MARK_LEGENDS,
   StatusMark,
   type MarkSize,
-  type MarkState,
   type StatusMarkProps,
 } from './components/status-mark/status-mark.tsx'
+export { MARK_LEGENDS, type MarkState } from './components/status-mark/mark-legends.ts'
 export { Tabs, type TabsItem, type TabsProps } from './components/tabs/tabs.tsx'
 export { Legend, type LegendProps } from './components/tooltip/legend.tsx'
 export {

@@ -9,7 +9,8 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Slider } from '../../components/slider/slider.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { type MarkState } from '../../components/status-mark/mark-legends.ts'
 import {
   type ModelChoice,
   ModelPicker,

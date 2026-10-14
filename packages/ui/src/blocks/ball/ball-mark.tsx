@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
 import { Face } from '../../components/face/face.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
+import { type MarkState } from '../../components/status-mark/mark-legends.ts'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { type Ball, BALL_LEGENDS } from './ball-legends.ts'
 
