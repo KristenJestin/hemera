@@ -13,6 +13,7 @@ import { realpathSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
+import { and, eq } from 'drizzle-orm'
 import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -26,6 +27,8 @@ import {
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { getSession, openSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
@@ -616,7 +619,13 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
           yield* until(
             Effect.sync(() => promptsOf(world).some((one) => one.includes('[hemera:expiry]'))),
           )
-          return { view: yield* buildingNow(mission.id) }
+          const expiries = yield* (yield* Database)
+            .select({ id: sessionDeliveries.id })
+            .from(sessionDeliveries)
+            .where(
+              and(eq(sessionDeliveries.ownerId, mission.id), eq(sessionDeliveries.kind, 'expiry')),
+            )
+          return { view: yield* buildingNow(mission.id), expiries }
         }),
       ),
     )
@@ -625,6 +634,8 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
     expect(statesOf(seen.view)['T4']).toBe('available')
     const decision = seen.view.decisions.find((one) => one.tasks.includes('T1'))
     expect(decision?.state).toBe('expired')
+    // Stored once, by the answer that expired it: the follower only hands it over.
+    expect(seen.expiries).toHaveLength(1)
   })
 
   test('an amendment that expires as it is answered, right before a stop, is told to the Builder after the start', async () => {
@@ -682,20 +693,18 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
       ),
     )
     const after = builderEngine(data, work)
+    const told = () => [...promptsOf(before.world), ...promptsOf(after.world)]
     await after.run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
           yield* until(Effect.map(buildingNow(first.mission.id), (view) => view.tasks.length > 0))
-          yield* until(
-            Effect.sync(() =>
-              promptsOf(after.world).some((one) => one.includes('[hemera:resume]')),
-            ),
-          )
+          // Taken by the Builder before the stop, or by the one the start brought back.
+          yield* until(Effect.sync(() => told().some((one) => one.includes('[hemera:expiry]'))))
         }),
       ),
     )
-    const expiry = promptsOf(after.world).find((one) => one.includes('[hemera:expiry]')) ?? ''
+    const expiry = told().find((one) => one.includes('[hemera:expiry]')) ?? ''
     expect(expiry).toContain('Removing T4 leaves R1.S1 covered by no task of the plan.')
   })
 })
