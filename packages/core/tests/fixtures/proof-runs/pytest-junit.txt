@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="0.043" timestamp="2026-10-14T10:04:56.176226+02:00" hostname="ci"><testcase classname="tests.test_report" name="test_one_is_one" file="tests/test_report.py" line="3" time="0.001"><failure message="assert 1 == 2">def test_one_is_one():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_report.py:5: AssertionError</failure></testcase><testcase classname="tests.test_report" name="test_exports[csv]" file="tests/test_report.py" line="7" time="0.001" /><testcase classname="tests.test_report" name="test_exports[md]" file="tests/test_report.py" line="7" time="0.001"><failure message="AssertionError: assert 'md' == 'csv'&#10;  &#10;  - csv&#10;  + md">kind = 'md'
+
+    @pytest.mark.parametrize("kind", ["csv", "md"])
+    def test_exports(kind):
+&gt;       assert kind == "csv"
+E       AssertionError: assert 'md' == 'csv'
+E         
+E         - csv
+E         + md
+
+tests/test_report.py:10: AssertionError</failure></testcase></testsuite></testsuites>
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_report.py:5: AssertionError
+_______________________________ test_exports[md] _______________________________
+
+kind = 'md'
+
+    @pytest.mark.parametrize("kind", ["csv", "md"])
+    def test_exports(kind):
+>       assert kind == "csv"
+E       AssertionError: assert 'md' == 'csv'
+E         
+E         - csv
+E         + md
+
+tests/test_report.py:10: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_report.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_report.py::test_exports[md] - AssertionError: assert 'md' =...
+2 failed, 1 passed in 0.04s

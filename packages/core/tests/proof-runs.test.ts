@@ -186,6 +186,25 @@ const run = (
   testPath: string | null = 'tests/export.test.mjs',
 ) => classifyProofRun({ output, exitCode, testPath })
 
+/**
+ * How many times longer `read` takes on the input `make` builds at eight times the size: about 8
+ * when the reading is linear, 64 when it is quadratic, whatever the machine's speed. Each side is
+ * read once to warm up, then timed as the fastest of five runs and at least a millisecond, so a
+ * busy machine slows both alike.
+ */
+const growth = (make: (size: number) => string, size: number, read: (output: string) => void) => {
+  const fastest = (output: string) => {
+    read(output)
+    const runs = [0, 1, 2, 3, 4].map(() => {
+      const started = performance.now()
+      read(output)
+      return performance.now() - started
+    })
+    return Math.max(1, Math.min(...runs))
+  }
+  return fastest(make(size * 8)) / fastest(make(size))
+}
+
 describe('A proof run is classified (CT-35)', () => {
   test('a TAP report whose test failed on an assertion is assertion_failed, with the test and the assertion', () => {
     expect(run(TAP_ASSERTION, 1)).toMatchObject({
@@ -1785,14 +1804,14 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
 
   test('a failing line of 300 KB is read quickly, cut to a few KB', () => {
     const path = 'src/a.test.ts'
-    const long = ` × src/a.test.ts > ${'[a] '.repeat(75_000)}> reads a file 3ms`
-    const output = `${long}\nAssertionError: expected false to be true // Object.is equality`
-    const started = performance.now()
-    const classified = run(output, 1, path)
+    const output = (size: number) =>
+      ` × src/a.test.ts > ${'[a] '.repeat(size)}> reads a file 3ms\nAssertionError: expected false to be true // Object.is equality`
+    const classified = run(output(75_000), 1, path)
     expect(classified.failingLines[0]?.length).toBeLessThanOrEqual(8_192)
     expect(validRed(classified, path, ['reads a dir'])).toBe(false)
-    // Generous, for a busy runner: what keeps it fast is the cut, checked above.
-    expect(performance.now() - started).toBeLessThan(5_000)
+    // Read once cut, a line of 300 KB costs no more than one eight times shorter, wherever it runs.
+    const read = (text: string) => validRed(run(text, 1, path), path, ['reads a dir'])
+    expect(growth(output, 9_375, read)).toBeLessThan(24)
   })
 
   test('a pytest id after a space in a case id, or in a summary line’s message, is not that test', () => {
@@ -1911,13 +1930,13 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
 
   test('a template-literal name against a failing line of 300 KB is read quickly, the line cut to a few KB', () => {
     const path = 'tests/export.test.ts'
-    const output = `× ${'a '.repeat(150_000)}\nexpect(1).toBe(2)\n`
-    const classified = run(output, 1, path)
+    const output = (size: number) => `× ${'a '.repeat(size)}\nexpect(1).toBe(2)\n`
+    const classified = run(output(150_000), 1, path)
     expect(classified.failingLines[0]?.length).toBeLessThanOrEqual(8_192)
-    const started = performance.now()
     expect(validRed(classified, path, ['${a} to ${b}'])).toBe(false)
-    // Generous: 17 s before the cut; a busy runner stays far below this.
-    expect(performance.now() - started).toBeLessThan(5_000)
+    // 17 s before the cut, growing faster than the line; cut, no more than a line eight times shorter.
+    const read = (text: string) => validRed(run(text, 1, path), path, ['${a} to ${b}'])
+    expect(growth(output, 18_750, read)).toBeLessThan(24)
   })
 
   test('a Go subtest Go renamed with #01, as a duplicate name, is a red by its name', () => {
@@ -2059,13 +2078,12 @@ describe('A red read from what a runner prints around the error (#303, round 2)'
   test('blank and space-only lines after a failure are read in linear time', () => {
     const path = 'tests/export.test.ts'
     const outputs = [
-      `× a\n${'\n'.repeat(40_000)}`,
-      `× a\n${`${' '.repeat(1_000)}\n`.repeat(5_000)}`,
-    ]
-    const started = performance.now()
-    for (const output of outputs) expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
-    // Generous, for a busy runner: quadratic, these took ten seconds and more.
-    expect(performance.now() - started).toBeLessThan(5_000)
+      [(size: number) => `× a\n${'\n'.repeat(size)}`, 5_000],
+      [(size: number) => `× a\n${`${' '.repeat(1_000)}\n`.repeat(size)}`, 250],
+    ] as const
+    const read = (output: string) => expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
+    // Quadratic, these took ten seconds and more: eight times the lines cost about eight times more.
+    for (const [output, size] of outputs) expect(growth(output, size, read)).toBeLessThan(24)
   })
 
   test('a Go testify assertion that failed in the test the proof adds is a red', () => {
@@ -2175,15 +2193,16 @@ describe('A red read from its own lines only (#331)', () => {
 
   test('lines that repeat expect( or assertion without closing them are read in linear time', () => {
     const path = 'tests/export.test.ts'
+    // Lines that grow up to the 4 KB a line is read to, and one line far past it.
     const outputs = [
-      `× a\n${`${'expect('.repeat(580)}\n`.repeat(1_000)}`,
-      `× a\n${'expect('.repeat(43_000)}`,
-      `× a\n${`${'assertion '.repeat(400)}\n`.repeat(1_000)}`,
-    ]
-    const started = performance.now()
-    for (const output of outputs) expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
-    // Generous, for a busy runner: quadratic, these took fifteen seconds and more.
-    expect(performance.now() - started).toBeLessThan(5_000)
+      [(size: number) => `× a\n${`${'expect('.repeat(size)}\n`.repeat(100)}`, 72],
+      [(size: number) => `× a\n${`${'assertion '.repeat(size)}\n`.repeat(100)}`, 50],
+      [(size: number) => `× a\n${'expect('.repeat(size)}`, 5_000],
+    ] as const
+    const read = (output: string) => expect(validRed(run(output, 1, path), path, ['b'])).toBe(false)
+    // Quadratic in a line's length, these took fifteen seconds and more (about 50 times longer for
+    // lines eight times longer); linear, about 8.
+    for (const [output, size] of outputs) expect(growth(output, size, read)).toBeLessThan(24)
   })
 })
 
@@ -2229,5 +2248,97 @@ describe('A red read from its own lines only, the real reds kept (#331, round 2)
     expect(validRed(run(output, 1, path), path, ['reads it back'])).toBe(true)
     expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
     expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+  })
+})
+
+describe('A red read failure by failure, each runner by its own reader (#342)', () => {
+  test('a pytest ExceptionGroup holding an AssertionError is a red, its summary without a message; one holding a TypeError is not', () => {
+    const path = 'tests/test_export_of_the_invoices_as_markdown_files.py'
+    for (const name of ['pytest-group-long', 'pytest-group-native']) {
+      const output = captured(name)
+      const red = (declared: string) => validRed(run(output, 1, path), path, [declared])
+      expect(red('test_the_invoices_export_as_markdown_in_a_task_group')).toBe(true)
+      expect(red('test_the_invoices_export_as_markdown_with_a_type_error_in_a_task_group')).toBe(
+        false,
+      )
+      expect(red('test_one_is_one')).toBe(true)
+    }
+    // A group holding an assertion and a TypeError: not every exception it holds is an assertion.
+    const mixed = captured('pytest-group-mixed')
+    const mixedPath = 'tests/test_group_mixed.py'
+    const names = ['test_the_invoices_export_as_markdown_in_a_mixed_task_group']
+    expect(validRed(run(mixed, 1, mixedPath), mixedPath, names)).toBe(false)
+  })
+
+  test('a pytest.fail message whose next line reads AssertionError is not a red', () => {
+    const path = 'tests/test_export_of_the_invoices_as_markdown_files.py'
+    for (const name of ['pytest-group-long', 'pytest-group-native']) {
+      const output = captured(name)
+      const names = ['test_the_invoices_export_as_markdown_failed_by_hand']
+      expect(validRed(run(output, 1, path), path, names)).toBe(false)
+    }
+  })
+
+  test('a mocha title starting with a space keeps its test’s name', () => {
+    const path = 'test/export.spec.js'
+    const output = captured('mocha-title-leading-space')
+    expect(validRed(run(output, 1, path), path, [' writes markdown'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, SCENARIO)).toBe(false)
+  })
+
+  test('a mocha describe named like the test the proof adds is not that test', () => {
+    const path = 'test/describe.spec.js'
+    const output = captured('mocha-describe-named-like-a-test')
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['one is one'])).toBe(true)
+  })
+
+  test('a JUnit report’s pytest case and Rust path are read by the test’s declared name', () => {
+    const path = 'tests/test_report.py'
+    const pytest = captured('pytest-junit')
+    expect(validRed(run(pytest, 1, path), path, ['test_exports'])).toBe(true)
+    expect(validRed(run(pytest, 1, path), path, ['test_export'])).toBe(false)
+    const nextest = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<testsuites name="nextest-run" tests="3" failures="2" errors="0">',
+      '  <testsuite name="acme" tests="3" disabled="0" errors="0" failures="2">',
+      '    <testcase name="tests::one_is_one" classname="acme" time="0.002"></testcase>',
+      '    <testcase name="tests::exports_markdown" classname="acme" time="0.004">',
+      '      <failure type="test failure">assertion `left == right` failed</failure>',
+      '    </testcase>',
+      '    <testcase name="tests::exports_cases::case_1" classname="acme" time="0.004">',
+      '      <failure type="test failure">assertion `left == right` failed</failure>',
+      '    </testcase>',
+      '  </testsuite>',
+      '</testsuites>',
+    ].join('\n')
+    const lib = 'src/lib.rs'
+    expect(validRed(run(nextest, 100, lib), lib, ['exports_markdown'])).toBe(true)
+    expect(validRed(run(nextest, 100, lib), lib, rustTests(['exports_cases']))).toBe(true)
+    expect(validRed(run(nextest, 100, lib), lib, ['one_is_one'])).toBe(false)
+    expect(validRed(run(nextest, 100, lib), lib, rustTests(['reads_rows']))).toBe(false)
+  })
+
+  test('a libtest stdout heading a test prints before the failures list is not a failure', () => {
+    const path = 'src/lib.rs'
+    const output = [
+      'running 2 tests',
+      '---- tests::exports_markdown stdout ----',
+      'assertion `left == right` failed',
+      'test tests::exports_markdown ... ok',
+      'test tests::one_is_one ... FAILED',
+      '',
+      'failures:',
+      '',
+      '---- tests::one_is_one stdout ----',
+      "thread 'tests::one_is_one' panicked at src/lib.rs:9:5:",
+      'assertion `left == right` failed',
+      '',
+      'failures:',
+      '    tests::one_is_one',
+    ].join('\n')
+    expect(validRed(run(output, 101, path), path, ['exports_markdown'])).toBe(false)
+    expect(validRed(run(output, 101, path), path, ['one_is_one'])).toBe(true)
   })
 })
