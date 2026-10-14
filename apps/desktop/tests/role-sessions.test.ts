@@ -10,7 +10,7 @@ import { realpathSync } from 'node:fs'
 
 import { deliveryBlock } from '@hemera/core/domain'
 
-import { Deferred, Effect, Fiber, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -67,6 +67,7 @@ import {
   acmeIn,
   agentsFound,
   held,
+  heldSweeps,
   sessionsEngine,
   text,
   until,
@@ -641,10 +642,11 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose own command runs, silent, is not stuck', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
       (index) =>
         index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
-      { timings: SILENCE },
+      sweeps,
     )
     const state = await run(({ profile }) =>
       within(
@@ -663,7 +665,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
             sessionId: session.id,
             missionId: mission.id,
           })
-          yield* Effect.sleep('1 second')
+          // Silent past the bound, then looked at.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           const now = (yield* getSession(session.id)).state
           yield* stopRun(started.id)
           hold.release()
@@ -676,12 +680,14 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose silent command ran past the bound is not stuck as the command ends', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
       (index) =>
         index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
-      { timings: SILENCE },
+      // Its agent starts slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
-    const state = await run(({ profile }) =>
+    const states = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -698,23 +704,29 @@ describe('Silence, waiting and stuck (CT-12)', () => {
             sessionId: session.id,
             missionId: mission.id,
           })
-          yield* Effect.sleep('700 millis')
+          // Silent past the bound, its command running.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
+          const running = (yield* getSession(session.id)).state
           yield* stopRun(started.id)
           // Swept more than once before the agent reports the command's end.
-          yield* Effect.sleep('250 millis')
-          const now = (yield* getSession(session.id)).state
+          yield* sweeps.swept
+          yield* sweeps.swept
+          const ended = (yield* getSession(session.id)).state
           hold.release()
-          return now
+          return [running, ended]
         }),
       ),
     )
-    expect(state).toBe('working')
+    expect(states).toEqual(['working', 'working'])
   })
 
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
-    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
-      timings: SILENCE,
-    })
+    const sweeps = heldSweeps()
+    const { run } = engine(
+      () => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }),
+      sweeps,
+    )
     const state = await run(({ profile }) =>
       within(
         profile,
@@ -722,7 +734,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
           yield* settled(session.id)
-          yield* Effect.sleep('1 second')
+          // Idle past the bound, then looked at.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           return (yield* getSession(session.id)).state
         }),
       ),
@@ -732,33 +746,38 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a provider’s wait keeps a long turn alive', async () => {
     // One wait longer than the stuck bound: the provider's retry outlasts it, then the turn ends.
-    let seen = 0
-    const pause = () => {
-      seen += 1
-      return new Promise<void>((resolve) => setTimeout(resolve, seen === 2 ? 1000 : 0))
-    }
+    const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
-      () => ({
-        between: pause,
-        steps: [
-          { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-          { does: 'says', text: 'done' },
-        ],
-      }),
-      { timings: SILENCE },
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
+              { does: 'says', text: 'done' },
+            ])
+          : {},
+      sweeps,
     )
-    const state = await run(({ profile }) =>
+    const states = await run(({ profile, lines }) =>
       within(
         profile,
         Effect.gen(function* () {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
+          // Its wait is heard, then lasts past the bound.
+          yield* until(
+            Effect.sync(() => lines.some((line) => line.includes(`${session.id} waits on`))),
+          )
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
+          const waiting = (yield* getSession(session.id)).state
+          hold.release()
           yield* settled(session.id)
-          return (yield* getSession(session.id)).state
+          return [waiting, (yield* getSession(session.id)).state]
         }),
       ),
     )
-    expect(state).toBe('idle')
+    expect(states).toEqual(['working', 'idle'])
     expect(world.agents).toHaveLength(1)
   })
 })
@@ -1225,7 +1244,7 @@ describe('stopTree', () => {
     const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
       children: true,
     })
-    const [stopped, order] = await run(({ profile }) =>
+    const [stopped, order, gone] = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -1237,6 +1256,10 @@ describe('stopTree', () => {
           const deeper = yield* opened(owner, main, 'helper', 'claude', helper)
           yield* settled(deeper.id)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
+          // Each child's end, as the supervisor saw it by the time the stop returned.
+          const exits = yield* Effect.forEach(world.children, (child) =>
+            Effect.map(Effect.timeoutOption(child.exited, Duration.zero), Option.isSome),
+          )
           const database = yield* Database
           const events = yield* database
             .select()
@@ -1246,14 +1269,15 @@ describe('stopTree', () => {
           return [
             yield* Effect.forEach([builder, helper, deeper], (one) => getSession(one.id)),
             [events.map((event) => event.entityId), [deeper.id, helper.id, builder.id]],
+            exits,
           ] as const
         }),
       ),
     )
     expect(stopped.map((one) => one.state)).toEqual(['ended', 'ended', 'ended'])
     expect(order[0]).toEqual(order[1])
-    expect(world.pids).toHaveLength(3)
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Never `process.kill(pid, 0)` once a child ended: Windows hands its pid to the next process.
+    expect(gone).toEqual([true, true, true])
   })
 })
 
@@ -1485,15 +1509,12 @@ describe('A session stopped while its agent starts leaves nothing', () => {
           yield* Effect.promise(() => reached.promise)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
           hold.release()
+          // Its child's end, as the supervisor sees it: a freed pid may already be another's.
           yield* until(
-            Effect.sync(() => {
-              try {
-                process.kill(world.pids[0] ?? 0, 0)
-                return false
-              } catch {
-                return true
-              }
-            }),
+            Effect.map(
+              Effect.timeoutOption(world.children[0]?.exited ?? Effect.never, Duration.zero),
+              Option.isSome,
+            ),
           )
         }),
       ),
