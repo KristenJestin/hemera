@@ -53,6 +53,7 @@ import { type RoleSession, getSession, sessionsOfLineage } from '../sessions/sto
 import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
+import { evidenceRead, reviewHeld } from '../review/gate.ts'
 import type { RunServices } from '../runs.ts'
 import { Secrets, type SecretsRegistry } from '../secrets.ts'
 import { refusedWhile } from '../storage/database.ts'
@@ -638,6 +639,9 @@ export const toolGateLayer = (settings: GateSettings) =>
           }
           const entry = TOOLS[name]
           noted.gateClass = entry.gate
+          // 2. While the user reviews, the mission's sessions write and run nothing (#341).
+          const held = yield* reviewHeld(grant.missionId, name)
+          if (held !== null) return refused(refusal(held))
           // A proposal's values are masked before its arguments are read, even when they do not.
           if (name === 'setup_propose') yield* SetupDesk.use((desk) => desk.heard(raw))
           // 3. The arguments decode with its schema.
@@ -944,6 +948,15 @@ export const toolGateLayer = (settings: GateSettings) =>
           const prepared = yield* prepare(grant, asked.tool, asked.arguments, noted)
           if (Result.isFailure(prepared)) return prepared.failure
           const { session, path, judged } = prepared.success
+
+          // An image of a mission's evidence: answered to its own sessions, refused to others (#341).
+          if (prepared.success.call.tool === 'fs_read' && path !== null) {
+            const evidence = yield* evidenceRead(session, path.resolved)
+            if (evidence !== null) {
+              noted.verdictBy = 'places'
+              return evidence
+            }
+          }
 
           if (judged === null) {
             // 5. Workflow tools: the places rule, never a question.

@@ -80,9 +80,11 @@ export function commandsEngine(
     | 'forge'
     | 'jira'
     | 'snapshots'
+    | 'database'
     | 'ticketProviders'
     | 'ticketSync'
     | 'building'
+    | 'review'
     | 'hostProcesses'
     | 'runs'
   > &

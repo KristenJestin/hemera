@@ -91,6 +91,8 @@ export type SnapshotOwner =
   | { readonly kind: 'review_exit'; readonly missionId: string; readonly buildingId: string }
   /** The Workspace as the live diff last read it (#249). */
   | { readonly kind: 'live'; readonly missionId: string }
+  /** The Workspace a code comment of Review was written on, kept as long as the mission (#341). */
+  | { readonly kind: 'feedback'; readonly missionId: string; readonly feedbackId: string }
 
 /** Git's letter for a change: added, modified, deleted, renamed, or its type changed. */
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'T'
@@ -286,6 +288,8 @@ export function refOf(owner: SnapshotOwner, repository: string): string {
       return `${mission}/buildings/${owner.buildingId}/review-exit/${leaf}`
     case 'live':
       return `${mission}/live/${leaf}`
+    case 'feedback':
+      return `${mission}/feedback/${owner.feedbackId}/${leaf}`
   }
 }
 
@@ -308,6 +312,8 @@ export function ownerText(owner: SnapshotOwner): string {
       return `the end of Building ${owner.buildingId}`
     case 'live':
       return 'the live diff'
+    case 'feedback':
+      return `the comment ${owner.feedbackId}`
   }
 }
 

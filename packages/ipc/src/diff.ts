@@ -58,6 +58,8 @@ export const DiffRepository = Schema.Struct({
   baseBranch: Schema.NullOr(Schema.String),
   /** The commit the diff starts from, null for a repository with no commit yet. */
   baseCommit: Schema.NullOr(Schema.String),
+  /** The tree the list was computed on, which a code comment names (#341); null when unread. */
+  tree: Schema.NullOr(Schema.String),
   files: Schema.Array(DiffFile),
   added: Schema.Number,
   removed: Schema.Number,
