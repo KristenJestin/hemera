@@ -24,7 +24,7 @@
  * Pure rules: the engine stores them, reads the forges and the catalogue, and copies the sections.
  */
 
-import { Option, Result, Schema } from 'effect'
+import { Option, Schema } from 'effect'
 
 // ——— The values ———
 
@@ -1073,15 +1073,6 @@ export function validateRules(
     )
   }
   return problems
-}
-
-/** The rules, or every reason they are refused. */
-export const checkedRules = (
-  rules: DeliveryRulesDraft,
-  project: DeliveryProject,
-): Result.Result<DeliveryRulesDraft, ReadonlyArray<DeliveryProblem>> => {
-  const problems = validateRules(rules, project)
-  return problems.length === 0 ? Result.succeed(rules) : Result.fail(problems)
 }
 
 // ——— The sections a mission copies (CT-47) ———
