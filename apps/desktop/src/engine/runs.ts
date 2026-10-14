@@ -50,6 +50,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import {
   Context,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -174,6 +175,8 @@ export class LaunchWithdrawn extends Schema.TaggedError<LaunchWithdrawn>()('Laun
 
 /** What a run of a declared command waits for: its mission's reservations, left at its end. */
 export interface RunReservation {
+  /** The names of the resources it waits for. */
+  readonly names: ReadonlyArray<string>
   /**
    * Waits until its mission holds every resource its command is declared on, each ready. Each one
    * taken is left once `ended` is done, promised in the very step that takes it, so no stop can
@@ -547,6 +550,11 @@ export interface RunAsked {
   /** The reset of a reservation its mission has just taken: it does not wait for it (#88). */
   readonly reserved?: boolean
   /**
+   * How long it may wait for its reservation before it is given up, failed and never started: a
+   * proof's, so the end of a Building never waits for good on a resource held elsewhere (#306).
+   */
+  readonly waitLimit?: Duration.Duration
+  /**
    * The intent of the action the run is (CT-09), written as its process launches, in the same
    * step: a run that waited and never launched leaves none, so nothing is "maybe done" for it.
    */
@@ -770,10 +778,26 @@ export const startRun = (asked: RunAsked) =>
           ),
       }),
     )
+    /** The wait for the reservation, given up past the run's limit when it has one (#306). */
+    const reserving = (held: RunReservation) => {
+      const waiting = held.wait(Deferred.await(live.ended))
+      const limit = asked.waitLimit
+      return limit === undefined
+        ? waiting
+        : Effect.timeoutOrElse(waiting, {
+            duration: limit,
+            orElse: () =>
+              Effect.fail(
+                new ReservationLost({
+                  reason: `it waited ${Duration.format(limit)} for ${held.names.join(', ')}, held elsewhere`,
+                }),
+              ),
+          })
+    }
     const proceed =
       reservation === null
         ? started
-        : reservation.wait(Deferred.await(live.ended)).pipe(
+        : reserving(reservation).pipe(
             Effect.matchEffect({
               onFailure: (lost) =>
                 Effect.andThen(

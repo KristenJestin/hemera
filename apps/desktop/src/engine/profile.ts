@@ -56,7 +56,7 @@ import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
-import { END_NEEDS, buildingEndLayer } from './building/end.ts'
+import { END_NEEDS, type EndHold, buildingEndLayer } from './building/end.ts'
 import { autoReviewLayer } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
@@ -298,6 +298,8 @@ export interface ProfileParts {
         readonly end?: Layer.Layer<BuildingEnd, never, Database | DomainEvents | Secrets>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold | undefined
+        /** Where a suite holds the end of a Building as it takes in a Builder's turn end. */
+        readonly endHold?: EndHold | undefined
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
         readonly outside?: Partial<OutsideSettings>
         /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */
@@ -539,7 +541,7 @@ export const startProfile = (
     // The Builder, and where its needs' answers go (#141).
     const builder = builderLayer(log, parts.building?.hold)
     // The end of a Building, and where the answers to the review's findings go (#147).
-    const ending = buildingEndLayer(log)
+    const ending = buildingEndLayer(log, parts.building?.endHold)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
     const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
     const wrapped = parts.snapshots

@@ -123,12 +123,13 @@ export interface LoopParts {
   readonly hold: (
     at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'mid-commit' | 'cutting',
   ) => Effect.Effect<void>
-  /** A delivery to a lineage of the mission, or to its Builder. */
+  /** A delivery to a lineage of the mission, or to its Builder; under `id` when one is given. */
   readonly deliver: (
     building: BuildingRow,
     target: { readonly lineage: string } | { readonly role: string },
     kind: string,
     body: string,
+    id?: string,
   ) => Effect.Effect<void, DatabaseError>
   /** A watched command of a task ended: the commits it held back may be made now. */
   readonly ran: (building: BuildingRow) => Effect.Effect<void>
@@ -1361,6 +1362,7 @@ export const buildingLoop = (parts: LoopParts) => {
           }
         }),
       )
+      // Under the attempt's id: the end reads when a turn of the Builder took it (#306).
       yield* deliver(
         building,
         target,
@@ -1370,6 +1372,7 @@ export const buildingLoop = (parts: LoopParts) => {
           results,
           `Attempt ${String(number)} on ${scope === 'end' ? 'the end' : (subject ?? '')} is yours: fix it without changing any task's state.`,
         ),
+        next,
       )
       return verdict
     })
