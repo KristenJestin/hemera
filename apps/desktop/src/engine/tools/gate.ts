@@ -49,6 +49,7 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { getAgentSession } from '../agents/sessions.ts'
+import { agentText } from '../agents/text.ts'
 import { type RoleSession, getSession, sessionsOfLineage } from '../sessions/store.ts'
 import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
@@ -275,7 +276,7 @@ const argumentsKept = (
 ): Masked<string> => {
   const args = withoutProposedValues(tool, given)
   const masked = Option.match(readArgumentFields(args), {
-    onNone: () => secrets.mask(JSON.stringify(args)),
+    onNone: () => secrets.mask(agentText(args)),
     onSome: (fields) => maskedJson(secrets.maskRecord(fields)),
   })
   return masked.length > ARGUMENTS_KEPT

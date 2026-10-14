@@ -12,8 +12,7 @@
  */
 
 import { MASK, NESTING_LIMIT } from '@hemera/core/domain'
-import { Predicate } from 'effect'
-import type { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 
 /** What `JSON.stringify` calls a replacer: it is given every value, the root under `''`. */
 export type Replacer = (key: string, held: Schema.Json) => Schema.Json
@@ -77,3 +76,8 @@ export const agentText = (value: Schema.Json, replace?: Replacer): string => {
     return MASKED
   }
 }
+
+const readText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+/** A value as `agentText` writes it, kept as a value: the same, with what nests too deep cut. */
+export const cutJson = (value: Schema.Json): Schema.Json => readText(agentText(value))
