@@ -225,7 +225,7 @@ export function maskShapes(text: string): string {
 }
 
 function* shapesMasked(text: string): Steps<string> {
-  if (untouched(text, [])) return text
+  if (yield* untouched(text, [])) return text
   let masked = text
   for (const shape of SHAPES) masked = yield* applied(masked, yield* shapeEdits(masked, shape))
   return masked
@@ -302,7 +302,7 @@ const maskKnown = (text: string, known: ReadonlyArray<string>): string =>
 
 /** Text with its known values masked, then the shapes of credentials. */
 function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
-  if (untouched(text, known)) return text
+  if (yield* untouched(text, known)) return text
   return yield* shapesMasked(yield* knownMasked(text, known))
 }
 
@@ -310,9 +310,15 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
  * Whether masking leaves a text as it is: no known value in it, and no shape. Most strings of a
  * JSON answer hold nothing to mask, and this answers for them without the steps' cost.
  */
-const untouched = (text: string, known: ReadonlyArray<string>): boolean =>
-  known.every((value) => !text.includes(value)) &&
-  SHAPES.every(([pattern]) => matchFrom(pattern, text, 0) === null)
+function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
+  if (known.some((value) => text.includes(value))) return false
+  for (const [pattern] of SHAPES) {
+    if (matchFrom(pattern, text, 0) !== null) return false
+    // A step after each pattern on a long text: each crosses all of it.
+    if (text.length > CHARACTERS_A_STEP) yield
+  }
+  return true
+}
 
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
