@@ -62,6 +62,7 @@ import {
   SILENCE,
   everyAgentFound,
   held,
+  heldSweeps,
   sessionsEngine,
   text,
   until,
@@ -1762,10 +1763,12 @@ describe('The pass as its LiveChip follows it', () => {
 
   test('a session silent in its turn makes the chip stuck; its replacement speaks, the chip is not, and it reports', async () => {
     const hold = held()
-    const { run } = coldReading(
+    const sweeps = heldSweeps()
+    const { world, run } = coldReading(
       (index) =>
         index === 0 ? { steps: [says('Reading.')], between: () => hold.promise } : reading(),
-      { timings: SILENCE },
+      // Its agents start slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1774,6 +1777,10 @@ describe('The pass as its LiveChip follows it', () => {
           const { mission, grantId } = yield* planned
           yield* writeComplete(grantId)
           yield* declare(grantId)
+          // Its turn begun, then silent past the bound, and looked at.
+          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) > 0))
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           yield* until(
             Effect.map(eventsOf(mission.id, 'planning.cold_read_stuck'), (rows) => rows.length > 0),
           )

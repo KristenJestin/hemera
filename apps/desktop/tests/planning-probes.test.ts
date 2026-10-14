@@ -82,7 +82,16 @@ import { ToolAccess } from '../src/engine/tools/access.ts'
 import { PermissionRequests } from '../src/engine/tools/ports.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
 import { commitOnRemote, git, remote, repository } from './repositories.ts'
-import { SILENCE, type World, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import {
+  SILENCE,
+  type World,
+  held,
+  heldSweeps,
+  sessionsEngine,
+  text,
+  until,
+  within,
+} from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 
@@ -1748,6 +1757,7 @@ describe('A restored Profile’s Probes (#4’s registry)', () => {
 describe('Stuck (#40’s rule)', () => {
   test('a Probe silent in a turn past the bound is stuck, its Planner told; not while its command runs', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     let longId = ''
     const { world, run } = probing(
       (index) => {
@@ -1760,7 +1770,8 @@ describe('Stuck (#40’s rule)', () => {
         if (index === 1) return { steps: [says('Silent.')], between: () => hold.promise }
         return { steps: [says('Back.')] }
       },
-      { timings: SILENCE },
+      // Its agents start slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1780,6 +1791,10 @@ describe('Stuck (#40’s rule)', () => {
           yield* until(Effect.sync(() => runs.live.size === 1))
           yield* launch(grantId, 'does the importer keep accents?')
           yield* probeIn(mission.id, 2, ['running'])
+          // Its turn begun, silent past the bound, its sibling's command running all along: looked at.
+          yield* until(Effect.sync(() => (world.agents[1]?.answers.prompts.length ?? 0) > 0))
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           // Stuck is told by its event: the fresh session may speak before a row is read.
           yield* until(Effect.map(eventsOf(mission.id, 'probe.stuck'), (rows) => rows.length > 0))
           const database = yield* Database
