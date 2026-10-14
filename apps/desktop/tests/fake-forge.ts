@@ -101,6 +101,8 @@ export interface FakeForge {
   readonly calls: () => ReadonlyArray<FakeCall>
   /** Replaces the rules. */
   readonly answer: (rules: ReadonlyArray<FakeRule>) => void
+  /** Puts a CLI that was missing on the `PATH`, as the user installing it does. */
+  readonly install: (cli: FakeCli) => void
 }
 
 /** The fakes, for the CLIs named (both unless told): a CLI not named is missing from the `PATH`. */
@@ -118,7 +120,7 @@ export function fakeForge(
   writeFileSync(rulesFile, JSON.stringify(rules))
   writeFileSync(log, '')
   mkdirSync(folder)
-  for (const cli of clis) {
+  const install = (cli: FakeCli) => {
     if (process.platform === 'win32') {
       writeFileSync(
         join(folder, `${cli}.cmd`),
@@ -137,6 +139,7 @@ export function fakeForge(
       chmodSync(file, 0o755)
     }
   }
+  for (const cli of clis) install(cli)
   const env: FakeForge['env'] & Record<string, string> = {
     PATH: folder,
     GH_CONFIG_DIR: userConfig,
@@ -163,6 +166,7 @@ export function fakeForge(
           return call
         }),
     answer: (next) => writeFileSync(rulesFile, JSON.stringify(next)),
+    install,
   }
 }
 

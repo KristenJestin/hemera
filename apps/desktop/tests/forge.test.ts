@@ -2344,3 +2344,95 @@ describe('A write that may have reached the forge is indeterminate, never failed
     },
   )
 })
+
+/** The pending need's text: what is missing, and what to do. */
+const needText = Effect.map(pendingNeeds, (pending) =>
+  pending.flatMap((need) =>
+    Predicate.isTagged(need.fields, 'Environment')
+      ? [{ id: need.id, missing: need.fields.missing, action: need.fields.action }]
+      : [],
+  ),
+)
+
+describe('A pending need says what the CLI lacks now, not what it lacked when it was made', () => {
+  test('gh missing, then installed but signed out: the need now says to sign in', async () => {
+    const fake = fakeForge(ghSignedOut(), ['bkt'])
+    const { before, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const missing = yield* needText
+          fake.install('gh')
+          yield* port.checkAgain(projectId, null)
+          return { before: missing, after: yield* needText }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(before).toEqual([
+      {
+        id: expect.any(String),
+        missing: 'gh, to reach github.com: it is not on the PATH',
+        action: expect.stringContaining('Install it: '),
+      },
+    ])
+    expect(after).toEqual([
+      {
+        id: before[0]?.id,
+        missing: 'gh signed in on github.com',
+        action: 'Sign in: gh auth login --hostname github.com\nThen choose Check again.',
+      },
+    ])
+  })
+
+  test('bkt missing, signed out, signed in with no context, signed out again, then ready: the need says each in turn and goes', async () => {
+    const fake = fakeForge(BKT_SIGNED_OUT, ['gh'])
+    const { texts, login, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('api')))
+          yield* someNeed
+          const seen = [yield* needText]
+          fake.install('bkt')
+          for (const rules of [BKT_SIGNED_OUT, bktReady([BKT_CLOUD], []), BKT_SIGNED_OUT]) {
+            fake.answer(rules)
+            yield* port.checkAgain(projectId, null)
+            seen.push(yield* needText)
+          }
+          fake.answer(bktReady())
+          yield* port.checkAgain(projectId, null)
+          return { texts: seen, login: yield* Fiber.join(waiting), after: yield* pendingNeeds }
+        }),
+      { api: REMOTES.api },
+    )
+    const signIn = {
+      missing: 'bkt signed in on bitbucket.org',
+      action:
+        'Sign in: bkt auth login https://bitbucket.org --kind cloud --web\nThen choose Check again.',
+    }
+    expect(texts.map((text) => text.map(({ missing, action }) => ({ missing, action })))).toEqual([
+      [
+        {
+          missing: 'bkt, to reach bitbucket.org: it is not on the PATH',
+          action: expect.stringContaining('Install it: '),
+        },
+      ],
+      [signIn],
+      [
+        {
+          missing:
+            'a bkt context for bitbucket.org: bkt is signed in there, but has no context for it',
+          action: `Make one: bkt context create ${q('acme-team-bitbucket.org')} --host api.bitbucket.org --workspace ${q('acme-team')}\nThen choose Check again.`,
+        },
+      ],
+      [signIn],
+    ])
+    expect(new Set(texts.flatMap((text) => text.map((one) => one.id))).size).toBe(1)
+    expect(login).toBe('octo')
+    expect(after).toEqual([])
+  })
+})

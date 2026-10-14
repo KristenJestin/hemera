@@ -18,7 +18,7 @@
  *   `forge.forced` event.
  */
 
-import { EnvironmentFields, ProjectOwner } from '@hemera/core/domain'
+import { EnvironmentFields, type NeedFields, ProjectOwner, maskedJson } from '@hemera/core/domain'
 import {
   type CliState,
   type ForcedForge,
@@ -60,6 +60,7 @@ import {
   type NeedServices,
   createNeedIn,
   needService,
+  reviseNeedIn,
   withdrawNeed,
 } from '../needs.ts'
 import { getProject, getRepository } from '../projects.ts'
@@ -97,6 +98,8 @@ interface CliCheck {
   readonly detail: string | null
   /** The bkt context of the repository's host, which every bkt write names; null for gh. */
   readonly context: string | null
+  /** bkt is signed in on the host, but has no context for it: what its fix makes. */
+  readonly noContext?: boolean
 }
 
 /** A failure of an operation once its CLI was ready: the forge's own, or the call's. */
@@ -360,6 +363,48 @@ interface Known {
   readonly projectId: string
   readonly status: ForgeRepositoryStatus
   readonly context: string | null
+  /** Signed out for want of a bkt context only (`CliCheck.noContext`). */
+  readonly noContext: boolean
+}
+
+/** What a need says its CLI lacks, from the state a repository waiting on it was found in. */
+const needFields = (waiting: Known): NeedFields => {
+  const { status } = waiting
+  const cli = status.cli ?? 'the forge CLI'
+  const host = status.host ?? ''
+  const fix = status.fix ?? ''
+  return Match.value(status.state).pipe(
+    Match.when('missing', () =>
+      EnvironmentFields.make({
+        missing: `${cli}, to reach ${host}: it is not on the PATH`,
+        action: `Install it: ${fix}\nThen choose Check again.`,
+        settingsSection: null,
+      }),
+    ),
+    Match.when('signed-out', () =>
+      waiting.noContext
+        ? EnvironmentFields.make({
+            missing: `a bkt context for ${host}: bkt is signed in there, but has no context for it`,
+            action:
+              status.fix === null
+                ? `Make one with bkt context create, for ${host}.\nThen choose Check again.`
+                : `Make one: ${status.fix}\nThen choose Check again.`,
+            settingsSection: null,
+          })
+        : EnvironmentFields.make({
+            missing: `${cli} signed in on ${host}`,
+            action: `Sign in: ${fix}\nThen choose Check again.`,
+            settingsSection: null,
+          }),
+    ),
+    Match.orElse(() =>
+      EnvironmentFields.make({
+        missing: `${host}, which ${cli} could not reach: ${status.detail ?? ''}`,
+        action: 'Choose Check again once it is reachable.',
+        settingsSection: null,
+      }),
+    ),
+  )
 }
 
 /**
@@ -525,6 +570,7 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
                 fix: contextLine(forge, host, signedIn.key, owner),
                 detail: null,
                 context: null,
+                noContext: true,
               } satisfies CliCheck)
             : ({
                 version,
@@ -559,30 +605,52 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
         Effect.gen(function* () {
           const database = yield* Database
           return yield* database
-            .select({ id: forgeNeeds.needId, cli: forgeNeeds.cli, host: forgeNeeds.host })
+            .select({
+              id: forgeNeeds.needId,
+              cli: forgeNeeds.cli,
+              host: forgeNeeds.host,
+              fields: needs.fields,
+            })
             .from(forgeNeeds)
             .innerJoin(needs, eq(needs.id, forgeNeeds.needId))
             .where(and(eq(forgeNeeds.projectId, projectId), eq(needs.state, 'pending')))
             .pipe(Effect.mapError(refusedWhile('reading the forge needs')))
         })
 
-      /** Whether a repository of the Project still waits on this CLI and host, as last checked. */
-      const stillWaits = (
+      /** The first repository of the Project that still waits on this CLI and host, as last checked. */
+      const waitingOn = (
         project: Project,
         known: ReadonlyMap<string, Known>,
         cli: string,
         host: string,
-      ): boolean =>
-        project.repositories.some((repository) => {
-          const now = known.get(repository.id)?.status
-          return (
-            now !== undefined &&
-            now.cli === cli &&
-            now.host === host &&
-            now.state !== 'ready' &&
-            now.state !== 'not-needed'
+      ): Known | undefined =>
+        project.repositories
+          .map((repository) => known.get(repository.id))
+          .find(
+            (now) =>
+              now !== undefined &&
+              now.status.cli === cli &&
+              now.status.host === host &&
+              now.status.state !== 'ready' &&
+              now.status.state !== 'not-needed',
           )
-        })
+
+      /**
+       * A pending need's text rewritten when it no longer says what its CLI lacks now (#362): a gh
+       * the user installed, as the need said, is signed out, not missing.
+       */
+      const revised = (
+        need: { readonly id: string; readonly fields: string },
+        fields: NeedFields,
+      ) =>
+        maskedJson(secrets.maskRecord(fields)) === need.fields
+          ? Effect.void
+          : mutate('revising a forge need', (transaction) =>
+              Effect.map(reviseNeedIn(transaction, need.id, fields), (events) => ({
+                result: undefined,
+                events,
+              })),
+            )
 
       /**
        * A forge need's row: what it waits for matters only while it is pending, so it goes when the
@@ -622,7 +690,11 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
               const known = yield* SubscriptionRef.get(memory)
               yield* settings.settleHold ?? Effect.void
               for (const need of yield* pendingNeeds(projectId)) {
-                if (stillWaits(project, known, need.cli, need.host)) continue
+                const waiting = waitingOn(project, known, need.cli, need.host)
+                if (waiting !== undefined) {
+                  yield* revised(need, needFields(waiting))
+                  continue
+                }
                 yield* withdrawNeed(
                   need.id,
                   `nothing waits on ${need.cli} for ${need.host} any more`,
@@ -638,6 +710,7 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
         projectId: string,
         status: ForgeRepositoryStatus,
         bktContext: string | null,
+        noContext: boolean,
       ) =>
         Effect.gen(function* () {
           const before = (yield* SubscriptionRef.get(memory)).get(status.repositoryId)?.status
@@ -673,7 +746,12 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
             )
           }
           yield* SubscriptionRef.update(memory, (known) =>
-            new Map(known).set(status.repositoryId, { projectId, status, context: bktContext }),
+            new Map(known).set(status.repositoryId, {
+              projectId,
+              status,
+              context: bktContext,
+              noContext,
+            }),
           )
           return status
         })
@@ -698,6 +776,7 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
               project.id,
               statusOf(repository, identity, found),
               found?.context ?? null,
+              found?.noContext ?? false,
             )
           }
           yield* settleNeeds(project.id)
@@ -827,8 +906,10 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
           Effect.gen(function* () {
             // A check since may have found it ready, or forced elsewhere, and settled the needs
             // already: a need made now would wait on nothing.
-            const now = (yield* SubscriptionRef.get(memory)).get(waiting.repositoryId)?.status
+            const known = (yield* SubscriptionRef.get(memory)).get(waiting.repositoryId)
+            const now = known?.status
             if (
+              known === undefined ||
               now === undefined ||
               now.cli !== waiting.cli ||
               now.host !== waiting.host ||
@@ -839,32 +920,11 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
             }
             const cli = waiting.cli ?? 'the forge CLI'
             const host = waiting.host ?? ''
+            // Made once; the settle after each check keeps its text to what the CLI lacks now.
             const pending = yield* pendingNeeds(projectId)
             if (pending.some((one) => one.cli === cli && one.host === host)) return
-            const fix = waiting.fix ?? ''
-            const fields = Match.value(waiting.state).pipe(
-              Match.when('missing', () =>
-                EnvironmentFields.make({
-                  missing: `${cli}, to reach ${host}: it is not on the PATH`,
-                  action: `Install it: ${fix}\nThen choose Check again.`,
-                  settingsSection: null,
-                }),
-              ),
-              Match.when('signed-out', () =>
-                EnvironmentFields.make({
-                  missing: `${cli} signed in on ${host}`,
-                  action: `Sign in: ${fix}\nThen choose Check again.`,
-                  settingsSection: null,
-                }),
-              ),
-              Match.orElse(() =>
-                EnvironmentFields.make({
-                  missing: `${host}, which ${cli} could not reach: ${waiting.detail ?? ''}`,
-                  action: 'Choose Check again once it is reachable.',
-                  settingsSection: null,
-                }),
-              ),
-            )
+            // What it lacks as last checked, which a check since may have changed.
+            const fields = needFields(known)
             const written = yield* createNeedIn(
               FORGE_NEEDS,
               ProjectOwner.make({ projectId }),
@@ -1152,7 +1212,10 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
             if (waits === undefined) return false
             yield* checkAgain(waits.projectId, null)
             const project = yield* getProject(waits.projectId)
-            return stillWaits(project, yield* SubscriptionRef.get(memory), waits.cli, waits.host)
+            return (
+              waitingOn(project, yield* SubscriptionRef.get(memory), waits.cli, waits.host) !==
+              undefined
+            )
           }),
         ).pipe(Effect.catch(() => Effect.succeed(true)))
 
