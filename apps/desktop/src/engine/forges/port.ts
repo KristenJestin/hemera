@@ -366,7 +366,7 @@ interface Known {
  * The port, and the handler its needs' Retry reaches. The layer stands on the needs, Git and the
  * runner.
  */
-export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
+export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold'> = {}) => {
   let recheck: NeedHandler['recheck'] = undefined
 
   const handler: NeedHandler = {
@@ -604,21 +604,33 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
        * is ready for their host, or no repository of the Project reaches that host through it now
        * (forced elsewhere, gone). After a restart the states known are only those checked since,
        * and a repository not known yet may still wait on any of them: each such one is checked
-       * first, so a need is settled on the states of all the Project's repositories.
+       * first, so a need is settled on the states of all the Project's repositories. The states,
+       * the Project and the needs are read, and the needs withdrawn, under the lock a need is made
+       * under (`needFor`): a need is then either read with the state that made it, or made after.
        */
       // Typed: it checks the repositories not known yet, and a check settles in turn.
       const settleNeeds = (projectId: string): Effect.Effect<void, never, ForgePortServices> =>
         Effect.gen(function* () {
           if ((yield* pendingNeeds(projectId)).length === 0) return
-          const project = yield* getProject(projectId)
-          yield* statesOf(project)
-          const known = yield* SubscriptionRef.get(memory)
-          // Read again: the check of a repository not known yet settled what it could in turn.
-          for (const need of yield* pendingNeeds(projectId)) {
-            if (stillWaits(project, known, need.cli, need.host)) continue
-            yield* withdrawNeed(need.id, `nothing waits on ${need.cli} for ${need.host} any more`)
-            yield* forgetNeed(need.id)
-          }
+          yield* statesOf(yield* getProject(projectId))
+          yield* Semaphore.withPermits(
+            needing,
+            1,
+          )(
+            Effect.gen(function* () {
+              const project = yield* getProject(projectId)
+              const known = yield* SubscriptionRef.get(memory)
+              yield* settings.settleHold ?? Effect.void
+              for (const need of yield* pendingNeeds(projectId)) {
+                if (stillWaits(project, known, need.cli, need.host)) continue
+                yield* withdrawNeed(
+                  need.id,
+                  `nothing waits on ${need.cli} for ${need.host} any more`,
+                )
+                yield* forgetNeed(need.id)
+              }
+            }),
+          )
         }).pipe(Effect.catch(() => Effect.void))
 
       /** Remembers a repository's state; a change is written to the journal and told. */
@@ -803,13 +815,28 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
           return { project, repository, status: known.status, context: known.context }
         })
 
-      /** The Project's need for this CLI and host, made once however many operations wait. */
+      /**
+       * The Project's need for this CLI and host, made once however many operations wait, and only
+       * while the repository still waits on them as last checked.
+       */
       const needFor = (projectId: string, waiting: ForgeRepositoryStatus) =>
         Semaphore.withPermits(
           needing,
           1,
         )(
           Effect.gen(function* () {
+            // A check since may have found it ready, or forced elsewhere, and settled the needs
+            // already: a need made now would wait on nothing.
+            const now = (yield* SubscriptionRef.get(memory)).get(waiting.repositoryId)?.status
+            if (
+              now === undefined ||
+              now.cli !== waiting.cli ||
+              now.host !== waiting.host ||
+              now.state === 'ready' ||
+              now.state === 'not-needed'
+            ) {
+              return
+            }
             const cli = waiting.cli ?? 'the forge CLI'
             const host = waiting.host ?? ''
             const pending = yield* pendingNeeds(projectId)
@@ -945,9 +972,6 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold'> = {}) => {
                 ),
               )
               if (Option.isNone(looked)) continue
-              // Its need may have been made after a check found the CLI ready, which then had
-              // nothing to withdraw: an operation that waited settles the needs once it runs.
-              if (waitedIn !== null) yield* settleNeeds(waitedIn)
               const { project, status: now, context: bktContext } = looked.value
               if (now.cli === null || now.host === null || now.state === 'not-needed') {
                 return yield* new ForgeRefused({

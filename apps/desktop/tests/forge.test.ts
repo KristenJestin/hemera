@@ -681,6 +681,78 @@ describe('A need made as its CLI turned ready does not stay pending', () => {
   })
 })
 
+describe('A settle never withdraws a need made while it ran', () => {
+  test('a settle held between the states it read and the needs it reads, an operation on a repository that just signed out makes its need meanwhile: the need stays', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...bktReady()])
+    const held = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    let armed = false
+    const main = checkout(REMOTES)
+    const kept = await commandsEngine(data, {
+      forge: {
+        env: fake.env,
+        limits: { read: 2_000, write: 4_000 },
+        // Held once, when armed: the next settle, between the states it read and the needs it reads.
+        settleHold: Effect.suspend(() => {
+          if (!armed) return Effect.void
+          armed = false
+          return Effect.andThen(Deferred.succeed(held, undefined), Deferred.await(go))
+        }),
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop', 'api'],
+          })
+          const id = (path: string) =>
+            project.repositories.find((one) => one.path === path)?.id ?? ''
+          const port = yield* forge
+          // Both repositories known: gh signed out, bkt ready. An operation on shop waits.
+          yield* port.status(project.id)
+          yield* Effect.forkChild(port.currentUser(id('shop')))
+          yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('50 millis'),
+              until: (pending) => pending.length === 1,
+            }),
+          )
+          armed = true
+          const settling = yield* Effect.forkChild(port.checkAgain(project.id, id('shop')))
+          yield* Deferred.await(held)
+          // bkt signs out, and an operation on api finds it so while the settle is held.
+          fake.answer([...ghSignedOut(), ...BKT_SIGNED_OUT])
+          yield* Effect.forkChild(port.currentUser(id('api')))
+          // Its need, made meanwhile if nothing stops it; a second at most.
+          yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (pending) => pending.length === 2,
+            }),
+            Effect.timeoutOption('1 second'),
+          )
+          yield* Deferred.succeed(go, undefined)
+          yield* Fiber.join(settling)
+          return yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (pending) => pending.length === 2,
+            }),
+            Effect.timeoutOption('2 seconds'),
+            Effect.andThen(pendingNeeds),
+          )
+        }),
+      ),
+    )
+    expect(missingOf(kept).toSorted()).toEqual([
+      'bkt signed in on bitbucket.org',
+      'gh signed in on github.com',
+    ])
+  })
+})
+
 describe('A repository removed while nothing waits on it settles its need', () => {
   test('after a restart, the only repository waiting removed: its need is withdrawn and its row deleted, with no Retry', async () => {
     const fake = fakeForge([...ghSignedOut(), ...bktReady()])

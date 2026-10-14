@@ -49,6 +49,11 @@ export interface ForgeSettings {
    * held otherwise. The port's, not the runner's.
    */
   readonly waitHold?: Effect.Effect<void> | undefined
+  /**
+   * Where a suite holds a settle of the needs between the states it read and the needs it reads;
+   * never held otherwise. The port's, not the runner's.
+   */
+  readonly settleHold?: Effect.Effect<void> | undefined
 }
 
 /** One call: which CLI, for which forge and host, for which Project, with which arguments. */
