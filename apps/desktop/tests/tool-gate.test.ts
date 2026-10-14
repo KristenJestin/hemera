@@ -27,8 +27,9 @@ import { eq } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
+import { Sessions } from '../src/engine/sessions/service.ts'
+import { getSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { agentSessions, effectfulActions, toolCalls } from '../src/engine/storage/schema.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
@@ -36,6 +37,7 @@ import { placesForWorkflow } from '../src/engine/tools/gate.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
+import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
 import { endChild, removeFolders, temporaryFolder } from './storage.ts'
 import {
   ALLOW,
@@ -451,7 +453,7 @@ describe('The same call key executes once', () => {
 })
 
 describe('Writing only on the version that was read', () => {
-  const engine = (rebuildHold: Effect.Effect<void> = Effect.void) =>
+  const engine = () =>
     commandsEngine(data, {
       tools: { verdicts: verdictsSaying(() => ALLOW).layer },
       secrets: (() => {
@@ -459,7 +461,6 @@ describe('Writing only on the version that was read', () => {
         secrets.register('project-variables:acme', ['hunter2'])
         return secrets
       })(),
-      sessions: { rebuildHold },
     })
 
   test('fs_write on a file the session never read is refused if the file exists', async () => {
@@ -637,34 +638,71 @@ describe('Writing only on the version that was read', () => {
     )
   })
 
-  test('the fingerprint of a read survives a restart with the session', async () => {
-    let grant = ''
-    let mission = ''
-    const first = engine()
-    await first(({ profile }) =>
-      profile.use(
+  test('the session rebuilt at restart keeps the fingerprint of the read before it', async () => {
+    const verdicts = verdictsSaying(() => ALLOW).layer
+    // Its agent reads a.txt on its first turn, through Hemera's MCP server.
+    const before = sessionsEngine(
+      data,
+      () => ({
+        turns: [
+          [{ does: 'uses', id: 'toolu_read', tool: 'fs_read', arguments: { path: 'a.txt' } }],
+        ],
+        steps: [{ does: 'says', text: 'Read.' }],
+      }),
+      { tools: { verdicts } },
+    )
+    const builder = await before.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const made = yield* acmeWithMission(work)
-          mission = made.mission.id
-          writeFileSync(join(made.main, 'a.txt'), 'one\n')
-          const builder = yield* sessionOf('builder', made.main, { kind: 'mission', id: mission })
-          grant = builder.sessionId
-          yield* callTool(builder.grantId, 'fs_read', { path: 'a.txt' })
+          const { owner, main } = yield* acmeIn(work)
+          writeFileSync(join(main, 'a.txt'), 'one\n')
+          const session = yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', provider: 'claude', folder: main }),
+          )
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
+          return session
         }),
       ),
     )
-    // The start's rebuild would replace the session: held until the write is answered.
-    const rebuilt = Deferred.makeUnsafe<void>()
-    const answer = await engine(Deferred.await(rebuilt))(({ profile }) =>
-      profile.use(
+    expect(before.world.agents[0]?.answers.toolAnswers[0]?.text).toContain('one')
+    // The start's rebuild replaces the session; its successor's agent writes on its first turn.
+    const after = sessionsEngine(
+      data,
+      () => ({
+        turns: [
+          [
+            {
+              does: 'uses',
+              id: 'toolu_write',
+              tool: 'fs_write',
+              arguments: { path: 'a.txt', content: 'two\n' },
+            },
+          ],
+        ],
+        steps: [{ does: 'says', text: 'Written.' }],
+      }),
+      { tools: { verdicts } },
+    )
+    const [replaced, successors] = await after.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(grant))
-          const again = yield* ToolAccess.use((access) => access.byToken(token))
-          return yield* callTool(again?.id ?? '', 'fs_write', { path: 'a.txt', content: 'two\n' })
-        }).pipe(Effect.ensuring(Deferred.succeed(rebuilt, undefined))),
+          yield* until(
+            Effect.sync(() => (after.world.agents[0]?.answers.toolAnswers.length ?? 0) > 0),
+          )
+          return [
+            yield* getSession(builder.id),
+            yield* sessionsIn(['starting', 'working', 'idle'], builder.owner),
+          ] as const
+        }),
       ),
     )
-    expect(answer).toMatchObject({ ok: true })
+    expect(replaced.state).toBe('replaced')
+    expect(successors).toEqual([expect.objectContaining({ lineage: builder.lineage, epoch: 1 })])
+    expect(after.world.agents[0]?.answers.toolAnswers).toEqual([
+      { text: 'wrote a.txt (4 bytes)', isError: false },
+    ])
     expect(readFileSync(join(work, 'acme', 'a.txt'), 'utf8')).toBe('two\n')
   })
 })
