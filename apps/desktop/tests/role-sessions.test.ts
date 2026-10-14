@@ -10,7 +10,7 @@ import { realpathSync } from 'node:fs'
 
 import { deliveryBlock } from '@hemera/core/domain'
 
-import { Deferred, Effect, Fiber, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -1244,7 +1244,7 @@ describe('stopTree', () => {
     const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
       children: true,
     })
-    const [stopped, order] = await run(({ profile }) =>
+    const [stopped, order, gone] = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -1256,6 +1256,10 @@ describe('stopTree', () => {
           const deeper = yield* opened(owner, main, 'helper', 'claude', helper)
           yield* settled(deeper.id)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
+          // Each child's end, as the supervisor saw it by the time the stop returned.
+          const exits = yield* Effect.forEach(world.children, (child) =>
+            Effect.map(Effect.timeoutOption(child.exited, Duration.zero), Option.isSome),
+          )
           const database = yield* Database
           const events = yield* database
             .select()
@@ -1265,14 +1269,15 @@ describe('stopTree', () => {
           return [
             yield* Effect.forEach([builder, helper, deeper], (one) => getSession(one.id)),
             [events.map((event) => event.entityId), [deeper.id, helper.id, builder.id]],
+            exits,
           ] as const
         }),
       ),
     )
     expect(stopped.map((one) => one.state)).toEqual(['ended', 'ended', 'ended'])
     expect(order[0]).toEqual(order[1])
-    expect(world.pids).toHaveLength(3)
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Never `process.kill(pid, 0)` once a child ended: Windows hands its pid to the next process.
+    expect(gone).toEqual([true, true, true])
   })
 })
 
@@ -1504,15 +1509,12 @@ describe('A session stopped while its agent starts leaves nothing', () => {
           yield* Effect.promise(() => reached.promise)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
           hold.release()
+          // Its child's end, as the supervisor sees it: a freed pid may already be another's.
           yield* until(
-            Effect.sync(() => {
-              try {
-                process.kill(world.pids[0] ?? 0, 0)
-                return false
-              } catch {
-                return true
-              }
-            }),
+            Effect.map(
+              Effect.timeoutOption(world.children[0]?.exited ?? Effect.never, Duration.zero),
+              Option.isSome,
+            ),
           )
         }),
       ),

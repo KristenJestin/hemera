@@ -25,7 +25,7 @@ import type {
 import { createProject } from '../src/engine/projects.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { SESSION_TIMINGS, type SessionTimings } from '../src/engine/sessions/service.ts'
-import { ProcessSupervisor } from '../src/engine/supervisor.ts'
+import { ProcessSupervisor, type Supervised } from '../src/engine/supervisor.ts'
 import { STAYS_UP, commandsEngine, script } from './commands-engine.ts'
 import { repository } from './repositories.ts'
 import { TEST_ROLE } from './test-role.ts'
@@ -98,6 +98,8 @@ export const heldSweeps = () => {
 export interface World {
   readonly agents: FakeAgent[]
   readonly pids: number[]
+  /** Those children, whose ends the supervisor saw. */
+  readonly children: Supervised[]
 }
 
 /** Every agent found, each started as the fake one, but those named, which are not signed in. */
@@ -164,7 +166,7 @@ export const sessionsEngine = (
     readonly hostProcesses?: ProfileParts['hostProcesses']
   } = {},
 ) => {
-  const world: World = { agents: [], pids: [] }
+  const world: World = { agents: [], pids: [], children: [] }
   const starter = Layer.effect(
     AgentStarter,
     Effect.gen(function* () {
@@ -180,6 +182,7 @@ export const sessionsEngine = (
                 })
                 .pipe(Effect.orDie)
               world.pids.push(child.pid)
+              world.children.push(child)
             }
             if (options.starting !== undefined) yield* options.starting(sessionId)
             const agent = fakeAgent(scriptOf(world.agents.length))
