@@ -185,7 +185,7 @@ describe('What Jev answers', () => {
   })
 
   test('a network that refuses is a network failure', async () => {
-    await jev.close()
+    jev.refuse()
     expect(await ask()).toMatchObject({ kind: 'unavailable', failure: 'network' })
   })
 
