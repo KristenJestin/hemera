@@ -5694,6 +5694,64 @@ describe('A restart in the middle of the end', () => {
     expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
   })
 
+  test(
+    'a restart between the checkpoint’s taking and its saving: one review checkpoint for the Building, no orphan',
+    SLOW,
+    async () => {
+      const taken = held()
+      const before = ending({
+        // The engine stops once the review checkpoint is taken, before the end moves on.
+        endHold: (at) =>
+          at === 'checkpoint_taken'
+            ? Effect.andThen(
+                Effect.sync(() => taken.release()),
+                Effect.never,
+              )
+            : Effect.void,
+      })
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* Effect.promise(() => taken.promise)
+            return mission
+          }),
+        ),
+      )
+      const after = ending({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            const database = yield* Database
+            return {
+              checkpoints: yield* database
+                .select()
+                .from(checkpoints)
+                .where(and(eq(checkpoints.missionId, left.id), eq(checkpoints.kind, 'review'))),
+              buildings: yield* database
+                .select()
+                .from(buildings)
+                .where(eq(buildings.missionId, left.id)),
+              passes: yield* database.select().from(reviewPasses),
+            }
+          }),
+        ),
+      )
+      expect(seen.checkpoints).toHaveLength(1)
+      const [checkpoint] = seen.checkpoints
+      expect(seen.buildings.map((one) => one.reviewCheckpointId)).toEqual([checkpoint?.id])
+      expect(seen.passes.map((one) => one.checkpointId)).toEqual([checkpoint?.id, checkpoint?.id])
+    },
+  )
+
   test('a restart during the documenter’s pass runs the pass again', SLOW, async () => {
     const before = ending()
     const left = await before.run(({ profile }) =>
