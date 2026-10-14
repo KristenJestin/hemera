@@ -16,6 +16,9 @@ export interface PlanningStageCardProps {
   kept?: readonly KeptAgentView[] | undefined
 }
 
+/** No kept agent: one array for every card, so the default does not redraw a child that compares it. */
+const NO_KEPT: readonly KeptAgentView[] = []
+
 /**
  * Planning's stage card, at the top of the rail: the face, the line that says what happens or
  * what waits, where Planning stands, and the chips of what runs — the cold read, the Probes, and
@@ -25,7 +28,7 @@ export function PlanningStageCard({
   attention,
   data,
   onOpenProbe,
-  kept = [],
+  kept = NO_KEPT,
 }: PlanningStageCardProps): ReactNode {
   const pass = data.passes.at(-1)
   const reading =
