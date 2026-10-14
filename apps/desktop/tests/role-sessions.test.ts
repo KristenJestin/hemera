@@ -362,14 +362,18 @@ describe('Deliveries between turns (channel 1)', () => {
 describe('An urgent delivery is a note in the next Hemera tool result (channel 2)', () => {
   test('the note is appended once, to the next call’s result', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0
-        ? holding(hold, 1, [
-            { does: 'says', text: 'listing' },
-            { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
-            { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
-          ])
-        : {},
+    const { world, run } = engine(
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'says', text: 'listing' },
+              { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
+              { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
+            ])
+          : {},
+      // The pickup is on a clock only the test moves: under load, the call can reach the gate
+      // after the real 300 ms, and the note then travels as the next message instead.
+      { testClock: true },
     )
     const [id, row] = await run(({ profile }) =>
       within(
@@ -377,7 +381,9 @@ describe('An urgent delivery is a note in the next Hemera tool result (channel 2
         Effect.gen(function* () {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
-          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1)),
+          )
           const delivered = yield* Sessions.use((sessions) =>
             sessions.deliver({
               owner,
