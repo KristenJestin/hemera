@@ -256,7 +256,9 @@ jobs:
       # without a finished file and names the file; the cap stays for what happens before that.
       #
       # Vitest splits the repository suites in two by their files: the two halves together run
-      # every file, each once.
+      # every file, each once. The split follows the time each file took on these runners
+      # (`tools/test-shards.ts`), not the hash of its path, which had put the two slowest files
+      # in the same half: that half took 13 to 15 minutes, the other 8 to 10 (#359).
       - name: Test the repository suites
         if: startsWith(matrix.part, 'repository')
         working-directory: source

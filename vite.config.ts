@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite-plus'
 
+import TimedSequencer from './tools/test-shards.ts'
+
 /** Generated output is not part of the workspace: never linted, formatted, type checked or tested. */
 const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**', '**/dist/**']
 /** Vendored lint rules keep their upstream style so a resync stays a readable diff. */
@@ -88,6 +90,8 @@ export default defineConfig({
   test: {
     // The watchdog ends a stories run that stops finishing files, and names the file it waits on.
     reporters: ['default', './tools/stories-watchdog.ts'],
+    // `--shard` splits the files by their measured time rather than by the hash of their path.
+    sequence: { sequencer: TimedSequencer },
     projects: [
       {
         test: {
