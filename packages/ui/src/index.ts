@@ -344,12 +344,14 @@ export {
 } from './blocks/project-settings/budget.tsx'
 export {
   InstructionsSection,
+  type InstructionsSectionProps,
+} from './blocks/project-settings/instructions.tsx'
+export {
   readingOf,
   type AgentInstructions,
-  type InstructionsSectionProps,
   type Reading,
   type RepositoryInstructions,
-} from './blocks/project-settings/instructions.tsx'
+} from './blocks/project-settings/instructions-model.ts'
 export {
   SETUP_KINDS,
   SETUP_TITLES,
