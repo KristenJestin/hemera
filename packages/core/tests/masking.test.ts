@@ -1412,6 +1412,12 @@ describe('A JSON string written inside any text is masked as a JSON string (#401
     expect(masked).toBe('[1, {"a":"password=•••"}, oops')
   })
 
+  test('a string line that holds braces stays one string, and NDJSON stays NDJSON', async () => {
+    const text = '{"id":1}\n"{} password=\\"a b\\" and [1]"\n{"id":2}'
+    const [masked] = await printedForms([text], [])
+    expect(masked).toBe('{"id":1}\n"{} password=••• and [1]"\n{"id":2}')
+  })
+
   test('prose holding quotes, escapes and brackets is left as it is', async () => {
     const texts = [
       'He said "hello" and left.',
@@ -1663,6 +1669,12 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     [
       'JSON written after a sentence, line after line (#401)',
       (size) => 'Said: {"a":"password=\\"b c\\""}\n'.repeat(size / 33),
+      printed,
+      4_000,
+    ],
+    [
+      'containers with no quote, a quote and a backslash at the end (#401)',
+      (size) => `${'[1]'.repeat(size / 3)}"\\`,
       printed,
       4_000,
     ],
