@@ -4186,6 +4186,53 @@ describe('The Builder while the end waits on it', () => {
   )
 
   test(
+    'an answer whose hand-over to the Builder failed is handed over again by the end, which waits for it before Review',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            // The hand-over's write fails once: the answer is kept, not handed over.
+            const database = yield* Database
+            yield* database.run(sql`CREATE TRIGGER refuse_answers BEFORE INSERT ON session_deliveries
+              WHEN NEW.kind = 'answer' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            const failed = yield* answersAndBuilding(mission.id)
+            yield* database.run(sql`DROP TRIGGER refuse_answers`)
+            // Nothing hands it over on its own now: the end, driven, does.
+            yield* driven(mission.id)
+            yield* inReview(mission.id)
+            return { failed, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.failed.answers).toEqual([])
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
     'a Retry of the Builder’s environment need at the refresh, its event follower behind, is kept for the Builder before the end can close the Building',
     SLOW,
     async () => {
