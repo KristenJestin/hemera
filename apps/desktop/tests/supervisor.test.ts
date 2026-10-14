@@ -957,3 +957,33 @@ describe('A command line is matched before anything is ended', () => {
     expect(stillRuns(root, '"C:\\Program Files\\Other\\other.exe" --flag', 'win32')).toBe(false)
   })
 })
+
+describe('A program the system refuses to start is a SpawnFailed, never a defect', () => {
+  test('a start that throws at once, as Windows does for a file that is no program, fails with its reason', async () => {
+    // Node on Windows throws `spawn UNKNOWN` from `spawn` itself for such a file, before any event.
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          start: () => {
+            throw new Error('spawn UNKNOWN')
+          },
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+    const failure = await on(
+      data,
+      Effect.scoped(Effect.flip(starting(script(''), []))).pipe(Effect.provide(layer)),
+    )
+    expect(failure).toBeInstanceOf(SpawnFailed)
+    expect(failure).toMatchObject({ reason: 'spawn UNKNOWN' })
+  })
+})

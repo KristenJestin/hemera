@@ -17,6 +17,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 
 import { ProjectOwner } from '@hemera/core/domain'
@@ -26,16 +27,22 @@ import {
   type ForgeRepositoryStatus,
   type Need,
   ForgeTimeout,
+  ForgeUnreachable,
   UnknownRepository,
 } from '@hemera/ipc'
-import { Deferred, Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Result, Schedule, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { listNeeds, retryNeed, withdrawNeed } from '../src/engine/needs.ts'
 import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts'
-import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
+import {
+  type ForgeCall,
+  type ForgeSettings,
+  ForgeCommandRefused,
+  ForgeRunner,
+} from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
 import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
@@ -82,7 +89,10 @@ const REMOTES = {
   api: 'https://bitbucket.org/acme-team/api.git',
 }
 
-/** The engine over these fakes, with Atlas made of the repositories given; limits shortened. */
+/**
+ * The engine over these fakes, with Atlas made of the repositories given. The limits are the
+ * product's: a fake started through a `.cmd` shim on a loaded runner never meets them (#362).
+ */
 const withForge = <A, E>(
   fake: FakeForge,
   program: (atlas: {
@@ -90,11 +100,11 @@ const withForge = <A, E>(
     readonly repository: (path: string) => string
   }) => Effect.Effect<A, E, EngineServices>,
   remotes: Readonly<Record<string, string>> = REMOTES,
-  limits = { read: 2_000, write: 4_000 },
+  settings: Omit<ForgeSettings, 'env'> = {},
   secrets: SecretsRegistry = secretsRegistry(),
 ) => {
   const main = checkout(remotes)
-  return commandsEngine(data, { forge: { env: fake.env, limits }, secrets })(({ profile }) =>
+  return commandsEngine(data, { forge: { env: fake.env, ...settings }, secrets })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
         const project = yield* createProject({
@@ -125,6 +135,20 @@ const forge = Effect.gen(function* () {
 const runner = Effect.gen(function* () {
   return yield* ForgeRunner
 })
+
+/**
+ * Cuts the call whose arguments hold a word as its limit would, once the fake has it: a timeout
+ * met by that call alone, never by a slow start of another one (#362).
+ */
+const cutting =
+  (fake: FakeForge, word: string) =>
+  (call: ForgeCall): Effect.Effect<void> | undefined =>
+    call.args.includes(word)
+      ? Effect.sync(() => fake.calls().some((one) => one.args.includes(word))).pipe(
+          Effect.repeat({ schedule: Schedule.spaced('20 millis'), until: (seen) => seen }),
+          Effect.asVoid,
+        )
+      : undefined
 
 describe('Ready, missing, signed-out and unreachable come from the fake CLI, each with its fix', () => {
   test('gh and bkt signed in are ready, with their versions, CRLF and all', async () => {
@@ -292,7 +316,7 @@ describe('Ready, missing, signed-out and unreachable come from the fake CLI, eac
         fake,
         ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
         { shop: REMOTES.shop },
-        { read: 500, write: 1_000 },
+        { cut: cutting(fake, 'auth') },
       ),
     )
     expect(statuses['shop']?.state).toBe('unreachable')
@@ -399,7 +423,7 @@ describe('A waiting operation survives a restart and wakes on any change', () =>
     const fake = fakeForge(ghSignedOut())
     const main = checkout({ shop: REMOTES.shop })
     const engine = commandsEngine(data, {
-      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+      forge: { env: fake.env },
     })
     const { projectId, repositoryId } = await engine(({ profile }) =>
       profile.use(
@@ -504,7 +528,7 @@ const restartedWith = async <A, E>(
   }) => Effect.Effect<A, E, EngineServices>,
 ) => {
   const main = checkout(remotes)
-  const forgeParts = { env: fake.env, limits: { read: 2_000, write: 4_000 } }
+  const forgeParts = { env: fake.env }
   const { projectId, ids } = await commandsEngine(data, { forge: forgeParts })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
@@ -647,7 +671,6 @@ describe('A need made as its CLI turned ready does not stay pending', () => {
     const { login, pending, rows } = await commandsEngine(data, {
       forge: {
         env: fake.env,
-        limits: { read: 2_000, write: 4_000 },
         // Held once, between the operation's check and its need.
         waitHold: Effect.andThen(Deferred.succeed(reached, undefined), Deferred.await(go)),
       },
@@ -691,7 +714,6 @@ describe('A settle never withdraws a need made while it ran', () => {
     const kept = await commandsEngine(data, {
       forge: {
         env: fake.env,
-        limits: { read: 2_000, write: 4_000 },
         // Held once, when armed: the next settle, between the states it read and the needs it reads.
         settleHold: Effect.suspend(() => {
           if (!armed) return Effect.void
@@ -880,7 +902,7 @@ describe('A forge need’s row is deleted when its need ends', () => {
   test('a row whose need ended another way goes at the next start', async () => {
     const fake = fakeForge(ghSignedOut())
     const engine = commandsEngine(data, {
-      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+      forge: { env: fake.env },
     })
     const main = checkout({ shop: REMOTES.shop })
     const left = await engine(({ profile }) =>
@@ -1346,10 +1368,10 @@ describe('A timeout gives ForgeTimeout, not a success', () => {
       ({ repository }) =>
         Effect.flip(Effect.flatMap(forge, (port) => port.currentUser(repository('shop')))),
       { shop: REMOTES.shop },
-      { read: 1_000, write: 2_000 },
+      { cut: cutting(fake, 'user') },
     )
     expect(failure).toBeInstanceOf(ForgeTimeout)
-    expect(failure).toMatchObject({ seconds: 1 })
+    expect(failure).toMatchObject({ seconds: 30 })
   })
 })
 
@@ -2198,5 +2220,279 @@ describe('A write goes only where its target names', () => {
     )
     expect(refused).toBeInstanceOf(ForgeCommandRefused)
     expect(fake.calls()).toEqual([])
+  })
+})
+
+/** `gh pr create` for Atlas's shop, as R6 sends it. */
+const createPullRequest = (projectId: string): ForgeCall => ({
+  cli: 'gh',
+  forge: 'github',
+  host: 'github.com',
+  projectId,
+  args: [
+    'pr',
+    'create',
+    '--repo',
+    'github.com/acme/shop',
+    '--base',
+    'main',
+    '--head',
+    'feat/ship',
+    '--title',
+    'Ship it',
+    '--body-file',
+    '-',
+  ],
+  input: 'What it ships.',
+})
+
+/** The recorded actions, each as its kind and its state. */
+const actionStates = Effect.map(listActions(), (actions) =>
+  actions.map((action) => [action.kind, action.state]),
+)
+
+/** Runs `gh pr create` on shop, answers how it ended and what was recorded of it. */
+const createdWith = (fake: FakeForge, settings: Omit<ForgeSettings, 'env'> = {}) =>
+  withForge(
+    fake,
+    ({ projectId }) =>
+      Effect.gen(function* () {
+        const forgeRunner = yield* runner
+        const ended = yield* Effect.result(forgeRunner.run(createPullRequest(projectId)))
+        return { ended, actions: yield* actionStates }
+      }),
+    { shop: REMOTES.shop },
+    settings,
+  )
+
+describe('A write that may have reached the forge is indeterminate, never failed', () => {
+  test.skipIf(process.platform === 'win32')(
+    'a write killed by a signal after it started is indeterminate',
+    async () => {
+      const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], kill: true }])
+      const { ended, actions } = await createdWith(fake)
+      expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+      expect(fake.calls().map((call) => call.args.slice(0, 2))).toEqual([['pr', 'create']])
+      expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+    },
+  )
+
+  test('a write cut for printing more than Hemera reads is indeterminate', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], flood: true }])
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write cut at its limit is indeterminate', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], hang: true }])
+    const { ended, actions } = await createdWith(fake, { cut: cutting(fake, 'create') })
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeTimeout)
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write the engine stopped while it ran is indeterminate at its next start', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], hang: true }])
+    const main = checkout({ shop: REMOTES.shop })
+    const engine = commandsEngine(data, { forge: { env: fake.env } })
+    await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const forgeRunner = yield* runner
+          yield* Effect.forkChild(forgeRunner.run(createPullRequest(project.id)))
+          // The engine stops once the CLI has the call.
+          yield* Effect.sync(() => fake.calls().length > 0).pipe(
+            Effect.repeat({ schedule: Schedule.spaced('20 millis'), until: (seen) => seen }),
+          )
+        }),
+      ),
+    )
+    const actions = await engine(({ profile }) => profile.use(actionStates))
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write the forge answered with a failure is failed, with what it said', async () => {
+    const fake = fakeForge([
+      ...ghReady(),
+      {
+        cli: 'gh',
+        when: ['pr', 'create'],
+        stderr: 'a pull request for branch "feat/ship" already exists\n',
+        code: 1,
+      },
+    ])
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isSuccess(ended) && ended.success.code).toBe(1)
+    expect(actions).toEqual([['forge.pr.create', 'failed']])
+  })
+
+  test('a write whose CLI could not start is failed', async () => {
+    const fake = fakeForge(ghReady(), ['bkt'])
+    const bin = fake.env['PATH'] ?? ''
+    // Found on the PATH, but not a program the system can start: the spawn itself fails, not on
+    // ENOENT. On Windows a `gh.exe` that is text; elsewhere a `gh` whose interpreter is a folder.
+    if (process.platform === 'win32') writeFileSync(join(bin, 'gh.exe'), 'not a program\r\n')
+    else writeFileSync(join(bin, 'gh'), `#!${tmpdir()}\n`, { mode: 0o755 })
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+    expect(fake.calls()).toEqual([])
+    expect(actions).toEqual([['forge.pr.create', 'failed']])
+  })
+})
+
+/** The pending need's text: what is missing, and what to do. */
+const needText = Effect.map(pendingNeeds, (pending) =>
+  pending.flatMap((need) =>
+    Predicate.isTagged(need.fields, 'Environment')
+      ? [{ id: need.id, missing: need.fields.missing, action: need.fields.action }]
+      : [],
+  ),
+)
+
+describe('A pending need says what the CLI lacks now, not what it lacked when it was made', () => {
+  test('gh missing, then installed but signed out: the need now says to sign in', async () => {
+    const fake = fakeForge(ghSignedOut(), ['bkt'])
+    const { before, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const missing = yield* needText
+          fake.install('gh')
+          yield* port.checkAgain(projectId, null)
+          return { before: missing, after: yield* needText }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(before).toEqual([
+      {
+        id: expect.any(String),
+        missing: 'gh, to reach github.com: it is not on the PATH',
+        action: expect.stringContaining('Install it: '),
+      },
+    ])
+    expect(after).toEqual([
+      {
+        id: before[0]?.id,
+        missing: 'gh signed in on github.com',
+        action: 'Sign in: gh auth login --hostname github.com\nThen choose Check again.',
+      },
+    ])
+  })
+
+  test('bkt missing, signed out, signed in with no context, signed out again, then ready: the need says each in turn and goes', async () => {
+    const fake = fakeForge(BKT_SIGNED_OUT, ['gh'])
+    const { texts, login, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('api')))
+          yield* someNeed
+          const seen = [yield* needText]
+          fake.install('bkt')
+          for (const rules of [BKT_SIGNED_OUT, bktReady([BKT_CLOUD], []), BKT_SIGNED_OUT]) {
+            fake.answer(rules)
+            yield* port.checkAgain(projectId, null)
+            seen.push(yield* needText)
+          }
+          fake.answer(bktReady())
+          yield* port.checkAgain(projectId, null)
+          return { texts: seen, login: yield* Fiber.join(waiting), after: yield* pendingNeeds }
+        }),
+      { api: REMOTES.api },
+    )
+    const signIn = {
+      missing: 'bkt signed in on bitbucket.org',
+      action:
+        'Sign in: bkt auth login https://bitbucket.org --kind cloud --web\nThen choose Check again.',
+    }
+    expect(texts.map((text) => text.map(({ missing, action }) => ({ missing, action })))).toEqual([
+      [
+        {
+          missing: 'bkt, to reach bitbucket.org: it is not on the PATH',
+          action: expect.stringContaining('Install it: '),
+        },
+      ],
+      [signIn],
+      [
+        {
+          missing:
+            'a bkt context for bitbucket.org: bkt is signed in there, but has no context for it',
+          action: `Make one: bkt context create ${q('acme-team-bitbucket.org')} --host api.bitbucket.org --workspace ${q('acme-team')}\nThen choose Check again.`,
+        },
+      ],
+      [signIn],
+    ])
+    expect(new Set(texts.flatMap((text) => text.map((one) => one.id))).size).toBe(1)
+    expect(login).toBe('octo')
+    expect(after).toEqual([])
+  })
+})
+
+describe('The window regaining the focus wakes an operation waiting on its CLI', () => {
+  test('a waiter on a signed-out gh resumes after the focus once gh is signed in', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const login = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          fake.answer(ghReady())
+          yield* port.focused
+          // Checked again by the focus itself, before it answered: no wait on a recheck.
+          const states = yield* port.status(projectId)
+          expect(states.map((state) => state.state)).toEqual(['ready'])
+          return yield* Fiber.join(waiting)
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(login).toBe('octo')
+  })
+})
+
+describe('A long outage writes no revision while what to do stays the same', () => {
+  test('ten checks of an unreachable forge whose message changes each time revise nothing; the sign-in after it revises once', async () => {
+    const fake = fakeForge([
+      { cli: 'gh', when: ['--version'], stdout: 'gh version 2.100.0 (2026-09-30)\n' },
+      {
+        cli: 'gh',
+        when: ['auth', 'status'],
+        // A round-robin address, as DNS gives: the message differs at each check.
+        stderr: 'dial tcp 140.82.112.{call}:443: i/o timeout\n',
+        code: 1,
+      },
+    ])
+    const { during, after, text } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const revisions = Effect.map(
+            readEvents({ limit: 1_000 }),
+            ({ events }) => events.filter((event) => event.type === 'need.revised').length,
+          )
+          for (let check = 0; check < 10; check += 1) yield* port.checkAgain(projectId, null)
+          const outage = yield* revisions
+          fake.answer(ghSignedOut())
+          yield* port.checkAgain(projectId, null)
+          return { during: outage, after: yield* revisions, text: yield* needText }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(during).toBe(0)
+    expect(after).toBe(1)
+    expect(text.map((one) => one.missing)).toEqual(['gh signed in on github.com'])
   })
 })

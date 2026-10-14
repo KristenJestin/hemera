@@ -625,49 +625,58 @@ export const processSupervisorLayer = Layer.effect(
           const id = crypto.randomUUID()
           const label = basename(program)
           // Started and listened to in one synchronous step: the events these listeners answer
-          // are the child's first moments, and Node tells them on the next tick.
-          const { child, process: started } = yield* Effect.sync(() => {
-            const made = host.start(program, args, {
-              detached: grouped,
-              cwd: options.cwd,
-              env: options.env,
-              verbatim: options.verbatim ?? false,
-            })
-            const tracked: Child = {
-              pid: () => made.pid,
-              label,
-              grouped,
-              grace: Duration.millis(options.graceMillis ?? DEFAULT_GRACE_MS),
-              lifecycle,
-              observation,
-              spawned,
-              closeInput: Effect.sync(() => made.end()),
-              signal: (signal) => made.signal(signal),
-            }
-            made.onSpawn(() => {
-              Effect.runSync(Ref.set(spawned, true))
-              Effect.runSync(Deferred.succeed(answer, undefined))
-            })
-            made.onExit((code, signal) => {
-              Effect.runFork(ended(tracked, id)({ code, signal, when: new Date().toISOString() }))
-            })
-            made.onFailure((reason) => {
-              Effect.runSync(Deferred.fail(answer, new SpawnFailed({ program, reason })))
-              Effect.runFork(
-                ended(
-                  tracked,
-                  null,
-                )({
-                  code: null,
-                  signal: `error: ${reason}`,
-                  when: new Date().toISOString(),
-                }),
-              )
-            })
-            made.onStderr((line) => {
-              Effect.runSync(sink.write(`${label} (${String(made.pid)}): ${line}`))
-            })
-            return { child: tracked, process: made }
+          // are the child's first moments, and Node tells them on the next tick. A program the
+          // system refuses outright (on Windows, a file that is no program) throws from the start
+          // itself, before any event: it failed to spawn too (#362).
+          const { child, process: started } = yield* Effect.try({
+            try: () => {
+              const made = host.start(program, args, {
+                detached: grouped,
+                cwd: options.cwd,
+                env: options.env,
+                verbatim: options.verbatim ?? false,
+              })
+              const tracked: Child = {
+                pid: () => made.pid,
+                label,
+                grouped,
+                grace: Duration.millis(options.graceMillis ?? DEFAULT_GRACE_MS),
+                lifecycle,
+                observation,
+                spawned,
+                closeInput: Effect.sync(() => made.end()),
+                signal: (signal) => made.signal(signal),
+              }
+              made.onSpawn(() => {
+                Effect.runSync(Ref.set(spawned, true))
+                Effect.runSync(Deferred.succeed(answer, undefined))
+              })
+              made.onExit((code, signal) => {
+                Effect.runFork(ended(tracked, id)({ code, signal, when: new Date().toISOString() }))
+              })
+              made.onFailure((reason) => {
+                Effect.runSync(Deferred.fail(answer, new SpawnFailed({ program, reason })))
+                Effect.runFork(
+                  ended(
+                    tracked,
+                    null,
+                  )({
+                    code: null,
+                    signal: `error: ${reason}`,
+                    when: new Date().toISOString(),
+                  }),
+                )
+              })
+              made.onStderr((line) => {
+                Effect.runSync(sink.write(`${label} (${String(made.pid)}): ${line}`))
+              })
+              return { child: tracked, process: made }
+            },
+            catch: (cause) =>
+              new SpawnFailed({
+                program,
+                reason: cause instanceof Error ? cause.message : String(cause),
+              }),
           })
           yield* Deferred.await(answer)
           const pid = started.pid
