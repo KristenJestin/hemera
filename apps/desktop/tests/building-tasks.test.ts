@@ -26,9 +26,14 @@ import {
 } from '../src/engine/building/builder.ts'
 import { type Stopper, getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { buildingAttempts, sessionDeliveries } from '../src/engine/storage/schema.ts'
+import {
+  buildingAttempts,
+  buildingDecisions,
+  sessionDeliveries,
+} from '../src/engine/storage/schema.ts'
 import { getSession, openSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
@@ -41,6 +46,7 @@ import {
   statesOf,
   taskIn,
 } from './builder-world.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { HELPER, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -1026,5 +1032,51 @@ describe('The end and Cancel', () => {
     )
     expect(seen.builders).toHaveLength(1)
     expect(seen.started).toHaveLength(1)
+  })
+})
+
+describe('A decision’s options and amendment are masked as JSON (#397)', () => {
+  test('task_blocked with an option and a new task holding a quoted credential and a known value stores nothing of either, and still JSON', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          const option = `Sign with ${QUOTED_SECRET} and ${KNOWN_SECRET}`
+          const answer = yield* call(grantId, 'task_blocked', {
+            ...REPLACE_T2,
+            options: [option, 'Keep it whole'],
+            recommended: option,
+            amendment: {
+              ...REPLACE_T2.amendment,
+              by: [
+                {
+                  id: 'T2a',
+                  title: `Read the invoices with ${QUOTED_SECRET} and ${KNOWN_SECRET}`,
+                  result: 'The invoices are read.',
+                  requirements: ['R1'],
+                  scenarios: ['R1.S2'],
+                  targets: [{ repository: 'api', path: 'read.ts', intent: 'create' }],
+                  depends_on: [],
+                },
+                ...REPLACE_T2.amendment.by.slice(1),
+              ],
+            },
+          })
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ options: buildingDecisions.options, amendment: buildingDecisions.amendment })
+            .from(buildingDecisions)
+          return { answer, row }
+        }),
+      ),
+    )
+    expect(seen.answer).toMatch(/T2 is blocked/)
+    expectMaskedJson(seen.row?.options)
+    expectMaskedJson(seen.row?.amendment)
   })
 })

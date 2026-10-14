@@ -32,10 +32,12 @@ import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { SessionPost } from '../src/engine/sessions/post.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  buildingDecisions,
   buildings,
   commandRuns,
   domainEvents,
@@ -49,6 +51,7 @@ import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import { builderAgents, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { nodeLine } from './commands-engine.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { ALLOW, verdictsSaying } from './tools-world.ts'
@@ -890,6 +893,42 @@ describe('Three reds become an error need', () => {
     expect(seen.direction.at(-1)?.body).toContain('Use UTC everywhere.')
     expect(seen.fourth).toMatch(/T1 started: attempt 4/)
     expect(seen.events).toHaveLength(1)
+  })
+
+  test('need_propose with an option holding a quoted credential and a known value stores nothing of either, and still JSON (#397)', async () => {
+    const checks = checksSaying((asked) => (asked.subject === 'T1' ? [red()] : []))
+    const { run } = builderEngine(data, work, { checks })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          for (const summary of ['One.', 'Two.', 'Three.']) {
+            yield* call(grantId, 'task_finished', { task: 'T1', summary })
+          }
+          const [need] = (yield* getMission(mission.id)).needs
+          const proposed = yield* call(grantId, 'need_propose', {
+            need: need?.id ?? '',
+            options: [
+              { label: 'Sign in', detail: `With ${QUOTED_SECRET} and ${KNOWN_SECRET}.` },
+              { label: 'Drop the test', detail: 'It tests nothing of R1.' },
+            ],
+            recommended: 'Drop the test',
+            reason: 'The failure names the account.',
+          })
+          const [row] = yield* (yield* Database)
+            .select({ options: buildingDecisions.options })
+            .from(buildingDecisions)
+            .where(eq(buildingDecisions.kind, 'error'))
+          return { proposed, stored: row?.options }
+        }),
+      ),
+    )
+    expect(seen.proposed).not.toMatch(/^refused/)
+    expectMaskedJson(seen.stored)
   })
 
   test('need_propose is refused for a need it was not asked for', async () => {
