@@ -22,11 +22,14 @@ import {
   defaultDeliveryRules,
   effectiveRepositories,
   inOrder,
+  mayWriteToNetwork,
   partsOf,
   preparationDifferences,
   proposeDependencies,
   renderTemplate,
+  rowsOf,
   sectionOf,
+  stepsOfRepository,
   validateRules,
   withDependencies,
 } from '../src/domain/index.ts'
@@ -262,6 +265,56 @@ describe('A repository overrides its preset', () => {
     )
     expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
     expect(Predicate.isTagged(result, 'Passed')).toBe(true)
+  })
+
+  test('the table of a preset shows, per repository, where each step comes from', () => {
+    const rules = rulesWith([
+      waves('shared', 'library'),
+      waves('api', 'library', {
+        deliversAfter: ['shared'],
+        steps: {
+          off: ['ci'],
+          changed: [{ id: 'merge', kind: 'merge', mode: 'click', method: 'rebase' }],
+          added: [
+            {
+              after: 'merge',
+              step: { id: 'look', kind: 'confirm', mode: 'click', what: 'it works' },
+            },
+          ],
+        },
+      }),
+      waves('web', 'application', { deliversAfter: ['api'] }),
+    ])
+    const rows = rowsOf(rules, ACME, 'library')
+    expect(
+      rows.map((row) => [row.step.id, row.owner, row.cells.map((cell) => cell.origin)]),
+    ).toEqual([
+      ['bump', null, ['inherited', 'inherited']],
+      ['merge', null, ['inherited', 'changed']],
+      ['look', 'api', [null, 'added']],
+      ['ci', null, ['inherited', 'off']],
+      ['published-version', null, ['inherited', 'inherited']],
+    ])
+    expect(rows[0]?.cells.map((cell) => cell.repositoryId)).toEqual(['shared', 'api'])
+    // What one repository runs: its push steps, then its recipe.
+    expect(stepsOfRepository(effectiveOf(rules, ACME, 'api')).map((step) => step.id)).toEqual([
+      'push',
+      'pull-request',
+      'bump',
+      'merge',
+      'look',
+      'published-version',
+    ])
+  })
+
+  test('a command and an agent may always write to the network', () => {
+    expect(mayWriteToNetwork({ id: 'c', kind: 'command', mode: 'auto', commandId: 'x' })).toBe(true)
+    expect(mayWriteToNetwork({ id: 'a', kind: 'agent', mode: 'auto', task: 'Release notes' })).toBe(
+      true,
+    )
+    expect(mayWriteToNetwork({ id: 'm', kind: 'merge', mode: 'auto', method: 'squash' })).toBe(
+      false,
+    )
   })
 
   test('a step read as what it is and what it acts on', () => {
