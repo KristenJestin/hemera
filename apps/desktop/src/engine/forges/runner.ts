@@ -40,6 +40,11 @@ export interface ForgeSettings {
   /** Shorter limits, for the suites. */
   readonly limits?: { readonly read: number; readonly write: number } | undefined
   /**
+   * Where a suite cuts the call it picks as its limit would, once the effect it answers for that
+   * call ends: a timeout met by that call alone (#362). Never cut otherwise.
+   */
+  readonly cut?: ((call: ForgeCall) => Effect.Effect<void> | undefined) | undefined
+  /**
    * The real path of the screenshot of Hemera's a path names, or null: the only files attached.
    * None otherwise, and nothing is attached.
    */
@@ -243,10 +248,14 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
               Deferred.await(outputEnded),
               Deferred.await(errorsEnded),
             ])
-            const finished = yield* Effect.raceFirst(
+            const answered = Effect.raceFirst(
               Effect.map(ended, ([exit]) => Option.some(exit)),
               Effect.as(Deferred.await(tooLong), Option.none()),
-            ).pipe(Effect.timeoutOption(limit))
+            )
+            const cut = settings.cut?.(call)
+            const finished = yield* cut === undefined
+              ? Effect.timeoutOption(answered, limit)
+              : Effect.raceFirst(Effect.map(answered, Option.some), Effect.as(cut, Option.none()))
             if (Option.isNone(finished)) {
               yield* child.kill
               yield* child.exited

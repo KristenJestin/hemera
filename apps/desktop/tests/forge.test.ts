@@ -35,7 +35,12 @@ import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { listNeeds, retryNeed, withdrawNeed } from '../src/engine/needs.ts'
 import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts'
-import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
+import {
+  type ForgeCall,
+  type ForgeSettings,
+  ForgeCommandRefused,
+  ForgeRunner,
+} from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
 import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
@@ -82,7 +87,10 @@ const REMOTES = {
   api: 'https://bitbucket.org/acme-team/api.git',
 }
 
-/** The engine over these fakes, with Atlas made of the repositories given; limits shortened. */
+/**
+ * The engine over these fakes, with Atlas made of the repositories given. The limits are the
+ * product's: a fake started through a `.cmd` shim on a loaded runner never meets them (#362).
+ */
 const withForge = <A, E>(
   fake: FakeForge,
   program: (atlas: {
@@ -90,11 +98,11 @@ const withForge = <A, E>(
     readonly repository: (path: string) => string
   }) => Effect.Effect<A, E, EngineServices>,
   remotes: Readonly<Record<string, string>> = REMOTES,
-  limits = { read: 2_000, write: 4_000 },
+  settings: Omit<ForgeSettings, 'env'> = {},
   secrets: SecretsRegistry = secretsRegistry(),
 ) => {
   const main = checkout(remotes)
-  return commandsEngine(data, { forge: { env: fake.env, limits }, secrets })(({ profile }) =>
+  return commandsEngine(data, { forge: { env: fake.env, ...settings }, secrets })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
         const project = yield* createProject({
@@ -125,6 +133,20 @@ const forge = Effect.gen(function* () {
 const runner = Effect.gen(function* () {
   return yield* ForgeRunner
 })
+
+/**
+ * Cuts the call whose arguments hold a word as its limit would, once the fake has it: a timeout
+ * met by that call alone, never by a slow start of another one (#362).
+ */
+const cutting =
+  (fake: FakeForge, word: string) =>
+  (call: ForgeCall): Effect.Effect<void> | undefined =>
+    call.args.includes(word)
+      ? Effect.sync(() => fake.calls().some((one) => one.args.includes(word))).pipe(
+          Effect.repeat({ schedule: Schedule.spaced('20 millis'), until: (seen) => seen }),
+          Effect.asVoid,
+        )
+      : undefined
 
 describe('Ready, missing, signed-out and unreachable come from the fake CLI, each with its fix', () => {
   test('gh and bkt signed in are ready, with their versions, CRLF and all', async () => {
@@ -292,7 +314,7 @@ describe('Ready, missing, signed-out and unreachable come from the fake CLI, eac
         fake,
         ({ projectId }) => Effect.flatMap(forge, (port) => port.checkAgain(projectId, null)),
         { shop: REMOTES.shop },
-        { read: 500, write: 1_000 },
+        { cut: cutting(fake, 'auth') },
       ),
     )
     expect(statuses['shop']?.state).toBe('unreachable')
@@ -399,7 +421,7 @@ describe('A waiting operation survives a restart and wakes on any change', () =>
     const fake = fakeForge(ghSignedOut())
     const main = checkout({ shop: REMOTES.shop })
     const engine = commandsEngine(data, {
-      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+      forge: { env: fake.env },
     })
     const { projectId, repositoryId } = await engine(({ profile }) =>
       profile.use(
@@ -504,7 +526,7 @@ const restartedWith = async <A, E>(
   }) => Effect.Effect<A, E, EngineServices>,
 ) => {
   const main = checkout(remotes)
-  const forgeParts = { env: fake.env, limits: { read: 2_000, write: 4_000 } }
+  const forgeParts = { env: fake.env }
   const { projectId, ids } = await commandsEngine(data, { forge: forgeParts })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
@@ -647,7 +669,6 @@ describe('A need made as its CLI turned ready does not stay pending', () => {
     const { login, pending, rows } = await commandsEngine(data, {
       forge: {
         env: fake.env,
-        limits: { read: 2_000, write: 4_000 },
         // Held once, between the operation's check and its need.
         waitHold: Effect.andThen(Deferred.succeed(reached, undefined), Deferred.await(go)),
       },
@@ -691,7 +712,6 @@ describe('A settle never withdraws a need made while it ran', () => {
     const kept = await commandsEngine(data, {
       forge: {
         env: fake.env,
-        limits: { read: 2_000, write: 4_000 },
         // Held once, when armed: the next settle, between the states it read and the needs it reads.
         settleHold: Effect.suspend(() => {
           if (!armed) return Effect.void
@@ -880,7 +900,7 @@ describe('A forge need’s row is deleted when its need ends', () => {
   test('a row whose need ended another way goes at the next start', async () => {
     const fake = fakeForge(ghSignedOut())
     const engine = commandsEngine(data, {
-      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+      forge: { env: fake.env },
     })
     const main = checkout({ shop: REMOTES.shop })
     const left = await engine(({ profile }) =>
@@ -1346,10 +1366,10 @@ describe('A timeout gives ForgeTimeout, not a success', () => {
       ({ repository }) =>
         Effect.flip(Effect.flatMap(forge, (port) => port.currentUser(repository('shop')))),
       { shop: REMOTES.shop },
-      { read: 1_000, write: 2_000 },
+      { cut: cutting(fake, 'user') },
     )
     expect(failure).toBeInstanceOf(ForgeTimeout)
-    expect(failure).toMatchObject({ seconds: 1 })
+    expect(failure).toMatchObject({ seconds: 30 })
   })
 })
 
