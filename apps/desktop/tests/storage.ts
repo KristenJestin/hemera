@@ -9,7 +9,7 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } fr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 
 import { type DomainEvents, domainEventsLayer } from '../src/engine/domain-events.ts'
@@ -88,7 +88,24 @@ export function removeFoldersWith(remove: Remover, wait: (millis: number) => voi
   if (first !== undefined) throw first
 }
 
-export function removeFolders(): void {
+/** The programs running on the tests' folders, until each ends. */
+const running = new Set<Fiber.Fiber<unknown, unknown>>()
+
+/**
+ * Runs a program as `Effect.runPromise` does, and keeps it until it ends: one its test left
+ * running (timed out, or never awaited) still holds its database and its children in the folders,
+ * so `removeFolders` interrupts it, its scope closed, before removing them.
+ */
+export function runOnFolders<A, E>(program: Effect.Effect<A, E>): Promise<A> {
+  const fiber = Effect.runFork(program)
+  running.add(fiber)
+  fiber.addObserver(() => running.delete(fiber))
+  return Effect.runPromise(Fiber.join(fiber))
+}
+
+/** Ends what still runs on the folders, then removes them. */
+export async function removeFolders(): Promise<void> {
+  await Effect.runPromise(Fiber.interruptAll([...running]))
   removeFoldersWith(removeTree, sleep)
 }
 
@@ -118,7 +135,7 @@ export function on<A, E>(
   program: Effect.Effect<A, E, Storage | Scope.Scope>,
 ): Promise<A> {
   mkdirSync(dataFolder, { recursive: true })
-  return Effect.runPromise(Effect.scoped(Effect.provide(program, storageOf(dataFolder))))
+  return runOnFolders(Effect.scoped(Effect.provide(program, storageOf(dataFolder))))
 }
 
 /** The same, for a program expected to fail: its error is the answer. */
@@ -127,9 +144,7 @@ export function refusalOn<A, E>(
   program: Effect.Effect<A, E, Storage | Scope.Scope>,
 ): Promise<E | DatabaseError> {
   mkdirSync(dataFolder, { recursive: true })
-  return Effect.runPromise(
-    Effect.scoped(Effect.flip(Effect.provide(program, storageOf(dataFolder)))),
-  )
+  return runOnFolders(Effect.scoped(Effect.flip(Effect.provide(program, storageOf(dataFolder)))))
 }
 
 let folders = 0
