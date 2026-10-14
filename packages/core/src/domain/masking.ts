@@ -305,21 +305,126 @@ const hiddenSpans = (text: string, known: ReadonlyArray<string>): ReadonlyArray<
   return merged(pieces.filter((piece) => !piece.copied).map((piece) => [piece.from, piece.to]))
 }
 
-/**
- * Whether a text is JSON. Only whether: a decoder would build a report of each failure, and most
- * lines of a text are not JSON.
- */
-const isJson = (text: string): boolean => {
-  try {
-    JSON.parse(text)
-    return true
-  } catch {
-    return false
+/** What a JSON string escapes, by the letter after its backslash. */
+const ESCAPED = new Map([
+  ['"', '"'],
+  ['\\', '\\'],
+  ['/', '/'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['r', '\r'],
+  ['t', '\t'],
+])
+
+/** What JSON takes for space between its tokens. */
+const JSON_SPACE = ' \t\n\r'
+
+/** Where the JSON string at `at` ends, after its closing quote, or -1 when it is not one. */
+const jsonStringEnd = (text: string, at: number): number => {
+  if (text.charAt(at) !== '"') return -1
+  let next = at + 1
+  for (;;) {
+    const code = text.charCodeAt(next)
+    if (Number.isNaN(code) || code < 0x20) return -1
+    if (code === 0x22) return next + 1
+    if (code !== 0x5c) next += 1
+    else if (text.charAt(next + 1) === 'u') {
+      if (!/^[\dA-Fa-f]{4}$/.test(text.slice(next + 2, next + 6))) return -1
+      next += 6
+    } else if (ESCAPED.has(text.charAt(next + 1))) next += 2
+    else return -1
   }
 }
 
-/** How a line that is JSON begins: a line that does not is not read as JSON at all. */
-const JSON_FIRST = /^\s*[[{"\-\d]|^\s*(?:true|false|null)\b/
+/** Where the run of digits at `at` ends. */
+const digitsEnd = (text: string, at: number): number => {
+  let next = at
+  while (text.charAt(next) >= '0' && text.charAt(next) <= '9') next += 1
+  return next
+}
+
+/** Where the JSON number at `at` ends, or -1 when it is not one. */
+const jsonNumberEnd = (text: string, at: number): number => {
+  let next = text.charAt(at) === '-' ? at + 1 : at
+  const whole = digitsEnd(text, next)
+  if (whole === next || (text.charAt(next) === '0' && whole > next + 1)) return -1
+  next = whole
+  if (text.charAt(next) === '.') {
+    next = digitsEnd(text, next + 1)
+    if (next === whole + 1) return -1
+  }
+  if (text.charAt(next) === 'e' || text.charAt(next) === 'E') {
+    const sign = '+-'.includes(text.charAt(next + 1)) ? next + 2 : next + 1
+    next = digitsEnd(text, sign)
+    if (next === sign) return -1
+  }
+  return next
+}
+
+/** Where the JSON string, number or literal at `at` ends, or -1 when there is none. */
+const jsonScalarEnd = (text: string, at: number): number => {
+  const first = text.charAt(at)
+  if (first === '"') return jsonStringEnd(text, at)
+  for (const literal of ['true', 'false', 'null']) {
+    if (text.startsWith(literal, at)) return at + literal.length
+  }
+  return first === '-' || (first >= '0' && first <= '9') ? jsonNumberEnd(text, at) : -1
+}
+
+/**
+ * Whether a text is JSON, in one pass and without throwing: most lines of a text are not JSON,
+ * and `JSON.parse` builds an error for each. The containers open are kept on a stack, not in
+ * calls, so no depth of nesting runs out of stack.
+ */
+export const isJson = (text: string): boolean => {
+  const space = (at: number): number => {
+    let next = at
+    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
+    return next
+  }
+  /** Where the value of the next field of an object begins, past its name and colon, or -1. */
+  const field = (at: number): number => {
+    const name = jsonStringEnd(text, at)
+    if (name === -1) return -1
+    const colon = space(name)
+    return text.charAt(colon) === ':' ? space(colon + 1) : -1
+  }
+  const closers: string[] = []
+  let at = space(0)
+  for (;;) {
+    const first = text.charAt(at)
+    if (first === '{' || first === '[') {
+      const closing = first === '{' ? '}' : ']'
+      at = space(at + 1)
+      if (text.charAt(at) === closing) at += 1
+      else {
+        closers.push(closing)
+        if (closing === '}') at = field(at)
+        if (at === -1) return false
+        continue
+      }
+    } else {
+      at = jsonScalarEnd(text, at)
+      if (at === -1) return false
+    }
+    // A value read: close what it ends, until a comma opens the next value.
+    for (;;) {
+      at = space(at)
+      const closing = closers.at(-1)
+      if (closing === undefined) return at === text.length
+      if (text.charAt(at) === ',') {
+        at = space(at + 1)
+        if (closing === '}') at = field(at)
+        if (at === -1) return false
+        break
+      }
+      if (text.charAt(at) !== closing) return false
+      closers.pop()
+      at += 1
+    }
+  }
+}
 
 /** The spans, in order and apart, that touch this stretch. */
 const touchingSpans = (
@@ -353,7 +458,7 @@ const jsonLines = (text: string, hidden: ReadonlyArray<Span>): ReadonlyArray<Spa
   let start = 0
   for (const line of text.split('\n')) {
     if (line.trim() !== '') {
-      if (JSON_FIRST.test(line) && isJson(line)) {
+      if (isJson(line)) {
         lines.push([start, start + line.length])
       } else mixed = true
     }
@@ -381,18 +486,6 @@ const outside = (spans: ReadonlyArray<Span>, units: ReadonlyArray<Span>): Readon
   }
   return parts
 }
-
-/** What a JSON string escapes, by the letter after its backslash. */
-const ESCAPED = new Map([
-  ['"', '"'],
-  ['\\', '\\'],
-  ['/', '/'],
-  ['b', '\b'],
-  ['f', '\f'],
-  ['n', '\n'],
-  ['r', '\r'],
-  ['t', '\t'],
-])
 
 /** A JSON string of the text, character by character, each with the stretch that writes it. */
 const readString = (
@@ -423,7 +516,6 @@ const textOf = (characters: ReadonlyArray<readonly [string, number, number]>): s
   characters.map(([character]) => character).join('')
 
 const QUOTED_MASK = JSON.stringify(MASK)
-const JSON_SPACE = ' \t\n\r'
 
 /**
  * What a CLI printed, masked so that it hides at least all that masking the whole text hides,

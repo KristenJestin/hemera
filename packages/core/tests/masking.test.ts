@@ -7,6 +7,7 @@ import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  isJson,
   MASK,
   maskAction,
   maskPrinted,
@@ -236,16 +237,18 @@ describe('An action is never sent in part', () => {
 /** How many times `word` stands in `text`. */
 const occurrences = (text: string, word: string): number => text.split(word).length - 1
 
+/** Whether `JSON.parse` reads the text. */
+const parses = (text: string) => {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Whether the text is JSON as a whole, or JSON on each of its lines that is not blank. */
 const jsonShape = (text: string): 'whole' | 'lines' | 'text' => {
-  const parses = (part: string) => {
-    try {
-      JSON.parse(part)
-      return true
-    } catch {
-      return false
-    }
-  }
   if (parses(text)) return 'whole'
   const lines = text.split('\n').filter((line) => line.trim() !== '')
   return lines.length > 0 && lines.every(parses) ? 'lines' : 'text'
@@ -428,6 +431,64 @@ describe('What a CLI printed is masked at least as much as the whole text would 
     expect(maskPrinted(text, [])).toBe(text)
     const ndjson = '{"id":12345678901234567890}\n{"id":98765432109876543210, "ok":true}'
     expect(maskPrinted(ndjson, [])).toBe(ndjson)
+  })
+
+  test('a line is read as JSON exactly when JSON.parse reads it', () => {
+    const piece = fc.constantFrom(
+      '{',
+      '}',
+      '[',
+      ']',
+      '"',
+      ',',
+      ':',
+      ' ',
+      '\t',
+      '\n',
+      '\r',
+      '\u00a0',
+      '\\',
+      '\\u00e9',
+      '\\u12',
+      '\\uZZZZ',
+      '\\n',
+      '\\x',
+      '\u0001',
+      'u',
+      '0',
+      '00',
+      '1',
+      '-',
+      '.',
+      'e',
+      'E',
+      '+',
+      'true',
+      'false',
+      'null',
+      'tru',
+      'a',
+    )
+    const spaced = fc
+      .tuple(fc.jsonValue(), fc.constantFrom(undefined, 2, '\t'))
+      .map(([value, indent]) => JSON.stringify(value, null, indent))
+    const line = fc.oneof(
+      fc.json(),
+      spaced,
+      fc.array(piece, { maxLength: 12 }).map((pieces) => pieces.join('')),
+      fc.tuple(fc.json(), fc.nat(), fc.array(piece, { maxLength: 2 })).map(([json, at, pieces]) => {
+        const cut = at % (json.length + 1)
+        return json.slice(0, cut) + pieces.join('') + json.slice(cut)
+      }),
+      fc.tuple(fc.json(), fc.nat()).map(([json, at]) => json.slice(0, at % (json.length + 1))),
+      fc.string(),
+    )
+    fc.assert(
+      fc.property(line, (text) => {
+        expect(isJson(text), text).toBe(parses(text))
+      }),
+      { numRuns: 20_000 },
+    )
   })
 
   test('a field named as a credential is masked whole, whatever it holds, and stays JSON', () => {
@@ -657,6 +718,19 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     [
       'a JSON string holding many labelled values',
       (size) => JSON.stringify({ body: 'password="x" '.repeat(size / 13) }),
+      printed,
+      4_000,
+    ],
+    [
+      'lines that open like JSON and are not',
+      (size) => '{"a" x\n'.repeat(size / 7),
+      printed,
+      4_000,
+    ],
+    ['lines of a diff', (size) => '-a\n'.repeat(size / 3), printed, 4_000],
+    [
+      'NDJSON lines holding tokens',
+      (size) => `{"t":"${token}"}\n`.repeat(size / 31),
       printed,
       4_000,
     ],
