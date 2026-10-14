@@ -1,13 +1,11 @@
-import type { ThemePreference } from '@hemera/ipc'
 import { NoticeStack, TooltipProvider } from '@hemera/ui'
 import { MotionConfig } from 'motion/react'
-import { StrictMode, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 // oxlint-disable-next-line import/no-unassigned-import
 import './window.css'
 import { AddProjectDialog, type AddingTools } from './add-project.tsx'
-import { AgentSection } from './agent-sections.tsx'
 import { AppSettingsPage, type AppSettingsTools } from './app-settings.tsx'
 import { FirstLaunchRoute } from './first-launch-route.tsx'
 import { ChatRoute, ProjectChats } from './chat-route.tsx'
@@ -26,14 +24,17 @@ import {
   landedAfterSetup,
   linkedSettings,
   open as openView,
+  openChatOf,
   placeOf,
   routeOf,
   sectionOf,
   show,
+  shownProjectOf,
   type Navigation,
   type Route,
 } from './navigation.ts'
-import { SettingsPage, type SettingsTools } from './settings-page.tsx'
+import type { SettingsTools } from './settings-page.tsx'
+import { ProjectSettingsRoute } from './settings-route.tsx'
 import { SidebarMissions } from './sidebar-missions.tsx'
 import { ProjectSetupTask, useSetupLaunches, useSetupOffer } from './setup-task.tsx'
 import { Shell } from './shell.tsx'
@@ -44,9 +45,8 @@ import { useEngine } from './use-engine.ts'
 import { useMinute, useNeeds } from './use-needs.ts'
 import { useNotices } from './use-notices.ts'
 import { useProject, useProjects } from './use-projects.ts'
-import { TicketSection } from './ticket-sections.tsx'
-import { useTicketProblem } from './ticket-providers.tsx'
-import { useSettings } from './use-settings.ts'
+import { useFolded } from './use-folded.ts'
+import { useThemePreference } from './use-theme-preference.ts'
 
 const root = document.querySelector('#root')
 if (root === null) throw new Error('the page has no root to mount on')
@@ -87,67 +87,28 @@ const SETTINGS_TOOLS: AppSettingsTools = {
   showLog: () => void link.showLog(),
 }
 
-/** The keystroke that folds and opens the sidebar, as its button's tooltip says: Ctrl+B. */
-const isFoldKey = (event: KeyboardEvent): boolean =>
-  (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === 'b'
-
 function Application() {
   const engine = useEngine(link)
   const ready = engine.kind === 'ready'
   const [navigation, setNavigation] = useState<Navigation>(START)
-  const [folded, setFolded] = useState(false)
+  const [folded, setFolded] = useFolded()
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const { route } = navigation
-  const shownProject =
-    route.kind === 'project' || route.kind === 'projectSettings'
-      ? route.id
-      : route.kind === 'chat' || route.kind === 'livingSpec'
-        ? route.projectId
-        : null
   const [projects, retryProjects] = useProjects(link, ready)
-  const [project, retryProject] = useProject(link, ready, shownProject)
+  const [project, retryProject] = useProject(link, ready, shownProjectOf(route))
   const [needs, answering] = useNeeds(link, ready)
   const now = useMinute()
   const routeChats = useChats(link, ready, route.kind === 'chat' ? route.projectId : null)
   const [adding, setAdding] = useState(false)
-  const [theme, setTheme] = useState<ThemePreference | null>(null)
-  useEffect(() => {
-    if (!ready) return
-    link.preferences().then(
-      (preferences) => setTheme(preferences.theme),
-      () => undefined,
-    )
-  }, [ready])
-  const settingsOf = route.kind === 'projectSettings' ? route.id : null
-  const ticketProblem = useTicketProblem(link, ready, settingsOf)
-  const [settingsData, settings] = useSettings(link, ready, settingsOf)
-  /** How many times the Project's models by role were changed in its settings. */
-  const [roleChanges, setRoleChanges] = useState(0)
-  // Read each time the add dialog opens, or the settings show, change Project or models by role.
+  const [theme, chooseTheme] = useThemePreference(link, ready)
+  // Read each time the add dialog opens.
   const setupOffer = useSetupOffer(link, ready && adding, null)
-  const settingsOffer = useSetupOffer(
-    link,
-    ready && settingsOf !== null,
-    settingsOf,
-    `${settingsOf ?? ''} ${String(roleChanges)}`,
-  )
   const launches = useSetupLaunches(link)
-  const settingsLaunch = settingsOf === null ? null : launches.of(settingsOf)
   const dataFolder = engine.kind === 'ready' ? engine.status.dataFolder : ''
   const tools = useMemo(() => settingsTools(dataFolder), [dataFolder])
   const { notices, open, dismiss } = useNotices(link, (target) =>
     setNavigation((before) => go(before, routeOf(target))),
   )
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (!isFoldKey(event)) return
-      event.preventDefault()
-      setFolded((before) => !before)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   const goTo = (to: Route): void => setNavigation((before) => go(before, to))
   const openChat = (projectId: string, id: string): void => {
@@ -186,7 +147,7 @@ function Application() {
             link={link}
             engineReady={ready}
             projectId={projectId}
-            current={route.kind === 'chat' ? route.id : null}
+            current={openChatOf(route)}
             onOpen={(id) => openChat(projectId, id)}
           />
         </>
@@ -311,58 +272,18 @@ function Application() {
         ) : null
       }
       projectSettings={
-        settingsOf === null ? null : (
-          <SettingsPage
-            key={settingsOf}
-            data={settingsData}
-            settings={settings}
+        route.kind === 'projectSettings' ? (
+          <ProjectSettingsRoute
+            key={route.id}
+            link={link}
+            engineReady={ready}
+            projectId={route.id}
+            section={route.section}
             tools={tools}
-            section={route.kind === 'projectSettings' ? route.section : undefined}
-            problems={
-              ticketProblem === undefined ? undefined : new Map([['tickets', ticketProblem]])
-            }
-            ticketSection={(section, showForm) => (
-              <TicketSection
-                section={section}
-                link={link}
-                engineReady={ready}
-                projectId={settingsOf}
-                project={
-                  settingsData.project.kind === 'ready' ? settingsData.project.project : null
-                }
-                catalogue={
-                  settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
-                }
-                show={showForm}
-                copy={tools.copy}
-              />
-            )}
-            setUp={{
-              // Launched, the setup is a task on the Project's page: the window goes there.
-              onStart: () => {
-                void launches.start(settingsOf).then((started) => {
-                  if (started) setNavigation((before) => landedAfterSetup(before, settingsOf))
-                })
-              },
-              starting: settingsLaunch?.starting ?? false,
-              unavailable: settingsOffer?.unavailable !== undefined,
-              refused: settingsOffer?.unavailable ?? settingsLaunch?.refused,
-            }}
-            agentSection={(section, showForm) => (
-              <AgentSection
-                section={section}
-                link={link}
-                engineReady={ready}
-                projectId={settingsOf}
-                catalogue={
-                  settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
-                }
-                show={showForm}
-                onRolesChanged={() => setRoleChanges((before) => before + 1)}
-              />
-            )}
+            launches={launches}
+            onSetUpLaunched={() => setNavigation((before) => landedAfterSetup(before, route.id))}
           />
-        )
+        ) : null
       }
       appSettings={
         <AppSettingsPage
@@ -372,10 +293,7 @@ function Application() {
           focus={focusOf(route)}
           onSection={(section) => goTo({ kind: 'settings', section })}
           theme={theme}
-          onTheme={(chosen) => {
-            setTheme(chosen)
-            void link.writePreferences({ theme: chosen }).catch(() => undefined)
-          }}
+          onTheme={chooseTheme}
           dataFolder={dataFolder}
           tools={SETTINGS_TOOLS}
         />
