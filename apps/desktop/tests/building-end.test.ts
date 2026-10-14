@@ -12,11 +12,15 @@
  */
 
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -1219,6 +1223,24 @@ describe('The copy the reviewers read', () => {
       expect(read(join(copy, 'api', 'beside'))).toBe('content withheld: api/beside\n')
     },
   )
+
+  test('a reviewer reading a withheld file while its copy is reused (a Retry) keeps reading it', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+    withheldIn(copy)
+    const path = join(copy, 'api', '.env')
+    // The reader opened the stand-in before the reuse, and still holds it.
+    const reader = openSync(path, 'r')
+    try {
+      const opened = fstatSync(reader, { bigint: true }).ino
+      withheldIn(copy)
+      expect(statSync(path, { bigint: true }).ino).toBe(opened)
+      expect(readFileSync(reader, 'utf8')).toBe('content withheld: api/.env\n')
+    } finally {
+      closeSync(reader)
+    }
+    expect(read(path)).toBe('content withheld: api/.env\n')
+  })
 
   test('withholding a copy twice leaves it as once', () => {
     const copy = copyIn()

@@ -22,7 +22,16 @@
  * (the last green's, which holds the proofs' turn).
  */
 
-import { existsSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, relative } from 'node:path'
 
 import {
@@ -213,8 +222,15 @@ export const withheldIn = (copy: string) => {
       }
       const named = relative(copy, path).replaceAll('\\', '/')
       if (!withheldFromReviewers(named) && (!entry.isSymbolicLink() || leadsIn(path))) continue
+      const standIn = `content withheld: ${named}\n`
+      // Withheld already (a copy reused): left as it is, under a reviewer that may be reading it.
+      const already =
+        entry.isFile() &&
+        statSync(path).size === Buffer.byteLength(standIn) &&
+        readFileSync(path, 'utf8') === standIn
+      if (already) continue
       rmSync(path, { force: true })
-      writeFileSync(path, `content withheld: ${named}\n`)
+      writeFileSync(path, standIn)
     }
   }
   walk(copy)
