@@ -11,7 +11,7 @@
  * string takes that type, so a string that skipped masking does not type-check.
  */
 
-import { Brand, Predicate, Schema } from 'effect'
+import { Brand, Option, Predicate, Schema } from 'effect'
 
 /** What a secret becomes. */
 export const MASK = '•••'
@@ -82,22 +82,60 @@ const LABELLED_CREDENTIAL = new RegExp(
   'gi',
 )
 
+/** A stretch of text, from its first character to the one after its last. */
+type Span = readonly [start: number, end: number]
+
+/** A stretch of text and what replaces it. */
+interface Edit {
+  readonly start: number
+  readonly end: number
+  readonly by: string
+}
+
+/** Text with its edits made; they are in order and do not overlap. */
+const applied = (text: string, edits: ReadonlyArray<Edit>): string => {
+  let out = ''
+  let from = 0
+  for (const edit of edits) {
+    out += text.slice(from, edit.start) + edit.by
+    from = edit.end
+  }
+  return out + text.slice(from)
+}
+
+/** A shape of credential, and what a match becomes given its groups: what names it, then `•••`. */
+type Shape = readonly [pattern: RegExp, by: (groups: ReadonlyArray<string>) => string]
+
+/** The shapes, in the order they are masked. */
+const SHAPES: ReadonlyArray<Shape> = [
+  [PRIVATE_KEY, () => MASK],
+  [CREDENTIAL_HEADER, ([name = '', separator = '']) => `${name}${separator}${MASK}`],
+  [BEARER, ([scheme = '']) => `${scheme} ${MASK}`],
+  [BASIC, ([scheme = '']) => `${scheme} ${MASK}`],
+  [PREFIXED_TOKEN, () => MASK],
+  [URL_PASSWORD, ([before = '']) => `${before}${MASK}@`],
+  [LABELLED_CREDENTIAL, ([label = '', separator = '']) => `${label}${separator}${MASK}`],
+]
+
+/** What one shape replaces in a text. */
+const shapeEdits = (text: string, [pattern, by]: Shape): ReadonlyArray<Edit> => {
+  // `exec` on the shape's own pattern: `matchAll` copies the pattern at each call, and this runs
+  // for every string of a JSON answer.
+  const edits: Edit[] = []
+  pattern.lastIndex = 0
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+    edits.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      by: by(match.slice(1).map((group) => group ?? '')),
+    })
+  }
+  return edits
+}
+
 /** Credentials recognised by their shape, masked without knowing their value. */
 export function maskShapes(text: string): string {
-  return text
-    .replace(PRIVATE_KEY, MASK)
-    .replace(
-      CREDENTIAL_HEADER,
-      (_, name: string, separator: string) => `${name}${separator}${MASK}`,
-    )
-    .replace(BEARER, (_, scheme: string) => `${scheme} ${MASK}`)
-    .replace(BASIC, (_, scheme: string) => `${scheme} ${MASK}`)
-    .replace(PREFIXED_TOKEN, MASK)
-    .replace(URL_PASSWORD, (_, before: string) => `${before}${MASK}@`)
-    .replace(
-      LABELLED_CREDENTIAL,
-      (_, label: string, separator: string) => `${label}${separator}${MASK}`,
-    )
+  return SHAPES.reduce((masked, shape) => applied(masked, shapeEdits(masked, shape)), text)
 }
 
 /**
@@ -111,43 +149,360 @@ const longestFirst = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
  * Every occurrence of every known value masked over its whole span: where two values overlap
  * without one containing the other, the stretch they cover together goes as one mask.
  */
-const maskKnown = (text: string, known: ReadonlyArray<string>): string => {
-  const spans: Array<readonly [number, number]> = []
+const knownSpans = (text: string, known: ReadonlyArray<string>): ReadonlyArray<Span> => {
+  const spans: Span[] = []
   for (const value of known) {
     for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
       spans.push([at, at + value.length])
     }
   }
-  if (spans.length === 0) return text
-  spans.sort((a, b) => a[0] - b[0])
-  let masked = ''
-  let from = 0
-  let end = -1
-  for (const [start, stop] of spans) {
-    if (start > end) {
-      if (end !== -1) masked += MASK
-      masked += text.slice(from, start)
-    }
-    end = Math.max(end, stop)
-    from = end
-  }
-  return `${masked}${MASK}${text.slice(from)}`
+  return merged(spans)
 }
+
+/** Spans in order, those that overlap or touch made one. */
+const merged = (spans: ReadonlyArray<Span>): ReadonlyArray<Span> => {
+  const out: Span[] = []
+  for (const [start, end] of spans.toSorted((a, b) => a[0] - b[0])) {
+    const last = out.at(-1)
+    if (last !== undefined && start <= last[1])
+      out[out.length - 1] = [last[0], Math.max(last[1], end)]
+    else out.push([start, end])
+  }
+  return out
+}
+
+const maskKnown = (text: string, known: ReadonlyArray<string>): string =>
+  applied(
+    text,
+    knownSpans(text, known).map(([start, end]) => ({ start, end, by: MASK })),
+  )
 
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
 
-/**
- * Text with its known values masked, and nothing else: the shapes of credentials are left for a
- * later pass, once the text has been read (the JSON a CLI printed, before its strings are masked).
- */
-export function maskKnownValues(text: string, values: ReadonlyArray<string>): string {
-  return maskKnown(text, longestFirst(values))
-}
-
 /** Text with its known values masked, then the shapes of credentials. */
 export function maskText(text: string, values: ReadonlyArray<string>): Masked<string> {
   return maskedString(maskShapes(maskKnown(text, longestFirst(values))))
+}
+
+/**
+ * A stretch of the text being masked, and the stretch of the text first given that it stands
+ * for: itself when it was copied, all that a mask replaced otherwise.
+ */
+interface Piece {
+  readonly length: number
+  readonly from: number
+  readonly to: number
+  readonly copied: boolean
+}
+
+/** The pieces once the edits are made: each edit stands for all that the pieces it took stood for. */
+const edited = (pieces: ReadonlyArray<Piece>, edits: ReadonlyArray<Edit>): ReadonlyArray<Piece> => {
+  const next: Piece[] = []
+  let at = 0
+  let index = 0
+  let taken: Span | null = null
+  for (const piece of pieces) {
+    let offset = 0
+    while (offset < piece.length) {
+      const edit = edits[index]
+      const here = at + offset
+      if (edit !== undefined && here >= edit.start) {
+        const take = Math.min(piece.length - offset, edit.end - here)
+        const from = piece.copied ? piece.from + offset : piece.from
+        const to = piece.copied ? piece.from + offset + take : piece.to
+        taken = taken === null ? [from, to] : [Math.min(taken[0], from), Math.max(taken[1], to)]
+        offset += take
+        if (here + take === edit.end) {
+          next.push({ length: edit.by.length, from: taken[0], to: taken[1], copied: false })
+          taken = null
+          index += 1
+        }
+      } else {
+        const stop = edit === undefined ? piece.length : Math.min(piece.length, edit.start - at)
+        next.push(
+          piece.copied
+            ? {
+                length: stop - offset,
+                from: piece.from + offset,
+                to: piece.from + stop,
+                copied: true,
+              }
+            : { ...piece, length: stop - offset },
+        )
+        offset = stop
+      }
+    }
+    at += piece.length
+  }
+  return next
+}
+
+/** An edit narrowed to what it changes: what its match and its replacement share at either end stays. */
+const narrowed = (text: string, edit: Edit): Edit => {
+  const match = text.slice(edit.start, edit.end)
+  let head = 0
+  while (head < match.length && head < edit.by.length && match[head] === edit.by[head]) head += 1
+  let tail = 0
+  while (
+    tail < match.length - head &&
+    tail < edit.by.length - head &&
+    match[match.length - 1 - tail] === edit.by[edit.by.length - 1 - tail]
+  ) {
+    tail += 1
+  }
+  return {
+    start: edit.start + head,
+    end: edit.end - tail,
+    by: edit.by.slice(head, edit.by.length - tail),
+  }
+}
+
+/** The stretches of a text that masking it whole (`maskText`) hides, in that text. */
+const hiddenSpans = (text: string, known: ReadonlyArray<string>): ReadonlyArray<Span> => {
+  let current = text
+  let pieces: ReadonlyArray<Piece> = [
+    { length: text.length, from: 0, to: text.length, copied: true },
+  ]
+  const make = (edits: ReadonlyArray<Edit>) => {
+    pieces = edited(pieces, edits)
+    current = applied(current, edits)
+  }
+  make(knownSpans(text, known).map(([start, end]) => ({ start, end, by: MASK })))
+  for (const shape of SHAPES) {
+    make(
+      shapeEdits(current, shape)
+        .map((edit) => narrowed(current, edit))
+        .filter((edit) => edit.end > edit.start),
+    )
+  }
+  return merged(pieces.filter((piece) => !piece.copied).map((piece) => [piece.from, piece.to]))
+}
+
+const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/** The spans, in order and apart, that touch this stretch. */
+const touchingSpans = (
+  spans: ReadonlyArray<Span>,
+  start: number,
+  end: number,
+): ReadonlyArray<Span> => {
+  let low = 0
+  let high = spans.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if ((spans[middle]?.[1] ?? 0) <= start) low = middle + 1
+    else high = middle
+  }
+  const found: Span[] = []
+  for (let index = low; index < spans.length; index += 1) {
+    const span = spans[index]
+    if (span === undefined || span[0] >= end) break
+    found.push(span)
+  }
+  return found
+}
+
+/**
+ * The lines of a text that are JSON, each where it stands. Among lines that are not, a line a
+ * hidden stretch covers whole is text: it is hidden whole, as masking the text would hide it.
+ */
+const jsonLines = (text: string, hidden: ReadonlyArray<Span>): ReadonlyArray<Span> => {
+  const lines: Span[] = []
+  let mixed = false
+  let start = 0
+  for (const line of text.split('\n')) {
+    if (line.trim() !== '') {
+      if (Option.isSome(readJson(line))) lines.push([start, start + line.length])
+      else mixed = true
+    }
+    start += line.length + 1
+  }
+  const coveredWhole = ([from, to]: Span) =>
+    touchingSpans(hidden, from, to).some(([spanFrom, spanTo]) => spanFrom <= from && spanTo >= to)
+  return mixed ? lines.filter((line) => !coveredWhole(line)) : lines
+}
+
+/** The parts of the spans outside the units. Both are in order, and the units do not overlap. */
+const outside = (spans: ReadonlyArray<Span>, units: ReadonlyArray<Span>): ReadonlyArray<Span> => {
+  const parts: Span[] = []
+  let first = 0
+  for (const [start, end] of spans) {
+    while ((units[first]?.[1] ?? Number.POSITIVE_INFINITY) <= start) first += 1
+    let from = start
+    for (let index = first; index < units.length; index += 1) {
+      const unit = units[index]
+      if (unit === undefined || unit[0] >= end) break
+      if (unit[0] > from) parts.push([from, unit[0]])
+      from = Math.max(from, unit[1])
+    }
+    if (from < end) parts.push([from, end])
+  }
+  return parts
+}
+
+/** What a JSON string escapes, by the letter after its backslash. */
+const ESCAPED = new Map([
+  ['"', '"'],
+  ['\\', '\\'],
+  ['/', '/'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['r', '\r'],
+  ['t', '\t'],
+])
+
+/** A JSON string of the text, character by character, each with the stretch that writes it. */
+const readString = (
+  text: string,
+  start: number,
+  end: number,
+): ReadonlyArray<readonly [character: string, from: number, to: number]> => {
+  const characters: Array<readonly [string, number, number]> = []
+  let at = start + 1
+  while (at < end - 1) {
+    if (text.charAt(at) !== '\\') {
+      characters.push([text.charAt(at), at, at + 1])
+      at += 1
+    } else if (text.charAt(at + 1) === 'u') {
+      const code = Number.parseInt(text.slice(at + 2, at + 6), 16)
+      characters.push([String.fromCharCode(code), at, at + 6])
+      at += 6
+    } else {
+      characters.push([ESCAPED.get(text.charAt(at + 1)) ?? '', at, at + 2])
+      at += 2
+    }
+  }
+  return characters
+}
+
+/** What the characters of a JSON string read. */
+const textOf = (characters: ReadonlyArray<readonly [string, number, number]>): string =>
+  characters.map(([character]) => character).join('')
+
+const QUOTED_MASK = JSON.stringify(MASK)
+const JSON_SPACE = ' \t\n\r'
+
+/**
+ * What a CLI printed, masked so that it hides at least all that masking the whole text hides,
+ * and stays JSON where it was: the whole text, or each of its lines.
+ *
+ * The stretches the whole-text masking hides are found in the text as printed. Outside JSON, each
+ * is masked as that masking does. In JSON, a number or literal one touches is masked whole
+ * (`"•••"`), and so is a string one runs out of; in a string, the characters one writes are
+ * masked once the string is read. Between values stand only brackets, commas, colons and spaces,
+ * which hold nothing. On top, the rules of a structured value: a field whose name says it is a
+ * credential masked whole, and every string, keys included, masked as text once read (where a
+ * known value written with escapes is found). Nothing else is written again: a number beyond what
+ * a double holds, the spacing and the escapes come out as printed.
+ */
+export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked<string> {
+  const known = longestFirst(values)
+  const hidden = hiddenSpans(text, known)
+  const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
+  const edits: Edit[] = []
+  const space = (at: number): number => {
+    let next = at
+    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
+    return next
+  }
+  const stringEnd = (at: number): number => {
+    let next = at + 1
+    while (text.charAt(next) !== '"') next += text.charAt(next) === '\\' ? 2 : 1
+    return next + 1
+  }
+  const tokenEnd = (at: number): number => {
+    let next = at
+    while (next < text.length && !`,]}:${JSON_SPACE}`.includes(text.charAt(next))) next += 1
+    return next
+  }
+  /**
+   * A string masked: whole where a hidden stretch runs past its quotes; otherwise read, the
+   * characters the hidden stretches write masked, then masked as text.
+   */
+  const maskString = (start: number, end: number) => {
+    const spans = touching(start, end)
+    if (spans.some(([from, to]) => from <= start || to >= end)) {
+      edits.push({ start, end, by: QUOTED_MASK })
+      return
+    }
+    if (spans.length === 0) {
+      // Nothing of the whole text's masking here: the string masked as text once read.
+      const plain = text.slice(start + 1, end - 1)
+      const read = plain.includes('\\') ? textOf(readString(text, start, end)) : plain
+      const masked = maskShapes(maskKnown(read, known))
+      if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
+      return
+    }
+    const characters = readString(text, start, end)
+    const read = textOf(characters)
+    const marked: Span[] = []
+    let at = 0
+    for (const [character, from, to] of characters) {
+      if (spans.some(([spanFrom, spanTo]) => spanFrom < to && spanTo > from)) {
+        marked.push([at, at + character.length])
+      }
+      at += character.length
+    }
+    const masked = applied(
+      read,
+      merged([...marked, ...hiddenSpans(read, known)]).map(([from, to]) => ({
+        start: from,
+        end: to,
+        by: MASK,
+      })),
+    )
+    if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
+  }
+  /** Masks the JSON value at `at`, standing in `field`, unless quiet; says where it ends. */
+  const value = (at: number, field: string, quiet: boolean): number => {
+    const start = space(at)
+    const first = text.charAt(start)
+    if (!quiet && CREDENTIAL_FIELD.test(field)) {
+      const end = value(start, '', true)
+      edits.push({ start, end, by: QUOTED_MASK })
+      return end
+    }
+    if (first === '{' || first === '[') {
+      const closing = first === '{' ? '}' : ']'
+      let next = space(start + 1)
+      if (text.charAt(next) === closing) return next + 1
+      for (;;) {
+        let name = field
+        if (first === '{') {
+          const keyEnd = stringEnd(next)
+          if (!quiet) maskString(next, keyEnd)
+          name = textOf(readString(text, next, keyEnd))
+          next = space(keyEnd) + 1
+        }
+        next = space(value(next, name, quiet))
+        if (text.charAt(next) !== ',') return next + 1
+        next = space(next + 1)
+      }
+    }
+    if (first === '"') {
+      const end = stringEnd(start)
+      if (!quiet) maskString(start, end)
+      return end
+    }
+    const end = tokenEnd(start)
+    if (!quiet && touching(start, end).length > 0) edits.push({ start, end, by: QUOTED_MASK })
+    return end
+  }
+  const units: ReadonlyArray<Span> = Option.isSome(readJson(text))
+    ? [[0, text.length]]
+    : jsonLines(text, hidden)
+  for (const [start] of units) value(start, '', false)
+  for (const [start, end] of outside(hidden, units)) {
+    if (text.slice(start, end).trim() !== '') edits.push({ start, end, by: MASK })
+  }
+  return maskedString(
+    applied(
+      text,
+      edits.toSorted((a, b) => a.start - b.start),
+    ),
+  )
 }
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */

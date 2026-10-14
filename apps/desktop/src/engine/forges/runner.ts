@@ -31,8 +31,6 @@ import { type CommandShape, type ParsedCommand, aimsAt, parseCommand } from './s
 /** How long a forge call may run: a read, a write. */
 export const FORGE_LIMITS = { read: 30_000, write: 120_000 } as const
 
-const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
-
 /** How much of what a CLI prints is read before the call is cut. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
@@ -68,12 +66,9 @@ export interface ForgeCall {
 
 /**
  * What a call answered: the command it ran, its exit code, what it printed and its standard error,
- * all three masked. The known values are masked over the whole output first. Then an output that
- * is JSON (any value: an object, a list, a string…) is read and masked value by value
- * (`maskRecord`: every string, and a credential field whole), then written back, so it stays
- * JSON; NDJSON (`--jq`), every line of which is JSON, is read so line by line. Any other output is
- * masked as one text, so a credential spread over its lines (a private key, a label and its value)
- * goes whole.
+ * all three masked. What it printed is masked at least as much as masking it whole as text would,
+ * and stays JSON where it was JSON, whole or line by line (`maskPrinted`): a string or a number
+ * such masking touches goes whole, a credential field too, and the rest is left as printed.
  */
 export interface ForgeAnswer {
   readonly command: string
@@ -170,36 +165,6 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           if (value !== undefined) given[name] = value
         }
         return { ...given, ...QUIET[cli] }
-      }
-
-      /**
-       * A JSON value masked value by value. Masked as text, a field named `token` or a body holding
-       * `password=\"x\"` would lose its quotes, and the JSON with them.
-       */
-      const maskJson = (value: Schema.Json): string =>
-        JSON.stringify(secrets.maskRecord({ value }).value)
-
-      /** What a CLI printed, masked: JSON value by value, NDJSON line by line, the rest as text. */
-      const maskOutput = (printed: string): string => {
-        // Known values first, over the raw text: one inside a string keeps the JSON readable; one
-        // that read JSON would split or never see as a string (a number, a key, a value that is
-        // JSON itself or spans lines) leaves the text unreadable as JSON, and so masked as text.
-        const known = secrets.maskKnown(printed)
-        const whole = readJson(known)
-        if (Option.isSome(whole)) return maskJson(whole.value)
-        let mixed = false
-        const lines = known.split('\n').map((line) => {
-          if (line.trim() === '') return line
-          const json = readJson(line)
-          if (Option.isSome(json)) return maskJson(json.value)
-          mixed = true
-          return line
-        })
-        // A line that is not JSON among JSON ones: the whole is masked as text too, since read
-        // apart, a label and its value on the next line, or a private key around a line of digits,
-        // would be masked in pieces. Its JSON lines were masked as JSON first, where text masking
-        // misses a value between escaped quotes.
-        return mixed ? secrets.mask(lines.join('\n')) : lines.join('\n')
       }
 
       const find = (cli: ForgeCli) =>
@@ -300,7 +265,7 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
             return {
               command,
               code: exit.code,
-              stdout: maskOutput(out.join('\n')),
+              stdout: secrets.maskPrinted(out.join('\n')),
               stderr: secrets.mask(err.join('\n').trim()),
             } satisfies ForgeAnswer
           }),

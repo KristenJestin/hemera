@@ -18,7 +18,7 @@
 import {
   MAIN_CHECKOUT_NAME,
   type Masked,
-  maskKnownValues,
+  maskPrinted,
   maskRecord,
   maskText,
 } from '@hemera/core/domain'
@@ -44,8 +44,10 @@ export interface SecretsRegistry {
   readonly values: () => ReadonlyArray<string>
   /** Text with every registered value masked, then the shapes of credentials. */
   readonly mask: (text: string) => Masked<string>
-  /** Text with every registered value masked, and nothing else: not masked yet, only less. */
-  readonly maskKnown: (text: string) => string
+  /**
+   * What a CLI printed, masked at least as the text whole would be, and still JSON where it was.
+   */
+  readonly maskPrinted: (text: string) => Masked<string>
   /** A structured value with every string in it masked, and its credential fields whole. */
   readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
@@ -74,7 +76,7 @@ export function secretsRegistry(): SecretsRegistry {
     },
     values,
     mask: (text) => maskText(text, values()),
-    maskKnown: (text) => maskKnownValues(text, values()),
+    maskPrinted: (text) => maskPrinted(text, values()),
     maskRecord: (record) => maskRecord(record, values()),
   }
 }

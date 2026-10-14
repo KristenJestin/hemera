@@ -1139,7 +1139,7 @@ describe('A JSON answer of any shape is masked value by value and stays JSON', (
       '-----END OPENSSH PRIVATE KEY-----',
     ]
     const stdout = await printed(`{"a": 1}\n${block.join('\n')}\n`)
-    expect(stdout).toBe('{"a":1}\n•••')
+    expect(stdout).toBe('{"a": 1}\n•••')
   })
 })
 
@@ -1169,7 +1169,8 @@ describe('Masking an answer read as JSON loses nothing whole-text masking catche
   const codes = '48213977\n55120934'
   test.each([
     ['after a label', `recovery codes:\n${codes}\n`, 'recovery codes:\n•••'],
-    ['alone', `${codes}\n`, '•••'],
+    // Every line JSON: it stays NDJSON, each number masked as a string.
+    ['alone', `${codes}\n`, '"•••"\n"•••"'],
   ])(
     'a known value over several lines, each a JSON number: %s',
     async (_case, stdout, expected) => {
@@ -1210,6 +1211,25 @@ describe('Masking an answer read as JSON loses nothing whole-text masking catche
       '-----END RSA PRIVATE KEY-----',
     ]
     expect(await printed(`${block.join('\n')}\n`)).toBe('•••')
+  })
+
+  test('a private key begun in a JSON line, its body on the lines after', async () => {
+    const stdout = await printed(
+      '{"msg":"-----BEGIN RSA PRIVATE KEY-----"}\nMIIEowIBAAKCAQEAbodyline\n-----END RSA PRIVATE KEY-----\n',
+    )
+    expect(stdout).not.toContain('MIIEowIBAAKCAQEAbodyline')
+  })
+
+  test('a cookie and a Set-Cookie header in a gh --json list', async () => {
+    const stdout = await printed(
+      '[{"cookie":"sessionid=abcdef123"},{"headers":{"Set-Cookie":"sid=zz99887766; Path=/"}}]\n',
+    )
+    expect(stdout).not.toMatch(/abcdef123|zz99887766/)
+    expect(JSON.parse(stdout)).toHaveLength(2)
+  })
+
+  test('a number beyond 2^53 comes back as printed', async () => {
+    expect(await printed('[{"id":12345678901234567890}]\n')).toBe('[{"id":12345678901234567890}]')
   })
 
   test('a known value used as an object key', async () => {

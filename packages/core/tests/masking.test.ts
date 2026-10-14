@@ -6,7 +6,14 @@
 import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { MASK, maskAction, maskRecord, maskShapes, maskText } from '../src/domain/index.ts'
+import {
+  MASK,
+  maskAction,
+  maskPrinted,
+  maskRecord,
+  maskShapes,
+  maskText,
+} from '../src/domain/index.ts'
 
 /** A value as a secret is: long enough to mean something, and nothing a shape would catch. */
 const secretValue = fc
@@ -209,5 +216,203 @@ describe('An action is never sent in part', () => {
     for (const field of ['path', 'target', 'cwd', 'command', 'program', 'line', 'url', 'host']) {
       expect(maskAction({ [field]: 'x known-value y' }, ['known-value'])).toBeNull()
     }
+  })
+})
+
+/** How many times `word` stands in `text`. */
+const occurrences = (text: string, word: string): number => text.split(word).length - 1
+
+/** Whether the text is JSON as a whole, or JSON on each of its lines that is not blank. */
+const jsonShape = (text: string): 'whole' | 'lines' | 'text' => {
+  const parses = (part: string) => {
+    try {
+      JSON.parse(part)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (parses(text)) return 'whole'
+  const lines = text.split('\n').filter((line) => line.trim() !== '')
+  return lines.length > 0 && lines.every(parses) ? 'lines' : 'text'
+}
+
+/**
+ * The rule of `maskPrinted`: no word of the text is left more often than masking the whole text
+ * leaves it, and what was JSON (whole, or line by line) is JSON still.
+ */
+const holdsTheRule = (text: string, values: ReadonlyArray<string>): string => {
+  const printed = maskPrinted(text, values)
+  const whole = maskText(text, values)
+  for (const word of new Set(text.match(/[\p{L}\p{N}_]{3,}/gu) ?? [])) {
+    expect(occurrences(printed, word), word).toBeLessThanOrEqual(occurrences(whole, word))
+  }
+  const shape = jsonShape(text)
+  if (shape !== 'text') expect(jsonShape(printed)).toBe(shape)
+  return printed
+}
+
+describe('What a CLI printed is masked at least as much as the whole text would be', () => {
+  const pem = ['MIIEowIBAAKCAQEAbodyline', '-----END RSA PRIVATE KEY-----']
+  const cases: ReadonlyArray<
+    readonly [string, string, ReadonlyArray<string>, ReadonlyArray<string>]
+  > = [
+    [
+      'a private key begun in a JSON line',
+      ['{"msg":"-----BEGIN RSA PRIVATE KEY-----"}', ...pem].join('\n'),
+      [],
+      ['MIIEowIBAAKCAQEAbodyline'],
+    ],
+    [
+      'a private key begun in a JSON string line',
+      ['"-----BEGIN RSA PRIVATE KEY-----"', ...pem].join('\n'),
+      [],
+      ['MIIEowIBAAKCAQEAbodyline'],
+    ],
+    [
+      'a private key with a line of digits in it',
+      ['-----BEGIN RSA PRIVATE KEY-----', 'b3BlbnNzaC1rZXk', '12345678', ...pem].join('\n'),
+      [],
+      ['b3BlbnNzaC1rZXk', '12345678', 'MIIEowIBAAKCAQEAbodyline'],
+    ],
+    ['a key shaped like a token', '[{"ghp_Q1w2e3r4t5y6u7i8o9p0":1}]', [], ['Q1w2e3r4t5y6u7i8o9p0']],
+    ['a cookie field in a list', '[{"cookie":"sessionid=abcdef123"}]', [], ['abcdef123']],
+    [
+      'a Set-Cookie header deep in a list',
+      '[{"response":{"headers":{"Set-Cookie":"sid=zz99887766; Path=/"}}}]',
+      [],
+      ['zz99887766'],
+    ],
+    [
+      'a Set-Cookie header in NDJSON',
+      '{"id":1}\n{"headers":{"Set-Cookie":"sid=zz99887766"}}',
+      [],
+      ['zz99887766'],
+    ],
+    ['a known value as an escaped key', '[{"pa\\"ssKEY123":1}]', ['pa"ssKEY123'], ['ssKEY123']],
+    [
+      'a known value as an escaped key of an object',
+      '{"pa\\"ssKEY123":1}',
+      ['pa"ssKEY123'],
+      ['ssKEY123'],
+    ],
+    [
+      'a known value as a key with an accent',
+      '[{"caféSECRETKEY":1}]',
+      ['caféSECRETKEY'],
+      ['SECRETKEY'],
+    ],
+    [
+      'a known value escaped in a value',
+      'warn\n{"k":"pa\\"ssKEY123"}',
+      ['pa"ssKEY123'],
+      ['ssKEY123'],
+    ],
+    [
+      'credential fields in NDJSON',
+      '{"token":"plain-1"}\n{"note":"password=\\"x2secret\\""}',
+      [],
+      ['plain', 'x2secret'],
+    ],
+    [
+      'credential fields and shapes in an array',
+      '[{"token":"plain-3","body":"use ghp_0123456789abcdefghij"}]',
+      [],
+      ['plain', 'ghp_0123456789abcdefghij'],
+    ],
+    [
+      'JSON lines mixed with text',
+      '{"a":"x"}\nwarning: token=zzsecret55\n{"b":"Bearer abcdefgh1234"}',
+      [],
+      ['zzsecret55', 'abcdefgh1234'],
+    ],
+    [
+      'NDJSON ending its lines with CRLF',
+      '{"token":"plain-4"}\r\n{"x":"Bearer abcdefgh1234"}\r\n',
+      [],
+      ['plain', 'abcdefgh1234'],
+    ],
+    [
+      'a label, its value on the next line',
+      'db:\n  password:\n    "hunter2xyz"',
+      [],
+      ['hunter2xyz'],
+    ],
+    ['a label and its value on two JSON lines', '"password:"\n"hunter2xyz"', [], ['hunter2xyz']],
+    ['a known number in a list', '[{"n":424242}]', ['424242'], ['424242']],
+    [
+      'a known value over two lines of numbers',
+      '48213977\n55120934',
+      ['48213977\n55120934'],
+      ['48213977', '55120934'],
+    ],
+    [
+      'a known value that is JSON itself, in a list',
+      `[${JSON.stringify({ auths: { reg: { auth: 'dXNlcjpodW50ZXIy' } } })}]`,
+      [JSON.stringify({ auths: { reg: { auth: 'dXNlcjpodW50ZXIy' } } })],
+      ['dXNlcjpodW50ZXIy'],
+    ],
+  ]
+  for (const [what, text, known, secrets] of cases) {
+    test(`${what}: nothing of the secret is left, and JSON stays JSON`, () => {
+      const printed = holdsTheRule(text, known)
+      for (const secret of secrets) expect(printed).not.toContain(secret)
+    })
+  }
+
+  test('what is not masked is left as it was printed: big numbers, spacing, escapes', () => {
+    const text = '{\n  "id": 12345678901234567890,\n  "name": "caf\\u00e9",\n  "n": 1.50\n}'
+    expect(maskPrinted(text, [])).toBe(text)
+    const ndjson = '{"id":12345678901234567890}\n{"id":98765432109876543210, "ok":true}'
+    expect(maskPrinted(ndjson, [])).toBe(ndjson)
+  })
+
+  test('a field named as a credential is masked whole, whatever it holds, and stays JSON', () => {
+    expect(
+      JSON.parse(maskPrinted('[{"token":{"a":"plain"},"password":7,"user":"octo"}]', [])),
+    ).toEqual([{ token: MASK, password: MASK, user: 'octo' }])
+  })
+
+  test('any JSON, whole or line by line, with secrets anywhere in it', () => {
+    const secret = fc.constantFrom(
+      'ghp_0123456789abcdefghij',
+      'Bearer abcdefgh1234',
+      'password=hunter2',
+      'Cookie: sid=zz99887766',
+      '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----',
+      'known-VALUE-1',
+    )
+    const withSecrets = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
+      value: fc.oneof(
+        fc.jsonValue({ maxDepth: 1 }),
+        secret,
+        fc.array(tie('value'), { maxLength: 3 }),
+        fc.dictionary(fc.oneof(fc.string({ maxLength: 6 }), secret), tie('value'), {
+          maxKeys: 3,
+        }),
+      ),
+    })).value
+    fc.assert(
+      fc.property(
+        fc.array(withSecrets, { minLength: 1, maxLength: 3 }),
+        fc.boolean(),
+        (values, lines) => {
+          const text = lines
+            ? values.map((value) => JSON.stringify(value)).join('\n')
+            : JSON.stringify(values, null, 2)
+          const printed = holdsTheRule(text, ['known-VALUE-1'])
+          for (const leaked of [
+            '0123456789abcdefghij',
+            'abcdefgh1234',
+            'hunter2',
+            'zz99887766',
+            'MIIEbody',
+            'known-VALUE-1',
+          ]) {
+            expect(printed).not.toContain(leaked)
+          }
+        },
+      ),
+    )
   })
 })
