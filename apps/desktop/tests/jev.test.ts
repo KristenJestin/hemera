@@ -129,6 +129,14 @@ describe('What Jev is told', () => {
     expect(jev.received).toHaveLength(0)
   })
 
+  test('an action nested 100,000 levels deep is not sent, and the call does not fail', async () => {
+    let deep: JevInput['action'] = { bottom: 'x' }
+    for (let level = 0; level < 100_000; level += 1) deep = { next: deep }
+    const result = await ask({ action: { ...action(), deep } })
+    expect(result).toEqual({ kind: 'unavailable', failure: 'input', status: null, ms: null })
+    expect(jev.received).toHaveLength(0)
+  })
+
   test('an empty key is never sent', async () => {
     expect(await ask({}, [], '  ')).toMatchObject({ kind: 'unavailable', failure: 'input' })
     expect(jev.received).toHaveLength(0)

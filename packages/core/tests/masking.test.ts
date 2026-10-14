@@ -3,7 +3,8 @@
  * the shapes of credentials it recognises without knowing their value. Every mask is `•••`.
  */
 
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
+import type { Schema } from 'effect'
 import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -17,6 +18,7 @@ import {
   maskShapes,
   maskText,
   maskTextPaced,
+  NESTING_LIMIT,
 } from '../src/domain/index.ts'
 import * as inTurn from './oracle/masking-in-turn.ts'
 
@@ -1246,7 +1248,7 @@ describe('What follows a quoted value inside another value stays hidden', () => 
 })
 
 /** How long `work` takes, run `times` times, in milliseconds. */
-const timed = (work: () => string, times: number): number => {
+const timed = (work: () => void, times: number): number => {
   const start = performance.now()
   for (let run = 0; run < times; run += 1) work()
   return performance.now() - start
@@ -1257,7 +1259,11 @@ const timed = (work: () => string, times: number): number => {
  * quadratic. The two sizes are timed in turn, seven times, each run long enough to be measured,
  * and each keeps its fastest: a load on the machine weighs on both alike.
  */
-const growth = (make: (size: number) => string, mask: (text: string) => string, size: number) => {
+const growth = <Input>(
+  make: (size: number) => Input,
+  mask: (input: Input) => void,
+  size: number,
+) => {
   const small = make(size)
   const large = make(16 * size)
   let times = 1
@@ -1440,4 +1446,208 @@ describe('A mask that fails gives •••, never the text, and never fails', (
     expect(await Effect.runPromise(maskTextPaced('a text', unreadable))).toBe(MASK)
     expect(await Effect.runPromise(maskPrintedPaced('{"a":"text"}', unreadable))).toBe(MASK)
   })
+})
+
+/** A value of `levels` containers, one in another, `bottom` in the innermost: built with no recursion. */
+const deepValue = (
+  levels: number,
+  bottom: string,
+  container: 'object' | 'list' | 'both' = 'object',
+) => {
+  let value: Schema.Json = bottom
+  for (let level = 0; level < levels; level += 1) {
+    value =
+      container === 'object' || (container === 'both' && level % 2 === 0)
+        ? { next: value }
+        : [value]
+  }
+  return value
+}
+
+/** What a value holds, a list's items or a record's fields: nothing for a string or a number. */
+const childrenOf = (value: Schema.Json): ReadonlyArray<Schema.Json> =>
+  value === null ||
+  Predicate.isString(value) ||
+  Predicate.isNumber(value) ||
+  Predicate.isBoolean(value)
+    ? []
+    : Object.values(value)
+
+/** How many containers one in another a value has, counted with no recursion. */
+const depthOf = (value: Schema.Json): number => {
+  let depth = 0
+  const level: Schema.Json[] = [value]
+  let inLevel = level
+  while (inLevel.length > 0) {
+    const next: Schema.Json[] = []
+    for (const item of inLevel) {
+      next.push(...childrenOf(item))
+    }
+    if (next.length > 0) depth += 1
+    inLevel = next
+  }
+  return depth
+}
+
+const DEEP = 100_000
+
+describe('A value nested deeper than a call stack reaches is masked, and never fails the call', () => {
+  const known = ['known-value']
+
+  const SHAPES = { object: 'objects', list: 'lists', both: 'objects and lists' }
+  for (const container of ['object', 'list', 'both'] as const) {
+    test(`a record ${String(DEEP)} levels deep (${SHAPES[container]}) is masked below the limit, and the record can be written`, () => {
+      const masked = maskRecord(
+        { note: 'a known-value', deep: deepValue(DEEP, 'known-value', container) },
+        known,
+      )
+      expect(masked['note']).toBe(`a ${MASK}`)
+      expect(depthOf(masked)).toBeLessThanOrEqual(NESTING_LIMIT)
+      expect(JSON.stringify(masked)).not.toContain('known-value')
+      expect(JSON.stringify(masked)).toContain(MASK)
+    })
+
+    test(`an action ${String(DEEP)} levels deep (${SHAPES[container]}) is not sent`, () => {
+      expect(
+        maskAction({ tool: 'fs_write', arguments: deepValue(DEEP, 'plain', container) }, known),
+      ).toBeNull()
+    })
+  }
+
+  test('the limit is exact: a value of that many containers is masked in full, one more is cut', () => {
+    // The record itself is the first container.
+    const tail = `"next":"${MASK}"${'}'.repeat(NESTING_LIMIT)}`
+    const within = maskRecord({ deep: deepValue(NESTING_LIMIT - 1, 'known-value') }, known)
+    expect(depthOf(within)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(within).endsWith(tail)).toBe(true)
+    expect(maskAction({ deep: deepValue(NESTING_LIMIT - 1, 'plain') }, known)).not.toBeNull()
+    const over = maskRecord({ deep: deepValue(NESTING_LIMIT, 'plain') }, known)
+    expect(depthOf(over)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(over).endsWith(tail)).toBe(true)
+    expect(maskAction({ deep: deepValue(NESTING_LIMIT, 'plain') }, known)).toBeNull()
+  })
+
+  test('what stands above the depth is masked as ever, a credential field whole', () => {
+    const masked = maskRecord(
+      { password: deepValue(DEEP, 'x'), note: 'a known-value', deep: deepValue(DEEP, 'y') },
+      known,
+    )
+    expect(masked['password']).toBe(MASK)
+    expect(masked['note']).toBe(`a ${MASK}`)
+  })
+
+  test('a value that cannot be read gives a masked record, and no action', () => {
+    const unreadable = { note: 'text' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskRecord(unreadable, known)).toEqual({ note: MASK, broken: MASK })
+    expect(maskAction(unreadable, known)).toBeNull()
+  })
+
+  test('a tag that holds more than a name is masked like any value', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { _tag: { token: 'x', note: 'known-value' }, kept: { _tag: 'Name' } }
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
+    const expected = { _tag: { token: MASK, note: MASK }, kept: { _tag: 'Name' } }
+    expect(maskRecord(tagged, known)).toEqual(expected)
+  })
+
+  test('fields keep their names and their order, a field named __proto__ among them', () => {
+    const value: Schema.JsonObject = JSON.parse(
+      '{"z":"known-value","__proto__":{"a":"known-value"},"a":["known-value",{"b":"known-value"}]}',
+    )
+    const masked = maskRecord(value, known)
+    expect(Object.keys(masked)).toEqual(['z', '__proto__', 'a'])
+    expect(JSON.stringify(masked)).toBe(
+      `{"z":"${MASK}","__proto__":{"a":"${MASK}"},"a":["${MASK}",{"b":"${MASK}"}]}`,
+    )
+  })
+
+  // A value of any shape, in the reach of the stack: fields named as a credential and as a tag among
+  // them.
+  const json: fc.Arbitrary<Schema.Json> = fc.letrec<{ value: Schema.Json }>((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small' },
+      fc.string({ maxLength: 12 }),
+      fc.constantFrom('known-value', 'a known-value b', 'ghp_Q1w2E3r4T5Q1w2E3r4T5'),
+      fc.integer(),
+      fc.boolean(),
+      fc.constant(null),
+      fc.array(tie('value'), { maxLength: 4 }),
+      fc.dictionary(
+        fc.constantFrom('a', 'b', 'password', 'apiKey', '_tag', 'path', 'line', '__proto__'),
+        tie('value'),
+        { maxKeys: 4 },
+      ),
+    ),
+  })).value
+
+  /** The walk as it was: in calls, one for each value. */
+  const walked = (value: Schema.Json, field: string): Schema.Json => {
+    if (/api[_-]?key|password|passwd|secret|token|credential|authorization/i.test(field))
+      return MASK
+    if (Predicate.isString(value)) return maskText(value, known)
+    if (Array.isArray(value)) return value.map((item) => walked(item, field))
+    if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
+    return Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [
+        name,
+        name === '_tag' && Predicate.isString(item) ? item : walked(item, name),
+      ]),
+    )
+  }
+
+  test('a value in the reach of the stack is masked as the walk in calls masked it', () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(fc.constantFrom('a', 'b', 'password', '_tag', 'note'), json),
+        (record) => {
+          const masked = maskRecord(record, known)
+          expect(masked).toEqual(walked(record, ''))
+        },
+      ),
+      { numRuns: 2_000 },
+    )
+  })
+})
+
+describe('Masking a structured value takes time in proportion to its size', () => {
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const wide = (width: number) => ({ items: Array.from({ length: width }, () => `a ${token} b`) })
+  const fields = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: width }, (_, index) => [`field${String(index)}`, `a ${token}`]),
+    )
+  const deep = (levels: number) => ({ deep: deepValue(levels, `a ${token}`) })
+
+  test(
+    '16 times as many items in a list takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(wide, (record) => maskRecord(record, []), 2_000)).toBeLessThan(64)
+      expect(growth(wide, (record) => maskAction(record, []), 2_000)).toBeLessThan(64)
+    },
+  )
+
+  test(
+    '16 times as many fields in a record takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(fields, (record) => maskRecord(record, []), 2_000)).toBeLessThan(64)
+      expect(growth(fields, (record) => maskAction(record, []), 2_000)).toBeLessThan(64)
+    },
+  )
+
+  test(
+    '16 times as many levels, up to the limit, takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(deep, (record) => maskRecord(record, []), 15)).toBeLessThan(64)
+      expect(growth(deep, (record) => maskAction(record, []), 15)).toBeLessThan(64)
+    },
+  )
 })
