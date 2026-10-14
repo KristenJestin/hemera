@@ -231,6 +231,16 @@ describe('An action is never sent in part', () => {
     ).toBeNull()
   })
 
+  test('an action whose destination cannot be masked is refused, as a partial action', () => {
+    // A quoted value of megabytes after a label: the pattern of a quoted value throws on it.
+    const unmaskable = `token: "${'x'.repeat(16 * 1024 * 1024)}"`
+    expect(maskAction({ tool: 'commands_run', line: unmaskable }, [])).toBeNull()
+    expect(maskAction({ tool: 'fs_write', note: unmaskable }, [])).toEqual({
+      tool: 'fs_write',
+      note: MASK,
+    })
+  })
+
   test('the same holds for every destination field', () => {
     for (const field of ['path', 'target', 'cwd', 'command', 'program', 'line', 'url', 'host']) {
       expect(maskAction({ [field]: 'x known-value y' }, ['known-value'])).toBeNull()

@@ -952,10 +952,15 @@ export function maskAction(
   const known = longestFirst(values)
   let lostDestination = false
   const masked = visitFields(action, (text, field) => {
-    if (DESTINATION_FIELD.test(field) && known.some((value) => text.includes(value))) {
-      lostDestination = true
+    const destination = DESTINATION_FIELD.test(field)
+    if (destination && known.some((value) => text.includes(value))) lostDestination = true
+    try {
+      return done(textMasked(text, known))
+    } catch {
+      // A destination that could not be masked is gone whole: the action would be sent in part.
+      if (destination) lostDestination = true
+      return MASK
     }
-    return doneOrMask(() => textMasked(text, known))
   })
   return lostDestination ? null : maskedRecord(masked)
 }
