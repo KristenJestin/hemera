@@ -89,8 +89,6 @@ export {
   type MentionRef,
 } from './components/mention-field/mention-field.tsx'
 export {
-  choiceWords,
-  EFFORTS,
   EffortGauge,
   ModelPicker,
   type Effort,
@@ -100,6 +98,7 @@ export {
   type PickerAgent,
   type PickerModel,
 } from './components/model-picker/model-picker.tsx'
+export { choiceWords, EFFORTS } from './components/model-picker/model-choice.ts'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {
   Select,

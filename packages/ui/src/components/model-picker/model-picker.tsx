@@ -27,6 +27,17 @@ import { Skeleton } from '../loading/loading.tsx'
 import { Popover } from '../popover/popover.tsx'
 import { Tabs } from '../tabs/tabs.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
+import {
+  EFFORTS,
+  choiceWords,
+  type Effort,
+  type Judge,
+  type ModelChoice,
+  type PickerAgent,
+  type PickerModel,
+} from './model-choice.ts'
+
+export type { Effort, Judge, ModelChoice, PickerAgent, PickerModel } from './model-choice.ts'
 
 /**
  * The model picker: one popover, the same wherever a model is chosen — the app's settings, a
@@ -51,43 +62,6 @@ import { Tooltip } from '../tooltip/tooltip.tsx'
  *   models that could not be read are said in words there, with Retry: the panel keeps its size
  *   through all of it.
  */
-
-export const EFFORTS = ['low', 'medium', 'high', 'max'] as const
-export type Effort = (typeof EFFORTS)[number]
-
-export interface PickerModel {
-  id: string
-  name: string
-  /** The efforts the model accepts, lowest first; none when it takes no effort. */
-  efforts?: readonly Effort[] | undefined
-  /** The effort the model runs at when none is chosen, when the agent says which. */
-  defaultEffort?: Effort | undefined
-  favourite?: boolean | undefined
-  hidden?: boolean | undefined
-}
-
-/** An agent this machine has, and the models it offers. */
-export interface PickerAgent {
-  id: string
-  name: string
-  models: readonly PickerModel[]
-  /** Whether its models are still on their way: the list shows rows of their shape meanwhile. */
-  loading?: boolean | undefined
-  /** Why its models could not be read, in words: said in the list's room, beside Retry. */
-  error?: string | undefined
-  /** Why it cannot be chosen now (not signed in, say): its mark is there, disabled, this its tooltip. */
-  unavailable?: string | undefined
-}
-
-export interface ModelChoice {
-  agent: string
-  model: string
-  /** Left out: the model's own default. */
-  effort?: Effort | undefined
-}
-
-/** Who answers the permissions an agent asks for: the user, or Hemera Auto. */
-export type Judge = 'you' | 'auto'
 
 export interface ModelPickerProps {
   /** What is being chosen: `Model of the Builder`. The trigger's name starts with it. */
@@ -125,25 +99,6 @@ const EFFORT_ROW = 'flex items-center gap-3 border-t border-border px-2 pt-2'
 const SEGMENTS = 'flex h-control-sm min-w-0 flex-1 items-stretch gap-0.5 rounded-md bg-muted p-0.5'
 const SEGMENT =
   'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-sm px-2 text-xs text-muted-foreground outline-none select-none focus-ring hover-motion hover:text-foreground data-checked:bg-card data-checked:font-medium data-checked:text-foreground data-checked:shadow-sm'
-
-/** The words of a choice, as the trigger's name and tooltip say them. */
-export function choiceWords(
-  agents: readonly PickerAgent[],
-  choice: ModelChoice,
-  judge: Judge = 'you',
-): string {
-  const agent = agents.find((one) => one.id === choice.agent)
-  const model = agent?.models.find((one) => one.id === choice.model)
-  return [
-    agent?.name ?? choice.agent,
-    model?.name ?? choice.model,
-    choice.effort === undefined ? null : `effort ${choice.effort}`,
-    judge === 'auto' ? 'Hemera Auto judges permissions' : null,
-    agent !== undefined && model === undefined ? `${agent.name} no longer offers this model` : null,
-  ]
-    .filter((word) => word !== null)
-    .join(' · ')
-}
 
 /** The effort as a gauge of four bars, the ones up to it filled. */
 export function EffortGauge({ effort }: { effort: Effort }): ReactNode {
@@ -341,20 +296,7 @@ function NotListed({
 const firstTab = (agents: readonly PickerAgent[], shown: ModelChoice | null | undefined): string =>
   shown?.agent ?? (agents.find((agent) => agent.unavailable === undefined) ?? agents[0])?.id ?? ''
 
-function AgentPane({
-  agent,
-  value,
-  fallback,
-  query,
-  onQuery,
-  editing,
-  onEditing,
-  search,
-  onChange,
-  onFavourite,
-  onHide,
-  onRetry,
-}: {
+interface AgentPaneProps {
   agent: PickerAgent
   value: ModelChoice | null
   fallback: ModelChoice | undefined
@@ -367,7 +309,170 @@ function AgentPane({
   onFavourite: (agent: string, model: string, favourite: boolean) => void
   onHide: (agent: string, model: string, hidden: boolean) => void
   onRetry: ((agent: string) => void) | undefined
-}): ReactNode {
+}
+
+/** The list in its edit mode: every model that matches, with its favourite and hide buttons. */
+function ModelEditList({
+  id,
+  agent,
+  query,
+  onFavourite,
+  onHide,
+}: Pick<AgentPaneProps, 'agent' | 'query' | 'onFavourite' | 'onHide'> & { id: string }): ReactNode {
+  return (
+    <ul id={id} aria-label={`Models of ${agent.name}`} className={LIST}>
+      {agent.models
+        .filter((one) => matches(one.name, query))
+        .map((one) => (
+          <li key={one.id} className="flex min-h-control-md items-center gap-1 px-2">
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate text-sm',
+                one.hidden === true && 'text-muted-foreground',
+              )}
+            >
+              {one.name}
+            </span>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconStar size="sm" weight={one.favourite === true ? 'filled' : 'outline'} />}
+              aria-label={`Favourite ${one.name}`}
+              aria-pressed={one.favourite === true}
+              onClick={() => onFavourite(agent.id, one.id, one.favourite !== true)}
+            />
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconEyeOff size="sm" />}
+              aria-label={`Hide ${one.name}`}
+              aria-pressed={one.hidden === true}
+              onClick={() => onHide(agent.id, one.id, one.hidden !== true)}
+            />
+          </li>
+        ))}
+    </ul>
+  )
+}
+
+interface ModelOptionsProps {
+  id: string
+  agent: PickerAgent
+  fallback: ModelChoice | undefined
+  entries: readonly Entry[]
+  /** The entry the arrows are on. */
+  current: number
+  /** Whether "Use the default" is the choice, else the choice of this agent, if it is one. */
+  value: ModelChoice | null
+  mine: ModelChoice | null
+  optionId: (entry: Entry) => string
+  onActive: (index: number) => void
+  onPick: (entry: Entry) => void
+}
+
+/** The models that match, favourites first, as the options of a listbox. */
+function ModelOptions({
+  id,
+  agent,
+  fallback,
+  entries,
+  current,
+  value,
+  mine,
+  optionId,
+  onActive,
+  onPick,
+}: ModelOptionsProps): ReactNode {
+  return (
+    <div id={id} role="listbox" aria-label={`Models of ${agent.name}`} className={LIST}>
+      {entries.map((entry, index) => {
+        const first = entries[index - 1]?.group !== entry.group
+        const selected = entry.model === null ? value === null : mine?.model === entry.model.id
+        return (
+          <div key={entry.key} className="contents">
+            {first && entry.group !== 'default' && (
+              <span className={GROUP_LABEL} aria-hidden="true">
+                {entry.group === 'favourites' ? 'Favourites' : 'Models'}
+              </span>
+            )}
+            <div
+              id={optionId(entry)}
+              role="option"
+              aria-selected={selected}
+              data-active={index === current}
+              className={OPTION}
+              onPointerMove={() => onActive(index)}
+              onClick={() => onPick(entry)}
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {entry.model === null ? (
+                  <>
+                    Use the default
+                    {fallback !== undefined && (
+                      <span className="text-muted-foreground">
+                        {' · '}
+                        {choiceWords([agent], {
+                          agent: fallback.agent,
+                          model: fallback.model,
+                        })}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  entry.model.name
+                )}
+              </span>
+              {entry.model?.favourite === true && (
+                <IconStar
+                  size="sm"
+                  weight="filled"
+                  aria-hidden="true"
+                  className="text-muted-foreground"
+                />
+              )}
+              <span
+                className={cn('flex size-icon-sm', !selected && 'invisible')}
+                aria-hidden="true"
+              >
+                <IconCheck size="sm" />
+              </span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** What the pane lists: the models on their way or not read, to edit, to choose from, or none. */
+function ModelList(props: ModelOptionsProps & AgentPaneProps): ReactNode {
+  const { id, agent, query, editing, entries, onFavourite, onHide, onRetry } = props
+  if (agent.loading === true || agent.error !== undefined) {
+    return <NotListed id={id} agent={agent} onRetry={onRetry} />
+  }
+  if (editing) {
+    return (
+      <ModelEditList
+        id={id}
+        agent={agent}
+        query={query}
+        onFavourite={onFavourite}
+        onHide={onHide}
+      />
+    )
+  }
+  if (entries.length === 0) {
+    return (
+      <p id={id} className={cn(QUIET, 'h-picker-list')}>
+        {query.trim() === '' ? 'No model to choose yet' : `No model matches “${query.trim()}”`}
+      </p>
+    )
+  }
+  return <ModelOptions {...props} />
+}
+
+function AgentPane(props: AgentPaneProps): ReactNode {
+  const { agent, value, fallback, query, onQuery, editing, onEditing, search, onChange } = props
   const id = useId()
   const entries = useMemo(
     () => entriesOf(agent.models, query, fallback !== undefined),
@@ -434,112 +539,16 @@ function AgentPane({
           </Tooltip>
         </div>
 
-        {agent.loading === true || agent.error !== undefined ? (
-          <NotListed id={`${id}-list`} agent={agent} onRetry={onRetry} />
-        ) : editing ? (
-          <ul id={`${id}-list`} aria-label={`Models of ${agent.name}`} className={LIST}>
-            {agent.models
-              .filter((one) => matches(one.name, query))
-              .map((one) => (
-                <li key={one.id} className="flex min-h-control-md items-center gap-1 px-2">
-                  <span
-                    className={cn(
-                      'min-w-0 flex-1 truncate text-sm',
-                      one.hidden === true && 'text-muted-foreground',
-                    )}
-                  >
-                    {one.name}
-                  </span>
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={
-                      <IconStar size="sm" weight={one.favourite === true ? 'filled' : 'outline'} />
-                    }
-                    aria-label={`Favourite ${one.name}`}
-                    aria-pressed={one.favourite === true}
-                    onClick={() => onFavourite(agent.id, one.id, one.favourite !== true)}
-                  />
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconEyeOff size="sm" />}
-                    aria-label={`Hide ${one.name}`}
-                    aria-pressed={one.hidden === true}
-                    onClick={() => onHide(agent.id, one.id, one.hidden !== true)}
-                  />
-                </li>
-              ))}
-          </ul>
-        ) : entries.length === 0 ? (
-          <p id={`${id}-list`} className={cn(QUIET, 'h-picker-list')}>
-            {query.trim() === '' ? 'No model to choose yet' : `No model matches “${query.trim()}”`}
-          </p>
-        ) : (
-          <div
-            id={`${id}-list`}
-            role="listbox"
-            aria-label={`Models of ${agent.name}`}
-            className={LIST}
-          >
-            {entries.map((entry, index) => {
-              const first = entries[index - 1]?.group !== entry.group
-              const selected =
-                entry.model === null ? value === null : mine?.model === entry.model.id
-              return (
-                <div key={entry.key} className="contents">
-                  {first && entry.group !== 'default' && (
-                    <span className={GROUP_LABEL} aria-hidden="true">
-                      {entry.group === 'favourites' ? 'Favourites' : 'Models'}
-                    </span>
-                  )}
-                  <div
-                    id={optionId(entry)}
-                    role="option"
-                    aria-selected={selected}
-                    data-active={index === current}
-                    className={OPTION}
-                    onPointerMove={() => setActive(index)}
-                    onClick={() => pick(entry)}
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      {entry.model === null ? (
-                        <>
-                          Use the default
-                          {fallback !== undefined && (
-                            <span className="text-muted-foreground">
-                              {' · '}
-                              {choiceWords([agent], {
-                                agent: fallback.agent,
-                                model: fallback.model,
-                              })}
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        entry.model.name
-                      )}
-                    </span>
-                    {entry.model?.favourite === true && (
-                      <IconStar
-                        size="sm"
-                        weight="filled"
-                        aria-hidden="true"
-                        className="text-muted-foreground"
-                      />
-                    )}
-                    <span
-                      className={cn('flex size-icon-sm', !selected && 'invisible')}
-                      aria-hidden="true"
-                    >
-                      <IconCheck size="sm" />
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        <ModelList
+          {...props}
+          id={`${id}-list`}
+          entries={entries}
+          current={current}
+          mine={mine}
+          optionId={optionId}
+          onActive={setActive}
+          onPick={pick}
+        />
       </div>
       {mine !== null && efforts.length > 0 ? (
         <EffortSegments
