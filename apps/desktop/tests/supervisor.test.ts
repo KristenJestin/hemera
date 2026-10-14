@@ -650,6 +650,97 @@ describe('The start does not wait on the left-over agents one after another', ()
   })
 })
 
+describe('A command line that came too late is never decided on', () => {
+  test('a lookup that answers past its bound leaves every living orphan kept and registered, nothing ended', async () => {
+    // Alive, and the machine says they run what they were started with, but only once the bound
+    // has passed: on Windows, a PowerShell slower than `WINDOWS_COMMAND_LINE_MS` on a loaded machine.
+    const pids = [92_001, 92_002]
+    const killed: number[] = []
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => pids.includes(pid),
+          commandLinesOf: (wanted: ReadonlyArray<number>) =>
+            Effect.succeed(
+              new Map(wanted.map((pid) => [pid, `${process.execPath} agent.mjs`] as const)),
+            ).pipe(Effect.delay(WINDOWS_COMMAND_LINE_MS * 2)),
+          killTree: (pid: number) => Effect.sync(() => killed.push(pid)),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const [orphans, kept, registered] = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        const supervisor = yield* ProcessSupervisor
+        const sweep = yield* supervisor.endOrphans('session').pipe(Effect.forkChild)
+        // The bound passes first, then the late answer.
+        yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS * 2)
+        return [
+          yield* Fiber.join(sweep),
+          yield* supervisor.kept,
+          yield* registry.leftBy('session', supervisor.engine),
+        ] as const
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+    expect(orphans.map((one) => [one.root.pid, one.ended])).toEqual(pids.map((pid) => [pid, false]))
+    expect(kept.map((root) => root.pid).toSorted()).toEqual(pids)
+    expect(registered.map((root) => root.pid).toSorted()).toEqual(pids)
+    expect(killed).toEqual([])
+  })
+
+  test(
+    'a lookup cut by its bound says nothing, not even the lines it had printed',
+    async () => {
+      // A query that printed one whole line and half of the next, then never ended: what it
+      // printed is not an answer, since the half line would read as another program.
+      const where = join(folder, 'printed')
+      const printsHalf = script(`
+import { writeFileSync } from 'node:fs'
+process.stdout.write('4242 node agent.mjs\\n4243 node age', () => {
+  writeFileSync(process.argv[2], 'printed')
+})
+${STAYS_UP}`)
+      const said = await Effect.runPromise(
+        Effect.gen(function* () {
+          const lookup = yield* outputOf(
+            process.execPath,
+            [printsHalf, where],
+            WINDOWS_COMMAND_LINE_MS,
+          ).pipe(Effect.forkChild)
+          yield* Effect.promise(() => untilTrue(() => readable(where), 30_000))
+          yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+          return yield* Fiber.join(lookup)
+        }).pipe(Effect.provide(TestClock.layer())),
+      )
+
+      expect(said).toBe(null)
+    },
+    WINDOWS_COMMAND_LINE_MS + 40_000,
+  )
+})
+
 describe('The machine is asked once for every left-over agent', () => {
   test('many orphans are looked up in one query of the machine, and each is ended', async () => {
     const pids = Array.from({ length: 10 }, (_, index) => 91_000 + index)

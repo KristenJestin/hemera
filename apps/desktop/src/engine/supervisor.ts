@@ -230,25 +230,21 @@ const taskkill = (pid: number) =>
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
 /**
- * What a program prints, once it ends or `millis` passed, or null when it printed nothing. It is
- * ended when the one waiting on it gives up first: a lookup the sweep's bound cuts leaves nothing
- * running behind it.
+ * What a program prints once it ends, or null when it printed nothing or did not end within
+ * `millis`: what a program cut by the bound had printed is no answer, its last line may be half
+ * of one. It is ended when the bound passes, or when the one waiting on it gives up first: a
+ * lookup cut leaves nothing running behind it.
  */
 export const outputOf = (program: string, args: ReadonlyArray<string>, millis: number) =>
   Effect.callback<string | null>((resume) => {
-    const child = execFile(
-      program,
-      [...args],
-      { windowsHide: true, timeout: millis },
-      (_error, stdout) => {
-        const text = String(stdout).trim()
-        resume(Effect.succeed(text === '' ? null : text))
-      },
-    )
+    const child = execFile(program, [...args], { windowsHide: true }, (_error, stdout) => {
+      const text = String(stdout).trim()
+      resume(Effect.succeed(text === '' ? null : text))
+    })
     return Effect.sync(() => {
       child.kill()
     })
-  })
+  }).pipe(Effect.timeoutOption(Duration.millis(millis)), Effect.map(Option.getOrNull))
 
 /** `<pid> <command line>` lines, as the two lookups below print them; one without a line is left out. */
 const linesByPid = (text: string | null): ReadonlyMap<number, string> =>
