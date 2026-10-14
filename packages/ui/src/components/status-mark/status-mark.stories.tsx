@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { type MarkState, StatusMark } from './status-mark.tsx'
+import { StatusMark } from './status-mark.tsx'
+import { type MarkState } from './mark-legends.ts'
 
 /**
  * Where a task stands, as one small mark that changes in place: a dotted ring to do; a turning

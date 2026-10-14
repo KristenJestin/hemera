@@ -1,3 +1,4 @@
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId } from 'react'
 
@@ -108,6 +109,111 @@ function FoundSkeleton(): ReactNode {
   )
 }
 
+type FieldProps = Pick<
+  AddProjectProps,
+  'found' | 'detecting' | 'onChoose' | 'byHand' | 'onByHand' | 'byHandError' | 'onAddByHand'
+>
+
+/** The repositories found in the folder, to choose among, and the one added by its path. */
+function RepositoriesField({
+  found,
+  detecting = false,
+  onChoose,
+  byHand,
+  onByHand,
+  byHandError,
+  onAddByHand,
+}: FieldProps): ReactNode {
+  const chosen = found?.filter((one) => one.chosen).length ?? 0
+  const listId = useId()
+  return (
+    <div className="flex flex-col gap-2">
+      <span className={LABEL} id={listId}>
+        Repositories
+        {!detecting && <span className={COUNT}>{chosen}</span>}
+      </span>
+      <Frame>
+        <ul aria-labelledby={listId} aria-busy={detecting} className="flex flex-col">
+          {detecting ? (
+            <>
+              <FoundSkeleton />
+              <FoundSkeleton />
+              <FoundSkeleton />
+            </>
+          ) : found !== null && found.length > 0 ? (
+            found.map((repository) => (
+              <li key={repository.path} className={RULE} data-found={repository.path}>
+                <span className={ROW}>
+                  <Checkbox
+                    checked={repository.chosen}
+                    onCheckedChange={(next) => onChoose(repository.path, next)}
+                    label={
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="flex text-muted-foreground" aria-hidden="true">
+                          {repository.byHand === true ? (
+                            <IconPlus size="sm" />
+                          ) : (
+                            <IconGitBranch size="sm" />
+                          )}
+                        </span>
+                        <span className={PATH}>{nameOf(repository.path)}</span>
+                      </span>
+                    }
+                  />
+                </span>
+              </li>
+            ))
+          ) : (
+            <li className={QUIET}>None in this folder</li>
+          )}
+        </ul>
+      </Frame>
+      {!detecting && (
+        <Input
+          label="Add a repository by its path"
+          placeholder="services/billing"
+          value={byHand}
+          onValueChange={onByHand}
+          error={byHandError}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            onAddByHand()
+          }}
+          action={
+            <Button onClick={onAddByHand}>
+              <IconPlus size="sm" />
+              Add
+            </Button>
+          }
+        />
+      )}
+    </div>
+  )
+}
+
+/** The choice to let an agent propose the rest of the setup, when a setup can be offered. */
+function SetupOption({
+  setup,
+  setUp = false,
+  onSetUp,
+}: Pick<AddProjectProps, 'setup' | 'setUp' | 'onSetUp'>): ReactNode {
+  if (setup === undefined) return null
+  return (
+    <Checkbox
+      checked={setUp}
+      disabled={setup.unavailable !== undefined}
+      onCheckedChange={(next) => onSetUp?.(next)}
+      label="Let an agent propose the rest of the setup"
+      description={
+        setup.unavailable === undefined
+          ? 'Its commands, preparation and variables, as proposals: nothing changes until you answer.'
+          : `No agent can propose the rest of the setup: ${setup.unavailable}`
+      }
+    />
+  )
+}
+
 export function AddProject({
   open,
   onOpenChange,
@@ -135,9 +241,7 @@ export function AddProject({
   creating = false,
   onCreate,
 }: AddProjectProps): ReactNode {
-  const chosen = found?.filter((one) => one.chosen).length ?? 0
   const looked = found !== null || detecting
-  const listId = useId()
   const folding = useTransition(fold)
   return (
     <Dialog
@@ -204,81 +308,16 @@ export function AddProject({
                   )
                 }
               />
-              <div className="flex flex-col gap-2">
-                <span className={LABEL} id={listId}>
-                  Repositories
-                  {!detecting && <span className={COUNT}>{chosen}</span>}
-                </span>
-                <Frame>
-                  <ul aria-labelledby={listId} aria-busy={detecting} className="flex flex-col">
-                    {detecting ? (
-                      <>
-                        <FoundSkeleton />
-                        <FoundSkeleton />
-                        <FoundSkeleton />
-                      </>
-                    ) : found !== null && found.length > 0 ? (
-                      found.map((repository) => (
-                        <li key={repository.path} className={RULE} data-found={repository.path}>
-                          <span className={ROW}>
-                            <Checkbox
-                              checked={repository.chosen}
-                              onCheckedChange={(next) => onChoose(repository.path, next)}
-                              label={
-                                <span className="flex min-w-0 items-center gap-2">
-                                  <span className="flex text-muted-foreground" aria-hidden="true">
-                                    {repository.byHand === true ? (
-                                      <IconPlus size="sm" />
-                                    ) : (
-                                      <IconGitBranch size="sm" />
-                                    )}
-                                  </span>
-                                  <span className={PATH}>{nameOf(repository.path)}</span>
-                                </span>
-                              }
-                            />
-                          </span>
-                        </li>
-                      ))
-                    ) : (
-                      <li className={QUIET}>None in this folder</li>
-                    )}
-                  </ul>
-                </Frame>
-                {!detecting && (
-                  <Input
-                    label="Add a repository by its path"
-                    placeholder="services/billing"
-                    value={byHand}
-                    onValueChange={onByHand}
-                    error={byHandError}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter') return
-                      event.preventDefault()
-                      onAddByHand()
-                    }}
-                    action={
-                      <Button onClick={onAddByHand}>
-                        <IconPlus size="sm" />
-                        Add
-                      </Button>
-                    }
-                  />
-                )}
-              </div>
-              {setup !== undefined && (
-                <Checkbox
-                  checked={setUp}
-                  disabled={setup.unavailable !== undefined}
-                  onCheckedChange={(next) => onSetUp?.(next)}
-                  label="Let an agent propose the rest of the setup"
-                  description={
-                    setup.unavailable === undefined
-                      ? 'Its commands, preparation and variables, as proposals: nothing changes until you answer.'
-                      : `No agent can propose the rest of the setup: ${setup.unavailable}`
-                  }
-                />
-              )}
+              <RepositoriesField
+                found={found}
+                detecting={detecting}
+                onChoose={onChoose}
+                byHand={byHand}
+                onByHand={onByHand}
+                byHandError={byHandError}
+                onAddByHand={onAddByHand}
+              />
+              <SetupOption setup={setup} setUp={setUp} onSetUp={onSetUp} />
             </motion.div>
           )}
         </AnimatePresence>

@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type KeyboardEvent, type ReactNode, use, useRef } from 'react'
 
@@ -8,7 +9,7 @@ import { Kbd } from '../../components/kbd/kbd.tsx'
 import { Loading } from '../../components/loading/loading.tsx'
 import { IconListCheck, IconPlus, IconSearch, IconWorld } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { MissionField } from '../../surfaces/project/project-page.tsx'
+import { MissionField } from '../../surfaces/project/mission-field.ts'
 
 /** What the field finds: a mission of the Project, a remote ticket, or the choice to create. */
 export type StartResultView =

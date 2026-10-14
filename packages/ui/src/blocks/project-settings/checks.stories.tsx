@@ -10,14 +10,9 @@ import {
   ProjectSettings,
   type SettingsForm,
 } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
-import {
-  type CheckDraft,
-  CheckForm,
-  ChecksSection,
-  NEW_CHECK,
-  type SettingsCheck,
-} from './checks.tsx'
+import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
+import { CheckForm, ChecksSection } from './checks.tsx'
+import { type CheckDraft, NEW_CHECK, type SettingsCheck } from './checks-model.ts'
 import {
   CHECK_COMMANDS,
   CHECKS,
