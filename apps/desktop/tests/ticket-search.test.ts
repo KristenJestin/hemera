@@ -15,11 +15,13 @@ import { type StartResult, SearchNotice } from '@hemera/ipc'
 import { Effect, Fiber, Predicate, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { ProfileParts } from '../src/engine/profile.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { createStart, searchStart } from '../src/engine/start/field.ts'
 import { addGithub } from '../src/engine/tickets/store.ts'
 import { commandsEngine, until } from './commands-engine.ts'
 import { type FakeGh, type GhRule, fakeGh, included } from './fake-gh.ts'
+import { observedProcesses } from './observed-processes.ts'
 import { repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -70,7 +72,8 @@ const titlesOf = (results: ReadonlyArray<StartResult>) =>
 const noticesOf = (results: ReadonlyArray<StartResult>) =>
   results.flatMap((result) => (Predicate.isTagged(result, 'SearchNotice') ? [result.sentence] : []))
 
-const engine = (gh: FakeGh) => commandsEngine(data, { gh: gh.settings })
+const engine = (gh: FakeGh, hostProcesses?: ProfileParts['hostProcesses']) =>
+  commandsEngine(data, { gh: gh.settings, hostProcesses })
 
 describe('Every provider of the Project answers; a failure is a notice, not the end', () => {
   test('a provider failing while another answers: the other’s hits stay, the failure is said once', async () => {
@@ -115,7 +118,11 @@ describe('Every provider of the Project answers; a failure is a notice, not the 
         stdout: hits(ENTERPRISE, 'acme/api', ['Export the API']),
       },
     ])
-    const [seen, hung] = await engine(gh)(({ profile }) =>
+    const observed = observedProcesses()
+    const [seen, hung] = await engine(
+      gh,
+      observed.layer,
+    )(({ profile }) =>
       Effect.gen(function* () {
         const project = yield* profile.use(acme)
         const results: StartResult[] = []
@@ -137,9 +144,10 @@ describe('Every provider of the Project answers; a failure is a notice, not the 
       }),
     )
     expect(titlesOf(seen)).toEqual(['Export the API'])
-    // The interruption returned once the hung gh had ended.
+    // The interruption returned once the hung gh had ended, as the supervisor saw it: its pid may
+    // already be another process's.
     expect(hung).toBeDefined()
-    expect(() => process.kill(hung?.pid ?? 0, 0)).toThrow()
+    expect(observed.ended(hung?.pid ?? 0)).toBe(true)
   })
 
   test('two searches at once each get their own answers', async () => {

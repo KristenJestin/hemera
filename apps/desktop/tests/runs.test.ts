@@ -42,6 +42,7 @@ import {
   script,
   until,
 } from './commands-engine.ts'
+import { endOf, observedProcesses } from './observed-processes.ts'
 import { endChild, on, removeFolders, temporaryFolder } from './storage.ts'
 import { atlas, atlasOnDiskConcurrently, opened } from './workspace-engine.ts'
 
@@ -242,7 +243,8 @@ describe('A service', () => {
   })
 
   test('a second start in the same scope joins it; a restart gives a new process', async () => {
-    const outcome = await commandsEngine(data)(({ profile }) =>
+    const observed = observedProcesses()
+    const outcome = await commandsEngine(data, { hostProcesses: observed.layer })(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const project = yield* atlas(main)
@@ -268,7 +270,8 @@ describe('A service', () => {
     const [before, after] = pidsWritten()
     expect(pidsWritten()).toHaveLength(2)
     expect(after).not.toBe(before)
-    expect(alive(before ?? 0)).toBe(false)
+    // Its end as the supervisor saw it: its pid may already be another process's.
+    expect(observed.ended(before ?? 0)).toBe(true)
   })
 
   test('a port another run of the Project holds is reported as a conflict, naming it', async () => {
@@ -467,6 +470,8 @@ describe('What a stopped engine left running', () => {
       detached: process.platform !== 'win32',
     })
     const theirs = spawn(process.execPath, [script(STAYS_UP)], { stdio: 'ignore' })
+    const oursEnd = endOf(ours)
+    const theirsEnd = endOf(theirs)
     strays.push(ours, theirs)
     const project = await commandsEngine(data)(({ profile }) => profile.use(atlas(main)))
     await on(
@@ -512,14 +517,9 @@ describe('What a stopped engine left running', () => {
       profile.use(listRuns(project.id, null)),
     )
     expect(runs.map((run) => run.state)).toEqual(['interrupted', 'interrupted'])
-    const left = await Effect.runPromise(
-      until(
-        Effect.sync(() => alive(ours.pid ?? 0)),
-        (still) => !still,
-      ),
-    )
-    expect(left).toBe(false)
-    expect(alive(theirs.pid ?? 0)).toBe(true)
+    // Their ends by their own `exit` events: a freed pid may already be another process's.
+    expect(await oursEnd.ends()).toBe(true)
+    expect(theirsEnd.stillRuns()).toBe(true)
   })
 })
 

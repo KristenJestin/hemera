@@ -54,6 +54,7 @@ import {
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
+import { endOf } from './observed-processes.ts'
 import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
@@ -976,6 +977,7 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       { detached: true, stdio: 'ignore' },
     )
     orphan.unref()
+    const orphanEnd = endOf(orphan)
     // What the orphan runs is answered here as the system says it, the rest asked of the machine.
     // On Windows the engine asks PowerShell, which a loaded runner was seen to answer only past
     // `WINDOWS_COMMAND_LINE_MS`: the orphan then stays unknown and is never ended. That query is
@@ -1059,7 +1061,8 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
     expect(lease?.sessionId).toBe(builder?.id)
     const orphanSaid = lines.findIndex((line) => line.includes('orphan agent process'))
     expect(orphanSaid).toBeGreaterThanOrEqual(0)
-    expect(() => process.kill(orphan.pid ?? 0, 0)).toThrow()
+    // Never `process.kill(pid, 0)` once the orphan ended: Windows hands its pid to the next process.
+    expect(await orphanEnd.ends()).toBe(true)
     expect(after.world.agents.map((agent) => text(agent.answers.prompts[0] ?? []))).toEqual([
       expect.stringContaining('[hemera:resume]'),
       expect.stringContaining('[hemera:resume]'),
@@ -1092,6 +1095,7 @@ describe('An agent a start could not stop is shown on its mission (#320)', () =>
       { detached: true, stdio: 'ignore' },
     )
     orphan.unref()
+    const orphanEnd = endOf(orphan)
     const pid = orphan.pid ?? 0
     const orphanLine = [process.execPath, ...orphan.spawnargs.slice(1)].join(' ')
     const before = await run(({ profile }) =>
@@ -1137,12 +1141,12 @@ describe('An agent a start could not stop is shown on its mission (#320)', () =>
     // What the orphan runs cannot be said: it is kept, and its mission says so.
     const kept = await restarted(null)
     expect(kept).toEqual([{ program: 'node', pid }])
-    expect(() => process.kill(pid, 0)).not.toThrow()
+    expect(orphanEnd.stillRuns()).toBe(true)
 
     // The next start can say it: the orphan is ended, and the notice goes with it.
     const after = await restarted(orphanLine)
     expect(after).toEqual([])
-    expect(() => process.kill(pid, 0)).toThrow()
+    expect(await orphanEnd.ends()).toBe(true)
   })
 
   test('three orphans whose lookups each take the worst case hold the rebuild back for one worst case, not three', async () => {
