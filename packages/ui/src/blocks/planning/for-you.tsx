@@ -14,6 +14,7 @@ import { TicketCard, TriageCard } from './planning-cards.tsx'
 import { SeverityMark } from './planning-marks.tsx'
 import { leftToAnswer, targetId } from './planning-progress.ts'
 import type {
+  ColdReadPass,
   Finding,
   PlanningData,
   PlanningHandlers,
@@ -262,6 +263,70 @@ export interface ForYouProps {
   handlers: PlanningHandlers
 }
 
+/** The needs that wait: the permissions agents ask for, or other needs, each one line. */
+function NeedsFold({ needs, onNeed }: Pick<ForYouProps, 'needs' | 'onNeed'>): ReactNode {
+  if (needs.length === 0) return null
+  const permissions = needs.every((need) => need.need.ask.kind === 'permission')
+  return (
+    <Fold
+      glyph={permissions ? <IconShieldLock size="sm" /> : <IconHelpCircle size="sm" />}
+      title={permissions ? 'Permissions' : 'Needs'}
+      detail={`${String(needs.length)} · ${[...new Set(needs.map((one) => one.who))].join(', ')}`}
+    >
+      <ul aria-label={permissions ? 'Permissions' : 'Needs'} className="flex flex-col pb-1">
+        {needs.map((need) => (
+          <NeedLine key={need.id} need={need} on={onNeed} />
+        ))}
+      </ul>
+    </Fold>
+  )
+}
+
+/** The questions to answer, open because answering them is the work of the page. */
+function QuestionsFold({
+  data,
+  mentionables,
+  handlers,
+}: Pick<ForYouProps, 'data' | 'mentionables' | 'handlers'>): ReactNode {
+  return (
+    <Fold
+      glyph={<IconHelpCircle size="sm" />}
+      title="Questions"
+      detail={leftToAnswer(data) ?? ''}
+      initiallyOpen
+    >
+      <div className="border-t border-border">
+        <QuestionsToAnswer data={data} mentionables={mentionables} handlers={handlers} />
+      </div>
+    </Fold>
+  )
+}
+
+interface FindingsFoldProps {
+  findings: readonly Finding[]
+  /** The cold read's last pass, whose findings these are. */
+  pass: ColdReadPass | undefined
+  onDismiss: PlanningHandlers['onDismissFinding']
+}
+
+/** The cold read's findings still to settle. */
+function FindingsFold({ findings, pass, onDismiss }: FindingsFoldProps): ReactNode {
+  if (findings.length === 0 || pass === undefined) return null
+  return (
+    <Fold
+      glyph={<IconEye size="sm" />}
+      title={`Cold read ${pass.label}`}
+      detail={plural(findings.length, 'finding to settle', 'findings to settle')}
+    >
+      <ul aria-label="Findings to settle" className="flex flex-col pb-1">
+        {findings.map((finding) => (
+          <FindingLine key={finding.id} finding={finding} onDismiss={onDismiss} />
+        ))}
+      </ul>
+    </Fold>
+  )
+}
+
 /**
  * What waits for the user, the agents blocked first: the needs, the questions, the findings to
  * settle, each kind one line until the user opens it — but the questions, which stand open
@@ -280,7 +345,6 @@ export function ForYou({
   const findings = findingsToSettle(data)
   const asked = data.questions.some(waits)
   const pass = data.passes.at(-1)
-  const permissions = needs.every((need) => need.need.ask.kind === 'permission')
   const lines = needs.length > 0 || asked || findings.length > 0
   const empty = !lines && data.triage === null && data.ticket === null
   return (
@@ -310,51 +374,9 @@ export function ForYou({
       {lines && (
         <Frame>
           <div className="flex flex-col divide-y divide-border">
-            {needs.length > 0 && (
-              <Fold
-                glyph={permissions ? <IconShieldLock size="sm" /> : <IconHelpCircle size="sm" />}
-                title={permissions ? 'Permissions' : 'Needs'}
-                detail={`${String(needs.length)} · ${[...new Set(needs.map((one) => one.who))].join(', ')}`}
-              >
-                <ul
-                  aria-label={permissions ? 'Permissions' : 'Needs'}
-                  className="flex flex-col pb-1"
-                >
-                  {needs.map((need) => (
-                    <NeedLine key={need.id} need={need} on={onNeed} />
-                  ))}
-                </ul>
-              </Fold>
-            )}
-            {asked && (
-              <Fold
-                glyph={<IconHelpCircle size="sm" />}
-                title="Questions"
-                detail={leftToAnswer(data) ?? ''}
-                initiallyOpen
-              >
-                <div className="border-t border-border">
-                  <QuestionsToAnswer data={data} mentionables={mentionables} handlers={handlers} />
-                </div>
-              </Fold>
-            )}
-            {findings.length > 0 && pass !== undefined && (
-              <Fold
-                glyph={<IconEye size="sm" />}
-                title={`Cold read ${pass.label}`}
-                detail={plural(findings.length, 'finding to settle', 'findings to settle')}
-              >
-                <ul aria-label="Findings to settle" className="flex flex-col pb-1">
-                  {findings.map((finding) => (
-                    <FindingLine
-                      key={finding.id}
-                      finding={finding}
-                      onDismiss={handlers.onDismissFinding}
-                    />
-                  ))}
-                </ul>
-              </Fold>
-            )}
+            <NeedsFold needs={needs} onNeed={onNeed} />
+            {asked && <QuestionsFold data={data} mentionables={mentionables} handlers={handlers} />}
+            <FindingsFold findings={findings} pass={pass} onDismiss={handlers.onDismissFinding} />
           </div>
         </Frame>
       )}
