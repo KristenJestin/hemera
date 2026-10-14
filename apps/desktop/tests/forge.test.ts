@@ -639,7 +639,7 @@ describe('A check after a restart settles only the needs whose CLI and host it c
 })
 
 describe('A need made as its CLI turned ready does not stay pending', () => {
-  test('an operation found its CLI signed out, and Check again found it ready before the need was made: the need goes once the operation runs', async () => {
+  test('an operation found its CLI signed out, and Check again found it ready before the need was made: no need is made, and the operation runs', async () => {
     const fake = fakeForge(ghSignedOut())
     const reached = Deferred.makeUnsafe<void>()
     const go = Deferred.makeUnsafe<void>()
