@@ -158,16 +158,16 @@ jobs:
         timeout-minutes: 20
         run: pnpm test
 
-  # Windows runs the same work as `verify` above, split over three runners side by side. On one
+  # Windows runs the same work as `verify` above, split over four runners side by side. On one
   # runner it took 23 to 26 minutes (#277): its four processors were full for the whole of the
   # repository suites, so the time was the sum of every test, not one slow test. Each part sets
-  # up on its own, and `verify (windows-latest)` below is green only when all three are.
+  # up on its own, and `verify (windows-latest)` below is green only when all four are.
   windows:
     name: windows (${{ matrix.part }})
     strategy:
       fail-fast: false
       matrix:
-        part: [checks and stories, repository 1/2, repository 2/2]
+        part: [checks and stories, repository 1/3, repository 2/3, repository 3/3]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -255,15 +255,18 @@ jobs:
       # for without a limit. `tools/stories-watchdog.ts` fails the run after ninety seconds
       # without a finished file and names the file; the cap stays for what happens before that.
       #
-      # Vitest splits the repository suites in two by their files: the two halves together run
+      # Vitest splits the repository suites in three by their files: the three parts together run
       # every file, each once. The split follows the time each file took on these runners
       # (`tools/test-shards.ts`), not the hash of its path, which had put the two slowest files
-      # in the same half: that half took 13 to 15 minutes, the other 8 to 10 (#359).
+      # in the same half of two: that half took 13 to 15 minutes, the other 8 to 10 (#359).
       - name: Test the repository suites
         if: startsWith(matrix.part, 'repository')
         working-directory: source
         timeout-minutes: 30
-        run: pnpm test --project repository --shard=${{ matrix.part == 'repository 1/2' && '1/2' || '2/2' }}
+        shell: bash
+        env:
+          PART: ${{ matrix.part }}
+        run: pnpm test --project repository --shard="${PART#repository }"
       #
       # The stall itself is not explained (#294). `@vitest/browser` waits on the iframe's `load`
       # and, once the run is acknowledged, on `response:execute`, neither with a timer; which one
