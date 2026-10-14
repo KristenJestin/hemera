@@ -1756,9 +1756,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         })
 
       /** An environment need's Retry: the proof it held leaves `held` with its withdrawal. */
-      takeRetry = (need, transaction) =>
+      takeRetry = (retriedNeed, transaction) =>
         Effect.gen(function* () {
-          const found = yield* decisionOfNeedIn(transaction, need.id)
+          const found = yield* decisionOfNeedIn(transaction, retriedNeed.id)
           if (found === null || found.building.state !== 'active') return []
           if (found.decision.kind !== 'proof_environment' || found.decision.subject === null)
             return []
