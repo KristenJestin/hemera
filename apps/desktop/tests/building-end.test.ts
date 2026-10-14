@@ -4353,6 +4353,75 @@ describe('The Builder while the end waits on it', () => {
   )
 
   test(
+    'an answer the Builder took in the tasks phase, its Builder stopped before the end and impossible to bring back, does not hold the exit: the Building reaches Review',
+    SLOW,
+    async () => {
+      let failing = false
+      let gate: ReturnType<typeof held> | null = null
+      const turn = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+        // Once armed, a Builder's start fails: it cannot be brought back.
+        sessionHold: (at, session) =>
+          at === 'starting' && failing && session.role === 'builder'
+            ? Effect.die(new Error('the provider is down'))
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* asked(builder.grantId)
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            // The Builder takes the answer in the tasks phase and ends its turn on it.
+            yield* until(
+              Effect.map(answersAndBuilding(mission.id), (now) =>
+                now.answers.some((one) => one.state === 'sent'),
+              ),
+              LONG,
+            )
+            yield* Sessions.use((sessions) => sessions.settled(builder.session.id))
+            // From now on its turns stay open: none ends once the end is called. It finishes the
+            // plan, then stops, and cannot be started again.
+            gate = turn
+            yield* builtAll(builder.grantId)
+            yield* endedQuietly(builder.session.id)
+            failing = true
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const errors = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((found) => Predicate.isTagged(found.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (
+                  (yield* getMission(mission.id)).stage === 'review' || (yield* errors).length > 0
+                )
+              }),
+              LONG,
+            )
+            return { mission: yield* getMission(mission.id), errors: yield* errors }
+          }),
+        ),
+      ).finally(() => turn.release())
+      expect(seen.errors).toEqual([])
+      expect(seen.mission.stage).toBe('review')
+    },
+  )
+
+  test(
     'a Retry of the Builder’s environment need at the refresh, its event follower behind, is kept for the Builder before the end can close the Building',
     SLOW,
     async () => {

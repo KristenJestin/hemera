@@ -1319,8 +1319,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             const session = yield* getSession(turn.sessionId)
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
-            if (building === null || endPhaseOf(building.phase) === null) return
-            yield* hold('turned')
+            if (building === null) return
+            // Kept whatever the phase, so an answer the Builder took before the end is called is
+            // known as taken (#348); only an end under way is driven.
+            const ending = endPhaseOf(building.phase) !== null
+            if (ending) yield* hold('turned')
             // When it ended, never when it is heard: a red or an answer its session sent next was
             // taken after it, whatever this listener was busy with.
             const at = turn.at
@@ -1341,7 +1344,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                 said(`the end of a Builder's turn was not kept: ${String(cause)}`),
               ),
             )
-            yield* drive(building.id)
+            if (ending) yield* drive(building.id)
           }).pipe(
             provided,
             Effect.catchCause((cause) => said(`a turn's end was not followed: ${String(cause)}`)),
