@@ -18,7 +18,7 @@ import type { Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { type ProfileParts, type StartedProfile, startProfile } from '../src/engine/profile.ts'
-import { SHIPPED, temporaryFolder } from './storage.ts'
+import { SHIPPED, runOnFolders, temporaryFolder } from './storage.ts'
 
 /** Fast enough for a suite: a readiness asked every 50 ms, and half a second of grace. */
 const FAST = { readinessEveryMillis: 50, readinessForMillis: 10_000, graceMillis: 500 }
@@ -71,7 +71,7 @@ export function commandsEngine(
 ) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {
     const lines: string[] = []
-    return Effect.runPromise(
+    return runOnFolders(
       Effect.scoped(
         Effect.gen(function* () {
           const profile = yield* startProfile(

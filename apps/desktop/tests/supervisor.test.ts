@@ -69,7 +69,7 @@ afterEach(async () => {
   for (const pid of left) process.kill(pid, 'SIGKILL')
   // Not children of this process: gone is what the system says.
   await allGone(left)
-  removeFolders()
+  await removeFolders()
 })
 
 function script(body: string): string {
