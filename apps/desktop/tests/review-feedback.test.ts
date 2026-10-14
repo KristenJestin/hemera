@@ -34,7 +34,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { ImageBlock } from '../src/engine/agents/client.ts'
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
-import { Snapshots } from '../src/engine/building/snapshots.ts'
+import {
+  SnapshotFailed,
+  Snapshots,
+  type SnapshotsService,
+} from '../src/engine/building/snapshots.ts'
 import { judgeManual } from '../src/engine/building/proofs.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { putEvidence } from '../src/engine/memory/evidence.ts'
@@ -73,13 +77,40 @@ const QUIET_TIMERS: Partial<OutsideSettings> = {
   baseEveryMillis: 3_600_000,
 }
 
-const engine = (hold?: ReviewHold, verdicts = verdictsSaying(() => ALLOW)) =>
+const engine = (
+  hold?: ReviewHold,
+  verdicts = verdictsSaying(() => ALLOW),
+  snapshots: (real: SnapshotsService) => SnapshotsService = (real) => real,
+) =>
   sessionsEngine(data, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdicts.layer },
     building: { outside: QUIET_TIMERS },
     review: { hold },
+    snapshots,
   })
+
+/** Snapshots whose checkpoint takes fail while `broken` says so, each attempt counted. */
+const checkpointsFailing = (broken: () => boolean) => {
+  const attempts = { count: 0 }
+  const wrap = (real: SnapshotsService): SnapshotsService => ({
+    ...real,
+    take: (repository, owner) => {
+      if (owner.kind !== 'checkpoint') return real.take(repository, owner)
+      attempts.count += 1
+      return broken()
+        ? Effect.fail(
+            new SnapshotFailed({
+              repository: repository.name,
+              owner: 'checkpoint',
+              said: 'git: no space left on device',
+            }),
+          )
+        : real.take(repository, owner)
+    },
+  })
+  return { attempts, wrap }
+}
 
 /** Every test runs a whole engine, Git and a Builder: far above its time alone (5 to 15 s). */
 const SLOW = 120_000
@@ -199,6 +230,78 @@ const workspaceGone = (folders: ReadonlyArray<string>) =>
   })
 
 describe('Review checkpoints', () => {
+  test(
+    'a Review checkpoint Git refuses once is taken again while the mission is in Review',
+    async () => {
+      // Armed as the mission enters Review: the Building's own checkpoints are not this test's.
+      let failures = 0
+      const failing = checkpointsFailing(() => {
+        failures -= 1
+        return failures >= 0
+      })
+      const { run } = engine(undefined, undefined, failing.wrap)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            const before = failing.attempts.count
+            failures = 1
+            yield* inReview(missionId)
+            return {
+              attempts: failing.attempts.count - before,
+              checkpoints: (yield* stateOf(missionId)).checkpoints.map((one) => [
+                one.round,
+                one.kind,
+              ]),
+            }
+          }),
+        ),
+      )
+      // The first try refused on `api`; the next takes `api` and `web`.
+      expect(seen.attempts).toBe(3)
+      expect(seen.checkpoints).toEqual([[0, 'review_entry']])
+    },
+    SLOW,
+  )
+
+  test(
+    'a mission that leaves Review before its checkpoint could be taken takes it on the way out',
+    async () => {
+      let broken = false
+      const failing = checkpointsFailing(() => broken)
+      const { run } = engine(undefined, undefined, failing.wrap)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            const before = failing.attempts.count
+            broken = true
+            yield* moved(missionId, 'endBuilding')
+            yield* until(
+              Effect.sync(() => failing.attempts.count > before),
+              30_000,
+            )
+            // Git works again; Fix is clicked before the next try: the round's archive is taken now.
+            broken = false
+            yield* add(missionId, remark('The export button is grey.'))
+            yield* moveRound(missionId, 1, 'grilling')
+            yield* moveRound(missionId, 1, 'building')
+            yield* moved(missionId, 'fix')
+            yield* until(
+              Effect.map(stateOf(missionId), (state) => state.checkpoints.length > 0),
+              30_000,
+            )
+            return (yield* stateOf(missionId)).checkpoints.map((one) => [one.round, one.kind])
+          }),
+        ),
+      )
+      expect(seen).toEqual([[0, 'review_entry']])
+    },
+    SLOW,
+  )
+
   test(
     'entering Review records one Review checkpoint per repository; a round’s end records another; both read back after the Workspace is removed and git gc --prune=now ran',
     async () => {

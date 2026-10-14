@@ -72,7 +72,17 @@ import {
   UserAuthor,
 } from '@hemera/ipc'
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
-import { Context, Effect, Layer, Predicate, Semaphore, Stream } from 'effect'
+import {
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Semaphore,
+  Stream,
+} from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { ImageBlock, type PromptBlock, TextBlock } from '../agents/client.ts'
@@ -189,6 +199,12 @@ export class Review extends Context.Service<Review, ReviewService>()('Review') {
 type FeedbackRow = typeof reviewFeedback.$inferSelect
 
 const now = () => new Date().toISOString()
+
+const readRound = Schema.decodeUnknownOption(Schema.Number)
+
+/** A Review checkpoint Git refused is tried again after 1 s, 2 s, 4 s…, this many times. */
+const CHECKPOINT_RETRY = '1 second'
+const CHECKPOINT_TRIES = 6
 
 const USER: FeedbackAuthor = FeedbackUser.make({})
 
@@ -307,6 +323,7 @@ export const reviewLayer = (settings: ReviewSettings) =>
       const home = yield* ProfileHome
       const hold: ReviewHold = settings.hold ?? (() => Effect.void)
       const said = (line: string) => Effect.sync(() => settings.log(`review: ${line}`))
+      const scope = yield* Effect.scope
       const turns = new Map<string, Semaphore.Semaphore>()
       const turnOf = (missionId: string) => {
         const found = turns.get(missionId) ?? Semaphore.makeUnsafe(1)
@@ -1412,12 +1429,15 @@ export const reviewLayer = (settings: ReviewSettings) =>
 
       // --- what Review follows --------------------------------------------------------------
 
-      /** The Review checkpoint of the mission's current round, unless it is recorded. */
-      const recordCheckpoint = (missionId: string) =>
+      /**
+       * The Review checkpoint of a round, unless it is recorded: the current one while the mission
+       * is in Review (`round` null), or the round a move out of Review just left.
+       */
+      const recordCheckpoint = (missionId: string, left: number | null = null) =>
         Effect.gen(function* () {
           const mission = yield* missionRow(missionId)
-          if (mission.stage !== 'review') return
-          const round = mission.round
+          if (left === null && mission.stage !== 'review') return
+          const round = left ?? mission.round
           const [kept] = yield* database
             .select()
             .from(reviewCheckpoints)
@@ -1426,8 +1446,9 @@ export const reviewLayer = (settings: ReviewSettings) =>
             )
           if (kept !== undefined) return
           const places = yield* diffs.places(missionId)
-          if (places === null)
-            return yield* said(`${missionId} entered Review without a Workspace: no checkpoint`)
+          if (places === null) {
+            return yield* refuse(`${missionId} is in Review without a Workspace: no checkpoint`)
+          }
           yield* hold('checkpoint')
           const checkpointId = yield* checkpointsService.take(
             missionId,
@@ -1531,7 +1552,31 @@ export const reviewLayer = (settings: ReviewSettings) =>
         Effect.gen(function* () {
           if (event.type === 'proof.manual_refused') return yield* proofRemark(event)
           if (event.type !== 'mission.moved') return
-          if (event.payload.to === 'review') return yield* recordCheckpoint(event.entityId)
+          if (event.payload.to === 'review') {
+            // Tried again, apart, while the mission stays in Review; the move out takes it at last.
+            yield* recordCheckpoint(event.entityId).pipe(
+              Effect.tapError((failure) =>
+                said(`the checkpoint of ${event.entityId} failed, tried again: ${failure.message}`),
+              ),
+              Effect.retry({
+                schedule: Schedule.exponential(CHECKPOINT_RETRY),
+                times: CHECKPOINT_TRIES,
+              }),
+              Effect.catchCause((cause) =>
+                said(`the checkpoint of ${event.entityId} was not taken: ${String(cause)}`),
+              ),
+              Effect.forkIn(scope),
+            )
+            return
+          }
+          if (event.payload.from === 'review') {
+            // Never out of Review without the archive of the round it leaves.
+            const round = Option.getOrElse(readRound(event.payload.round), () => 0)
+            yield* recordCheckpoint(
+              event.entityId,
+              event.payload.move === 'fix' ? round - 1 : round,
+            )
+          }
           if (event.payload.move === 'ship') return yield* closeAll(event.entityId)
         })
 
