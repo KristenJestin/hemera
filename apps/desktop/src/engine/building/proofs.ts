@@ -1723,13 +1723,14 @@ export const buildingProofs = (parts: ProofParts) => {
       }
       const state = stateOf(row)
       if (state === 'held') return refusal(`refused: ${args.scenario} waits for the user's answer.`)
-      // Before its tasks are done, a run is for information: it judges nothing.
+      // Before its tasks are done, a run is for information: it judges nothing. A stale proof's run
+      // is a rerun: held on a need, its Retry leaves it stale again, never back to its red.
       const run = yield* inTurn(
         building.missionId,
         state === 'waiting_red'
           ? redOf(building, args.scenario)
           : greenDue(tasks, args.scenario, row.requirement)
-            ? greenOf(building, args.scenario, 'green')
+            ? greenOf(building, args.scenario, state === 'to_rerun' ? 'rerun' : 'green')
             : runOf(building, args.scenario, 'info', proof),
       )
       if (run === null) return refusal(`refused: ${args.scenario} no longer waits for its red.`)

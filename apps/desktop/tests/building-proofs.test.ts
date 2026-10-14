@@ -2091,6 +2091,127 @@ describe('A proof waiting for an exclusive resource', () => {
       ['rerun', 'passed'],
     ])
   })
+
+  test('a stale proof the Builder runs while a resource held elsewhere keeps it from running is stale again at its Retry, never back to its red', async () => {
+    let proofCommand = ''
+    let held = false
+    // The Retry's run, held once it ran and before it is judged.
+    let arming = false
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    let taking: SnapshotsService | null = null
+    const seen = await proofsEngine(
+      data,
+      (at) =>
+        at === 'greening' && arming
+          ? Effect.gen(function* () {
+              arming = false
+              yield* Deferred.succeed(reached, undefined)
+              yield* Deferred.await(go)
+            })
+          : Effect.void,
+      undefined,
+      undefined,
+      {
+        proofMinute: Duration.seconds(2),
+        snapshots: (real) => {
+          taking = real
+          return real
+        },
+      },
+    ).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                yield* setProofLimit(projectId, 1)
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: false,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+                // Free until the Builder runs the stale proof; then another mission's service
+                // holds the port, until the user frees it.
+                const runs = yield* Runs
+                const real = runs.reservations.current
+                runs.reservations.current = {
+                  enter: (run) =>
+                    run.commandId === proofCommand && held
+                      ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                      : real.enter(run),
+                }
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', RIGHT_EXPORT]])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          // A change a snapshot sees makes the proof stale.
+          const api = yield* apiOf(mission.id)
+          writeFileSync(join(api, 'invoices.ts'), 'export const invoices = [2]\n')
+          if (taking === null) return yield* Effect.die(new Error('no snapshots'))
+          yield* taking.take(
+            { name: 'api', folder: api },
+            { kind: 'run', missionId: mission.id, runId: crypto.randomUUID(), side: 'before' },
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'to_rerun')
+          held = true
+          yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          const need = yield* needOf(mission.id, 'Environment')
+          held = false
+          arming = true
+          yield* retryNeed(need.id)
+          yield* Deferred.await(reached)
+          const retried = yield* proofOf(mission.id, 'R1.S2')
+          yield* Deferred.succeed(go, undefined)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return { retried, after: yield* proofOf(mission.id, 'R1.S2') }
+        }),
+      ),
+    )
+    expect(seen.retried.state).toBe('to_rerun')
+    expect(seen.after.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'passed'],
+      ['rerun', 'environment'],
+      ['rerun', 'passed'],
+    ])
+  })
 })
 
 describe('A proof whose run started and then met its environment', () => {
