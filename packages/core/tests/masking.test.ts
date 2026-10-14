@@ -3,6 +3,7 @@
  * the shapes of credentials it recognises without knowing their value. Every mask is `•••`.
  */
 
+import { Effect } from 'effect'
 import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -11,6 +12,7 @@ import {
   MASK,
   maskAction,
   maskPrinted,
+  maskPrintedPaced,
   maskRecord,
   maskShapes,
   maskText,
@@ -491,6 +493,16 @@ describe('What a CLI printed is masked at least as much as the whole text would 
     )
   })
 
+  test('JSON nested deeper than a call stack reaches is masked, and stays JSON', () => {
+    const depth = 100_000
+    const open = '{"a":['.repeat(depth)
+    const close = ']}'.repeat(depth)
+    expect(maskPrinted(`${open}"${FAKE.github}"${close}`, [])).toBe(`${open}"${MASK}"${close}`)
+    expect(maskPrinted(`${open}{"token":[1,{"b":2}]}${close}`, [])).toBe(
+      `${open}{"token":"${MASK}"}${close}`,
+    )
+  })
+
   test('a field named as a credential is masked whole, whatever it holds, and stays JSON', () => {
     expect(
       JSON.parse(maskPrinted('[{"token":{"a":"plain"},"password":7,"user":"octo"}]', [])),
@@ -744,4 +756,36 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       },
     )
   }
+})
+
+describe('Masking a long output lets the engine go on', () => {
+  test('another fiber runs while a long output is masked, and the mask is the same', async () => {
+    const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+    const output = JSON.stringify({ body: Array.from({ length: 40_000 }, () => token).join(' ') })
+    let turns = 0
+    let timerFired = false
+    const { masked, turnsWhileMasking } = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.forkChild(
+          Effect.forever(
+            Effect.andThen(
+              Effect.sync(() => {
+                turns += 1
+              }),
+              Effect.yieldNow,
+            ),
+          ),
+        )
+        setTimeout(() => {
+          timerFired = true
+        }, 0)
+        const before = turns
+        const result = yield* maskPrintedPaced(output, [])
+        return { masked: result, turnsWhileMasking: turns - before }
+      }),
+    )
+    expect(turnsWhileMasking).toBeGreaterThan(0)
+    expect(timerFired).toBe(true)
+    expect(masked).toBe(maskPrinted(output, []))
+  })
 })

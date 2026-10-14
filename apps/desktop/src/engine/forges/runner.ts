@@ -270,8 +270,8 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
             return {
               command,
               code: exit.code,
-              stdout: secrets.maskPrinted(out.join('\n')),
-              stderr: secrets.mask(err.join('\n').trim()),
+              stdout: yield* secrets.maskPrinted(out.join('\n')),
+              stderr: yield* secrets.maskPaced(err.join('\n').trim()),
             } satisfies ForgeAnswer
           }),
         )

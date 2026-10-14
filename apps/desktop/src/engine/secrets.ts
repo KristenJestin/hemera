@@ -18,9 +18,10 @@
 import {
   MAIN_CHECKOUT_NAME,
   type Masked,
-  maskPrinted,
+  maskPrintedPaced,
   maskRecord,
   maskText,
+  maskTextPaced,
 } from '@hemera/core/domain'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Context, Effect } from 'effect'
@@ -44,10 +45,13 @@ export interface SecretsRegistry {
   readonly values: () => ReadonlyArray<string>
   /** Text with every registered value masked, then the shapes of credentials. */
   readonly mask: (text: string) => Masked<string>
+  /** As `mask`, in slices of time: the engine answers while a long text is masked. */
+  readonly maskPaced: (text: string) => Effect.Effect<Masked<string>>
   /**
-   * What a CLI printed, masked at least as the text whole would be, and still JSON where it was.
+   * What a CLI printed, masked at least as the text whole would be, and still JSON where it was;
+   * in slices of time, as `maskPaced`.
    */
-  readonly maskPrinted: (text: string) => Masked<string>
+  readonly maskPrinted: (text: string) => Effect.Effect<Masked<string>>
   /** A structured value with every string in it masked, and its credential fields whole. */
   readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
@@ -76,7 +80,8 @@ export function secretsRegistry(): SecretsRegistry {
     },
     values,
     mask: (text) => maskText(text, values()),
-    maskPrinted: (text) => maskPrinted(text, values()),
+    maskPaced: (text) => maskTextPaced(text, values()),
+    maskPrinted: (text) => maskPrintedPaced(text, values()),
     maskRecord: (record) => maskRecord(record, values()),
   }
 }
