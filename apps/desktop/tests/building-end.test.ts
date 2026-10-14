@@ -2764,7 +2764,6 @@ describe('The refresh and an environment need', () => {
               ),
               LONG,
             )
-            console.log('DEBUG deliveries', JSON.stringify(yield* toBuilder(mission.id, '')))
             return {
               meanwhile,
               after: yield* errors(mission.id),
