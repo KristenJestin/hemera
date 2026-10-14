@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import type { AgentProvider } from '@hemera/core/domain'
 import { AgentNotSignedIn, type LaunchFailed } from '@hemera/ipc'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Queue } from 'effect'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
 import { Discovery } from '../src/engine/agents/discovery.ts'
@@ -69,6 +69,30 @@ export const FAST = {
 
 /** The silence bound of the suites about silence (CT-12): a turn held past 400 ms is stuck. */
 export const SILENCE = { stuckAfter: Duration.millis(400) }
+
+/**
+ * The health sweep held by the suite (CT-12): the sessions are looked at only when it says, one
+ * look per `swept`, which returns once that look has ended. On its own timer, a sweep under load
+ * finds a turn silent while its agent still starts, and replaces it under the suite.
+ */
+export const heldSweeps = () => {
+  const arrived = Effect.runSync(Queue.unbounded<void>())
+  const go = Effect.runSync(Queue.unbounded<void>())
+  let waiting = false
+  return {
+    /** The bounds of `SILENCE`, each look waiting at the hold as soon as the last one ended. */
+    timings: { ...SILENCE, sweepEvery: Duration.zero },
+    sessions: { sweepHold: Effect.andThen(Queue.offer(arrived, undefined), Queue.take(go)) },
+    swept: Effect.gen(function* () {
+      // The first look waits at the hold from the engine's start.
+      if (!waiting) yield* Queue.take(arrived)
+      waiting = true
+      yield* Queue.offer(go, undefined)
+      // The next one waits there: this one has ended.
+      yield* Queue.take(arrived)
+    }),
+  }
+}
 
 /** What a world started: one fake agent per process, and the real children of some. */
 export interface World {
