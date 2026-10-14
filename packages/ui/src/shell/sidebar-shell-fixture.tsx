@@ -15,32 +15,36 @@ export function SidebarMissionGroups({
   current: SidebarPlace
   onMission: (key: string) => void
 }): ReactNode {
-  return STAGE_ORDER.map((stage) => {
-    const inStage = missions.filter((mission) => mission.stage === stage)
-    if (inStage.length === 0) return null
-    return (
-      <SidebarStageGroup
-        key={stage}
-        stage={stage}
-        count={inStage.length}
-        folded={stage === 'Done' || stage === 'Cancelled'}
-      >
-        {inStage.map((mission) => (
-          <SidebarRow
-            key={mission.missionKey}
-            missionKey={mission.missionKey}
-            title={mission.title}
-            ball={mission.ball}
-            event={mission.event}
-            needsYou={mission.needsYou}
-            percent={mission.percent}
-            current={current.kind === 'mission' && current.key === mission.missionKey}
-            onPress={() => onMission(mission.missionKey)}
-          />
-        ))}
-      </SidebarStageGroup>
-    )
-  })
+  return (
+    <>
+      {STAGE_ORDER.map((stage) => {
+        const inStage = missions.filter((mission) => mission.stage === stage)
+        if (inStage.length === 0) return null
+        return (
+          <SidebarStageGroup
+            key={stage}
+            stage={stage}
+            count={inStage.length}
+            folded={stage === 'Done' || stage === 'Cancelled'}
+          >
+            {inStage.map((mission) => (
+              <SidebarRow
+                key={mission.missionKey}
+                missionKey={mission.missionKey}
+                title={mission.title}
+                ball={mission.ball}
+                event={mission.event}
+                needsYou={mission.needsYou}
+                percent={mission.percent}
+                current={current.kind === 'mission' && current.key === mission.missionKey}
+                onPress={() => onMission(mission.missionKey)}
+              />
+            ))}
+          </SidebarStageGroup>
+        )
+      })}
+    </>
+  )
 }
 
 /** The rows under Acme in the sidebar: its missions by stage and, when asked, its Chats. */
