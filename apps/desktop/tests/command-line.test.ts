@@ -30,7 +30,7 @@ describe('A line becomes a process without a shell', () => {
     })
   })
 
-  test("on Windows a .cmd shim goes through cmd.exe as one quoted line, cmd.exe's syntax escaped", () => {
+  test("on Windows a .cmd shim goes through cmd.exe as one quoted line, cmd.exe's syntax escaped", async () => {
     const bin = realpathSync.native(temporaryFolder('shims'))
     writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\n')
     const invocation = invocationOf(
@@ -38,7 +38,7 @@ describe('A line becomes a process without a shell', () => {
       'win32',
       windowsLookup(bin),
     )
-    removeFolders()
+    await removeFolders()
     expect(invocation?.program).toBe('C:\\Windows\\system32\\cmd.exe')
     expect(invocation?.verbatim).toBe(true)
     expect(invocation?.args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
@@ -48,7 +48,7 @@ describe('A line becomes a process without a shell', () => {
     expect(line).toContain('^"two^ words^"')
   })
 
-  test('on Windows a {files} name holding $, %NAME% or a quote reaches a .cmd shim as its literal name, cmd.exe syntax escaped', () => {
+  test('on Windows a {files} name holding $, %NAME% or a quote reaches a .cmd shim as its literal name, cmd.exe syntax escaped', async () => {
     const bin = realpathSync.native(temporaryFolder('shims'))
     writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\n')
     const line = expandFiles(
@@ -61,39 +61,39 @@ describe('A line becomes a process without a shell', () => {
       null,
     )
     const invocation = invocationOf(wordsOf(line ?? ''), 'win32', windowsLookup(bin))
-    removeFolders()
+    await removeFolders()
     const quoted = invocation?.args[3] ?? ''
     expect(quoted).toContain('^"routes/$postId.test.tsx^"')
     expect(quoted).toContain('^"^%HOME^%.test.ts^"')
     expect(quoted).toContain(`^"it's.test.ts^"`)
   })
 
-  test('on Windows a bare name is the shim cmd.exe would run, never a file without an extension', () => {
+  test('on Windows a bare name is the shim cmd.exe would run, never a file without an extension', async () => {
     // What corepack and npm install beside each other: a shell script for Git Bash, and the shim.
     const bin = realpathSync.native(temporaryFolder('shims'))
     writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\n')
     writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\n')
     const invocation = invocationOf(['pnpm', 'dev'], 'win32', windowsLookup(bin))
-    removeFolders()
+    await removeFolders()
     expect(invocation?.program).toBe('C:\\Windows\\system32\\cmd.exe')
     expect(invocation?.args[3]).toContain('pnpm.cmd')
   })
 
-  test('on Windows a shim under node_modules/.bin has its words escaped twice', () => {
+  test('on Windows a shim under node_modules/.bin has its words escaped twice', async () => {
     const root = realpathSync.native(temporaryFolder('shims'))
     const bin = join(root, 'node_modules', '.bin')
     mkdirSync(bin, { recursive: true })
     writeFileSync(join(bin, 'vite.cmd'), '@echo off\r\n')
     const invocation = invocationOf(['vite', 'a&b'], 'win32', windowsLookup(bin))
-    removeFolders()
+    await removeFolders()
     expect(invocation?.args[3]).toContain('^^^"a^^^&b^^^"')
   })
 
-  test('on Windows a program that is not a shim is started directly', () => {
+  test('on Windows a program that is not a shim is started directly', async () => {
     const bin = realpathSync.native(temporaryFolder('shims'))
     writeFileSync(join(bin, 'node.exe'), '')
     const invocation = invocationOf(['node', 'a&b'], 'win32', windowsLookup(bin))
-    removeFolders()
+    await removeFolders()
     expect(invocation).toEqual({ program: 'node', args: ['a&b'], verbatim: false })
   })
 })

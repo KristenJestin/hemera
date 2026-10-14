@@ -61,7 +61,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await jev.close()
-  removeFolders()
+  await removeFolders()
 })
 
 /** The models the fake judge offers, as Claude Code's adapter names them. */
