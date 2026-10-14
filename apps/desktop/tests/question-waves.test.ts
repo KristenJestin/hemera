@@ -37,6 +37,7 @@ import {
 import { readSpec } from '../src/engine/planning/store.ts'
 import { PlannerWake } from '../src/engine/planning/wake.ts'
 import { createProject } from '../src/engine/projects.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { type RoleSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
@@ -45,8 +46,10 @@ import {
   domainEvents,
   memoryJournal,
   memoryNext,
+  questions as questionRows,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { git, repository } from './repositories.ts'
 import {
   BUILDER,
@@ -1573,5 +1576,44 @@ describe('The vision is an input too', () => {
     expect(seen.inputs).toEqual([
       expect.objectContaining({ id: 'I1', kind: 'vision', state: 'integrated', where: 'goals' }),
     ])
+  })
+})
+
+describe('A question’s options are masked as JSON (#397)', () => {
+  test('an option holding a quoted credential and a known value is stored with nothing of either, and still JSON', async () => {
+    const { run } = planning(() => QUIET)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const project = yield* acme
+          const { mission, planner } = yield* missionPlanned(project.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          const writer = { sessionId: planner.id, role: 'planner', missionId: mission.id }
+          yield* askWave(writer, [
+            {
+              text: 'Which account signs the export?',
+              why: 'The export depends on it.',
+              options: [
+                { label: `Use ${QUOTED_SECRET}`, detail: `Its key is ${KNOWN_SECRET}.` },
+                { label: 'Ask the team', detail: '' },
+              ],
+              recommended: 1,
+              recommendedReason: 'Nothing says otherwise.',
+            },
+          ])
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ options: questionRows.options })
+            .from(questionRows)
+            .where(eq(questionRows.missionId, mission.id))
+          return { stored: row?.options, waves: yield* wavesOf(mission.id) }
+        }),
+      ),
+    )
+    expectMaskedJson(seen.stored)
+    const shown = JSON.stringify(seen.waves[0]?.questions[0]?.options)
+    expect(shown).not.toContain('a b')
+    expect(shown).not.toContain(KNOWN_SECRET)
   })
 })

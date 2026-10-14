@@ -43,6 +43,7 @@ import {
   Role,
   SITUATION_CHANGED,
   TOOL_NAMES,
+  maskPrinted,
   maskText,
   placesNamed,
   resultText,
@@ -352,7 +353,7 @@ const endedWith = (
   text: Masked<string>,
 ) =>
   Effect.gen(function* () {
-    const said = maskText(resultText({ number: row.number, tool: row.tool, result, text }), [])
+    const said = maskPrinted(resultText({ number: row.number, tool: row.tool, result, text }), [])
     const written = yield* transaction
       .update(permissionRequests)
       .set({ state: 'ended', result, resultText: said, endedAt: now() })

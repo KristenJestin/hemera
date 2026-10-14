@@ -20,6 +20,7 @@ import {
   fetchTransport,
 } from '../src/engine/permissions/jev.ts'
 import { type FakeJev, fakeJev, scored, scoredBody } from './fake-jev.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 
 const KEY = 'jev-test-key-0123456789'
 
@@ -113,6 +114,15 @@ describe('What Jev is told', () => {
     expect(body).toContain('•••')
   })
 
+  test('a JSON line the user wrote, holding a quoted credential and a known value, reaches Jev with nothing of either, and still JSON (#397)', async () => {
+    const pasted = JSON.stringify([QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+    await ask({ humanContext: [`The user answered:\n${pasted}`] }, [KNOWN_SECRET])
+    const sent = JSON.parse(jev.received[0]?.body ?? '{}')
+    const [head, line] = String(sent.state.user_context[0]).split('\n')
+    expect(head).toBe('The user answered:')
+    expectMaskedJson(line)
+  })
+
   test('an action whose destination masking would change is not sent', async () => {
     const result = await ask({ action: action({ cwd: '/srv/tok-registered-77' }) }, [
       'tok-registered-77',
@@ -126,6 +136,14 @@ describe('What Jev is told', () => {
       action: action({ line: `echo ${'a'.repeat(JEV_ACTION_LIMIT)}` }),
     })
     expect(result).toMatchObject({ kind: 'unavailable', failure: 'input' })
+    expect(jev.received).toHaveLength(0)
+  })
+
+  test('an action nested 100,000 levels deep is not sent, and the call does not fail', async () => {
+    let deep: JevInput['action'] = { bottom: 'x' }
+    for (let level = 0; level < 100_000; level += 1) deep = { next: deep }
+    const result = await ask({ action: { ...action(), deep } })
+    expect(result).toEqual({ kind: 'unavailable', failure: 'input', status: null, ms: null })
     expect(jev.received).toHaveLength(0)
   })
 

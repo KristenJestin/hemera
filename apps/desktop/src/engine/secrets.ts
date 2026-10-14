@@ -18,10 +18,9 @@
 import {
   MAIN_CHECKOUT_NAME,
   type Masked,
+  maskPrinted,
   maskPrintedPaced,
   maskRecord,
-  maskText,
-  maskTextPaced,
 } from '@hemera/core/domain'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Context, Effect } from 'effect'
@@ -43,7 +42,12 @@ export interface SecretsRegistry {
   readonly unregister: (source: string) => void
   /** Every value registered now, once each. */
   readonly values: () => ReadonlyArray<string>
-  /** Text with every registered value and every shape of credential masked. */
+  /**
+   * Text with every registered value and every shape of credential masked. A text that is JSON,
+   * whole or line by line, is masked as JSON and stays JSON (`maskPrinted`): a serialized value
+   * is never masked as plain text, where a quoted value inside a JSON string leaked and broke it.
+   * A text that is not JSON is masked as plain text masks it.
+   */
   readonly mask: (text: string) => Masked<string>
   /** As `mask`, in slices of time: the engine answers while a long text is masked. */
   readonly maskPaced: (text: string) => Effect.Effect<Masked<string>>
@@ -79,8 +83,8 @@ export function secretsRegistry(): SecretsRegistry {
       sources.delete(source)
     },
     values,
-    mask: (text) => maskText(text, values()),
-    maskPaced: (text) => maskTextPaced(text, values()),
+    mask: (text) => maskPrinted(text, values()),
+    maskPaced: (text) => maskPrintedPaced(text, values()),
     maskPrinted: (text) => maskPrintedPaced(text, values()),
     maskRecord: (record) => maskRecord(record, values()),
   }

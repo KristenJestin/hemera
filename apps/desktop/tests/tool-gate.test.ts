@@ -37,6 +37,7 @@ import { placesForWorkflow } from '../src/engine/tools/gate.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
 import { endChild, removeFolders, temporaryFolder } from './storage.ts'
 import {
@@ -774,6 +775,27 @@ describe('Every call is recorded', () => {
       },
     ])
     expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('A call’s arguments are kept masked as JSON (#397)', () => {
+  test('arguments that are not a record, holding a quoted credential and a known value, are kept with nothing of either, and still JSON', async () => {
+    const verdicts = verdictsSaying(() => ALLOW)
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', [KNOWN_SECRET])
+    const calls = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', [QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+            return yield* callsOf(builder.sessionId)
+          }),
+        ),
+    )
+    expect(calls).toHaveLength(1)
+    expectMaskedJson(calls[0]?.arguments)
   })
 })
 

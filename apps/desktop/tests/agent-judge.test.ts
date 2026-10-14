@@ -44,6 +44,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents } from '../src/engine/storage/schema.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { type FakeJev, fakeJev, scored } from './fake-jev.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { PASSING } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { acmeWithMission, callTool, questionsKept, sessionOf } from './tools-world.ts'
@@ -509,6 +510,33 @@ describe('A judge that can do nothing, told nothing secret', () => {
     expect(questions).toEqual([
       'No rule of this Project allows this command for the Builder, and the call could not be sent to Claude Code’s judge whole.',
     ])
+  })
+
+  test('a JSON line the user wrote, holding a quoted credential and a known value, reaches the judge with nothing of either, and still JSON (#397)', async () => {
+    const pasted = JSON.stringify([QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+    const { judges } = await withJudge(({ builder, projectId, missionId }) =>
+      Effect.gen(function* () {
+        yield* Secrets.useSync((secrets) => secrets.register('suite', [KNOWN_SECRET]))
+        const need = yield* createNeed(
+          AGENT_REQUESTS,
+          MissionOwner.make({ projectId, missionId, taskId: null }),
+          DecisionFields.make({ question: 'which account?', options: ['a'], recommended: null }),
+        )
+        yield* answerNeed({
+          id: need.id,
+          answer: WrittenAnswer.make({ text: `Use these:\n${pasted}` }),
+          key: 'answer-1',
+        })
+        yield* callTool(builder, 'fs_write', { path: 'notes.md', content: 'x', why: 'notes' })
+      }),
+    )
+    const prompts = judges.started.flatMap((judge) => judge.answers.prompts).map(textOf)
+    expect(prompts).toHaveLength(1)
+    // The turn's data is its third line: the action and the human context, as JSON.
+    const turnData = JSON.parse((prompts[0] ?? '').split('\n')[2] ?? '{}')
+    const told = String(turnData.humanContext?.[0] ?? '')
+    expect(told).toMatch(/^The user answered: Use these:\n/)
+    expectMaskedJson(told.split('\n')[1])
   })
 })
 
