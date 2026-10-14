@@ -7,7 +7,7 @@
  * counts: on the Windows runners (#359) it put the two slowest files of the repository,
  * `building-end` and `building-proofs` (some 700 and 600 s each), in the same half, which took
  * 13 to 15 minutes while the other half took 8 to 10. Here each file goes, slowest first, to
- * the shard with the least time so far: the two halves carry the same time to within a small
+ * the shard with the least time so far: the shards carry the same time to within a small
  * file, and every file still runs once, in one shard.
  *
  * The times are those the Windows runners measured, kept in `tools/test-times.json`. A file
