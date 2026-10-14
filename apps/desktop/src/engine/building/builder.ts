@@ -368,10 +368,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         loop,
         said,
-        deliver: (building, target, kind, body) =>
-          deliverTo(building, target, kind, body).pipe(
-            Effect.catchCause((cause) => said(`a delivery was not kept: ${String(cause)}`)),
-          ),
         background: (effect) => effect.pipe(provided, Effect.forkIn(layerScope), Effect.asVoid),
       })
       /** The missions a Builder's write settled in, taken one by one outside its transaction. */
@@ -1757,6 +1753,15 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           return (yield* settleIn(transaction, found.building)).events
         })
 
+      /** What the Builder is told of an expiry, under one id whoever stores it first. */
+      const expirySaid = (decision: DecisionRow, reason: string | null) => {
+        const tasks = JSON.parse(decision.tasks).join(', ')
+        return {
+          id: `expired-${decision.needId}`,
+          body: `Your request no longer holds and expired: ${decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
+        }
+      }
+
       /** What the Builder is told of the user's Retry, under one id whoever stores it first. */
       const fixedSaid = (decision: DecisionRow) => {
         const tasks = JSON.parse(decision.tasks).join(', ')
@@ -1821,6 +1826,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (problems.length > 0) {
               const reason = `the plan moved since it was asked: ${problems.join(' ')}`
               events.push(...(yield* expireNeedIn(transaction, answeredNeed.id, reason)))
+              // Told with the expiry, so a stop before the follower loses none of it.
+              yield* storeDeliveryIn(transaction, {
+                ...expirySaid(decision, reason),
+                owner: { kind: 'mission', missionId: building.missionId },
+                target: { role: 'builder' },
+                kind: 'expiry',
+              }).pipe(
+                Effect.catchTag('DeliveryKindRefused', (refused) =>
+                  Effect.fail(new DeliveryFailed({ reason: refused.message })),
+                ),
+              )
               yield* transaction
                 .update(buildingDecisions)
                 .set({ state: 'expired', answeredAt: now() })
@@ -1913,12 +1929,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             yield* deliverTo(outcome.building, { role: 'builder' }, 'answer', body, id)
             return
           }
-          const tasks = JSON.parse(outcome.decision.tasks).join(', ')
-          yield* deliver(
-            outcome.building,
-            'expiry',
-            `Your request no longer holds and expired: ${outcome.decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
-          )
+          // Stored already when the answer expired it: only handed over then.
+          const { id, body } = expirySaid(outcome.decision, reason)
+          yield* deliverTo(outcome.building, { role: 'builder' }, 'expiry', body, id)
         })
 
       /** A mission cancelled: its Building ends as cancelled; the work stays. */

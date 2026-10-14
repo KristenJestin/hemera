@@ -27,6 +27,7 @@ import { getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { getSession, openSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import {
   builderEngine,
@@ -624,6 +625,78 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
     expect(statesOf(seen.view)['T4']).toBe('available')
     const decision = seen.view.decisions.find((one) => one.tasks.includes('T1'))
     expect(decision?.state).toBe('expired')
+  })
+
+  test('an amendment that expires as it is answered, right before a stop, is told to the Builder after the start', async () => {
+    const removing = (task: string, out: string) => ({
+      task,
+      kind: 'impossible',
+      reason: `${out} is not needed.`,
+      options: [`Remove ${out}`, 'Keep it'],
+      recommended: `Remove ${out}`,
+      recommended_reason: 'It does nothing more.',
+      amendment: { kind: 'remove', task: out, reason: 'Not needed.' },
+    })
+    let lagging = false
+    let reached = false
+    // The follower that tells the Builder of the expiry never gets past it before the stop.
+    const hold: BuilderHold = (at) =>
+      at === 'releasing' && lagging
+        ? Effect.andThen(
+            Effect.sync(() => {
+              reached = true
+            }),
+            Effect.never,
+          )
+        : Effect.void
+    const before = builderEngine(data, work, { hold })
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* call(grantId, 'task_blocked', removing('T1', 'T4'))
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          yield* call(grantId, 'task_blocked', removing('T2', 'T1'))
+          const needs = (yield* getMission(mission.id)).needs
+          const needOf = (taskId: string) =>
+            needs.find(
+              (one) => Predicate.isTagged(one.owner, 'Mission') && one.owner.taskId === taskId,
+            )?.id ?? ''
+          yield* answerNeed({
+            id: needOf('T2'),
+            answer: ChosenAnswer.make({ option: 'Remove T1' }),
+            key: 'answer-t2',
+          })
+          lagging = true
+          yield* answerNeed({
+            id: needOf('T1'),
+            answer: ChosenAnswer.make({ option: 'Remove T4' }),
+            key: 'answer-t1',
+          })
+          yield* until(Effect.sync(() => reached))
+          return { mission }
+        }),
+      ),
+    )
+    const after = builderEngine(data, work)
+    await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(Effect.map(buildingNow(first.mission.id), (view) => view.tasks.length > 0))
+          yield* until(
+            Effect.sync(() =>
+              promptsOf(after.world).some((one) => one.includes('[hemera:resume]')),
+            ),
+          )
+        }),
+      ),
+    )
+    const expiry = promptsOf(after.world).find((one) => one.includes('[hemera:expiry]')) ?? ''
+    expect(expiry).toContain('Removing T4 leaves R1.S1 covered by no task of the plan.')
   })
 })
 

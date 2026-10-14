@@ -3064,6 +3064,107 @@ describe('What the user answers on a red', () => {
     expect(seen.proof.state).toBe('waiting_red')
   })
 
+  /** The engine stopped once an answer is applied, its follower not past it. */
+  const stoppedOnAnswer = () => {
+    const answering = holdOnce('answering')
+    const hold: BuilderHold = (at) =>
+      at === 'answering' ? Effect.andThen(answering.hold(at), Effect.never) : Effect.void
+    return { answering, hold }
+  }
+
+  /** Once the start acted on the answer, or asked the user again. */
+  const actedOrAsked = (missionId: string, acted: Effect.Effect<boolean, unknown, Database>) =>
+    until(
+      Effect.gen(function* () {
+        if (yield* acted) return true
+        const mission = yield* getMission(missionId)
+        return mission.needs.some((need) => Predicate.isTagged(need.fields, 'Decision'))
+      }),
+    )
+
+  test('"send it back" answered right before a stop opens the attempt with both outputs after the start, and asks nothing again', async () => {
+    const stop = stoppedOnAnswer()
+    const first = await proofsEngine(data, stop.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(mismatch)
+          const need = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: need.id,
+            answer: ChosenAnswer.make({ option: SEND_BACK }),
+            key: 'answer-1',
+          })
+          yield* Deferred.await(stop.answering.reached)
+          return { mission }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* actedOrAsked(
+            first.mission.id,
+            Effect.map(proofAttemptsOf('R1.S2'), (rows) => rows.length > 0),
+          )
+          return {
+            attempts: yield* proofAttemptsOf('R1.S2'),
+            mission: yield* getMission(first.mission.id),
+            delivered: yield* deliveredTo(first.mission.id, 'the user sent this red back'),
+          }
+        }),
+      ),
+    )
+    expect(seen.attempts.map((one) => one.verdict)).toEqual(['red'])
+    expect(seen.mission.needs).toEqual([])
+    expect(seen.delivered).toContain('total is wrong in')
+  })
+
+  test('"more information" answered right before a stop reaches the Builder after the start', async () => {
+    const stop = stoppedOnAnswer()
+    const first = await proofsEngine(data, stop.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(EXPORT_PATH, testFile("  assert.equal(1, 1, 'it passes')")),
+          }))
+          const need = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: need.id,
+            answer: WrittenAnswer.make({ text: 'It fails on the March invoices only.' }),
+            key: 'answer-1',
+          })
+          yield* Deferred.await(stop.answering.reached)
+          return { mission }
+        }),
+      ),
+    )
+    const told = 'R1.S2 already passes, and the user says more'
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const database = yield* Database
+          const bodies = Effect.map(
+            database
+              .select({ body: sessionDeliveries.body })
+              .from(sessionDeliveries)
+              .where(eq(sessionDeliveries.ownerId, first.mission.id)),
+            (rows) => rows.map((row) => row.body).join('\n'),
+          )
+          yield* actedOrAsked(
+            first.mission.id,
+            Effect.map(bodies, (all) => all.includes(told)),
+          )
+          return yield* bodies
+        }),
+      ),
+    )
+    expect(seen).toContain(`${told}: It fails on the March invoices only.`)
+  })
+
   test('touched names the proofs and the final checks whose repository changed', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
