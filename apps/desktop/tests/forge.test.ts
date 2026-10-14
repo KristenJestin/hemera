@@ -24,19 +24,23 @@ import {
   ForgeError,
   ForgeRefused,
   type ForgeRepositoryStatus,
+  type Need,
   ForgeTimeout,
   UnknownRepository,
 } from '@hemera/ipc'
-import { Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
-import { listNeeds, retryNeed } from '../src/engine/needs.ts'
+import { listNeeds, retryNeed, withdrawNeed } from '../src/engine/needs.ts'
 import { ForgePort, contextLine, forgeError } from '../src/engine/forges/port.ts'
 import { ForgeCommandRefused, ForgeRunner } from '../src/engine/forges/runner.ts'
 import { COMMAND_SHAPES } from '../src/engine/forges/shapes.ts'
 import { createProject, getProject, removeRepository } from '../src/engine/projects.ts'
+import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { forgeNeeds } from '../src/engine/storage/schema.ts'
 import { listActions } from '../src/engine/tools/actions.ts'
 import { commandsEngine } from './commands-engine.ts'
 import {
@@ -87,9 +91,10 @@ const withForge = <A, E>(
   }) => Effect.Effect<A, E, EngineServices>,
   remotes: Readonly<Record<string, string>> = REMOTES,
   limits = { read: 2_000, write: 4_000 },
+  secrets: SecretsRegistry = secretsRegistry(),
 ) => {
   const main = checkout(remotes)
-  return commandsEngine(data, { forge: { env: fake.env, limits } })(({ profile }) =>
+  return commandsEngine(data, { forge: { env: fake.env, limits }, secrets })(({ profile }) =>
     profile.use(
       Effect.gen(function* () {
         const project = yield* createProject({
@@ -472,6 +477,435 @@ describe('A waiting operation survives a restart and wakes on any change', () =>
   })
 })
 
+/** The rows of `forge_needs`, whatever the state of their need. */
+const forgeNeedRows = Effect.gen(function* () {
+  const database = yield* Database
+  return yield* database.select().from(forgeNeeds)
+})
+
+/** What each pending need says is missing. */
+const missingOf = (pending: ReadonlyArray<Need>) =>
+  pending.map((need) =>
+    Predicate.isTagged(need.fields, 'Environment') ? need.fields.missing : null,
+  )
+
+/**
+ * Two openings of the engine over one data folder: the first leaves an operation waiting on each
+ * repository given, then stops; the second runs the program with its start held before its own
+ * recheck of the environment needs, so that the forge port knows only what the program checks.
+ */
+const restartedWith = async <A, E>(
+  fake: FakeForge,
+  remotes: Readonly<Record<string, string>>,
+  needsLeft: number,
+  program: (atlas: {
+    readonly projectId: string
+    readonly repository: (path: string) => string
+  }) => Effect.Effect<A, E, EngineServices>,
+) => {
+  const main = checkout(remotes)
+  const forgeParts = { env: fake.env, limits: { read: 2_000, write: 4_000 } }
+  const { projectId, ids } = await commandsEngine(data, { forge: forgeParts })(({ profile }) =>
+    profile.use(
+      Effect.gen(function* () {
+        const project = yield* createProject({
+          name: 'Atlas',
+          mainCheckout: main,
+          repositories: Object.keys(remotes),
+        })
+        const port = yield* forge
+        for (const one of project.repositories) yield* Effect.forkChild(port.currentUser(one.id))
+        yield* pendingNeeds.pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced('50 millis'),
+            until: (pending) => pending.length >= needsLeft,
+          }),
+        )
+        return {
+          projectId: project.id,
+          ids: new Map(project.repositories.map((one) => [one.path, one.id])),
+        }
+      }),
+    ),
+  )
+  const repository = (path: string) => ids.get(path) ?? ''
+  return commandsEngine(data, {
+    forge: forgeParts,
+    // The start's chain waits here, before it checks the environment needs again.
+    sessions: { rebuildHold: Effect.never },
+  })(({ profile }) => profile.use(program({ projectId, repository })))
+}
+
+const BKT_SIGNED_OUT = bktReady([], [])
+const TWO_ON_GITHUB = { shop: REMOTES.shop, web: 'https://github.com/acme/web.git' }
+
+describe('A check after a restart settles only the needs whose CLI and host it checked', () => {
+  test('two repositories on two hosts each wait behind a need; checking one leaves the other’s need', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...BKT_SIGNED_OUT])
+    const { afterShop, afterApi } = await restartedWith(
+      fake,
+      REMOTES,
+      2,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          fake.answer([...ghReady(), ...BKT_SIGNED_OUT])
+          yield* port.checkAgain(projectId, repository('shop'))
+          const shopChecked = yield* pendingNeeds
+          fake.answer([...ghReady(), ...bktReady()])
+          yield* port.checkAgain(projectId, repository('api'))
+          return { afterShop: shopChecked, afterApi: yield* pendingNeeds }
+        }),
+    )
+    expect(missingOf(afterShop)).toEqual(['bkt signed in on bitbucket.org'])
+    expect(afterApi).toEqual([])
+  })
+
+  test('the need pending, its repository still signed out: checking it keeps the need', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const pending = await restartedWith(fake, TWO_ON_GITHUB, 1, ({ projectId, repository }) =>
+      Effect.gen(function* () {
+        const port = yield* forge
+        yield* port.checkAgain(projectId, repository('shop'))
+        return yield* pendingNeeds
+      }),
+    )
+    expect(missingOf(pending)).toEqual(['gh signed in on github.com'])
+  })
+
+  test('forced to none while another repository not checked since the restart still waits: the need stays, then goes with the last', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { oneForced, bothForced } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          const first = yield* pendingNeeds
+          yield* port.setForced(projectId, repository('web'), 'none', null)
+          return { oneForced: first, bothForced: yield* pendingNeeds }
+        }),
+    )
+    expect(missingOf(oneForced)).toEqual(['gh signed in on github.com'])
+    expect(bothForced).toEqual([])
+  })
+
+  test('an operation waiting after the restart, its repository removed: the need stays for the other', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { failure, pending } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* port.checkAgain(projectId, repository('shop'))
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          const project = yield* getProject(projectId)
+          yield* removeRepository({ id: repository('shop'), version: project.version })
+          return { failure: yield* Fiber.join(waiting), pending: yield* pendingNeeds }
+        }),
+    )
+    expect(failure).toBeInstanceOf(UnknownRepository)
+    expect(missingOf(pending)).toEqual(['gh signed in on github.com'])
+  })
+
+  test('both repositories removed after the restart: Retry withdraws the need', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { kept, retried } = await restartedWith(
+      fake,
+      TWO_ON_GITHUB,
+      1,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          yield* removeRepository({
+            id: repository('shop'),
+            version: (yield* getProject(projectId)).version,
+          })
+          const [need] = yield* pendingNeeds
+          const stays = yield* retryNeed(need?.id ?? '')
+          yield* removeRepository({
+            id: repository('web'),
+            version: (yield* getProject(projectId)).version,
+          })
+          return { kept: stays.state, retried: (yield* retryNeed(need?.id ?? '')).state }
+        }),
+    )
+    expect(kept).toBe('pending')
+    expect(retried).toBe('withdrawn')
+  })
+})
+
+describe('A need made as its CLI turned ready does not stay pending', () => {
+  test('an operation found its CLI signed out, and Check again found it ready before the need was made: no need is made, and the operation runs', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    const main = checkout({ shop: REMOTES.shop })
+    const { login, pending, rows } = await commandsEngine(data, {
+      forge: {
+        env: fake.env,
+        limits: { read: 2_000, write: 4_000 },
+        // Held once, between the operation's check and its need.
+        waitHold: Effect.andThen(Deferred.succeed(reached, undefined), Deferred.await(go)),
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(
+            port.currentUser(project.repositories[0]?.id ?? ''),
+          )
+          yield* Deferred.await(reached)
+          fake.answer(ghReady())
+          yield* port.checkAgain(project.id, null)
+          yield* Deferred.succeed(go, undefined)
+          return {
+            login: yield* Fiber.join(waiting),
+            pending: yield* pendingNeeds,
+            rows: yield* forgeNeedRows,
+          }
+        }),
+      ),
+    )
+    expect(login).toBe('octo')
+    expect(pending).toEqual([])
+    expect(rows).toEqual([])
+  })
+})
+
+describe('A settle never withdraws a need made while it ran', () => {
+  test('a settle held between the states it read and the needs it reads, an operation on a repository that just signed out makes its need meanwhile: the need stays', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...bktReady()])
+    const held = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    let armed = false
+    const main = checkout(REMOTES)
+    const kept = await commandsEngine(data, {
+      forge: {
+        env: fake.env,
+        limits: { read: 2_000, write: 4_000 },
+        // Held once, when armed: the next settle, between the states it read and the needs it reads.
+        settleHold: Effect.suspend(() => {
+          if (!armed) return Effect.void
+          armed = false
+          return Effect.andThen(Deferred.succeed(held, undefined), Deferred.await(go))
+        }),
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop', 'api'],
+          })
+          const id = (path: string) =>
+            project.repositories.find((one) => one.path === path)?.id ?? ''
+          const port = yield* forge
+          // Both repositories known: gh signed out, bkt ready. An operation on shop waits.
+          yield* port.status(project.id)
+          yield* Effect.forkChild(port.currentUser(id('shop')))
+          yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('50 millis'),
+              until: (pending) => pending.length === 1,
+            }),
+          )
+          armed = true
+          const settling = yield* Effect.forkChild(port.checkAgain(project.id, id('shop')))
+          yield* Deferred.await(held)
+          // bkt signs out, and an operation on api finds it so while the settle is held.
+          fake.answer([...ghSignedOut(), ...BKT_SIGNED_OUT])
+          yield* Effect.forkChild(port.currentUser(id('api')))
+          // Its need, made meanwhile if nothing stops it; a second at most.
+          yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (pending) => pending.length === 2,
+            }),
+            Effect.timeoutOption('1 second'),
+          )
+          yield* Deferred.succeed(go, undefined)
+          yield* Fiber.join(settling)
+          return yield* pendingNeeds.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (pending) => pending.length === 2,
+            }),
+            Effect.timeoutOption('2 seconds'),
+            Effect.andThen(pendingNeeds),
+          )
+        }),
+      ),
+    )
+    expect(missingOf(kept).toSorted()).toEqual([
+      'bkt signed in on bitbucket.org',
+      'gh signed in on github.com',
+    ])
+  })
+})
+
+describe('A repository removed while nothing waits on it settles its need', () => {
+  test('after a restart, the only repository waiting removed: its need is withdrawn and its row deleted, with no Retry', async () => {
+    const fake = fakeForge([...ghSignedOut(), ...bktReady()])
+    const rows = await restartedWith(fake, REMOTES, 1, ({ projectId, repository }) =>
+      Effect.gen(function* () {
+        yield* removeRepository({
+          id: repository('shop'),
+          version: (yield* getProject(projectId)).version,
+        })
+        yield* pendingNeeds.pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced('50 millis'),
+            until: (pending) => pending.length === 0,
+          }),
+        )
+        return yield* forgeNeedRows
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+})
+
+describe('A forge need’s row is deleted when its need ends', () => {
+  test('withdrawn by Check again', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const { during, after } = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          const rows = yield* forgeNeedRows
+          fake.answer(ghReady())
+          yield* port.checkAgain(projectId, null)
+          yield* Fiber.join(waiting)
+          return { during: rows, after: yield* forgeNeedRows }
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(during).toHaveLength(1)
+    expect(after).toEqual([])
+  })
+
+  test('withdrawn outside the port, as Retry does when the CLI turns ready after its own check: the row goes at once', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const [need] = yield* someNeed
+          yield* withdrawNeed(need?.id ?? '', 'the CLI turned ready')
+          return yield* forgeNeedRows.pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced('20 millis'),
+              until: (rows) => rows.length === 0,
+            }),
+            Effect.timeoutOption('2 seconds'),
+            Effect.andThen(forgeNeedRows),
+          )
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('withdrawn by Retry', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          const [need] = yield* someNeed
+          fake.answer(ghReady())
+          yield* retryNeed(need?.id ?? '')
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('the repository forced to none', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          yield* port.setForced(projectId, repository('shop'), 'none', null)
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('the repository removed', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const after = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(Effect.flip(port.currentUser(repository('shop'))))
+          yield* someNeed
+          const project = yield* getProject(projectId)
+          yield* removeRepository({ id: repository('shop'), version: project.version })
+          yield* Fiber.join(waiting)
+          return yield* forgeNeedRows
+        }),
+      { shop: REMOTES.shop, api: REMOTES.api },
+    )
+    expect(after).toEqual([])
+  })
+
+  test('a row whose need ended another way goes at the next start', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const engine = commandsEngine(data, {
+      forge: { env: fake.env, limits: { read: 2_000, write: 4_000 } },
+    })
+    const main = checkout({ shop: REMOTES.shop })
+    const left = await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const port = yield* forge
+          yield* Effect.forkChild(port.currentUser(project.repositories[0]?.id ?? ''))
+          const [need] = yield* someNeed
+          // Ended outside the port, as an older engine left it.
+          yield* withdrawNeed(need?.id ?? '', 'ended elsewhere')
+          return yield* forgeNeedRows
+        }),
+      ),
+    )
+    const after = await engine(({ profile }) => profile.use(forgeNeedRows))
+    expect(left).toHaveLength(1)
+    expect(after).toEqual([])
+  })
+})
+
 describe('The runner never asks for a token and never reads a CLI configuration', () => {
   test('no auth token, no token variable, the user’s own configuration folder left as it is', async () => {
     const fake = fakeForge([...ghReady(), ...bktReady()])
@@ -721,6 +1155,183 @@ describe('What a CLI prints and the command it ran are masked', () => {
     )
     expect(failure).toBeInstanceOf(ForgeError)
     expect(failure.message.endsWith('line 2999\nthe last line')).toBe(true)
+  })
+})
+
+describe('A JSON answer of any shape is masked value by value and stays JSON', () => {
+  /** What the runner gives back of `gh api … user` when the fake prints this, these values known. */
+  const printed = (stdout: string, known: ReadonlyArray<string> = []) => {
+    const secrets = secretsRegistry()
+    secrets.register('known', [], known)
+    const fake = fakeForge([{ cli: 'gh', when: ['api', 'user'], stdout }])
+    return withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flatMap(runner, (forgeRunner) =>
+          forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId,
+            args: ['api', '--hostname', 'github.com', 'user', '--jq', '.login'],
+          }),
+        ),
+      { shop: REMOTES.shop },
+      undefined,
+      secrets,
+    ).then((answer) => answer.stdout)
+  }
+
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(4)}`
+  /** A field named as a credential, and a body that quotes a password with escaped quotes. */
+  const item = (at: number) => ({
+    number: at,
+    token: `plain-${String(at)}`,
+    body: `set password="x${String(at)}" then ${token}`,
+  })
+  const masked = (at: number) => ({ number: at, token: '•••', body: 'set password=••• then •••' })
+
+  test('a top-level array, as gh --json lists print it', async () => {
+    const stdout = await printed(`${JSON.stringify([item(1), item(2)], null, 2)}\n`)
+    expect(JSON.parse(stdout)).toEqual([masked(1), masked(2)])
+  })
+
+  test('a top-level object holding an array', async () => {
+    const stdout = await printed(JSON.stringify({ items: [item(1)] }))
+    expect(JSON.parse(stdout)).toEqual({ items: [masked(1)] })
+  })
+
+  test.each([
+    [JSON.stringify(item(1).body), masked(1).body],
+    ['42\n', 42],
+    ['null\n', null],
+  ])('a top-level string, number or null: %j', async (stdout, expected) => {
+    expect(JSON.parse(await printed(stdout))).toEqual(expected)
+  })
+
+  test('NDJSON, as --jq prints it, line by line', async () => {
+    const lines = [item(1), item(2), item(3).body].map((one) => JSON.stringify(one))
+    const stdout = await printed(`${lines.join('\n')}\n`)
+    expect(stdout.split('\n').map((line) => JSON.parse(line))).toEqual([
+      masked(1),
+      masked(2),
+      masked(3).body,
+    ])
+  })
+
+  test('JSON lines mixed with text are masked as one text: nothing of a secret is left', async () => {
+    const stdout = await printed(
+      `${JSON.stringify(item(1))}\nwarning: token=${token}\n${JSON.stringify(item(2))}\n`,
+    )
+    expect(stdout).not.toMatch(/plain-|x1|x2|ghp_/)
+    expect(stdout).toContain('warning: token=•••')
+  })
+
+  test('a private key printed as text is masked whole, across its lines', async () => {
+    const block = [
+      '-----BEGIN OPENSSH PRIVATE KEY-----',
+      'b3BlbnNzaC1rZXktdjEAAAAA',
+      'QUJDREVGR0hJ',
+      '-----END OPENSSH PRIVATE KEY-----',
+    ]
+    const stdout = await printed(`{"a": 1}\n${block.join('\n')}\n`)
+    expect(stdout).toBe('{"a": 1}\n•••')
+  })
+})
+
+describe('Masking an answer read as JSON loses nothing whole-text masking catches', () => {
+  const printed = (stdout: string, known: ReadonlyArray<string> = []) => {
+    const secrets = secretsRegistry()
+    secrets.register('known', [], known)
+    const fake = fakeForge([{ cli: 'gh', when: ['api', 'user'], stdout }])
+    return withForge(
+      fake,
+      ({ projectId }) =>
+        Effect.flatMap(runner, (forgeRunner) =>
+          forgeRunner.run({
+            cli: 'gh',
+            forge: 'github',
+            host: 'github.com',
+            projectId,
+            args: ['api', '--hostname', 'github.com', 'user', '--jq', '.login'],
+          }),
+        ),
+      { shop: REMOTES.shop },
+      undefined,
+      secrets,
+    ).then((answer) => answer.stdout)
+  }
+
+  const codes = '48213977\n55120934'
+  test.each([
+    ['after a label', `recovery codes:\n${codes}\n`, 'recovery codes:\n•••'],
+    // Every line JSON: it stays NDJSON, each number masked as a string.
+    ['alone', `${codes}\n`, '"•••"\n"•••"'],
+  ])(
+    'a known value over several lines, each a JSON number: %s',
+    async (_case, stdout, expected) => {
+      expect(await printed(stdout, [codes])).toBe(expected)
+    },
+  )
+
+  test('a known numeric value inside a gh --json list', async () => {
+    const stdout = await printed('[{"n":424242}]\n', ['424242'])
+    expect(stdout).not.toContain('424242')
+  })
+
+  const dockerConfig = JSON.stringify({ auths: { 'reg.acme.test': { auth: 'dXNlcjpodW50ZXIy' } } })
+
+  test('a known value that is itself JSON, among text', async () => {
+    expect(await printed(`config:\n${dockerConfig}\nend\n`, [dockerConfig])).toBe(
+      'config:\n•••\nend',
+    )
+  })
+
+  test('a known value that is itself JSON, inside a list', async () => {
+    expect(await printed(`[${dockerConfig}]\n`, [dockerConfig])).not.toContain('dXNlcjpodW50ZXIy')
+  })
+
+  test.each([
+    ['db:\n  password:\n    "hunter2xyz"\n', 'hunter2xyz'],
+    ['cookie:\n"sessionid=abcdef123"\n', 'abcdef123'],
+  ])('a label on one line, its quoted value on the next: %j', async (stdout, secret) => {
+    expect(await printed(stdout)).not.toContain(secret)
+  })
+
+  test('a private key block with a line of digits in its middle', async () => {
+    const block = [
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'b3BlbnNzaC1rZXktdjEAAAAA',
+      '12345678',
+      'QUJDREVG',
+      '-----END RSA PRIVATE KEY-----',
+    ]
+    expect(await printed(`${block.join('\n')}\n`)).toBe('•••')
+  })
+
+  test('a private key begun in a JSON line, its body on the lines after', async () => {
+    const stdout = await printed(
+      '{"msg":"-----BEGIN RSA PRIVATE KEY-----"}\nMIIEowIBAAKCAQEAbodyline\n-----END RSA PRIVATE KEY-----\n',
+    )
+    expect(stdout).not.toContain('MIIEowIBAAKCAQEAbodyline')
+  })
+
+  test('a cookie and a Set-Cookie header in a gh --json list', async () => {
+    const stdout = await printed(
+      '[{"cookie":"sessionid=abcdef123"},{"headers":{"Set-Cookie":"sid=zz99887766; Path=/"}}]\n',
+    )
+    expect(stdout).not.toMatch(/abcdef123|zz99887766/)
+    expect(JSON.parse(stdout)).toHaveLength(2)
+  })
+
+  test('a number beyond 2^53 comes back as printed', async () => {
+    expect(await printed('[{"id":12345678901234567890}]\n')).toBe('[{"id":12345678901234567890}]')
+  })
+
+  test('a known value used as an object key', async () => {
+    const stdout = await printed('[{"s3cretKEYvalue":1}]\n', ['s3cretKEYvalue'])
+    expect(stdout).not.toContain('s3cretKEYvalue')
+    expect(JSON.parse(stdout)).toEqual([{ '•••': 1 }])
   })
 })
 

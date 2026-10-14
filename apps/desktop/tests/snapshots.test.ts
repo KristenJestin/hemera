@@ -23,7 +23,7 @@ import {
 import { join } from 'node:path'
 
 import { DatabaseSync } from 'node:sqlite'
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -203,6 +203,63 @@ describe('A snapshot leaves the user’s repository untouched', () => {
     expect(execInStore(store, objectsOf(main), 'cat-file', '-p', `${seen.tree}:tracked.txt`)).toBe(
       'one\ntwo\nthree\nfour',
     )
+  })
+})
+
+describe('Two first snapshots of a Project at once share one store', () => {
+  test('a snapshot taken while another creates the Project’s store never creates it over that one, and both are taken', async () => {
+    const { main, worktree } = workspace()
+    // Git refuses a second `init` over one still writing (its config lock, its templates): the
+    // first creation is held while the second snapshot runs from start to end.
+    const firstHeld = Deferred.makeUnsafe<void>()
+    const firstArrived = Deferred.makeUnsafe<void>()
+    const creating = new Set<string>()
+    const createdOver: string[] = []
+    let inits = 0
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (args[0] !== 'init') return real(folder, args, kind, options)
+        const target = args.at(-1) ?? ''
+        if (creating.has(target)) createdOver.push(target)
+        creating.add(target)
+        inits += 1
+        const turn =
+          inits === 1
+            ? Effect.andThen(Deferred.succeed(firstArrived, undefined), Deferred.await(firstHeld))
+            : Effect.void
+        return turn.pipe(
+          Effect.andThen(real(folder, args, kind, options)),
+          Effect.ensuring(Effect.sync(() => creating.delete(target))),
+        )
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const place = { name: 'acme', folder: worktree }
+          const first = yield* Effect.forkChild(
+            Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'start'))),
+          )
+          yield* Deferred.await(firstArrived)
+          const second = yield* Snapshots.use((snapshots) =>
+            snapshots.take(place, attempt(missionId, 'end')),
+          )
+          yield* Deferred.succeed(firstHeld, undefined)
+          return { projectId, missionId, first: yield* Fiber.join(first), second }
+        }),
+      ),
+    )
+
+    expect(createdOver).toEqual([])
+    expect(seen.first).toBe(seen.second)
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(git(store, 'for-each-ref', '--format=%(refname) %(objectname)')).toBe(
+      [
+        `refs/hemera/${seen.missionId}/attempt-1/end/acme ${seen.second}`,
+        `refs/hemera/${seen.missionId}/attempt-1/start/acme ${seen.first}`,
+      ].join('\n'),
+    )
+    expect(readdirSync(join(data, 'snapshots'))).toEqual([`${seen.projectId}.git`])
   })
 })
 
