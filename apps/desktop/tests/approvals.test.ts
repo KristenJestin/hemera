@@ -26,6 +26,7 @@ import { NeverProgram, PermissionAnswer, type PermissionChoice } from '@hemera/c
 import type { CommandDraft } from '@hemera/ipc'
 import { asc, eq } from 'drizzle-orm'
 import { Deferred, Effect, Layer, Predicate, Schema } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
@@ -172,31 +173,29 @@ describe('A call that asks is answered at once, and waits for nobody', () => {
   test('the agent reads the waiting text with its number; nothing runs; the request and its need are stored', async () => {
     const out = join(work, 'out.txt')
     const appender = script(APPENDS)
+    // The clock of the calls is never advanced: a call that waited on a grace or a timer, for any
+    // length, would never return. No elapsed time is read.
     const seen = await engine()(
       inEngine(
         Effect.gen(function* () {
           const world = yield* acme
-          const began = performance.now()
           const first = yield* callTool(world.builder.grantId, 'commands_run', {
             line: nodeLine(appender, out),
             why: 'seed the notes',
           })
-          const took = performance.now() - began
           const second = yield* callTool(world.builder.grantId, 'fs_write', {
             path: '../elsewhere.txt',
             content: 'x',
           })
           const rows = yield* requests
           const need = yield* getNeed(rows[0]?.needId ?? '')
-          return { first, second, took, rows, need }
-        }),
+          return { first, second, rows, need }
+        }).pipe(Effect.provide(TestClock.layer())),
       ),
     )
     expect(seen.first.text).toMatch(WAITING)
     expect(seen.first.text).toContain('request #1.')
     expect(seen.second.text).toContain('request #2.')
-    // No grace, no timer: the answer does not wait for the user.
-    expect(seen.took).toBeLessThan(5000)
     expect(linesIn(out)).toBe(0)
     expect(existsSync(join(work, 'elsewhere.txt'))).toBe(false)
     expect(seen.rows.map((row) => [row.number, row.state, row.tool])).toEqual([
@@ -835,14 +834,13 @@ describe('An agent over real MCP is never held by a question', () => {
           renewed: () => Effect.succeed('# Instructions'),
         }),
       )
-      const began = performance.now()
       yield* AgentRuntime.use((runtime) =>
         runtime.prompt(sessionId, [TextBlock.make({ text: 'seed the notes' })]),
       ).pipe(
         Effect.provide(agentRuntimeLayer({ dataFolder: data, log: () => {} })),
         Effect.provide(world),
       )
-      return { answers: agent.answers.toolAnswers, took: performance.now() - began }
+      return { answers: agent.answers.toolAnswers }
     })
 
   test('the agent reads the waiting answer and goes on; quit with the need pending; started again, nothing ran; Allow runs it once', async () => {
@@ -876,7 +874,6 @@ describe('An agent over real MCP is never held by a question', () => {
     expect(first.answers[0]?.text).toMatch(WAITING)
     // It went on with what does not depend on it: the next call was answered in the same turn.
     expect(first.answers[1]?.text).toContain('Acme')
-    expect(first.took).toBeLessThan(10_000)
     expect(linesIn(out)).toBe(0)
 
     const after = await engine()(

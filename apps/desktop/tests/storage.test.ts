@@ -6,8 +6,10 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 
+import { Effect } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { commandsEngine } from './commands-engine.ts'
 import {
   removeFolders,
   removeTree,
@@ -55,25 +57,25 @@ describe('A temporary folder held for a moment', () => {
 })
 
 describe('A temporary folder held for good', () => {
-  test('still fails, naming the folder, after the retries', () => {
+  test('still fails, naming the folder, after the retries', async () => {
     const folder = temporaryFolder('stuck')
     const { calls, remove } = holding('EPERM', Infinity)
     expect(() => removeWithRetries(folder, remove, () => undefined)).toThrow(basename(folder))
     expect(calls.length).toBeGreaterThan(1)
     expect(calls.length).toBeLessThan(100)
-    removeFolders()
+    await removeFolders()
     expect(existsSync(folder)).toBe(false)
   })
 
-  test('is not retried when the refusal is not a transient hold', () => {
+  test('is not retried when the refusal is not a transient hold', async () => {
     const folder = temporaryFolder('refused')
     const { calls, remove } = holding('EACCES', Infinity)
     expect(() => removeWithRetries(folder, remove, () => undefined)).toThrow(/EACCES/)
     expect(calls).toHaveLength(1)
-    removeFolders()
+    await removeFolders()
   })
 
-  test('does not leave the other folders behind', () => {
+  test('does not leave the other folders behind', async () => {
     const stuck = temporaryFolder('stuck')
     const other = temporaryFolder('other')
     const remove: Remover = (folder) => {
@@ -82,6 +84,31 @@ describe('A temporary folder held for good', () => {
     }
     expect(() => removeFoldersWith(remove, () => undefined)).toThrow(basename(stuck))
     expect(existsSync(other)).toBe(false)
-    removeFolders()
+    await removeFolders()
+  })
+})
+
+describe('A folder an engine still stands in when its test ends', () => {
+  test('an engine its test left running is closed before its data folder is removed', async () => {
+    const data = temporaryFolder('left-running')
+    let closedOnItsFolder: boolean | null = null
+    const { promise: started, resolve } = Promise.withResolvers<void>()
+    // What a test that timed out leaves: its engine still running, its promise awaited by no one.
+    const abandoned = commandsEngine(data)(() =>
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            closedOnItsFolder = existsSync(data)
+          }),
+        )
+        resolve()
+        return yield* Effect.never
+      }),
+    )
+    abandoned.catch(() => undefined)
+    await started
+    await removeFolders()
+    expect(closedOnItsFolder).toBe(true)
+    expect(existsSync(data)).toBe(false)
   })
 })

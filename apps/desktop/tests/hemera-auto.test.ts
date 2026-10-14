@@ -70,7 +70,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await jev.close()
-  removeFolders()
+  await removeFolders()
 })
 
 interface World {
