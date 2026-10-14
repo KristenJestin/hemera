@@ -61,7 +61,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await Promise.all(strays.splice(0).map(endChild))
-  removeFolders()
+  await removeFolders()
 })
 
 /** The pids written into the suite's file so far. */
