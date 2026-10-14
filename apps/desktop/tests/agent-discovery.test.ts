@@ -7,7 +7,7 @@
  * asked. The real machine is run against small scripts written into temporary folders.
  */
 
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -18,7 +18,7 @@ import {
   NotQualified,
   Qualified,
 } from '@hemera/ipc'
-import { Deferred, Effect, Layer, Schedule } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Schedule } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { opencode } from '../src/engine/agents/adapters/opencode.ts'
@@ -31,6 +31,8 @@ import {
   discoveryLayer,
   machineLayer,
 } from '../src/engine/agents/discovery.ts'
+import { runCommand } from '../src/engine/agents/installer.ts'
+import { alive } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 afterEach(removeFolders)
@@ -318,19 +320,22 @@ describe('The real machine', () => {
     'a version probe that does not answer in time is a version not known',
     async () => {
       const folder = temporaryFolder('agents-slow')
+      const release = join(folder, 'release')
+      // The agent's own process (a child of the shell script, holding its pipes) answers only once
+      // the test releases it: the probe returning before that is the probe cut at its limit, and
+      // answered at once, not after the child's end. No elapsed time is read.
       const path = script(
         folder,
         'slow-agent',
-        `"${process.execPath}" -e "setTimeout(() => console.log('1.0.0'), 5000)"`,
+        `"${process.execPath}" -e "const wait = setInterval(() => { if (require('node:fs').existsSync('${release}')) { clearInterval(wait); console.log('1.0.0') } }, 20); setTimeout(() => process.exit(), 60000)"`,
       )
-      const started = Date.now()
       const version = await Effect.runPromise(
         Machine.use((machine) => machine.version(path)).pipe(
           Effect.provide(machineLayer({ PATH: folder }, 'linux', 200)),
         ),
       )
+      writeFileSync(release, '')
       expect(version).toBeNull()
-      expect(Date.now() - started).toBeLessThan(4_000)
     },
   )
 
@@ -362,5 +367,33 @@ describe('The real machine', () => {
     expect(bundledEntry('@agentclientprotocol/codex-acp', resources)).toBe(
       join(carried, 'dist', 'index.js'),
     )
+  })
+})
+
+describe('A version probe stopped while it runs', () => {
+  test('a version probe stopped while it runs has ended its child when the stop returns', async () => {
+    const folder = temporaryFolder('agents-stopped')
+    const pidFile = join(folder, 'pid')
+    const probe = join(folder, 'probe.mjs')
+    writeFileSync(
+      probe,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(process.argv[2], String(process.pid))\nsetInterval(() => {}, 1000)\n`,
+    )
+    const pid = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          runCommand([process.execPath, probe, pidFile], process.env, process.platform, {
+            timeoutMs: 30_000,
+            outputChars: 100,
+          }),
+        )
+        while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8') === '') {
+          yield* Effect.sleep('20 millis')
+        }
+        yield* Fiber.interrupt(fiber)
+        return Number(readFileSync(pidFile, 'utf8'))
+      }),
+    )
+    expect(alive(pid)).toBe(false)
   })
 })

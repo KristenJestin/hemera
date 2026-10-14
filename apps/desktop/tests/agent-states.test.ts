@@ -282,16 +282,16 @@ describe('The registry is read with a time limit', () => {
   })
 
   test('a registry that does not answer in time leaves the latest version unknown', async () => {
+    // The server never answers: the call returning is the registry read cut at its limit, whatever
+    // the machine's speed. No elapsed time is read.
     const server = await serving(() => null)
     try {
-      const started = Date.now()
       const latest = await Effect.runPromise(
         AgentRegistry.use((registry) => registry.latest(ADAPTERS.claude, 'npm')).pipe(
           Effect.provide(registryLayer(server.addresses, 200)),
         ),
       )
       expect(latest).toBeNull()
-      expect(Date.now() - started).toBeLessThan(3_000)
     } finally {
       server.close()
     }
@@ -321,11 +321,17 @@ describe('The update runs with a time limit and an output cap', () => {
   test.skipIf(process.platform === 'win32')(
     'an update past its time limit is stopped',
     async () => {
-      // The limit runs from the spawn, so it must outlast the child's start-up, or 'started' is never
-      // printed: 2 s is over a hundred times a Node start (about 20 ms), enough for a loaded runner.
-      // The child would run for a minute, so a bound far under it proves it was stopped.
-      const path = script(`console.log('started'); setTimeout(() => console.log('done'), 60000)`)
-      const started = Date.now()
+      // The child prints 'done' only once the test releases it, which comes after the call: the call
+      // returning is the update stopped at its limit, and 'done' in its output would be the child let
+      // run on. No elapsed time is read. What the child printed before the cut is not asserted: the
+      // limit runs from the spawn, so on a loaded machine the cut can come before Node has started.
+      const release = join(temporaryFolder('agents-update-release'), 'release')
+      const path = script(
+        `const { existsSync } = require('node:fs')
+         console.log('started')
+         const wait = setInterval(() => { if (existsSync(${JSON.stringify(release)})) { clearInterval(wait); console.log('done') } }, 20)
+         setTimeout(() => process.exit(), 60000)`,
+      )
       const output = await Effect.runPromise(
         AgentUpdater.use((updater) => updater.run([path])).pipe(
           Effect.provide(
@@ -333,8 +339,8 @@ describe('The update runs with a time limit and an output cap', () => {
           ),
         ),
       )
-      expect(output).toBe('started')
-      expect(Date.now() - started).toBeLessThan(20_000)
+      writeFileSync(release, '')
+      expect(output).not.toContain('done')
     },
   )
 })

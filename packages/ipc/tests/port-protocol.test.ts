@@ -6,9 +6,10 @@
 
 import { MessageChannel } from 'node:worker_threads'
 
-import { Deferred, Effect, Exit, Fiber, Predicate, Schema, Stream } from 'effect'
+import { Deferred, Duration, Effect, Exit, Fiber, Predicate, Schema, Stream } from 'effect'
 import type { Scope } from 'effect'
 import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcServer } from 'effect/rpc'
+import { TestClock } from 'effect/testing'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -26,7 +27,7 @@ const groupWith = (badItem: Schema.Codec<number, number>) =>
     Rpc.make('Greet', { payload: { name: Schema.String }, success: Schema.String, error: Refused }),
     Rpc.make('Count', { payload: { upTo: Schema.Number }, success: Schema.Number, stream: true }),
     Rpc.make('Hold', { success: Schema.Void }),
-    Rpc.make('Slow', { payload: { millis: Schema.Number }, success: Schema.String }),
+    Rpc.make('Held', { success: Schema.String }),
     Rpc.make('Ticks', { success: Schema.Number, stream: true }),
     Rpc.make('Bad', { success: badItem, stream: true }),
   )
@@ -42,6 +43,8 @@ const setup = Effect.gen(function* () {
     holdInterrupted: yield* Deferred.make<void>(),
     ticksStopped: yield* Deferred.make<void>(),
     badStopped: yield* Deferred.make<void>(),
+    heldStarted: yield* Deferred.make<void>(),
+    heldReleased: yield* Deferred.make<void>(),
   }
   const handlers = ServerGroup.toLayer({
     Greet: ({ name }) =>
@@ -54,7 +57,11 @@ const setup = Effect.gen(function* () {
         Effect.andThen(Effect.never),
         Effect.onInterrupt(() => Deferred.succeed(probes.holdInterrupted, undefined)),
       ),
-    Slow: ({ millis }) => Effect.as(Effect.sleep(millis), 'done'),
+    Held: () =>
+      Deferred.succeed(probes.heldStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(probes.heldReleased)),
+        Effect.as('done'),
+      ),
     Ticks: () =>
       Stream.iterate(0, (n) => n + 1).pipe(
         Stream.ensuring(Deferred.succeed(probes.ticksStopped, undefined)),
@@ -116,6 +123,12 @@ const within = <A, E, R>(self: Effect.Effect<A, E, R>, what: string) =>
 
 const run = (body: (link: Link) => Effect.Effect<void, unknown, Scope.Scope>) =>
   Effect.runPromise(Effect.scoped(Effect.flatMap(setup, body)))
+
+/** The link and its server on a TestClock: nothing of theirs waits on real time. */
+const runOnTestClock = (body: (link: Link) => Effect.Effect<void, unknown, Scope.Scope>) =>
+  Effect.runPromise(
+    Effect.scoped(Effect.flatMap(setup, body)).pipe(Effect.provide(TestClock.layer())),
+  )
 
 describe('A link over a MessagePort', () => {
   test('a request succeeds, and fails with its typed error received as its class', () =>
@@ -244,14 +257,17 @@ describe('A link over a MessagePort', () => {
       }),
     ))
 
-  test(
-    'a call that runs longer than 5 seconds completes normally',
-    () =>
-      run(({ client }) =>
-        Effect.gen(function* () {
-          expect(yield* client.Slow({ millis: 6_000 })).toBe('done')
-        }),
-      ),
-    15_000,
-  )
+  test('a call that outlasts every timer of the link completes normally', () =>
+    runOnTestClock(({ client, probes }) =>
+      Effect.gen(function* () {
+        // The call is in the server's hands; then every timer of the link, of any length up to an
+        // hour, is due. The call is released only after: it must still be there to be answered. No
+        // real time is waited for, so the machine's speed does not enter.
+        const call = yield* Effect.forkChild(client.Held())
+        yield* Deferred.await(probes.heldStarted)
+        yield* TestClock.adjust(Duration.hours(1))
+        yield* Deferred.succeed(probes.heldReleased, undefined)
+        expect(yield* Fiber.join(call)).toBe('done')
+      }),
+    ))
 })
