@@ -1,0 +1,135 @@
+/**
+ * The anchors of Review's code comments (#341, CT-44), as pure rules: the fingerprint of the
+ * targeted lines with three lines of context, normalised for line endings; the excerpt kept; and
+ * the re-anchoring of a range from the commented version of a file to the version now.
+ */
+
+import { describe, expect, test } from 'vite-plus/test'
+
+import {
+  excerptOf,
+  fingerprintOf,
+  lineMapping,
+  linesOf,
+  reanchor,
+} from '../src/engine/review/anchors.ts'
+
+/** Twenty numbered lines, `line 1` to `line 20`. */
+const FILE = Array.from({ length: 20 }, (_, at) => `line ${String(at + 1)}`)
+const text = (lines: ReadonlyArray<string>) => `${lines.join('\n')}\n`
+
+const anchored = (start: number, end: number) => ({
+  range: { start, end },
+  fingerprint: fingerprintOf(FILE, { start, end }),
+})
+
+describe('The fingerprint of the targeted lines', () => {
+  test('is the same whatever the line endings', () => {
+    const crlf = linesOf(Buffer.from(FILE.join('\r\n')))
+    expect(fingerprintOf(crlf, { start: 10, end: 12 })).toBe(
+      fingerprintOf(FILE, { start: 10, end: 12 }),
+    )
+  })
+  test('changes when a line of context changes', () => {
+    const changed = FILE.map((line) => (line === 'line 7' ? 'line seven' : line))
+    expect(fingerprintOf(changed, { start: 10, end: 12 })).not.toBe(
+      fingerprintOf(FILE, { start: 10, end: 12 }),
+    )
+  })
+  test('keeps up to three lines of context at the ends of the file', () => {
+    expect(excerptOf(FILE, { start: 2, end: 2 })).toEqual({
+      before: ['line 1'],
+      lines: ['line 2'],
+      after: ['line 3', 'line 4', 'line 5'],
+      start: 2,
+    })
+  })
+})
+
+describe('A code comment on lines 10–12 follows its lines', () => {
+  test('the file unchanged: current, at the same range', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    expect(reanchor(FILE, FILE, range, fingerprint)).toEqual({ kind: 'current', range })
+  })
+  test('the file changes above them: moved, with the new range', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = ['new 1', 'new 2', ...FILE]
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({
+      kind: 'moved',
+      range: { start: 12, end: 14 },
+    })
+  })
+  test('the file changes below them: current', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = [...FILE.slice(0, 16), 'new', ...FILE.slice(16)]
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'current', range })
+  })
+  test('a line just above them changes: their lines are unchanged, current', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = FILE.map((line) => (line === 'line 9' ? 'line nine' : line))
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'current', range })
+  })
+  test('the lines themselves change: outdated', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = FILE.map((line) => (line === 'line 11' ? 'line eleven' : line))
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'outdated' })
+  })
+  test('the lines are deleted: outdated', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = [...FILE.slice(0, 9), ...FILE.slice(12)]
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'outdated' })
+  })
+  test('the block with its context moves down the file: moved, found by its fingerprint', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    // Lines 7 to 15 (the targets and their context) cut and pasted at the end.
+    const now = [...FILE.slice(0, 6), ...FILE.slice(15), ...FILE.slice(6, 15)]
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({
+      kind: 'moved',
+      range: { start: 15, end: 17 },
+    })
+  })
+  test('lines repeated elsewhere never make a deleted range current', () => {
+    const repeated = ['a', 'b', 'c', 'x', 'y', 'z', 'a', 'b', 'c']
+    const fingerprint = fingerprintOf(repeated, { start: 4, end: 6 })
+    const now = ['a', 'b', 'c', 'a', 'b', 'c']
+    expect(reanchor(repeated, now, { start: 4, end: 6 }, fingerprint)).toEqual({
+      kind: 'outdated',
+    })
+  })
+})
+
+describe('Lines are read the same with or without a last newline', () => {
+  test('a text and its lines', () => {
+    expect(linesOf(Buffer.from(text(['a', 'b'])))).toEqual(['a', 'b'])
+    expect(linesOf(Buffer.from('a\nb'))).toEqual(['a', 'b'])
+    expect(linesOf(Buffer.from(''))).toEqual([])
+  })
+})
+
+describe('The line mapping keeps only lines that are the same, in order', () => {
+  test('on two hundred edited files, every kept line is equal and the kept lines never cross', () => {
+    let seed = 341
+    const next = (below: number) => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+      return seed % below
+    }
+    for (let round = 0; round < 200; round += 1) {
+      const before = Array.from({ length: 1 + next(60) }, () => `l${String(next(8))}`)
+      const after = [...before]
+      for (let edits = next(10); edits > 0; edits -= 1) {
+        const at = next(after.length + 1)
+        if (next(2) === 0) after.splice(at, 1)
+        else after.splice(at, 0, `n${String(next(8))}`)
+      }
+      const mapping = lineMapping(before, after)
+      expect(mapping).not.toBeNull()
+      let last = -1
+      for (const [from, to] of (mapping ?? []).entries()) {
+        if (to < 0) continue
+        expect(after[to]).toBe(before[from])
+        expect(to).toBeGreaterThan(last)
+        last = to
+      }
+    }
+  })
+})
