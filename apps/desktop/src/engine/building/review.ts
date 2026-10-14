@@ -35,6 +35,7 @@ import {
   type Reviewer,
   type ToolArguments,
   findingProblem,
+  repositoriesOfPath,
   sensitivePlace,
 } from '@hemera/core/domain'
 import { and, eq, inArray } from 'drizzle-orm'
@@ -175,6 +176,16 @@ const placeSaid = (repository: string): string =>
 
 const fileSaid = (repository: string, path: string): string =>
   repository === ROOT_REPOSITORY ? path : `${repository}/${path}`
+
+/** A file a reviewer names, as the checkpoint lists it: forward slashes, no leading `./`. */
+const pathOf = (named: string): string => named.replaceAll('\\', '/').replace(/^\.\//, '')
+
+/**
+ * Whether a reviewer is kept from a file's content, in `checkpoint_read` and in the copy alike: a
+ * sensitive place, the `.env` templates included, which sometimes hold real values.
+ */
+export const withheldFromReviewers = (path: string): boolean =>
+  sensitivePlace(path, { home: homedir(), platform: process.platform }) !== null
 
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
@@ -559,18 +570,23 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             const root = repositoryFolderOf(folder, repository)
             return insideCopy(root, path) && existsSync(resolve(root, path))
           }
+          /** The repositories a path without one may be in, by the checkpoint's changed files. */
+          const choices = (path: string) =>
+            repositoriesOfPath(repositories, (one) =>
+              files.some((file) => file.repository === one && file.path === pathOf(path)),
+            )
           const listed = (repository: string | null, path: string) => {
             const named = repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '')
             const where =
               named === undefined ? repositories : repositories.filter((one) => one === named)
             return where.some(
               (one) =>
-                files.some((file) => file.repository === one && file.path === path) ||
-                inCopy(one, path),
+                files.some((file) => file.repository === one && file.path === pathOf(path)) ||
+                inCopy(one, pathOf(path)),
             )
           }
           for (const [at, finding] of args.findings.entries()) {
-            const problem = findingProblem(finding, listed)
+            const problem = findingProblem(finding, listed, choices)
             if (problem !== null) {
               return refusal(`refused: finding ${String(at + 1)}: ${problem}. Nothing was kept.`)
             }
@@ -603,8 +619,9 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
                       requirement: finding.requirement ?? null,
                       scenario: finding.scenario ?? null,
                       repository:
-                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ?? null,
-                      path: finding.path?.replaceAll('\\', '/') ?? null,
+                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ??
+                        (finding.path === undefined ? null : (choices(finding.path)[0] ?? null)),
+                      path: finding.path === undefined ? null : pathOf(finding.path),
                       line: finding.line ?? null,
                       text: secrets.mask(finding.text.trim()),
                       contradictsSpec: finding.contradicts_spec,
@@ -688,15 +705,21 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
               ),
             )
           }
-          const path = args.path.replaceAll('\\', '/').replace(/^\.\//, '')
-          const place =
-            repositories.find((one) =>
-              files.some((file) => file.repository === one.repository && file.path === path),
-            ) ?? repositories[0]
+          const path = pathOf(args.path)
+          const among = repositoriesOfPath(
+            repositories.map((one) => one.repository),
+            (repository) =>
+              files.some((file) => file.repository === repository && file.path === path),
+          )
+          if (among.length > 1) {
+            return refusal(
+              `refused: ${path} names no single repository: say which, one of ${among.map(placeSaid).join(', ')}`,
+            )
+          }
+          const place = repositories.find((one) => one.repository === among[0])
           if (place === undefined) return refusal('refused: the checkpoint has no repository')
           const where = fileSaid(place.repository, path)
-          const machine = { home: homedir(), platform: process.platform }
-          if (sensitivePlace(path, machine) !== null) return answered(`content withheld: ${path}`)
+          if (withheldFromReviewers(path)) return answered(`content withheld: ${path}`)
           const diff = yield* checkpoints.diff(pass.checkpointId, place.repository, path)
           const text = (side: { readonly content: Uint8Array | null } | null) =>
             side?.content == null ? null : Buffer.from(side.content).toString('utf8')

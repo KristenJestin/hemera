@@ -43,7 +43,7 @@ export interface SecretsRegistry {
   readonly unregister: (source: string) => void
   /** Every value registered now, once each. */
   readonly values: () => ReadonlyArray<string>
-  /** Text with every registered value masked, then the shapes of credentials. */
+  /** Text with every registered value and every shape of credential masked. */
   readonly mask: (text: string) => Masked<string>
   /** As `mask`, in slices of time: the engine answers while a long text is masked. */
   readonly maskPaced: (text: string) => Effect.Effect<Masked<string>>

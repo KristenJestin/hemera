@@ -114,17 +114,39 @@ export const EvidenceRead = Schema.Struct({
 })
 export type EvidenceRead = typeof EvidenceRead.Type
 
-/** Why a finding cannot be kept, or null when it can. `listed` says whether a file is in the checkpoint. */
+/**
+ * The repositories a path given without one may be in: the only repository, or the only one whose
+ * changed files hold it. Otherwise the choices: those whose changed files hold it, or every one.
+ */
+export function repositoriesOfPath(
+  repositories: ReadonlyArray<string>,
+  changedIn: (repository: string) => boolean,
+): ReadonlyArray<string> {
+  if (repositories.length <= 1) return repositories
+  const holding = repositories.filter(changedIn)
+  return holding.length === 0 ? repositories : holding
+}
+
+/**
+ * Why a finding cannot be kept, or null when it can. `listed` says whether a file is in the
+ * checkpoint; `choices` gives the repositories a path without one may be in (`repositoriesOfPath`).
+ */
 export function findingProblem(
   finding: ReviewFinding,
   listed: (repository: string | null, path: string) => boolean,
+  choices: (path: string) => ReadonlyArray<string>,
 ): string | null {
   if (finding.severity === 'blocking' && (finding.evidence ?? '').trim() === '') {
     return 'a blocking finding carries its evidence: what you read that shows it'
   }
-  if (finding.path !== undefined && !listed(finding.repository ?? null, finding.path)) {
-    const named =
-      finding.repository === undefined ? finding.path : `${finding.repository}/${finding.path}`
+  if (finding.path === undefined) return null
+  const among = finding.repository === undefined ? choices(finding.path) : []
+  if (among.length > 1) {
+    return `${finding.path} names no single repository: say which, one of ${among.join(', ')}`
+  }
+  const repository = finding.repository ?? among[0] ?? null
+  if (!listed(repository, finding.path)) {
+    const named = repository === null ? finding.path : `${repository}/${finding.path}`
     return `${named} is not in the checkpoint: name a file you read there`
   }
   return null
