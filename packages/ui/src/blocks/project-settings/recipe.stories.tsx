@@ -2,14 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import {
-  NEW_STEP,
-  RecipeSection,
-  type RecipeSectionProps,
-  type SettingsStep,
-  type StepDraft,
-  StepForm,
-} from './recipe.tsx'
+import { RecipeSection, type RecipeSectionProps, StepForm } from './recipe.tsx'
+import { NEW_STEP, type SettingsStep, type StepDraft } from './recipe-model.ts'
 import { COMMANDS, STEPS, shellRefusal } from './project-settings-fixtures.ts'
 
 /**

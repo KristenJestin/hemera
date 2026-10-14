@@ -5,7 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { badgesOffBaseline, keepsItsLines } from '../../components/mention-field/badge-baseline.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
-import { loadMentionEditor } from '../../components/mention-field/mention-field.tsx'
+import { loadMentionEditor } from '../../components/mention-field/load-mention-editor.ts'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import {
   CONVERSATION,

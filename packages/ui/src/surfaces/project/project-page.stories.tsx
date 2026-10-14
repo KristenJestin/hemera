@@ -6,7 +6,8 @@ import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { ACME_LOGO } from '../../components/project-mark/project-mark-fixtures.ts'
 import { IconFileText } from '../../icons.ts'
-import { LONG_NAME, LONG_TITLE, REPOSITORIES } from '../../shell/shell-fixtures.tsx'
+import { LONG_TITLE, REPOSITORIES } from '../../shell/shell-fixtures.tsx'
+import { LONG_NAME } from '../../shell/shell-data.ts'
 import { ProjectTasks, SetupTask } from '../project-setup/setup-task.tsx'
 import { ProjectPage } from './project-page.tsx'
 import {
@@ -15,7 +16,7 @@ import {
   PROJECT_LIVING_SPEC,
   STAGE_GROUPS,
   manyGroups,
-} from './project-shell-fixture.tsx'
+} from './project-fixture-data.ts'
 import { ProjectStartSlot } from './project-start-slot.tsx'
 
 /**

@@ -2,10 +2,7 @@ import type { ReactNode } from 'react'
 
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { IconTerminal } from '../../icons.ts'
-
-/** What a kept agent is, in plain words: its chip's legend. */
-export const KEPT_AGENT_WORDS =
-  'An agent Hemera started before its last restart is still running. Hemera could not stop it, and stops it the next time Hemera starts.'
+import { KEPT_AGENT_WORDS } from './kept-agent-words.ts'
 
 /** An agent Hemera started before its last restart and could not stop: its program and pid. */
 export interface KeptAgentView {
@@ -14,10 +11,14 @@ export interface KeptAgentView {
 }
 
 /** The kept agents of a stage card's chips, one chip each. */
-export function keptAgentChips(kept: readonly KeptAgentView[]): ReactNode {
-  return kept.map((agent) => (
-    <KeptAgentChip key={agent.pid} program={agent.program} pid={agent.pid} />
-  ))
+export function KeptAgentChips({ kept }: { kept: readonly KeptAgentView[] }): ReactNode {
+  return (
+    <>
+      {kept.map((agent) => (
+        <KeptAgentChip key={agent.pid} program={agent.program} pid={agent.pid} />
+      ))}
+    </>
+  )
 }
 
 export interface KeptAgentChipProps {

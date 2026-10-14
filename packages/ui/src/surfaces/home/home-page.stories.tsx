@@ -11,7 +11,7 @@ import {
   denseQuestions,
   denseRows,
   denseSince,
-} from './home-shell-fixture.tsx'
+} from './home-fixture-data.ts'
 
 /**
  * Home, coming back: Since you left leads — a card per mission, its events newest first — with

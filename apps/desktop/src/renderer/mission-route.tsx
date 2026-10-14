@@ -9,7 +9,7 @@ import {
   MissionFrame,
   MissionFrameBase,
   MissionFrameNeeds,
-  keptAgentChips,
+  KeptAgentChips,
   type MissionFrameState,
   type MissionView,
 } from '@hemera/ui'
@@ -186,7 +186,7 @@ export function MissionPage({
         base: (
           <MissionFrameBase
             stage={line.stage}
-            running={kept.length > 0 ? keptAgentChips(kept) : undefined}
+            running={kept.length > 0 ? <KeptAgentChips kept={kept} /> : undefined}
           />
         ),
       })

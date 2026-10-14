@@ -8,13 +8,15 @@
  *   to what would be pushed".
  * - **Each file** carries Git's letter, its counts or its binary sizes, and whether it is
  *   untracked, generated (Git's attributes or a lockfile's name), large (the two constants below),
- *   changed outside Hemera (#148's result, read and never decided here) or withheld (a sensitive
+ *   changed outside Hemera (#148's result, read and never decided here; found since the mission's
+ *   last Review checkpoint, which takes in what was found before it, #341) or withheld (a sensitive
  *   place: listed, its content never sent). The list carries no content; `file` answers both sides
  *   of one file, masked, and a large one's only when forced.
  * - **Live.** A repository is computed again when the detector of #148 reports a change in the
- *   mission, when a Hemera write or command of the mission ends, and when the window regains the
- *   focus: 250 ms after the last of them, never twice at once. A computation that moves the list
- *   bumps the repository's sequence and is told on `changes`, with only what moved.
+ *   mission, when a Hemera write or command of the mission ends, when a Review checkpoint is
+ *   recorded, and when the window regains the focus: 250 ms after the last of them, never twice
+ *   at once. A computation that moves the list bumps the repository's sequence and is told on
+ *   `changes`, with only what moved.
  * - **Without the Workspace** (cleaned up, or a mission Done or Cancelled), the diff is read from
  *   the mission's latest checkpoint (#140), from the database alone, and marked as such.
  */
@@ -67,6 +69,7 @@ import {
   commandRuns,
   effectfulActions,
   missions,
+  reviewCheckpoints,
   workspaceRepositories,
   workspaces,
 } from '../storage/schema.ts'
@@ -120,12 +123,32 @@ export interface DiffsService {
   readonly changes: (missionId: string) => Stream.Stream<DiffChange, UnknownMission | DatabaseError>
   /** The window regained the focus: every mission followed is computed again. */
   readonly focused: Effect.Effect<void>
+  /**
+   * One repository of the Workspace computed now, in its turn: its folder, the trees its list lies
+   * between and its files; null without the Workspace, or when Git could not read it (#341).
+   */
+  readonly at: (
+    missionId: string,
+    repository: string,
+  ) => Effect.Effect<RepositoryNow | null, UnknownMission | DatabaseError>
+  /** The repositories of the mission's Workspace still on disk, in order; null without it (#341). */
+  readonly places: (
+    missionId: string,
+  ) => Effect.Effect<ReadonlyArray<Place> | null, UnknownMission | DatabaseError>
+}
+
+/** A repository of the Workspace as the live diff computed it last. */
+export interface RepositoryNow {
+  readonly folder: string
+  readonly base: string | null
+  readonly tree: string
+  readonly files: ReadonlyArray<DiffFile>
 }
 
 export class Diffs extends Context.Service<Diffs, DiffsService>()('Diffs') {}
 
 /** A repository of the Workspace as the diff reads it. */
-interface Place {
+export interface Place {
   readonly name: string
   readonly folder: string
   readonly baseRef: string | null
@@ -251,7 +274,7 @@ const fileOf = (
 }
 
 const repositoryOf = (
-  shape: Pick<DiffRepository, 'repository' | 'branch' | 'baseBranch' | 'baseCommit'>,
+  shape: Pick<DiffRepository, 'repository' | 'branch' | 'baseBranch' | 'baseCommit' | 'tree'>,
   files: ReadonlyArray<DiffFile>,
   sequence: number,
   unreadable: string | null,
@@ -398,10 +421,20 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
       const outsideOf = (missionId: string) =>
         Effect.gen(function* () {
           const listed = yield* outside.list(missionId)
+          // A Review checkpoint takes in what was found before it (#341, open question 29).
+          const [reviewed] = yield* database
+            .select({ takenAt: checkpoints.takenAt })
+            .from(reviewCheckpoints)
+            .innerJoin(checkpoints, eq(checkpoints.id, reviewCheckpoints.checkpointId))
+            .where(eq(reviewCheckpoints.missionId, missionId))
+            .orderBy(desc(reviewCheckpoints.round))
+            .limit(1)
+            .pipe(Effect.mapError(refusedWhile('reading the Review checkpoints')))
           const since = new Map<string, string>()
           for (const repository of listed) {
             for (const change of repository.changes) {
               if (change.overwrittenBy !== null) continue
+              if (reviewed !== undefined && change.detectedAt < reviewed.takenAt) continue
               const key = keyOf(repository.repository, change.path)
               const first = since.get(key)
               if (first === undefined || change.detectedAt < first)
@@ -492,7 +525,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
               last?.repository.unreadable !== computed.unreadable)
           const sequence = (last?.sequence ?? 0) + (changed ? 1 : 0)
           const repository = repositoryOf(
-            computed.shape,
+            { ...computed.shape, tree: computed.tree },
             computed.files,
             sequence,
             computed.unreadable,
@@ -549,6 +582,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
                   branch,
                   baseBranch: branchName(one.base),
                   baseCommit: one.mergeBase,
+                  tree: one.tree,
                 },
                 files
                   .filter((file) => file.repository === one.repository)
@@ -796,6 +830,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
       /** The missions a committed event concerns: a write or a command that ended. */
       const missionsOf = (type: string, entityId: string) =>
         Effect.gen(function* () {
+          if (type === 'review.checkpoint_recorded') return [entityId]
           if (type === 'action.done' || type === 'action.failed') {
             const [action] = yield* database
               .select({ ownerKind: effectfulActions.ownerKind, ownerId: effectfulActions.ownerId })
@@ -881,6 +916,24 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
         focused: Effect.suspend(() =>
           Effect.forEach([...followed.keys()], refresh, { discard: true }),
         ),
+        places: (missionId) =>
+          Effect.map(workspaceNow(missionId), (workspace) => workspace?.places ?? null),
+        at: (missionId, repository) =>
+          Effect.gen(function* () {
+            const workspace = yield* workspaceNow(missionId)
+            const place = workspace?.places.find((one) => one.name === repository)
+            if (workspace === null || place === undefined) return null
+            yield* recompute(missionId, workspace, place)
+            const current = known.get(keyOf(missionId, repository))
+            if (current === undefined || current.tree === null) return null
+            const now: RepositoryNow = {
+              folder: place.folder,
+              base: current.base,
+              tree: current.tree,
+              files: current.repository.files,
+            }
+            return now
+          }),
       }
       return service
     }),
