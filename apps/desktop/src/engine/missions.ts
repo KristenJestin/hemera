@@ -140,6 +140,19 @@ export class MissionStoppers extends Context.Service<MissionStoppers, ReadonlyAr
   'MissionStoppers',
 ) {}
 
+/**
+ * What a cancel ends in its own transaction, beside the stage (#378): writes only, never a wait,
+ * so what the mission's Building, helpers and review held is ended before anything reads it again.
+ */
+export type CancelIn = (
+  transaction: EngineTransaction,
+  missionId: string,
+) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError>
+
+export class MissionCancels extends Context.Service<MissionCancels, ReadonlyArray<CancelIn>>()(
+  'MissionCancels',
+) {}
+
 /** What goes on in a mission beyond its records: a session working, a question waiting. */
 export interface Activity {
   readonly sessionWorking: boolean
@@ -166,6 +179,8 @@ export interface MissionParts {
   readonly guards: Partial<Record<GuardedMove, Guard>>
   /** Called by a cancel, after the runs of the mission, which this ticket stops itself. */
   readonly stoppers: ReadonlyArray<Stopper>
+  /** Written by a cancel in its own transaction. */
+  readonly cancels: ReadonlyArray<CancelIn>
   readonly activity: MissionActivity['Service']
   /** The services that own needs, by name: where their answers go. */
   readonly owners: ReadonlyMap<string, NeedHandler>
@@ -197,6 +212,7 @@ export const missionsLayer = (parts: Partial<MissionParts> = {}) =>
   Layer.mergeAll(
     Layer.succeed(MoveGuards, parts.guards ?? {}),
     stoppersLayer(parts.stoppers ?? []),
+    Layer.succeed(MissionCancels, parts.cancels ?? []),
     Layer.succeed(
       MissionActivity,
       parts.activity ?? (() => Effect.succeed({ sessionWorking: false, questionWaiting: false })),
@@ -211,6 +227,7 @@ export type MissionServices =
   | NeedServices
   | MoveGuards
   | MissionStoppers
+  | MissionCancels
   | MissionActivity
   | MissionStarts
 
@@ -634,8 +651,9 @@ export const runStops = (missionId: string | null) =>
   }).pipe(Semaphore.withPermits(stopping, 1))
 
 /**
- * The user's cancel written in the transaction given: the stage, the pending needs expired and the
- * stops owed, which run after it (`runStops`) or at the next start. Answers its events; null when
+ * The user's cancel written in the transaction given: the stage, the pending needs expired, what
+ * the cancels registered end, and the stops owed, which run after it (`runStops`) or at the next
+ * start. Answers its events; null when
  * the mission moved meanwhile.
  */
 const cancelIn = (
@@ -652,6 +670,8 @@ const cancelIn = (
       .pipe(Effect.mapError(refusedWhile('cancelling the mission')))
     if (written.length === 0) return null
     const expired = yield* expireMissionNeeds(transaction, mission.id, CANCELLED)
+    const cancels = yield* MissionCancels
+    const ended = yield* Effect.forEach(cancels, (cancelOf) => cancelOf(transaction, mission.id))
     if (stoppers.length > 0) {
       yield* transaction
         .insert(missionStops)
@@ -674,6 +694,7 @@ const cancelIn = (
         cleanup: 'awaiting-confirmation',
       }),
       ...expired,
+      ...ended.flat(),
     ]
   })
 

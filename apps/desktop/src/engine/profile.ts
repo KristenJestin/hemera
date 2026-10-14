@@ -44,6 +44,7 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
+  cancelBuildingIn,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
 import { proofRunnerLayer } from './building/proof-runner.ts'
@@ -54,10 +55,10 @@ import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
 import { END_NEEDS, type EndHold, buildingEndLayer } from './building/end.ts'
-import { autoReviewLayer } from './building/review.ts'
+import { autoReviewLayer, cancelReviewIn } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -633,10 +634,10 @@ export const startProfile = (
                     ),
               },
             ]),
-        // The Building ended as cancelled, once its tree is stopped.
-        builder.stopper,
         ...(parts.missions?.stoppers ?? []),
       ],
+      // Ended with the stage, in the cancel's transaction: nothing of the Building starts again.
+      cancels: [cancelBuildingIn, cancelHelpersIn, cancelReviewIn],
       activity:
         parts.missions?.activity ??
         ((missionId) =>

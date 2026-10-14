@@ -27,6 +27,7 @@ import { type PlatformPath, isAbsolute, join, relative, resolve, sep } from 'nod
 import { homedir } from 'node:os'
 
 import {
+  MaskedText,
   REVIEW_SEVERITIES,
   REVIEWERS,
   REVIEWER_NAMES,
@@ -54,6 +55,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
+import type { CancelIn } from '../missions.ts'
 import { Memory } from '../memory/index.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
@@ -236,6 +238,36 @@ type Needs =
   | AutomationGate
   | Memory
   | ReviewDesk
+
+/** Hemera's own words: nothing in them to mask. */
+const MISSION_CANCELLED = MaskedText.make('the mission was cancelled')
+
+/**
+ * A cancelled mission's review passes, waiting or running, end as failed in the cancel's own
+ * transaction (#378): a start never relaunches one, and the tree's stop ends their sessions.
+ */
+export const cancelReviewIn: CancelIn = (transaction, missionId) =>
+  transaction
+    .update(reviewPasses)
+    .set({ state: 'failed', failure: MISSION_CANCELLED, endedAt: now() })
+    .where(
+      and(
+        eq(reviewPasses.missionId, missionId),
+        inArray(reviewPasses.state, ['waiting', 'running']),
+      ),
+    )
+    .returning()
+    .pipe(
+      Effect.mapError(refusedWhile('failing the review’s passes')),
+      Effect.map((rows) =>
+        rows.map((row) =>
+          buildingEvent(row.missionId, 'review.pass_ended', {
+            reviewer: row.reviewer,
+            failed: MISSION_CANCELLED,
+          }),
+        ),
+      ),
+    )
 
 export const autoReviewLayer = (settings: AutoReviewSettings) =>
   Layer.effect(
@@ -743,21 +775,6 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const payload = event.payload
-            if (event.type === 'mission.cancelled') {
-              const database = yield* Database
-              const going = yield* database
-                .select()
-                .from(reviewPasses)
-                .where(
-                  and(
-                    eq(reviewPasses.missionId, event.entityId),
-                    inArray(reviewPasses.state, ['waiting', 'running']),
-                  ),
-                )
-                .pipe(Effect.mapError(refusedWhile('reading the review’s passes')))
-              for (const row of going) yield* fail(row.id, 'the mission was cancelled')
-              return
-            }
             if (event.type !== 'session.stopped') return
             if (!REVIEWERS.some((one) => one === payload['role'])) return
             // Ended too: a pass that reported is done before its session ends.

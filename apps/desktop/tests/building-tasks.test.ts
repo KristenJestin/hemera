@@ -24,7 +24,7 @@ import {
   buildingOf,
   inRepository,
 } from '../src/engine/building/builder.ts'
-import { getMission, moveMission } from '../src/engine/missions.ts'
+import { type Stopper, getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -33,6 +33,7 @@ import { getSession, openSession, sessionsIn } from '../src/engine/sessions/stor
 import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import {
+  builderAgents,
   builderEngine,
   builderOf,
   buildingNow,
@@ -40,7 +41,7 @@ import {
   statesOf,
   taskIn,
 } from './builder-world.ts'
-import { text, until, within } from './sessions-world.ts'
+import { HELPER, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -874,14 +875,21 @@ describe('The end and Cancel', () => {
     expect(statesOf(seen.view)['T1']).toBe('in_progress')
   })
 
-  test('a Cancel whose Building is not cancelled yet when the engine stops ends it as cancelled after the start, and brings no Builder back', async () => {
+  test('a Cancel whose stops a stop cut ends its Building as cancelled, its stops done after the start, and brings no Builder back', async () => {
     const reached = Deferred.makeUnsafe<void>()
     let armed = false
-    const hold: BuilderHold = (at) =>
-      at === 'cancelling' && armed
-        ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never)
-        : Effect.void
-    const first = await builderEngine(data, work, { hold }).run(({ profile }) =>
+    // Once armed, the tree's stop never ends: the engine stops in the middle of the cancel's stops.
+    // The launch's Freeze stops the tree too, before.
+    const tree: Stopper = {
+      name: 'sessions',
+      stop: () =>
+        armed ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never) : Effect.void,
+    }
+    const first = await sessionsEngine(data, builderAgents, {
+      roles: [HELPER],
+      tools: { home: work },
+      missions: { stoppers: [tree] },
+    }).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {

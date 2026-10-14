@@ -53,7 +53,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
-import { StopFailed, type Stopper, cancelMissionIn, runStops } from '../missions.ts'
+import { type CancelIn, type MissionCancels, cancelMissionIn, runStops } from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
@@ -122,6 +122,7 @@ import {
   NeedCause,
   type TaskNow,
   activeBuildingIn,
+  latestBuildingIn,
   activeBuildings,
   amendments,
   applyAmendmentIn,
@@ -204,6 +205,7 @@ type Needs =
   | OutsideChanges
   | ProofNeeds
   | ToolAccess
+  | MissionCancels
   | Effect.Services<ReturnType<typeof runStops>>
 
 const NO_MISSION = refusal('refused: this session works for no mission')
@@ -300,9 +302,39 @@ export type BuilderHold = (
     | 'retrying'
     | 'releasing'
     | 'answering'
-    | 'telling'
-    | 'cancelling',
+    | 'telling',
 ) => Effect.Effect<void>
+
+/**
+ * A cancelled mission's Building ends as cancelled, in the cancel's own transaction (#378): its
+ * claims released and its open attempts ended; the work stays. Nothing of it is active after the
+ * cancel commits, so no phase, need or session of the Building starts from it again.
+ */
+export const cancelBuildingIn: CancelIn = (transaction, missionId) =>
+  Effect.gen(function* () {
+    const building = yield* activeBuildingIn(transaction, missionId)
+    if (building === null) return []
+    yield* transaction
+      .update(buildings)
+      .set({ state: 'cancelled', endedAt: now() })
+      .where(eq(buildings.id, building.id))
+      .pipe(Effect.mapError(refusedWhile('cancelling the Building')))
+    yield* transaction
+      .delete(buildingClaims)
+      .where(eq(buildingClaims.buildingId, building.id))
+      .pipe(Effect.mapError(refusedWhile('releasing the claims')))
+    for (const task of yield* tasksIn(transaction, building.id)) {
+      if (task.state !== 'in_progress') continue
+      const attempt = yield* openAttemptIn(transaction, building.id, task.id)
+      if (attempt === null) continue
+      yield* transaction
+        .update(buildingAttempts)
+        .set({ endedAt: now(), outcome: 'cancelled' })
+        .where(eq(buildingAttempts.id, attempt.id))
+        .pipe(Effect.mapError(refusedWhile('ending the attempt')))
+    }
+    return []
+  })
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
@@ -322,7 +354,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
   let takeRestart: Effect.Effect<void> | null = null
-  let takeCancel: ((missionId: string) => Effect.Effect<void, DatabaseError>) | null = null
   const handedOver = Deferred.makeUnsafe<void>()
   /**
    * At an engine's start, before the cut actions are handed over: each write a stop left found
@@ -334,19 +365,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
   /** A command a stop cut in the middle, taken by the Building when its mission builds (#142). */
   const cut = (action: EffectfulAction) =>
     takeCut === null ? Effect.succeed(false) : takeCut(action)
-  /**
-   * A cancelled mission's Building ends as cancelled: a stop its cancel owes, written down in the
-   * cancel's transaction, so one a stop cut is done at the next start, before the Buildings resume.
-   */
-  const stopper: Stopper = {
-    name: 'building',
-    stop: (missionId) =>
-      takeCancel === null
-        ? Effect.fail(new StopFailed({ reason: 'the Builder is not running yet' }))
-        : takeCancel(missionId).pipe(
-            Effect.mapError((refused) => new StopFailed({ reason: refused.message })),
-          ),
-  }
   const layer = Layer.effect(
     BuildingStart,
     Effect.gen(function* () {
@@ -1961,40 +1979,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* deliverTo(outcome.building, { role: 'builder' }, 'expiry', body, id)
         })
 
-      /** A mission cancelled: its Building ends as cancelled; the work stays. */
-      const cancelled = (missionId: string) =>
-        hold('cancelling').pipe(
-          Effect.andThen(
-            mutate('cancelling the Building', (transaction) =>
-              Effect.gen(function* () {
-                const building = yield* activeBuildingIn(transaction, missionId)
-                if (building === null) return { result: undefined, events: [] }
-                yield* transaction
-                  .update(buildings)
-                  .set({ state: 'cancelled', endedAt: now() })
-                  .where(eq(buildings.id, building.id))
-                  .pipe(Effect.mapError(refusedWhile('cancelling the Building')))
-                yield* transaction
-                  .delete(buildingClaims)
-                  .where(eq(buildingClaims.buildingId, building.id))
-                  .pipe(Effect.mapError(refusedWhile('releasing the claims')))
-                for (const task of yield* tasksIn(transaction, building.id)) {
-                  if (task.state !== 'in_progress') continue
-                  const attempt = yield* openAttemptIn(transaction, building.id, task.id)
-                  if (attempt === null) continue
-                  yield* transaction
-                    .update(buildingAttempts)
-                    .set({ endedAt: now(), outcome: 'cancelled' })
-                    .where(eq(buildingAttempts.id, attempt.id))
-                    .pipe(Effect.mapError(refusedWhile('ending the attempt')))
-                }
-                counting.delete(building.id)
-                return { result: undefined, events: [] }
-              }),
-            ),
-          ),
-        )
-
       /** What the Builder is told of the user's answer, kept in the transaction that applies it. */
       const answerIn = (
         transaction: EngineTransaction,
@@ -2094,10 +2078,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 Option.getOrNull(readString(payload['reason'])),
               )
             }
-            // The stops a cancel owes, its Building's among them, run now: a cancel kept with an
-            // answer has nobody else to run them before the next start. Out of this follower, which
-            // never waits on a stopper.
+            // The cancel's transaction ended the Building: this engine counts no more of its time.
+            // The stops it owes run now: a cancel kept with an answer has nobody else to run them
+            // before the next start. Out of this follower, which never waits on a stopper.
             if (event.type === 'mission.cancelled') {
+              const cancelled = yield* latestBuildingIn(yield* Database, event.entityId)
+              if (cancelled !== null) counting.delete(cancelled.id)
               yield* runStops(event.entityId).pipe(
                 Effect.catchCause((cause) => said(`the stops were not run: ${String(cause)}`)),
                 Effect.forkIn(layerScope),
@@ -2113,8 +2099,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         ),
       )
-
-      takeCancel = (missionId) => cancelled(missionId).pipe(provided)
 
       // At every start: each active Building counts this engine's time, judges again a task left
       // checking, says it resumed, and has its Builder.
@@ -2227,5 +2211,5 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       }
     }),
   )
-  return { layer, handler, cut, restarted, handed, stopper }
+  return { layer, handler, cut, restarted, handed }
 }

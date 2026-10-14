@@ -16,7 +16,7 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema } from 'effect'
+import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema, Semaphore } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -41,7 +41,7 @@ import {
 } from '../src/engine/building/proofs.ts'
 import { readEvidence } from '../src/engine/memory/evidence.ts'
 import { getMission } from '../src/engine/missions.ts'
-import { answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
+import { NeedOwners, answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
@@ -53,6 +53,7 @@ import {
   buildingAttempts,
   buildingDecisions,
   buildingTasks,
+  commandRuns,
   scenarioProofs,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
@@ -3328,6 +3329,66 @@ describe('What the user answers on a red', () => {
     expect(seen.mission.stage).toBe('cancelled')
     expect(seen.mission.unstopped).toEqual([])
     expect(seen.building?.state).toBe('cancelled')
+  })
+
+  test('"cancel the mission" answered, then a stop before its hand-over: after the start the mission and its Building are cancelled, and no proof runs first', async () => {
+    const handing = Deferred.makeUnsafe<void>()
+    const runsOfMission = (missionId: string) =>
+      Effect.gen(function* () {
+        const database = yield* Database
+        return yield* database
+          .select()
+          .from(commandRuns)
+          .where(eq(commandRuns.missionId, missionId))
+      })
+    const first = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(EXPORT_PATH, testFile("  assert.equal(1, 1, 'it passes')")),
+          }))
+          const need = yield* needOf(mission.id, 'Decision')
+          // Another round of answers holds the hand-over: this one is answered, not handed yet.
+          const owners = yield* NeedOwners
+          yield* Semaphore.withPermits(
+            owners.delivering,
+            1,
+          )(Deferred.await(handing)).pipe(Effect.forkChild)
+          yield* answerNeed({
+            id: need.id,
+            answer: ChosenAnswer.make({ option: CANCEL_MISSION }),
+            key: 'answer-1',
+          }).pipe(Effect.forkChild)
+          yield* until(Effect.map(getNeed(need.id), (one) => one.state === 'answered'))
+          return {
+            mission,
+            stage: (yield* getMission(mission.id)).stage,
+            runs: (yield* runsOfMission(mission.id)).length,
+          }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(
+            Effect.map(
+              getMission(first.mission.id),
+              (one) => one.stage === 'cancelled' && one.unstopped.length === 0,
+            ),
+          )
+          return {
+            building: yield* buildingOf(first.mission.id),
+            runs: (yield* runsOfMission(first.mission.id)).length,
+          }
+        }),
+      ),
+    )
+    expect(first.stage).toBe('building')
+    expect(seen.building?.state).toBe('cancelled')
+    expect(seen.runs).toBe(first.runs)
   })
 
   test('"more information" told to the Builder, then a stop before its proof_run: after the start the proof waits for the Builder, and nothing is asked again', async () => {
