@@ -52,21 +52,19 @@ export {
   type SkeletonProps,
   type SkeletonShape,
 } from './components/loading/loading.tsx'
-export {
-  LIVE_WORDS,
-  LiveChip,
-  STUCK_AFTER,
-  durationOf,
-  type LiveChipProps,
-  type LiveState,
-} from './components/live-chip/live-chip.tsx'
+export { LiveChip, type LiveChipProps, type LiveState } from './components/live-chip/live-chip.tsx'
 export {
   LiveChipGlance,
-  glanceWordsOf,
   type LiveChipGlanceProps,
   type LiveGlance,
   type LiveKind,
 } from './components/live-chip/live-chip-glance.tsx'
+export {
+  LIVE_WORDS,
+  STUCK_AFTER,
+  durationOf,
+  glanceWordsOf,
+} from './components/live-chip/live-words.ts'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
   ChatThread,

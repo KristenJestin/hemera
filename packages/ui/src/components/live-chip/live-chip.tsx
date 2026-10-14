@@ -6,6 +6,7 @@ import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
 import { Popover } from '../popover/popover.tsx'
 import { Tooltip } from '../tooltip/tooltip.tsx'
 import { type LiveGlance, LiveChipGlance } from './live-chip-glance.tsx'
+import { LIVE_WORDS, STUCK_AFTER, durationOf } from './live-words.ts'
 import { type LiveState, LiveTint, useSweep } from './tint.tsx'
 
 /**
@@ -35,18 +36,6 @@ import { type LiveState, LiveTint, useSweep } from './tint.tsx'
  */
 
 export type { LiveState } from './tint.tsx'
-
-/** How each state is said to a screen reader, after the name. */
-export const LIVE_WORDS: Record<LiveState, string> = {
-  running: 'running',
-  stuck: 'no activity',
-  finished: 'done',
-  failed: 'failed',
-  stopped: 'stopped',
-}
-
-/** How long without an event a chip is said to be stuck, in the words of its legend. */
-export const STUCK_AFTER = '5 minutes'
 
 const CHIP =
   'relative isolate inline-flex h-control-sm max-w-chip shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:tinted focus-ring hover-motion'
@@ -78,11 +67,6 @@ const NAME = 'min-w-chip-name flex-1 truncate text-left font-medium'
 
 /** Three digits and the unit, set against its end; a fourth digit widens it. */
 const TIME = 'min-w-8 shrink-0 text-right font-mono text-muted-foreground tabular-nums'
-
-/** A duration in seconds and nothing else, the unit against the number: `1s`, `84s`, `1200s`. */
-export function durationOf(ms: number): string {
-  return `${String(Math.max(0, Math.floor(ms / 1000)))}s`
-}
 
 /** What the chip's legend says after its name. */
 function legendOf(state: LiveState, time: string): string {
