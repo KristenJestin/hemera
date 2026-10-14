@@ -130,6 +130,8 @@ export const sessionsEngine = (
     readonly reconciliationSteps?: ProfileParts['reconciliationSteps']
     /** Where a launched mission's Building starts, when a suite counts it (#139). */
     readonly building?: ProfileParts['building']
+    /** Where a suite holds Review's feedback (#341). */
+    readonly review?: ProfileParts['review']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
     /** The machine's processes as the supervisor sees them, when a suite answers for some. */
@@ -167,6 +169,7 @@ export const sessionsEngine = (
     ticketProviders: options.ticketProviders,
     ticketSync: options.ticketSync,
     building: options.building,
+    review: options.review,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,

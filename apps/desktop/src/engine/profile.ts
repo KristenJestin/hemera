@@ -183,6 +183,8 @@ import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
 import { type Diffs, diffsLayer } from './review/diffs.ts'
+import { Review, type ReviewHold, reviewLayer } from './review/feedback.ts'
+import { REVIEW_MAPPERS } from './review/journal.ts'
 import {
   type OutsideChanges,
   type OutsideSettings,
@@ -272,6 +274,8 @@ export interface ProfileParts {
   }
   /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
+  /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
+  readonly review?: { readonly hold?: ReviewHold | undefined } | undefined
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
@@ -391,6 +395,7 @@ export type EngineServices =
   | OutsideChanges
   | Checkpoints
   | Diffs
+  | Review
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -553,6 +558,10 @@ export const startProfile = (
     const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
       Layer.provideMerge(snapshots),
     )
+    // One live diff: the calls and Review's anchors (#341) read the same repositories' turns.
+    const diffs = diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
+      Layer.provide(Layer.mergeAll(checkpoints, outside)),
+    )
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -621,6 +630,7 @@ export const startProfile = (
         ...TICKET_MAPPERS,
         ...BUILDING_MAPPERS,
         ...HELPER_MAPPERS,
+        ...REVIEW_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -701,8 +711,9 @@ export const startProfile = (
       agentOffersServed,
       outside,
       checkpoints,
-      diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
-        Layer.provide(Layer.mergeAll(checkpoints, outside)),
+      diffs,
+      reviewLayer({ log, hold: parts.review?.hold }).pipe(
+        Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
       ),
     ).pipe(
       Layer.provideMerge(
@@ -998,6 +1009,13 @@ export const startProfile = (
     const ticketsRead = yield* Context.get(context, DomainEvents).subscribe
     yield* gate.pass.pipe(
       Effect.andThen(run(deliverReadTickets(ticketsRead, log))),
+      Effect.forkScoped,
+    )
+    // Review's checkpoints and refused proofs (#341): followed from now, what a stop left caught up
+    // once automations may run.
+    const reviewEvents = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Review.use((review) => review.follow(reviewEvents)))),
       Effect.forkScoped,
     )
     // Once automations may run: the reservations are settled, then again at each change (#88).

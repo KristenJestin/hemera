@@ -120,12 +120,32 @@ export interface DiffsService {
   readonly changes: (missionId: string) => Stream.Stream<DiffChange, UnknownMission | DatabaseError>
   /** The window regained the focus: every mission followed is computed again. */
   readonly focused: Effect.Effect<void>
+  /**
+   * One repository of the Workspace computed now, in its turn: its folder, the trees its list lies
+   * between and its files; null without the Workspace, or when Git could not read it (#341).
+   */
+  readonly at: (
+    missionId: string,
+    repository: string,
+  ) => Effect.Effect<RepositoryNow | null, UnknownMission | DatabaseError>
+  /** The repositories of the mission's Workspace still on disk, in order; null without it (#341). */
+  readonly places: (
+    missionId: string,
+  ) => Effect.Effect<ReadonlyArray<Place> | null, UnknownMission | DatabaseError>
+}
+
+/** A repository of the Workspace as the live diff computed it last. */
+export interface RepositoryNow {
+  readonly folder: string
+  readonly base: string | null
+  readonly tree: string
+  readonly files: ReadonlyArray<DiffFile>
 }
 
 export class Diffs extends Context.Service<Diffs, DiffsService>()('Diffs') {}
 
 /** A repository of the Workspace as the diff reads it. */
-interface Place {
+export interface Place {
   readonly name: string
   readonly folder: string
   readonly baseRef: string | null
@@ -881,6 +901,24 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
         focused: Effect.suspend(() =>
           Effect.forEach([...followed.keys()], refresh, { discard: true }),
         ),
+        places: (missionId) =>
+          Effect.map(workspaceNow(missionId), (workspace) => workspace?.places ?? null),
+        at: (missionId, repository) =>
+          Effect.gen(function* () {
+            const workspace = yield* workspaceNow(missionId)
+            const place = workspace?.places.find((one) => one.name === repository)
+            if (workspace === null || place === undefined) return null
+            yield* recompute(missionId, workspace, place)
+            const current = known.get(keyOf(missionId, repository))
+            if (current === undefined || current.tree === null) return null
+            const now: RepositoryNow = {
+              folder: place.folder,
+              base: current.base,
+              tree: current.tree,
+              files: current.repository.files,
+            }
+            return now
+          }),
       }
       return service
     }),

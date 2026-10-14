@@ -62,6 +62,7 @@ export function commandsEngine(
     | 'ticketProviders'
     | 'ticketSync'
     | 'building'
+    | 'review'
     | 'hostProcesses'
     | 'runs'
   > &

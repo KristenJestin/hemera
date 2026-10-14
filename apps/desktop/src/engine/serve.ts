@@ -12,6 +12,8 @@ import {
   DiffRpcs,
   DocRecipesRpcs,
   ProofsRpcs,
+  ReviewRpcs,
+  FeedbackUser,
   AutoReviewRpcs,
   EngineApartRpcs,
   ForgeRpcs,
@@ -37,6 +39,7 @@ import {
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
+import { Review, type ReviewService } from './review/feedback.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
 import {
@@ -884,7 +887,50 @@ export const engineHandlers = (
     diffHandlers(profile, log),
     proofsHandlers(profile, log),
     autoReviewHandlers(profile, log),
+    reviewHandlers(profile, log),
   )
+}
+
+/** Review's feedback (#341), a layer of its own (see `EngineServedRpcs`); the user is the caller. */
+const reviewHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  const user = FeedbackUser.make({})
+  const review = <A, E>(call: (service: ReviewService) => Effect.Effect<A, E>) =>
+    use(Review.use(call))
+  return ReviewRpcs.toLayer({
+    'review.state': ({ missionId }) =>
+      review((one) => one.state(missionId)).pipe(observed('review.state', log)),
+    'review.feedbackAdd': ({ missionId, kind, body, anchor, images }) =>
+      review((one) => one.feedbackAdd(missionId, { kind, body, anchor, images }, user)).pipe(
+        observed('review.feedbackAdd', log),
+      ),
+    'review.feedbackEdit': ({ feedbackId, body, version }) =>
+      review((one) => one.feedbackEdit(feedbackId, body, version, user)).pipe(
+        observed('review.feedbackEdit', log),
+      ),
+    'review.feedbackWithdraw': ({ feedbackId }) =>
+      review((one) => one.feedbackWithdraw(feedbackId, user)).pipe(
+        observed('review.feedbackWithdraw', log),
+      ),
+    'review.feedbackResolve': ({ feedbackId }) =>
+      review((one) => one.feedbackResolve(feedbackId, user)).pipe(
+        observed('review.feedbackResolve', log),
+      ),
+    'review.feedbackFollowUp': ({ feedbackId, body, images }) =>
+      review((one) => one.feedbackFollowUp(feedbackId, body, images, user)).pipe(
+        observed('review.feedbackFollowUp', log),
+      ),
+    'review.imageAdd': ({ missionId, name, bytes }) =>
+      review((one) => one.imageAdd(missionId, name, bytes)).pipe(observed('review.imageAdd', log)),
+    'review.commentedVersion': ({ feedbackId }) =>
+      review((one) => one.commentedVersion(feedbackId)).pipe(
+        observed('review.commentedVersion', log),
+      ),
+    'review.changes': ({ missionId }) =>
+      follow(Stream.unwrap(Review.useSync((one) => one.changes(missionId)))).pipe(
+        observedStream('review.changes', log),
+      ),
+  })
 }
 
 /** The proofs (#144), a layer of their own (see `EngineServedRpcs`). */

@@ -43,6 +43,8 @@ export interface ToolAnswer {
   /** A rule said no, rather than something going wrong. */
   readonly refused: boolean
   readonly text: string
+  /** An image answered beside the text, as base64 (#341: an image of the mission's evidence). */
+  readonly image?: { readonly mimeType: string; readonly data: string }
 }
 
 export const answered = (text: string): ToolAnswer => ({ ok: true, refused: false, text })

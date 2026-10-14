@@ -3111,3 +3111,114 @@ export const reviewChangedAfter = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
 )
+
+/**
+ * A round of Review (#341): a batch of the user's feedback, numbered from 1 per mission, and where
+ * it stands (`collecting`, `grilling`, `building`, `answered`, `closed`), forward only.
+ */
+export const reviewRounds = sqliteTable(
+  'review_rounds',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    state: text('state').notNull(),
+    createdAt: text('created_at').notNull(),
+    movedAt: text('moved_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.number] })],
+)
+
+/**
+ * A Review checkpoint (#341, CT-44): the one taken on entering Review (round 0) and the one at the
+ * end of each round, the archive of what the user reviewed. One per mission and round.
+ */
+export const reviewCheckpoints = sqliteTable(
+  'review_checkpoints',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.round] })],
+)
+
+/**
+ * A feedback of Review (#341): its round, its author (`user`, or a forge login, R8), its kind, its
+ * current body (masked) and version, its state, and its anchor: a place in the diff (the repository,
+ * the path, the side, the lines or none for the whole file, the tree it was written on, the
+ * fingerprint of its lines, and the anchored side's content in `file_contents` or why it was
+ * withheld) or a Spec item. `follows_up` names the feedback it follows up; `source` what wrote it
+ * on its own (a refused manual proof), once.
+ */
+export const reviewFeedback = sqliteTable(
+  'review_feedback',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    authorKind: text('author_kind').notNull(),
+    authorLogin: text('author_login'),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    anchorKind: text('anchor_kind'),
+    anchorRepository: text('anchor_repository'),
+    anchorPath: text('anchor_path'),
+    anchorSide: text('anchor_side'),
+    anchorStart: integer('anchor_start'),
+    anchorEnd: integer('anchor_end'),
+    anchorTree: text('anchor_tree'),
+    anchorFingerprint: text('anchor_fingerprint'),
+    anchorSha256: text('anchor_sha256'),
+    anchorSize: integer('anchor_size'),
+    anchorWithheld: text('anchor_withheld'),
+    anchorItem: text('anchor_item'),
+    followsUp: text('follows_up'),
+    source: text('source'),
+    answer: text('answer').$type<Masked<string>>(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('review_feedback_of_mission').on(table.missionId, table.round),
+    uniqueIndex('review_feedback_source').on(table.source),
+  ],
+)
+
+/** Every version of a feedback's body (#341), the first included: an edit keeps the old one. */
+export const reviewFeedbackVersions = sqliteTable(
+  'review_feedback_versions',
+  {
+    feedbackId: text('feedback_id')
+      .notNull()
+      .references(() => reviewFeedback.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.feedbackId, table.version] })],
+)
+
+/** The images of a feedback (#341), in their order: evidence of its mission (A8). */
+export const reviewFeedbackImages = sqliteTable(
+  'review_feedback_images',
+  {
+    feedbackId: text('feedback_id')
+      .notNull()
+      .references(() => reviewFeedback.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    evidenceId: text('evidence_id')
+      .notNull()
+      .references(() => memoryEvidence.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.feedbackId, table.position] })],
+)
