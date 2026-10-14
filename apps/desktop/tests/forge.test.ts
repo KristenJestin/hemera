@@ -17,6 +17,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 
 import { ProjectOwner } from '@hemera/core/domain'
@@ -26,9 +27,10 @@ import {
   type ForgeRepositoryStatus,
   type Need,
   ForgeTimeout,
+  ForgeUnreachable,
   UnknownRepository,
 } from '@hemera/ipc'
-import { Deferred, Effect, Fiber, Predicate, Schedule, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Result, Schedule, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { readEvents } from '../src/engine/journal.ts'
@@ -2219,4 +2221,126 @@ describe('A write goes only where its target names', () => {
     expect(refused).toBeInstanceOf(ForgeCommandRefused)
     expect(fake.calls()).toEqual([])
   })
+})
+
+/** `gh pr create` for Atlas's shop, as R6 sends it. */
+const createPullRequest = (projectId: string): ForgeCall => ({
+  cli: 'gh',
+  forge: 'github',
+  host: 'github.com',
+  projectId,
+  args: [
+    'pr',
+    'create',
+    '--repo',
+    'github.com/acme/shop',
+    '--base',
+    'main',
+    '--head',
+    'feat/ship',
+    '--title',
+    'Ship it',
+    '--body-file',
+    '-',
+  ],
+  input: 'What it ships.',
+})
+
+/** The recorded actions, each as its kind and its state. */
+const actionStates = Effect.map(listActions(), (actions) =>
+  actions.map((action) => [action.kind, action.state]),
+)
+
+/** Runs `gh pr create` on shop, answers how it ended and what was recorded of it. */
+const createdWith = (fake: FakeForge, settings: Omit<ForgeSettings, 'env'> = {}) =>
+  withForge(
+    fake,
+    ({ projectId }) =>
+      Effect.gen(function* () {
+        const forgeRunner = yield* runner
+        const ended = yield* Effect.result(forgeRunner.run(createPullRequest(projectId)))
+        return { ended, actions: yield* actionStates }
+      }),
+    { shop: REMOTES.shop },
+    settings,
+  )
+
+describe('A write that may have reached the forge is indeterminate, never failed', () => {
+  test.skipIf(process.platform === 'win32')(
+    'a write killed by a signal after it started is indeterminate',
+    async () => {
+      const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], kill: true }])
+      const { ended, actions } = await createdWith(fake)
+      expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+      expect(fake.calls().map((call) => call.args.slice(0, 2))).toEqual([['pr', 'create']])
+      expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+    },
+  )
+
+  test('a write cut for printing more than Hemera reads is indeterminate', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], flood: true }])
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write cut at its limit is indeterminate', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], hang: true }])
+    const { ended, actions } = await createdWith(fake, { cut: cutting(fake, 'create') })
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeTimeout)
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write the engine stopped while it ran is indeterminate at its next start', async () => {
+    const fake = fakeForge([...ghReady(), { cli: 'gh', when: ['pr', 'create'], hang: true }])
+    const main = checkout({ shop: REMOTES.shop })
+    const engine = commandsEngine(data, { forge: { env: fake.env } })
+    await engine(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Atlas',
+            mainCheckout: main,
+            repositories: ['shop'],
+          })
+          const forgeRunner = yield* runner
+          yield* Effect.forkChild(forgeRunner.run(createPullRequest(project.id)))
+          // The engine stops once the CLI has the call.
+          yield* Effect.sync(() => fake.calls().length > 0).pipe(
+            Effect.repeat({ schedule: Schedule.spaced('20 millis'), until: (seen) => seen }),
+          )
+        }),
+      ),
+    )
+    const actions = await engine(({ profile }) => profile.use(actionStates))
+    expect(actions).toEqual([['forge.pr.create', 'indeterminate']])
+  })
+
+  test('a write the forge answered with a failure is failed, with what it said', async () => {
+    const fake = fakeForge([
+      ...ghReady(),
+      {
+        cli: 'gh',
+        when: ['pr', 'create'],
+        stderr: 'a pull request for branch "feat/ship" already exists\n',
+        code: 1,
+      },
+    ])
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isSuccess(ended) && ended.success.code).toBe(1)
+    expect(actions).toEqual([['forge.pr.create', 'failed']])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a write whose CLI could not start is failed',
+    async () => {
+      const fake = fakeForge(ghReady())
+      // Found on the PATH, but its interpreter is a folder: the spawn itself fails, not on ENOENT.
+      writeFileSync(join(fake.env['PATH'] ?? '', 'gh'), `#!${tmpdir()}\n`)
+      const { ended, actions } = await createdWith(fake)
+      expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+      expect(fake.calls()).toEqual([])
+      expect(actions).toEqual([['forge.pr.create', 'failed']])
+    },
+  )
 })

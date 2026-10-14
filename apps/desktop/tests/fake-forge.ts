@@ -6,7 +6,7 @@
  * the user's own may be) that runs one Node script. Each call is written down (which CLI, its
  * arguments, the environment variables a CLI reads its account or configuration from) as one JSON
  * line, then answered by the first rule of that CLI whose words all appear in its arguments: an
- * output, an exit code, a hang.
+ * output, an exit code, a hang, a death on a signal, an output too long to read.
  */
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -28,6 +28,10 @@ export interface FakeRule {
   readonly code?: number
   /** Never answers: the call is cut at its limit. */
   readonly hang?: boolean
+  /** Ends on SIGKILL once its call is written down, as a process the system kills does. */
+  readonly kill?: boolean
+  /** Prints more than Hemera reads of one answer, then hangs: the call is cut for it. */
+  readonly flood?: boolean
 }
 
 export interface FakeCall {
@@ -63,6 +67,19 @@ module.exports = (cli, args) => {
     process.exit(1)
   }
   if (rule.hang) { setInterval(() => {}, 1000); return }
+  if (rule.kill) { process.kill(process.pid, 'SIGKILL'); return }
+  if (rule.flood) {
+    const line = 'x'.repeat(1024 * 1024) + '\\n'
+    let left = 40
+    const more = () => {
+      while (left > 0) {
+        left -= 1
+        if (!process.stdout.write(line)) return process.stdout.once('drain', more)
+      }
+      setInterval(() => {}, 1000)
+    }
+    return more()
+  }
   // \`{call}\` is this call's number, for an answer that differs each time.
   const logged = readFileSync(process.env.FAKE_FORGE_LOG, 'utf8').split('\\n').filter(Boolean)
   const call = String(logged.length)

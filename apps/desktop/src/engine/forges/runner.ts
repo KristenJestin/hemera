@@ -10,10 +10,14 @@
  *   `GH_CONFIG_DIR`, no injected `pushInsteadOf`), and never with a token Hemera would pass. A text
  *   Hemera sends goes on the standard input.
  * - A read has 30 seconds, a write 2 minutes; a call cut at its limit is killed, waited for, and
- *   answered `ForgeTimeout`. A process that cannot run, or dies on a signal, is `ForgeUnreachable`.
+ *   answered `ForgeTimeout`. A process that cannot run, dies on a signal, or prints more than is
+ *   read of one answer, is `ForgeUnreachable`.
  * - The exit code is kept, and the standard error, masked: the caller decides what a failure is.
  * - A write is recorded as an effectful action (CT-09): its intent before it starts, its outcome
- *   after.
+ *   after. A write that never started (refused, its CLI missing, its spawn failed) is `failed`, and
+ *   so is one whose CLI exited with a code other than 0: the CLI said how it ended. One that started
+ *   and was cut (its limit, a signal, too much printed) may have reached the forge: it is
+ *   `indeterminate`, and so is one a stopped engine left, at the engine's next start.
  */
 
 import { type ForgeCli, type ForgeName, ForgeTimeout, ForgeUnreachable } from '@hemera/ipc'
@@ -182,12 +186,13 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           Option.fromNullishOr(findOnPath(cli, hostLookup(process.cwd(), env), process.platform)),
         )
 
-      /** Spawns the CLI and reads its answer, within its limit. */
+      /** Spawns the CLI and reads its answer, within its limit; `spawnedNow` once it was spawned. */
       const spawned = (
         call: ForgeCall,
         program: string,
         limit: number,
         command: string,
+        spawnedNow: () => void = () => undefined,
       ): Effect.Effect<ForgeAnswer, ForgeRunFailure> =>
         Effect.scoped(
           Effect.gen(function* () {
@@ -212,6 +217,7 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
                     : new ForgeUnreachable({ ...where, reason: secrets.mask(failed.reason) }),
                 ),
               )
+            spawnedNow()
             if (call.input !== undefined) yield* child.write(call.input)
             yield* child.closeInput
             const out: string[] = []
@@ -285,12 +291,15 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           }),
         )
 
-      /** A write, recorded: its intent committed before it starts, its outcome after. */
+      /**
+       * A write, recorded: its intent committed before it starts, its outcome after. `effect` is
+       * told to say when the CLI was spawned: what fails after may have reached the forge.
+       */
       const recorded = (
         call: ForgeCall,
         shape: CommandShape,
         command: string,
-        effect: Effect.Effect<ForgeAnswer, ForgeRunFailure>,
+        effect: (spawnedNow: () => void) => Effect.Effect<ForgeAnswer, ForgeRunFailure>,
       ): Effect.Effect<ForgeAnswer, ForgeRunFailure | DatabaseError> =>
         Effect.gen(function* () {
           const id = yield* recording(
@@ -302,22 +311,27 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           )
           const failed = <F extends ForgeRunFailure>(failure: F) =>
             Effect.andThen(recording(actionFailed(id, failure.message)), Effect.fail(failure))
-          const answer = yield* effect.pipe(
-            Effect.catchTags({
-              // Cut at its limit, a write may or may not have reached the forge.
-              ForgeTimeout: (cut) =>
-                Effect.andThen(
-                  recording(
-                    mutate('recording a forge call cut at its limit', (transaction) =>
-                      Effect.map(
-                        settleActionIn(transaction, id, 'indeterminate', null),
-                        (events) => ({ result: undefined, events }),
-                      ),
-                    ),
-                  ),
-                  Effect.fail(cut),
+          // Cut once it started, a write may or may not have reached the forge.
+          const unknown = <F extends ForgeRunFailure>(failure: F) =>
+            Effect.andThen(
+              recording(
+                mutate('recording a forge call cut once started', (transaction) =>
+                  Effect.map(settleActionIn(transaction, id, 'indeterminate', null), (events) => ({
+                    result: undefined,
+                    events,
+                  })),
                 ),
-              ForgeUnreachable: failed,
+              ),
+              Effect.fail(failure),
+            )
+          let started = false
+          const answer = yield* effect(() => {
+            started = true
+          }).pipe(
+            Effect.catchTags({
+              ForgeTimeout: unknown,
+              // A spawn that failed never ran; a signal or too much printed cut a running write.
+              ForgeUnreachable: (cut) => (started ? unknown(cut) : failed(cut)),
               ForgeCliMissing: failed,
               ForgeCommandRefused: failed,
             }),
@@ -357,8 +371,9 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           const program = yield* find(ran.cli)
           if (Option.isNone(program)) return yield* new ForgeCliMissing({ cli: ran.cli })
           const limit = shape.class === 'read' ? limits.read : limits.write
-          const answered = spawned(ran, program.value, limit, command)
-          const done = shape.class === 'read' ? answered : recorded(ran, shape, command, answered)
+          const answered = (spawnedNow?: () => void) =>
+            spawned(ran, program.value, limit, command, spawnedNow)
+          const done = shape.class === 'read' ? answered() : recorded(ran, shape, command, answered)
           return yield* outsideTransaction(`run ${ran.cli} ${ran.args[0] ?? ''}`, done).pipe(
             Effect.catchTag('SideEffectInTransaction', (refused) => Effect.die(refused)),
           )
