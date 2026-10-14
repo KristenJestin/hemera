@@ -52,7 +52,8 @@ import { getMission, moveIn as moveMissionIn } from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
-  type NeedOwners,
+  NeedOwners,
+  answersToHand,
   createNeedIn,
   deliverAnswers,
   needService,
@@ -76,7 +77,6 @@ import {
   checkpointRepositories,
   checkpoints,
   missions,
-  needDeliveries,
   needs,
   reviewChangedAfter,
   reviewFindings,
@@ -926,17 +926,12 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
       /**
        * Whether an answer the user gave on the mission is not handed to its owner yet: invisible
        * among the pending needs, and not yet an answer to the Builder, it holds the exit (#348).
+       * Exactly what a hand-over round hands over, so the round always moves what holds it.
        */
       const answerHanding = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
-        reader
-          .select({ id: needDeliveries.needId })
-          .from(needDeliveries)
-          .innerJoin(needs, eq(needs.id, needDeliveries.needId))
-          .where(and(eq(needs.missionId, missionId), isNull(needDeliveries.deliveredAt)))
-          .pipe(
-            Effect.mapError(refusedWhile('reading the answers not handed over')),
-            Effect.map((rows) => rows.length > 0),
-          )
+        NeedOwners.use((owners) => answersToHand(reader, owners, missionId)).pipe(
+          Effect.map((left) => left.length > 0),
+        )
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
       const unsettled = (building: BuildingRow) =>

@@ -4421,6 +4421,65 @@ describe('The Builder while the end waits on it', () => {
     },
   )
 
+  /**
+   * The Builder's question at the refresh, turned by hand into an answer the hand-over skips, as
+   * `changed` rewrites its need; then the end is driven, up to Review.
+   */
+  const skippedAnswer = (changed: (needId: string) => ReturnType<typeof sql>) => {
+    const { world, run } = ending()
+    return run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          yield* builtAll(builder.grantId)
+          yield* asked(builder.grantId)
+          yield* documented(world, mission.id)
+          yield* reviewed(world, mission.id, 'spec-reviewer')
+          yield* reviewed(world, mission.id, 'code-reviewer')
+          yield* until(
+            Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+            LONG,
+          )
+          const need = (yield* getMission(mission.id)).needs[0]
+          if (need === undefined) return yield* Effect.die(new Error('no question'))
+          const database = yield* Database
+          yield* database.run(sql`UPDATE needs SET state = 'answered',
+            answer = '{"_tag":"Chosen","option":"Comma"}', ended_at = ${new Date().toISOString()}
+            WHERE id = ${need.id}`)
+          yield* database.run(changed(need.id))
+          yield* database.insert(needDeliveries).values({ needId: need.id, deliveredAt: null })
+          yield* driven(mission.id)
+          yield* inReview(mission.id)
+          return yield* getMission(mission.id)
+        }),
+      ),
+    )
+  }
+
+  test(
+    'an answer to a need no service takes, which the hand-over always skips, does not hold the exit',
+    SLOW,
+    async () => {
+      const seen = await skippedAnswer(
+        (needId) => sql`UPDATE needs SET service = 'nobody' WHERE id = ${needId}`,
+      )
+      expect(seen.stage).toBe('review')
+    },
+  )
+
+  test(
+    'an answer to a need this version cannot read, which the hand-over always skips, does not hold the exit',
+    SLOW,
+    async () => {
+      const seen = await skippedAnswer(
+        (needId) => sql`UPDATE needs SET fields = '{"_tag":"Unknown"}' WHERE id = ${needId}`,
+      )
+      expect(seen.stage).toBe('review')
+    },
+  )
+
   test(
     'a Retry of the Builder’s environment need at the refresh, its event follower behind, is kept for the Builder before the end can close the Building',
     SLOW,
