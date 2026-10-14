@@ -175,6 +175,9 @@ const placeSaid = (repository: string): string =>
 const fileSaid = (repository: string, path: string): string =>
   repository === ROOT_REPOSITORY ? path : `${repository}/${path}`
 
+/** A file a reviewer names, as the checkpoint lists it: forward slashes, no leading `./`. */
+const pathOf = (named: string): string => named.replaceAll('\\', '/').replace(/^\.\//, '')
+
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
@@ -531,7 +534,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
           /** The repositories a path without one may be in, by the checkpoint's changed files. */
           const choices = (path: string) =>
             repositoriesOfPath(repositories, (one) =>
-              files.some((file) => file.repository === one && file.path === path),
+              files.some((file) => file.repository === one && file.path === pathOf(path)),
             )
           const listed = (repository: string | null, path: string) => {
             const named = repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '')
@@ -539,8 +542,8 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
               named === undefined ? repositories : repositories.filter((one) => one === named)
             return where.some(
               (one) =>
-                files.some((file) => file.repository === one && file.path === path) ||
-                inCopy(one, path),
+                files.some((file) => file.repository === one && file.path === pathOf(path)) ||
+                inCopy(one, pathOf(path)),
             )
           }
           for (const [at, finding] of args.findings.entries()) {
@@ -579,7 +582,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
                       repository:
                         finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ??
                         (finding.path === undefined ? null : (choices(finding.path)[0] ?? null)),
-                      path: finding.path?.replaceAll('\\', '/') ?? null,
+                      path: finding.path === undefined ? null : pathOf(finding.path),
                       line: finding.line ?? null,
                       text: secrets.mask(finding.text.trim()),
                       contradictsSpec: finding.contradicts_spec,
@@ -663,7 +666,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
               ),
             )
           }
-          const path = args.path.replaceAll('\\', '/').replace(/^\.\//, '')
+          const path = pathOf(args.path)
           const among = repositoriesOfPath(
             repositories.map((one) => one.repository),
             (repository) =>

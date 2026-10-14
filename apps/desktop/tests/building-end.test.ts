@@ -881,7 +881,7 @@ describe('The reviewers', () => {
   )
 
   test(
-    'a finding with a path and no repository, in a two-repository Workspace: refused with both names when the path is changed in both or unchanged; kept on the one repository whose changed files hold it, its special task targeting it',
+    'a finding with a path and no repository, in a two-repository Workspace: refused with both names when the path is changed in both or unchanged; kept on the one repository whose changed files hold it, written with ./ or backslashes, its special task targeting it',
     SLOW,
     async () => {
       const { world, run } = ending()
@@ -894,6 +894,7 @@ describe('The reviewers', () => {
             const web = yield* folderOf(mission.id, 'web')
             writtenInWorkspace(web, 'invoices.ts', 'export const fromWeb = true\n')
             writtenInWorkspace(web, 'page.ts', 'export const page = "web"\n')
+            writtenInWorkspace(web, 'src/view.ts', 'export const view = "web"\n')
             yield* builtAll(builder.grantId)
             yield* documented(world, mission.id)
             const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
@@ -910,10 +911,18 @@ describe('The reviewers', () => {
               })
             const inBoth = yield* report('invoices.ts')
             const unchanged = yield* report('package.json')
-            const inWeb = yield* report('page.ts')
+            // Written from where the reviewer stands, or with Windows separators: the same file.
+            const inWeb = yield* report('./page.ts')
             world.release(reviewer.index)
-            yield* reviewed(world, mission.id, 'code-reviewer')
-            yield* specialAvailable(mission.id, 'RV1')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              {
+                severity: 'warning',
+                path: 'src\\view.ts',
+                text: 'Look again at the view.',
+                contradicts_spec: false,
+              },
+            ])
+            yield* specialAvailable(mission.id, 'RV2')
             return {
               inBoth,
               unchanged,
@@ -931,10 +940,12 @@ describe('The reviewers', () => {
         'refused: finding 1: package.json names no single repository: say which, one of api, web. Nothing was kept.',
       )
       expect(seen.inWeb).toContain('Your report is kept.')
-      expect(seen.review?.findings).toHaveLength(1)
+      expect(seen.review?.findings).toHaveLength(2)
       expect(seen.review?.findings[0]).toMatchObject({ repository: 'web', path: 'page.ts' })
+      expect(seen.review?.findings[1]).toMatchObject({ repository: 'web', path: 'src/view.ts' })
       expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
         [{ repository: 'web', path: 'page.ts', intent: 'change' }],
+        [{ repository: 'web', path: 'src/view.ts', intent: 'change' }],
       ])
     },
   )
