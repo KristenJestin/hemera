@@ -83,7 +83,7 @@ import {
   specScenarios,
   writesBeforeRed,
 } from '../storage/schema.ts'
-import type { Grant } from '../tools/access.ts'
+import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { WrittenFile } from '../tools/ports.ts'
 import { actionDone, beginAction } from '../tools/actions.ts'
 import { answered, refusal } from '../tools/files.ts'
@@ -176,6 +176,7 @@ export const PROOF_KINDS = [
 /** The services the proofs' work runs on, which the Builder provides. */
 export type ProofNeeds =
   | Database
+  | ToolAccess
   | DomainEvents
   | Secrets
   | Snapshots
@@ -1210,6 +1211,10 @@ export const buildingProofs = (parts: ProofParts) => {
       const row = yield* scenarioProofIn(database, building.id, scenario)
       if (row === null || stateOf(row) === 'not_reproducible') return run
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
+      // Stopped by the exit of the Building, it says nothing of the code: the exit's snapshot
+      // judges what it left (#309).
+      if (run.stopped && (yield* ToolAccess.use((access) => access.isExiting(building.missionId))))
+        return run
       // Kept from running (a port another mission holds): not the Builder's to fix (#306). A run
       // that started is, whatever its runner said: its code may never end, or never answer.
       if (run.classification === 'environment' && !run.started) {

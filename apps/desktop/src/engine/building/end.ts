@@ -320,10 +320,11 @@ const specialTaskIn = (
 
 /**
  * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
- * steps begins and ends, and once the review checkpoint is taken. Nothing otherwise.
+ * steps begins and ends, once the review checkpoint is taken, and as the exit begins. Nothing
+ * otherwise.
  */
 export type EndHold = (
-  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken',
+  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken' | 'exiting',
 ) => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
@@ -1035,12 +1036,14 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         })
 
       /**
-       * The mission's whole tree stops: every session, children first, and every command its agents
-       * started. Then the calls already executing end, and what one started meanwhile (a helper's
-       * session, a command) is stopped in turn, and its calls waited for: nothing of theirs lands
-       * after this. A call the user allowed runs no more from the first stop, whoever of the tree
-       * asked it, until a Builder works on the mission again. What was queued for them is kept, for
-       * a Builder the exit sends back; the exit's commit sets it aside.
+       * The mission's whole tree stops: every session, children first, every command its agents
+       * started, and every run Hemera started for one of their calls (a `proof_run`, the checks of
+       * `task_finished`), so the wait for those calls never lasts a run's own limit (#309). Then the
+       * calls already executing end, and what one started meanwhile (a helper's session, a command,
+       * a run) is stopped in turn, and its calls waited for: nothing of theirs lands after this. A
+       * call the user allowed runs no more from the first stop, whoever of the tree asked it, until
+       * a Builder works on the mission again. What was queued for them is kept, for a Builder the
+       * exit sends back; the exit's commit sets it aside.
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
@@ -1074,6 +1077,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         Effect.gen(function* () {
           const database = yield* Database
           const missionId = building.missionId
+          yield* hold('exiting')
           yield* stopAll(missionId)
           // What the exit stopped, the end brings back once more.
           broughtBack.delete(building.id)

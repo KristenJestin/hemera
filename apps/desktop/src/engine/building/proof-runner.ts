@@ -77,6 +77,11 @@ export interface ProofRun extends ProofRunClass {
    * resource held elsewhere (#306). Known as it runs, never recorded.
    */
   readonly started: boolean
+  /**
+   * Whether it was stopped before it ended, other than at its limit (the exit's stops, #309).
+   * Known as it runs, never recorded.
+   */
+  readonly stopped: boolean
 }
 
 /** The proof's command: what runs its test, or the command with no test file. */
@@ -175,6 +180,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
     let runId: string | null = null
     let line = command
     let timedOut = false
+    let stopped = false
     if (Result.isFailure(launched)) {
       if (watch !== null) yield* watch.finish(null)
       output = `It could not start: ${launched.failure.message}`
@@ -196,6 +202,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       )
       output = (yield* runOutput(id)).output
       timedOut = ended.timedOut
+      stopped = !ended.timedOut && ended.run.state === 'stopped'
       if (ended.timedOut) {
         output = `${output}\nIt timed out after ${Duration.format(limit)}: Hemera ended it.`
       }
@@ -242,6 +249,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       at: new Date().toISOString(),
       timedOutAfter: timedOut ? (mission.minutes ?? DEFAULT_PROOF_MINUTES) : null,
       started: yield* Deferred.isDone(started),
+      stopped,
     }
     yield* mutate('recording a proof run', (transaction) =>
       transaction

@@ -2707,6 +2707,113 @@ const markdownProof = () => ({
   },
 })
 
+describe('A run a call started, as the exit begins', () => {
+  test(
+    'a proof_run that hangs when the exit begins: the exit does not wait for its limit, and nothing it writes after the snapshot reaches Review unseen',
+    SLOW,
+    async () => {
+      // Once armed, the exit is held as it begins until the test lets it go.
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        endHold: (at) =>
+          at === 'exiting' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+      })
+      // While this file is there, the proof's next run writes into the Workspace and never ends.
+      const hang = join(data, 'hang')
+      const hanging = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { appendFileSync, existsSync, rmSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', async () => {",
+        `  if (existsSync(${JSON.stringify(hang)})) {`,
+        `    rmSync(${JSON.stringify(hang)})`,
+        '    for (;;) {',
+        "      appendFileSync(new URL('../late.txt', import.meta.url), 'late\\n')",
+        '      await new Promise((resolve) => setTimeout(resolve, 50))',
+        '    }',
+        '  }',
+        "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
+        '})',
+        '',
+      ].join('\n')
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  ...exportProof()['R1.S2'],
+                  test: { ...exportProof()['R1.S2'].test, code: hanging },
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            arming = true
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(reached)
+            const proofAttempts = Effect.gen(function* () {
+              const view = yield* buildingNow(mission.id)
+              return (yield* attemptsIn(yield* Database, view.buildingId)).filter(
+                (one) => one.scope === 'proof',
+              )
+            })
+            const before = yield* proofAttempts
+            // The Builder runs its green proof again as the exit begins; the run hangs, writing.
+            writeFileSync(hang, '')
+            yield* Effect.forkChild(call(builder.grantId, 'proof_run', { scenario: 'R1.S2' }))
+            yield* until(
+              Effect.sync(() => existsSync(join(api, 'late.txt'))),
+              LONG,
+            )
+            yield* Deferred.succeed(go, undefined)
+            // Far within the proof's limit of ten minutes.
+            yield* inReview(mission.id)
+            const runs = yield* Runs
+            return {
+              going: [...runs.live.values()].filter((one) => one.run.missionId === mission.id),
+              before,
+              after: yield* proofAttempts,
+              review: yield* autoReviewOf(mission.id),
+              view: yield* buildingNow(mission.id),
+            }
+          }),
+        ),
+      )
+      // Stopped before the snapshot: nothing of it is still going, nor writes any more.
+      expect(seen.going).toEqual([])
+      // What it wrote before its stop was seen: in the snapshot, and checked before Review.
+      expect(seen.review?.changedAfter.map((one) => one.path)).toContain('late.txt')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+      // A run the exit stopped is no red of the Builder's.
+      expect(seen.after).toEqual(seen.before)
+    },
+  )
+})
+
 describe('The refresh', () => {
   test(
     'a proof red at the refresh is waited on, not the Builder: its green moves the end on with no turn of the Builder',

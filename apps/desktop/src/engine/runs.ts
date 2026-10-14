@@ -74,6 +74,7 @@ import { Secrets } from './secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
 import { commandRuns } from './storage/schema.ts'
 import { ProcessSupervisor, type Supervised } from './supervisor.ts'
+import { ExecutingFor } from './tools/access.ts'
 import { defended } from './permissions/defence.ts'
 import { mutate } from './transaction.ts'
 import { environmentAt } from './variables.ts'
@@ -145,6 +146,8 @@ interface Live {
   readonly published: Deferred.Deferred<string | null>
   /** Whether it runs through Portless, whose address is the proxy's and holds no port of its own. */
   readonly portless: boolean
+  /** The mission of the call it was started for, or null: the exit of its Building stops it. */
+  readonly call: string | null
 }
 
 /**
@@ -704,6 +707,7 @@ export const startRun = (asked: RunAsked) =>
       ended: yield* Deferred.make<void>(),
       published: yield* Deferred.make<string | null>(),
       portless: portless !== null,
+      call: yield* ExecutingFor,
     }
     // An agent's command in a mission gets the defence in depth: no forge login, no push.
     const environment =
@@ -958,14 +962,17 @@ export const stopMissionRuns = (missionId: string) =>
   })
 
 /**
- * Stops every run a mission's agents started: what the end of its Building asks. A run the user or
- * Hemera started keeps going.
+ * Stops every run a mission's agents started, and every run Hemera started for one of their calls
+ * (a proof, a check): what the end of its Building asks. Any other run of the user or Hemera keeps
+ * going.
  */
 export const stopAgentRuns = (missionId: string) =>
   Effect.gen(function* () {
     const runs = yield* Runs
     const going = [...runs.live.values()].filter(
-      (live) => live.run.missionId === missionId && live.run.startedBy === 'agent',
+      (live) =>
+        live.run.missionId === missionId &&
+        (live.run.startedBy === 'agent' || live.call === missionId),
     )
     yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
       concurrency: 'unbounded',

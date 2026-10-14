@@ -12,6 +12,8 @@
  *
  * A call is executed only while its grant is live, and counted against its mission until it ends:
  * once a mission's sessions are stopped, `settled` waits for the calls that were already executing.
+ * What a call's execution starts knows the call's mission (`ExecutingFor`): a run Hemera starts for
+ * it (a proof, a check) is stopped with the agents' own commands, so `settled` never waits for it.
  * A call the user allowed is refused once its mission's Building is exiting, for a session of the
  * tree the exit stops, until a Builder works on the mission again.
  *
@@ -106,6 +108,14 @@ export class ToolAccess extends Context.Service<
   }
 >()('ToolAccess') {}
 
+/**
+ * The mission of the call whose execution runs in this fiber, or null: a run started there is the
+ * call's, and the exit of its Building stops it (#309).
+ */
+export const ExecutingFor = Context.Reference<string | null>('ExecutingFor', {
+  defaultValue: () => null,
+})
+
 /** How many refused accesses are written in a minute; the rest are counted, and said later. */
 export const REFUSALS_LOGGED = 20
 
@@ -184,7 +194,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
             if (missionId !== null) begun(missionId)
             return { live: grant !== null, missionId }
           }),
-          ({ live }) => (live ? execution : Effect.succeed(null)),
+          ({ live, missionId }) =>
+            live ? Effect.provideService(execution, ExecutingFor, missionId) : Effect.succeed(null),
           ({ missionId }) => (missionId === null ? Effect.void : ended(missionId)),
         ),
       counted: ({ missionId, lineage }, execution) =>
@@ -198,7 +209,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
             const tree = exits.get(missionId)
             return tree === undefined || (lineage !== null && !tree.has(lineage))
           }),
-          (runs) => (runs ? execution : Effect.succeed(null)),
+          (runs) =>
+            runs ? Effect.provideService(execution, ExecutingFor, missionId) : Effect.succeed(null),
           () => (missionId === null ? Effect.void : ended(missionId)),
         ),
       exiting: (missionId, lineages) => Effect.sync(() => exits.set(missionId, new Set(lineages))),
