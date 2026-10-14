@@ -22,7 +22,8 @@
  * (the last green's, which holds the proofs' turn).
  */
 
-import { existsSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 
 import {
   CONTRADICTION_OPTIONS,
@@ -100,7 +101,13 @@ import {
   stateOf,
   upToDate,
 } from './proof-store.ts'
-import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
+import {
+  AutoReview,
+  insideCopy,
+  repositoryFolderOf,
+  reviewFolderOf,
+  withheldFromReviewers,
+} from './review.ts'
 import {
   REVIEW_NEEDS,
   type ReviewFindingRow,
@@ -179,6 +186,40 @@ const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
 
 const placeOf = (base: BuildingBase) => ({ name: base.repository, folder: base.folder })
 
+/**
+ * What no reviewer reads in a copy of the checkpoint, whichever tool reaches it: a file withheld
+ * from the reviewers (a `.env` committed on the branch) and a link that really leads out of the
+ * copy, each replaced by a line saying so. The folders are walked by hand: a link is judged as a
+ * link and never walked through, so a link out is replaced before anything beyond it is reached,
+ * and a link back into the copy is not walked again.
+ */
+export const withheldIn = (copy: string) => {
+  const root = realpathSync.native(copy)
+  /** Whether a link leads into the copy, where it resolves on the disk; a broken one does not. */
+  const leadsIn = (link: string) => {
+    try {
+      const target = realpathSync.native(link)
+      return target === root || insideCopy(root, target)
+    } catch {
+      return false
+    }
+  }
+  const walk = (folder: string) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name)
+      if (entry.isDirectory()) {
+        walk(path)
+        continue
+      }
+      const named = relative(copy, path).replaceAll('\\', '/')
+      if (!withheldFromReviewers(named) && (!entry.isSymbolicLink() || leadsIn(path))) continue
+      rmSync(path, { force: true })
+      writeFileSync(path, `content withheld: ${named}\n`)
+    }
+  }
+  walk(copy)
+}
+
 const answerOf = (need: Need): string | null => {
   const answer = need.answer
   if (answer === null) return null
@@ -217,9 +258,11 @@ const specialTaskIn = (
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
     const task = specialTaskOf(finding)
     const result = written === null ? task.result : `${task.result}\nThe user answered: ${written}`
+    // `review_report` keeps a path's repository; a row without one is read in the only repository.
+    const only = basesOf(building)
     const repository =
       finding.repository ??
-      (finding.path === null ? null : (basesOf(building)[0]?.repository ?? null))
+      (finding.path === null || only.length !== 1 ? null : (only[0]?.repository ?? null))
     const targets =
       repository === null || finding.path === null
         ? []
@@ -400,7 +443,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
       const copyOf = (building: BuildingRow, checkpointId: string) =>
         Effect.gen(function* () {
           const folder = reviewFolderOf(dataFolder, building.id)
-          if (existsSync(folder)) return folder
+          if (existsSync(folder)) {
+            // A copy kept from an engine that did not withhold it is withheld before it is read.
+            yield* Effect.sync(() => withheldIn(folder))
+            return folder
+          }
           const database = yield* Database
           const trees = yield* database
             .select()
@@ -422,6 +469,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             )
           }
           yield* Effect.sync(() => {
+            withheldIn(partial)
             rmSync(folder, { recursive: true, force: true })
             // A copy is whole or absent: one stopped half-way is made again.
             renameSync(partial, folder)

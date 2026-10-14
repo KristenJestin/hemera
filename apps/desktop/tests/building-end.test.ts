@@ -11,7 +11,15 @@
  * lets it go, once it reported. The checks are a fake `TaskChecks`: none unless a test says.
  */
 
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, win32 } from 'node:path'
 
 import {
@@ -46,8 +54,8 @@ import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
-import { insideCopy } from '../src/engine/building/review.ts'
-import type { EndHold } from '../src/engine/building/end.ts'
+import { insideCopy, reviewFolderOf } from '../src/engine/building/review.ts'
+import { type EndHold, withheldIn } from '../src/engine/building/end.ts'
 import type { OutsideSettings } from '../src/engine/building/outside.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
@@ -98,9 +106,11 @@ import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
+import { ProfileHome } from '../src/engine/profile-home.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
+import { git } from './repositories.ts'
 
 let data: string
 let work: string
@@ -453,6 +463,25 @@ const writtenInWorkspace = (folder: string, path: string, content: string) => {
 const apiOf = (missionId: string) =>
   Effect.map(buildingNow(missionId), (view) => view.repositories[0]?.folder ?? '')
 
+/** The folder of a repository of the Workspace. */
+const folderOf = (missionId: string, name: string) =>
+  Effect.map(
+    buildingNow(missionId),
+    (view) => view.repositories.find((one) => one.name === name)?.folder ?? '',
+  )
+
+/** The Impact of a mission whose Workspace holds both of Acme's repositories. */
+const BOTH = 'It touches api and web, nothing else.'
+
+/** The targets of the special tasks born from the findings. */
+const specialTargets = Effect.gen(function* () {
+  const database = yield* Database
+  return (yield* database
+    .select({ targets: buildingTasks.targets })
+    .from(buildingTasks)
+    .where(eq(buildingTasks.origin, 'review'))).map((row) => row.targets)
+})
+
 describe('The end sequence', () => {
   test(
     'every task done runs, in order: documenter, final checks, checkpoint, both reviewers, special tasks, refresh, Review; the stage moves to Review on its own with building.ended',
@@ -779,12 +808,419 @@ describe('The reviewers', () => {
     },
   )
 
+  test(
+    'checkpoint_read of a path without a repository, in a two-repository Workspace: changed in one, it reads that one; changed in both, unchanged or in neither, it is refused with both names',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme, BOTH)
+            const builder = yield* builderOf(mission.id)
+            const web = yield* folderOf(mission.id, 'web')
+            writtenInWorkspace(web, 'invoices.ts', 'export const fromWeb = true\n')
+            writtenInWorkspace(web, 'page.ts', 'export const page = "web"\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) => call(reviewer.grantId, 'checkpoint_read', { path })
+            return {
+              inApi: yield* read('export.ts'),
+              inWeb: yield* read('page.ts'),
+              inBoth: yield* read('invoices.ts'),
+              unchanged: yield* read('package.json'),
+              nowhere: yield* read('nowhere.ts'),
+            }
+          }),
+        ),
+      )
+      expect(seen.inApi).toContain('## api/export.ts')
+      expect(seen.inApi).toContain('export const markdown = true')
+      expect(seen.inWeb).toContain('## web/page.ts')
+      expect(seen.inWeb).toContain('export const page = "web"')
+      for (const answer of [seen.inBoth, seen.unchanged, seen.nowhere]) {
+        expect(answer).toMatch(/^refused: /)
+        expect(answer).toContain('api, web')
+        expect(answer).not.toContain('"name": "api"')
+      }
+      expect(seen.inBoth).toContain('invoices.ts')
+      expect(seen.unchanged).toContain('package.json')
+    },
+  )
+
+  test(
+    'in a one-repository Workspace, a path without a repository names it: checkpoint_read reads an unchanged file there, and a finding on it targets it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const unchanged = yield* call(reviewer.grantId, 'checkpoint_read', {
+              path: 'package.json',
+            })
+            yield* reviewed(world, mission.id, 'spec-reviewer', [
+              {
+                severity: 'warning',
+                path: 'package.json',
+                text: 'The package names no export script.',
+                contradicts_spec: false,
+              },
+            ])
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* specialAvailable(mission.id, 'RV1')
+            return { unchanged, targets: yield* specialTargets }
+          }),
+        ),
+      )
+      expect(seen.unchanged).toContain('## api/package.json, unchanged since the merge base')
+      expect(seen.unchanged).toContain('"name": "api"')
+      expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
+        [{ repository: 'api', path: 'package.json', intent: 'change' }],
+      ])
+    },
+  )
+
+  test(
+    'a finding with a path and no repository, in a two-repository Workspace: refused with both names when the path is changed in both or unchanged; kept on the one repository whose changed files hold it, written with ./ or backslashes, its special task targeting it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme, BOTH)
+            const builder = yield* builderOf(mission.id)
+            const web = yield* folderOf(mission.id, 'web')
+            writtenInWorkspace(web, 'invoices.ts', 'export const fromWeb = true\n')
+            writtenInWorkspace(web, 'page.ts', 'export const page = "web"\n')
+            writtenInWorkspace(web, 'src/view.ts', 'export const view = "web"\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const report = (path: string) =>
+              call(reviewer.grantId, 'review_report', {
+                findings: [
+                  {
+                    severity: 'warning',
+                    path,
+                    text: `Look again at ${path}.`,
+                    contradicts_spec: false,
+                  },
+                ],
+              })
+            const inBoth = yield* report('invoices.ts')
+            const unchanged = yield* report('package.json')
+            // Written from where the reviewer stands, or with Windows separators: the same file.
+            const inWeb = yield* report('./page.ts')
+            world.release(reviewer.index)
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              {
+                severity: 'warning',
+                path: 'src\\view.ts',
+                text: 'Look again at the view.',
+                contradicts_spec: false,
+              },
+            ])
+            yield* specialAvailable(mission.id, 'RV2')
+            return {
+              inBoth,
+              unchanged,
+              inWeb,
+              review: yield* autoReviewOf(mission.id),
+              targets: yield* specialTargets,
+            }
+          }),
+        ),
+      )
+      expect(seen.inBoth).toBe(
+        'refused: finding 1: invoices.ts names no single repository: say which, one of api, web. Nothing was kept.',
+      )
+      expect(seen.unchanged).toBe(
+        'refused: finding 1: package.json names no single repository: say which, one of api, web. Nothing was kept.',
+      )
+      expect(seen.inWeb).toContain('Your report is kept.')
+      expect(seen.review?.findings).toHaveLength(2)
+      expect(seen.review?.findings[0]).toMatchObject({ repository: 'web', path: 'page.ts' })
+      expect(seen.review?.findings[1]).toMatchObject({ repository: 'web', path: 'src/view.ts' })
+      expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
+        [{ repository: 'web', path: 'page.ts', intent: 'change' }],
+        [{ repository: 'web', path: 'src/view.ts', intent: 'change' }],
+      ])
+    },
+  )
+
+  test(
+    'a .env of the checkpoint, read through the copy with fs_read or search, with or without a glob: content withheld, none of its lines printed',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            // Written and left uncommitted: the checkpoint keeps a stand-in for it.
+            writtenInWorkspace(api, '.env', 'TOKEN=left-in-the-workspace\n')
+            // Committed: the checkpoint's tree holds its content as it is.
+            writtenInWorkspace(api, 'config/.env.production', 'TOKEN=committed-to-the-branch\n')
+            git(api, 'add', '-f', 'config/.env.production')
+            git(api, 'commit', '-q', '-m', 'production settings')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) =>
+              call(reviewer.grantId, 'fs_read', { repository: 'api', path })
+            const asked = { repository: 'api', pattern: 'TOKEN' }
+            const search = (glob: string | null) =>
+              call(reviewer.grantId, 'search', glob === null ? asked : { ...asked, glob })
+            return {
+              reads: [yield* read('.env'), yield* read('config/.env.production')],
+              searches: [
+                yield* search(null),
+                yield* search('**/.env*'),
+                yield* search('.env'),
+                yield* search('.env.production'),
+              ],
+              checkpoint: yield* call(reviewer.grantId, 'checkpoint_read', {
+                repository: 'api',
+                path: 'config/.env.production',
+              }),
+            }
+          }),
+        ),
+      )
+      for (const answer of seen.reads) {
+        expect(answer).toContain('content withheld')
+      }
+      for (const answer of [...seen.reads, ...seen.searches, seen.checkpoint]) {
+        expect(answer).not.toContain('TOKEN=')
+        expect(answer).not.toContain('left-in-the-workspace')
+        expect(answer).not.toContain('committed-to-the-branch')
+      }
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link in the copy of the checkpoint to its .env, or to a file outside it, read with fs_read or search: content withheld, none of its lines printed',
+    SLOW,
+    async () => {
+      const outside = join(work, 'outside-secret.txt')
+      writeFileSync(outside, 'TOKEN=outside-the-copy\n')
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, 'config/.env.production', 'TOKEN=committed-to-the-branch\n')
+            symlinkSync('config/.env.production', join(api, 'settings.txt'))
+            symlinkSync(outside, join(api, 'elsewhere.txt'))
+            git(api, 'add', '-f', 'config/.env.production', 'settings.txt', 'elsewhere.txt')
+            git(api, 'commit', '-q', '-m', 'linked settings')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) =>
+              call(reviewer.grantId, 'fs_read', { repository: 'api', path })
+            return {
+              answers: [
+                yield* read('settings.txt'),
+                yield* read('elsewhere.txt'),
+                yield* call(reviewer.grantId, 'search', { repository: 'api', pattern: 'TOKEN' }),
+                yield* call(reviewer.grantId, 'search', {
+                  repository: 'api',
+                  pattern: 'TOKEN',
+                  glob: '*.txt',
+                }),
+              ],
+            }
+          }),
+        ),
+      )
+      expect(seen.answers[0]).toContain('content withheld: api/config/.env.production')
+      expect(seen.answers[1]).toContain('content withheld: api/elsewhere.txt')
+      for (const answer of seen.answers) {
+        expect(answer).not.toContain('TOKEN=')
+        expect(answer).not.toContain('committed-to-the-branch')
+        expect(answer).not.toContain('outside-the-copy')
+      }
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a committed link to a folder outside the copy, and a link to the copy itself: the review runs, and the link out reads content withheld',
+    SLOW,
+    async () => {
+      const outside = join(work, 'outside-folder')
+      mkdirSync(outside)
+      writeFileSync(join(outside, '.env'), 'TOKEN=outside-the-copy\n')
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            symlinkSync(outside, join(api, 'out'))
+            symlinkSync('.', join(api, 'self'))
+            git(api, 'add', 'out', 'self')
+            git(api, 'commit', '-q', '-m', 'linked folders')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewing(mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            return {
+              out: yield* call(reviewer.grantId, 'fs_read', { repository: 'api', path: 'out' }),
+              search: yield* call(reviewer.grantId, 'search', {
+                repository: 'api',
+                pattern: 'TOKEN',
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.out).toContain('content withheld: api/out')
+      expect(seen.search).not.toContain('outside-the-copy')
+      expect(readFileSync(join(outside, '.env'), 'utf8')).toBe('TOKEN=outside-the-copy\n')
+    },
+  )
+
+  test(
+    'a copy of the checkpoint made before the withholding is withheld when it is used again',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const { dataFolder } = yield* ProfileHome
+            const folder = reviewFolderOf(dataFolder, (yield* buildingNow(mission.id)).buildingId)
+            // A copy left by an engine that did not withhold, as an upgrade mid-end finds it.
+            writtenInWorkspace(folder, 'api/.env', 'TOKEN=in-an-old-copy\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            return yield* call(reviewer.grantId, 'fs_read', { repository: 'api', path: '.env' })
+          }),
+        ),
+      )
+      expect(seen).toContain('content withheld: api/.env')
+      expect(seen).not.toContain('in-an-old-copy')
+    },
+  )
+
   test('on Windows, a finding’s path on another drive is not inside the checkpoint', () => {
     const root = 'C:\\Users\\someone\\hemera\\reviews\\b1\\api'
     expect(insideCopy(root, 'src\\x.ts', win32)).toBe(true)
     expect(insideCopy(root, '..\\web\\x.ts', win32)).toBe(false)
     expect(insideCopy(root, 'D:\\secrets\\x.ts', win32)).toBe(false)
     expect(insideCopy(root, 'D:x.ts', win32)).toBe(false)
+  })
+})
+
+describe('The copy the reviewers read', () => {
+  /** A copy of the checkpoint holding `api`, in a reviews folder of its own. */
+  const copyIn = () => {
+    const copy = join(work, 'reviews', 'b1.partial')
+    mkdirSync(join(copy, 'api'), { recursive: true })
+    writeFileSync(join(copy, 'api', 'README.md'), 'Acme api\n')
+    return copy
+  }
+  const isLink = (path: string) => lstatSync(path).isSymbolicLink()
+  const read = (path: string) => readFileSync(path, 'utf8')
+
+  test('a .env template is withheld, as checkpoint_read withholds it', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env.example'), 'TOKEN=a-real-value\n')
+    withheldIn(copy)
+    expect(read(join(copy, 'api', '.env.example'))).toBe('content withheld: api/.env.example\n')
+    expect(read(join(copy, 'api', 'README.md'))).toBe('Acme api\n')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to a folder outside the copy is withheld as a link, and nothing outside is touched',
+    () => {
+      const copy = copyIn()
+      const outside = join(work, 'outside-folder')
+      mkdirSync(outside)
+      writeFileSync(join(outside, '.env'), 'TOKEN=outside-the-copy\n')
+      symlinkSync(join(outside, '.env'), join(outside, 'link'))
+      symlinkSync(outside, join(copy, 'api', 'out'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'out'))).toBe(false)
+      expect(read(join(copy, 'api', 'out'))).toBe('content withheld: api/out\n')
+      expect(read(join(outside, '.env'))).toBe('TOKEN=outside-the-copy\n')
+      expect(isLink(join(outside, 'link'))).toBe(true)
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to the copy itself is kept and never walked through',
+    () => {
+      const copy = copyIn()
+      writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+      symlinkSync('.', join(copy, 'api', 'self'))
+      symlinkSync('..', join(copy, 'api', 'root'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'self'))).toBe(true)
+      expect(isLink(join(copy, 'api', 'root'))).toBe(true)
+      expect(read(join(copy, 'api', 'self', '.env'))).toBe('content withheld: api/.env\n')
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to a folder inside the copy that holds a .env is kept, and reads the .env withheld',
+    () => {
+      const copy = copyIn()
+      mkdirSync(join(copy, 'api', 'config'))
+      writeFileSync(join(copy, 'api', 'config', '.env.production'), 'TOKEN=in-the-copy\n')
+      symlinkSync('config', join(copy, 'api', 'settings'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'settings'))).toBe(true)
+      expect(read(join(copy, 'api', 'settings', '.env.production'))).toBe(
+        'content withheld: api/config/.env.production\n',
+      )
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link whose text stays in the copy but whose path leads out through another link is withheld',
+    () => {
+      const copy = copyIn()
+      writeFileSync(join(work, 'reviews', 'secret.txt'), 'TOKEN=beside-the-copy\n')
+      // `up` leads to the copy's root, so `up/..` is the folder above the copy, not `api`.
+      symlinkSync('..', join(copy, 'api', 'up'))
+      symlinkSync('up/../secret.txt', join(copy, 'api', 'beside'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'up'))).toBe(true)
+      expect(read(join(copy, 'api', 'beside'))).toBe('content withheld: api/beside\n')
+    },
+  )
+
+  test('withholding a copy twice leaves it as once', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+    withheldIn(copy)
+    withheldIn(copy)
+    expect(read(join(copy, 'api', '.env'))).toBe('content withheld: api/.env\n')
   })
 })
 
