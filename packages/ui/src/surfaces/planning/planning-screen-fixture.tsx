@@ -17,7 +17,8 @@ import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
 import * as forYou from './for-you-fixtures.ts'
 import * as moments from './planning-fixtures.ts'
-import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
+import { PlanningPage } from './planning-page.tsx'
+import { discussionViewId, probeViewId } from './planning-view-ids.ts'
 import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
