@@ -820,21 +820,24 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               yield* proofs.askUnproven(row, stuck, refreshing)
               return
             }
-            const waits = red.join('\u0000')
             if (red.length > 0) {
-              if (endWaits.get(row.id) !== waits) {
+              // A proof held on the user's need is not the Builder's to move (#306).
+              const held = yield* proofs.heldOnUser(row)
+              const told = red.filter((one) => !held.includes(one))
+              const waits = told.join('\u0000')
+              if (endWaits.get(row.id) !== waits && told.length > 0) {
                 endWaits.set(row.id, waits)
                 yield* deliver(
                   row,
                   'red',
-                  `The end waits: ${listed(red.map((one) => `${one}'s proof`))} ${red.length === 1 ? 'is' : 'are'} not green.`,
+                  `The end waits: ${listed(told.map((one) => `${one}'s proof`))} ${told.length === 1 ? 'is' : 'are'} not green.`,
                 )
               }
               yield* watchQuiet(row)
               return
             }
             if (refreshing) return
-            endWaits.set(row.id, waits)
+            endWaits.set(row.id, '')
             yield* ended(row)
           }),
         )

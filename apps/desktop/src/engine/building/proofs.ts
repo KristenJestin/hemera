@@ -1286,6 +1286,14 @@ export const buildingProofs = (parts: ProofParts) => {
         .map((row) => row.scenario)
     })
 
+  /** The scenarios held on a need of the user's: only its answer moves them, never the Builder. */
+  const heldOnUser = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      return (yield* scenarioProofsIn(yield* Database, building.id))
+        .filter((row) => stateOf(row) === 'held')
+        .map((row) => row.scenario)
+    })
+
   /** The scenarios the user ended the Building without. */
   const notProven = (building: BuildingRow) =>
     Effect.gen(function* () {
@@ -1859,6 +1867,7 @@ export const buildingProofs = (parts: ProofParts) => {
     afterAnswer,
     retried,
     rerunning,
+    heldOnUser,
     proofRun,
     refresh,
     touched,
