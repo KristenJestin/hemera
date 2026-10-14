@@ -10,7 +10,7 @@
  * end of a Building moves it (B9), the test writing in its Workspace as the user would.
  */
 
-import { existsSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { REVIEW_HOLD, type RoundState, SpecAnchorAsked } from '@hemera/core/domain'
@@ -1184,6 +1184,51 @@ describe('The agents do not write during Review', () => {
       })
       expect(seen.other.ok).toBe(false)
       expect(seen.other.text).toContain(join('missions', seen.otherKey))
+    },
+    SLOW,
+  )
+  test(
+    'fs_read through a link in its own evidence folder to another mission’s image is refused, and the image never delivered',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId } = yield* launchedOverBoth()
+            const { grantId } = yield* builderOf(missionId)
+            yield* Review.use((review) => review.imageAdd(missionId, 'grey.png', PNG))
+            const other = yield* createMission({
+              projectId,
+              idea: { sentence: 'Another one', ticket: null },
+            })
+            const theirs = yield* putEvidence({
+              missionId: other.id,
+              content: { bytes: PNG },
+              name: 'theirs.png',
+              about: null,
+              author: UserAuthor.make({}),
+            })
+            // A junction: a link Windows makes without privileges, as an agent's command could.
+            const linked = join(
+              missionFolder(data, yield* missionKeyOf(missionId)),
+              'evidence',
+              'linked',
+            )
+            symlinkSync(
+              join(missionFolder(data, yield* missionKeyOf(other.id)), 'evidence'),
+              linked,
+              'junction',
+            )
+            return yield* callTool(grantId, 'fs_read', {
+              path: join(linked, `${theirs.sha256}.png`),
+            })
+          }),
+        ),
+      )
+      expect(seen.ok).toBe(false)
+      expect(seen).not.toHaveProperty('image')
+      expect(seen.text).toContain('refused')
     },
     SLOW,
   )
