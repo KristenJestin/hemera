@@ -20,7 +20,12 @@ import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema } from 'effe
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
-import { BuildingEnd, type BuilderHold, builderLayer } from '../src/engine/building/builder.ts'
+import {
+  BuildingEnd,
+  type BuilderHold,
+  builderLayer,
+  buildingOf,
+} from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
 import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
@@ -663,6 +668,8 @@ describe('The red phase (CT-35)', () => {
             Effect.map(getMission(mission.id), (one) => one.stage === 'cancelled'),
             20_000,
           )
+          // Its stops run with it: the Building ends as cancelled.
+          yield* until(Effect.map(buildingOf(mission.id), (view) => view?.state === 'cancelled'))
           return { need, events: yield* payloadsOf(mission.id, 'building.already_passes') }
         }),
       ),
@@ -3219,6 +3226,45 @@ describe('What the user answers on a red', () => {
       ),
     )
     expect(seen).toContain(`${told}: It fails on the March invoices only.`)
+  })
+
+  test('"cancel the mission" answered right before a stop cancels the mission and its Building after the start', async () => {
+    const stop = stoppedOnAnswer()
+    const first = await proofsEngine(data, stop.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(EXPORT_PATH, testFile("  assert.equal(1, 1, 'it passes')")),
+          }))
+          const need = yield* needOf(mission.id, 'Decision')
+          yield* answerNeed({
+            id: need.id,
+            answer: ChosenAnswer.make({ option: CANCEL_MISSION }),
+            key: 'answer-1',
+          })
+          yield* Deferred.await(stop.answering.reached)
+          return { mission }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(
+            Effect.map(buildingOf(first.mission.id), (view) => view?.state === 'cancelled'),
+          )
+          return {
+            mission: yield* getMission(first.mission.id),
+            building: yield* buildingOf(first.mission.id),
+          }
+        }),
+      ),
+    )
+    expect(seen.mission.stage).toBe('cancelled')
+    expect(seen.mission.unstopped).toEqual([])
+    expect(seen.building?.state).toBe('cancelled')
   })
 
   test('touched names the proofs and the final checks whose repository changed', async () => {

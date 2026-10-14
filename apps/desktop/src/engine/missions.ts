@@ -633,46 +633,76 @@ export const runStops = (missionId: string | null) =>
     }
   }).pipe(Semaphore.withPermits(stopping, 1))
 
+/**
+ * The user's cancel written in the transaction given: the stage, the pending needs expired and the
+ * stops owed, which run after it (`runStops`) or at the next start. Answers its events; null when
+ * the mission moved meanwhile.
+ */
+const cancelIn = (
+  transaction: EngineTransaction,
+  mission: { readonly id: string; readonly stage: Stage; readonly round: number },
+) =>
+  Effect.gen(function* () {
+    const stoppers = yield* MissionStoppers
+    const written = yield* transaction
+      .update(missions)
+      .set({ stage: 'cancelled', cleanup: 'awaiting-confirmation', updatedAt: now() })
+      .where(and(eq(missions.id, mission.id), eq(missions.stage, mission.stage)))
+      .returning({ id: missions.id })
+      .pipe(Effect.mapError(refusedWhile('cancelling the mission')))
+    if (written.length === 0) return null
+    const expired = yield* expireMissionNeeds(transaction, mission.id, CANCELLED)
+    if (stoppers.length > 0) {
+      yield* transaction
+        .insert(missionStops)
+        .values(
+          stoppers.map((stopper) => ({
+            missionId: mission.id,
+            stopper: stopper.name,
+            failedReason: null,
+          })),
+        )
+        // A Freeze's stops not done yet (#92) are owed once.
+        .onConflictDoNothing()
+        .pipe(Effect.mapError(refusedWhile('writing the stops')))
+    }
+    return [
+      missionEvent('mission.cancelled', mission.id, BY_THE_USER, {
+        from: mission.stage,
+        actor: 'user',
+        round: mission.round,
+        cleanup: 'awaiting-confirmation',
+      }),
+      ...expired,
+    ]
+  })
+
+/**
+ * The user's cancel decided by another write (a proof's "Cancel the mission"), kept in its
+ * transaction so that a stop never parts them; nothing when the mission's stage is not cancelled
+ * from. Answers its events.
+ */
+export const cancelMissionIn = (transaction: EngineTransaction, missionId: string) =>
+  Effect.gen(function* () {
+    const [row] = yield* transaction
+      .select()
+      .from(missions)
+      .where(eq(missions.id, missionId))
+      .pipe(Effect.mapError(refusedWhile('reading the mission')))
+    if (row === undefined) return []
+    const stage = stageOf(row)
+    if (Result.isFailure(checkedMove('cancel', stage, 'user'))) return []
+    return (yield* cancelIn(transaction, { id: row.id, stage, round: row.round })) ?? []
+  })
+
 /** Cancel: the stage, the pending needs and the stops owed in one transaction, then the stops. */
 const cancel = (mission: Mission) =>
   Effect.gen(function* () {
-    const stoppers = yield* MissionStoppers
     yield* mutate('cancelling a mission', (transaction) =>
       Effect.gen(function* () {
-        const written = yield* transaction
-          .update(missions)
-          .set({ stage: 'cancelled', cleanup: 'awaiting-confirmation', updatedAt: now() })
-          .where(and(eq(missions.id, mission.id), eq(missions.stage, mission.stage)))
-          .returning({ id: missions.id })
-          .pipe(Effect.mapError(refusedWhile('cancelling the mission')))
-        if (written.length === 0) return yield* movedMeanwhile('cancel', mission.stage)
-        const expired = yield* expireMissionNeeds(transaction, mission.id, CANCELLED)
-        if (stoppers.length > 0) {
-          yield* transaction
-            .insert(missionStops)
-            .values(
-              stoppers.map((stopper) => ({
-                missionId: mission.id,
-                stopper: stopper.name,
-                failedReason: null,
-              })),
-            )
-            // A Freeze's stops not done yet (#92) are owed once.
-            .onConflictDoNothing()
-            .pipe(Effect.mapError(refusedWhile('writing the stops')))
-        }
-        return {
-          result: undefined,
-          events: [
-            missionEvent('mission.cancelled', mission.id, BY_THE_USER, {
-              from: mission.stage,
-              actor: 'user',
-              round: mission.round,
-              cleanup: 'awaiting-confirmation',
-            }),
-            ...expired,
-          ],
-        }
+        const events = yield* cancelIn(transaction, mission)
+        if (events === null) return yield* movedMeanwhile('cancel', mission.stage)
+        return { result: undefined, events }
       }),
     )
     yield* runStops(mission.id)

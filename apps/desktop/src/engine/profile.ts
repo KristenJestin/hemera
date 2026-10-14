@@ -628,6 +628,8 @@ export const startProfile = (
                     ),
               },
             ]),
+        // The Building ended as cancelled, once its tree is stopped.
+        builder.stopper,
         ...(parts.missions?.stoppers ?? []),
       ],
       activity:

@@ -1575,15 +1575,14 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * What follows an answer, once it is kept: a red sent back is an attempt on the proof for the
-   * Builder, with both outputs (more information was told with the answer). Answers whether the
-   * user chose to cancel the mission.
+   * Builder, with both outputs (more information was told with the answer, and a cancel of the
+   * mission kept with it).
    */
   const afterAnswer = (missionId: string, kind: string, scenario: string, answer: string) =>
     Effect.gen(function* () {
       const database = yield* Database
       const building = yield* activeBuildingIn(database, missionId)
-      if (building === null) return false
-      if (kind === 'already_passes' && answer === CANCEL_MISSION) return true
+      if (building === null) return
       if (kind === 'proofs_unproven') {
         // Each proof run again, then the end judged again, out of the turn the end may take. Counted
         // as running from now: the Builder's turn on the answer judges nothing before it ends.
@@ -1615,10 +1614,10 @@ export const buildingProofs = (parts: ProofParts) => {
             Effect.catchCause((cause) => said(`the proofs were not run again: ${String(cause)}`)),
           ),
         )
-        return false
+        return
       }
       const row = yield* scenarioProofIn(database, building.id, scenario)
-      if (row === null || stateOf(row) !== 'waiting_red') return false
+      if (row === null || stateOf(row) !== 'waiting_red') return
       const run = (yield* proofRunsIn(database, building.id)).find(
         (one) => one.id === row.heldRunId,
       )
@@ -1642,7 +1641,6 @@ export const buildingProofs = (parts: ProofParts) => {
           `Make the test fail as Planning saw it, within the Proof block and never by changing its expected result, then call proof_run(${scenario}).`,
         )
       }
-      return false
     })
 
   /**
