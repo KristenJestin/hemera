@@ -1172,8 +1172,8 @@ export const forgePort = (settings: Pick<ForgeSettings, 'waitHold' | 'settleHold
 
       // A need ended elsewhere: Retry and the recheck withdraw it themselves when the CLI turned
       // ready after their own check had kept it. Its row goes now, not at the next start.
-      const ended = yield* DomainEvents.use((domain) => domain.subscribe)
-      yield* ended.pipe(
+      const endings = yield* DomainEvents.use((domain) => domain.subscribe)
+      yield* endings.pipe(
         Stream.filter((event) => event.type === 'need.withdrawn' || event.type === 'need.expired'),
         Stream.runForEach((event) =>
           provided(forgetNeed(event.entityId)).pipe(Effect.catch(() => Effect.void)),
