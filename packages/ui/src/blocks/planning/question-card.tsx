@@ -329,67 +329,38 @@ export interface QuestionCardProps extends Pick<
   mentionables: readonly Mentionable[]
 }
 
-/**
- * A question of the Planner: its options with the recommended one starred and why, answered by a
- * press that leaves at once (no Send) and fills the option at once, or in the user's own words
- * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
- * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
- * Answered, the card folds at once: the question, then its answer and Change; its dot and a word say
- * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
- * is said as a change; a retired question stays, with its reason. Open or folded, the question
- * has its row to itself: the dot and its word, and the waiting clock, sit under it. Everything but a press on its
- * way and Change is drawn from the question: a card is the same live and after a restart.
- */
-export function QuestionCard({
-  question,
-  discussed,
-  mentionables,
-  onAnswer,
-  onWaitOnSomeone,
-  onCopyDraft,
-  onAcceptProposed,
-  onDismissProposed,
-  onDiscuss,
-}: QuestionCardProps): ReactNode {
+/** What the open card holds beside the question: the user's words, the note, and their sending. */
+interface Drafts {
+  readonly ownWords: boolean
+  readonly toggleOwnWords: () => void
+  readonly text: string
+  readonly setText: (text: string) => void
+  /** Opens the words with a proposal's text in them: sent, they accept that proposal. */
+  readonly edit: (proposal: ProposedAnswer) => void
+  readonly noting: boolean
+  readonly toggleNoting: () => void
+  readonly note: string
+  readonly setNote: (note: string) => void
+  readonly answering: Sending
+  readonly waiting: Sending
+  readonly submit: () => void
+  readonly wait: () => void
+}
+
+type DraftHandlers = Pick<QuestionCardProps, 'onAnswer' | 'onWaitOnSomeone' | 'onAcceptProposed'>
+
+function useDrafts(
+  question: Question,
+  { onAnswer, onWaitOnSomeone, onAcceptProposed }: DraftHandlers,
+): Drafts {
   const [ownWords, setOwnWords] = useState(false)
   const [text, setText] = useState('')
   // The proposal whose words are being edited: read when the answer is sent, never drawn.
   const editing = useRef<string | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
-  // Change opens a folded card again until the next answer comes: the count of answers then.
-  const [changingAt, setChangingAt] = useState<number | null>(null)
-  // The option pressed, shown at once, until the answer it sent comes back with the question.
-  const [pressed, setPressed] = useState<{ optionId: string; after: number } | null>(null)
-  const folding = useTransition(fold)
-  const choosing = useSending()
   const answering = useSending()
   const waiting = useSending()
-  const answer = latest(question)
-  const count = question.answers.length
-  const pressing =
-    pressed !== null && pressed.after === count && choosing.refusal === undefined
-      ? pressed.optionId
-      : null
-  if (RETIRED.has(question.state)) {
-    return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
-  }
-  // Answered, it folds at once to its line — on the press, before the engine has it — and stays
-  // folded while the answer goes on its way. Apart from a press on its way and Change, what it
-  // shows comes from the question alone: the same card live and after a restart.
-  const folded =
-    pressing !== null ||
-    (question.state === 'answered' && answer !== undefined && changingAt !== count)
-  const step: StepShown =
-    pressing === null ? answerStepOf(question) : choosing.busy ? 'sending' : 'received'
-  const press = (optionId: string): void => {
-    // A press while an answer is on its way sends nothing: `send` keeps to one.
-    choosing.send(() => {
-      setPressed({ optionId, after: count })
-      return onAnswer(question.id, { optionId })
-    })
-  }
-  const proposal = question.proposals[0]
   const submit = (): void => {
     const said = text.trim()
     if (said === '') return
@@ -415,6 +386,245 @@ export function QuestionCard({
         setNote('')
       },
     )
+  }
+  return {
+    ownWords,
+    toggleOwnWords: () => {
+      editing.current = null
+      setOwnWords(!ownWords)
+    },
+    text,
+    setText,
+    edit: (proposal) => {
+      editing.current = proposal.id
+      setText(proposal.text)
+      setOwnWords(true)
+    },
+    noting,
+    toggleNoting: () => setNoting(!noting),
+    note,
+    setNote,
+    answering,
+    waiting,
+    submit,
+    wait,
+  }
+}
+
+interface OpenQuestionProps extends Pick<
+  QuestionCardProps,
+  | 'question'
+  | 'discussed'
+  | 'mentionables'
+  | 'onCopyDraft'
+  | 'onAcceptProposed'
+  | 'onDismissProposed'
+  | 'onDiscuss'
+> {
+  /** Where the answer shown stands. */
+  step: StepShown
+  /** The option shown as chosen: the one pressed, or the answer's. */
+  chosen: string | null
+  /** The answer in words, when the user gave their own. */
+  answer: AnswerVersion | undefined
+  choosing: Sending
+  drafts: Drafts
+  onPress: (optionId: string) => void
+}
+
+/** The card of a question still to answer, or being changed: all that can be done to it. */
+function OpenQuestion({
+  question,
+  discussed,
+  mentionables,
+  onCopyDraft,
+  onAcceptProposed,
+  onDismissProposed,
+  onDiscuss,
+  step,
+  chosen,
+  answer,
+  choosing,
+  drafts,
+  onPress,
+}: OpenQuestionProps): ReactNode {
+  const proposal = question.proposals[0]
+  return (
+    <article
+      id={targetId({ kind: 'question', id: question.id })}
+      tabIndex={-1}
+      aria-label={`${question.id} · ${question.text}`}
+      className="flex min-w-0 flex-col gap-3 rounded-md px-3 py-3 outline-none focus-ring"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <span className={ID}>{question.id}</span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h3 className="text-sm font-medium break-words">{question.text}</h3>
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="flex items-center gap-1.5">
+              <InputDot state={step === 'sending' ? 'received' : step} />
+              <span role="status" className={QUIET}>
+                {STEP_WORDS[step]}
+              </span>
+            </span>
+            {question.state === 'waiting' && (
+              <Legend label="Waiting on someone">
+                <span aria-hidden="true" className="flex text-muted-foreground">
+                  <IconClockPause size="sm" />
+                </span>
+              </Legend>
+            )}
+          </span>
+        </div>
+      </div>
+      {question.why !== '' && <p className={cn(QUIET, 'break-words')}>{question.why}</p>}
+      <Options question={question} chosen={chosen} answering={choosing} onPress={onPress} />
+      <NotSent refusal={choosing.refusal} />
+      <p className={cn(QUIET, 'flex min-w-0 items-start gap-1.5 break-words')}>
+        <span aria-hidden="true" className="flex shrink-0 pt-0.5">
+          <IconStar size="sm" />
+        </span>
+        <span className="min-w-0">
+          <span className="font-medium text-foreground">Recommended {question.recommended}</span>
+          {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
+        </span>
+      </p>
+      {answer !== undefined && answer.text !== null && (
+        <blockquote className="border-l-2 border-border pl-3 text-sm break-words">
+          {answer.text}
+        </blockquote>
+      )}
+      <ChangedAnswer question={question} />
+      {question.state === 'waiting' && <WaitingBox question={question} onCopy={onCopyDraft} />}
+      {proposal !== undefined && (
+        <Proposed
+          proposal={proposal}
+          onAccept={() => onAcceptProposed(proposal.id, null)}
+          onEdit={() => drafts.edit(proposal)}
+          onDismiss={() => onDismissProposed(proposal.id)}
+        />
+      )}
+      <Unfold open={drafts.ownWords}>
+        <div className="flex flex-col gap-1">
+          <MentionField
+            label={`Your answer to ${question.id}`}
+            placeholder="In your own words…"
+            value={drafts.text}
+            onValueChange={(value) => drafts.setText(value)}
+            mentionables={mentionables}
+            onSubmit={drafts.submit}
+            disabled={drafts.answering.busy}
+          />
+          <NotSent refusal={drafts.answering.refusal} />
+        </div>
+      </Unfold>
+      <Unfold open={drafts.noting}>
+        <Input
+          label="Who, or what, it waits on"
+          placeholder="Optional"
+          size="sm"
+          value={drafts.note}
+          onValueChange={drafts.setNote}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') drafts.wait()
+          }}
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              state={drafts.waiting.busy ? 'loading' : 'idle'}
+              onClick={drafts.wait}
+            >
+              Wait
+            </Button>
+          }
+        />
+      </Unfold>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={drafts.ownWords}
+          onClick={drafts.toggleOwnWords}
+        >
+          In my own words
+        </Button>
+        {question.state === 'open' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={drafts.noting}
+            onClick={drafts.toggleNoting}
+          >
+            <IconClockPause size="sm" />
+            I’m waiting on someone
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onDiscuss({ kind: 'question', id: question.id })}
+        >
+          <IconMessages size="sm" />
+          {discussed ? 'Open the discussion' : 'Discuss'}
+        </Button>
+      </div>
+    </article>
+  )
+}
+
+/**
+ * A question of the Planner: its options with the recommended one starred and why, answered by a
+ * press that leaves at once (no Send) and fills the option at once, or in the user's own words
+ * through the mention field; "I'm waiting on someone" with an optional note, and the Planner's
+ * drafted message with Copy; an answer proposed from the ticket with Accept, Edit and Dismiss.
+ * Answered, the card folds at once: the question, then its answer and Change; its dot and a word say
+ * where the answer stands — Sending, Sent, With the Planner, Taken into account. A changed answer
+ * is said as a change; a retired question stays, with its reason. Open or folded, the question
+ * has its row to itself: the dot and its word, and the waiting clock, sit under it. Everything but a press on its
+ * way and Change is drawn from the question: a card is the same live and after a restart.
+ */
+export function QuestionCard({
+  question,
+  discussed,
+  mentionables,
+  onAnswer,
+  onWaitOnSomeone,
+  onCopyDraft,
+  onAcceptProposed,
+  onDismissProposed,
+  onDiscuss,
+}: QuestionCardProps): ReactNode {
+  // Change opens a folded card again until the next answer comes: the count of answers then.
+  const [changingAt, setChangingAt] = useState<number | null>(null)
+  // The option pressed, shown at once, until the answer it sent comes back with the question.
+  const [pressed, setPressed] = useState<{ optionId: string; after: number } | null>(null)
+  const folding = useTransition(fold)
+  const choosing = useSending()
+  const drafts = useDrafts(question, { onAnswer, onWaitOnSomeone, onAcceptProposed })
+  const answer = latest(question)
+  const count = question.answers.length
+  const pressing =
+    pressed !== null && pressed.after === count && choosing.refusal === undefined
+      ? pressed.optionId
+      : null
+  if (RETIRED.has(question.state)) {
+    return <RetiredQuestion question={question} discussed={discussed} onDiscuss={onDiscuss} />
+  }
+  // Answered, it folds at once to its line — on the press, before the engine has it — and stays
+  // folded while the answer goes on its way. Apart from a press on its way and Change, what it
+  // shows comes from the question alone: the same card live and after a restart.
+  const folded =
+    pressing !== null ||
+    (question.state === 'answered' && answer !== undefined && changingAt !== count)
+  const step: StepShown =
+    pressing === null ? answerStepOf(question) : choosing.busy ? 'sending' : 'received'
+  const press = (optionId: string): void => {
+    // A press while an answer is on its way sends nothing: `send` keeps to one.
+    choosing.send(() => {
+      setPressed({ optionId, after: count })
+      return onAnswer(question.id, { optionId })
+    })
   }
   // Answered, the card folds to its line: the card collapses as the line comes, on `fold`.
   return (
@@ -448,142 +658,21 @@ export function QuestionCard({
           exit={collapse}
           transition={folding}
         >
-          <article
-            id={targetId({ kind: 'question', id: question.id })}
-            tabIndex={-1}
-            aria-label={`${question.id} · ${question.text}`}
-            className="flex min-w-0 flex-col gap-3 rounded-md px-3 py-3 outline-none focus-ring"
-          >
-            <div className="flex min-w-0 items-start gap-2">
-              <span className={ID}>{question.id}</span>
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <h3 className="text-sm font-medium break-words">{question.text}</h3>
-                <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="flex items-center gap-1.5">
-                    <InputDot state={step === 'sending' ? 'received' : step} />
-                    <span role="status" className={QUIET}>
-                      {STEP_WORDS[step]}
-                    </span>
-                  </span>
-                  {question.state === 'waiting' && (
-                    <Legend label="Waiting on someone">
-                      <span aria-hidden="true" className="flex text-muted-foreground">
-                        <IconClockPause size="sm" />
-                      </span>
-                    </Legend>
-                  )}
-                </span>
-              </div>
-            </div>
-            {question.why !== '' && <p className={cn(QUIET, 'break-words')}>{question.why}</p>}
-            <Options
-              question={question}
-              chosen={pressing ?? answer?.optionId ?? null}
-              answering={choosing}
-              onPress={press}
-            />
-            <NotSent refusal={choosing.refusal} />
-            <p className={cn(QUIET, 'flex min-w-0 items-start gap-1.5 break-words')}>
-              <span aria-hidden="true" className="flex shrink-0 pt-0.5">
-                <IconStar size="sm" />
-              </span>
-              <span className="min-w-0">
-                <span className="font-medium text-foreground">
-                  Recommended {question.recommended}
-                </span>
-                {question.recommendedReason === '' ? '' : ` · ${question.recommendedReason}`}
-              </span>
-            </p>
-            {answer !== undefined && answer.text !== null && (
-              <blockquote className="border-l-2 border-border pl-3 text-sm break-words">
-                {answer.text}
-              </blockquote>
-            )}
-            <ChangedAnswer question={question} />
-            {question.state === 'waiting' && (
-              <WaitingBox question={question} onCopy={onCopyDraft} />
-            )}
-            {proposal !== undefined && (
-              <Proposed
-                proposal={proposal}
-                onAccept={() => onAcceptProposed(proposal.id, null)}
-                onEdit={() => {
-                  editing.current = proposal.id
-                  setText(proposal.text)
-                  setOwnWords(true)
-                }}
-                onDismiss={() => onDismissProposed(proposal.id)}
-              />
-            )}
-            <Unfold open={ownWords}>
-              <div className="flex flex-col gap-1">
-                <MentionField
-                  label={`Your answer to ${question.id}`}
-                  placeholder="In your own words…"
-                  value={text}
-                  onValueChange={(value) => setText(value)}
-                  mentionables={mentionables}
-                  onSubmit={submit}
-                  disabled={answering.busy}
-                />
-                <NotSent refusal={answering.refusal} />
-              </div>
-            </Unfold>
-            <Unfold open={noting}>
-              <Input
-                label="Who, or what, it waits on"
-                placeholder="Optional"
-                size="sm"
-                value={note}
-                onValueChange={setNote}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') wait()
-                }}
-                action={
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    state={waiting.busy ? 'loading' : 'idle'}
-                    onClick={wait}
-                  >
-                    Wait
-                  </Button>
-                }
-              />
-            </Unfold>
-            <div className="flex flex-wrap items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-expanded={ownWords}
-                onClick={() => {
-                  editing.current = null
-                  setOwnWords(!ownWords)
-                }}
-              >
-                In my own words
-              </Button>
-              {question.state === 'open' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-expanded={noting}
-                  onClick={() => setNoting(!noting)}
-                >
-                  <IconClockPause size="sm" />
-                  I’m waiting on someone
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDiscuss({ kind: 'question', id: question.id })}
-              >
-                <IconMessages size="sm" />
-                {discussed ? 'Open the discussion' : 'Discuss'}
-              </Button>
-            </div>
-          </article>
+          <OpenQuestion
+            question={question}
+            discussed={discussed}
+            mentionables={mentionables}
+            onCopyDraft={onCopyDraft}
+            onAcceptProposed={onAcceptProposed}
+            onDismissProposed={onDismissProposed}
+            onDiscuss={onDiscuss}
+            step={step}
+            chosen={pressing ?? answer?.optionId ?? null}
+            answer={answer}
+            choosing={choosing}
+            drafts={drafts}
+            onPress={press}
+          />
         </motion.div>
       )}
     </AnimatePresence>
