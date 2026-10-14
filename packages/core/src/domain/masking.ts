@@ -828,13 +828,37 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
     ? [[0, text.length]]
     : yield* jsonLines(text, hidden)
   for (const [start] of units) yield* value(start)
+  const outsideJson: Edit[] = []
   for (const [start, end] of yield* outside(hidden, units)) {
-    if (text.slice(start, end).trim() !== '') edits.push({ start, end, by: MASK })
+    if (text.slice(start, end).trim() !== '') outsideJson.push({ start, end, by: MASK })
+    if (due()) yield
   }
-  return yield* applied(
-    text,
-    edits.toSorted((a, b) => a.start - b.start),
-  )
+  return yield* applied(text, yield* inOrder(edits, outsideJson))
+}
+
+/**
+ * Two lists of edits, each in order, as one in order: in one pass and in steps, where sorting
+ * them together would hold the engine on an output with millions of masks.
+ */
+function* inOrder(
+  first: ReadonlyArray<Edit>,
+  second: ReadonlyArray<Edit>,
+): Steps<ReadonlyArray<Edit>> {
+  const out: Edit[] = []
+  let inFirst = 0
+  let inSecond = 0
+  for (;;) {
+    const fromFirst = first[inFirst]
+    const fromSecond = second[inSecond]
+    const takeFirst =
+      fromFirst !== undefined && (fromSecond === undefined || fromFirst.start <= fromSecond.start)
+    const edit = takeFirst ? fromFirst : fromSecond
+    if (edit === undefined) return out
+    if (takeFirst) inFirst += 1
+    else inSecond += 1
+    out.push(edit)
+    if (due()) yield
+  }
 }
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */
