@@ -20,6 +20,7 @@ import {
   fetchTransport,
 } from '../src/engine/permissions/jev.ts'
 import { type FakeJev, fakeJev, scored, scoredBody } from './fake-jev.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 
 const KEY = 'jev-test-key-0123456789'
 
@@ -111,6 +112,15 @@ describe('What Jev is told', () => {
     expect(body).not.toContain('tok-registered-77')
     expect(body).not.toContain(KEY)
     expect(body).toContain('•••')
+  })
+
+  test('a JSON line the user wrote, holding a quoted credential and a known value, reaches Jev with nothing of either, and still JSON (#397)', async () => {
+    const pasted = JSON.stringify([QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+    await ask({ humanContext: [`The user answered:\n${pasted}`] }, [KNOWN_SECRET])
+    const sent = JSON.parse(jev.received[0]?.body ?? '{}')
+    const [head, line] = String(sent.state.user_context[0]).split('\n')
+    expect(head).toBe('The user answered:')
+    expectMaskedJson(line)
   })
 
   test('an action whose destination masking would change is not sent', async () => {
