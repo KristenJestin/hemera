@@ -1087,7 +1087,7 @@ describe('The agents do not write during Review', () => {
       image: { mimeType: 'image/png', data: PNG.toString('base64') },
     })
     expect(seen.other.ok).toBe(false)
-    expect(seen.other.text).toContain(`missions/${seen.otherKey}`)
+    expect(seen.other.text).toContain(join('missions', seen.otherKey))
   })
 })
 
