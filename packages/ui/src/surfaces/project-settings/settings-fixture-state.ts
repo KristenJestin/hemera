@@ -13,10 +13,8 @@ import {
 } from '../../blocks/project-settings/recipe-model.ts'
 import type { NeverLine } from '../../blocks/project-settings/never.tsx'
 import type { ProjectRoleModel } from '../../blocks/project-settings/role-models.tsx'
-import type {
-  RepositoryDraft,
-  SettingsRepository,
-} from '../../blocks/project-settings/repositories.tsx'
+import type { RepositoryDraft } from '../../blocks/project-settings/repositories.tsx'
+import type { SettingsRepository } from '../../blocks/project-settings/repositories-model.ts'
 import type { SettingsRun } from '../../blocks/project-settings/services.tsx'
 import type { SettingsVariable, VariableDraft } from '../../blocks/project-settings/variables.tsx'
 import {

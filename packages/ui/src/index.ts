@@ -230,11 +230,13 @@ export {
 export {
   RepositoriesSection,
   RepositoryForm,
-  type BaseFreshness,
   type RemoteChoice,
   type RepositoryDraft,
-  type SettingsRepository,
 } from './blocks/project-settings/repositories.tsx'
+export {
+  type BaseFreshness,
+  type SettingsRepository,
+} from './blocks/project-settings/repositories-model.ts'
 export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
 export { CommandForm, CommandsSection } from './blocks/project-settings/commands.tsx'
 export {
