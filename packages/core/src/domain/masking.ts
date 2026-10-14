@@ -64,21 +64,37 @@ const PREFIXED_TOKEN = new RegExp(
     String.raw`\bATATT[A-Za-z0-9_=-]{16,}`,
     String.raw`\bBBDC-[A-Za-z0-9+/_=-]{16,}`,
     String.raw`\bAKIA[0-9A-Z]{16}`,
-    String.raw`\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`,
   ].join('|'),
   'g',
 )
 
+/*
+ * The shapes below begin only where a run of the characters they cross begins (a lookbehind):
+ * begun at each word of a run instead, each would cross the rest of the run again, and a run of
+ * `a-a-a-…` took time in the square of its length. What a later start in the run would find, the
+ * one at its beginning finds too, so nothing is masked less.
+ */
+
+/**
+ * A JSON Web Token: three runs of base64url joined by dots, the first two opening on `eyJ`. Its
+ * first run may hold more before it, after a `-`: the first `eyJ` that opens a word is taken, at
+ * once (a lookahead read back), since if a token does not follow it, none follows a later one.
+ */
+const WEB_TOKEN =
+  /(?<![A-Za-z0-9_-])(?=((?:[A-Za-z0-9_-]*?-)??)eyJ)\1eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g
+
 /** The password in a URL's user information; the scheme, the user and the host stay. */
-const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi
+const URL_PASSWORD = /((?<![a-z0-9+.-])[a-z0-9+.-]+:\/\/[^\s:/@]+:)[^\s@/]+@/gi
 
 /**
  * A credential given a value in text, by name: `password=…`, `token: …`, `api_key=…`, and the
  * names built on them (`DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `SECRET_KEY`). A plural
- * (`max_tokens`) is not one.
+ * (`max_tokens`) is not one. The name is the whole run of name characters before the separator,
+ * none of which can stand in a name: a lookahead finds the word in it, then the run is taken at
+ * once (a lookahead read back), never given back a character at a time.
  */
 const LABELLED_CREDENTIAL = new RegExp(
-  String.raw`\b([A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-][A-Za-z0-9_-]*)?)(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
+  String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-]|(?![A-Za-z0-9_-])))(?=([A-Za-z0-9_-]+))\1(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
   'gi',
 )
 
@@ -113,6 +129,7 @@ const SHAPES: ReadonlyArray<Shape> = [
   [BEARER, ([scheme = '']) => `${scheme} ${MASK}`],
   [BASIC, ([scheme = '']) => `${scheme} ${MASK}`],
   [PREFIXED_TOKEN, () => MASK],
+  [WEB_TOKEN, ([before = '']) => `${before}${MASK}`],
   [URL_PASSWORD, ([before = '']) => `${before}${MASK}@`],
   [LABELLED_CREDENTIAL, ([label = '', separator = '']) => `${label}${separator}${MASK}`],
 ]
@@ -446,8 +463,11 @@ export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked
     const read = textOf(characters)
     const marked: Span[] = []
     let at = 0
+    // The spans are in order and apart, as the characters: one index moves forward through them.
+    let next = 0
     for (const [character, from, to] of characters) {
-      if (spans.some(([spanFrom, spanTo]) => spanFrom < to && spanTo > from)) {
+      while ((spans[next]?.[1] ?? Number.POSITIVE_INFINITY) <= from) next += 1
+      if ((spans[next]?.[0] ?? Number.POSITIVE_INFINITY) < to) {
         marked.push([at, at + character.length])
       }
       at += character.length

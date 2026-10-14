@@ -557,3 +557,66 @@ describe('What a CLI printed is masked at least as much as the whole text would 
     )
   })
 })
+
+/** How long `work` takes, run `times` times, in milliseconds. */
+const timed = (work: () => string, times: number): number => {
+  const start = performance.now()
+  for (let run = 0; run < times; run += 1) work()
+  return performance.now() - start
+}
+
+/**
+ * How much longer masking takes on an input 8 times larger: about 8 when it is linear, 64 when
+ * quadratic. Each side is the fastest of five runs, each long enough to be measured.
+ */
+const growth = (make: (size: number) => string, mask: (text: string) => string, size: number) => {
+  const small = make(size)
+  const large = make(8 * size)
+  let times = 1
+  while (timed(() => mask(small), times) < 10) times *= 2
+  const fastest = (text: string) =>
+    Math.min(...Array.from({ length: 5 }, () => timed(() => mask(text), times)))
+  return fastest(large) / fastest(small)
+}
+
+describe('Masking takes time in proportion to what it masks, whatever it is given', () => {
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const text = (printed: string) => maskText(printed, [])
+  const printed = (output: string) => maskPrinted(output, [])
+  const cases: ReadonlyArray<
+    readonly [string, (size: number) => string, (text: string) => string, number]
+  > = [
+    ['a run of a-a-a- (labels)', (size) => 'a-'.repeat(size / 2), text, 4_000],
+    ['a run of a.a.a. (URLs)', (size) => 'a.'.repeat(size / 2), text, 4_000],
+    ['a run of eyJ-eyJ- (web tokens)', (size) => 'eyJ-'.repeat(size / 4), text, 4_000],
+    ['a run of password-password-', (size) => 'password-'.repeat(size / 9), text, 450],
+    ['a run of password_password_', (size) => 'password_'.repeat(size / 9), text, 450],
+    [
+      'a run of a-a-a- in a JSON string',
+      (size) => JSON.stringify([{ body: 'a-'.repeat(size / 2) }]),
+      printed,
+      4_000,
+    ],
+    [
+      'a JSON string holding many tokens',
+      (size) => JSON.stringify({ body: Array.from({ length: size / 25 }, () => token).join(' ') }),
+      printed,
+      20_000,
+    ],
+    [
+      'a JSON string holding many labelled values',
+      (size) => JSON.stringify({ body: 'password="x" '.repeat(size / 13) }),
+      printed,
+      4_000,
+    ],
+  ]
+  for (const [what, make, mask, size] of cases) {
+    test(
+      `${what}: 8 times the input takes less than 20 times as long`,
+      { timeout: 600_000 },
+      () => {
+        expect(growth(make, mask, size)).toBeLessThan(20)
+      },
+    )
+  }
+})
