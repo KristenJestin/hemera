@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { loadMentionEditor } from '../components/mention-field/mention-field.tsx'
+import { loadMentionEditor } from '../components/mention-field/load-mention-editor.ts'
 import { AppFixture, LONG_NAME, MANY_PROJECTS, NOTICES } from './shell-fixtures.tsx'
 
 /**

@@ -78,7 +78,6 @@ export {
 export { ChatPage, type ChatPageProps, type ChatTurn } from './surfaces/chat/chat-page.tsx'
 export {
   kindOf,
-  loadMentionEditor,
   MentionBadge,
   MentionField,
   MentionFieldSkeleton,
@@ -88,6 +87,7 @@ export {
   type MentionKind,
   type MentionRef,
 } from './components/mention-field/mention-field.tsx'
+export { loadMentionEditor } from './components/mention-field/load-mention-editor.ts'
 export {
   EffortGauge,
   ModelPicker,
