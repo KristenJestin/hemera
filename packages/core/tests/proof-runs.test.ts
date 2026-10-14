@@ -21,6 +21,15 @@ import {
   validRed,
 } from '../src/domain/index.ts'
 
+/** A repository holding the test file alone, at a path of no language: nothing else to read. */
+const ALONE = { path: 'test', read: () => null }
+
+/** A repository of the given files, the test file among them: nothing else to read. */
+const repository = (path: string, files: ReadonlyArray<readonly [string, string]>) => {
+  const all = new Map(files)
+  return { path, read: (one: string) => all.get(one) ?? null }
+}
+
 const TAP_ASSERTION = `TAP version 13
 # Subtest: exports as CSV
 not ok 1 - exports as CSV
@@ -370,7 +379,7 @@ describe('A valid red', () => {
       '  it(`writes ${kind}`, () => {})',
       '})',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     expect(names).toEqual([
       {
         title: { template: 'writes ${kind}' },
@@ -430,29 +439,38 @@ describe('A valid red', () => {
 
   test('the tests a proof adds are named from its new file, or from the lines its patch adds', () => {
     expect(
-      addedTestNames({
-        insertion: 'new_file',
-        code: 'test(\'exports as CSV\', () => {})\nit("reads it back", () => {})\n',
-        patch: null,
-      }),
+      addedTestNames(
+        {
+          insertion: 'new_file',
+          code: 'test(\'exports as CSV\', () => {})\nit("reads it back", () => {})\n',
+          patch: null,
+        },
+        ALONE,
+      ),
     ).toEqual(['exports as CSV', 'reads it back'])
     expect(
-      addedTestNames({
-        insertion: 'addition',
-        code: "test('one is one', () => {})\ntest('the invoices export as Markdown', () => {})\n",
-        patch:
-          "@@ -1 +1,2 @@\n test('one is one', () => {})\n+test('the invoices export as Markdown', () => {})\n",
-      }),
+      addedTestNames(
+        {
+          insertion: 'addition',
+          code: "test('one is one', () => {})\ntest('the invoices export as Markdown', () => {})\n",
+          patch:
+            "@@ -1 +1,2 @@\n test('one is one', () => {})\n+test('the invoices export as Markdown', () => {})\n",
+        },
+        ALONE,
+      ),
     ).toEqual(['the invoices export as Markdown'])
   })
 
   test('test.each and it.each name their tests too', () => {
     expect(
-      addedTestNames({
-        insertion: 'new_file',
-        code: "test.each([['csv', 1], ['md', 2]])('exports %s', (kind) => {})\nit.each`\n  a\n`('reads $a', () => {})\n",
-        patch: null,
-      }),
+      addedTestNames(
+        {
+          insertion: 'new_file',
+          code: "test.each([['csv', 1], ['md', 2]])('exports %s', (kind) => {})\nit.each`\n  a\n`('reads $a', () => {})\n",
+          patch: null,
+        },
+        ALONE,
+      ),
     ).toEqual(['exports %s', 'reads $a'])
   })
 
@@ -678,12 +696,15 @@ describe('A red read from the words of each runner', () => {
 
   test('a pytest addition into a file whose older test already fails, the new test passing, is not a red', () => {
     const path = 'tests/test_export.py'
-    const names = addedTestNames({
-      insertion: 'addition',
-      code: 'def test_one_is_one():\n    assert 1 == 2\n\n\ndef test_exports_markdown():\n    assert to_markdown([]) == "| total |"\n',
-      patch:
-        '@@ -5,0 +7,4 @@\n+\n+\n+def test_exports_markdown():\n+    assert to_markdown([]) == "| total |"\n',
-    })
+    const names = addedTestNames(
+      {
+        insertion: 'addition',
+        code: 'def test_one_is_one():\n    assert 1 == 2\n\n\ndef test_exports_markdown():\n    assert to_markdown([]) == "| total |"\n',
+        patch:
+          '@@ -5,0 +7,4 @@\n+\n+\n+def test_exports_markdown():\n+    assert to_markdown([]) == "| total |"\n',
+      },
+      ALONE,
+    )
     expect(names).toEqual(['test_exports_markdown'])
     expect(validRed(run(PYTEST_OTHER_FAILS, 1, path), path, names)).toBe(false)
     expect(validRed(run(PYTEST_BOTH_FAIL, 1, path), path, names)).toBe(true)
@@ -691,11 +712,14 @@ describe('A red read from the words of each runner', () => {
 
   test('a Go func TestX failing is a red, by name', () => {
     const path = 'export_test.go'
-    const names = addedTestNames({
-      insertion: 'new_file',
-      code: 'package acme\n\nimport "testing"\n\nfunc TestExportMarkdown(t *testing.T) {\n\tif got := ToMarkdown(); got != "| total |" {\n\t\tt.Errorf("got %q", got)\n\t}\n}\n',
-      patch: null,
-    })
+    const names = addedTestNames(
+      {
+        insertion: 'new_file',
+        code: 'package acme\n\nimport "testing"\n\nfunc TestExportMarkdown(t *testing.T) {\n\tif got := ToMarkdown(); got != "| total |" {\n\t\tt.Errorf("got %q", got)\n\t}\n}\n',
+        patch: null,
+      },
+      ALONE,
+    )
     expect(names).toEqual(['TestExportMarkdown'])
     expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, names)).toBe(true)
     expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, ['TestImportCsv'])).toBe(false)
@@ -703,12 +727,15 @@ describe('A red read from the words of each runner', () => {
 
   test('a Rust #[test] fn x failing is a red, by name', () => {
     const path = 'src/lib.rs'
-    const names = addedTestNames({
-      insertion: 'addition',
-      code: '',
-      patch:
-        '@@ -8,0 +9,5 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
-    })
+    const names = addedTestNames(
+      {
+        insertion: 'addition',
+        code: '',
+        patch:
+          '@@ -8,0 +9,5 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
+      },
+      ALONE,
+    )
     expect(names).toEqual(['exports_markdown'])
     expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, names)).toBe(true)
     expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, ['one_is_one'])).toBe(false)
@@ -745,7 +772,7 @@ describe('A red read from the words of each runner', () => {
       'async fn exports_async() {}',
       'fn not_a_test() {}',
     ].join('\n')
-    expect(addedTestNames({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTestNames({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       'test_writes_csv',
       'test_reads_back',
       'TestImportCsv',
@@ -760,7 +787,7 @@ describe('A red read from the words of each runner', () => {
       ['export_test.go', 'func TestExportMarkdown(t *testing.T) {\n\tt.Fatal("no")\n}\n'],
       ['src/lib.rs', '#[test]\nfn exports_markdown() {\n    assert!(false);\n}\n'],
     ] as const) {
-      const names = addedTestNames({ insertion: 'new_file', code, patch: null })
+      const names = addedTestNames({ insertion: 'new_file', code, patch: null }, ALONE)
       expect(names.length).toBe(1)
       expect(validRed(run(output, 1, path), path, names)).toBe(false)
     }
@@ -954,11 +981,14 @@ const GO_SUBTESTS_PATCH = [
 describe('A red read from pytest parametrised tests and Go subtests', () => {
   test('a pytest parametrised test failing on some of its cases is a red, by its declared name', () => {
     const path = 'tests/test_export.py'
-    const names = addedTestNames({
-      insertion: 'addition',
-      code: '',
-      patch: PYTEST_PARAMETRISED_PATCH,
-    })
+    const names = addedTestNames(
+      {
+        insertion: 'addition',
+        code: '',
+        patch: PYTEST_PARAMETRISED_PATCH,
+      },
+      ALONE,
+    )
     expect(names).toEqual(['test_exports'])
     expect(validRed(run(PYTEST_PARAMETRISED_FAILS, 1, path), path, names)).toBe(true)
     expect(validRed(run(PYTEST_PARAMETRISED_FAILS, 1, path), path, ['test_one_is_one'])).toBe(false)
@@ -976,11 +1006,14 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
 
   test('a pytest parametrised test whose cases pass or are skipped, beside an older failing test, is not a red', () => {
     const path = 'tests/test_export.py'
-    const names = addedTestNames({
-      insertion: 'addition',
-      code: '',
-      patch: PYTEST_PARAMETRISED_PATCH,
-    })
+    const names = addedTestNames(
+      {
+        insertion: 'addition',
+        code: '',
+        patch: PYTEST_PARAMETRISED_PATCH,
+      },
+      ALONE,
+    )
     expect(validRed(run(PYTEST_PARAMETRISED_OTHER_FAILS, 1, path), path, names)).toBe(false)
     expect(validRed(run(PYTEST_PARAMETRISED_OTHER_FAILS, 1, path), path, ['test_one_is_one'])).toBe(
       true,
@@ -1000,13 +1033,13 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       '\t}',
       '}',
     ].join('\n')
-    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       'TestExport',
       { parent: 'TestExport', subtest: 'csv', nesting: [], whole: true },
       { parent: 'TestExport', subtest: 'as markdown', nesting: [], whole: true },
       { parent: 'TestExport', subtest: 'with header', nesting: ['as markdown'], whole: true },
     ])
-    expect(addedTestNames({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTestNames({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       'TestExport',
       'csv',
       'as markdown',
@@ -1030,7 +1063,7 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
 
   test('Go subtests the proof adds, passing or skipped under a parent failing on an older one, are not a red', () => {
     const path = 'export_test.go'
-    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH })
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUBTESTS_PATCH }, ALONE)
     expect(names).toEqual([
       { parent: 'TestExport', subtest: 'as markdown', nesting: [], whole: false },
       { parent: 'TestExport', subtest: 'txt', nesting: [], whole: false },
@@ -1047,7 +1080,7 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       '\tt.Run("empty", func(t *testing.T) {})',
       '}',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     expect(names).toEqual([
       'TestExport',
       { parent: 'TestExport', subtest: 'empty', nesting: [], whole: true },
@@ -1174,8 +1207,8 @@ mod tests {
 /** The tests the Rust file declares under the given names, as a proof adding it reads them. */
 const rustTests = (names: ReadonlyArray<string>) => {
   const file = { insertion: 'new_file', code: RUST_DECLARATIONS, patch: null } as const
-  const declared = addedTestNames(file)
-  return addedTests(file).filter((_, at) => names.includes(declared[at] ?? ''))
+  const declared = addedTestNames(file, ALONE)
+  return addedTests(file, ALONE).filter((_, at) => names.includes(declared[at] ?? ''))
 }
 
 describe('A red read from the failing names #260 still missed', () => {
@@ -1249,18 +1282,18 @@ describe('A red read from the failing names #260 still missed', () => {
   })
 
   test('Rust tests under #[tokio::test(…)], #[rstest] and #[test_case(…)] are named', () => {
-    expect(addedTestNames({ insertion: 'new_file', code: RUST_DECLARATIONS, patch: null })).toEqual(
-      [
-        'one_is_one',
-        'rejects_empty',
-        'rejects_blank',
-        'exports_async',
-        'reads_plain',
-        'exports_cases',
-        'exports_markdown',
-        'reads_rows',
-      ],
-    )
+    expect(
+      addedTestNames({ insertion: 'new_file', code: RUST_DECLARATIONS, patch: null }, ALONE),
+    ).toEqual([
+      'one_is_one',
+      'rejects_empty',
+      'rejects_blank',
+      'exports_async',
+      'reads_plain',
+      'exports_cases',
+      'exports_markdown',
+      'reads_rows',
+    ])
     const lines = [
       '#[test_case(',
       '    vec![] ;',
@@ -1271,7 +1304,7 @@ describe('A red read from the failing names #260 still missed', () => {
       ')]',
       'fn rejects_markdown(rows: Vec<&str>) {}',
     ].join('\n')
-    expect(addedTests({ insertion: 'new_file', code: lines, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: lines, patch: null }, ALONE)).toEqual([
       { function: 'rejects_markdown' },
     ])
   })
@@ -1540,7 +1573,7 @@ FAIL
 describe('A red read from the Go subtests and pytest ids #279 left', () => {
   test('a Go subtest under the same parent but another branch is not the red', () => {
     const path = 'export_test.go'
-    const names = addedTests({ insertion: 'addition', code: '', patch: GO_BRANCH_PATCH })
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_BRANCH_PATCH }, ALONE)
     expect(names).toEqual([
       { parent: 'TestExport', subtest: 'md', nesting: [], whole: false },
       { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: false },
@@ -1570,7 +1603,7 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
       '\tt.Run("empty", func(t *testing.T) {})',
       '}',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     expect(names).toEqual([
       'TestExport',
       { parent: 'TestExport', subtest: 'md', nesting: [], whole: true },
@@ -1589,13 +1622,13 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
 
   test('a subtest seen with its parent unknown is decided by the key line when the proof has one', () => {
     const path = 'export_test.go'
-    const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH })
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH }, ALONE)
     expect(names).toEqual([{ parent: null, subtest: 'md', nesting: [], whole: false }])
     expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
     expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
     expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(true)
     const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
-    expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: helper, patch: null }, ALONE)).toEqual([
       { parent: null, subtest: 'empty', nesting: [], whole: true },
     ])
     // A report that names the file decides by the key line too; a named test keeps its own rule.
@@ -1609,7 +1642,7 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
 
   test('a testify suite method’s subtest is a red on its exit code when the proof has no key line, and not when its key line differs', () => {
     const path = 'export_test.go'
-    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUITE_PATCH })
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUITE_PATCH }, ALONE)
     expect(names).toEqual([{ parent: null, subtest: 'empty', nesting: [], whole: true }])
     expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, null)).toBe(true)
     expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, false)).toBe(false)
@@ -1725,7 +1758,7 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
       '\t}))',
       '}',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     expect(names).toEqual([
       'TestExport',
       { parent: 'TestExport', subtest: 'w', nesting: [], whole: true },
@@ -1748,7 +1781,7 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
       '\t}',
       '}',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     expect(names).toEqual([
       'TestExport',
       { parent: 'TestExport', subtest: 'empty', nesting: [null], whole: true },
@@ -1783,7 +1816,7 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     ]
     for (const layout of layouts) {
       const code = ['func TestExport(t *testing.T) {', ...layout, '}'].join('\n')
-      const names = addedTests({ insertion: 'new_file', code, patch: null })
+      const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
       const empty = names.filter(
         (name) => Predicate.hasProperty(name, 'subtest') && name.subtest === 'empty',
       )
@@ -1797,7 +1830,7 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
 
   test('a subtest in a hunk that starts inside its t.Run block is still read by its name, a differing key line left to the user', () => {
     const path = 'export_test.go'
-    const names = addedTests({ insertion: 'addition', code: '', patch: GO_INSIDE_PATCH })
+    const names = addedTests({ insertion: 'addition', code: '', patch: GO_INSIDE_PATCH }, ALONE)
     expect(names).toEqual([{ parent: 'TestExport', subtest: 'empty', nesting: [], whole: false }])
     // A red whose key line differs is a red the user is asked about (red_mismatch), not refused.
     expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(true)
@@ -2580,11 +2613,14 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       '  ✕ charges $10 for shipping (3 ms)\n  ● charges $10 for shipping\n    expect(received).toBe(1)'
     expect(validRed(run(output, 1, path), path, ['charges $5 for shipping'])).toBe(false)
     expect(validRed(run(output, 1, path), path, ['charges $10 for shipping'])).toBe(true)
-    const declared = addedTests({
-      insertion: 'new_file',
-      code: "test('charges $5 for shipping', () => {})\ntest.each([[5]])('charges $amount', () => {})\ntest(`charges ${amount}`, () => {})\n",
-      patch: null,
-    })
+    const declared = addedTests(
+      {
+        insertion: 'new_file',
+        code: "test('charges $5 for shipping', () => {})\ntest.each([[5]])('charges $amount', () => {})\ntest(`charges ${amount}`, () => {})\n",
+        patch: null,
+      },
+      ALONE,
+    )
     // Each could produce another's title (#342, round 5): none names its test.
     const generated = { scope: [], twin: true, clash: true }
     expect(declared).toEqual([
@@ -2719,23 +2755,25 @@ describe('A red read by its test’s path, its errors and its panics, the key li
     const path = 'export.test.ts'
     const output = run(captured('vitest-same-title'), 1, path)
     // archive > keeps passes, restore > keeps fails on an assertion.
-    const keeps = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 10, 12))
+    const keeps = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 10, 12), ALONE)
     expect(validRed(output, path, keeps)).toBe(false)
-    expect(validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 13, 15)))).toBe(
-      true,
-    )
+    expect(
+      validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 13, 15), ALONE)),
+    ).toBe(true)
     // export > saves threw an object, import > saves failed on an assertion.
-    const saves = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 3, 3))
+    const saves = addedTests(addition(VITEST_SAME_TITLE_SOURCE, 3, 3), ALONE)
     expect(validRed(output, path, saves)).toBe(false)
-    expect(validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 7, 9)))).toBe(true)
+    expect(
+      validRed(output, path, addedTests(addition(VITEST_SAME_TITLE_SOURCE, 7, 9), ALONE)),
+    ).toBe(true)
   })
 
   test('a node:test test whose title another describe repeats is named by nothing its list prints: the key line decides', () => {
     const path = 'b.test.mjs'
     const output = run(captured('node-same-title'), 1, path)
-    const saves = addedTests(addition(NODE_SAME_TITLE_SOURCE, 3, 3))
+    const saves = addedTests(addition(NODE_SAME_TITLE_SOURCE, 3, 3), ALONE)
     expect(validRed(output, path, saves)).toBe(false)
-    const imports = addedTests(addition(NODE_SAME_TITLE_SOURCE, 4, 4))
+    const imports = addedTests(addition(NODE_SAME_TITLE_SOURCE, 4, 4), ALONE)
     expect(validRed(output, path, imports)).toBe(false)
     expect(validRed(output, path, imports, true)).toBe(true)
   })
@@ -2743,19 +2781,21 @@ describe('A red read by its test’s path, its errors and its panics, the key li
   test('a pytest test the proof adds is not another class’s test of the same name', () => {
     const path = 'tests/test_dup.py'
     const output = run(captured('pytest-same-title'), 1, path)
-    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 1, 3)))).toBe(false)
-    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 9, 11)))).toBe(
-      false,
-    )
-    expect(validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 13, 15)))).toBe(
-      true,
-    )
+    expect(
+      validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 1, 3), ALONE)),
+    ).toBe(false)
+    expect(
+      validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 9, 11), ALONE)),
+    ).toBe(false)
+    expect(
+      validRed(output, path, addedTests(addition(PYTEST_SAME_TITLE_SOURCE, 13, 15), ALONE)),
+    ).toBe(true)
   })
 
   test('two tests declared with the same path are named by nothing: the key line decides', () => {
     const path = 'tests/export.test.ts'
     const code = ["test('keeps', () => {})", "test('keeps', () => {})"].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     for (const printed of [' × keeps 3ms', ' FAIL  tests/export.test.ts > keeps']) {
       const output = run(`${printed}\nAssertionError: expected 1 to be 2`, 1, path)
       expect(validRed(output, path, names)).toBe(false)
@@ -2795,13 +2835,17 @@ describe('A red read by its test’s path, its errors and its panics, the key li
       '     AssertionError [ERR_ASSERTION]: Expected values to be strictly equal',
     ].join('\n')
     const jestPath = 'tests/export.test.js'
-    expect(validRed(run(jest, 1, jestPath), jestPath, addedTests(addition(js, 4, 6)))).toBe(true)
-    expect(validRed(run(jest, 1, jestPath), jestPath, addedTests(addition(js, 1, 3)))).toBe(false)
+    expect(validRed(run(jest, 1, jestPath), jestPath, addedTests(addition(js, 4, 6), ALONE))).toBe(
+      true,
+    )
+    expect(validRed(run(jest, 1, jestPath), jestPath, addedTests(addition(js, 1, 3), ALONE))).toBe(
+      false,
+    )
     // mocha prints no file: another file's test may have the same path (#342, round 5).
     const mochaPath = 'test/export.spec.js'
     const mochaRun = run(mocha, 1, mochaPath)
-    expect(validRed(mochaRun, mochaPath, addedTests(addition(js, 4, 6)))).toBe(false)
-    expect(validRed(mochaRun, mochaPath, addedTests(addition(js, 4, 6)), true)).toBe(true)
+    expect(validRed(mochaRun, mochaPath, addedTests(addition(js, 4, 6), ALONE))).toBe(false)
+    expect(validRed(mochaRun, mochaPath, addedTests(addition(js, 4, 6), ALONE), true)).toBe(true)
     const python = [
       'import unittest',
       'class Export(unittest.TestCase):',
@@ -2821,8 +2865,12 @@ describe('A red read by its test’s path, its errors and its panics, the key li
       'AssertionError: 1 != 2',
     ].join('\n')
     const path = 'test_export.py'
-    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 5, 7)))).toBe(true)
-    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 2, 4)))).toBe(false)
+    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 5, 7), ALONE))).toBe(
+      true,
+    )
+    expect(validRed(run(unittest, 1, path), path, addedTests(addition(python, 2, 4), ALONE))).toBe(
+      false,
+    )
   })
 
   test('a unittest test with an ERROR beside its FAIL is not a red, a subTest’s or a cleanup’s', () => {
@@ -2954,9 +3002,9 @@ describe('A red read by its test’s path, its errors and its panics, the key li
     const code = (size: number) =>
       `${"describe('a', () => {\n".repeat(size)}test('b', () => {})\n${'})\n'.repeat(size)}`
     const read = (text: string) => {
-      addedTests({ insertion: 'new_file', code: text, patch: null })
+      addedTests({ insertion: 'new_file', code: text, patch: null }, ALONE)
     }
-    expect(addedTests({ insertion: 'new_file', code: code(3), patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: code(3), patch: null }, ALONE)).toEqual([
       { title: 'b', scope: ['a', 'a', 'a'], twin: false, clash: false },
     ])
     expect(growth(code, 400, read)).toBeLessThan(24)
@@ -3022,17 +3070,23 @@ describe('A name that decides only when read with certainty, the key line decidi
       "   test('keeps', () => { expect(1).toBe(2) })",
       ' })',
     ].join('\n')
-    const names = addedTests({ insertion: 'addition', code: VITEST_SAME_TITLE_SOURCE, patch })
+    const names = addedTests(
+      { insertion: 'addition', code: VITEST_SAME_TITLE_SOURCE, patch },
+      ALONE,
+    )
     expect(names.some((name) => Predicate.isString(name))).toBe(false)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, true)).toBe(true)
     // Placed exactly, the same patch names its test.
     const placed = patch.replace('@@ -9,6 +9,9 @@', '@@ -7,6 +7,9 @@')
-    const exact = addedTests({
-      insertion: 'addition',
-      code: VITEST_SAME_TITLE_SOURCE,
-      patch: placed,
-    })
+    const exact = addedTests(
+      {
+        insertion: 'addition',
+        code: VITEST_SAME_TITLE_SOURCE,
+        patch: placed,
+      },
+      ALONE,
+    )
     expect(validRed(output, path, exact)).toBe(false)
   })
 
@@ -3053,12 +3107,12 @@ describe('A name that decides only when read with certainty, the key line decidi
       ' })',
     ].join('\n')
     const adding = { insertion: 'addition' as const, code: REGEX_PAREN_SOURCE, patch }
-    expect(addedTests(adding)).toEqual([
+    expect(addedTests(adding, ALONE)).toEqual([
       { title: 'saves', scope: ['a', 'b'], twin: true, clash: false },
     ])
-    expect(validRed(run(captured('vitest-regex-paren'), 1, path), path, addedTests(adding))).toBe(
-      false,
-    )
+    expect(
+      validRed(run(captured('vitest-regex-paren'), 1, path), path, addedTests(adding, ALONE)),
+    ).toBe(false)
   })
 
   test('a Python string spanning lines at a lower indentation does not close a class', () => {
@@ -3073,7 +3127,7 @@ describe('A name that decides only when read with certainty, the key line decidi
       '+            assert 1 == 1',
       ' ',
     ].join('\n')
-    const names = addedTests({ insertion: 'addition', code: STRING_INDENT_SOURCE, patch })
+    const names = addedTests({ insertion: 'addition', code: STRING_INDENT_SOURCE, patch }, ALONE)
     expect(names).toEqual([
       { title: 'test_saves', scope: ['TestA', 'TestB'], twin: true, clash: false },
     ])
@@ -3088,7 +3142,7 @@ describe('A name that decides only when read with certainty, the key line decidi
       "test('one is one', () => { expect(1).toBe(1) })",
       "test('exports csv', () => { expect('a,b').toBe('a,b') })",
     ].join('\n')
-    const names = addedTests(addition(code, 4, 4))
+    const names = addedTests(addition(code, 4, 4), ALONE)
     expect(validRed(run(captured('vitest-two-files'), 1, path), path, names)).toBe(false)
     // pytest's node id and jest's file line say the file too.
     const pytest = [
@@ -3101,11 +3155,14 @@ describe('A name that decides only when read with certainty, the key line decidi
       'tests/test_other.py:2: AssertionError',
       'FAILED tests/test_other.py::test_saves - assert 1 == 2',
     ].join('\n')
-    const python = addedTests({
-      insertion: 'new_file',
-      code: 'def test_saves():\n    assert 1 == 1\n',
-      patch: null,
-    })
+    const python = addedTests(
+      {
+        insertion: 'new_file',
+        code: 'def test_saves():\n    assert 1 == 1\n',
+        patch: null,
+      },
+      ALONE,
+    )
     const pyPath = 'tests/test_export.py'
     expect(validRed(run(pytest, 1, pyPath), pyPath, python)).toBe(false)
     const jest = [
@@ -3117,7 +3174,10 @@ describe('A name that decides only when read with certainty, the key line decidi
       '',
       '    expect(received).toBe(expected) // Object.is equality',
     ].join('\n')
-    const js = addedTests({ insertion: 'new_file', code: "test('saves', () => {})\n", patch: null })
+    const js = addedTests(
+      { insertion: 'new_file', code: "test('saves', () => {})\n", patch: null },
+      ALONE,
+    )
     const jsPath = 'tests/export.test.js'
     expect(validRed(run(jest, 1, jsPath), jsPath, js)).toBe(false)
     expect(validRed(run(jest.replace('other', 'export'), 1, jsPath), jsPath, js)).toBe(true)
@@ -3141,16 +3201,19 @@ describe('A name that decides only when read with certainty, the key line decidi
       const code = ["describe('a', () => {", `  ${doubt}`, "  test('saves', () => {})", '})'].join(
         '\n',
       )
-      const names = addedTests({ insertion: 'new_file', code, patch: null })
+      const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
       expect([doubt, validRed(output, path, names)]).toEqual([doubt, false])
       expect([doubt, validRed(output, path, names, true)]).toEqual([doubt, true])
     }
     // A describe never closed.
-    const open = addedTests({
-      insertion: 'new_file',
-      code: "describe('a', () => {\n  test('saves', () => {})\n",
-      patch: null,
-    })
+    const open = addedTests(
+      {
+        insertion: 'new_file',
+        code: "describe('a', () => {\n  test('saves', () => {})\n",
+        patch: null,
+      },
+      ALONE,
+    )
     expect(validRed(output, path, open)).toBe(false)
     // Read for certain, the same file names its test: a division, a regex after a condition.
     const sure = [
@@ -3160,7 +3223,7 @@ describe('A name that decides only when read with certainty, the key line decidi
       "  test('saves', () => {})",
       '})',
     ]
-    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null })
+    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null }, ALONE)
     expect(validRed(output, path, names)).toBe(true)
   })
 
@@ -3171,7 +3234,10 @@ describe('A name that decides only when read with certainty, the key line decidi
       ['class TestA:', '    def test_saves(self):', '        x = """never closed'],
       ['class TestA:', '        x = 1', '    def test_saves(self):', '        pass'],
     ]) {
-      const names = addedTests({ insertion: 'new_file', code: doubt.join('\n'), patch: null })
+      const names = addedTests(
+        { insertion: 'new_file', code: doubt.join('\n'), patch: null },
+        ALONE,
+      )
       expect([doubt, validRed(output, path, names)]).toEqual([doubt, false])
     }
     // A test read at the top of a file whose indentation opens or closes no block.
@@ -3180,7 +3246,10 @@ describe('A name that decides only when read with certainty, the key line decidi
       ['class TestA:', '        x = 1', 'def test_saves():', '    pass', '  y = 2'],
       ['x = 1', '    def test_saves():', '        pass'],
     ]) {
-      const names = addedTests({ insertion: 'new_file', code: doubt.join('\n'), patch: null })
+      const names = addedTests(
+        { insertion: 'new_file', code: doubt.join('\n'), patch: null },
+        ALONE,
+      )
       expect([doubt, validRed(top, path, names)]).toEqual([doubt, false])
     }
     const sure = [
@@ -3189,13 +3258,13 @@ describe('A name that decides only when read with certainty, the key line decidi
       '    def test_saves(self):',
       '        pass',
     ]
-    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null })
+    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null }, ALONE)
     expect(validRed(output, path, names)).toBe(true)
   })
 
   test('a test whose title is not one literal names nothing', () => {
     const js = "test('sa' + 'ves', () => {})\n"
-    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null })).toEqual([])
+    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null }, ALONE)).toEqual([])
   })
 
   test('a unittest failure of another module’s test of the same class and name is not the proof’s', () => {
@@ -3206,7 +3275,7 @@ describe('A name that decides only when read with certainty, the key line decidi
       '    def test_saves(self):',
       '        self.assertEqual(1, 2)',
     ].join('\n')
-    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     const output = (module: string) =>
       [
         `FAIL: test_saves (${module}.Import.test_saves)`,
@@ -3219,14 +3288,18 @@ describe('A name that decides only when read with certainty, the key line decidi
 
   test('a method named test is not a test, nor a def inside a function', () => {
     const js = "test('saves', () => { expect(/x/.test(')')).toBe(false) })\n"
-    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null })).toEqual(['saves'])
+    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null }, ALONE)).toEqual([
+      'saves',
+    ])
     const py = [
       'def test_outer():',
       '    def test_inner():',
       '        pass',
       '    test_inner()',
     ].join('\n')
-    expect(addedTestNames({ insertion: 'new_file', code: py, patch: null })).toEqual(['test_outer'])
+    expect(addedTestNames({ insertion: 'new_file', code: py, patch: null }, ALONE)).toEqual([
+      'test_outer',
+    ])
   })
 
   test('a Rust test whose name another module of the file repeats is named by nothing: the key line decides', () => {
@@ -3253,14 +3326,14 @@ describe('A name that decides only when read with certainty, the key line decidi
       'failures:',
       '    b::eq',
     ].join('\n')
-    const names = addedTests(addition(code, 1, 4))
+    const names = addedTests(addition(code, 1, 4), ALONE)
     expect(validRed(run(output, 101, path), path, names)).toBe(false)
     expect(validRed(run(output, 101, path), path, names, true)).toBe(true)
   })
 
   test('source that never closes a describe.each, a comment or a test.each is read in linear time', () => {
     const read = (code: string) => {
-      addedTests({ insertion: 'new_file', code, patch: null })
+      addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     }
     for (const unit of ['describe.each(', 'a /* x\n', 'test.each(']) {
       expect([unit, growth((size) => unit.repeat(size), 2_000, read) < 24]).toEqual([unit, true])
@@ -3278,7 +3351,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test('exports csv', () => { expect(1).toBe(1) })",
     ].join('\n')
     const output = run(captured('vitest-each-twin'), 1, path)
-    const names = addedTests(addition(code, 4, 4))
+    const names = addedTests(addition(code, 4, 4), ALONE)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, false)).toBe(false)
   })
@@ -3292,7 +3365,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test('exports csv', () => { expect(1).toBe(1) })",
     ].join('\n')
     const output = run(captured('vitest-loop-titles'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4), ALONE))).toBe(false)
   })
 
   test('a test whose title is a variable makes its file uncertain: the key line decides', () => {
@@ -3305,7 +3378,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test('saves', () => { expect(1).toBe(1) })",
     ].join('\n')
     const output = run(captured('vitest-loop-titles'), 1, path)
-    const names = addedTests(addition(code, 5, 5))
+    const names = addedTests(addition(code, 5, 5), ALONE)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, true)).toBe(true)
   })
@@ -3320,7 +3393,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test('exports csv', () => {})",
     ].join('\n')
     const output = run(captured('node-loop-titles'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 5, 5)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 5, 5), ALONE))).toBe(false)
   })
 
   test('a template that could produce a literal of its file names no test either', () => {
@@ -3329,7 +3402,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test.each(['csv', 'md'])('exports %s', (kind) => { expect(kind).toBe('txt') })",
       "test('exports csv', () => { expect(1).toBe(1) })",
     ].join('\n')
-    expect(addedTests(addition(code, 2, 2))).toEqual([
+    expect(addedTests(addition(code, 2, 2), ALONE)).toEqual([
       { title: { template: 'exports %s' }, scope: [], twin: true, clash: true },
     ])
   })
@@ -3343,10 +3416,10 @@ describe('A generated title and a failure printed with no file, each read only w
     ].join('\n')
     const failing = (title: string) =>
       run(` FAIL  export.test.ts > ${title}\nAssertionError: expected 1 to be 2`, 1, path)
-    const exportCsv = addedTests(addition(code, 2, 2))
+    const exportCsv = addedTests(addition(code, 2, 2), ALONE)
     expect(exportCsv).toEqual([{ title: 'saves', scope: ['export csv'], twin: true, clash: true }])
     expect(validRed(failing('export csv > saves'), path, exportCsv)).toBe(false)
-    const imported = addedTests(addition(code, 3, 3))
+    const imported = addedTests(addition(code, 3, 3), ALONE)
     expect(imported).toEqual([{ title: 'saves', scope: ['import'], twin: true, clash: false }])
     expect(validRed(failing('import > saves'), path, imported)).toBe(true)
   })
@@ -3356,7 +3429,7 @@ describe('A generated title and a failure printed with no file, each read only w
       "test.each(['exports csv'])('%s', (title) => { expect(title).toBe('') })",
       "test('exports csv', () => { expect(1).toBe(1) })",
     ].join('\n')
-    expect(addedTests(addition(alone, 2, 2))).toEqual([
+    expect(addedTests(addition(alone, 2, 2), ALONE)).toEqual([
       { title: 'exports csv', scope: [], twin: true, clash: true },
     ])
     const two = [
@@ -3364,17 +3437,17 @@ describe('A generated title and a failure printed with no file, each read only w
       "for (const kind of ['md']) test(`exports ${kind}`, () => { expect(kind).toBe('') })",
       "test.each(['csv'])('imports %s', (kind) => { expect(kind).toBe('') })",
     ].join('\n')
-    expect(addedTests(addition(two, 1, 1))).toEqual([
+    expect(addedTests(addition(two, 1, 1), ALONE)).toEqual([
       { title: { template: 'exports %s' }, scope: [], twin: true, clash: true },
     ])
-    expect(addedTests(addition(two, 3, 3))).toEqual([
+    expect(addedTests(addition(two, 3, 3), ALONE)).toEqual([
       { title: { template: 'imports %s' }, scope: [], twin: false, clash: false },
     ])
   })
 
   test('a describe whose title is not a literal leaves its tests’ paths unknown', () => {
     const code = "const name = 'export'\ndescribe(name, () => { test('saves', () => {}) })"
-    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       { title: 'saves', scope: null, twin: false, clash: false },
     ])
   })
@@ -3390,24 +3463,30 @@ describe('A generated title and a failure printed with no file, each read only w
       ' FAIL  export.test.ts > saves',
       'AssertionError: expected 1 to be 2 // Object.is equality',
     ].join('\n')
-    const names = addedTests(addition(code, 3, 3))
+    const names = addedTests(addition(code, 3, 3), ALONE)
     expect(names).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
     expect(validRed(run(output, 1, path), path, names)).toBe(true)
   })
 
   test('node:test’s failing test is read in the file its `test at` line names', () => {
     const output = run(captured('node-two-files'), 1, 'c.test.mjs')
-    const added = addedTests({
-      insertion: 'new_file',
-      code: "import { test } from 'node:test'\n\ntest('saves', () => {})",
-      patch: null,
-    })
+    const added = addedTests(
+      {
+        insertion: 'new_file',
+        code: "import { test } from 'node:test'\n\ntest('saves', () => {})",
+        patch: null,
+      },
+      ALONE,
+    )
     expect(validRed(output, 'c.test.mjs', added)).toBe(false)
-    const failing = addedTests({
-      insertion: 'new_file',
-      code: "import { test } from 'node:test'\nimport assert from 'node:assert'\n\ntest('saves', () => { assert.strictEqual(1, 2) })",
-      patch: null,
-    })
+    const failing = addedTests(
+      {
+        insertion: 'new_file',
+        code: "import { test } from 'node:test'\nimport assert from 'node:assert'\n\ntest('saves', () => { assert.strictEqual(1, 2) })",
+        patch: null,
+      },
+      ALONE,
+    )
     expect(validRed(run(captured('node-two-files'), 1, 'b.test.mjs'), 'b.test.mjs', failing)).toBe(
       true,
     )
@@ -3421,26 +3500,29 @@ describe('A generated title and a failure printed with no file, each read only w
 
   test('a report’s failure is read in its file, so it names a declared test of that file', () => {
     const path = 'tests/export.test.mjs'
-    const names = addedTests({
-      insertion: 'new_file',
-      code: "test('exports as CSV', () => { assert.strictEqual('a,b', 'a;b') })",
-      patch: null,
-    })
+    const names = addedTests(
+      {
+        insertion: 'new_file',
+        code: "test('exports as CSV', () => { assert.strictEqual('a,b', 'a;b') })",
+        patch: null,
+      },
+      ALONE,
+    )
     expect(validRed(run(JUNIT_ASSERTION, 1, path), path, names)).toBe(true)
   })
 
   test('a pytest section printed with no file names no test: the key line decides', () => {
     const path = 'tests/test_a.py'
     const code = 'def test_one_is_one():\n    assert 1 == 1\n\ndef test_saves():\n    assert 1 == 1'
-    const names = addedTests(addition(code, 4, 5))
+    const names = addedTests(addition(code, 4, 5), ALONE)
     const output = run(captured('pytest-two-files-rN'), 1, path)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, true)).toBe(true)
   })
 
   test('pytest’s summary line reads its failure in its own file', () => {
-    const names = addedTests(addition('def test_saves():\n    assert 1 == 1', 1, 2))
-    const failing = addedTests(addition('def test_saves():\n    assert 1 == 2', 1, 2))
+    const names = addedTests(addition('def test_saves():\n    assert 1 == 1', 1, 2), ALONE)
+    const failing = addedTests(addition('def test_saves():\n    assert 1 == 2', 1, 2), ALONE)
     const output = (path: string) => run(captured('pytest-two-files'), 1, path)
     expect(validRed(output('tests/test_a.py'), 'tests/test_a.py', names)).toBe(false)
     expect(validRed(output('tests/test_b.py'), 'tests/test_b.py', failing)).toBe(true)
@@ -3448,7 +3530,7 @@ describe('A generated title and a failure printed with no file, each read only w
 
   test('a call with a literal title followed by a block is a test: no method takes a literal parameter', () => {
     const code = "const o = { test('x') { return 1 } }\ntest('y', () => {})"
-    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       { title: 'x', scope: [], twin: false, clash: false },
       { title: 'y', scope: [], twin: false, clash: false },
     ])
@@ -3460,22 +3542,22 @@ describe('A generated title and a failure printed with no file, each read only w
       'class Probe { test(name: string): boolean { return name.length > 0 } }',
       "test('y', () => {})",
     ].join('\n')
-    expect(addedTests({ insertion: 'new_file', code: own, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: own, patch: null }, ALONE)).toEqual([
       { title: 'y', scope: null, twin: false, clash: false },
     ])
     const zero = "function test() { return 1 }\ntest('y', () => {})"
-    expect(addedTests({ insertion: 'new_file', code: zero, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: zero, patch: null }, ALONE)).toEqual([
       { title: 'y', scope: null, twin: false, clash: false },
     ])
     const method = "class Probe { test() { return 1 } }\ntest('y', () => {})"
-    expect(addedTests({ insertion: 'new_file', code: method, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: method, patch: null }, ALONE)).toEqual([
       { title: 'y', scope: [], twin: false, clash: false },
     ])
   })
 
   test('tests beside many test.each templates are read in linear time', () => {
     const read = (code: string) => {
-      addedTests({ insertion: 'new_file', code, patch: null })
+      addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     }
     const templates = "test.each([1])('saves %s', () => {})\n"
     const beside = (size: number) =>
@@ -3486,7 +3568,7 @@ describe('A generated title and a failure printed with no file, each read only w
 
   test('describes nested deep, each holding a test, are read in linear time', () => {
     const read = (code: string) => {
-      addedTests({ insertion: 'new_file', code, patch: null })
+      addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     }
     const nested = (size: number) =>
       `${"describe('d', () => { test('t', () => {})\n".repeat(size)}${'})\n'.repeat(size)}`
@@ -3508,7 +3590,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "withKind('saves', ({ kind }) => { expect(kind).toBe('md') })",
       "test('saves', () => { expect(1).toBe(1) })",
     ])
-    const names = addedTests(addition(code, 5, 5))
+    const names = addedTests(addition(code, 5, 5), ALONE)
     const output = run(captured('vitest-extend-alias'), 1, path)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, true)).toBe(true)
@@ -3521,7 +3603,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test('saves', () => { expect(1).toBe(1) })",
     ])
     const output = run(captured('vitest-ternary-callee'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4), ALONE))).toBe(false)
   })
 
   test('a test declared in a ternary’s branch is read, a twin of the test of its title', () => {
@@ -3531,7 +3613,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "enabled ? test('saves', () => { expect(1).toBe(2) }) : test.skip('skipped', () => {})",
       "test('saves', () => { expect(1).toBe(1) })",
     ])
-    const names = addedTests(addition(code, 5, 5))
+    const names = addedTests(addition(code, 5, 5), ALONE)
     expect(names).toEqual([{ title: 'saves', scope: [], twin: true, clash: true }])
     expect(validRed(run(captured('vitest-ternary-calls'), 1, path), path, names)).toBe(false)
   })
@@ -3543,16 +3625,16 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test('exports csv', () => { expect(1).toBe(1) })",
     ])
     const output = run(captured('vitest-each-generic'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4), ALONE))).toBe(false)
     const typed = "test<{ a: number }>('saves', () => {})\ntest('saves', () => {})"
-    expect(addedTests(addition(typed, 2, 2))).toEqual([
+    expect(addedTests(addition(typed, 2, 2), ALONE)).toEqual([
       { title: 'saves', scope: null, twin: false, clash: false },
     ])
   })
 
   test('a test followed by a block on the next line is still read', () => {
     const code = "test('saves', () => {})\n{\n  const x = 1\n}\ntest('other', () => {})"
-    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code, patch: null }, ALONE)).toEqual([
       { title: 'saves', scope: [], twin: false, clash: false },
       { title: 'other', scope: [], twin: false, clash: false },
     ])
@@ -3570,7 +3652,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test('saves', () => {})",
     ].join('\n')
     const output = run(captured('node-subtest'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 7, 7)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 7, 7), ALONE))).toBe(false)
   })
 
   test('a call of an imported helper at the top of the file or in a describe leaves it uncertain; the runner’s hooks do not', () => {
@@ -3582,7 +3664,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "failingTest('saves')",
       "test('saves', () => { expect(1).toBe(1) })",
     ].join('\n')
-    const names = addedTests(addition(code, 5, 5))
+    const names = addedTests(addition(code, 5, 5), ALONE)
     const output = run(captured('vitest-imported-helper'), 1, path)
     expect(validRed(output, path, names)).toBe(false)
     expect(validRed(output, path, names, true)).toBe(true)
@@ -3594,7 +3676,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "  test('keeps', () => {})",
       '})',
     ].join('\n')
-    expect(addedTests(addition(nested, 5, 5))).toEqual([
+    expect(addedTests(addition(nested, 5, 5), ALONE)).toEqual([
       { title: 'keeps', scope: null, twin: false, clash: false },
     ])
     const hooks = [
@@ -3606,14 +3688,19 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "  test('keeps', () => { expect(render()).toBe(1) })",
       '})',
     ].join('\n')
-    expect(addedTests(addition(hooks, 6, 6))).toEqual([
+    const modules = repository('hooks.test.ts', [
+      ['hooks.test.ts', hooks],
+      ['render.ts', 'export const render = () => 1'],
+      ['store.ts', 'export const store = new Map<string, number>()'],
+    ])
+    expect(addedTests(addition(hooks, 6, 6), modules)).toEqual([
       { title: 'keeps', scope: ['export'], twin: false, clash: false },
     ])
   })
 
   test('a member the reader does not know leaves its file uncertain, even with a literal title', () => {
     const code = "test.repeats('saves', () => {})\ntest('keeps', () => {})"
-    expect(addedTests(addition(code, 2, 2))).toEqual([
+    expect(addedTests(addition(code, 2, 2), ALONE)).toEqual([
       { title: 'keeps', scope: null, twin: false, clash: false },
     ])
   })
@@ -3626,7 +3713,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "  it('saves', () => { assert.strictEqual(1, 2) })",
       '})',
     ].join('\n')
-    expect(addedTests(addition(code, 4, 4))).toEqual([
+    expect(addedTests(addition(code, 4, 4), ALONE)).toEqual([
       { title: 'saves', scope: ['export'], twin: false, clash: false },
     ])
   })
@@ -3636,7 +3723,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "import './shared-tests.ts'",
       "import { test as base } from 'vite-plus/test'",
     ]) {
-      expect(addedTests(addition(`${first}\ntest('saves', () => {})`, 2, 2))).toEqual([
+      expect(addedTests(addition(`${first}\ntest('saves', () => {})`, 2, 2), ALONE)).toEqual([
         { title: 'saves', scope: null, twin: false, clash: false },
       ])
     }
@@ -3649,7 +3736,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test('exports 1', () => { expect(1).toBe(1) })",
     ])
     const output = run(captured('vitest-each-index'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4), ALONE))).toBe(false)
   })
 
   test('a template literal whose ${…} holds a brace produces any title', () => {
@@ -3662,10 +3749,10 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test('exports csv', () => { expect(1).toBe(1) })",
     ])
     const output = run(captured('vitest-interpolated-call'), 1, path)
-    expect(validRed(output, path, addedTests(addition(code, 7, 7)))).toBe(false)
+    expect(validRed(output, path, addedTests(addition(code, 7, 7), ALONE))).toBe(false)
     for (const loop of ['`exports ${`${k}`}`', "`exports ${k ?? '}'}`", '`exports ${k}%x`']) {
       const source = `for (const k of ['csv']) test(${loop}, () => {})\ntest('saves', () => {})`
-      expect([loop, addedTests(addition(source, 2, 2))]).toEqual([
+      expect([loop, addedTests(addition(source, 2, 2), ALONE)]).toEqual([
         loop,
         [{ title: 'saves', scope: [], twin: true, clash: true }],
       ])
@@ -3674,7 +3761,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
 
   test('a placeholder may stand for an empty value', () => {
     const code = "test.each([''])('exports%s', () => {})\ntest('exports', () => {})"
-    expect(addedTests(addition(code, 2, 2))).toEqual([
+    expect(addedTests(addition(code, 2, 2), ALONE)).toEqual([
       { title: 'exports', scope: [], twin: true, clash: true },
     ])
   })
@@ -3687,7 +3774,7 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "  test('b', () => { expect(1).toBe(1) })",
       '})',
     ])
-    const names = addedTests(addition(code, 4, 6))
+    const names = addedTests(addition(code, 4, 6), ALONE)
     expect(names).toEqual([{ title: 'b', scope: null, twin: false, clash: false }])
     const output = run(captured('vitest-separator-title'), 1, path)
     expect(validRed(output, path, names)).toBe(false)
@@ -3699,14 +3786,14 @@ describe('A reader certain only of the shapes it knows whole, a template only of
       "test.each(['x > b'])('a %s', () => {})",
       "describe('a x', () => { test('b', () => {}) })",
     ].join('\n')
-    expect(addedTests(addition(code, 2, 2))).toEqual([
+    expect(addedTests(addition(code, 2, 2), ALONE)).toEqual([
       { title: 'b', scope: ['a x'], twin: false, clash: true },
     ])
   })
 
   test('imports, member calls and helpers are read in linear time', () => {
     const read = (code: string) => {
-      addedTests({ insertion: 'new_file', code, patch: null })
+      addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
     }
     const inputs: ReadonlyArray<readonly [string, (size: number) => string]> = [
       ['import clauses never closed', (size) => 'import { a,\n'.repeat(size)],
@@ -3727,5 +3814,596 @@ describe('A reader certain only of the shapes it knows whole, a template only of
     for (const [label, make] of inputs) {
       expect([label, growth(make, 400, read) < 24]).toEqual([label, true])
     }
+  })
+})
+
+const VITEST_HELPERS = [
+  "import { expect, test } from 'vite-plus/test'",
+  '',
+  'export const failingTest = (name: string) => test(name, () => { expect(1).toBe(2) })',
+].join('\n')
+const VITEST_SHARED = [
+  "import { expect, test } from 'vite-plus/test'",
+  '',
+  "test('saves', () => { expect(1).toBe(2) })",
+].join('\n')
+
+describe('A file read in a closed world: every piece of code run while it is collected seen, none declaring a test unread (#342, round 7)', () => {
+  /** Whether a red is taken for the test a file adds at one line, the file read in its repository. */
+  const red = (
+    fixture: string,
+    path: string,
+    lines: ReadonlyArray<string>,
+    at: number,
+    files: ReadonlyArray<readonly [string, string]>,
+  ) => {
+    const code = lines.join('\n')
+    const names = addedTests(addition(code, at, at), repository(path, [[path, code], ...files]))
+    return validRed(run(captured(fixture), 1, path), path, names)
+  }
+  const head = "import { expect, test } from 'vite-plus/test'"
+  const helper = "import { failingTest } from './helpers.ts'"
+  const passing = "test('saves', () => { expect(1).toBe(1) })"
+  const helpers = [['helpers.ts', VITEST_HELPERS]] as const
+
+  test('a module re-exported whole (export * from) that declares a test leaves the file uncertain', () => {
+    const lines = [head, '', "export * from './shared.ts'", passing]
+    expect(red('vitest-barrel', 'barrel.test.ts', lines, 4, [['shared.ts', VITEST_SHARED]])).toBe(
+      false,
+    )
+  })
+
+  test('a module imported at run time (await import) that declares a test leaves the file uncertain', () => {
+    const lines = [head, '', "await import('./shared.ts')", passing]
+    const files = [['shared.ts', VITEST_SHARED]] as const
+    expect(red('vitest-dynamic-import', 'dynamic.test.ts', lines, 4, files)).toBe(false)
+  })
+
+  test('a helper declaring tests, called in a local function, leaves the file uncertain', () => {
+    const lines = [
+      head,
+      helper,
+      '',
+      'function cases() {',
+      "  failingTest('saves')",
+      '}',
+      'cases()',
+      passing,
+    ]
+    expect(red('vitest-local-function', 'local.test.ts', lines, 8, helpers)).toBe(false)
+  })
+
+  test('a helper declaring tests, called as a describe’s arrow body, leaves the file uncertain', () => {
+    const lines = [
+      "import { describe, expect, test } from 'vite-plus/test'",
+      helper,
+      '',
+      "describe('a', () => failingTest('saves'))",
+      "describe('a', () => {",
+      "  test('saves', () => { expect(1).toBe(1) })",
+      '})',
+    ]
+    expect(red('vitest-arrow-describe', 'arrow.test.ts', lines, 6, helpers)).toBe(false)
+  })
+
+  test('a helper declaring tests, passed as a value, assigned or called in an if, leaves the file uncertain', () => {
+    const cases = [
+      ['vitest-foreach-helper', 'foreach.test.ts', [";['saves'].forEach(failingTest)"]],
+      ['vitest-assigned-helper', 'assign.test.ts', ["const registered = failingTest('saves')"]],
+      [
+        'vitest-if-helper',
+        'ifblock.test.ts',
+        ['if (process.env.NEVER_SET === undefined) {', "  failingTest('saves')", '}'],
+      ],
+    ] as const
+    for (const [fixture, path, calls] of cases) {
+      const lines = [head, helper, '', ...calls, passing]
+      expect([fixture, red(fixture, path, lines, lines.length, helpers)]).toEqual([fixture, false])
+    }
+  })
+
+  test('a module imported for a binding that declares a test at its top leaves the file uncertain', () => {
+    const kinds = [
+      head,
+      '',
+      "export const kinds = ['csv', 'md']",
+      "test('saves', () => { expect(kinds).toHaveLength(3) })",
+    ]
+    const lines = [
+      head,
+      "import { kinds } from './kinds.ts'",
+      '',
+      "test('saves', () => { expect(kinds).toHaveLength(2) })",
+    ]
+    expect(
+      red('vitest-module-tests', 'binding.test.ts', lines, 4, [['kinds.ts', kinds.join('\n')]]),
+    ).toBe(false)
+  })
+
+  test('a global a setup file defines, called while the file is collected, leaves the file uncertain', () => {
+    const setup = [
+      head,
+      '',
+      ';(globalThis as { failingTest?: (name: string) => void }).failingTest = (name) => {',
+      '  test(name, () => { expect(1).toBe(2) })',
+      '}',
+    ].join('\n')
+    const config = "export default { test: { globals: true, setupFiles: ['./setup.ts'] } }"
+    const lines = [
+      head,
+      '',
+      'declare const failingTest: (name: string) => void',
+      "failingTest('saves')",
+      passing,
+    ]
+    const files = [
+      ['setup.ts', setup],
+      ['vite.config.ts', config],
+    ] as const
+    expect(red('vitest-setup-global', 'global.test.ts', lines, 5, files)).toBe(false)
+    // Without the setup file, the global is still a name the file does not declare.
+    expect(red('vitest-setup-global', 'global.test.ts', lines, 5, [])).toBe(false)
+  })
+
+  test('a setup file that declares a test itself leaves every file uncertain', () => {
+    const config = "export default { test: { setupFiles: ['./setup.ts'] } }"
+    const lines = [head, passing]
+    const files = [
+      ['setup.ts', VITEST_SHARED],
+      ['vite.config.ts', config],
+    ] as const
+    expect(red('vitest-setup-declares', 'own.test.ts', lines, 2, files)).toBe(false)
+  })
+
+  test('a CommonJS helper loaded through createRequire leaves the file uncertain', () => {
+    const lines = [
+      "import { createRequire } from 'node:module'",
+      head,
+      '',
+      'const require = createRequire(import.meta.url)',
+      "const { failingTest } = require('./helpers.cjs')",
+      "failingTest('saves')",
+      passing,
+    ]
+    const cjs = 'exports.failingTest = (name) => test(name, () => { expect(1).toBe(2) })'
+    expect(red('vitest-create-require', 'require.test.ts', lines, 7, [['helpers.cjs', cjs]])).toBe(
+      false,
+    )
+  })
+
+  test('node:test reached under another name, by require or import, leaves the file uncertain', () => {
+    const alias = [
+      "const { test } = require('node:test')",
+      "const assert = require('node:assert')",
+      "const check = require('node:test').test",
+      '',
+      "check('saves', () => { assert.strictEqual(1, 2) })",
+      "test('saves', () => {})",
+    ]
+    expect(red('node-require-alias', 'alias.test.cjs', alias, 6, [])).toBe(false)
+    const imported = [
+      "import { test } from 'node:test'",
+      "import assert from 'node:assert'",
+      '',
+      "const { default: check } = await import('node:test')",
+      "check('saves', () => { assert.strictEqual(1, 2) })",
+      "test('saves', () => {})",
+    ]
+    expect(red('node-import-default', 'alias2.test.mjs', imported, 6, [])).toBe(false)
+  })
+
+  test('a CommonJS helper required by node or jest leaves the file uncertain', () => {
+    const node = [
+      "const { test } = require('node:test')",
+      "const { failingTest } = require('./helpers.cjs')",
+      '',
+      "failingTest('saves')",
+      "test('saves', () => {})",
+    ]
+    const cjs = [
+      "const { test } = require('node:test')",
+      "const assert = require('node:assert')",
+      'exports.failingTest = (name) => test(name, () => { assert.strictEqual(1, 2) })',
+    ].join('\n')
+    expect(red('node-require-helper', 'req.test.cjs', node, 5, [['helpers.cjs', cjs]])).toBe(false)
+    const jest = [
+      "const { failingTest } = require('./helpers')",
+      '',
+      "failingTest('saves')",
+      passing,
+    ]
+    const jestHelpers = 'exports.failingTest = (name) => test(name, () => { expect(1).toBe(2) })'
+    expect(
+      red('jest-require-helper', 'helper.test.js', jest, 4, [['helpers.js', jestHelpers]]),
+    ).toBe(false)
+    expect(red('jest-require-helper', 'helper.test.js', jest, 4, [])).toBe(false)
+  })
+
+  test('a file whose modules declare no test, its runner configured without setup, is still read for certain', () => {
+    const path = 'tests/export.test.ts'
+    const code = [
+      "import { describe, expect, test } from 'vite-plus/test'",
+      "import { toCsv } from '../src/export.ts'",
+      "import rows from './rows.json'",
+      '',
+      "describe('export', () => {",
+      "  test('saves', () => { expect(toCsv(rows)).toBe('a,b') })",
+      '})',
+    ].join('\n')
+    const files = [
+      [path, code],
+      [
+        'src/export.ts',
+        "import { join } from './join.ts'\nexport const toCsv = (rows: string[]) => join(rows, ',')",
+      ],
+      ['src/join.ts', 'export const join = (rows: string[], by: string) => rows.join(by)'],
+      ['tests/rows.json', '["a", "b"]'],
+      [
+        'vite.config.ts',
+        "import { defineConfig } from 'vitest/config'\nexport default defineConfig({ test: { environment: 'node' } })",
+      ],
+      ['package.json', '{ "name": "api", "devDependencies": { "vitest": "5.0.1" } }'],
+    ] as const
+    const names = addedTests(addition(code, 6, 6), repository(path, files))
+    expect(names).toEqual([{ title: 'saves', scope: ['export'], twin: false, clash: false }])
+    const output = ` FAIL  ${path} > export > saves\nAssertionError: expected 'a;b' to be 'a,b'`
+    expect(validRed(run(output, 1, path), path, names)).toBe(true)
+  })
+
+  test('what the reader cannot follow leaves the file uncertain: a missing module, a cycle, a path out of the repository, an alias, a computed specifier', () => {
+    const path = 'tests/export.test.ts'
+    const read = (
+      lines: ReadonlyArray<string>,
+      files: ReadonlyArray<readonly [string, string]> = [],
+    ) => {
+      const code = [head, ...lines, passing].join('\n')
+      return addedTests(
+        addition(code, lines.length + 2, lines.length + 2),
+        repository(path, [[path, code], ...files]),
+      )
+    }
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    expect(read(["import { a } from './missing.ts'"])).toEqual(unread)
+    const cycle = [
+      ['tests/a.ts', "import { b } from './b.ts'\nexport const a = b"],
+      ['tests/b.ts', "import { a } from './a.ts'\nexport const b = 1"],
+    ] as const
+    expect(read(["import { a } from './a.ts'"], cycle)).toEqual(unread)
+    expect(read(["import { a } from '../../a.ts'"])).toEqual(unread)
+    expect(read(["import { a } from '@/a'"])).toEqual(unread)
+    const absolute = [['work/acme/api/a.ts', 'export const a = 1']] as const
+    expect(read(["import { a } from '/work/acme/api/a.ts'"], absolute)).toEqual(unread)
+    expect(read(["const name = './a.ts'", 'await import(name)'])).toEqual(unread)
+    expect(read(['eval("test(\'saves\', () => {})")'])).toEqual(unread)
+  })
+
+  test('a package binding used while the file is collected leaves it uncertain; inside a test or a hook it does not', () => {
+    const path = 'tests/export.test.ts'
+    const registry = '{ "devDependencies": { "@acme/testkit": "^1.2.0" } }'
+    const read = (lines: ReadonlyArray<string>, manifest = registry) => {
+      const code = [head, "import { cases } from '@acme/testkit'", ...lines].join('\n')
+      return addedTests(
+        addition(code, lines.length + 2, lines.length + 2),
+        repository(path, [
+          [path, code],
+          ['package.json', manifest],
+        ]),
+      )
+    }
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    expect(read(["cases('saves')", passing])).toEqual(unread)
+    const inside = ["test('saves', () => { expect(cases('saves')).toBe(1) })"]
+    expect(read(inside)).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
+    const hooked = [
+      "import { afterEach } from 'vite-plus/test'",
+      'afterEach(() => cases.reset())',
+      passing,
+    ]
+    expect(read(hooked)).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
+  })
+
+  test('a bare name the repository may hold (a workspace’s package, an alias, an undeclared name) leaves the file uncertain', () => {
+    const path = 'tests/export.test.ts'
+    const code = [head, "import { rows } from '@acme/testkit'", passing].join('\n')
+    const read = (manifest: string | null) =>
+      addedTests(
+        addition(code, 3, 3),
+        repository(path, [
+          [path, code],
+          ...(manifest === null ? [] : [['package.json', manifest] as const]),
+        ]),
+      )
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    expect(read(null)).toEqual(unread)
+    expect(read('{ "devDependencies": { "vitest": "5.0.1" } }')).toEqual(unread)
+    expect(read('{ "devDependencies": { "@acme/testkit": "workspace:*" } }')).toEqual(unread)
+    expect(read('{ "devDependencies": { "@acme/testkit": "file:../testkit" } }')).toEqual(unread)
+    expect(
+      read('{ "workspaces": ["packages/*"], "devDependencies": { "@acme/testkit": "1.2.0" } }'),
+    ).toEqual(unread)
+    expect(read('{ "devDependencies": { "@acme/testkit": "1.2.0" } }')).toEqual([
+      { title: 'saves', scope: [], twin: false, clash: false },
+    ])
+  })
+
+  test('a module that hands the runner on under another name, or runs code from a string, leaves the file uncertain', () => {
+    const path = 'export.test.ts'
+    const code = [
+      head,
+      "import { test as check } from './runner.ts'",
+      '',
+      "check('saves', () => { expect(1).toBe(2) })",
+      passing,
+    ].join('\n')
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    const runner = [['runner.ts', "export * from 'vite-plus/test'"]] as const
+    expect(addedTests(addition(code, 5, 5), repository(path, [[path, code], ...runner]))).toEqual(
+      unread,
+    )
+    const strings = [head, "import { rows } from './rows.ts'", passing].join('\n')
+    const evaluated = [['rows.ts', "export const rows = eval('[1, 2]')"]] as const
+    expect(
+      addedTests(addition(strings, 3, 3), repository(path, [[path, strings], ...evaluated])),
+    ).toEqual(unread)
+  })
+
+  test('require reached under another name, by createRequire or as a value, leaves the file uncertain', () => {
+    const cjs = 'exports.failingTest = (name) => test(name, () => { expect(1).toBe(2) })'
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    const created = [
+      "import { createRequire } from 'node:module'",
+      head,
+      'const load = createRequire(import.meta.url)',
+      "load('./helpers.cjs')",
+      passing,
+    ].join('\n')
+    const files = [['helpers.cjs', cjs]] as const
+    expect(
+      addedTests(
+        addition(created, 5, 5),
+        repository('a.test.ts', [['a.test.ts', created], ...files]),
+      ),
+    ).toEqual(unread)
+    const valued = [
+      "const { test } = require('node:test')",
+      'const load = require',
+      "load('./helpers.cjs')",
+      "test('saves', () => {})",
+    ].join('\n')
+    expect(
+      addedTests(
+        addition(valued, 4, 4),
+        repository('b.test.cjs', [['b.test.cjs', valued], ...files]),
+      ),
+    ).toEqual(unread)
+  })
+
+  test('an added line that declares no test the reader can read leaves the key line to decide', () => {
+    const path = 'helper.test.ts'
+    const code = [
+      head,
+      "import { failingTest } from './helpers.ts'",
+      '',
+      "failingTest('saves')",
+      passing,
+    ].join('\n')
+    const names = addedTests(
+      addition(code, 4, 4),
+      repository(path, [
+        [path, code],
+        ['helpers.ts', VITEST_HELPERS],
+      ]),
+    )
+    const output = run(captured('vitest-imported-helper'), 1, path)
+    expect(validRed(output, path, names)).toBe(false)
+    expect(validRed(output, path, names, true)).toBe(true)
+  })
+
+  test('a bracket closed by a bracket of another kind leaves the file uncertain', () => {
+    const code = "test('keeps', () => { const rows = [1, 2) })\ntest('saves', () => {})"
+    expect(
+      addedTests(addition(code, 2, 2), repository('a.test.ts', [['a.test.ts', code]])),
+    ).toEqual([{ title: 'saves', scope: null, twin: false, clash: false }])
+  })
+
+  test('vitest’s %$ is a placeholder read whole: its template makes no title unlike its own', () => {
+    const code = "test.each([1])('exports %$', () => {})\ntest('saves', () => {})"
+    expect(
+      addedTests(addition(code, 2, 2), repository('a.test.ts', [['a.test.ts', code]])),
+    ).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
+  })
+
+  test('a runner configuration the reader cannot follow leaves the file uncertain', () => {
+    const path = 'export.test.ts'
+    const code = [head, passing].join('\n')
+    for (const [name, text] of [
+      ['vite.config.ts', 'export default { test: { setupFiles: setups } }'],
+      ['vitest.config.ts', "export default { test: { projects: ['a', 'b'] } }"],
+      ['package.json', '{ "scripts": { "test": "node --import ./setup.mjs --test" } }'],
+      ['.mocharc.yml', 'require: ./setup.js'],
+    ] as const) {
+      expect([
+        name,
+        addedTests(
+          addition(code, 2, 2),
+          repository(path, [
+            [path, code],
+            [name, text],
+          ]),
+        ),
+      ]).toEqual([name, [{ title: 'saves', scope: null, twin: false, clash: false }]])
+    }
+  })
+
+  test('a Python file importing a test, everything, or a name it declares, or under a conftest that changes collection, is uncertain', () => {
+    const path = 'tests/test_export.py'
+    const read = (code: string, files: ReadonlyArray<readonly [string, string]> = []) =>
+      addedTests(
+        { insertion: 'new_file', code, patch: null },
+        repository(path, [[path, code], ...files]),
+      )
+    const own = 'def test_saves():\n    assert 1 == 2'
+    expect(read(own)).toEqual([{ title: 'test_saves', scope: [], twin: false, clash: false }])
+    for (const first of [
+      'from .shared import test_saves',
+      'from .shared import *',
+      'from .shared import (\n    Export,\n    TestSaving,\n)',
+      'test_keeps = test_saves',
+    ]) {
+      expect([first, read(`${own}\n${first}`)]).toEqual([
+        first,
+        [{ title: 'test_saves', scope: null, twin: false, clash: false }],
+      ])
+    }
+    const conftest = 'def pytest_collection_modifyitems(items):\n    items.reverse()'
+    expect(read(own, [['tests/conftest.py', conftest]])).toEqual([
+      { title: 'test_saves', scope: null, twin: false, clash: false },
+    ])
+  })
+
+  test('a module the runner mocks from its source is followed as any module it loads', () => {
+    const path = 'export.test.ts'
+    const code = [head, "vi.mock('./store.ts')", passing].join('\n')
+    const unread = [{ title: 'saves', scope: null, twin: false, clash: false }]
+    expect(
+      addedTests(
+        addition(code, 3, 3),
+        repository(path, [
+          [path, code],
+          ['store.ts', VITEST_SHARED],
+        ]),
+      ),
+    ).toEqual(unread)
+    const store = 'export const store = new Map<string, number>()'
+    expect(
+      addedTests(
+        addition(code, 3, 3),
+        repository(path, [
+          [path, code],
+          ['store.ts', store],
+        ]),
+      ),
+    ).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
+  })
+
+  test('a runner configuration that loads a module of the repository leaves the file uncertain', () => {
+    const path = 'export.test.ts'
+    const code = [head, passing].join('\n')
+    const config = [
+      "import { mergeConfig } from 'vite'",
+      "import base from './vite.base.ts'",
+      'export default mergeConfig(base, { test: { environment: "node" } })',
+    ].join('\n')
+    const base = "export default { test: { setupFiles: ['./setup.ts'] } }"
+    const files = [
+      [path, code],
+      ['vite.config.ts', config],
+      ['vite.base.ts', base],
+      ['setup.ts', VITEST_SHARED],
+    ] as const
+    expect(addedTests(addition(code, 2, 2), repository(path, files))).toEqual([
+      { title: 'saves', scope: null, twin: false, clash: false },
+    ])
+  })
+
+  test('a Python class imported from a module of the repository that holds a test case leaves the file uncertain', () => {
+    const path = 'tests/test_export.py'
+    const read = (code: string, files: ReadonlyArray<readonly [string, string]>) =>
+      addedTests(
+        { insertion: 'new_file', code, patch: null },
+        repository(path, [[path, code], ...files]),
+      )
+    const own = 'def test_saves():\n    assert 1 == 2'
+    const unread = [{ title: 'test_saves', scope: null, twin: false, clash: false }]
+    const saving =
+      'import unittest\n\nclass Saving(unittest.TestCase):\n    def test_saves(self):\n        self.assertEqual(1, 2)'
+    expect(read(`from .cases import Saving\n\n${own}`, [['tests/cases.py', saving]])).toEqual(
+      unread,
+    )
+    const again = [
+      ['tests/cases.py', 'from .base import Saving'],
+      ['tests/base.py', saving],
+    ] as const
+    expect(read(`from .cases import Saving\n\n${own}`, again)).toEqual(unread)
+    expect(read(`from app.cases import Saving\n\n${own}`, [['src/app/cases.py', saving]])).toEqual(
+      unread,
+    )
+    const plain = [
+      ['src/app/export.py', 'class Export:\n    def save(self):\n        return 1'],
+    ] as const
+    expect(
+      read(`from app.export import Export\nfrom attrs import define\n\n${own}`, plain),
+    ).toEqual([{ title: 'test_saves', scope: [], twin: false, clash: false }])
+  })
+
+  test('a reader that fails has read nothing for certain: the key line decides', () => {
+    const failing = {
+      path: 'export.test.ts',
+      read: (): string | null => {
+        throw new Error('the disk is gone')
+      },
+    }
+    const code = [head, passing].join('\n')
+    expect(addedTests(addition(code, 2, 2), failing)).toEqual([
+      { title: 'saves', scope: null, twin: false, clash: false },
+    ])
+    // A world that fails before any reader runs: the proof adds a test that names nothing.
+    const lost = {
+      get path(): string {
+        throw new Error('the repository is gone')
+      },
+      read: (): string | null => null,
+    }
+    expect(addedTests(addition(code, 2, 2), lost)).toEqual([
+      { title: '', scope: null, twin: false, clash: false },
+    ])
+  })
+
+  test('twenty thousand awaits before a call are read without exhausting the stack', () => {
+    const path = 'export.test.ts'
+    const code = `${head}\nimport { h } from './h.ts'\n${'await '.repeat(20_000)}h('x')\n${passing}`
+    const names = addedTests(
+      addition(code, 4, 4),
+      repository(path, [
+        [path, code],
+        ['h.ts', 'export const h = (x: string) => x'],
+      ]),
+    )
+    expect(names).toEqual([{ title: 'saves', scope: [], twin: false, clash: false }])
+  })
+
+  test('a template holding many ${ never closed is read in linear time', () => {
+    const read = (code: string) => {
+      addedTests({ insertion: 'new_file', code, patch: null }, ALONE)
+    }
+    const template = (size: number) =>
+      `test.each([1])('${'${'.repeat(size)}', () => {})\ntest('a', () => {})`
+    expect(growth(template, 20_000, read)).toBeLessThan(24)
+  })
+
+  test('a deep chain of modules is walked in linear time', () => {
+    const chain = (size: number): ReadonlyArray<readonly [string, string]> => [
+      ...Array.from({ length: size }, (_, at) => {
+        const [here, next] = [String(at), String(at + 1)]
+        return [
+          `m${here}.ts`,
+          `import { v${next} } from './m${next}.ts'\nexport const v${here} = v${next}`,
+        ] as const
+      }),
+      [`m${String(size)}.ts`, `export const v${String(size)} = 1`],
+    ]
+    const code = `${head}\nimport { v0 } from './m0.ts'\ntest('saves', () => { expect(v0).toBe(1) })`
+    const worlds = new Map<string, ReturnType<typeof repository>>()
+    const make = (size: number) => {
+      worlds.set(String(size), repository('t.test.ts', [['t.test.ts', code], ...chain(size)]))
+      return String(size)
+    }
+    const walk = (size: string) => {
+      const world = worlds.get(size) ?? ALONE
+      expect(addedTests({ insertion: 'new_file', code, patch: null }, world)).toEqual([
+        { title: 'saves', scope: [], twin: false, clash: false },
+      ])
+    }
+    expect(growth(make, 100, walk)).toBeLessThan(24)
   })
 })

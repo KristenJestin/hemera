@@ -45,6 +45,7 @@ import {
   type ProofPhase,
   PROOF_PHASES,
   type ScenarioProofState,
+  type SourceWorld,
   type ToolArguments,
   addedTestNames,
   addedTests,
@@ -54,7 +55,7 @@ import {
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { Effect, Option, Result, Semaphore } from 'effect'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { Git } from '../git.ts'
@@ -417,6 +418,23 @@ export const buildingProofs = (parts: ProofParts) => {
     basesOf(building).find((one) => one.repository === repository)?.folder ?? null
 
   /**
+   * A proof's test file in its repository, as the test readers see it: each file it reaches, read
+   * from the Workspace by its path in the repository; none when the repository has no folder.
+   */
+  const worldOf = (building: BuildingRow, test: NonNullable<Proof['test']>): SourceWorld => {
+    const folder = folderOf(building, test.repository)
+    return {
+      path: test.path,
+      read: (path) => {
+        const file = folder === null ? null : join(folder, path)
+        return file !== null && existsSync(file) && statSync(file).isFile()
+          ? readFileSync(file, 'utf8')
+          : null
+      },
+    }
+  }
+
+  /**
    * Whether a proof's test is in the Workspace: always for a command with no test file; for an
    * addition, once the tests it adds are found in the file (a conflict integrated by hand).
    */
@@ -428,11 +446,10 @@ export const buildingProofs = (parts: ProofParts) => {
     if (path === null || !existsSync(path)) return false
     if (test.insertion !== 'addition') return true
     const text = readFileSync(path, 'utf8')
-    const names = addedTestNames({
-      insertion: test.insertion,
-      code: test.code,
-      patch: test.patch ?? null,
-    })
+    const names = addedTestNames(
+      { insertion: test.insertion, code: test.code, patch: test.patch ?? null },
+      worldOf(building, test),
+    )
     const added =
       names.length > 0
         ? names
@@ -940,11 +957,10 @@ export const buildingProofs = (parts: ProofParts) => {
       const names =
         test === undefined
           ? []
-          : addedTests({
-              insertion: test.insertion,
-              code: test.code,
-              patch: test.patch ?? null,
-            })
+          : addedTests(
+              { insertion: test.insertion, code: test.code, patch: test.patch ?? null },
+              worldOf(building, test),
+            )
       if (validRed(run, test?.path ?? null, names, run.keyLineMatched)) {
         if (run.keyLineMatched === false) {
           const question = [

@@ -17,6 +17,9 @@
 import { Predicate, Schema } from 'effect'
 
 import { jsTests, pythonTests } from './test-sources.ts'
+import { type SourceWorld, jsWorldCertain, pythonWorldCertain } from './test-world.ts'
+
+export type { SourceWorld } from './test-world.ts'
 
 /** How a proof run ended, as Hemera classifies it (CT-35). */
 export const PROOF_CLASSES = [
@@ -1006,10 +1009,10 @@ export type TestName = string | TemplateTest | DeclaredTest | GoSubtest | RustCa
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
 
-/** A template's placeholders: `each`'s `%s`, `%$` and `$name`, a template literal's `${…}`. */
-const PLACEHOLDER = /%[sdifjoOp#%$]|\$\{[^}]*\}|\$[A-Za-z_]\w*(?:\.\w+)*/
-/** Each `%` and each `${` of a template, with what follows it. */
-const PLACEHOLDER_START = /%(?<format>[\s\S]?)|\$\{(?<code>[^}]*)(?<closed>\}?)/g
+/** The formats `each` replaces after a `%`. */
+const FORMATS = 'sdifjoOp#%$'
+/** A `$name` placeholder of `each`, with its member path, read where it starts. */
+const NAMED_PLACEHOLDER = /\$[A-Za-z_]\w*(?:\.\w+)*/y
 /** What a placeholder stands for: words within a title, never across its runner's separators. */
 const WORDS = /^[^\n>›]*$/
 /** What a placeholder may produce: anything, a separator included. */
@@ -1017,18 +1020,49 @@ const ANYTHING = /^[\s\S]*$/
 /** A runner's path separator inside a title: vitest's ` > `, jest's ` › `. */
 const SEPARATOR = / [>›] /
 
+/** A template as the matcher reads it: whether whole, and its literal pieces. */
+interface ReadTemplate {
+  readonly readable: boolean
+  readonly pieces: ReadonlyArray<string>
+}
+
 /**
- * Whether the matcher reads a template whole: each `%` a placeholder it knows, each `${…}` ended
- * by its first `}`, with no brace, quote or template literal inside (`${f({ a })}`, `${a ?? '}'}`).
- * A template it does not read whole may produce any title.
+ * A template read once, left to right: its placeholders are `each`'s `%s`, `%$` and `$name` and a
+ * template literal's `${…}`. It is read whole when each `%` is a format it knows and each `${…}`
+ * ends at its first `}` with no brace, quote or template literal inside (`${f({ a })}`,
+ * `${a ?? '}'}`); a template it does not read whole may produce any title. Linear: a `${` with no
+ * `}` after it ends the reading, since none after it closes either.
  */
-const readable = (template: string): boolean =>
-  Array.from(template.matchAll(PLACEHOLDER_START)).every((found) => {
-    const groups = found.groups ?? {}
-    const code = groups['code']
-    if (code === undefined) return /^[sdifjoOp#%$]$/.test(groups['format'] ?? '')
-    return groups['closed'] === '}' && !/[{`'"]/.test(code)
-  })
+const readTemplate = (template: string): ReadTemplate => {
+  const pieces: Array<string> = []
+  let piece = 0
+  let at = 0
+  const cut = (start: number, end: number) => {
+    pieces.push(template.slice(piece, start))
+    piece = end
+    at = end
+  }
+  while (at < template.length) {
+    const char = template[at]
+    if (char === '%') {
+      if (!FORMATS.includes(template[at + 1] ?? '')) return { readable: false, pieces: [] }
+      cut(at, at + 2)
+    } else if (char === '$' && template[at + 1] === '{') {
+      const close = template.indexOf('}', at + 2)
+      if (close < 0 || /[{`'"]/.test(template.slice(at + 2, close))) {
+        return { readable: false, pieces: [] }
+      }
+      cut(at, close + 1)
+    } else if (char === '$') {
+      NAMED_PLACEHOLDER.lastIndex = at
+      const named = NAMED_PLACEHOLDER.exec(template)
+      if (named === null) at += 1
+      else cut(at, at + named[0].length)
+    } else at += 1
+  }
+  pieces.push(template.slice(piece))
+  return { readable: true, pieces }
+}
 
 /**
  * Whether a title is one a template makes: the title starts and ends with the template's literal
@@ -1058,22 +1092,14 @@ const templateMakes = (pieces: ReadonlyArray<string>, title: string, within: Reg
  * placeholders alone, each placeholder words within the title, never a separator.
  */
 const templateAnswers = (template: string, title: string): boolean => {
-  const pieces = template.split(PLACEHOLDER)
+  const { readable, pieces } = readTemplate(template)
   return (
-    readable(template) &&
-    !pieces.every((piece) => piece.trim() === '') &&
-    templateMakes(pieces, title, WORDS)
+    readable && !pieces.every((piece) => piece.trim() === '') && templateMakes(pieces, title, WORDS)
   )
 }
 
 /** How many tests under a template a file's tests are compared with: past it, none names its test. */
 const MAX_TEMPLATES = 64
-
-/** A template as the matcher reads it: whether whole, and its literal pieces. */
-interface ReadTemplate {
-  readonly readable: boolean
-  readonly pieces: ReadonlyArray<string>
-}
 
 /**
  * Whether two titles a file declares could be the same title a runner prints, each template read
@@ -1342,11 +1368,35 @@ const addedLinesOf = (patch: string, lines: ReadonlyArray<string>): ReadonlySet<
  * nothing, and the key line decides. A title a template of the file could produce is a twin of the
  * template's tests, and a path one could produce a clash.
  */
-export const addedTests = (test: {
-  readonly insertion: 'new_file' | 'addition'
-  readonly code: string
-  readonly patch: string | null
-}): ReadonlyArray<TestName> => {
+export const addedTests = (
+  test: {
+    readonly insertion: 'new_file' | 'addition'
+    readonly code: string
+    readonly patch: string | null
+  },
+  world: SourceWorld,
+): ReadonlyArray<TestName> => {
+  try {
+    return readAdded(test, world)
+  } catch {
+    // A reader that fails has read nothing for certain: the key line decides.
+    return [UNREAD]
+  }
+}
+
+/** A test the proof adds that no reader read for certain: it names nothing. */
+const UNREAD: DeclaredTest = { title: '', scope: null, twin: false, clash: false }
+/** The extensions of a JavaScript or TypeScript file. */
+const JAVASCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
+
+const readAdded = (
+  test: {
+    readonly insertion: 'new_file' | 'addition'
+    readonly code: string
+    readonly patch: string | null
+  },
+  world: SourceWorld,
+): ReadonlyArray<TestName> => {
   const lines = test.code.split('\n')
   const placed = test.insertion === 'new_file' ? null : addedLinesOf(test.patch ?? '', lines)
   const whole = test.insertion === 'new_file' || placed !== null
@@ -1382,8 +1432,24 @@ export const addedTests = (test: {
     for (const one of keys) counted.set(one, (counted.get(one) ?? 0) + 1)
     return counted
   }
-  const sources = [jsTests(added), pythonTests(added)].flatMap((read) =>
-    read.tests.map((one) => ({ ...one, certain: whole && read.certain })),
+  // Each language's reader, by the file's extension (both for a file of neither), each certain
+  // only of a file in a closed world (`test-world.ts`).
+  const extension = /\.[^./]+$/.exec(world.path)?.[0] ?? ''
+  const javascript = JAVASCRIPT.has(extension)
+  const python = extension === '.py'
+  const readers = [
+    ...(javascript || !python ? [{ read: jsTests(added), closed: jsWorldCertain }] : []),
+    ...(python || !javascript ? [{ read: pythonTests(added), closed: pythonWorldCertain }] : []),
+  ].map(({ read, closed }) => ({
+    tests: read.tests,
+    certain:
+      whole &&
+      read.certain &&
+      (read.tests.length === 0 && !javascript && !python ? true : closed(test.code, world)),
+  }))
+  const certainFile = readers.every((one) => one.certain)
+  const sources = readers.flatMap((one) =>
+    one.tests.map((declared) => ({ ...declared, certain: one.certain })),
   )
   // A test under a template (its title's or a describe's) is told apart from another only where no
   // title its template produces could be the other's: a title either could have makes them twins, a
@@ -1401,7 +1467,7 @@ export const addedTests = (test: {
   const read = (template: string) => {
     const known = reads.get(template)
     if (known !== undefined) return known
-    const fresh = { readable: readable(template), pieces: template.split(PLACEHOLDER) }
+    const fresh = readTemplate(template)
     reads.set(template, fresh)
     return fresh
   }
@@ -1458,13 +1524,14 @@ export const addedTests = (test: {
       name: { function: found.groups?.['name'] ?? '' },
     })),
   ]
-  return [
-    ...[...declared, ...others]
-      .filter((one) => placed === null || placed.has(lineAt(one.at) + 1))
-      .toSorted((a, b) => a.at - b.at)
-      .map((one) => one.name),
-    ...subtestsOf(test),
-  ]
+  const inOrder = [...declared, ...others]
+    .filter((one) => placed === null || placed.has(lineAt(one.at) + 1))
+    .toSorted((a, b) => a.at - b.at)
+    .map((one) => one.name)
+  // A JavaScript or Python file not read for certain, whose added lines declare no test the
+  // reader saw, still adds a test: one that names nothing.
+  const unread = (javascript || python) && !certainFile && inOrder.length === 0
+  return [...inOrder, ...(unread ? [UNREAD] : []), ...subtestsOf(test)]
 }
 
 /**
@@ -1577,12 +1644,15 @@ const goCode = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
 }
 
 /** The literal names a proof's tests are declared with, as its code reads. */
-export const addedTestNames = (test: {
-  readonly insertion: 'new_file' | 'addition'
-  readonly code: string
-  readonly patch: string | null
-}): ReadonlyArray<string> =>
-  addedTests(test).map((name) => {
+export const addedTestNames = (
+  test: {
+    readonly insertion: 'new_file' | 'addition'
+    readonly code: string
+    readonly patch: string | null
+  },
+  world: SourceWorld,
+): ReadonlyArray<string> =>
+  addedTests(test, world).map((name) => {
     if (Predicate.isString(name)) return name
     if (Predicate.hasProperty(name, 'template')) return name.template
     if (Predicate.hasProperty(name, 'scope')) {
