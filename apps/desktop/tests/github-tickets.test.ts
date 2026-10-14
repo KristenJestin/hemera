@@ -24,11 +24,13 @@ import {
 import { Effect, Option, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { ProfileParts } from '../src/engine/profile.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
 import { GhCli, type GhSettings, findOnPath } from '../src/engine/tickets/gh.ts'
 import { githubProvider } from '../src/engine/tickets/github.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { type GhRule, fakeGh, included } from './fake-gh.ts'
+import { observedProcesses } from './observed-processes.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -51,8 +53,9 @@ const withProvider = <A, E>(
   program: (provider: Effect.Success<ReturnType<typeof githubProvider>>) => Effect.Effect<A, E>,
   config = ACME,
   secrets = secretsRegistry(),
+  hostProcesses?: ProfileParts['hostProcesses'],
 ) =>
-  commandsEngine(data, { gh, secrets })(({ profile }) =>
+  commandsEngine(data, { gh, secrets, hostProcesses })(({ profile }) =>
     profile.use(Effect.flatMap(githubProvider(config), program)),
   )
 
@@ -219,14 +222,20 @@ describe('gh runs as a program: argument array, no shell, the user’s configura
 
   test('a hung gh is killed at the limit and reported unreachable', async () => {
     const gh = fakeGh([{ when: ['graphql'], hang: true }], { limitMillis: 400 })
-    const failed = await withProvider(gh.settings, (provider) =>
-      Effect.flip(provider.read(reference('acme/shop#41'))),
+    const observed = observedProcesses()
+    const failed = await withProvider(
+      gh.settings,
+      (provider) => Effect.flip(provider.read(reference('acme/shop#41'))),
+      ACME,
+      secretsRegistry(),
+      observed.layer,
     )
     expect(failed).toBeInstanceOf(ProviderUnreachable)
     expect(failed.message).toContain('did not answer within')
     const [call] = gh.calls()
-    // The read answers once the process has ended, never while it is still there.
-    expect(() => process.kill(call?.pid ?? 0, 0)).toThrow()
+    // The read answers once the process has ended, as the supervisor saw it: its pid may already
+    // be another process's.
+    expect(observed.ended(call?.pid ?? 0)).toBe(true)
   })
 })
 
