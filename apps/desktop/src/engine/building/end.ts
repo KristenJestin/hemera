@@ -40,7 +40,7 @@ import {
   specialTaskOf,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
-import { and, desc, eq, gt, gte, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { Cause, Effect, Layer, Option, Predicate, Schema, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
@@ -49,7 +49,15 @@ import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
-import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
+import {
+  DeliveryFailed,
+  type NeedHandler,
+  NeedOwners,
+  answersToHand,
+  createNeedIn,
+  deliverAnswers,
+  needService,
+} from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
@@ -161,6 +169,7 @@ type Needs =
   | Memory
   | Runs
   | ToolAccess
+  | NeedOwners
   | Effect.Services<ReturnType<typeof getMission>>
 
 const readString = Schema.decodeUnknownOption(Schema.String)
@@ -711,6 +720,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
               if (yield* unsettled(building)) return yield* withBuilder(building)
               if ((yield* getMission(missionId)).needs.length > 0)
                 return yield* withBuilder(building)
+              // An answer not handed over yet is handed now: what it moves drives the end again.
+              if (yield* answerHanding(yield* Database, missionId)) {
+                yield* deliverAnswers
+                return false
+              }
               // An answer to the Builder holds the exit until a turn of the Builder on it ended.
               if (yield* answerWaits(yield* Database, building)) return yield* withBuilder(building)
               return yield* exit(building)
@@ -857,8 +871,9 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         })
 
       /**
-       * Whether an answer to the Builder, given since the end was called, waits for it: still
-       * queued, or taken by a turn that has not ended yet. Answers to other agents are theirs.
+       * Whether an answer to the Builder waits for it, once the end is called: still queued, or
+       * taken by a turn that has not ended yet, whenever it was given (#348). Answers to other
+       * agents are theirs.
        */
       const answerWaits = (
         reader: Database['Service'] | EngineTransaction,
@@ -889,7 +904,6 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                 eq(sessionDeliveries.ownerId, building.missionId),
                 eq(sessionDeliveries.kind, 'answer'),
                 inArray(sessionDeliveries.state, ['queued', 'sent']),
-                gte(sessionDeliveries.createdAt, called),
               ),
             )
             .pipe(Effect.mapError(refusedWhile('reading the answers to the Builder')))).filter(
@@ -908,6 +922,16 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             (one) => one.sentAt === null || turned === null || turned <= one.sentAt,
           )
         })
+
+      /**
+       * Whether an answer the user gave on the mission is not handed to its owner yet: invisible
+       * among the pending needs, and not yet an answer to the Builder, it holds the exit (#348).
+       * Exactly what a hand-over round hands over, so the round always moves what holds it.
+       */
+      const answerHanding = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
+        NeedOwners.use((owners) => answersToHand(reader, owners, missionId)).pipe(
+          Effect.map((left) => left.length > 0),
+        )
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
       const unsettled = (building: BuildingRow) =>
@@ -969,8 +993,10 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           // the Builder back to take its answer; an answer that reached it as it stopped, too.
           if (
             (yield* getMission(missionId)).needs.length > 0 ||
+            (yield* answerHanding(database, missionId)) ||
             (yield* answerWaits(database, building))
           ) {
+            yield* deliverAnswers
             return yield* withBuilder(building)
           }
           const snapshots = yield* Snapshots
@@ -1061,6 +1087,9 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                   ),
                 )
                 .pipe(Effect.mapError(refusedWhile('reading the sessions')))
+              // No answer is left to hand over here: once the tree is stopped twice, nothing raises a
+              // need answered through a hand-over (a `commit` need `commitsLeft` may raise is
+              // retried, never handed over). An answer may still reach the Builder meanwhile.
               if (!exiting || live.length > 0 || (yield* answerWaits(transaction, current))) {
                 return { result: 'again' as const, events: [] }
               }
@@ -1288,8 +1317,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             const session = yield* getSession(turn.sessionId)
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
-            if (building === null || endPhaseOf(building.phase) === null) return
-            yield* hold('turned')
+            if (building === null) return
+            // Kept whatever the phase, so an answer the Builder took before the end is called is
+            // known as taken (#348); only an end under way is driven.
+            const ending = endPhaseOf(building.phase) !== null
+            if (ending) yield* hold('turned')
             // When it ended, never when it is heard: a red or an answer its session sent next was
             // taken after it, whatever this listener was busy with.
             const at = turn.at
@@ -1310,7 +1342,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                 said(`the end of a Builder's turn was not kept: ${String(cause)}`),
               ),
             )
-            yield* drive(building.id)
+            if (ending) yield* drive(building.id)
           }).pipe(
             provided,
             Effect.catchCause((cause) => said(`a turn's end was not followed: ${String(cause)}`)),
