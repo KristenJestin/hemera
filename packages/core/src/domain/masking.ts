@@ -203,6 +203,13 @@ const edited = (pieces: ReadonlyArray<Piece>, edits: ReadonlyArray<Edit>): Reado
   let index = 0
   let taken: Span | null = null
   for (const piece of pieces) {
+    // A mask narrowed to nothing (its match ended in an earlier mask) still stands for what it
+    // hid: kept as it is, or taken into the edit it stands in.
+    if (piece.length === 0) {
+      if (taken === null) next.push(piece)
+      else taken = [Math.min(taken[0], piece.from), Math.max(taken[1], piece.to)]
+      continue
+    }
     let offset = 0
     while (offset < piece.length) {
       const edit = edits[index]

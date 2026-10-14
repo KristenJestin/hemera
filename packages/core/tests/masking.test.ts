@@ -352,6 +352,55 @@ describe('What a CLI printed is masked at least as much as the whole text would 
       [JSON.stringify({ auths: { reg: { auth: 'dXNlcjpodW50ZXIy' } } })],
       ['dXNlcjpodW50ZXIy'],
     ],
+    // A match that ends in a mask an earlier rule laid (a known value, a cut private key).
+    [
+      'a Cookie header ending in a known value',
+      'Cookie: sid=abc123 KNOWNSECRET1',
+      ['KNOWNSECRET1'],
+      ['abc123'],
+    ],
+    [
+      'a Cookie header ending in a known value, in JSON',
+      '{"h":"Cookie: sid=abc123 KNOWNSECRET1"}',
+      ['KNOWNSECRET1'],
+      ['abc123'],
+    ],
+    [
+      'a Set-Cookie header ending in a known value, in a gh --json list',
+      '[{"headers":"Set-Cookie: sid=abc123; KNOWNSECRET1"}]',
+      ['KNOWNSECRET1'],
+      ['abc123'],
+    ],
+    [
+      'an Authorization header ending in a known value',
+      'Authorization: Basic dXNlcjpwYXNz KNOWNSECRET1',
+      ['KNOWNSECRET1'],
+      ['dXNlcjpwYXNz'],
+    ],
+    [
+      'a cut private key ending in a known value',
+      '-----BEGIN RSA PRIVATE KEY-----\nMIIEbodyQQ\nKNOWNSECRET1',
+      ['KNOWNSECRET1'],
+      ['MIIEbodyQQ'],
+    ],
+    [
+      'a cut private key ending in a known value, in a JSON string',
+      JSON.stringify({ k: '-----BEGIN RSA PRIVATE KEY-----\nMIIEbodyQQ\nKNOWNSECRET1' }),
+      ['KNOWNSECRET1'],
+      ['MIIEbodyQQ'],
+    ],
+    [
+      'a URL password ending in a known value',
+      'git remote: https://bob:pwQQ7KNOWNSECRET1@h.test/x',
+      ['KNOWNSECRET1'],
+      ['pwQQ7'],
+    ],
+    [
+      'a Cookie header ending in a private key',
+      'Cookie: sid=abc123 -----BEGIN RSA PRIVATE KEY-----',
+      [],
+      ['abc123'],
+    ],
   ]
   for (const [what, text, known, secrets] of cases) {
     test(`${what}: nothing of the secret is left, and JSON stays JSON`, () => {
@@ -413,6 +462,98 @@ describe('What a CLI printed is masked at least as much as the whole text would 
           }
         },
       ),
+    )
+  })
+  test('outputs built from fragments: no marker the whole-text mask hides is left, no known value', () => {
+    const known = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD', '😀5EE']
+    const marker = fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`)
+    const fragment = fc.oneof(
+      {
+        weight: 6,
+        arbitrary: fc.constantFrom(
+          'password=',
+          'password: ',
+          'token:',
+          'api_key=',
+          '"',
+          "'",
+          ' ',
+          '\n',
+          ',',
+          ':',
+          '\\',
+          'Bearer ',
+          'Authorization: ',
+          'Cookie: ',
+          'Set-Cookie: ',
+          'set-cookie=',
+          'Basic ',
+          'https://u:',
+          '@h.test',
+          '-----BEGIN RSA PRIVATE KEY-----',
+          '-----END RSA PRIVATE KEY-----',
+          'ghp_',
+          'sk-',
+          'eyJ',
+          '.',
+          '123',
+          '{',
+          '}',
+          '[',
+          ']',
+          'x',
+        ),
+      },
+      { weight: 3, arbitrary: marker },
+      { weight: 1, arbitrary: fc.constantFrom(...known) },
+    )
+    const text = fc.array(fragment, { minLength: 1, maxLength: 8 }).map((parts) => parts.join(''))
+    const name = fc.oneof(
+      text,
+      fc.constantFrom('a', 'body', 'token', 'cookie', 'name', 'Authorization', 'x'),
+    )
+    const json = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
+      value: fc.oneof(
+        { depthSize: 'small', withCrossShrink: true },
+        text,
+        fc.constantFrom(123, 9876543, true, null, 1.5),
+        fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
+        fc.dictionary(name, tie('value'), { minKeys: 1, maxKeys: 3 }),
+      ),
+    })).value
+    const line = fc.oneof(
+      text,
+      json.map((value) => JSON.stringify(value)),
+    )
+    const printed = fc.oneof(
+      json.map((value) => JSON.stringify(value)),
+      json.map((value) => JSON.stringify(value, null, 2)),
+      fc
+        .tuple(
+          fc.array(
+            json.map((value) => JSON.stringify(value)),
+            { minLength: 1, maxLength: 4 },
+          ),
+          fc.constantFrom('\n', '\r\n'),
+        )
+        .map(([lines, end]) => lines.join(end)),
+      fc
+        .tuple(fc.array(line, { minLength: 1, maxLength: 4 }), fc.constantFrom('\n', '\r\n'))
+        .map(([lines, end]) => lines.join(end)),
+    )
+    fc.assert(
+      fc.property(printed, (output) => {
+        const masked = holdsTheRule(output, known)
+        const whole = maskText(output, known)
+        for (const mark of new Set(output.match(/Mk\d+Zq/g) ?? [])) {
+          expect(occurrences(masked, mark), mark).toBeLessThanOrEqual(occurrences(whole, mark))
+        }
+        for (const value of known) {
+          expect(masked).not.toContain(value)
+          expect(masked).not.toContain(JSON.stringify(value).slice(1, -1))
+        }
+      }),
+      { numRuns: 5_000 },
     )
   })
 })
