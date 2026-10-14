@@ -455,36 +455,70 @@ export const reviewLayer = (settings: ReviewSettings) =>
           if (live === null)
             return yield* refuse(`${anchor.repository} could not be read now: try again.`)
           const repository = { name: place.name, folder: place.folder }
+          const failed = (failure: { readonly message: string }) =>
+            new FeedbackRefused({ reason: failure.message })
+          /** The anchored side of the file in a tree, or the refusal that says why there is none. */
+          const sideAt = (tree: string) =>
+            Effect.gen(function* () {
+              const [file] = yield* snapshots
+                .diff(missionId, repository, live.base, tree, anchor.path)
+                .pipe(Effect.mapError(failed))
+              if (file === undefined || file.path !== anchor.path) {
+                return yield* refuse(
+                  `${anchor.path} is not in the changes of ${anchor.repository}.`,
+                )
+              }
+              const side = anchor.side === 'new' ? file.after : file.before
+              if (side === null) {
+                return yield* refuse(
+                  `${anchor.path} has no ${anchor.side === 'new' ? 'new' : 'old'} side: comment on the other one.`,
+                )
+              }
+              return side
+            })
+          const linesAt = (side: FileSide) =>
+            Effect.gen(function* () {
+              const lines = textLines(side.withheld === null ? side.content : null)
+              if (lines === null) {
+                return yield* refuse(
+                  `${anchor.path} has no lines to read: comment on the whole file.`,
+                )
+              }
+              return lines
+            })
+          // What the user saw (the tree the window showed, or the live one) is checked first, before
+          // any snapshot is held for the comment: a refused anchor leaves nothing behind.
+          const seenTree = anchor.tree ?? live.tree
+          const seen = yield* sideAt(seenTree)
+          const seenLines = anchor.lines === null ? null : yield* linesAt(seen)
+          if (anchor.lines !== null && seenLines !== null) {
+            const wrong = rangeRefusal(anchor.lines, seenLines.length)
+            if (wrong !== null) return yield* refuse(wrong)
+          }
           const tree = yield* snapshots
             .take(repository, { kind: 'feedback', missionId, feedbackId })
-            .pipe(Effect.mapError((failure) => new FeedbackRefused({ reason: failure.message })))
+            .pipe(Effect.mapError(failed))
           yield* hold('anchor')
-          const [file] = yield* snapshots
-            .diff(missionId, repository, live.base, tree, anchor.path)
-            .pipe(Effect.mapError((failure) => new FeedbackRefused({ reason: failure.message })))
-          if (file === undefined || file.path !== anchor.path) {
-            return yield* refuse(`${anchor.path} is not in the changes of ${anchor.repository}.`)
-          }
-          const content = anchor.side === 'new' ? file.after : file.before
-          if (content === null) {
-            return yield* refuse(
-              `${anchor.path} has no ${anchor.side === 'new' ? 'new' : 'old'} side: comment on the other one.`,
-            )
-          }
-          if (anchor.lines === null) {
+          const content = yield* sideAt(tree)
+          if (anchor.lines === null || seenLines === null) {
             const whole: Recorded = { ...anchor, tree, fingerprint: null, content }
             return whole
           }
-          const lines = textLines(content.withheld === null ? content.content : null)
-          if (lines === null) {
-            return yield* refuse(`${anchor.path} has no lines to read: comment on the whole file.`)
+          const lines = yield* linesAt(content)
+          // The file may have moved on since it was shown: the comment goes on the lines seen.
+          let range = anchor.lines
+          if (tree !== seenTree) {
+            const found = reanchor(seenLines, lines, range, fingerprintOf(seenLines, range))
+            if (found.kind === 'outdated') {
+              return yield* refuse('The lines changed while you wrote: select them again.')
+            }
+            range = found.range
           }
-          const wrong = rangeRefusal(anchor.lines, lines.length)
-          if (wrong !== null) return yield* refuse(wrong)
           const recorded: Recorded = {
             ...anchor,
+            lines: range,
             tree,
-            fingerprint: fingerprintOf(lines, anchor.lines),
+            fingerprint: fingerprintOf(lines, range),
             content,
           }
           return recorded

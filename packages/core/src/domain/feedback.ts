@@ -55,6 +55,11 @@ export const CodeAnchorAsked = Schema.TaggedStruct('Code', {
   side: AnchorSide,
   /** Absent for a comment on the whole file. */
   lines: Schema.NullOr(LineRange),
+  /**
+   * The tree of the repository the window showed (`DiffRepository.tree`): the lines are taken on
+   * it and carried to the Workspace as it is when the comment is sent. Null: the Workspace now.
+   */
+  tree: Schema.NullOr(Schema.String),
 })
 export const SpecAnchorAsked = Schema.TaggedStruct('Spec', {
   /** A requirement (`R2`) or a scenario (`R2.S1`) of the frozen Spec. */

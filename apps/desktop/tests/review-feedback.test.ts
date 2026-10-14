@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { REVIEW_HOLD, type RoundState, SpecAnchorAsked } from '@hemera/core/domain'
+import { CodeAnchorAsked, REVIEW_HOLD, type RoundState, SpecAnchorAsked } from '@hemera/core/domain'
 import {
   AnchorCurrent,
   AnchorMoved,
@@ -34,6 +34,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { ImageBlock } from '../src/engine/agents/client.ts'
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
+import { Snapshots } from '../src/engine/building/snapshots.ts'
 import { judgeManual } from '../src/engine/building/proofs.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { putEvidence } from '../src/engine/memory/evidence.ts'
@@ -150,13 +151,13 @@ const remark = (body: string) => ({ kind: 'remark' as const, body, anchor: null,
 const codeOn = (start: number, end: number, body = 'These lines read badly.') => ({
   kind: 'code' as const,
   body,
-  anchor: {
-    _tag: 'Code' as const,
+  anchor: CodeAnchorAsked.make({
     repository: 'api',
     path: 'notes.ts',
-    side: 'new' as const,
+    side: 'new',
     lines: { start, end },
-  },
+    tree: null,
+  }),
   images: [],
 })
 const moveRound = (missionId: string, number: number, to: RoundState) =>
@@ -920,6 +921,34 @@ describe('Code comments follow their lines', () => {
   )
 
   test(
+    'a refused anchor holds no snapshot for the comment it never became',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const refused = (asked: Parameters<typeof add>[1]) =>
+              add(missionId, asked).pipe(Effect.flip, Effect.asVoid)
+            yield* refused(codeOn(19, 21))
+            yield* refused({ ...codeOn(1, 1), anchor: { ...codeOn(1, 1).anchor, path: 'nope.ts' } })
+            const kept = yield* add(missionId, codeOn(10, 12))
+            const refs = (yield* Snapshots.use((snapshots) =>
+              snapshots.diagnose(missionId),
+            )).flatMap((repository) => repository.refs.filter((ref) => ref.includes('/feedback/')))
+            return { refs, kept: kept.id }
+          }),
+        ),
+      )
+      expect(seen.refs).toHaveLength(1)
+      expect(seen.refs[0]).toContain(seen.kept)
+    },
+    SLOW,
+  )
+
+  test(
     'a Spec anchor on a requirement or a scenario of the frozen Spec is taken',
     async () => {
       const { run } = engine()
@@ -1071,6 +1100,67 @@ describe('Changes made outside Hemera', () => {
         ),
       )
       expect(seen).toEqual(AnchorMoved.make({ path: 'notes.ts', lines: { start: 11, end: 13 } }))
+    },
+    SLOW,
+  )
+  test(
+    'a change landing while the user writes a comment: it lands on the lines the user saw, or is refused when they changed',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, api } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const shownTree = Effect.map(
+              Diffs.use((diffs) => diffs.live(missionId)),
+              (diff) => diff.repositories.find((one) => one.repository === 'api')?.tree ?? null,
+            )
+            const seenTree = yield* shownTree
+            // The user selects lines 10–12 and writes; meanwhile their editor adds two lines on top.
+            writeFileSync(join(api, 'notes.ts'), textOf(['// one', '// two', ...NOTES]))
+            const asked = codeOn(10, 12)
+            const one = yield* add(missionId, {
+              ...asked,
+              anchor: { ...asked.anchor, tree: seenTree },
+            })
+            const view = feedbackOf(yield* stateOf(missionId), one.id)
+            // Seen again, then the selected lines themselves change before the comment is sent.
+            const again = yield* shownTree
+            writeFileSync(
+              join(api, 'notes.ts'),
+              textOf([
+                '// one',
+                '// two',
+                ...NOTES.map((line) => line.replace('line 11', 'eleven')),
+              ]),
+            )
+            const refused = yield* add(missionId, {
+              ...asked,
+              anchor: { ...asked.anchor, tree: again },
+            }).pipe(
+              Effect.flip,
+              Effect.map((failure) => failure.message),
+            )
+            return {
+              seenTree,
+              live: liveOf(view),
+              excerpt:
+                view.anchor !== null && Predicate.isTagged(view.anchor, 'Code')
+                  ? view.anchor.excerpt?.lines
+                  : null,
+              refused,
+            }
+          }),
+        ),
+      )
+      expect(seen.seenTree).toEqual(expect.any(String))
+      expect(seen.excerpt).toEqual(['line 10', 'line 11', 'line 12'])
+      expect(seen.live).toEqual(
+        AnchorCurrent.make({ path: 'notes.ts', lines: { start: 12, end: 14 } }),
+      )
+      expect(seen.refused).toBe('The lines changed while you wrote: select them again.')
     },
     SLOW,
   )

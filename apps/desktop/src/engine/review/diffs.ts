@@ -274,7 +274,7 @@ const fileOf = (
 }
 
 const repositoryOf = (
-  shape: Pick<DiffRepository, 'repository' | 'branch' | 'baseBranch' | 'baseCommit'>,
+  shape: Pick<DiffRepository, 'repository' | 'branch' | 'baseBranch' | 'baseCommit' | 'tree'>,
   files: ReadonlyArray<DiffFile>,
   sequence: number,
   unreadable: string | null,
@@ -525,7 +525,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
               last?.repository.unreadable !== computed.unreadable)
           const sequence = (last?.sequence ?? 0) + (changed ? 1 : 0)
           const repository = repositoryOf(
-            computed.shape,
+            { ...computed.shape, tree: computed.tree },
             computed.files,
             sequence,
             computed.unreadable,
@@ -582,6 +582,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
                   branch,
                   baseBranch: branchName(one.base),
                   baseCommit: one.mergeBase,
+                  tree: one.tree,
                 },
                 files
                   .filter((file) => file.repository === one.repository)
