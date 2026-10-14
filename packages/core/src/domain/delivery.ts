@@ -432,25 +432,26 @@ export const changesOf = <S extends { readonly id: string }>(overrides: Override
   overrides.off.length + overrides.changed.length + overrides.added.length
 
 /** One repository's rules, resolved: what a section copies and what an executor reads. */
-export interface EffectiveRepository {
-  readonly repositoryId: string
-  readonly name: string
-  readonly preset: DeliveryPreset
-  readonly preparation: {
-    readonly commitTemplate: string
-    readonly pullRequestTitle: string
-    readonly pullRequestBody: string
-    readonly reviewers: ReadonlyArray<string>
-    readonly requireApproval: boolean
-  }
+export const EffectiveRepository = Schema.Struct({
+  repositoryId: Schema.String,
+  name: Schema.String,
+  preset: DeliveryPreset,
+  preparation: Schema.Struct({
+    commitTemplate: Schema.String,
+    pullRequestTitle: Schema.String,
+    pullRequestBody: Schema.String,
+    reviewers: Schema.Array(Schema.String),
+    requireApproval: Schema.Boolean,
+  }),
   /** Its push steps, in order: those placed in Review run before Ship. */
-  readonly pushSteps: ReadonlyArray<PreparationStep>
+  pushSteps: Schema.Array(PreparationStep),
   /** Its recipe in the waves, in order. */
-  readonly steps: ReadonlyArray<WaveStep>
-  readonly deliversAfter: ReadonlyArray<string>
+  steps: Schema.Array(WaveStep),
+  deliversAfter: Schema.Array(Schema.String),
   /** What it changes of its preset and of the push steps. */
-  readonly changes: number
-}
+  changes: Schema.Number,
+})
+export type EffectiveRepository = typeof EffectiveRepository.Type
 
 const defaultPreset = (repository: DeliveryRepository): DeliveryPreset =>
   repository.forge === 'none' ? 'local' : 'application'

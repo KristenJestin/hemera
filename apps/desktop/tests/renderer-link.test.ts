@@ -20,6 +20,7 @@ import {
   InvalidProofLimit,
   DocRecipesRpcs,
   ForgeRpcs,
+  DeliveryRulesRpcs,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -557,6 +558,14 @@ const main = async (engine: 'answers' | 'gone') => {
       'forge.checkAgain': unused,
       'forge.setForced': unused,
       'forge.changes': () => Stream.die('the window’s link is not asked for the forges here'),
+    }),
+    DeliveryRulesRpcs.toLayer({
+      'deliveryRules.read': unused,
+      'deliveryRules.validate': unused,
+      'deliveryRules.save': unused,
+      'deliveryRules.acceptDependencies': unused,
+      'deliveryRules.missionCopies': unused,
+      'deliveryRules.preparationChangedSinceCopy': unused,
     }),
     DiffRpcs.toLayer({
       'diff.live': unused,
