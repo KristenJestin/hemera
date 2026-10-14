@@ -81,7 +81,7 @@ export const runCommand = (
   platform: NodeJS.Platform,
   limits: CommandLimits,
 ): Effect.Effect<CommandEnd> =>
-  Effect.callback<CommandEnd>((resume, signal) => {
+  Effect.callback<CommandEnd>((resume) => {
     const invocation = invocationOf(words, platform, hostLookup(process.cwd(), env))
     if (invocation === null) return resume(Effect.succeed({ succeeded: false, output: '' }))
     let output = ''
@@ -90,7 +90,6 @@ export const runCommand = (
     }
     const child = spawn(invocation.program, invocation.args, {
       env,
-      signal,
       timeout: limits.timeoutMs,
       windowsHide: true,
       windowsVerbatimArguments: invocation.verbatim,
@@ -106,6 +105,14 @@ export const runCommand = (
       if (killed !== null) resume(Effect.succeed({ succeeded: false, output }))
     })
     child.on('close', (code) => resume(Effect.succeed({ succeeded: code === 0, output })))
+    // Interrupted: the interruption returns once the child has exited, not once it was told to go.
+    return Effect.callback<void>((gone) => {
+      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+        return gone(Effect.void)
+      }
+      child.once('exit', () => gone(Effect.void))
+      child.kill('SIGKILL')
+    })
   })
 
 export interface AgentRegistryService {
