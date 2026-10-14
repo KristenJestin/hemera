@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  type Reanchored,
   excerptOf,
   fingerprintOf,
   lineMapping,
@@ -143,12 +144,56 @@ describe('The line mapping keeps only lines that are the same, in order', () => 
       const mapping = lineMapping(before, after)
       expect(mapping).not.toBeNull()
       let last = -1
+      let kept = 0
       for (const [from, to] of (mapping ?? []).entries()) {
         if (to < 0) continue
         expect(after[to]).toBe(before[from])
         expect(to).toBeGreaterThan(last)
         last = to
+        kept += 1
       }
+      // And as many as can be: a shortest edit script keeps a longest common subsequence.
+      expect(kept).toBe(longestCommon(before, after))
     }
+  })
+})
+
+/** The length of a longest common subsequence, by the textbook table. */
+const longestCommon = (before: ReadonlyArray<string>, after: ReadonlyArray<string>) => {
+  let row = new Array<number>(after.length + 1).fill(0)
+  for (const line of before) {
+    const next = [0]
+    for (const [at, other] of after.entries()) {
+      next.push(line === other ? (row[at] ?? 0) + 1 : Math.max(row[at + 1] ?? 0, next[at] ?? 0))
+    }
+    row = next
+  }
+  return row[after.length] ?? 0
+}
+
+describe('Re-anchoring a file rewritten whole stays cheap as the file grows', () => {
+  test('a file ten times longer takes about the same time: bounded by the edits allowed', () => {
+    const rewritten = (lines: number) => {
+      const before = Array.from({ length: lines }, (_, at) => `old ${String(at)}`)
+      const after = Array.from({ length: lines }, (_, at) => `new ${String(at)}`)
+      const range = { start: 10, end: 12 }
+      return () => reanchor(before, after, range, fingerprintOf(before, range))
+    }
+    const fastest = (work: () => Reanchored) => {
+      let best = Number.POSITIVE_INFINITY
+      for (let round = 0; round < 3; round += 1) {
+        const started = performance.now()
+        work()
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    const small = rewritten(2_000)
+    const large = rewritten(20_000)
+    expect(small()).toEqual({ kind: 'outdated' })
+    expect(large()).toEqual({ kind: 'outdated' })
+    // Bounded by the edits it allows, not by the file: a copy of the diagonals per edit (the
+    // first version) made this ratio about ten, a quadratic one would make it a hundred.
+    expect(fastest(large) / fastest(small)).toBeLessThan(4)
   })
 })

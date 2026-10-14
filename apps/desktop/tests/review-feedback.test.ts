@@ -786,6 +786,45 @@ describe('Code comments follow their lines', () => {
   )
 
   test(
+    'a comment is re-anchored once per version of the Workspace, not at each read of the Review',
+    async () => {
+      let computed = 0
+      const { run } = engine((at) =>
+        at === 'reanchor'
+          ? Effect.sync(() => {
+              computed += 1
+            })
+          : Effect.void,
+      )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, api } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const one = yield* add(missionId, codeOn(10, 12))
+            const added = computed
+            yield* stateOf(missionId)
+            yield* stateOf(missionId)
+            const read = computed
+            writeFileSync(join(api, 'notes.ts'), textOf(['new 1', ...NOTES]))
+            const live = liveOf(feedbackOf(yield* stateOf(missionId), one.id))
+            yield* stateOf(missionId)
+            return { added, read, changed: computed, live }
+          }),
+        ),
+      )
+      expect(seen.added).toBe(1)
+      expect(seen.read).toBe(1)
+      expect(seen.changed).toBe(2)
+      expect(seen.live).toEqual(
+        AnchorMoved.make({ path: 'notes.ts', lines: { start: 11, end: 13 } }),
+      )
+    },
+    SLOW,
+  )
+
+  test(
     'a whole-file comment follows its file when renamed',
     async () => {
       const { run } = engine()

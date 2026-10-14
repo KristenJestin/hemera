@@ -61,81 +61,114 @@ export type Reanchored =
   | { readonly kind: 'moved'; readonly range: LineRange }
   | { readonly kind: 'outdated' }
 
+/** The middle snake of a part: its diagonal's two ends, and the edits of the part's script. */
+interface Snake {
+  readonly x0: number
+  readonly y0: number
+  readonly x1: number
+  readonly y1: number
+  readonly edits: number
+}
+
+/**
+ * Myers' middle snake of `a[aLo, aHi)` against `b[bLo, bHi)`, in space linear in their lengths:
+ * null when the part takes more than `limit` edits.
+ */
+const middleSnake = (
+  a: ReadonlyArray<string>,
+  aLo: number,
+  aHi: number,
+  b: ReadonlyArray<string>,
+  bLo: number,
+  bHi: number,
+  limit: number,
+): Snake | null => {
+  const n = aHi - aLo
+  const m = bHi - bLo
+  const delta = n - m
+  const odd = (delta & 1) !== 0
+  const most = Math.min(Math.ceil((n + m) / 2), Math.ceil(limit / 2))
+  const offset = most + 1
+  const forward = new Int32Array(2 * most + 3)
+  const backward = new Int32Array(2 * most + 3)
+  for (let d = 0; d <= most; d += 1) {
+    for (let k = -d; k <= d; k += 2) {
+      const down =
+        k === -d || (k !== d && (forward[offset + k - 1] ?? 0) < (forward[offset + k + 1] ?? 0))
+      const x0 = down ? (forward[offset + k + 1] ?? 0) : (forward[offset + k - 1] ?? 0) + 1
+      const y0 = x0 - k
+      let x = x0
+      let y = y0
+      while (x < n && y < m && a[aLo + x] === b[bLo + y]) {
+        x += 1
+        y += 1
+      }
+      forward[offset + k] = x
+      const back = delta - k
+      if (odd && back >= -(d - 1) && back <= d - 1 && x + (backward[offset + back] ?? 0) >= n) {
+        return { x0, y0, x1: x, y1: y, edits: 2 * d - 1 }
+      }
+    }
+    for (let k = -d; k <= d; k += 2) {
+      const down =
+        k === -d || (k !== d && (backward[offset + k - 1] ?? 0) < (backward[offset + k + 1] ?? 0))
+      const x0 = down ? (backward[offset + k + 1] ?? 0) : (backward[offset + k - 1] ?? 0) + 1
+      const y0 = x0 - k
+      let x = x0
+      let y = y0
+      while (x < n && y < m && a[aHi - 1 - x] === b[bHi - 1 - y]) {
+        x += 1
+        y += 1
+      }
+      backward[offset + k] = x
+      const ahead = delta - k
+      if (!odd && ahead >= -d && ahead <= d && x + (forward[offset + ahead] ?? 0) >= n) {
+        return { x0: n - x, y0: m - y, x1: n - x0, y1: m - y0, edits: 2 * d }
+      }
+    }
+  }
+  return null
+}
+
 /**
  * For each line of `before`, its index in `after` when a shortest edit script keeps it, or -1:
- * Myers' diff, after the common head and tail are set aside. Null past `MAPPING_EDITS_MAX` edits.
+ * Myers' diff in linear space (the middle snake, part by part), after the common head and tail
+ * are set aside. Null past `MAPPING_EDITS_MAX` edits.
  */
 export const lineMapping = (
   before: ReadonlyArray<string>,
   after: ReadonlyArray<string>,
 ): Int32Array | null => {
   const mapping = new Int32Array(before.length).fill(-1)
-  let head = 0
-  while (head < before.length && head < after.length && before[head] === after[head]) {
-    mapping[head] = head
-    head += 1
-  }
-  let tail = 0
-  while (
-    tail < before.length - head &&
-    tail < after.length - head &&
-    before[before.length - 1 - tail] === after[after.length - 1 - tail]
-  ) {
-    mapping[before.length - 1 - tail] = after.length - 1 - tail
-    tail += 1
-  }
-  const a = before.slice(head, before.length - tail)
-  const b = after.slice(head, after.length - tail)
-  const n = a.length
-  const m = b.length
-  const max = n + m
-  if (max === 0) return mapping
-  const offset = max + 1
-  const v = new Int32Array(2 * max + 3)
-  const trace: Int32Array[] = []
-  let found = -1
-  for (let d = 0; d <= Math.min(max, MAPPING_EDITS_MAX); d += 1) {
-    trace.push(v.slice())
-    for (let k = -d; k <= d; k += 2) {
-      const down = k === -d || (k !== d && (v[offset + k - 1] ?? 0) < (v[offset + k + 1] ?? 0))
-      let x = down ? (v[offset + k + 1] ?? 0) : (v[offset + k - 1] ?? 0) + 1
-      let y = x - k
-      while (x < n && y < m && a[x] === b[y]) {
-        x += 1
-        y += 1
-      }
-      v[offset + k] = x
-      if (x >= n && y >= m) {
-        found = d
-        break
-      }
+  const parts: Array<readonly [number, number, number, number]> = [
+    [0, before.length, 0, after.length],
+  ]
+  let first = true
+  for (let part = parts.pop(); part !== undefined; part = parts.pop()) {
+    let [aLo, aHi, bLo, bHi] = part
+    while (aLo < aHi && bLo < bHi && before[aLo] === after[bLo]) {
+      mapping[aLo] = bLo
+      aLo += 1
+      bLo += 1
     }
-    if (found >= 0) break
-  }
-  if (found < 0) return null
-  // Back from the end: the diagonal before each edit is lines kept.
-  let x = n
-  let y = m
-  for (let d = found; d > 0; d -= 1) {
-    const previous = trace[d] ?? v
-    const k = x - y
-    const down =
-      k === -d || (k !== d && (previous[offset + k - 1] ?? 0) < (previous[offset + k + 1] ?? 0))
-    const fromK = down ? k + 1 : k - 1
-    const fromX = previous[offset + fromK] ?? 0
-    const fromY = fromX - fromK
-    while (x > fromX && y > fromY) {
-      x -= 1
-      y -= 1
-      mapping[head + x] = head + y
+    while (aLo < aHi && bLo < bHi && before[aHi - 1] === after[bHi - 1]) {
+      mapping[aHi - 1] = bHi - 1
+      aHi -= 1
+      bHi -= 1
     }
-    x = fromX
-    y = fromY
-  }
-  while (x > 0 && y > 0) {
-    x -= 1
-    y -= 1
-    mapping[head + x] = head + y
+    if (aLo === aHi || bLo === bHi) continue
+    const snake = middleSnake(before, aLo, aHi, after, bLo, bHi, MAPPING_EDITS_MAX)
+    // Each part takes fewer edits than the whole: the first one decides whether it is too many.
+    if (snake === null) {
+      if (first) return null
+      continue
+    }
+    first = false
+    for (let step = 0; step < snake.x1 - snake.x0; step += 1)
+      mapping[aLo + snake.x0 + step] = bLo + snake.y0 + step
+    // Head and tail set aside, both sides hold a line: the part takes two edits at least.
+    parts.push([aLo, aLo + snake.x0, bLo, bLo + snake.y0])
+    parts.push([aLo + snake.x1, aHi, bLo + snake.y1, bHi])
   }
   return mapping
 }
@@ -166,8 +199,11 @@ export const reanchor = (
     if (together && fingerprintOf(after, mapped) === fingerprint) return at(range, first + 1)
   }
   const length = range.end - range.start + 1
+  const targeted = before.slice(range.start - 1, range.end)
   const found: number[] = []
   for (let start = 1; start + length - 1 <= after.length; start += 1) {
+    // The lines themselves first, a string compare; the fingerprint only where they stand.
+    if (!targeted.every((line, step) => after[start - 1 + step] === line)) continue
     if (fingerprintOf(after, { start, end: start + length - 1 }) === fingerprint) found.push(start)
   }
   const [only] = found

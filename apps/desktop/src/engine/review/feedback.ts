@@ -111,7 +111,7 @@ import { excerptOf, fingerprintOf, linesOf, reanchor } from './anchors.ts'
 import { Diffs, type RepositoryNow } from './diffs.ts'
 
 /** Where a suite holds the service: an anchor's tree taken, a checkpoint about to be, a proof's remark. */
-export type ReviewHold = (at: 'anchor' | 'checkpoint' | 'proof') => Effect.Effect<void>
+export type ReviewHold = (at: 'anchor' | 'checkpoint' | 'proof' | 'reanchor') => Effect.Effect<void>
 
 export interface ReviewSettings {
   readonly log: Log
@@ -534,19 +534,47 @@ export const reviewLayer = (settings: ReviewSettings) =>
         })
 
       /** Where an anchor stands on the live Workspace, `live` read once per repository. */
+      /** Where each comment stood on a live tree: computed once per comment and tree (#341). */
+      const reanchored = new Map<string, AnchorLive>()
+      const REANCHORED_MAX = 2_000
+
       const liveOf = (
         missionId: string,
         row: FeedbackRow,
         live: RepositoryNow | null,
         content: Buffer | null,
+      ) => {
+        if (live === null) {
+          return Effect.succeed(AnchorUnread.make({ why: 'the Workspace cannot be read' }))
+        }
+        const key = [row.id, row.anchorTree, live.base, live.tree].join('\u0000')
+        const known = reanchored.get(key)
+        if (known !== undefined) return Effect.succeed(known)
+        return computeLive(missionId, row, live, content).pipe(
+          Effect.tap((found) =>
+            Effect.sync(() => {
+              // A failure to read is not kept: the next read tries again.
+              if (Predicate.isTagged(found, 'Unread')) return
+              if (reanchored.size >= REANCHORED_MAX) reanchored.clear()
+              reanchored.set(key, found)
+            }),
+          ),
+        )
+      }
+
+      const computeLive = (
+        missionId: string,
+        row: FeedbackRow,
+        live: RepositoryNow,
+        content: Buffer | null,
       ) =>
         Effect.gen(function* () {
+          yield* hold('reanchor')
           const path = row.anchorPath ?? ''
           const lines: LineRange | null =
             row.anchorStart === null || row.anchorEnd === null
               ? null
               : { start: row.anchorStart, end: row.anchorEnd }
-          if (live === null) return AnchorUnread.make({ why: 'the Workspace cannot be read' })
           const repository = { name: row.anchorRepository ?? '', folder: live.folder }
           let pathNow = path
           let sideNow: FileSide | null
