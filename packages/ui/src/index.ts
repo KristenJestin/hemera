@@ -320,12 +320,8 @@ export {
   type SoundStyleChoice,
   type Toggle,
 } from './blocks/app-settings/app-sections.tsx'
-export {
-  APP_SECTIONS,
-  AppSettings,
-  type AppSection,
-  type AppSettingsProps,
-} from './surfaces/app-settings/app-settings.tsx'
+export { AppSettings, type AppSettingsProps } from './surfaces/app-settings/app-settings.tsx'
+export { APP_SECTIONS, type AppSection } from './surfaces/app-settings/app-sections.tsx'
 export {
   NeverForm,
   NeverSection,
