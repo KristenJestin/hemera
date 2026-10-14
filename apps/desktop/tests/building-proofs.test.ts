@@ -20,7 +20,7 @@ import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema } from 'effe
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
-import { BuildingEnd, type BuilderHold } from '../src/engine/building/builder.ts'
+import { BuildingEnd, type BuilderHold, builderLayer } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
 import { OutsideChanges } from '../src/engine/building/outside.ts'
 import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
@@ -42,6 +42,7 @@ import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
 import { Runs } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { mutate } from '../src/engine/transaction.ts'
 import { activeBuildingIn, decisionsIn, tasksIn } from '../src/engine/building/tasks.ts'
 import {
   buildingAttempts,
@@ -549,6 +550,38 @@ describe('The red phase (CT-35)', () => {
     expect(seen.again.id).not.toBe(first.need.id)
     expect(seen.decision).toBe('withdrawn')
     expect(seen.blockedOn).toBe(seen.again.id)
+  })
+
+  test('a Retry that reaches the Builder’s needs before the Builder runs is refused, never taken without moving its proof', async () => {
+    const port = await closedPort()
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(
+              EXPORT_PATH,
+              testFile(
+                `  await new Promise((done, fail) => connect(${String(port)}, '127.0.0.1').on('connect', done).on('error', fail))`,
+                ["import { connect } from 'node:net'"],
+              ),
+            ),
+          }))
+          const need = yield* needOf(mission.id, 'Environment')
+          // The handler of a Builder whose layer is not built yet, as at the engine's start.
+          const early = builderLayer(() => undefined).handler.retriedIn
+          if (early === undefined) return yield* Effect.die(new Error('no Retry hook'))
+          return Exit.isFailure(
+            yield* Effect.exit(
+              mutate('a Retry before the Builder runs', (transaction) =>
+                Effect.map(early(need, transaction), (events) => ({ result: undefined, events })),
+              ),
+            ),
+          )
+        }),
+      ),
+    )
+    expect(seen).toBe(true)
   })
 
   /** A bug seen today: what Planning observed, its key line, and where it was seen. */

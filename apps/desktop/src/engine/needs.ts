@@ -96,7 +96,7 @@ export interface NeedHandler {
   readonly retriedIn?: (
     need: Need,
     transaction: EngineTransaction,
-  ) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError>
+  ) => Effect.Effect<ReadonlyArray<NewEvent>, DeliveryFailed | DatabaseError>
 }
 
 export class NeedOwners extends Context.Service<
@@ -635,13 +635,12 @@ export const answerNeed = (asked: NeedAnswerAsked) =>
   })
 
 /** Ends a pending need without an answer: it expired, or its owner withdrew it. */
-const endNeed = (
+const endNeed = <E = never>(
   id: string,
   state: 'expired' | 'withdrawn',
   reason: string,
-  within: (
-    transaction: EngineTransaction,
-  ) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError> = () => Effect.succeed([]),
+  within: (transaction: EngineTransaction) => Effect.Effect<ReadonlyArray<NewEvent>, E> = () =>
+    Effect.succeed([]),
 ) =>
   Effect.gen(function* () {
     const row = yield* needRow(id)
@@ -714,6 +713,11 @@ export const retryNeed = (id: string) =>
       'withdrawn',
       RESOLVED,
       retriedIn === undefined ? undefined : (transaction) => retriedIn(need, transaction),
+    ).pipe(
+      // Its owner could not take the Retry now: the need stays open, to be retried again.
+      Effect.catchTag('DeliveryFailed', (failed) =>
+        Effect.fail(new NeedAnswerRefused({ reason: failed.reason })),
+      ),
     )
   })
 

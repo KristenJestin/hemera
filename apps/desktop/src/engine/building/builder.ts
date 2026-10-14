@@ -304,8 +304,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         : apply(need, transaction),
     // An environment need holds until the user's Retry says it is fixed.
     recheck: (_need, retried) => Effect.succeed(!retried),
+    // Refused, like an answer, until the Builder runs: the need stays open for another Retry.
     retriedIn: (need, transaction) =>
-      takeRetry === null ? Effect.succeed([]) : takeRetry(need, transaction),
+      takeRetry === null
+        ? Effect.fail(new DeliveryFailed({ reason: 'the Builder is not running yet' }))
+        : takeRetry(need, transaction),
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
   let takeRestart: Effect.Effect<void> | null = null
