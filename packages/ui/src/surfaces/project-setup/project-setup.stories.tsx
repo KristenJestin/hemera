@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { PROPOSALS } from '../../blocks/setup/setup-fixtures.ts'
+import { foldedOut } from '../../exit-play.ts'
 import type { SetupCardEntry } from './project-setup.tsx'
 import { SetupFixture } from './setup-fixture.tsx'
 import { ProjectTasks, SetupTask, type SetupTaskProps } from './setup-task.tsx'
@@ -563,6 +564,8 @@ async function foldWithEarlier(): Promise<HTMLElement> {
   await userEvent.click(within(said).getByRole('button', { name: 'Unfold the summary' }))
   await userEvent.click(await within(said).findByRole('button', { name: /Earlier messages/ }))
   const earlier = await within(said).findByRole('list', { name: 'Earlier messages' })
+  // Folded at its start, a list that has not grown yet is at 0 before the fold begins.
+  await waitFor(() => expect(earlier.style.height).toBe('auto'))
   await userEvent.click(within(said).getByRole('button', { name: 'Fold the summary' }))
   await waitFor(() => expect(within(said).queryByText(/Reading/)).toBeNull())
   expect(within(said).queryByRole('button', { name: /Earlier messages/ })).toBeNull()
@@ -570,17 +573,20 @@ async function foldWithEarlier(): Promise<HTMLElement> {
 }
 
 /**
- * Folding the summary with the earlier messages open: their list folds with the summary. The
- * stories run asking for less movement, where that fold takes no time and its last frame may be
- * dropped as the summary leaves, so the play reads where it lands; the fold is read on frames.
+ * Folding the summary with the earlier messages open: their list folds with the summary, and
+ * plays its own exit before it goes. The stories ask for less movement, where the last frame of
+ * a fold may be dropped as the summary leaves, so this one asks for the movement and reads that
+ * the list reached a height of 0 before it left; cut with the summary it would keep the height
+ * it was drawn at. The fold itself is read on frames.
  */
 export const TaskSummaryFoldedWithEarlier: Story = {
   render: () => (
-    <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+    <MotionConfig reducedMotion="never">
+      <Held {...BASE} open messages={['Reading `package.json` of **api** and **web**', SUMMARY]} />
+    </MotionConfig>
   ),
   play: async () => {
-    const earlier = await foldWithEarlier()
-    await waitFor(() => expect(earlier).not.toBeInTheDocument())
+    await foldedOut(await foldWithEarlier())
   },
 }
 
