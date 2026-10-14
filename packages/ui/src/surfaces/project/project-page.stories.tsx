@@ -16,7 +16,7 @@ import {
   PROJECT_LIVING_SPEC,
   STAGE_GROUPS,
   manyGroups,
-} from './project-shell-fixture.tsx'
+} from './project-fixture-data.ts'
 import { ProjectStartSlot } from './project-start-slot.tsx'
 
 /**
