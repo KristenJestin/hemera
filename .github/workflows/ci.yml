@@ -235,13 +235,6 @@ jobs:
       - name: Start Git without its launcher
         shell: pwsh
         run: '"C:\Program Files\Git\mingw64\bin" >> $env:GITHUB_PATH'
-      - name: Probe Defender (temporary, 359)
-        shell: pwsh
-        run: |
-          Get-MpComputerStatus | Format-List RealTimeProtectionEnabled, AntivirusEnabled, OnAccessProtectionEnabled
-          Get-MpPreference | Format-List DisableRealtimeMonitoring, ExclusionPath
-          Get-PSDrive C, D | Format-Table Name, Used, Free
-          (Measure-Command { 1..20 | % { git --version | Out-Null } }).TotalMilliseconds
 
       - working-directory: source
         run: pnpm build
