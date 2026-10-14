@@ -1637,14 +1637,26 @@ export const buildingProofs = (parts: ProofParts) => {
   const retried = (building: BuildingRow, scenario: string) =>
     Effect.gen(function* () {
       const { missionId } = building
-      // Said as running before it leaves `held`, and until its run is recorded, whose events drive
-      // the end again: the end never takes it meanwhile for a stale proof nothing runs.
+      // Said as running before it leaves `held`, and until its run is recorded: the end never takes
+      // it meanwhile for a stale proof nothing runs. Once it is no longer said to run, the end is
+      // judged again: a drive while it ran left it out, and its run may have left it stale with no
+      // event of its own (a tree moved meanwhile), or never been recorded at all.
       const over = Effect.sync(() => {
         const left = [...(retrying.get(missionId) ?? [])]
         left.splice(left.indexOf(scenario), 1)
         if (left.length === 0) retrying.delete(missionId)
         else retrying.set(missionId, left)
-      })
+      }).pipe(
+        Effect.andThen(
+          mutate('judging the end again', () =>
+            Effect.succeed({
+              result: undefined,
+              events: [buildingEvent(missionId, 'building.proof_retry_over', { scenario })],
+            }),
+          ),
+        ),
+        Effect.catchCause((cause) => said(`the end was not judged again: ${String(cause)}`)),
+      )
       retrying.set(missionId, [...(retrying.get(missionId) ?? []), scenario])
       const heldOn = yield* mutate('running a proof again', (transaction) =>
         Effect.gen(function* () {
