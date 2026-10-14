@@ -1092,12 +1092,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                   ),
                 )
                 .pipe(Effect.mapError(refusedWhile('reading the sessions')))
-              if (
-                !exiting ||
-                live.length > 0 ||
-                (yield* answerHanding(transaction, missionId)) ||
-                (yield* answerWaits(transaction, current))
-              ) {
+              if (!exiting || live.length > 0 || (yield* answerWaits(transaction, current))) {
                 return { result: 'again' as const, events: [] }
               }
               const [mission] = yield* transaction
