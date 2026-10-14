@@ -272,10 +272,11 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
  *   line end then runs on through what an earlier shape hid, and hides what is glued after it
  *   (`password=<private key>x`);
  * - each shape once more, on the text where the known values, and every stretch the two readings
- *   found that holds a space or a quote, are written over. A value hidden by itself, quoted or
- *   spaced, no longer stops the value it stands in (`password=token="a b"x`, `https://u:token="a
- *   b"x@h`), whichever shape found it. A stretch with neither is left as it is: it stops no value
- *   that stops at a space or a quote, and the names in it stay readable (`Bearer password=…`).
+ *   found that holds a space or a quote up to its last one, are written over. A value hidden by
+ *   itself, quoted or spaced, no longer stops the value it stands in (`password=token="a b"x`,
+ *   `https://u:token="a b"x@h`), whichever shape found it. What holds neither is left as it is: it
+ *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
+ *   password=…`, `password=<private key>token: "a"x`).
  *
  * The union hides at least what any reading hides, and its cost is three scans of each shape.
  */
@@ -315,16 +316,27 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
 /** What stops a value read to the next space or quote. */
 const STOPS = /[\s"']/g
 
+/** One character that stops such a value. */
+const STOP = /[\s"']/
+
 /**
- * The stretches, in order of their starts, that hold a space or a quote. Where the next one stands
- * is searched once from each start past the last one found, so the text is crossed once.
+ * Of each stretch, in order of their starts, that holds a space or a quote: the part up to its
+ * last one. What follows that, up to the stretch's end, stops no value, and may be the name of a
+ * shape glued after it (`password=<private key>token: "a"`), which must stay readable. Where the
+ * next space or quote stands is searched once from each start past the last one found; the last
+ * one is found walking back from the end over what holds none, which no other stretch of the same
+ * shape crosses but a word: the text is crossed a fixed number of times.
  */
 function* closedSpans(text: string, spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
   const closed: Span[] = []
   let stop = -1
-  for (const span of spans) {
-    if (stop < span[0]) stop = matchFrom(STOPS, text, span[0])?.index ?? Number.POSITIVE_INFINITY
-    if (stop < span[1]) closed.push(span)
+  for (const [start, end] of spans) {
+    if (stop < start) stop = matchFrom(STOPS, text, start)?.index ?? Number.POSITIVE_INFINITY
+    if (stop < end) {
+      let last = end
+      while (!STOP.test(text.charAt(last - 1))) last -= 1
+      closed.push([start, last])
+    }
     if (due()) yield
   }
   return closed

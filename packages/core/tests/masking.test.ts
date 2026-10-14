@@ -1067,8 +1067,20 @@ const INNER_NAMES = ['token', 'api_key', 'password', 'secret', 'cookie', 'Author
 /** Quoted values that hold a space, the other quote, or an escaped quote. */
 const QUOTED_VALUES = ['"a b"', "'a b'", `'a"b'`, String.raw`"a\"b c"`, `"a'b"`] as const
 
-/** What may stand in the outer value before the inner shape. */
-const BEFORE_INNER = ['', 'pw-', 'a.'] as const
+/** A known value that holds a space, written over wherever it stands. */
+const SPACED_KNOWN = 'k n0wn'
+
+/** A private key block, which holds spaces and line ends. */
+const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
+
+/**
+ * What may stand in the outer value before the inner shape: nothing, a word, or a hidden stretch
+ * that holds a space, the inner name glued after it.
+ */
+const BEFORE_INNER = ['', 'pw-', 'a.', SPACED_KNOWN, PEM] as const
+
+/** What stands between the inner name and its quoted value. */
+const SEPARATORS = ['=', ':', ': ', ' = '] as const
 
 /** What may stand before the outer shape, taking its name in a value of its own. */
 const BEFORE_OUTER = ['', 'Bearer ', 'Basic '] as const
@@ -1146,12 +1158,28 @@ describe('What follows a quoted value inside another value stays hidden', () => 
     await hidesAtLeastTheOracle('Authorization: kn0wnCookie: "a b"Sx1Zq', ['kn0wn'])
   })
 
+  test('an inner name glued after a hidden stretch that holds a space stays readable', async () => {
+    // The outer value runs through the stretch and ends on the inner name: what is written over
+    // stops at the stretch's last space, and the inner label still reads its value.
+    const texts = [
+      `password=${SPACED_KNOWN}token: "a"Sx1Zq`,
+      `password=${PEM}token: "a"Sx3Zq`,
+      `password=${PEM}token = 'a b'Sx4Zq`,
+    ]
+    await Promise.all(
+      texts.map(async (text) => {
+        await leavesNoMarkerIn(text, [SPACED_KNOWN])
+        await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
+      }),
+    )
+  })
+
   test('every outer shape around every quoted inner one, at every position, leaves no marker', async () => {
     const texts = BEFORE_OUTER.flatMap((before) =>
       OUTERS.flatMap((outer) =>
         BEFORE_INNER.flatMap((inValue) =>
           INNER_NAMES.flatMap((name) =>
-            ['=', ':'].flatMap((separator) =>
+            SEPARATORS.flatMap((separator) =>
               QUOTED_VALUES.map((quoted) =>
                 quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
               ),
@@ -1163,8 +1191,8 @@ describe('What follows a quoted value inside another value stays hidden', () => 
     // Run at once, the paced maskings take turns with one another.
     await Promise.all(
       texts.map(async (text) => {
-        await leavesNoMarkerIn(text, [])
-        await hidesAtLeastTheOracle(text, [])
+        await leavesNoMarkerIn(text, [SPACED_KNOWN])
+        await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
       }),
     )
   })
@@ -1189,7 +1217,7 @@ describe('What follows a quoted value inside another value stays hidden', () => 
         fc.constantFrom(...OUTERS),
         fc.constantFrom(...BEFORE_INNER),
         fc.constantFrom(...INNER_NAMES),
-        fc.constantFrom('=', ':'),
+        fc.constantFrom(...SEPARATORS),
         quoted,
         mark,
         after,
@@ -1198,7 +1226,7 @@ describe('What follows a quoted value inside another value stays hidden', () => 
         ([before, outer, inValue, name, separator, value, marker, rest]) =>
           `${quotedInside(before, outer, inValue, name, separator, value, marker)}${rest}`,
       )
-    const known = ['kn0wnAAA1']
+    const known = ['kn0wnAAA1', SPACED_KNOWN]
     await fc.assert(
       fc.asyncProperty(text, async (written) => {
         await leavesNoMarkerIn(written, known)
