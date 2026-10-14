@@ -60,7 +60,14 @@ import { dirname, join } from 'node:path'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { putEvidence } from '../memory/evidence.ts'
-import { type NeedService, type NeedServices, createNeedIn, withdrawNeed } from '../needs.ts'
+import { storeDeliveryIn } from '../sessions/deliveries.ts'
+import {
+  DeliveryFailed,
+  type NeedService,
+  type NeedServices,
+  createNeedIn,
+  withdrawNeed,
+} from '../needs.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { ProfileHome } from '../profile-home.ts'
 import { planRows, readProof } from '../planning/plan.ts'
@@ -191,12 +198,6 @@ export interface ProofParts {
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
   readonly said: (line: string) => Effect.Effect<void>
-  readonly deliver: (
-    building: BuildingRow,
-    target: { readonly lineage: string } | { readonly role: string },
-    kind: string,
-    body: string,
-  ) => Effect.Effect<void>
   /** Runs in the background of the Builder's layer: nothing waits for it. */
   readonly background: (effect: Effect.Effect<void, never, ProofNeeds>) => Effect.Effect<void>
 }
@@ -341,7 +342,7 @@ export const proofsRead = (missionId: string) =>
   })
 
 export const buildingProofs = (parts: ProofParts) => {
-  const { loop, said, deliver } = parts
+  const { loop, said } = parts
   // One proof of a mission judged at a time: a state is read and moved without another run of
   // the same mission in between.
   const turns = new Map<string, Semaphore.Semaphore>()
@@ -1295,9 +1296,9 @@ export const buildingProofs = (parts: ProofParts) => {
     })
 
   /** The scenarios the user ended the Building without. */
-  const notProven = (building: BuildingRow) =>
+  const notProvenIn = (reader: EngineTransaction | Database['Service'], building: BuildingRow) =>
     Effect.gen(function* () {
-      return (yield* scenarioProofsIn(yield* Database, building.id))
+      return (yield* scenarioProofsIn(reader, building.id))
         .filter((row) => stateOf(row) === 'not_proven')
         .map((row) => row.scenario)
     })
@@ -1556,12 +1557,25 @@ export const buildingProofs = (parts: ProofParts) => {
       }
       if (decision.kind === 'already_passes' && answer === CANCEL_MISSION) return []
       yield* setProofIn(transaction, building.id, scenario, { state: 'waiting_red', needId: null })
+      // More information, told with the answer, so a stop before the follower loses none of it.
+      if (decision.kind === 'already_passes') {
+        yield* storeDeliveryIn(transaction, {
+          owner: { kind: 'mission', missionId: building.missionId },
+          target: { role: 'builder' },
+          kind: 'answer',
+          body: `${scenario} already passes, and the user says more: ${answer ?? ''}\nAdjust the starting data or the actions within the Proof block, never its expected result, then call proof_run(${scenario}).`,
+        }).pipe(
+          Effect.catchTag('DeliveryKindRefused', (refused) =>
+            Effect.fail(new DeliveryFailed({ reason: refused.message })),
+          ),
+        )
+      }
       return []
     })
 
   /**
    * What follows an answer, once it is kept: a red sent back is an attempt on the proof for the
-   * Builder, with both outputs; more information is delivered to the Builder. Answers whether the
+   * Builder, with both outputs (more information was told with the answer). Answers whether the
    * user chose to cancel the mission.
    */
   const afterAnswer = (missionId: string, kind: string, scenario: string, answer: string) =>
@@ -1627,15 +1641,36 @@ export const buildingProofs = (parts: ProofParts) => {
           },
           `Make the test fail as Planning saw it, within the Proof block and never by changing its expected result, then call proof_run(${scenario}).`,
         )
-      } else if (kind === 'already_passes') {
-        yield* deliver(
-          building,
-          { role: 'builder' },
-          'answer',
-          `${scenario} already passes, and the user says more: ${answer}\nAdjust the starting data or the actions within the Proof block, never its expected result, then call proof_run(${scenario}).`,
-        )
       }
       return false
+    })
+
+  /**
+   * The reds the user sent back whose attempt a stop kept from being opened: opened now, before
+   * the red phase, which would run them again and ask the same question (#348).
+   */
+  const sentBackLeft = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const attempts = yield* attemptsIn(database, building.id)
+      const decisions = yield* decisionsIn(database, building.id)
+      for (const row of yield* scenarioProofsIn(database, building.id)) {
+        if (stateOf(row) !== 'waiting_red') continue
+        const last = decisions.findLast(
+          (one) => one.scope === 'proof' && one.subject === row.scenario,
+        )
+        if (last?.kind !== 'red_mismatch' || last.state !== 'answered') continue
+        // By the answer: an attempt opened on the proof since it was given, never an earlier one.
+        const since = last.answeredAt ?? ''
+        if (
+          attempts.some(
+            (one) =>
+              one.scope === 'proof' && one.subject === row.scenario && one.startedAt >= since,
+          )
+        )
+          continue
+        yield* afterAnswer(building.missionId, last.kind, row.scenario, last.answer ?? '')
+      }
     })
 
   /** The phase of the run a proof was held on, which its Retry runs again: a red by default. */
@@ -1859,7 +1894,8 @@ export const buildingProofs = (parts: ProofParts) => {
       // run again on trees that may have moved during the stop, nothing is stuck (#290).
       yield* begin(building.missionId)
       yield* parts.background(
-        redPhase(building).pipe(
+        sentBackLeft(building).pipe(
+          Effect.andThen(redPhase(building)),
           Effect.andThen(parts.hold('greens-due')),
           Effect.andThen(greensDue(building)),
           Effect.catchCause((cause) => said(`the proofs did not resume: ${String(cause)}`)),
@@ -1874,7 +1910,7 @@ export const buildingProofs = (parts: ProofParts) => {
     resumed,
     greensDue,
     unproven,
-    notProven,
+    notProvenIn,
     stuckOf,
     unprovenPending,
     withdrawUnproven,
