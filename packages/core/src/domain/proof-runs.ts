@@ -16,6 +16,8 @@
 
 import { Predicate, Schema } from 'effect'
 
+import { jsTests, pythonTests } from './test-sources.ts'
+
 /** How a proof run ended, as Hemera classifies it (CT-35). */
 export const PROOF_CLASSES = [
   'assertion_failed',
@@ -214,6 +216,9 @@ const JS_FILE = /^\s*FAIL\s+(?:\|[^|]*\|\s+)?(?<name>\S+\.\w+(?:\s.*)?)$/
 const JEST_PROJECT_FILE =
   /^\s*FAIL\s+(?<name>\S.*?\s(?:\S+\.(?:test|spec)\.\w+|\S*__tests__\/\S+))(?:\s+\(\d+(?:\.\d+)? m?s\))?\s*$/
 /** TAP's `not ok 3 - name`, printed without its report's version line. */
+/** jest's `PASS file` and `FAIL file` line, a project's displayName before its file or not. */
+const JEST_FILE_LINE =
+  /^\s*(?:PASS|FAIL)\s+(?:\|[^|]*\|\s+)?(?:\S.*?\s)?(?<file>\S+\.[A-Za-z]\w*)(?:\s+\(\d+(?:\.\d+)?\s?m?s\))?\s*$/
 const TAP_NOT_OK = /^\s*not ok \d+(?: - (?<name>.*))?/
 /**
  * A duration as each runner prints one after a title, and only there: vitest's ` 3ms` on its `×`
@@ -356,6 +361,8 @@ export interface Printed {
   readonly name: string
   readonly titles: ReadonlyArray<string>
   readonly paths: ReadonlyArray<ReadonlyArray<string>>
+  /** The test's file, when the runner prints it (vitest's title, jest's file line, a node id). */
+  readonly file: string | null
 }
 
 /** A failing test as its runner prints it, and what one of its failures says. */
@@ -379,7 +386,8 @@ const printed = (
   name: string,
   titles: ReadonlyArray<string>,
   paths: ReadonlyArray<ReadonlyArray<string>> = [],
-): Printed => ({ runner, name, titles, paths })
+  file: string | null = null,
+): Printed => ({ runner, name, titles, paths, file })
 
 /**
  * A vitest or jest title's tests: the title, then what follows each ` > ` or ` › ` in it, each
@@ -403,26 +411,33 @@ const jsTitles = (title: string, mark: string | null): ReadonlyArray<string> => 
 
 /**
  * A pytest node id's or section heading's path: its classes and its test function, before its
- * case, the file aside (`file.py::Class::test_x[1]`, `Class.test_x[1]`).
+ * case, the file aside (`file.py::Class::test_x[1]`, `Class.test_x[1]`); the file is read apart.
  */
 const pytestPath = (id: string): ReadonlyArray<string> => {
   const parts = id.replace(/\[.*$/, '').split('::')
   return parts.length > 1 ? parts.slice(1) : (parts[0] ?? '').split('.')
 }
 
+/** A vitest title's file, and its paths after it. */
+interface VitestTitle {
+  readonly file: string | null
+  readonly paths: ReadonlyArray<ReadonlyArray<string>>
+}
+
 /**
- * The path a vitest title prints whole after its file (`file.test.ts > export > saves`), each
- * form its title may be read as; none when the line does not start with its file.
+ * The file a vitest title starts with (`file.test.ts > export > saves`), and the path it prints
+ * whole after it, each form its title may be read as; none when the line does not start with its
+ * file.
  */
-const vitestPaths = (
-  titles: ReadonlyArray<string>,
-  whole: string,
-): ReadonlyArray<ReadonlyArray<string>> => {
+const vitestPaths = (titles: ReadonlyArray<string>, whole: string): VitestTitle => {
   const [file] = whole.split(' > ')
-  if (file === undefined || file === whole || !/^\S+\.\w+$/.test(file)) return []
-  return titles
+  if (file === undefined || file === whole || !/^\S+\.\w+$/.test(file)) {
+    return { file: null, paths: [] }
+  }
+  const paths = titles
     .filter((title) => title.startsWith(`${file} > `))
     .map((title) => title.slice(file.length + 3).split(' > '))
+  return { file, paths }
 }
 
 /** A Rust path's test: its last `::` part. */
@@ -430,21 +445,22 @@ const rustTest = (path: string): string => path.split('::').at(-1) ?? path
 
 /**
  * vitest, jest, node:test, and TAP printed without its report: a mark, a heading, a file line;
- * its path when it prints it whole, vitest after its file, jest's `●` heading.
+ * its path when it prints it whole, vitest after its file, jest's `●` heading; its file, vitest's
+ * before its title, and jest's file line above its marks and headings (`jestFile`).
  */
-const jsFailure = (line: string): Read | null => {
+const jsFailure = (line: string, jestFile: string | null): Read | null => {
   const heading = JEST_HEADING.exec(line)
+  const mark = JS_MARK.exec(line)
   const found =
-    JS_MARK.exec(line) ??
-    TAP_NOT_OK.exec(line) ??
-    heading ??
-    JS_FILE.exec(line) ??
-    JEST_PROJECT_FILE.exec(line)
+    mark ?? TAP_NOT_OK.exec(line) ?? heading ?? JS_FILE.exec(line) ?? JEST_PROJECT_FILE.exec(line)
   if (found === null) return null
   const name = found.groups?.['name'] ?? ''
   const titles = jsTitles(name, found.groups?.['mark'] ?? null)
-  const paths = heading === found ? [name.trim().split(' › ')] : vitestPaths(titles, name.trim())
-  return { printed: printed('js', name, titles, paths), marked: true, verdict: jsVerdict }
+  const vitest = vitestPaths(titles, name.trim())
+  const jest = heading === found || mark?.groups?.['mark'] === '✕'
+  const paths = heading === found ? [name.trim().split(' › ')] : vitest.paths
+  const file = jest ? jestFile : vitest.file
+  return { printed: printed('js', name, titles, paths, file), marked: true, verdict: jsVerdict }
 }
 
 /**
@@ -458,8 +474,9 @@ const pytestFailure = (line: string): Read | null => {
     const path = pytestPath(id.slice('FAILED '.length))
     const name = path.at(-1) ?? ''
     const message = line.slice(id.length).replace(/^ - /, '')
+    const file = id.slice('FAILED '.length).split('::')[0] ?? null
     return {
-      printed: printed('pytest', name, [name], [path]),
+      printed: printed('pytest', name, [name], [path], file),
       marked: true,
       verdict: () => pythonVerdict(message),
     }
@@ -478,17 +495,19 @@ const pytestFailure = (line: string): Read | null => {
 /**
  * unittest and Django: `FAIL: test_x (module.Class.test_x)`, which they print only for a test
  * whose last exception is an assertion, and `ERROR: …` for any other, each named by its class and
- * its test (the module before them is the file's).
+ * its test, its module the file's.
  */
 const unittestFailure = (line: string): Read | null => {
   const found = UNITTEST_HEADING.exec(line)?.groups
   const name = found?.['name']
   if (found === undefined || name === undefined) return null
   const id = (found['id'] ?? '').split('.')
+  const module = id.slice(0, id.at(-1) === name ? -2 : -1)
   const owner = id.at(-1) === name ? id.at(-2) : id.at(-1)
   const verdict: Verdict = found['kind'] === 'FAIL' ? 'assertion' : 'error'
+  const file = module.length === 0 ? null : `${module.join('/')}.py`
   return {
-    printed: printed('unittest', name, [name], [[owner ?? '', name]]),
+    printed: printed('unittest', name, [name], [[owner ?? '', name]], file),
     marked: true,
     verdict: () => verdict,
   }
@@ -574,12 +593,17 @@ const rustFailure = (line: string, afterFailures: boolean, listed: boolean): Rea
 }
 
 /** The failure a line starts, as the first reader that knows its shape reads it. */
-const failureAt = (line: string, afterFailures: boolean, listed: boolean): Read | null =>
+const failureAt = (
+  line: string,
+  afterFailures: boolean,
+  listed: boolean,
+  jestFile: string | null,
+): Read | null =>
   pytestFailure(line) ??
   unittestFailure(line) ??
   goFailure(line) ??
   rustFailure(line, afterFailures, listed) ??
-  jsFailure(line)
+  jsFailure(line, jestFile)
 
 /**
  * The failing lines of an output, uncoloured and cut, and the tests they name, each with what its
@@ -618,10 +642,14 @@ const failingLinesOf = (
   const mochaVerdict = (below: ReadonlyArray<string>) => verdictOf(below.join('\n'))
   const entries: Array<{ readonly at: number; readonly read: Read }> = []
   let inList = false
+  let jestFile: string | null = null
   for (const [at, line] of lines.entries()) {
     // libtest's list of failing tests, right below a `failures:` line.
     inList = RUST_FAILURES.test(line) || (inList && RUST_LISTED.test(line))
-    const read = failureAt(line, rustAt >= 0 && at > rustAt, inList && !RUST_FAILURES.test(line))
+    // jest's file line, above its tests' marks and headings.
+    if (!line.includes(' > ')) jestFile = JEST_FILE_LINE.exec(line)?.groups?.['file'] ?? jestFile
+    const rustListed = inList && !RUST_FAILURES.test(line)
+    const read = failureAt(line, rustAt >= 0 && at > rustAt, rustListed, jestFile)
     if (read !== null) {
       entries.push({ at, read })
       continue
@@ -646,6 +674,7 @@ const failingLinesOf = (
       name: name.name,
       titles: name.titles,
       paths: name.paths,
+      file: name.file,
       verdict: entry.read.verdict(below),
     }
     return [failure]
@@ -695,6 +724,7 @@ const goVerdicts = (
       name: one.name,
       titles: one.titles,
       paths: one.paths,
+      file: one.file,
       verdict: verdict === 'silent' ? 'assertion' : verdict,
     }
     return failure
@@ -737,6 +767,7 @@ const rustVerdicts = (
         name: one.name,
         titles: one.titles,
         paths: one.paths,
+        file: one.file,
         verdict: combined([one.verdict, ...(byThread.get(one.name) ?? [])]),
       }
       return failure
@@ -944,10 +975,10 @@ export interface TemplateTest {
   readonly template: string
 }
 /**
- * A JavaScript or Python test as its file declares it: its title, the titles of the describes or
- * classes it is declared in, outermost first (null when one is not written as a literal), whether
- * another test of the file has the same title (`twin`), and whether one has the same path too
- * (`clash`), which no output can tell apart.
+ * A test as its file declares it: its title, the titles of the describes or classes it is
+ * declared in, outermost first (null when they were not read with certainty: the test then names
+ * nothing), whether another test of the file has the same title (`twin`), and whether one has the
+ * same path too (`clash`), which no output can tell apart.
  */
 export interface DeclaredTest {
   readonly title: string | TemplateTest
@@ -1057,13 +1088,13 @@ const titleAnswers = (declared: string | TemplateTest, title: string): boolean =
 
 /**
  * Whether a failing test is a declared test of the file: by its path when its line prints it
- * whole, otherwise by its title when no other test of the file has that title. Two tests of the
- * same path are never told apart.
+ * whole, otherwise by its title when no other test of the file has that title. A test whose path
+ * was not read for certain, or that shares its path with another, is never told apart.
  */
 const declaredAnswers = (failure: Printed, test: DeclaredTest): boolean => {
-  if (test.clash) return false
   const scope = test.scope
-  if (scope !== null && failure.paths.length > 0) {
+  if (test.clash || scope === null) return false
+  if (failure.paths.length > 0) {
     return failure.paths.some(
       (path) =>
         path.length === scope.length + 1 &&
@@ -1089,20 +1120,35 @@ const answers = (failure: Printed, test: TestName): boolean => {
   return pattern !== null && pattern.test(failure.name)
 }
 
+/** Whether a file a runner prints is the test's file, either path ending the other. */
+const sameFile = (shown: string, testPath: string): boolean => {
+  const one = posix(shown).replace(/^\.\//, '')
+  const other = posix(testPath).replace(/^\.\//, '')
+  return one === other || one.endsWith(`/${other}`) || other.endsWith(`/${one}`)
+}
+
 /**
  * What the failures of the tests the proof adds say: an assertion when one test's own failures
  * say one and none says another error; another error when a test's say one; nothing when no
- * failure is theirs, or theirs say nothing.
+ * failure is theirs, or theirs say nothing. A failure whose runner prints another file is never the test's, and when one does, a failure
+ * printed with no file (a tree's line, a pytest section) may be that one: it is not the test's
+ * either.
  */
 const named = (
   failures: ReadonlyArray<PrintedFailure>,
   names: ReadonlyArray<TestName>,
+  testPath: string,
 ): Verdict => {
-  const verdicts = names.map((name) =>
-    combined(
-      failures.filter((failure) => answers(failure, name)).map((failure) => failure.verdict),
-    ),
-  )
+  const verdicts = names.map((name) => {
+    const matched = failures.filter((failure) => answers(failure, name))
+    const elsewhere = matched.some(
+      (failure) => failure.file !== null && !sameFile(failure.file, testPath),
+    )
+    const own = matched.filter((failure) =>
+      failure.file === null ? !elsewhere : sameFile(failure.file, testPath),
+    )
+    return combined(own.map((failure) => failure.verdict))
+  })
   return verdicts.includes('assertion')
     ? 'assertion'
     : verdicts.includes('error')
@@ -1149,104 +1195,34 @@ export const validRed = (
     return asserted && (located.length === 0 || own.some((one) => one.assertion))
   }
   const reported = run.failures.length > 0
-  const said = named(reported ? own.map(reportFailure) : run.printedFailures, names)
+  const said = named(reported ? own.map(reportFailure) : run.printedFailures, names, testPath)
   if (said !== 'silent') return said === 'assertion'
   return keyLineMatched === true && (reported ? own.some((one) => one.assertion) : asserted)
 }
 
 /**
- * The name a test is declared with: as `test('…'` or `it("…"` declares it, a Python `def test_…(`
- * (its pytest cases, `test_…[id]`, are its own), a Go `func TestX(t *testing.T)` and the literal
- * names of its subtests (`t.Run("…",`), a Rust `fn x` under `#[test]` (or `#[tokio::test(…)]`),
- * and a Rust cased test under `#[rstest]` or `#[test_case(…)]`.
+ * The name a Go `func TestX(t *testing.T)` declares, and the literal names of its subtests
+ * (`t.Run("…",`); a Rust `fn x` under `#[test]` (or `#[tokio::test(…)]`), and a Rust cased test
+ * under `#[rstest]` or `#[test_case(…)]`. JavaScript and Python tests are read by their tokenizers
+ * (`test-sources.ts`).
  */
-const TEST_NAME = /\b(?:test|it)(?:\.(?!each\b)\w+)?\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
-/** The name a `test.each(…)('…')` or `it.each\`…\`('…')` declares. */
-const EACH_NAME =
-  /\b(?:test|it)(?:\.\w+)*\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*\(\s*(['"`])(?<name>(?:(?!\1).)+)\1/g
-
-const PYTHON_NAME = /^[ \t]*(?:async[ \t]+)?def[ \t]+(?<name>test\w*)[ \t]*\(/gm
 const GO_NAME = /^func[ \t]+(?<name>Test\w*)[ \t]*\([ \t]*\w+[ \t]+\*testing\.T[ \t]*\)/gm
 /** A `t.Run(` call's literal name, read where the call starts, across lines. */
 const GO_SUBTEST_NAME = /\w+\.Run\(\s*(["`])(?<name>(?:(?!\1).)+)\1\s*,/y
 /** A `t.Run(` call, its name a literal or not. */
 const GO_RUN = /\b\w+\.Run\(/g
-/** Go's strings, runes and comments, a raw string or a block comment across lines. */
-const GO_LITERAL = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
+/**
+ * Go's strings, runes and comments, a raw string or a block comment across lines; a block comment
+ * never closed runs to the end, matched once.
+ */
+const GO_LITERAL =
+  /\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|`[^`]*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
 /** The function a line of Go declares, or a hunk header names after its `@@`. */
 const GO_FUNCTION = /^(?:@@[^@]*@@\s*)?func\s/
 const RUST_NAME =
   /#\[(?:\w+::)*test(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
 const RUST_CASED_NAME =
   /#\[(?:\w+::)*(?:rstest|test_case)(?:\((?:[^[\]]|\[[^[\]]*\])*\))?\]\s*(?:#\[(?:[^[\]]|\[[^[\]]*\])*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?<name>\w+)/g
-
-/**
- * A describe's call whose arguments start with its title: `describe(`, `describe.skip(`,
- * `describe.each(…)(`, mocha's `context(` and `suite(`.
- */
-const DESCRIBE_CALL =
-  /\b(?:describe|suite|context)(?:\.(?!each\b)\w+)*(?<each>\.each\s*(?:\([\s\S]*?\)|`[\s\S]*?`)\s*)?\(/g
-/** A title written as a literal at the start of a call's arguments. */
-const LITERAL_TITLE = /\s*(['"`])(?<title>(?:(?!\1).)+)\1/y
-/** JavaScript's strings and comments, a template literal or a block comment across lines. */
-const JS_LITERAL =
-  /\/\/[^\n]*|\/\*[\s\S]*?\*\/|`(?:[^`\\]|\\.)*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g
-const PYTHON_CLASS = /^[ \t]*class[ \t]+(?<name>\w+)/
-
-/** A title as a test or a describe declares it: a template when `each` or `${…}` makes it. */
-const titleOf = (title: string, quote: string | undefined, each: boolean): string | TemplateTest =>
-  each || (quote === '`' && title.includes('${')) ? { template: title } : title
-
-/**
- * The describes each of the given places of a JavaScript file is in, outermost first, each by
- * its title (null when it is not a literal): read in one pass over the file, its strings and
- * comments blanked, each parenthesis opened pushed and each closed popped.
- */
-const describedAt = (
-  code: string,
-  places: ReadonlyArray<number>,
-): ReadonlyMap<number, ReadonlyArray<string | TemplateTest | null>> => {
-  const blanked = code.replace(JS_LITERAL, (literal) => literal.replace(/[^\n]/g, ' '))
-  const titles = new Map<number, string | TemplateTest | null>()
-  for (const found of code.matchAll(DESCRIBE_CALL)) {
-    const open = found.index + found[0].length - 1
-    LITERAL_TITLE.lastIndex = open + 1
-    const literal = LITERAL_TITLE.exec(code)
-    const each = found.groups?.['each'] !== undefined
-    titles.set(
-      open,
-      literal === null ? null : titleOf(literal.groups?.['title'] ?? '', literal[1], each),
-    )
-  }
-  const wanted = new Set(places)
-  const scopes = new Map<number, ReadonlyArray<string | TemplateTest | null>>()
-  // Each parenthesis open, with its describe's title when it opens a describe's call.
-  const open: Array<{ readonly title: string | TemplateTest | null } | null> = []
-  for (const [at, char] of blanked.split('').entries()) {
-    if (wanted.has(at))
-      scopes.set(
-        at,
-        open.flatMap((one) => (one === null ? [] : [one.title])),
-      )
-    if (char === '(') open.push(titles.has(at) ? { title: titles.get(at) ?? null } : null)
-    if (char === ')') open.pop()
-  }
-  return scopes
-}
-
-/** The classes each line of a Python file is in, outermost first, read from its indentation. */
-const classesOf = (lines: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> => {
-  let open: Array<{ readonly indent: number; readonly name: string }> = []
-  return lines.map((line) => {
-    if (line.trim() === '' || line.trim().startsWith('#')) return open.map((one) => one.name)
-    const indent = /^[ \t]*/.exec(line)?.[0].length ?? 0
-    open = open.filter((one) => one.indent < indent)
-    const scope = open.map((one) => one.name)
-    const name = PYTHON_CLASS.exec(line)?.groups?.['name']
-    if (name !== undefined) open = [...open, { indent, name }]
-    return scope
-  })
-}
 
 /**
  * The lines a patch adds, numbered in the file's code (from 1), as its hunks' headers place them;
@@ -1278,9 +1254,11 @@ const addedLinesOf = (patch: string, lines: ReadonlyArray<string>): ReadonlySet<
 /**
  * The tests a proof adds: every test its new file declares, or those the lines its patch adds
  * declare, a Go subtest with the function it runs under; none when the code names none. A
- * JavaScript or Python test is read in the file's whole code, with the describes or classes it is
- * declared in and the file's other tests of the same title; from the patch's lines alone, by its
- * title, when the patch does not make the code.
+ * JavaScript or Python test is read by its tokenizer in the file's whole code, with the describes
+ * or classes it is declared in and the file's other tests of the same title. A name decides only
+ * when read with certainty: a test read from a patch that does not place in the code, from a file
+ * its tokenizer is not certain of, or a Rust test whose name the file declares twice, names
+ * nothing, and the key line decides.
  */
 export const addedTests = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -1314,67 +1292,58 @@ export const addedTests = (test: {
     }
     return low
   }
-  const matches = [TEST_NAME, EACH_NAME, PYTHON_NAME, GO_NAME, RUST_NAME, RUST_CASED_NAME].map(
-    (pattern) => ({ pattern, found: Array.from(added.matchAll(pattern)) }),
-  )
-  const described = whole
-    ? describedAt(
-        added,
-        matches
-          .filter((one) => one.pattern === TEST_NAME || one.pattern === EACH_NAME)
-          .flatMap((one) => one.found.map((found) => found.index)),
-      )
-    : new Map<number, ReadonlyArray<string | TemplateTest | null>>()
-  const classes = whole ? classesOf(lines) : []
-  const declared = matches
-    .flatMap(({ pattern, found: all }) =>
-      all.map((found) => {
-        const name = found.groups?.['name'] ?? ''
-        const title = titleOf(name, found[1], pattern === EACH_NAME)
-        const scope =
-          pattern === PYTHON_NAME
-            ? (classes[lineAt(found.index)] ?? [])
-            : (described.get(found.index) ?? [])
-        return {
-          at: found.index,
-          name,
-          title,
-          scope: scope.every((one) => one !== null) ? scope : null,
-          declared:
-            whole && (pattern === TEST_NAME || pattern === EACH_NAME || pattern === PYTHON_NAME),
-          cased: pattern === RUST_CASED_NAME,
-        }
-      }),
-    )
-    .filter((found) => found.name !== '')
-    .toSorted((a, b) => a.at - b.at)
   const key = (title: string | TemplateTest) =>
     Predicate.isString(title) ? `"${title}` : `\`${title.template}`
-  const pathKey = (found: (typeof declared)[number]) =>
-    found.scope === null ? null : [...found.scope, found.title].map(key).join('\n')
-  // How many of the file's tests have each title, and each path.
-  const count = (keys: ReadonlyArray<string | null>) => {
+  // How many of the file's tests have each key.
+  const count = (keys: ReadonlyArray<string>) => {
     const counted = new Map<string, number>()
-    for (const one of keys) if (one !== null) counted.set(one, (counted.get(one) ?? 0) + 1)
+    for (const one of keys) counted.set(one, (counted.get(one) ?? 0) + 1)
     return counted
   }
-  const tests = declared.filter((found) => found.declared)
-  const titles = count(tests.map((found) => key(found.title)))
-  const paths = count(tests.map(pathKey))
+  const sources = [jsTests(added), pythonTests(added)].flatMap((read) =>
+    read.tests.map((one) => ({ ...one, certain: whole && read.certain })),
+  )
+  const titles = count(sources.map((one) => key(one.title)))
+  const paths = count(sources.map((one) => [...one.scope, one.title].map(key).join('\n')))
+  const declared: ReadonlyArray<{ readonly at: number; readonly name: TestName }> = sources.map(
+    (one) => ({
+      at: one.at,
+      name: {
+        title: one.title,
+        scope: one.certain ? one.scope : null,
+        twin: (titles.get(key(one.title)) ?? 0) > 1,
+        clash: (paths.get([...one.scope, one.title].map(key).join('\n')) ?? 0) > 1,
+      },
+    }),
+  )
+  const rust = Array.from(added.matchAll(RUST_NAME), (found) => ({
+    at: found.index,
+    title: found.groups?.['name'] ?? '',
+  }))
+  const functions = count(rust.map((one) => one.title))
+  const others: ReadonlyArray<{ readonly at: number; readonly name: TestName }> = [
+    ...Array.from(added.matchAll(GO_NAME), (found) => ({
+      at: found.index,
+      name: found.groups?.['name'] ?? '',
+    })),
+    // A Rust test the file declares twice, in two modules, is told apart by no name.
+    ...rust.map((one) => ({
+      at: one.at,
+      name:
+        whole && (functions.get(one.title) ?? 0) > 1
+          ? { title: one.title, scope: null, twin: true, clash: false }
+          : one.title,
+    })),
+    ...Array.from(added.matchAll(RUST_CASED_NAME), (found) => ({
+      at: found.index,
+      name: { function: found.groups?.['name'] ?? '' },
+    })),
+  ]
   return [
-    ...declared
-      .filter((found) => placed === null || placed.has(lineAt(found.at) + 1))
-      .map((found): TestName => {
-        if (found.cased) return { function: found.name }
-        if (!found.declared) return found.title
-        const path = pathKey(found)
-        return {
-          title: found.title,
-          scope: found.scope,
-          twin: (titles.get(key(found.title)) ?? 0) > 1,
-          clash: path !== null && (paths.get(path) ?? 0) > 1,
-        }
-      }),
+    ...[...declared, ...others]
+      .filter((one) => placed === null || placed.has(lineAt(one.at) + 1))
+      .toSorted((a, b) => a.at - b.at)
+      .map((one) => one.name),
     ...subtestsOf(test),
   ]
 }

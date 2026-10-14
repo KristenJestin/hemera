@@ -2948,7 +2948,8 @@ describe('A red read by its test’s path, its errors and its panics, the key li
   })
 
   test('a file’s tests are read with their describes in linear time, nested as deep as they go', () => {
-    const code = (size: number) => `${"describe('a', () => {\n".repeat(size)}test('b', () => {})\n`
+    const code = (size: number) =>
+      `${"describe('a', () => {\n".repeat(size)}test('b', () => {})\n${'})\n'.repeat(size)}`
     const read = (text: string) => {
       addedTests({ insertion: 'new_file', code: text, patch: null })
     }
@@ -2963,5 +2964,303 @@ describe('A red read by its test’s path, its errors and its panics, the key li
     const output =
       'E   assert 1 == 2\nFAILED t.py::test_one - assert 1 == 2\nFAILED t.py::test_new - NameError'
     expect(validRed(run(output, 1, path), path, ['test_new'], true)).toBe(false)
+  })
+})
+
+const REGEX_PAREN_SOURCE = [
+  "import { describe, expect, test } from 'vite-plus/test'",
+  '',
+  "describe('a', () => {",
+  "  describe('b', () => {",
+  '    const closing = /\\)/',
+  "    test('saves', () => { expect(closing.test(')')).toBe(true) })",
+  '  })',
+  "  test('saves', () => { expect(1).toBe(2) })",
+  '})',
+].join('\n')
+
+const STRING_INDENT_SOURCE = [
+  'class TestA:',
+  '    class TestB:',
+  '        def test_render(self):',
+  '            expected = """',
+  '    indented four',
+  '    """',
+  '            assert expected',
+  '        def test_saves(self):',
+  '            assert 1 == 1',
+  '',
+  '    def test_report(self):',
+  '        expected = """',
+  'flush left',
+  '"""',
+  '        assert expected',
+  '',
+  '    def test_saves(self):',
+  '        assert 1 == 2',
+].join('\n')
+
+describe('A name that decides only when read with certainty, the key line deciding any doubt (#342, round 4)', () => {
+  test('a patch whose hunks do not place in the code names no test: the key line decides', () => {
+    const path = 'export.test.ts'
+    const output = run(captured('vitest-same-title'), 1, path)
+    // The archive block added below import's, its header two lines off (`git apply` takes it).
+    const patch = [
+      '--- a/export.test.ts',
+      '+++ b/export.test.ts',
+      '@@ -9,6 +9,9 @@',
+      " describe('import', () => {",
+      "   test('saves', () => { expect(1).toBe(2) })",
+      ' })',
+      "+describe('archive', () => {",
+      "+  test('keeps', () => { expect(1).toBe(1) })",
+      '+})',
+      " describe('restore', () => {",
+      "   test('keeps', () => { expect(1).toBe(2) })",
+      ' })',
+    ].join('\n')
+    const names = addedTests({ insertion: 'addition', code: VITEST_SAME_TITLE_SOURCE, patch })
+    expect(names.some((name) => Predicate.isString(name))).toBe(false)
+    expect(validRed(output, path, names)).toBe(false)
+    expect(validRed(output, path, names, true)).toBe(true)
+    // Placed exactly, the same patch names its test.
+    const placed = patch.replace('@@ -9,6 +9,9 @@', '@@ -7,6 +7,9 @@')
+    const exact = addedTests({
+      insertion: 'addition',
+      code: VITEST_SAME_TITLE_SOURCE,
+      patch: placed,
+    })
+    expect(validRed(output, path, exact)).toBe(false)
+  })
+
+  test('a regex literal holding a parenthesis does not move a test into another describe', () => {
+    const path = 'paren.test.ts'
+    const patch = [
+      '--- a/paren.test.ts',
+      '+++ b/paren.test.ts',
+      '@@ -1,5 +1,9 @@',
+      " import { describe, expect, test } from 'vite-plus/test'",
+      ' ',
+      " describe('a', () => {",
+      "+  describe('b', () => {",
+      '+    const closing = /\\)/',
+      "+    test('saves', () => { expect(closing.test(')')).toBe(true) })",
+      '+  })',
+      "   test('saves', () => { expect(1).toBe(2) })",
+      ' })',
+    ].join('\n')
+    const adding = { insertion: 'addition' as const, code: REGEX_PAREN_SOURCE, patch }
+    expect(addedTests(adding)).toEqual([
+      { title: 'saves', scope: ['a', 'b'], twin: true, clash: false },
+    ])
+    expect(validRed(run(captured('vitest-regex-paren'), 1, path), path, addedTests(adding))).toBe(
+      false,
+    )
+  })
+
+  test('a Python string spanning lines at a lower indentation does not close a class', () => {
+    const path = 'tests/test_doc.py'
+    const patch = [
+      '--- a/tests/test_doc.py',
+      '+++ b/tests/test_doc.py',
+      '@@ -6,3 +6,5 @@',
+      '     """',
+      '             assert expected',
+      '+        def test_saves(self):',
+      '+            assert 1 == 1',
+      ' ',
+    ].join('\n')
+    const names = addedTests({ insertion: 'addition', code: STRING_INDENT_SOURCE, patch })
+    expect(names).toEqual([
+      { title: 'test_saves', scope: ['TestA', 'TestB'], twin: true, clash: false },
+    ])
+    expect(validRed(run(captured('pytest-string-indent'), 1, path), path, names)).toBe(false)
+  })
+
+  test('a failing test of the same title in another file is not the proof’s test', () => {
+    const path = 'export.test.ts'
+    const code = [
+      "import { expect, test } from 'vite-plus/test'",
+      '',
+      "test('one is one', () => { expect(1).toBe(1) })",
+      "test('exports csv', () => { expect('a,b').toBe('a,b') })",
+    ].join('\n')
+    const names = addedTests(addition(code, 4, 4))
+    expect(validRed(run(captured('vitest-two-files'), 1, path), path, names)).toBe(false)
+    // pytest's node id and jest's file line say the file too.
+    const pytest = [
+      '___ test_saves ___',
+      '',
+      '    def test_saves():',
+      '>       assert 1 == 2',
+      'E       assert 1 == 2',
+      '',
+      'tests/test_other.py:2: AssertionError',
+      'FAILED tests/test_other.py::test_saves - assert 1 == 2',
+    ].join('\n')
+    const python = addedTests({
+      insertion: 'new_file',
+      code: 'def test_saves():\n    assert 1 == 1\n',
+      patch: null,
+    })
+    const pyPath = 'tests/test_export.py'
+    expect(validRed(run(pytest, 1, pyPath), pyPath, python)).toBe(false)
+    const jest = [
+      'PASS tests/export.test.js',
+      'FAIL tests/other.test.js',
+      '  ✕ saves (3 ms)',
+      '',
+      '  ● saves',
+      '',
+      '    expect(received).toBe(expected) // Object.is equality',
+    ].join('\n')
+    const js = addedTests({ insertion: 'new_file', code: "test('saves', () => {})\n", patch: null })
+    const jsPath = 'tests/export.test.js'
+    expect(validRed(run(jest, 1, jsPath), jsPath, js)).toBe(false)
+    expect(validRed(run(jest.replace('other', 'export'), 1, jsPath), jsPath, js)).toBe(true)
+  })
+
+  test('a JavaScript file read with any doubt, a slash or a parenthesis, gives no path: the key line decides', () => {
+    const path = 't.test.ts'
+    const output = run(' FAIL  t.test.ts > a > saves\nAssertionError: expected 1 to be 2', 1, path)
+    for (const doubt of [
+      // A slash after a closing brace: a division, or a regex after a block.
+      'const o = {}\n  /x/.test("x")',
+      // JSX text holding a parenthesis.
+      'render(<li>1) step</li>)',
+      // A string never closed.
+      "const s = 'never closed",
+      // Brackets closed by another kind.
+      'f(1]\n  g[2)',
+      // A call never closed.
+      'f(',
+    ]) {
+      const code = ["describe('a', () => {", `  ${doubt}`, "  test('saves', () => {})", '})'].join(
+        '\n',
+      )
+      const names = addedTests({ insertion: 'new_file', code, patch: null })
+      expect([doubt, validRed(output, path, names)]).toEqual([doubt, false])
+      expect([doubt, validRed(output, path, names, true)]).toEqual([doubt, true])
+    }
+    // A describe never closed.
+    const open = addedTests({
+      insertion: 'new_file',
+      code: "describe('a', () => {\n  test('saves', () => {})\n",
+      patch: null,
+    })
+    expect(validRed(output, path, open)).toBe(false)
+    // Read for certain, the same file names its test: a division, a regex after a condition.
+    const sure = [
+      "describe('a', () => {",
+      '  const x = (1 + 2) / 3',
+      "  if (x) /\\(/.test('(')",
+      "  test('saves', () => {})",
+      '})',
+    ]
+    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null })
+    expect(validRed(output, path, names)).toBe(true)
+  })
+
+  test('a Python file read with any doubt, a string never closed or a dedent to no block, gives no path', () => {
+    const path = 'tests/test_export.py'
+    const output = run('FAILED tests/test_export.py::TestA::test_saves - assert 1 == 2', 1, path)
+    for (const doubt of [
+      ['class TestA:', '    def test_saves(self):', '        x = """never closed'],
+      ['class TestA:', '        x = 1', '    def test_saves(self):', '        pass'],
+    ]) {
+      const names = addedTests({ insertion: 'new_file', code: doubt.join('\n'), patch: null })
+      expect([doubt, validRed(output, path, names)]).toEqual([doubt, false])
+    }
+    // A test read at the top of a file whose indentation opens or closes no block.
+    const top = run('FAILED tests/test_export.py::test_saves - assert 1 == 2', 1, path)
+    for (const doubt of [
+      ['class TestA:', '        x = 1', 'def test_saves():', '    pass', '  y = 2'],
+      ['x = 1', '    def test_saves():', '        pass'],
+    ]) {
+      const names = addedTests({ insertion: 'new_file', code: doubt.join('\n'), patch: null })
+      expect([doubt, validRed(top, path, names)]).toEqual([doubt, false])
+    }
+    const sure = [
+      "class TestA:  # the export's tests",
+      '    # a comment',
+      '    def test_saves(self):',
+      '        pass',
+    ]
+    const names = addedTests({ insertion: 'new_file', code: sure.join('\n'), patch: null })
+    expect(validRed(output, path, names)).toBe(true)
+  })
+
+  test('a test whose title is not one literal names nothing', () => {
+    const js = "test('sa' + 'ves', () => {})\n"
+    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null })).toEqual([])
+  })
+
+  test('a unittest failure of another module’s test of the same class and name is not the proof’s', () => {
+    const path = 'test_export.py'
+    const code = [
+      'import unittest',
+      'class Import(unittest.TestCase):',
+      '    def test_saves(self):',
+      '        self.assertEqual(1, 2)',
+    ].join('\n')
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    const output = (module: string) =>
+      [
+        `FAIL: test_saves (${module}.Import.test_saves)`,
+        '----------------------------------------------------------------------',
+        'AssertionError: 1 != 2',
+      ].join('\n')
+    expect(validRed(run(output('test_other'), 1, path), path, names)).toBe(false)
+    expect(validRed(run(output('test_export'), 1, path), path, names)).toBe(true)
+  })
+
+  test('a method named test is not a test, nor a def inside a function', () => {
+    const js = "test('saves', () => { expect(/x/.test(')')).toBe(false) })\n"
+    expect(addedTestNames({ insertion: 'new_file', code: js, patch: null })).toEqual(['saves'])
+    const py = [
+      'def test_outer():',
+      '    def test_inner():',
+      '        pass',
+      '    test_inner()',
+    ].join('\n')
+    expect(addedTestNames({ insertion: 'new_file', code: py, patch: null })).toEqual(['test_outer'])
+  })
+
+  test('a Rust test whose name another module of the file repeats is named by nothing: the key line decides', () => {
+    const path = 'src/lib.rs'
+    const code = [
+      'mod a {',
+      '    #[test]',
+      '    fn eq() { assert_eq!(1, 1); }',
+      '}',
+      'mod b {',
+      '    #[test]',
+      '    fn eq() { assert_eq!(1, 2); }',
+      '}',
+    ].join('\n')
+    const output = [
+      'test b::eq ... FAILED',
+      '',
+      'failures:',
+      '',
+      '---- b::eq stdout ----',
+      "thread 'b::eq' panicked at src/lib.rs:7:15:",
+      'assertion `left == right` failed',
+      '',
+      'failures:',
+      '    b::eq',
+    ].join('\n')
+    const names = addedTests(addition(code, 1, 4))
+    expect(validRed(run(output, 101, path), path, names)).toBe(false)
+    expect(validRed(run(output, 101, path), path, names, true)).toBe(true)
+  })
+
+  test('source that never closes a describe.each, a comment or a test.each is read in linear time', () => {
+    const read = (code: string) => {
+      addedTests({ insertion: 'new_file', code, patch: null })
+    }
+    for (const unit of ['describe.each(', 'a /* x\n', 'test.each(']) {
+      expect([unit, growth((size) => unit.repeat(size), 2_000, read) < 24]).toEqual([unit, true])
+    }
   })
 })
