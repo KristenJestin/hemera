@@ -677,6 +677,174 @@ describe('What a CLI printed is masked at least as much as the whole text would 
   })
 })
 
+/**
+ * A shape of credential written around a marker no mask may leave (`Sx<n>Zq`, in any case): what
+ * stands before its value, its value, and what it needs after it. `glued` says its value does not
+ * begin a word, so another shape cannot stand at its start; `closed` that it is a credential only
+ * while nothing stands between its value and its tail.
+ */
+interface Written {
+  readonly head: string
+  readonly value: string
+  readonly tail: string
+  readonly glued: boolean
+  readonly closed: boolean
+}
+
+/** The shapes, one writing of each per marker, and the known values written as they are. */
+const writings = (mark: string, known: string): ReadonlyArray<Written> => {
+  const word = (head: string, value: string, tail = '', glued = false, closed = false) => ({
+    head,
+    value,
+    tail,
+    glued,
+    closed,
+  })
+  const upper = mark.toUpperCase().padEnd(16, 'A')
+  return [
+    word('-----BEGIN RSA PRIVATE KEY-----\n', mark, '\n-----END RSA PRIVATE KEY-----'),
+    word('-----BEGIN OPENSSH PRIVATE KEY-----\n', mark),
+    word('Authorization: ', mark),
+    word('Cookie: ', mark),
+    word('set-cookie=', mark),
+    word('Bearer ', mark),
+    word('Basic ', mark.padEnd(8, 'A')),
+    word(`eyJ${mark}.eyJ${mark}.`, `c2ln${mark}`),
+    word(`eyJ${mark}-`, `AKIA${upper}.eyJ${mark}.c2ln`, '', true),
+    word('ghp_', mark.padEnd(16, 'A'), '', true),
+    word('sk-', mark.padEnd(8, 'A'), '', true),
+    word('AKIA', upper, '', true),
+    word('https://u:', mark, '@h.test', true, true),
+    word('password=', mark),
+    word('token: ', `"${mark} x"`),
+    word("api_key='", mark, "'"),
+    word('', known),
+  ]
+}
+
+/**
+ * Where the inner shape stands in the outer one's value: at its start, after the outer value and a
+ * `-` (still inside most values), or after a separator that ends some of them.
+ */
+const POSITIONS = ['start', 'middle', ' ', ';', '.', ',', '=', ':', '/', '\n', '"'] as const
+
+/**
+ * One writing nested in another's value, at a position, masked by every function that masks
+ * text: none leaves a marker, and paced masking gives what masking at once gives.
+ */
+const leavesNoMarker = async (
+  outerAt: number,
+  innerAt: number,
+  where: (typeof POSITIONS)[number],
+  outerMark: string,
+  innerMark: string,
+): Promise<void> => {
+  const known = [`kn0wn${outerMark}`, `kn0wn${innerMark}x`]
+  const outer = writings(outerMark, known[0] ?? '')[outerAt]
+  const inner = writings(innerMark, known[1] ?? '')[innerAt]
+  if (outer === undefined || inner === undefined) return
+  const shape = `${inner.head}${inner.value}${inner.tail}`
+  // A glued value has no start another shape can stand at: its inner shape goes after it. A
+  // closed shape with another inside may be no credential at all: no marker in its value then.
+  const text =
+    where === 'start' && !outer.glued
+      ? `${outer.head}${shape}${outer.tail}`
+      : `${outer.head}${outer.closed ? 'pw' : outer.value}${where === 'start' || where === 'middle' ? '-' : where}${shape}${outer.tail}`
+  const forms = [
+    maskText(text, known),
+    maskRecord({ body: text }, known)['body'],
+    maskAction({ note: text }, known)?.['note'],
+    maskPrinted(text, known),
+    maskPrinted(JSON.stringify({ body: text }), known),
+    maskPrinted(JSON.stringify([text, { text }]), known),
+    await Effect.runPromise(maskTextPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+  ]
+  for (const masked of forms) expect(masked, text).not.toMatch(/sx\d+zq/i)
+  expect(forms[6], text).toBe(forms[0])
+  expect(forms[7], text).toBe(forms[3])
+}
+
+describe('Every shape is matched on the text as it was given', () => {
+  // Each shape sees the original text, and what is masked is every stretch any of them hides: a
+  // shape that takes the first word of another no longer hides the rest of it.
+  const leaks: ReadonlyArray<readonly [string, string, string]> = [
+    [
+      'a Bearer credential that takes the scheme of a URL',
+      'Bearer password=https://user:value@host.test',
+      'value',
+    ],
+    [
+      'a Basic credential that takes the first part of a web token',
+      `Basic eyJxAAAA-${FAKE.github}.eyJy.sig`,
+      'eyJy',
+    ],
+  ]
+  for (const [what, text, secret] of leaks) {
+    test(`${what} leaves nothing of the other`, async () => {
+      for (const masked of [
+        maskShapes(text),
+        maskText(text, []),
+        maskPrinted(text, []),
+        maskPrinted(JSON.stringify({ body: text }), []),
+        await Effect.runPromise(maskTextPaced(text, [])),
+        await Effect.runPromise(maskPrintedPaced(text, [])),
+      ]) {
+        expect(masked).not.toContain(secret)
+      }
+    })
+  }
+
+  test('a shape glued to a known value is masked as when the value stood apart', async () => {
+    const known = ['kn0wnValue']
+    const glued = [
+      [FAKE.github, 'abcdefghij'],
+      [FAKE.aws, 'EFGHIJKLMNOP'],
+      [FAKE.jwt, 'eyJzdWIiOiIxIn0'],
+      ['Bearer Sx1Zq', 'Sx1Zq'],
+      ['Basic Sx1ZqAAA', 'Sx1Zq'],
+      ['Cookie: Sx1Zq', 'Sx1Zq'],
+      ['https://u:Sx1Zq@h.test', 'Sx1Zq'],
+    ] as const
+    await Promise.all(
+      glued.map(async ([shape, secret]) => {
+        const text = `${known[0] ?? ''}${shape}`
+        for (const masked of [
+          maskText(text, known),
+          maskPrinted(text, known),
+          maskPrinted(JSON.stringify({ body: text }), known),
+          await Effect.runPromise(maskTextPaced(text, known, 0)),
+          await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+        ]) {
+          expect(masked, text).not.toContain(secret)
+          expect(masked, text).not.toContain('kn0wn')
+        }
+      }),
+    )
+  })
+
+  test('a shape nested in another, every pair at every position, leaves none of its markers', async () => {
+    const indexes = writings('', '').map((_, index) => index)
+    // Run at once, the paced maskings take turns with one another.
+    await Promise.all(
+      indexes.flatMap((outerAt) =>
+        indexes.flatMap((innerAt) =>
+          POSITIONS.map((where) => leavesNoMarker(outerAt, innerAt, where, 'Sx1Zq', 'Sx2Zq')),
+        ),
+      ),
+    )
+  })
+
+  test('the same with markers of any length, 5,000 samples', async () => {
+    const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
+    const at = fc.nat({ max: writings('', '').length - 1 })
+    await fc.assert(
+      fc.asyncProperty(at, at, fc.constantFrom(...POSITIONS), mark, mark, leavesNoMarker),
+      { numRuns: 5_000 },
+    )
+  })
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => string, times: number): number => {
   const start = performance.now()
@@ -721,6 +889,13 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     ['a run of eyJ-eyJ- (web tokens)', (size) => 'eyJ-'.repeat(size / 4), text, 4_000],
     ['a run of password-password-', (size) => 'password-'.repeat(size / 9), text, 270],
     ['a run of password_password_', (size) => 'password_'.repeat(size / 9), text, 270],
+    ['a run of password=password=', (size) => 'password='.repeat(size / 9), text, 4_000],
+    [
+      'labels nested in labels (password=a.token="b")',
+      (size) => 'password=a.token="b" '.repeat(size / 21),
+      text,
+      4_000,
+    ],
     [
       'a run of a-a-a- in a JSON string',
       (size) => JSON.stringify([{ body: 'a-'.repeat(size / 2) }]),
