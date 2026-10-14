@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
 import { BudgetSection } from '../../blocks/project-settings/budget.tsx'
-import { CommandsSection, NEW_COMMAND } from '../../blocks/project-settings/commands.tsx'
+import { CommandsSection } from '../../blocks/project-settings/commands.tsx'
+import { NEW_COMMAND } from '../../blocks/project-settings/commands-model.ts'
 import { InstructionsSection } from '../../blocks/project-settings/instructions.tsx'
 import { NeverSection } from '../../blocks/project-settings/never.tsx'
 import { Section } from '../../blocks/project-settings/parts.tsx'

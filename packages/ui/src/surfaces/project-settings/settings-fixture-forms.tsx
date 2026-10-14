@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
 import { FormFoot } from '../../blocks/project-settings/parts.tsx'
-import { CommandForm, typeIcon } from '../../blocks/project-settings/commands.tsx'
+import { CommandForm } from '../../blocks/project-settings/commands.tsx'
+import { typeIcon } from '../../blocks/project-settings/command-types.tsx'
 import { NeverForm } from '../../blocks/project-settings/never.tsx'
 import { StepForm, placeOfStep, whatOf } from '../../blocks/project-settings/recipe.tsx'
 import { RepositoryForm } from '../../blocks/project-settings/repositories.tsx'

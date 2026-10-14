@@ -235,16 +235,17 @@ export {
   type SettingsRepository,
 } from './blocks/project-settings/repositories.tsx'
 export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
+export { CommandForm, CommandsSection } from './blocks/project-settings/commands.tsx'
 export {
   COMMAND_TYPES,
-  CommandForm,
-  CommandsSection,
-  NEW_COMMAND,
   typeIcon,
-  type CommandDraft,
   type CommandType,
+} from './blocks/project-settings/command-types.tsx'
+export {
+  NEW_COMMAND,
+  type CommandDraft,
   type SettingsCommand,
-} from './blocks/project-settings/commands.tsx'
+} from './blocks/project-settings/commands-model.ts'
 export {
   NEW_STEP,
   RecipeSection,

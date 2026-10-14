@@ -1,4 +1,4 @@
-import type { SettingsCommand } from './commands.tsx'
+import type { SettingsCommand } from './commands-model.ts'
 import type { SettingsStep } from './recipe.tsx'
 import type { RemoteChoice, SettingsRepository } from './repositories.tsx'
 import type { RunnableCommand, SettingsRun } from './services.tsx'

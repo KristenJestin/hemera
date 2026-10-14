@@ -5,7 +5,7 @@ import {
   type CommandDraft,
   NEW_COMMAND,
   type SettingsCommand,
-} from '../../blocks/project-settings/commands.tsx'
+} from '../../blocks/project-settings/commands-model.ts'
 import {
   NEW_STEP,
   type SettingsStep,
