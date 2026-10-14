@@ -75,6 +75,8 @@ const NOT_DECLARATIONS = new Set([
   'configure',
   'expect',
 ])
+/** How deep describes nest in a file read for certain: deeper, its tests' paths are unknown. */
+const MAX_DEPTH = 64
 /** The bracket each closing one closes. */
 const OPENS = new Map([
   [')', '('],
@@ -274,11 +276,13 @@ const literalTitle = (
  * The tests a JavaScript or TypeScript file declares (`test(`, `it(`, `test.skip(`,
  * `test.each(…)(`), each under the describes (`describe(`, `describe.each(…)(`, `suite(`,
  * `context(`, `test.describe(`) whose call holds it. A call is read at the start of an expression
- * only (`x.test(…)` is a method); a describe whose title is not a literal makes its tests' paths
- * unknown, as an uncertain file does.
+ * only (`x.test(…)` is a method, `{ test() {…} }` a method it declares); a describe whose title is
+ * not a literal makes its tests' paths unknown, and a test whose title is not one (a variable, a
+ * call) makes the whole file uncertain, since it may have any test's name.
  */
 export const jsTests = (code: string): SourceTests => {
   const { tokens, closer, certain } = jsTokens(code)
+  let generated = false
   const describes = new Map<number, SourceTitle | null>()
   const declared: Array<{
     readonly head: number
@@ -305,30 +309,39 @@ export const jsTests = (code: string): SourceTests => {
       else continue
     }
     if (tokens[open]?.text !== '(') continue
+    // A method an object literal or a class declares (`{ test('x') { … } }`, `test(): T {`), or a
+    // function named test, is no call.
+    const after = tokens[(closer.get(open) ?? tokens.length) + 1]?.text
+    if (after === '{' || after === ':') continue
     const title = literalTitle(tokens, open, each)
     if (isDescribe || members.includes('describe')) describes.set(open, title)
     else if (title !== null) declared.push({ head, at: start.at, title })
+    // A title from a variable, a call or a loop may be any test's.
+    else generated = true
   }
-  // The describes open at each token, pushed at their call's `(` and popped past its `)`.
-  const open: Array<{ readonly close: number; readonly title: SourceTitle | null }> = []
-  const scopes = new Map<number, ReadonlyArray<SourceTitle | null>>()
+  // The describes open at each token, pushed at their call's `(` and popped past its `)`, each
+  // with the scope its tests are under, built once when it opens; null when a title is not
+  // literal, or the describes nest past what any real file does.
+  const open: Array<{ readonly close: number; readonly scope: ReadonlyArray<SourceTitle> | null }> =
+    []
+  const scopes = new Map<number, ReadonlyArray<SourceTitle> | null>()
   const heads = new Set(declared.map((one) => one.head))
   for (let index = 0; index < tokens.length; index += 1) {
     while ((open.at(-1)?.close ?? tokens.length) < index) open.pop()
-    if (heads.has(index))
-      scopes.set(
-        index,
-        open.map((one) => one.title),
-      )
+    const inner = open.length === 0 ? [] : (open.at(-1)?.scope ?? null)
+    if (heads.has(index)) scopes.set(index, inner)
     if (describes.has(index)) {
-      open.push({ close: closer.get(index) ?? tokens.length, title: describes.get(index) ?? null })
+      const title = describes.get(index) ?? null
+      const scope =
+        inner === null || title === null || open.length >= MAX_DEPTH ? null : [...inner, title]
+      open.push({ close: closer.get(index) ?? tokens.length, scope })
     }
   }
-  let known = certain
+  let known = certain && !generated
   const tests = declared.map((one) => {
-    const scope = (scopes.get(one.head) ?? []).flatMap((title) => (title === null ? [] : [title]))
-    if (scope.length !== (scopes.get(one.head) ?? []).length) known = false
-    return { at: one.at, title: one.title, scope }
+    const scope = scopes.get(one.head) ?? null
+    if (scope === null) known = false
+    return { at: one.at, title: one.title, scope: scope ?? [] }
   })
   return { certain: known, tests }
 }

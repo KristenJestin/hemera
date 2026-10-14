@@ -219,6 +219,8 @@ const JEST_PROJECT_FILE =
 /** jest's `PASS file` and `FAIL file` line, a project's displayName before its file or not. */
 const JEST_FILE_LINE =
   /^\s*(?:PASS|FAIL)\s+(?:\|[^|]*\|\s+)?(?:\S.*?\s)?(?<file>\S+\.[A-Za-z]\w*)(?:\s+\(\d+(?:\.\d+)?\s?m?s\))?\s*$/
+/** node:test's line above a failing test it lists at the end of its spec output: its file. */
+const NODE_TEST_AT = /^\s*test at (?<file>.+?):\d+:\d+\s*$/
 const TAP_NOT_OK = /^\s*not ok \d+(?: - (?<name>.*))?/
 /**
  * A duration as each runner prints one after a title, and only there: vitest's ` 3ms` on its `×`
@@ -365,6 +367,12 @@ export interface Printed {
   readonly file: string | null
 }
 
+/** The files a JavaScript runner prints apart from a failing test's line: jest's, node:test's. */
+interface JsFiles {
+  readonly jest: string | null
+  readonly node: string | null
+}
+
 /** A failing test as its runner prints it, and what one of its failures says. */
 export interface PrintedFailure extends Printed {
   readonly verdict: Verdict
@@ -446,9 +454,10 @@ const rustTest = (path: string): string => path.split('::').at(-1) ?? path
 /**
  * vitest, jest, node:test, and TAP printed without its report: a mark, a heading, a file line;
  * its path when it prints it whole, vitest after its file, jest's `●` heading; its file, vitest's
- * before its title, and jest's file line above its marks and headings (`jestFile`).
+ * before its title, jest's file line above its marks and headings, and node:test's `test at` line
+ * right above the `✖` it lists.
  */
-const jsFailure = (line: string, jestFile: string | null): Read | null => {
+const jsFailure = (line: string, files: JsFiles): Read | null => {
   const heading = JEST_HEADING.exec(line)
   const mark = JS_MARK.exec(line)
   const found =
@@ -459,7 +468,8 @@ const jsFailure = (line: string, jestFile: string | null): Read | null => {
   const vitest = vitestPaths(titles, name.trim())
   const jest = heading === found || mark?.groups?.['mark'] === '✕'
   const paths = heading === found ? [name.trim().split(' › ')] : vitest.paths
-  const file = jest ? jestFile : vitest.file
+  const node = mark?.groups?.['mark'] === '✖'
+  const file = jest ? files.jest : node ? files.node : vitest.file
   return { printed: printed('js', name, titles, paths, file), marked: true, verdict: jsVerdict }
 }
 
@@ -597,13 +607,13 @@ const failureAt = (
   line: string,
   afterFailures: boolean,
   listed: boolean,
-  jestFile: string | null,
+  files: JsFiles,
 ): Read | null =>
   pytestFailure(line) ??
   unittestFailure(line) ??
   goFailure(line) ??
   rustFailure(line, afterFailures, listed) ??
-  jsFailure(line, jestFile)
+  jsFailure(line, files)
 
 /**
  * The failing lines of an output, uncoloured and cut, and the tests they name, each with what its
@@ -649,7 +659,8 @@ const failingLinesOf = (
     // jest's file line, above its tests' marks and headings.
     if (!line.includes(' > ')) jestFile = JEST_FILE_LINE.exec(line)?.groups?.['file'] ?? jestFile
     const rustListed = inList && !RUST_FAILURES.test(line)
-    const read = failureAt(line, rustAt >= 0 && at > rustAt, rustListed, jestFile)
+    const node = NODE_TEST_AT.exec(lines[at - 1] ?? '')?.groups?.['file'] ?? null
+    const read = failureAt(line, rustAt >= 0 && at > rustAt, rustListed, { jest: jestFile, node })
     if (read !== null) {
       entries.push({ at, read })
       continue
@@ -1025,6 +1036,39 @@ const templateAnswers = (template: string, title: string): boolean => {
   return WORDS.test(title.slice(at, end))
 }
 
+/** How many tests under a template a file's tests are compared with: past it, none names its test. */
+const MAX_TEMPLATES = 64
+
+/** Whether a template could produce a title: one made of placeholders alone produces any. */
+const produces = (template: string, title: string): boolean =>
+  template.split(PLACEHOLDER).every((piece) => piece.trim() === '') ||
+  templateAnswers(template, title)
+
+/** Whether two titles a file declares could be the same title a runner prints. */
+const mayEqual = (one: string | TemplateTest, other: string | TemplateTest): boolean => {
+  if (Predicate.isString(one)) {
+    return Predicate.isString(other) ? one === other : produces(other.template, one)
+  }
+  return Predicate.isString(other)
+    ? produces(one.template, other)
+    : overlap(one.template, other.template)
+}
+
+/**
+ * Whether two templates could produce the same title: unless the start of one is no start of the
+ * other's, or the end of one no end of the other's, they are taken to.
+ */
+const overlap = (one: string, other: string): boolean => {
+  const pieces = one.split(PLACEHOLDER)
+  const others = other.split(PLACEHOLDER)
+  const [first, otherFirst] = [pieces[0] ?? '', others[0] ?? '']
+  const [last, otherLast] = [pieces.at(-1) ?? '', others.at(-1) ?? '']
+  return (
+    (first.startsWith(otherFirst) || otherFirst.startsWith(first)) &&
+    (last.endsWith(otherLast) || otherLast.endsWith(last))
+  )
+}
+
 /**
  * A Go subtest as `go test` prints its path: its parent function, the subtests it is nested in,
  * then its name, each space turned into `_` (`TestExport/as_markdown/with_header`), and Go's `#01`
@@ -1130,9 +1174,10 @@ const sameFile = (shown: string, testPath: string): boolean => {
 /**
  * What the failures of the tests the proof adds say: an assertion when one test's own failures
  * say one and none says another error; another error when a test's say one; nothing when no
- * failure is theirs, or theirs say nothing. A failure whose runner prints another file is never the test's, and when one does, a failure
- * printed with no file (a tree's line, a pytest section) may be that one: it is not the test's
- * either.
+ * failure is theirs, or theirs say nothing. A failure whose runner prints another file is never the
+ * test's. One printed with no file (a tree's line, a pytest section, mocha's list) may be another
+ * file's test of the same path: it is never a declared test's, and another name's only when no
+ * failure it answers is printed in another file.
  */
 const named = (
   failures: ReadonlyArray<PrintedFailure>,
@@ -1145,7 +1190,9 @@ const named = (
       (failure) => failure.file !== null && !sameFile(failure.file, testPath),
     )
     const own = matched.filter((failure) =>
-      failure.file === null ? !elsewhere : sameFile(failure.file, testPath),
+      failure.file === null
+        ? !elsewhere && !Predicate.hasProperty(name, 'scope')
+        : sameFile(failure.file, testPath),
     )
     return combined(own.map((failure) => failure.verdict))
   })
@@ -1159,6 +1206,7 @@ const named = (
 /** A report's failure as its runner would print it, with what it says. */
 const reportFailure = (failure: ProofRunClass['failures'][number]): PrintedFailure => ({
   ...reportPrinted(failure.test),
+  file: failure.file,
   verdict: failure.assertion ? 'assertion' : 'error',
 })
 
@@ -1258,7 +1306,8 @@ const addedLinesOf = (patch: string, lines: ReadonlyArray<string>): ReadonlySet<
  * or classes it is declared in and the file's other tests of the same title. A name decides only
  * when read with certainty: a test read from a patch that does not place in the code, from a file
  * its tokenizer is not certain of, or a Rust test whose name the file declares twice, names
- * nothing, and the key line decides.
+ * nothing, and the key line decides. A title a template of the file could produce is a twin of the
+ * template's tests, and a path one could produce a clash.
  */
 export const addedTests = (test: {
   readonly insertion: 'new_file' | 'addition'
@@ -1303,16 +1352,39 @@ export const addedTests = (test: {
   const sources = [jsTests(added), pythonTests(added)].flatMap((read) =>
     read.tests.map((one) => ({ ...one, certain: whole && read.certain })),
   )
+  // A test under a template (its title's or a describe's) is told apart from another only where no
+  // title its template produces could be the other's: a title either could have makes them twins, a
+  // path either could have a clash.
+  const templated = sources.flatMap((one, at) =>
+    [one.title, ...one.scope].some((title) => !Predicate.isString(title)) ? [at] : [],
+  )
+  const twins = new Set<number>()
+  const clashes = new Set<number>(templated.length > MAX_TEMPLATES ? sources.keys() : [])
+  for (const at of clashes.size > 0 ? [] : templated) {
+    const one = sources[at]
+    for (const [other, two] of sources.entries()) {
+      if (one === undefined || other === at || !mayEqual(one.title, two.title)) continue
+      twins.add(at).add(other)
+      const scope = two.scope
+      if (
+        one.scope.length === scope.length &&
+        one.scope.every((title, level) => mayEqual(title, scope[level] ?? ''))
+      ) {
+        clashes.add(at).add(other)
+      }
+    }
+  }
   const titles = count(sources.map((one) => key(one.title)))
   const paths = count(sources.map((one) => [...one.scope, one.title].map(key).join('\n')))
   const declared: ReadonlyArray<{ readonly at: number; readonly name: TestName }> = sources.map(
-    (one) => ({
+    (one, at) => ({
       at: one.at,
       name: {
         title: one.title,
         scope: one.certain ? one.scope : null,
-        twin: (titles.get(key(one.title)) ?? 0) > 1,
-        clash: (paths.get([...one.scope, one.title].map(key).join('\n')) ?? 0) > 1,
+        twin: twins.has(at) || (titles.get(key(one.title)) ?? 0) > 1,
+        clash:
+          clashes.has(at) || (paths.get([...one.scope, one.title].map(key).join('\n')) ?? 0) > 1,
       },
     }),
   )
