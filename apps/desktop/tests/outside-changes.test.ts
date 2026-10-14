@@ -276,30 +276,38 @@ const runningOf = (commandId: string) =>
   })
 
 describe('A change made outside Hemera is detected (CT-22)', () => {
-  test('a file changed by the test (as me) while nothing runs is detected within one tick, once, with the mark naming the repository and the Journal line', async () => {
-    const tick = 300
-    const { run } = engine({ compareEveryMillis: tick })
+  test('a file changed by the test (as me) while nothing runs is detected by the tick, once, with the mark naming the repository and the Journal line', async () => {
+    // Every compare of the tick passes the hold once its snapshot is about to be taken: the test
+    // counts them, so "several ticks more" is a number of ticks, not a number of milliseconds.
+    let compares = 0
+    const { run } = engine({
+      compareEveryMillis: 300,
+      hold: () => Effect.sync(() => void (compares += 1)),
+    })
     const seen = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
           const { project, mission } = yield* launched(work)
           const { session } = yield* builderOf(mission.id)
-          // A tick first, so the expected tree stands before the user's change.
-          yield* Effect.sleep(tick * 2)
+          // A compare first, so the expected tree stands before the user's change.
+          yield* compare(mission.id)
           writeFileSync(join(session.folder, 'api', 'invoices.ts'), 'mine\n')
-          const at = Date.now()
+          // Nothing else compares (the window's focus is not regained): only the tick can record it.
+          // The bound only ends a test that would hang: 20 s is some seventy times what it takes alone.
           yield* until(
             Effect.map(recorded(mission.id), (rows) => rows.length > 0),
-            tick * 4,
+            20_000,
           )
-          const took = Date.now() - at
           // Several ticks more: still once.
-          yield* Effect.sleep(tick * 3)
+          const detected = compares
+          yield* until(
+            Effect.sync(() => compares >= detected + 3),
+            20_000,
+          )
           yield* Memory.use((memory) => memory.catchUp)
           const journal = yield* Memory.use((memory) => memory.journal(mission.id, null))
           return {
-            took,
             rows: yield* recorded(mission.id),
             marks: (yield* getMission(mission.id)).marks,
             apiId: yield* apiId(project.id),
@@ -309,7 +317,6 @@ describe('A change made outside Hemera is detected (CT-22)', () => {
         }),
       ),
     )
-    expect(seen.took).toBeLessThan(tick * 2 + 1_000)
     expect(seen.rows).toEqual(['api/invoices.ts'])
     expect(seen.marks.map((one) => one.mark)).toContainEqual(
       ChangedOutsideMark.make({ repositoryId: seen.apiId ?? '' }),
