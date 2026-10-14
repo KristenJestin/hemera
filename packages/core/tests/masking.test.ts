@@ -164,6 +164,20 @@ describe('Each recognised shape is masked without its value being known', () => 
     expect(masked).not.toContain('sk-live-SECRET')
   })
 
+  test('a JSON Web Token is masked whole when another token starts inside it', () => {
+    const header = 'eyJhbGciOiJIUzI1NiJ9'
+    const payload = 'eyJzdWIiOiJib2JAZXhhbXBsZS50ZXN0In0'
+    for (const token of [
+      `${header}.${payload}.ghp_Q1w2E3r4T5Q1w2E3r4T5sig`,
+      `${header}.${payload}.sk-abcdefgh12`,
+      `${header}.${payload}.AKIAABCDEFGHIJKLMNOP`,
+      `${header}-AKIAABCDEFGHIJKLMNOP.${payload}.c2ln`,
+    ]) {
+      expect(String(maskText(`auth ${token}`, []))).toBe(`auth ${MASK}`)
+      expect(maskPrinted(`auth ${token}`, [])).toBe(`auth ${MASK}`)
+    }
+  })
+
   test('ordinary words that only resemble a label are left alone', () => {
     for (const text of ['max_tokens: 4096', 'the tokens were counted', 'PORT=3000']) {
       expect(maskShapes(text)).toBe(text)
@@ -467,6 +481,29 @@ describe('What a CLI printed is masked at least as much as the whole text would 
   test('outputs built from fragments: no marker the whole-text mask hides is left, no known value', () => {
     const known = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD', '😀5EE']
     const marker = fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`)
+    // One shape nested in another, each holding a marker no mask may leave, whatever the order the
+    // shapes run in: `Sx<n>Zq`. Each opens on `;`, which no shape takes as the start of its value:
+    // a Bearer or a Basic credential just before does not take the nested shape's first word.
+    const hidden = fc.nat({ max: 999 }).map((index) => `Sx${index}Zq`)
+    const inner = fc.constantFrom(
+      'ghp_Q1w2E3r4T5Q1w2E3r4T5',
+      'sk-abcdefgh12',
+      'AKIAABCDEFGHIJKLMNOP',
+      'c2ln',
+    )
+    const nested = fc.oneof(
+      fc
+        .tuple(hidden, hidden, inner)
+        .map(([header, payload, signature]) => `;eyJ${header}.eyJ${payload}.${signature}`),
+      fc
+        .tuple(hidden, inner, hidden)
+        .map(([header, token, payload]) => `;eyJ${header}-${token}.eyJ${payload}.c2ln`),
+      hidden.map((value) => `;password=https://u:${value}@h.test`),
+      fc
+        .tuple(hidden, hidden)
+        .map(([header, payload]) => `;Authorization: Bearer eyJ${header}.eyJ${payload}.c2ln`),
+      hidden.map((body) => `;-----BEGIN RSA PRIVATE KEY-----\n${body}`),
+    )
     const fragment = fc.oneof(
       {
         weight: 6,
@@ -506,6 +543,7 @@ describe('What a CLI printed is masked at least as much as the whole text would 
       },
       { weight: 3, arbitrary: marker },
       { weight: 1, arbitrary: fc.constantFrom(...known) },
+      { weight: 2, arbitrary: nested },
     )
     const text = fc.array(fragment, { minLength: 1, maxLength: 8 }).map((parts) => parts.join(''))
     const name = fc.oneof(
@@ -548,6 +586,8 @@ describe('What a CLI printed is masked at least as much as the whole text would 
         for (const mark of new Set(output.match(/Mk\d+Zq/g) ?? [])) {
           expect(occurrences(masked, mark), mark).toBeLessThanOrEqual(occurrences(whole, mark))
         }
+        expect(whole).not.toMatch(/Sx\d+Zq/)
+        expect(masked).not.toMatch(/Sx\d+Zq/)
         for (const value of known) {
           expect(masked).not.toContain(value)
           expect(masked).not.toContain(JSON.stringify(value).slice(1, -1))

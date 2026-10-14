@@ -128,8 +128,10 @@ const SHAPES: ReadonlyArray<Shape> = [
   [CREDENTIAL_HEADER, ([name = '', separator = '']) => `${name}${separator}${MASK}`],
   [BEARER, ([scheme = '']) => `${scheme} ${MASK}`],
   [BASIC, ([scheme = '']) => `${scheme} ${MASK}`],
-  [PREFIXED_TOKEN, () => MASK],
+  // A web token before the prefixed ones: one of them can start inside it, and masked first it
+  // would leave the token's header and payload readable.
   [WEB_TOKEN, ([before = '']) => `${before}${MASK}`],
+  [PREFIXED_TOKEN, () => MASK],
   [URL_PASSWORD, ([before = '']) => `${before}${MASK}@`],
   [LABELLED_CREDENTIAL, ([label = '', separator = '']) => `${label}${separator}${MASK}`],
 ]
