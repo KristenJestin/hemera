@@ -570,6 +570,9 @@ export const reviewLayer = (settings: ReviewSettings) =>
       const imagesChecked = (missionId: string, images: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           if (images.length === 0) return
+          if (new Set(images).size !== images.length) {
+            return yield* refuse('An image is attached once: it was given twice.')
+          }
           const rows = yield* database
             .select({ id: memoryEvidence.id, mediaType: memoryEvidence.mediaType })
             .from(memoryEvidence)
@@ -584,7 +587,6 @@ export const reviewLayer = (settings: ReviewSettings) =>
             return yield* refuse(`${missing} is not an image of this mission.`)
         })
 
-      /** Where an anchor stands on the live Workspace, `live` read once per repository. */
       /** Where each comment stood on a live tree: computed once per comment and tree (#341). */
       const reanchored = new Map<string, AnchorLive>()
       const REANCHORED_MAX = 2_000

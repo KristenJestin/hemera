@@ -1320,6 +1320,32 @@ describe('Images', () => {
   )
 
   test(
+    'an image given twice to one feedback is refused, never delivered twice',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const image = yield* Review.use((review) => review.imageAdd(missionId, 'grey.png', PNG))
+            return yield* add(missionId, {
+              ...remark('The button is grey.'),
+              images: [image.evidenceId, image.evidenceId],
+            }).pipe(
+              Effect.flip,
+              Effect.map((failure) => failure.message),
+            )
+          }),
+        ),
+      )
+      expect(seen).toBe('An image is attached once: it was given twice.')
+    },
+    SLOW,
+  )
+
+  test(
     'an image of a feedback reaches an agent as an image block when it takes images, by its path otherwise',
     async () => {
       const { run } = engine()
