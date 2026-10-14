@@ -74,6 +74,7 @@ import {
 import { commandRuns, missions, runnerLeases } from '../storage/schema.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
 import { ToolAccess } from '../tools/access.ts'
+import { passFingerprints } from '../tools/files.ts'
 import { mutate } from '../transaction.ts'
 import { type BriefSources, type Predecessor, briefOf } from './brief.ts'
 import {
@@ -1150,6 +1151,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           }
           const successor = yield* succeed(session, RESTARTED)
           if (successor === null) continue
+          // What it read survives the restart: its successor writes on the versions it read.
+          yield* passFingerprints(session.id, successor.id)
           rebuilt.push(successor)
           starts.push(() =>
             start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
