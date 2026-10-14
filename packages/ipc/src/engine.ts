@@ -47,6 +47,7 @@ import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
 import { ForgeRpcs } from './forge.ts'
+import { DeliveryRulesRpcs } from './delivery.ts'
 import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
@@ -199,6 +200,9 @@ export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 /** The forge of each repository (#253), a layer of its own in the engine and in main (TS2589). */
 export const EngineForgeRpcs = ForgeRpcs
 
+/** A Project's delivery rules (#340), a layer of its own in the engine and in main (TS2589). */
+export const EngineDeliveryRulesRpcs = DeliveryRulesRpcs
+
 /** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
 export const EngineReviewRpcs = DiffRpcs
 
@@ -206,6 +210,7 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
   EngineForgeRpcs,
+  EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
 )
 

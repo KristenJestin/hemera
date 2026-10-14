@@ -47,6 +47,8 @@ export const TABLE_CLASSES = {
   project_repositories: 'state',
   repository_forges: 'state',
   forge_needs: 'state',
+  delivery_rules: 'state',
+  delivery_rule_copies: 'permanent',
   workspaces: 'state',
   workspace_repositories: 'state',
   project_preparation_steps: 'state',

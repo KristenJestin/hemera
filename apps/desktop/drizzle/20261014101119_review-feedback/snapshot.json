@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "7eb81edc-37e6-4630-a685-54b7407c2a36",
-  "prevIds": ["b7dda099-0032-492b-a002-03731aadcc8a"],
+  "id": "7849886b-1eed-4244-87f5-c0e2ff0ae4a8",
+  "prevIds": ["81d1b14a-3593-4055-95c5-cd7f33e2173f"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -98,6 +98,14 @@
     },
     {
       "name": "command_runs",
+      "entityType": "tables"
+    },
+    {
+      "name": "delivery_rule_copies",
+      "entityType": "tables"
+    },
+    {
+      "name": "delivery_rules",
       "entityType": "tables"
     },
     {
@@ -3285,6 +3293,96 @@
       "name": "ended_at",
       "entityType": "columns",
       "table": "command_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "section",
+      "entityType": "columns",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "copied_at",
+      "entityType": "columns",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "document",
+      "entityType": "columns",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "delivery_rules"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "delivery_rules"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "saved_at",
+      "entityType": "columns",
+      "table": "delivery_rules"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "document",
+      "entityType": "columns",
+      "table": "delivery_rules"
     },
     {
       "type": "integer",
@@ -13505,6 +13603,28 @@
       "table": "command_runs"
     },
     {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_delivery_rule_copies_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "delivery_rule_copies"
+    },
+    {
+      "columns": ["project_id"],
+      "tableTo": "projects",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_delivery_rules_project_id_projects_id_fk",
+      "entityType": "fks",
+      "table": "delivery_rules"
+    },
+    {
       "columns": ["discussion_id"],
       "tableTo": "discussions",
       "columnsTo": ["id"],
@@ -14888,6 +15008,13 @@
       "table": "cold_read_findings"
     },
     {
+      "columns": ["mission_id", "section"],
+      "nameExplicit": false,
+      "name": "delivery_rule_copies_pk",
+      "entityType": "pks",
+      "table": "delivery_rule_copies"
+    },
+    {
       "columns": ["mission_id", "run_id"],
       "nameExplicit": false,
       "name": "dismissed_services_pk",
@@ -15179,6 +15306,13 @@
       "nameExplicit": false,
       "name": "command_runs_pk",
       "table": "command_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["project_id"],
+      "nameExplicit": false,
+      "name": "delivery_rules_pk",
+      "table": "delivery_rules",
       "entityType": "pks"
     },
     {

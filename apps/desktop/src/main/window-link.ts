@@ -19,6 +19,7 @@ import {
   DiffRpcs,
   DocRecipesRpcs,
   ForgeRpcs,
+  DeliveryRulesRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -974,6 +975,39 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['forge.changes'](request).pipe(
           streamClosedAs(gone),
           observedStream('forge.changes', log),
+        ),
+    }),
+    // A Project's delivery rules (#340), a layer of their own.
+    DeliveryRulesRpcs.toLayer({
+      'deliveryRules.read': (request) =>
+        engine['deliveryRules.read'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.read', log),
+        ),
+      'deliveryRules.validate': (request) =>
+        engine['deliveryRules.validate'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.validate', log),
+        ),
+      'deliveryRules.save': (request) =>
+        engine['deliveryRules.save'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.save', log),
+        ),
+      'deliveryRules.acceptDependencies': (request) =>
+        engine['deliveryRules.acceptDependencies'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.acceptDependencies', log),
+        ),
+      'deliveryRules.missionCopies': (request) =>
+        engine['deliveryRules.missionCopies'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.missionCopies', log),
+        ),
+      'deliveryRules.preparationChangedSinceCopy': (request) =>
+        engine['deliveryRules.preparationChangedSinceCopy'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.preparationChangedSinceCopy', log),
         ),
     }),
     // The live diff of a mission (#249), a layer of its own.
