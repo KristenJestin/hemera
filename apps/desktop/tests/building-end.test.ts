@@ -453,6 +453,25 @@ const writtenInWorkspace = (folder: string, path: string, content: string) => {
 const apiOf = (missionId: string) =>
   Effect.map(buildingNow(missionId), (view) => view.repositories[0]?.folder ?? '')
 
+/** The folder of a repository of the Workspace. */
+const folderOf = (missionId: string, name: string) =>
+  Effect.map(
+    buildingNow(missionId),
+    (view) => view.repositories.find((one) => one.name === name)?.folder ?? '',
+  )
+
+/** The Impact of a mission whose Workspace holds both of Acme's repositories. */
+const BOTH = 'It touches api and web, nothing else.'
+
+/** The targets of the special tasks born from the findings. */
+const specialTargets = Effect.gen(function* () {
+  const database = yield* Database
+  return (yield* database
+    .select({ targets: buildingTasks.targets })
+    .from(buildingTasks)
+    .where(eq(buildingTasks.origin, 'review'))).map((row) => row.targets)
+})
+
 describe('The end sequence', () => {
   test(
     'every task done runs, in order: documenter, final checks, checkpoint, both reviewers, special tasks, refresh, Review; the stage moves to Review on its own with building.ended',
@@ -776,6 +795,146 @@ describe('The reviewers', () => {
       expect(seen.read).toContain('at the checkpoint')
       expect(seen.read).not.toContain('later')
       expect(seen.folder).not.toBe(dirname(seen.api))
+    },
+  )
+
+  test(
+    'checkpoint_read of a path without a repository, in a two-repository Workspace: changed in one, it reads that one; changed in both, unchanged or in neither, it is refused with both names',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme, BOTH)
+            const builder = yield* builderOf(mission.id)
+            const web = yield* folderOf(mission.id, 'web')
+            writtenInWorkspace(web, 'invoices.ts', 'export const fromWeb = true\n')
+            writtenInWorkspace(web, 'page.ts', 'export const page = "web"\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const read = (path: string) => call(reviewer.grantId, 'checkpoint_read', { path })
+            return {
+              inApi: yield* read('export.ts'),
+              inWeb: yield* read('page.ts'),
+              inBoth: yield* read('invoices.ts'),
+              unchanged: yield* read('package.json'),
+              nowhere: yield* read('nowhere.ts'),
+            }
+          }),
+        ),
+      )
+      expect(seen.inApi).toContain('## api/export.ts')
+      expect(seen.inApi).toContain('export const markdown = true')
+      expect(seen.inWeb).toContain('## web/page.ts')
+      expect(seen.inWeb).toContain('export const page = "web"')
+      for (const answer of [seen.inBoth, seen.unchanged, seen.nowhere]) {
+        expect(answer).toMatch(/^refused: /)
+        expect(answer).toContain('api, web')
+        expect(answer).not.toContain('"name": "api"')
+      }
+      expect(seen.inBoth).toContain('invoices.ts')
+      expect(seen.unchanged).toContain('package.json')
+    },
+  )
+
+  test(
+    'in a one-repository Workspace, a path without a repository names it: checkpoint_read reads an unchanged file there, and a finding on it targets it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const unchanged = yield* call(reviewer.grantId, 'checkpoint_read', {
+              path: 'package.json',
+            })
+            yield* reviewed(world, mission.id, 'spec-reviewer', [
+              {
+                severity: 'warning',
+                path: 'package.json',
+                text: 'The package names no export script.',
+                contradicts_spec: false,
+              },
+            ])
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* specialAvailable(mission.id, 'RV1')
+            return { unchanged, targets: yield* specialTargets }
+          }),
+        ),
+      )
+      expect(seen.unchanged).toContain('## api/package.json, unchanged since the merge base')
+      expect(seen.unchanged).toContain('"name": "api"')
+      expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
+        [{ repository: 'api', path: 'package.json', intent: 'change' }],
+      ])
+    },
+  )
+
+  test(
+    'a finding with a path and no repository, in a two-repository Workspace: refused with both names when the path is changed in both or unchanged; kept on the one repository whose changed files hold it, its special task targeting it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme, BOTH)
+            const builder = yield* builderOf(mission.id)
+            const web = yield* folderOf(mission.id, 'web')
+            writtenInWorkspace(web, 'invoices.ts', 'export const fromWeb = true\n')
+            writtenInWorkspace(web, 'page.ts', 'export const page = "web"\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            const report = (path: string) =>
+              call(reviewer.grantId, 'review_report', {
+                findings: [
+                  {
+                    severity: 'warning',
+                    path,
+                    text: `Look again at ${path}.`,
+                    contradicts_spec: false,
+                  },
+                ],
+              })
+            const inBoth = yield* report('invoices.ts')
+            const unchanged = yield* report('package.json')
+            const inWeb = yield* report('page.ts')
+            world.release(reviewer.index)
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* specialAvailable(mission.id, 'RV1')
+            return {
+              inBoth,
+              unchanged,
+              inWeb,
+              review: yield* autoReviewOf(mission.id),
+              targets: yield* specialTargets,
+            }
+          }),
+        ),
+      )
+      expect(seen.inBoth).toBe(
+        'refused: finding 1: invoices.ts names no single repository: say which, one of api, web. Nothing was kept.',
+      )
+      expect(seen.unchanged).toBe(
+        'refused: finding 1: package.json names no single repository: say which, one of api, web. Nothing was kept.',
+      )
+      expect(seen.inWeb).toContain('Your report is kept.')
+      expect(seen.review?.findings).toHaveLength(1)
+      expect(seen.review?.findings[0]).toMatchObject({ repository: 'web', path: 'page.ts' })
+      expect(seen.targets.map((one) => JSON.parse(one))).toEqual([
+        [{ repository: 'web', path: 'page.ts', intent: 'change' }],
+      ])
     },
   )
 

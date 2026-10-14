@@ -34,6 +34,7 @@ import {
   type Reviewer,
   type ToolArguments,
   findingProblem,
+  repositoriesOfPath,
   sensitivePlace,
 } from '@hemera/core/domain'
 import { and, eq, inArray } from 'drizzle-orm'
@@ -527,6 +528,11 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             const root = repositoryFolderOf(folder, repository)
             return insideCopy(root, path) && existsSync(resolve(root, path))
           }
+          /** The repositories a path without one may be in, by the checkpoint's changed files. */
+          const choices = (path: string) =>
+            repositoriesOfPath(repositories, (one) =>
+              files.some((file) => file.repository === one && file.path === path),
+            )
           const listed = (repository: string | null, path: string) => {
             const named = repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '')
             const where =
@@ -538,7 +544,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             )
           }
           for (const [at, finding] of args.findings.entries()) {
-            const problem = findingProblem(finding, listed)
+            const problem = findingProblem(finding, listed, choices)
             if (problem !== null) {
               return refusal(`refused: finding ${String(at + 1)}: ${problem}. Nothing was kept.`)
             }
@@ -571,7 +577,8 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
                       requirement: finding.requirement ?? null,
                       scenario: finding.scenario ?? null,
                       repository:
-                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ?? null,
+                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ??
+                        (finding.path === undefined ? null : (choices(finding.path)[0] ?? null)),
                       path: finding.path?.replaceAll('\\', '/') ?? null,
                       line: finding.line ?? null,
                       text: secrets.mask(finding.text.trim()),
@@ -657,10 +664,17 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
             )
           }
           const path = args.path.replaceAll('\\', '/').replace(/^\.\//, '')
-          const place =
-            repositories.find((one) =>
-              files.some((file) => file.repository === one.repository && file.path === path),
-            ) ?? repositories[0]
+          const among = repositoriesOfPath(
+            repositories.map((one) => one.repository),
+            (repository) =>
+              files.some((file) => file.repository === repository && file.path === path),
+          )
+          if (among.length > 1) {
+            return refusal(
+              `refused: ${path} names no single repository: say which, one of ${among.map(placeSaid).join(', ')}`,
+            )
+          }
+          const place = repositories.find((one) => one.repository === among[0])
           if (place === undefined) return refusal('refused: the checkpoint has no repository')
           const where = fileSaid(place.repository, path)
           const machine = { home: homedir(), platform: process.platform }

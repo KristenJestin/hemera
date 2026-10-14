@@ -217,9 +217,11 @@ const specialTaskIn = (
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
     const task = specialTaskOf(finding)
     const result = written === null ? task.result : `${task.result}\nThe user answered: ${written}`
+    // `review_report` keeps a path's repository; a row without one is read in the only repository.
+    const only = basesOf(building)
     const repository =
       finding.repository ??
-      (finding.path === null ? null : (basesOf(building)[0]?.repository ?? null))
+      (finding.path === null || only.length !== 1 ? null : (only[0]?.repository ?? null))
     const targets =
       repository === null || finding.path === null
         ? []
