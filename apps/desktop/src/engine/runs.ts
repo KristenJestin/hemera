@@ -65,6 +65,7 @@ import {
 
 import type { Log } from '../main/diagnostic.ts'
 import { AskBeforeRunning } from './ask-before-running.ts'
+import { refusedIfCancelled } from './cancelled.ts'
 import { getCommand } from './catalogue.ts'
 import { findOnPath, hostLookup, invocationOf } from './command-line.ts'
 import type { DomainEvents } from './domain-events.ts'
@@ -122,10 +123,10 @@ export interface RunsSettings {
   /** The empty folder the forge CLIs of an agent's commands read their configuration from. */
   readonly agentConfigFolder: string
   /**
-   * Runs at a point a suite needs to reach: `launched`, once a run's process is started and
-   * before the run says it is running. Never held otherwise.
+   * Runs at a point a suite needs to reach: `recording`, before a run is written; `launched`, once
+   * a run's process is started and before the run says it is running. Never held otherwise.
    */
-  readonly hold?: ((at: 'launched') => Effect.Effect<void>) | undefined
+  readonly hold?: ((at: 'recording' | 'launched') => Effect.Effect<void>) | undefined
 }
 
 /** One run going in this engine, and everything known of it. */
@@ -711,36 +712,45 @@ export const startRun = (asked: RunAsked) =>
         : yield* environmentAt(place)
     const reservation =
       asked.reserved === true ? null : yield* runs.reservations.current.enter(live.run)
+    if (runs.settings.hold !== undefined) yield* runs.settings.hold('recording')
     yield* mutate('recording a run', (transaction) =>
-      transaction
-        .insert(commandRuns)
-        .values({
-          id: live.run.id,
-          projectId: live.run.projectId,
-          workspaceId,
-          commandId: live.run.commandId,
-          name: live.run.name,
-          type: live.run.type,
-          line: live.run.line,
-          folder,
-          askedLine: command === null ? line : null,
-          askedFolder: command === null ? relativeFolder : null,
-          startedBy: asked.startedBy,
-          sessionId: asked.sessionId,
-          missionId: live.run.missionId,
-          state: live.run.state,
-          exitCode: null,
-          url: null,
-          portConflict: null,
-          output: runs.mask(''),
-          dropped: 0,
-          startedAt: live.run.startedAt,
-          endedAt: null,
-        })
-        .pipe(
-          Effect.mapError(refusedWhile('recording a run')),
-          Effect.as({ result: undefined, events: [] }),
-        ),
+      Effect.andThen(
+        // A cancelled mission records no run: the cancel stopped its runs, and none starts after.
+        live.run.missionId === null
+          ? Effect.void
+          : refusedIfCancelled(transaction, live.run.missionId).pipe(
+              Effect.catchTag(
+                'MissionCancelled',
+                () => new InvalidCommand({ reason: 'its mission was cancelled' }),
+              ),
+            ),
+        transaction
+          .insert(commandRuns)
+          .values({
+            id: live.run.id,
+            projectId: live.run.projectId,
+            workspaceId,
+            commandId: live.run.commandId,
+            name: live.run.name,
+            type: live.run.type,
+            line: live.run.line,
+            folder,
+            askedLine: command === null ? line : null,
+            askedFolder: command === null ? relativeFolder : null,
+            startedBy: asked.startedBy,
+            sessionId: asked.sessionId,
+            missionId: live.run.missionId,
+            state: live.run.state,
+            exitCode: null,
+            url: null,
+            portConflict: null,
+            output: runs.mask(''),
+            dropped: 0,
+            startedAt: live.run.startedAt,
+            endedAt: null,
+          })
+          .pipe(Effect.mapError(refusedWhile('recording a run'))),
+      ).pipe(Effect.as({ result: undefined, events: [] })),
     )
     runs.live.set(live.run.id, live)
     const launched = launch(live, { words, folder, environment, portless })

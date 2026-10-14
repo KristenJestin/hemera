@@ -213,6 +213,7 @@ import {
 } from './sessions/roles.ts'
 import {
   type SessionHold,
+  type SessionsSettings,
   type SessionTimings,
   Sessions,
   sessionsLayer,
@@ -341,6 +342,8 @@ export interface SessionsParts {
   readonly rebuildHold?: Effect.Effect<void>
   /** Where a suite holds a session as it starts or fails, or fails its start. */
   readonly sessionHold?: SessionHold
+  /** Where a suite holds a session's opening, before it is written. */
+  readonly openHold?: SessionsSettings['openHold']
   /** Where a suite holds the health sweep, as each look begins (CT-12). */
   readonly sweepHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
@@ -752,6 +755,7 @@ export const startProfile = (
           timings: parts.sessions?.timings,
           rebuildHold: parts.sessions?.rebuildHold,
           sessionHold: parts.sessions?.sessionHold,
+          openHold: parts.sessions?.openHold,
           sweepHold: parts.sessions?.sweepHold,
         }),
       ),

@@ -187,7 +187,10 @@ describe('An "at open" command marked "ask before running"', () => {
     // The engine is held once the process is started, before the run says it is running: the
     // child writes its pid first, as it may on a loaded machine. Let go at the latest at the end.
     const launched = held()
-    const runs = { hold: () => Effect.promise(() => launched.promise) }
+    const runs = {
+      hold: (at: 'recording' | 'launched') =>
+        at === 'launched' ? Effect.promise(() => launched.promise) : Effect.void,
+    }
     const outcome = await commandsEngine(data, { runs })(({ profile }) =>
       Effect.gen(function* () {
         const project = yield* profile.use(Effect.flatMap(atlas(main), asking))

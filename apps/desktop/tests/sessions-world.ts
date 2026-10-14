@@ -160,6 +160,8 @@ export const sessionsEngine = (
     readonly building?: ProfileParts['building']
     /** Where a suite holds Review's feedback (#341). */
     readonly review?: ProfileParts['review']
+    /** Where a suite holds a run as it is written or launched. */
+    readonly runs?: ProfileParts['runs']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
     /** The machine's processes as the supervisor sees them, when a suite answers for some. */
@@ -221,11 +223,13 @@ export const sessionsEngine = (
     options.database === undefined
       ? withSnapshots
       : { ...withSnapshots, database: options.database }
+  const withRuns =
+    options.runs === undefined ? withDatabase : { ...withDatabase, runs: options.runs }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined
-      ? withDatabase
-      : { ...withDatabase, reconciliationSteps: options.reconciliationSteps },
+      ? withRuns
+      : { ...withRuns, reconciliationSteps: options.reconciliationSteps },
     options.testClock,
   )
   return { world, run }
