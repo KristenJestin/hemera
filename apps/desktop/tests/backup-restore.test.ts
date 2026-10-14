@@ -22,6 +22,7 @@ import {
   type ReconciliationStep,
 } from '../src/engine/reconciliation.ts'
 import { RESTORE_FOLDER, isNewer } from '../src/engine/restore.ts'
+import { NO_AGENTS } from './commands-engine.ts'
 import { SHIPPED, on, removeFolders, temporaryFolder } from './storage.ts'
 
 afterEach(removeFolders)
@@ -38,6 +39,7 @@ const start = (dataFolder: string, version = '1.0.0') => ({
 const parts = (more: Partial<ProfileParts> = {}): ProfileParts => ({
   backupFolders: [FAKE],
   reconciliationSteps: [],
+  sessions: { discovery: NO_AGENTS },
   ...more,
 })
 
