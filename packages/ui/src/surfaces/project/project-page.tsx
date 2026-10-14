@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { createContext, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import {
   MissionRow,
@@ -23,6 +23,7 @@ import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconBook2, IconInbox, IconMessages, IconSettings } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { Page, PageHeader } from '../page.tsx'
+import { MissionField } from './mission-field.ts'
 
 /**
  * The Project page: its name, and two columns under it.
@@ -89,13 +90,6 @@ export interface ProjectPageProps {
   /** The Project's tasks, under the field that starts a mission: what Hemera does for it. */
   tasks?: ReactNode
 }
-
-/**
- * The field that starts a mission, as the Project's tasks reach it: a task leaving the page while
- * the focus is in it hands the focus there rather than to nothing. The page provides the ref; the
- * field takes it as its `inputRef`.
- */
-export const MissionField = createContext<RefObject<HTMLInputElement | null> | null>(null)
 
 const REPOSITORIES = 'flex min-w-0 items-center gap-1.5 font-mono text-xs'
 

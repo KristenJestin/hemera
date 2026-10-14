@@ -8,7 +8,7 @@ import { Kbd } from '../../components/kbd/kbd.tsx'
 import { Loading } from '../../components/loading/loading.tsx'
 import { IconListCheck, IconPlus, IconSearch, IconWorld } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { MissionField } from '../../surfaces/project/project-page.tsx'
+import { MissionField } from '../../surfaces/project/mission-field.ts'
 
 /** What the field finds: a mission of the Project, a remote ticket, or the choice to create. */
 export type StartResultView =
