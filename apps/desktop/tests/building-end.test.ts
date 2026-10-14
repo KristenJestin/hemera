@@ -1031,7 +1031,7 @@ describe('The reviewers', () => {
           }),
         ),
       )
-      expect(seen.answers[0]).toContain('content withheld: api/settings.txt')
+      expect(seen.answers[0]).toContain('content withheld: api/config/.env.production')
       expect(seen.answers[1]).toContain('content withheld: api/elsewhere.txt')
       for (const answer of seen.answers) {
         expect(answer).not.toContain('TOKEN=')
