@@ -19,12 +19,12 @@ import { listRuns, startRun } from '../src/engine/runs.ts'
 import {
   FAILS_LOUDLY,
   WRITES_ITS_PID,
-  alive,
   commandsEngine,
   nodeLine,
   script,
   until,
 } from './commands-engine.ts'
+import { observedProcesses } from './observed-processes.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { held } from './sessions-world.ts'
 import { atlas, atlasOnDisk, opened } from './workspace-engine.ts'
@@ -106,7 +106,8 @@ describe('Commands marked "at open" run once the window is shown', () => {
   })
 
   test('a run of it still going is stopped first and started again', async () => {
-    const runs = await commandsEngine(data)(({ profile }) =>
+    const observed = observedProcesses()
+    const runs = await commandsEngine(data, { hostProcesses: observed.layer })(({ profile }) =>
       Effect.gen(function* () {
         const project = yield* profile.use(atlas(main))
         const db = yield* profile.use(
@@ -139,7 +140,8 @@ describe('Commands marked "at open" run once the window is shown', () => {
       ['user', 'stopped'],
     ])
     const [first, second] = pidsWritten()
-    expect(alive(first ?? 0)).toBe(false)
+    // Its end as the supervisor saw it: its pid may already be another process's.
+    expect(observed.ended(first ?? 0)).toBe(true)
     expect(second).not.toBe(first)
   })
 

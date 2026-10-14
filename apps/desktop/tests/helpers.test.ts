@@ -46,7 +46,7 @@ import {
 import { callTool } from './tools-world.ts'
 import { QUIET, READING, call, eventsOf, grantOf } from './building-world.ts'
 import { builderOf, launched } from './builder-world.ts'
-import { SILENCE, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import { SILENCE, held, heldSweeps, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { nodeLine, script } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -603,7 +603,9 @@ describe('A helper asks through its parent’s mission', () => {
 
 describe('A helper silent in a turn is stuck', () => {
   test('the flag, the parent’s note, and a replacement with the same brief', async () => {
-    const { world, run } = helping({ timings: SILENCE })
+    const sweeps = heldSweeps()
+    // Its agents start slower than the bound, as under load: the start is part of the turn.
+    const { world, run } = helping({ ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) })
     const seen = await run(({ profile }) =>
       within(
         profile,
@@ -612,6 +614,10 @@ describe('A helper silent in a turn is stuck', () => {
           const builder = yield* builderOf(mission.id)
           yield* call(builder.grantId, 'helper_launch', { brief: 'Read the whole history.' })
           const helper = yield* helperNumbered(mission.id, 1)
+          // Its turn begun, then silent past the bound, and looked at.
+          yield* until(Effect.sync(() => promptsOf(world.agents[2]).length > 0))
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           yield* until(Effect.map(listHelpers(mission.id), (chips) => chips[0]?.stuck === true))
           const chips = yield* listHelpers(mission.id)
           yield* until(
