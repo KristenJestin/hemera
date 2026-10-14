@@ -10,7 +10,7 @@ import {
   ProjectSettings,
   type SettingsForm,
 } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
+import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import {
   DOC_RECIPES,
   LONG_RECIPE,
@@ -19,14 +19,13 @@ import {
   recipeDraftOf,
   recipeRefusals,
 } from './checks-fixtures.ts'
+import { DocRecipeForm, DocRecipesSection } from './doc-recipes.tsx'
 import {
   type DocRecipeDraft,
-  DocRecipeForm,
-  DocRecipesSection,
   NEW_DOC_RECIPE,
   type SettingsDocRecipe,
   recipeName,
-} from './doc-recipes.tsx'
+} from './doc-recipes-model.ts'
 import { FormFoot } from './parts.tsx'
 import { STALE } from './project-settings-fixtures.ts'
 

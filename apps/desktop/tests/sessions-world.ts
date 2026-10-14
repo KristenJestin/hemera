@@ -123,6 +123,8 @@ export const sessionsEngine = (
     readonly gh?: GhSettings
     /** The snapshot service wrapped, when a suite holds the Freeze's snapshot (#92, #208). */
     readonly snapshots?: ProfileParts['snapshots']
+    /** The database wrapped, when a suite makes a read fail (#341). */
+    readonly database?: ProfileParts['database']
     /** The fake trackers of the ticket sync's suites, and its schedule (#97). */
     readonly ticketProviders?: ProfileParts['ticketProviders']
     readonly ticketSync?: ProfileParts['ticketSync']
@@ -130,6 +132,8 @@ export const sessionsEngine = (
     readonly reconciliationSteps?: ProfileParts['reconciliationSteps']
     /** Where a launched mission's Building starts, when a suite counts it (#139). */
     readonly building?: ProfileParts['building']
+    /** Where a suite holds Review's feedback (#341). */
+    readonly review?: ProfileParts['review']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
     /** The machine's processes as the supervisor sees them, when a suite answers for some. */
@@ -167,6 +171,7 @@ export const sessionsEngine = (
     ticketProviders: options.ticketProviders,
     ticketSync: options.ticketSync,
     building: options.building,
+    review: options.review,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,
@@ -185,11 +190,15 @@ export const sessionsEngine = (
     options.helpers === undefined ? withProbes : { ...withProbes, helpers: options.helpers }
   const withSnapshots =
     options.snapshots === undefined ? withHelpers : { ...withHelpers, snapshots: options.snapshots }
+  const withDatabase =
+    options.database === undefined
+      ? withSnapshots
+      : { ...withSnapshots, database: options.database }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined
-      ? withSnapshots
-      : { ...withSnapshots, reconciliationSteps: options.reconciliationSteps },
+      ? withDatabase
+      : { ...withDatabase, reconciliationSteps: options.reconciliationSteps },
     options.testClock,
   )
   return { world, run }

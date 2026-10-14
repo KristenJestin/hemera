@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type HTMLAttributes, type ReactNode, type Ref, useState } from 'react'
 
@@ -15,7 +16,8 @@ import {
   IconRefresh,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-card.tsx'
+import { NeedCard, type NeedCardProps, NeedGlyph } from './need-card.tsx'
+import { type NeedKind } from './need-kinds.ts'
 
 /**
  * Needs you, across every Project: one row per need, in the order they wait in — the

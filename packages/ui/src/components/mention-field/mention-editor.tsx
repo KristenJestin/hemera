@@ -17,18 +17,15 @@ import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } f
 
 import { Skeleton } from '../loading/loading.tsx'
 import { Popover } from '../popover/popover.tsx'
+import { AREA, FieldBox, MentionBadge, type MentionFieldProps } from './mention-parts.tsx'
 import {
-  AREA,
-  FieldBox,
   GLYPHS,
   KINDS,
-  MentionBadge,
   type Mentionable,
-  type MentionFieldProps,
   type MentionRef,
   mentionsFor,
   shortName,
-} from './mention-parts.tsx'
+} from './mention-model.tsx'
 
 const EDITABLE = 'min-h-full outline-none whitespace-pre-wrap break-words'
 const LIST = 'flex max-h-mention-list w-mention flex-col gap-0.5 overflow-y-auto'

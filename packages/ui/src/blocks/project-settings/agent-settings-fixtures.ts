@@ -1,5 +1,5 @@
 import type { BudgetLimit } from './budget.tsx'
-import type { AgentInstructions, RepositoryInstructions } from './instructions.tsx'
+import type { AgentInstructions, RepositoryInstructions } from './instructions-model.ts'
 import type { NeverLine } from './never.tsx'
 import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import type { PickerAgent, PickerModel } from '../../components/model-picker/model-picker.tsx'

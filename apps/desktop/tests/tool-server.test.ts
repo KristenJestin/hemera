@@ -19,6 +19,7 @@ import {
   toolsOf,
 } from '@hemera/core/domain'
 import { toToolInputSchema } from '@hemera/core/schema'
+import { UserAuthor } from '@hemera/ipc'
 import { Effect, Layer, Option, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -36,6 +37,8 @@ import {
 } from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
+import { putEvidence } from '../src/engine/memory/evidence.ts'
+import { missionFolder, missionKeyOf } from '../src/engine/memory/files.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { ALLOW, acmeWithMission, sessionOf, verdictsSaying } from './tools-world.ts'
@@ -188,6 +191,45 @@ describe('A token is the right to ask, for as long as its session lasts', () => 
       ),
     )
     expect(status).toBe(403)
+  })
+})
+
+describe('An image of the mission’s evidence crosses MCP as an image block', () => {
+  test('fs_read of an evidence PNG answers a text block and an image block (#341)', async () => {
+    // A PNG's signature and IHDR, 1 × 1.
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000', 'hex')
+    const answered = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const session = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const item = yield* putEvidence({
+            missionId: mission.id,
+            content: { bytes: png },
+            name: 'grey.png',
+            about: null,
+            author: UserAuthor.make({}),
+          })
+          const key = yield* missionKeyOf(mission.id)
+          const url = yield* HemeraEndpoint.use((endpoint) => endpoint.url)
+          return yield* Effect.promise(() =>
+            callOverMcp(bearer(url, session.token), 'tools/call', {
+              name: 'fs_read',
+              arguments: { path: join(missionFolder(data, key), 'evidence', `${item.sha256}.png`) },
+            }),
+          )
+        }),
+      ),
+    )
+    expect(answered).toMatchObject({
+      result: {
+        content: [
+          { type: 'text' },
+          { type: 'image', mimeType: 'image/png', data: png.toString('base64') },
+        ],
+        isError: false,
+      },
+    })
   })
 })
 

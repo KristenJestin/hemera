@@ -3,7 +3,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { IconTerminal } from '../../icons.ts'
-import { KeptAgentChip, KEPT_AGENT_WORDS } from './kept-agent-chip.tsx'
+import { KeptAgentChip } from './kept-agent-chip.tsx'
+import { KEPT_AGENT_WORDS } from './kept-agent-words.ts'
 import { StageCard } from './stage-card.tsx'
 
 /**
