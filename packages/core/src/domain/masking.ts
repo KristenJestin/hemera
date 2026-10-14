@@ -263,37 +263,68 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
 
 /**
  * The stretches of a text that masking hides: every occurrence of a known value, and every
- * stretch a shape hides, each found in the text as it was given. Those that overlap or touch make
- * one.
+ * stretch a shape hides, those that overlap or touch made one. They are the union of two readings:
+ *
+ * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
+ *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
+ * - the shapes in turn, as masking used to read them: each on the text where the known values and
+ *   all the shapes before it found are written over. A value that stops at a space, a quote or a
+ *   line end then runs on through what an earlier shape hid, and hides what is glued after it
+ *   (`password=<private key>x`).
+ *
+ * The union hides at least what either reading hides, and its cost is two scans of each shape.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
   const knownHidden = yield* knownSpans(text, known)
   let spans = knownHidden
-  for (const view of yield* views(text, knownHidden)) {
-    for (const pattern of SHAPES) spans = yield* union(spans, yield* shapeSpans(view, pattern))
+  let inTurn = knownHidden
+  // Written over only once something is hidden: until then, the shapes in turn read the text.
+  let view = text
+  let written = false
+  if (knownHidden.length > 0) {
+    view = yield* writtenOver(text, knownHidden)
+    written = true
   }
-  return spans
+  for (const pattern of SHAPES) {
+    const found = yield* shapeSpans(text, pattern)
+    spans = yield* union(spans, found)
+    const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
+    if (foundInTurn.length > 0) {
+      inTurn = yield* union(inTurn, foundInTurn)
+      view = yield* writtenOver(view, foundInTurn)
+      written = true
+    }
+  }
+  return yield* union(spans, inTurn)
 }
 
-/** What a known value is written over by, in the second text the shapes are matched on. */
+/** What a hidden stretch is written over by, one for each of its characters. */
 const BLANK = MASK.charAt(0)
 
 /**
- * The texts the shapes are matched on: the text as it was given and, when it holds a known value,
- * the same text with each known value written over by as many `•`. A shape glued to a known value
- * (`<value>ghp_…`) then stands apart from it, as it did when known values were masked first, and
- * every stretch found is where it is in the text.
+ * A text with each of the stretches, in order, written over by as many `•`: every pattern matches
+ * there as it matched around `•••`, and every stretch it finds is where it is in the text.
  */
-function* views(text: string, knownHidden: ReadonlyArray<Span>): Steps<ReadonlyArray<string>> {
-  if (knownHidden.length === 0) return [text]
-  let blanked = ''
+function* writtenOver(text: string, spans: ReadonlyArray<Span>): Steps<string> {
+  // Joined a step at a time, then once: a string added to piece by piece is a rope of millions
+  // of pieces, and the next pattern flattens it in one go, the engine held meanwhile.
+  const joined: string[] = []
+  let pieces: string[] = []
   let from = 0
-  for (const [start, end] of knownHidden) {
-    blanked += text.slice(from, start) + BLANK.repeat(end - start)
+  for (const [start, end] of spans) {
+    if (end <= from) continue
+    const begin = Math.max(start, from)
+    pieces.push(text.slice(from, begin), BLANK.repeat(end - begin))
     from = end
-    if (due()) yield
+    if (due()) {
+      joined.push(pieces.join(''))
+      pieces = []
+      yield
+    }
   }
-  return [text, blanked + text.slice(from)]
+  pieces.push(text.slice(from))
+  joined.push(pieces.join(''))
+  return joined.join('')
 }
 
 /** Text with each of the stretches, in order and apart, masked. */
