@@ -140,16 +140,39 @@ const due = (): boolean => {
 const SLICE = 10
 
 /**
- * Steps run in slices of `slice` milliseconds, other fibers and the event loop running between
- * two. A slice of 0 gives way after every step.
+ * A mask run to its end at once; `•••` when it throws. A mask that fails (a pattern out of stack
+ * on a quoted value of megabytes, or anything else) never gives back the text it was given, and
+ * never fails what asked for it.
+ */
+const doneOrMask = (steps: () => Steps<string>): string => {
+  try {
+    return done(steps())
+  } catch {
+    return MASK
+  }
+}
+
+/**
+ * A mask run in slices of `slice` milliseconds, other fibers and the event loop running between
+ * two; a slice of 0 gives way after every step. `•••` when it throws, as `doneOrMask`.
  */
 const paced = (steps: () => Steps<string>, slice: number): Effect.Effect<string> =>
   Effect.suspend(() => {
-    const running = steps()
+    let running: Steps<string>
+    try {
+      running = steps()
+    } catch {
+      return Effect.succeed(MASK)
+    }
     const next = (): Effect.Effect<string> => {
       const until = performance.now() + slice
       for (;;) {
-        const step = running.next()
+        let step: IteratorResult<void, string>
+        try {
+          step = running.next()
+        } catch {
+          return Effect.succeed(MASK)
+        }
         if (step.done === true) return Effect.succeed(step.value)
         if (performance.now() >= until) return Effect.flatMap(Effect.yieldNow, next)
       }
@@ -221,7 +244,7 @@ function* shapeEdits(text: string, [pattern, by]: Shape): Steps<ReadonlyArray<Ed
 
 /** Credentials recognised by their shape, masked without knowing their value. */
 export function maskShapes(text: string): string {
-  return done(shapesMasked(text))
+  return doneOrMask(() => shapesMasked(text))
 }
 
 function* shapesMasked(text: string): Steps<string> {
@@ -298,7 +321,7 @@ function* knownMasked(text: string, known: ReadonlyArray<string>): Steps<string>
 }
 
 const maskKnown = (text: string, known: ReadonlyArray<string>): string =>
-  done(knownMasked(text, known))
+  doneOrMask(() => knownMasked(text, known))
 
 /** Text with its known values masked, then the shapes of credentials. */
 function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
@@ -325,7 +348,7 @@ const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
 
 /** Text with its known values masked, then the shapes of credentials. */
 export function maskText(text: string, values: ReadonlyArray<string>): Masked<string> {
-  return maskedString(done(textMasked(text, longestFirst(values))))
+  return maskedString(doneOrMask(() => textMasked(text, longestFirst(values))))
 }
 
 /**
@@ -717,7 +740,7 @@ interface Open {
  * a double holds, the spacing and the escapes come out as printed.
  */
 export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked<string> {
-  return maskedString(done(printedMasked(text, longestFirst(values))))
+  return maskedString(doneOrMask(() => printedMasked(text, longestFirst(values))))
 }
 
 /**
@@ -922,7 +945,7 @@ export function maskRecord(
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> {
   const known = longestFirst(values)
-  return maskedRecord(visitFields(record, (text) => done(textMasked(text, known))))
+  return maskedRecord(visitFields(record, (text) => doneOrMask(() => textMasked(text, known))))
 }
 
 /**

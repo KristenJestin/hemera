@@ -820,3 +820,31 @@ describe('Masking a long output lets the engine go on', () => {
     expect(secondPrinted).toBe(maskPrinted(second, []))
   })
 })
+
+/** Known values that cannot be read: any masking given them throws. */
+class Unreadable extends Array<string> {
+  override [Symbol.iterator](): ArrayIterator<string> {
+    throw new Error('the values cannot be read')
+  }
+}
+
+describe('A mask that fails gives •••, never the text, and never fails', () => {
+  // A quoted value of megabytes after a label: the pattern of a quoted value runs out of the
+  // stack its engine backtracks on, and throws.
+  const quoted = `token: "${'x'.repeat(16 * 1024 * 1024)}"`
+  const unreadable = new Unreadable()
+
+  test('a pattern that throws on a quoted value of megabytes', async () => {
+    expect(maskText(quoted, [])).toBe(MASK)
+    expect(maskPrinted(quoted, [])).toBe(MASK)
+    expect(await Effect.runPromise(maskTextPaced(quoted, []))).toBe(MASK)
+    expect(await Effect.runPromise(maskPrintedPaced(quoted, []))).toBe(MASK)
+  })
+
+  test('known values that throw as they are read', async () => {
+    expect(maskText('a ghp_ text', unreadable)).toBe(MASK)
+    expect(maskPrinted('{"a":"text"}', unreadable)).toBe(MASK)
+    expect(await Effect.runPromise(maskTextPaced('a text', unreadable))).toBe(MASK)
+    expect(await Effect.runPromise(maskPrintedPaced('{"a":"text"}', unreadable))).toBe(MASK)
+  })
+})
