@@ -268,12 +268,14 @@ export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
 export {
   CheckForm,
   ChecksSection,
-  NEW_CHECK,
-  type CheckDraft,
   type CheckRefusals,
   type ProofLimitField,
-  type SettingsCheck,
 } from './blocks/project-settings/checks.tsx'
+export {
+  NEW_CHECK,
+  type CheckDraft,
+  type SettingsCheck,
+} from './blocks/project-settings/checks-model.ts'
 export {
   DocRecipeForm,
   DocRecipesSection,
