@@ -1,7 +1,8 @@
 import type { ReactDoctorConfig } from 'react-doctor/api'
 
 /**
- * React Doctor, the React-specific check beside oxlint: `pnpm run doctor`, gated in CI at error level.
+ * React Doctor, the React-specific check beside oxlint: `pnpm run doctor`, gated in CI at warning level:
+ * the code has none, and a new one is fixed, or disabled at its line with its reason.
  *
  * Nothing leaves the machine: the score is computed by React Doctor's server from the findings, so
  * it is off, and so is the supply-chain pass, which asks Socket about every dependency. The
@@ -11,6 +12,7 @@ import type { ReactDoctorConfig } from 'react-doctor/api'
 export default {
   projects: ['packages/ui', 'apps/desktop/src/renderer'],
   noScore: true,
+  blocking: 'warning',
   share: false,
   supplyChain: { enabled: false },
   rules: {

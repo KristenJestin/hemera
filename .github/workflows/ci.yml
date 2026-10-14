@@ -55,7 +55,7 @@ jobs:
           fi
 
   # React Doctor, the React-specific check: on a pull request it reads only the files the change
-  # touches and fails on a finding at error level it brings in; on a push it reads everything. It
+  # touches and fails on a finding it brings in, a warning included; on a push it reads everything. It
   # posts nothing anywhere: the log and the job summary hold the report.
   doctor:
     runs-on: ubuntu-latest
