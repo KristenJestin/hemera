@@ -58,6 +58,11 @@ export interface FakeJev {
   readonly received: Received[]
   /** Replaces how the next requests are answered. */
   answer: (request: Received) => Reply | Promise<Reply>
+  /**
+   * Resets every connection from now on, before any answer: a network that refuses, while the
+   * port stays bound, so no other server on the machine can take it and answer in Jev's place.
+   */
+  readonly refuse: () => void
   readonly close: () => Promise<void>
 }
 
@@ -73,8 +78,10 @@ export async function fakeJev(): Promise<FakeJev> {
     url: '',
     received: [],
     answer: () => scored(0, 0, 0),
+    refuse: () => undefined,
     close: () => Promise.resolve(),
   }
+  let refusing = false
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     void (async () => {
       const received = { authorization: request.headers.authorization, body: await bodyOf(request) }
@@ -83,6 +90,9 @@ export async function fakeJev(): Promise<FakeJev> {
       response.writeHead(reply.status, { 'content-type': 'application/json', ...reply.headers })
       response.end(reply.json === undefined ? reply.body : JSON.stringify(reply.json))
     })()
+  })
+  server.on('connection', (socket) => {
+    if (refusing) socket.destroy()
   })
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
   // SAFETY: a server listening on a TCP port answers its address as an AddressInfo.
@@ -96,6 +106,9 @@ export async function fakeJev(): Promise<FakeJev> {
     },
     set answer(next) {
       fake.answer = next
+    },
+    refuse: () => {
+      refusing = true
     },
     close: () =>
       new Promise((done) => {

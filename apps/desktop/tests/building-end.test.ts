@@ -12,7 +12,7 @@
  */
 
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 
 import {
   ChosenAnswer,
@@ -22,11 +22,12 @@ import {
   SPEC_IS_RIGHT,
   START_AGAIN,
   TOOLS,
+  WrittenAnswer,
   toolsOf,
 } from '@hemera/core/domain'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { LaunchFailed } from '@hemera/ipc'
-import { Deferred, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -35,15 +36,20 @@ import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
+import { insideCopy } from '../src/engine/building/review.ts'
+import type { EndHold } from '../src/engine/building/end.ts'
+import type { OutsideSettings } from '../src/engine/building/outside.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
 import { projectLimits, setProjectLimits } from '../src/engine/budget.ts'
 import { acceptDocRecipes } from '../src/engine/doc-recipes.ts'
+import { saveCommand } from '../src/engine/catalogue.ts'
+import { setProofLimit } from '../src/engine/project-checks.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, retryNeed } from '../src/engine/needs.ts'
-import { getRun } from '../src/engine/runs.ts'
+import { Runs, getRun } from '../src/engine/runs.ts'
 import { TaskStates, everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
 import {
@@ -63,6 +69,7 @@ import { Database } from '../src/engine/storage/database.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import {
   agentSessions,
+  buildingTasks,
   buildings,
   checkpoints,
   permissionRequests,
@@ -150,8 +157,14 @@ const ending = (
     readonly attribution?: Layer.Layer<WriteAttribution>
     /** Where the Builder is held, when a test orders it against the end. */
     readonly hold?: BuilderHold
+    /** Where the end is held as it takes in a Builder's turn end. */
+    readonly endHold?: EndHold
     /** Where a session is held as it starts or fails, or its start failed. */
     readonly sessionHold?: SessionHold
+    /** How long a minute of the Project's proof limit lasts (#321). */
+    readonly proofMinute?: Duration.Duration
+    /** The detector of changes outside Hemera, when a test keeps its timer from driving the end. */
+    readonly outside?: Partial<OutsideSettings>
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -180,6 +193,9 @@ const ending = (
         : { home: work, verdicts, taskStates, attribution: options.attribution },
     building: {
       hold: options.hold,
+      endHold: options.endHold,
+      proofMinute: options.proofMinute,
+      outside: options.outside ?? {},
       checks: Layer.succeed(TaskChecks, {
         run: (asked) => {
           const said = checks(asked)
@@ -751,6 +767,14 @@ describe('The reviewers', () => {
       expect(seen.folder).not.toBe(dirname(seen.api))
     },
   )
+
+  test('on Windows, a finding’s path on another drive is not inside the checkpoint', () => {
+    const root = 'C:\\Users\\someone\\hemera\\reviews\\b1\\api'
+    expect(insideCopy(root, 'src\\x.ts', win32)).toBe(true)
+    expect(insideCopy(root, '..\\web\\x.ts', win32)).toBe(false)
+    expect(insideCopy(root, 'D:\\secrets\\x.ts', win32)).toBe(false)
+    expect(insideCopy(root, 'D:x.ts', win32)).toBe(false)
+  })
 })
 
 describe('The findings and their fate', () => {
@@ -852,6 +876,61 @@ describe('The findings and their fate', () => {
       expect(seen.toldAfter.join('\n')).toContain('RV1')
       const finding = seen.review?.findings[0]
       expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1', contradictsSpec: true })
+    },
+  )
+
+  test(
+    'a written answer to a contradicting finding is taken as "the Spec is right": its special task carries the user’s words',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer', [
+              {
+                severity: 'blocking',
+                requirement: 'R1',
+                repository: 'api',
+                path: 'invoices.ts',
+                text: 'The CSV has no header row, which the scenario R1.S1 asks for.',
+                contradicts_spec: true,
+                evidence: 'R1.S1: as CSV, it works; invoices.ts writes no header.',
+              },
+            ])
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            yield* answerNeed({
+              id: need?.id ?? '',
+              answer: WrittenAnswer.make({ text: 'Add the header, and keep the column order.' }),
+              key: 'written',
+            })
+            yield* specialAvailable(mission.id, 'RV1')
+            const database = yield* Database
+            return {
+              tasks: yield* database
+                .select({ id: buildingTasks.id, result: buildingTasks.result })
+                .from(buildingTasks)
+                .where(eq(buildingTasks.origin, 'review')),
+              review: yield* autoReviewOf(mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.tasks).toHaveLength(1)
+      expect(seen.tasks[0]?.result).toContain('The CSV has no header row')
+      expect(seen.tasks[0]?.result).toContain('Add the header, and keep the column order.')
+      const finding = seen.review?.findings[0]
+      expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1' })
     },
   )
 
@@ -2006,6 +2085,35 @@ describe('The exit', () => {
   )
 })
 
+/** R1.S2's test: green while `api/export.ts` exports `toMarkdown`. */
+const markdownTest = [
+  "import { test } from 'node:test'",
+  "import assert from 'node:assert/strict'",
+  "import { existsSync, readFileSync } from 'node:fs'",
+  '',
+  "test('the scenario holds', () => {",
+  "  const file = new URL('../export.ts', import.meta.url)",
+  "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+  '})',
+  '',
+].join('\n')
+const markdownProof = () => ({
+  'R1.S2': {
+    mode: 'automated',
+    actions: ['Run the test'],
+    starting_data: 'None.',
+    expected: 'The assertion of the test holds.',
+    test: {
+      repository: 'api',
+      path: 'tests/export.test.mjs',
+      code: markdownTest,
+      insertion: 'new_file',
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+    },
+    seen_today: false,
+  },
+})
+
 describe('The refresh', () => {
   test(
     'a proof red at the refresh is waited on, not the Builder: its green moves the end on with no turn of the Builder',
@@ -2105,6 +2213,180 @@ describe('The refresh', () => {
   )
 
   test(
+    'a proof red at the refresh that the Builder looks at and leaves unfixed asks the user: Try again, or End without it, which moves the end on',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              markdownProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 breaks what the proof reads: the refresh runs it again, red, and the Builder,
+            // told, ends its turn without writing.
+            yield* specialDone(builder.grantId, 'RV1', 'export.ts', 'export const toCsv = 1\n')
+            yield* documented(world, mission.id, 2)
+            const decisions = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Decision')),
+            )
+            yield* until(
+              Effect.map(decisions, (found) => found.length > 0),
+              LONG,
+            )
+            const [asked] = yield* decisions
+            if (asked === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: asked.id,
+              answer: ChosenAnswer.make({ option: 'End without it' }),
+              key: asked.id,
+            })
+            // A Builder the exit brings back to take the answer holds its turn: it is let go.
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                return (yield* getMission(mission.id)).stage === 'review'
+              }),
+              LONG,
+            )
+            return {
+              asked,
+              view: yield* buildingNow(mission.id),
+              told: yield* toBuilder(mission.id, builder.session.lineage),
+            }
+          }),
+        ),
+      )
+      const fields = seen.asked.fields
+      if (!Predicate.isTagged(fields, 'Decision')) throw new Error('not a decision')
+      expect(fields.question).toContain('R1.S2 is not proven')
+      // Said as it is at the refresh: no task was skipped, and no answer came before.
+      expect(fields.question).toContain("its proof failed again at the end's refresh")
+      expect(fields.options).toEqual(['Try again', 'End without it'])
+      // The end was called already: the summary it asked for is told what was left out.
+      expect(seen.told.some((one) => one.includes('say so in the summary'))).toBe(true)
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof?.state).toBe('not_proven')
+      // The end is called once: the refresh never calls it again.
+      expect(seen.told.filter((one) => one.startsWith('done: '))).toHaveLength(1)
+    },
+  )
+
+  test(
+    'a proof red at the refresh whose Builder writes a file unchanged, then leaves it, still asks the user',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        builder: {
+          ...QUIET,
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              markdownProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            yield* specialDone(builder.grantId, 'RV1', 'export.ts', 'export const toCsv = 1\n')
+            yield* until(
+              Effect.map(sessionsIn(['idle'], { kind: 'mission', missionId: mission.id }), (rows) =>
+                rows.some((row) => row.role === 'builder'),
+              ),
+              LONG,
+            )
+            // The Builder's turn on the refresh's red holds while it writes.
+            holding = true
+            yield* documented(world, mission.id, 2)
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ state: sessionDeliveries.state, body: sessionDeliveries.body })
+                  .from(sessionDeliveries)
+                  .where(
+                    and(
+                      eq(sessionDeliveries.ownerId, mission.id),
+                      eq(sessionDeliveries.kind, 'red'),
+                    ),
+                  ),
+                (reds) =>
+                  reds.some((one) => one.state === 'sent' && one.body.startsWith("R1.S2's proof")),
+              ),
+              LONG,
+            )
+            // The same content again: no tree moves, nothing runs the proof again.
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'export.ts',
+              content: 'export const toCsv = 1\n',
+            })
+            yield* Effect.sleep('1 second')
+            holding = false
+            for (const turn of turns) turn.release()
+            const decisions = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Decision')),
+            )
+            yield* until(
+              Effect.map(decisions, (found) => found.length > 0),
+              LONG,
+            )
+            return yield* decisions
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      const fields = seen[0]?.fields
+      expect(Predicate.isTagged(fields, 'Decision') ? fields.question : '').toContain(
+        'R1.S2 is not proven',
+      )
+    },
+  )
+
+  test(
     'a stale proof the refresh cannot run is refreshed once, said once, and holds the end on an error need instead of looping',
     SLOW,
     async () => {
@@ -2181,6 +2463,85 @@ describe('The refresh', () => {
     },
   )
   test(
+    'a refresh whose own snapshot sees a change is not run again on that same tree: the stale proof it cannot run asks the user after one refresh',
+    SLOW,
+    async () => {
+      // A change no snapshot saw yet lands as the refresh takes its own snapshot.
+      let unseen: (() => void) | null = null
+      const { world, run } = ending({
+        snapshots: (real) => ({
+          ...real,
+          take: (place, owner) => {
+            if (owner.kind === 'run' && owner.runId.startsWith('refresh-') && unseen !== null) {
+              unseen()
+              unseen = null
+            }
+            return real.take(place, owner)
+          },
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              exportProof,
+            )
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Export a function, not a flag.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // The proof is no longer in the Spec: nothing can run it again once RV1 makes it stale.
+            const database = yield* Database
+            yield* database
+              .delete(specProofs)
+              .where(and(eq(specProofs.missionId, mission.id), eq(specProofs.scenarioId, 'R1.S2')))
+            unseen = () => writtenInWorkspace(api, 'notes.md', 'A note of the user.\n')
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => ""\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const refreshes = eventsOf(mission.id, 'building.proofs_refreshed')
+            const errorNeeds = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* errorNeeds).length > 0 || (yield* refreshes).length >= 3
+              }),
+              LONG,
+            )
+            // Long enough for a second refresh to show itself.
+            yield* Effect.sleep('1 second')
+            return {
+              refreshes: yield* refreshes,
+              needs: yield* errorNeeds,
+              unseen,
+            }
+          }),
+        ),
+      )
+      expect(seen.unseen).toBeNull()
+      expect(seen.refreshes).toHaveLength(1)
+      expect(seen.needs).toHaveLength(1)
+    },
+  )
+  test(
     'a stale final check the refresh cannot run again is refreshed once and holds the end on an error need instead of looping',
     SLOW,
     async () => {
@@ -2238,6 +2599,384 @@ describe('The refresh', () => {
         expect(need.fields.failed).toContain('unit tests · api')
         expect(need.fields.proposals).toEqual(['Retry'])
       }
+    },
+  )
+})
+
+describe('The refresh and an environment need', () => {
+  test(
+    'an environment need’s Retry at the refresh, its rerun not recorded yet when the end judges, raises no "stayed stale" error, and the end moves on once it is green',
+    SLOW,
+    async () => {
+      let proofCommand = ''
+      let portHeld = false
+      // The Retry's rerun, held once it ran and before its result is recorded.
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      // Each pass of the end over its steps, numbered as it begins, and those that finished.
+      let begun = 0
+      const finished: Array<number> = []
+      const { world, run } = ending({
+        proofMinute: Duration.seconds(2),
+        hold: (at) =>
+          at === 'greening' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+        endHold: (at) =>
+          Effect.sync(() => {
+            if (at === 'advancing') begun += 1
+            if (at === 'advanced') finished.push(begun)
+          }),
+      })
+      const errors = (missionId: string) =>
+        Effect.map(getMission(missionId), (one) =>
+          one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              (projectId) =>
+                Effect.gen(function* () {
+                  yield* withReadme(projectId)
+                  yield* setProofLimit(projectId, 1)
+                  const saved = yield* saveCommand({
+                    projectId,
+                    id: null,
+                    command: {
+                      name: 'export proof',
+                      type: 'script',
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      lineWindows: null,
+                      lineLinux: null,
+                      repositoryId: null,
+                      folder: null,
+                      scope: 'workspace',
+                      portless: false,
+                      portlessName: null,
+                      check: false,
+                      atOpen: false,
+                      askBeforeRunning: false,
+                      readOnly: false,
+                      writeGlobs: [],
+                    },
+                  })
+                  proofCommand = saved.id
+                  // Free until the refresh; then another mission's service holds the port.
+                  const runs = yield* Runs
+                  const real = runs.reservations.current
+                  runs.reservations.current = {
+                    enter: (asked) =>
+                      asked.commandId === proofCommand && portHeld
+                        ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                        : real.enter(asked),
+                  }
+                }),
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  mode: 'automated',
+                  actions: ['Run the test'],
+                  starting_data: 'None.',
+                  expected: 'The assertion of the test holds.',
+                  test: {
+                    repository: 'api',
+                    path: 'tests/export.test.mjs',
+                    code: markdownTest,
+                    insertion: 'new_file',
+                    command: proofCommand,
+                  },
+                  seen_today: false,
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 keeps the proof passing on a new tree: the refresh runs it again, and its rerun
+            // waits for the port until the Project's limit.
+            portHeld = true
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => "md"\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const environment = Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+            yield* until(
+              Effect.map(environment, (need) => need !== undefined),
+              LONG,
+            )
+            const need = yield* environment
+            if (need === undefined) return yield* Effect.die(new Error('no environment need'))
+            // The user frees the port and Retries: the rerun runs, and is held before its record.
+            portHeld = false
+            arming = true
+            yield* retryNeed(need.id)
+            yield* Deferred.await(reached)
+            // Meanwhile the end is driven (the Builder's turn on the Retry ends, say): a whole
+            // pass over its steps, begun once the rerun was held.
+            const from = begun
+            yield* mutate('driving the end', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [buildingEvent(mission.id, 'building.end_retried')],
+              }),
+            )
+            yield* until(
+              Effect.sync(() => finished.some((one) => one > from)),
+              LONG,
+            )
+            const meanwhile = yield* errors(mission.id)
+            yield* Deferred.succeed(go, undefined)
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                const stage = (yield* getMission(mission.id)).stage
+                return stage === 'review' || (yield* errors(mission.id)).length > 0
+              }),
+              LONG,
+            )
+            // Recorded, the rerun is no longer said to run: a later stale proof is judged again.
+            yield* until(
+              Effect.map(
+                BuildDesk.use((desk) => desk.rerunning(mission.id)),
+                (left) => left.length === 0,
+              ),
+              LONG,
+            )
+            return {
+              meanwhile,
+              after: yield* errors(mission.id),
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+            }
+          }),
+        ),
+      )
+      expect(seen.meanwhile.map((one) => one.fields)).toEqual([])
+      expect(seen.after).toEqual([])
+      expect(seen.stage).toBe('review')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+  test(
+    'a Retry’s rerun at the refresh that passes on a tree moved meanwhile is run again, never left stale',
+    SLOW,
+    async () => {
+      let proofCommand = ''
+      let portHeld = false
+      // The Retry's rerun, held once it ran and before its result is recorded.
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      // Each pass of the end over its steps, numbered as it begins, and those that finished.
+      let begun = 0
+      const finished: Array<number> = []
+      let taking: SnapshotsService | null = null
+      const { world, run } = ending({
+        snapshots: (real) => {
+          taking = real
+          return real
+        },
+        // Its compare would drive the end on the change below: only the fix may.
+        outside: { compareEveryMillis: 3_600_000 },
+        proofMinute: Duration.seconds(2),
+        hold: (at) =>
+          at === 'greening' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+        endHold: (at) =>
+          Effect.sync(() => {
+            if (at === 'advancing') begun += 1
+            if (at === 'advanced') finished.push(begun)
+          }),
+      })
+      const errors = (missionId: string) =>
+        Effect.map(getMission(missionId), (one) =>
+          one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              (projectId) =>
+                Effect.gen(function* () {
+                  yield* withReadme(projectId)
+                  yield* setProofLimit(projectId, 1)
+                  const saved = yield* saveCommand({
+                    projectId,
+                    id: null,
+                    command: {
+                      name: 'export proof',
+                      type: 'script',
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      lineWindows: null,
+                      lineLinux: null,
+                      repositoryId: null,
+                      folder: null,
+                      scope: 'workspace',
+                      portless: false,
+                      portlessName: null,
+                      check: false,
+                      atOpen: false,
+                      askBeforeRunning: false,
+                      readOnly: false,
+                      writeGlobs: [],
+                    },
+                  })
+                  proofCommand = saved.id
+                  // Free until the refresh; then another mission's service holds the port.
+                  const runs = yield* Runs
+                  const real = runs.reservations.current
+                  runs.reservations.current = {
+                    enter: (asked) =>
+                      asked.commandId === proofCommand && portHeld
+                        ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                        : real.enter(asked),
+                  }
+                }),
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  mode: 'automated',
+                  actions: ['Run the test'],
+                  starting_data: 'None.',
+                  expected: 'The assertion of the test holds.',
+                  test: {
+                    repository: 'api',
+                    path: 'tests/export.test.mjs',
+                    code: markdownTest,
+                    insertion: 'new_file',
+                    command: proofCommand,
+                  },
+                  seen_today: false,
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 keeps the proof passing on a new tree: the refresh runs it again, and its rerun
+            // waits for the port until the Project's limit.
+            portHeld = true
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => "md"\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const environment = Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+            yield* until(
+              Effect.map(environment, (need) => need !== undefined),
+              LONG,
+            )
+            const need = yield* environment
+            if (need === undefined) return yield* Effect.die(new Error('no environment need'))
+            // The user frees the port and Retries: the rerun runs, and is held before its record.
+            portHeld = false
+            arming = true
+            yield* retryNeed(need.id)
+            yield* Deferred.await(reached)
+            // Meanwhile the end is driven (the Builder's turn on the Retry ends, say): a whole
+            // pass over its steps, begun once the rerun was held.
+            const from = begun
+            yield* mutate('driving the end', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [buildingEvent(mission.id, 'building.end_retried')],
+              }),
+            )
+            yield* until(
+              Effect.sync(() => finished.some((one) => one > from)),
+              LONG,
+            )
+            const meanwhile = yield* errors(mission.id)
+            // A change lands, and a snapshot sees it, while the rerun is held: it passed on a tree
+            // that is no longer the current one.
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, 'notes.md', 'A note of the user.\n')
+            if (taking === null) return yield* Effect.die(new Error('no snapshots'))
+            yield* taking.take(
+              { name: 'api', folder: api },
+              { kind: 'run', missionId: mission.id, runId: crypto.randomUUID(), side: 'before' },
+            )
+            const proven = Effect.map(buildingNow(mission.id), (view) =>
+              view.requirements
+                .flatMap((one) => one.scenarios)
+                .find((one) => one.scenario === 'R1.S2'),
+            )
+            yield* Deferred.succeed(go, undefined)
+            // Recorded stale, no longer said to run: the end is judged again and runs it again,
+            // with no agent's turn to drive it.
+            yield* until(
+              Effect.map(proven, (proof) => proof?.state === 'green'),
+              LONG,
+            )
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                const stage = (yield* getMission(mission.id)).stage
+                return stage === 'review' || (yield* errors(mission.id)).length > 0
+              }),
+              LONG,
+            )
+            return {
+              meanwhile,
+              after: yield* errors(mission.id),
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+            }
+          }),
+        ),
+      )
+      expect(seen.meanwhile.map((one) => one.fields)).toEqual([])
+      expect(seen.after).toEqual([])
+      expect(seen.stage).toBe('review')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
     },
   )
 })
@@ -2320,6 +3059,234 @@ describe('A Builder stopped at a provider limit', () => {
 })
 
 describe('The Builder while the end waits on it', () => {
+  test(
+    'a red of the final checks delivered while a Builder turn runs is judged again only after a turn that started once it was delivered',
+    SLOW,
+    async () => {
+      // Once armed, each turn of the Builder holds until the test lets it go.
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const turnsHeld = (count: number) =>
+        until(
+          Effect.sync(() => turns.length >= count),
+          LONG,
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            // The Builder is in a turn of its own before the final checks run.
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* turnsHeld(1)
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // The turn that started before the red ends: the red is taken by the next one.
+            turns[0]?.release()
+            yield* turnsHeld(2)
+            // Long enough for a judgement on the first turn's end to have run.
+            yield* Effect.sleep('1 second')
+            const whileTaken = yield* endAttempts(mission.id)
+            turns[1]?.release()
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 3),
+              LONG,
+            )
+            return { whileTaken, after: yield* endAttempts(mission.id) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
+      expect(seen.after).toEqual(['red', 'red', null])
+    },
+  )
+
+  test(
+    'a turn end the end takes in late, once the red it left queued was taken, does not count as the turn on the red',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      // Once armed, the end takes in a Builder's turn end only when the test lets it.
+      let late: ReturnType<typeof held> | null = null
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+        endHold: () => {
+          const gate = late
+          return gate === null ? Effect.void : Effect.promise(() => gate.promise)
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* until(
+              Effect.sync(() => turns.length >= 1),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // The end of the turn that started before the red is taken in only once the next
+            // turn took the red.
+            const gate = held()
+            late = gate
+            turns[0]?.release()
+            yield* until(
+              Effect.sync(() => turns.length >= 2),
+              LONG,
+            )
+            late = null
+            gate.release()
+            // Long enough for a judgement on the late turn end to have run.
+            yield* Effect.sleep('1 second')
+            return { whileTaken: yield* endAttempts(mission.id) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        late?.release()
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
+    },
+  )
+
+  test(
+    'a red of the final checks no turn took, its Builder ended mid-turn, is judged again only after the Builder brought back took it',
+    SLOW,
+    async () => {
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* until(
+              Effect.sync(() => turns.length >= 1),
+              LONG,
+            )
+            yield* documented(world, mission.id)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length === 2),
+              LONG,
+            )
+            // Its session ends in the turn that started before the red: nobody took the red.
+            yield* Sessions.use((sessions) =>
+              sessions.end(builder.session.lineage, 'the test ended it'),
+            )
+            // The end brings it back, and the red reaches its first turn, which holds.
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ state: sessionDeliveries.state })
+                  .from(sessionDeliveries)
+                  .where(
+                    and(
+                      eq(sessionDeliveries.ownerId, mission.id),
+                      eq(sessionDeliveries.kind, 'red'),
+                    ),
+                  ),
+                (reds) => reds.length === 1 && reds[0]?.state === 'sent',
+              ),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            const whileTaken = yield* endAttempts(mission.id)
+            for (const index of world.agents.keys()) world.release(index)
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length >= 3),
+              LONG,
+            )
+            // Let go, the Builder may already have ended its turn on the third red too.
+            return { whileTaken, after: (yield* endAttempts(mission.id)).slice(0, 2) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.whileTaken).toEqual(['red', null])
+      expect(seen.after).toEqual(['red', 'red'])
+    },
+  )
+
   /** A Builder session that ended with no need of its own, as the store reads it. */
   const endedQuietly = (sessionId: string) =>
     Effect.gen(function* () {

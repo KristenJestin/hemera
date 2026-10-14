@@ -23,7 +23,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { type PlatformPath, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 
 import {
@@ -121,6 +121,30 @@ export const reviewFolderOf = (dataFolder: string, buildingId: string): string =
 /** Where a repository of the Workspace is in a copy. */
 export const repositoryFolderOf = (folder: string, repository: string): string =>
   repository === ROOT_REPOSITORY ? folder : join(folder, repository)
+
+/**
+ * Whether a path a reviewer names is a file inside a repository's copy: never the copy itself, a
+ * place above it, nor one on another drive. `paths` is the platform's path module.
+ */
+export const insideCopy = (
+  root: string,
+  named: string,
+  paths: Pick<PlatformPath, 'resolve' | 'relative' | 'isAbsolute' | 'sep'> = {
+    resolve,
+    relative,
+    isAbsolute,
+    sep,
+  },
+): boolean => {
+  const inside = paths.relative(root, paths.resolve(root, named))
+  return (
+    inside !== '' &&
+    !inside.startsWith(`..${paths.sep}`) &&
+    inside !== '..' &&
+    // On Windows, another drive has no relative path: `relative` answers it whole.
+    !paths.isAbsolute(inside)
+  )
+}
 
 /** What a reviewer that ended a turn without its report is told, once per session. */
 export const END_WITH_REVIEW_REPORT =
@@ -501,11 +525,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
           /** Whether a file is in the checkpoint: changed there, or in the copy of its trees. */
           const inCopy = (repository: string, path: string) => {
             const root = repositoryFolderOf(folder, repository)
-            const file = resolve(root, path)
-            const inside = relative(root, file)
-            return (
-              inside !== '' && !inside.startsWith(`..${sep}`) && inside !== '..' && existsSync(file)
-            )
+            return insideCopy(root, path) && existsSync(resolve(root, path))
           }
           const listed = (repository: string | null, path: string) => {
             const named = repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '')
