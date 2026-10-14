@@ -10,7 +10,8 @@ import {
   IconTerminal,
   IconWorld,
 } from '../../icons.ts'
-import { LetterAvatar, type LetterTone, letterToneOf } from '../letter-avatar/letter-avatar.tsx'
+import { LetterAvatar } from '../letter-avatar/letter-avatar.tsx'
+import { type LetterTone, letterToneOf } from '../letter-avatar/letter-names.ts'
 import { Legend } from '../tooltip/legend.tsx'
 
 /**

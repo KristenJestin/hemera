@@ -37,14 +37,13 @@ export {
   type FrameProps,
 } from './components/frame/frame.tsx'
 export { Kbd, type KbdProps } from './components/kbd/kbd.tsx'
+export { LetterAvatar, type LetterAvatarProps } from './components/letter-avatar/letter-avatar.tsx'
 export {
   LETTER_TONES,
-  LetterAvatar,
   initialsOf,
   letterToneOf,
-  type LetterAvatarProps,
   type LetterTone,
-} from './components/letter-avatar/letter-avatar.tsx'
+} from './components/letter-avatar/letter-names.ts'
 export { List, ListItem, type ListItemProps, type ListProps } from './components/list/list.tsx'
 export {
   Loading,

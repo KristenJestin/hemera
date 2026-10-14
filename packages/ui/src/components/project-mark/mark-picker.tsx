@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 
 import { IconPhoto, IconX } from '../../icons.ts'
 import { Button } from '../button/button.tsx'
-import { LETTER_TONES, type LetterTone, letterToneOf } from '../letter-avatar/letter-avatar.tsx'
+import { LETTER_TONES, type LetterTone, letterToneOf } from '../letter-avatar/letter-names.ts'
 import { Popover } from '../popover/popover.tsx'
 import {
   type Identity,
