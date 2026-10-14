@@ -92,6 +92,7 @@ import {
   until,
   within,
 } from './sessions-world.ts'
+import { observedProcesses } from './observed-processes.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 
@@ -1157,6 +1158,7 @@ ${STAYS_UP}`)
           (state) => Effect.sync(() => void cleaned.push({ probe, ...state })),
         ),
     })
+    const observed = observedProcesses()
     const { world, run } = probing(
       () => ({
         turns: [
@@ -1172,7 +1174,7 @@ ${STAYS_UP}`)
         steps: [says('Waiting.')],
         between: () => hold.promise,
       }),
-      { children: true, probes: { cleanup } },
+      { children: true, probes: { cleanup }, hostProcesses: observed.layer },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1232,8 +1234,9 @@ ${STAYS_UP}`)
         runsLive: 0,
       },
     ])
-    expect(() => process.kill(seen.servePid, 0)).toThrow()
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Each process's end as the supervisor saw it: a freed pid may already be another's.
+    expect(world.pids.length).toBeGreaterThan(0)
+    for (const pid of [seen.servePid, ...world.pids]) expect(observed.ended(pid)).toBe(true)
   })
 
   // Git for Windows writes `gitdir: C:/…/.git/worktrees/<name>`, and `worktree.useRelativePaths`
