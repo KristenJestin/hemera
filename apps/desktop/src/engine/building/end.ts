@@ -40,7 +40,7 @@ import {
   specialTaskOf,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
-import { and, desc, eq, gt, gte, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { Cause, Effect, Layer, Option, Predicate, Schema, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
@@ -49,7 +49,14 @@ import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
-import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
+import {
+  DeliveryFailed,
+  type NeedHandler,
+  type NeedOwners,
+  createNeedIn,
+  deliverAnswers,
+  needService,
+} from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
@@ -69,6 +76,7 @@ import {
   checkpointRepositories,
   checkpoints,
   missions,
+  needDeliveries,
   needs,
   reviewChangedAfter,
   reviewFindings,
@@ -161,6 +169,7 @@ type Needs =
   | Memory
   | Runs
   | ToolAccess
+  | NeedOwners
   | Effect.Services<ReturnType<typeof getMission>>
 
 const readString = Schema.decodeUnknownOption(Schema.String)
@@ -711,6 +720,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
               if (yield* unsettled(building)) return yield* withBuilder(building)
               if ((yield* getMission(missionId)).needs.length > 0)
                 return yield* withBuilder(building)
+              // An answer not handed over yet is handed now: what it moves drives the end again.
+              if (yield* answerHanding(yield* Database, missionId)) {
+                yield* deliverAnswers
+                return false
+              }
               // An answer to the Builder holds the exit until a turn of the Builder on it ended.
               if (yield* answerWaits(yield* Database, building)) return yield* withBuilder(building)
               return yield* exit(building)
@@ -857,8 +871,9 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         })
 
       /**
-       * Whether an answer to the Builder, given since the end was called, waits for it: still
-       * queued, or taken by a turn that has not ended yet. Answers to other agents are theirs.
+       * Whether an answer to the Builder waits for it, once the end is called: still queued, or
+       * taken by a turn that has not ended yet, whenever it was given (#348). Answers to other
+       * agents are theirs.
        */
       const answerWaits = (
         reader: Database['Service'] | EngineTransaction,
@@ -889,7 +904,6 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                 eq(sessionDeliveries.ownerId, building.missionId),
                 eq(sessionDeliveries.kind, 'answer'),
                 inArray(sessionDeliveries.state, ['queued', 'sent']),
-                gte(sessionDeliveries.createdAt, called),
               ),
             )
             .pipe(Effect.mapError(refusedWhile('reading the answers to the Builder')))).filter(
@@ -908,6 +922,21 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             (one) => one.sentAt === null || turned === null || turned <= one.sentAt,
           )
         })
+
+      /**
+       * Whether an answer the user gave on the mission is not handed to its owner yet: invisible
+       * among the pending needs, and not yet an answer to the Builder, it holds the exit (#348).
+       */
+      const answerHanding = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
+        reader
+          .select({ id: needDeliveries.needId })
+          .from(needDeliveries)
+          .innerJoin(needs, eq(needs.id, needDeliveries.needId))
+          .where(and(eq(needs.missionId, missionId), isNull(needDeliveries.deliveredAt)))
+          .pipe(
+            Effect.mapError(refusedWhile('reading the answers not handed over')),
+            Effect.map((rows) => rows.length > 0),
+          )
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
       const unsettled = (building: BuildingRow) =>
@@ -969,8 +998,10 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           // the Builder back to take its answer; an answer that reached it as it stopped, too.
           if (
             (yield* getMission(missionId)).needs.length > 0 ||
+            (yield* answerHanding(database, missionId)) ||
             (yield* answerWaits(database, building))
           ) {
+            yield* deliverAnswers
             return yield* withBuilder(building)
           }
           const snapshots = yield* Snapshots
@@ -1061,7 +1092,12 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                   ),
                 )
                 .pipe(Effect.mapError(refusedWhile('reading the sessions')))
-              if (!exiting || live.length > 0 || (yield* answerWaits(transaction, current))) {
+              if (
+                !exiting ||
+                live.length > 0 ||
+                (yield* answerHanding(transaction, missionId)) ||
+                (yield* answerWaits(transaction, current))
+              ) {
                 return { result: 'again' as const, events: [] }
               }
               const [mission] = yield* transaction
