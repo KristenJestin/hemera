@@ -318,19 +318,22 @@ describe('The real machine', () => {
     'a version probe that does not answer in time is a version not known',
     async () => {
       const folder = temporaryFolder('agents-slow')
+      const release = join(folder, 'release')
+      // The agent's own process (a child of the shell script, holding its pipes) answers only once
+      // the test releases it: the probe returning before that is the probe cut at its limit, and
+      // answered at once, not after the child's end. No elapsed time is read.
       const path = script(
         folder,
         'slow-agent',
-        `"${process.execPath}" -e "setTimeout(() => console.log('1.0.0'), 5000)"`,
+        `"${process.execPath}" -e "const wait = setInterval(() => { if (require('node:fs').existsSync('${release}')) { clearInterval(wait); console.log('1.0.0') } }, 20); setTimeout(() => process.exit(), 60000)"`,
       )
-      const started = Date.now()
       const version = await Effect.runPromise(
         Machine.use((machine) => machine.version(path)).pipe(
           Effect.provide(machineLayer({ PATH: folder }, 'linux', 200)),
         ),
       )
+      writeFileSync(release, '')
       expect(version).toBeNull()
-      expect(Date.now() - started).toBeLessThan(4_000)
     },
   )
 
