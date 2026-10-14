@@ -11,15 +11,15 @@ import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconCheck, IconChevronDown, IconChevronRight, IconClockPause } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { MissionField } from '../project/project-page.tsx'
+import { MissionField } from '../project/mission-field.ts'
 import {
   AgentMark,
   type ProjectSetupProps,
   SetupBody,
   type SetupBodyProps,
   type SetupCardEntry,
-  shownCards,
 } from './project-setup.tsx'
+import { shownCards } from './setup-cards.ts'
 
 /**
  * The Project's tasks, on its page under the field that starts a mission: what Hemera does for

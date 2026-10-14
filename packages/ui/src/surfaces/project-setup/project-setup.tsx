@@ -8,6 +8,7 @@ import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import type { LiveGlance } from '../../components/live-chip/live-chip-glance.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconClockPause, IconSearch } from '../../icons.ts'
+import { shownCards } from './setup-cards.ts'
 
 /**
  * What a Project's setup is made of, shared by its task on the Project's page (`setup-task.tsx`):
@@ -98,13 +99,6 @@ export function AgentMark({
     />
   )
 }
-
-/** The cards shown: once the agent stopped, those it had not written are not drawn. */
-export const shownCards = (
-  agent: SetupAgent,
-  cards: readonly SetupCardEntry[],
-): readonly SetupCardEntry[] =>
-  agent === 'failed' ? cards.filter((card) => card.status.state !== 'reading') : cards
 
 /** What the cards' answers and the agent's state say, under a setup's header: shared by its views. */
 export type SetupBodyProps = Pick<
