@@ -564,20 +564,42 @@ export const deliverAnswers = Effect.gen(function* () {
   yield* deliveryRound(owners).pipe(Semaphore.withPermits(owners.delivering, 1))
 })
 
+/**
+ * The answers a hand-over round hands over: not handed yet, of a need this version reads and a
+ * service there to take it, oldest first; only a mission's when one is named. What waits on a
+ * hand-over waits on exactly these: one the round skips would wait for good (#348).
+ */
+export const answersToHand = (
+  reader: Database['Service'] | EngineTransaction,
+  owners: NeedOwners['Service'],
+  missionId: string | null,
+) =>
+  reader
+    .select({ need: needs })
+    .from(needDeliveries)
+    .innerJoin(needs, eq(needs.id, needDeliveries.needId))
+    .where(
+      and(
+        isNull(needDeliveries.deliveredAt),
+        missionId === null ? undefined : eq(needs.missionId, missionId),
+      ),
+    )
+    .orderBy(asc(needs.endedAt))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the answers to deliver')),
+      Effect.map((rows) =>
+        rows.flatMap(({ need: row }) => {
+          const handler = owners.handlers.get(row.service)
+          const need = needOf(row)
+          return handler === undefined || need === null ? [] : [{ row, need, handler }]
+        }),
+      ),
+    )
+
 const deliveryRound = (owners: NeedOwners['Service']) =>
   Effect.gen(function* () {
     const database = yield* Database
-    const waiting = yield* database
-      .select({ need: needs })
-      .from(needDeliveries)
-      .innerJoin(needs, eq(needs.id, needDeliveries.needId))
-      .where(isNull(needDeliveries.deliveredAt))
-      .orderBy(asc(needs.endedAt))
-      .pipe(Effect.mapError(refusedWhile('reading the answers to deliver')))
-    for (const { need: row } of waiting) {
-      const handler = owners.handlers.get(row.service)
-      const need = needOf(row)
-      if (handler === undefined || need === null) continue
+    for (const { row, need, handler } of yield* answersToHand(database, owners, null)) {
       yield* mutate('handing an answer to its owner', (transaction) =>
         Effect.gen(function* () {
           const events = yield* handler.deliver(need, transaction)
