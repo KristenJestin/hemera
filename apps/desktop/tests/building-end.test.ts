@@ -3911,6 +3911,203 @@ describe('The Builder while the end waits on it', () => {
     },
   )
 
+  /** The answers kept for a mission's agents, and the state of its Building. */
+  const answersAndBuilding = (missionId: string) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const answers = yield* database
+        .select()
+        .from(sessionDeliveries)
+        .where(and(eq(sessionDeliveries.ownerId, missionId), eq(sessionDeliveries.kind, 'answer')))
+      const [building] = yield* database
+        .select({ state: buildings.state, turned: buildings.builderTurnedAt })
+        .from(buildings)
+        .where(eq(buildings.missionId, missionId))
+      return { answers, building }
+    })
+
+  /** The Builder's event follower, held as it takes in an answer once `lagging` is set. */
+  const laggingFollower = () => {
+    const state = { lagging: false }
+    const entered = Deferred.makeUnsafe<void>()
+    const behind = held()
+    const hold: BuilderHold = (at) =>
+      at === 'answering' && state.lagging
+        ? Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Effect.promise(() => behind.promise)),
+          )
+        : Effect.void
+    return { state, entered, behind, hold }
+  }
+
+  test(
+    'an answer applied while the Builder’s event follower lags behind is kept for the Builder before the end can close the Building, and its turn on it is waited for',
+    SLOW,
+    async () => {
+      const follower = laggingFollower()
+      const { world, run } = ending({ hold: follower.hold })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            follower.state.lagging = true
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            // The answer is applied; the follower that acts on it has not taken it in yet.
+            yield* Deferred.await(follower.entered)
+            // Whatever drives the end meanwhile, it does not close the Building on that answer.
+            yield* driven(mission.id)
+            const lagged = yield* answersAndBuilding(mission.id)
+            follower.behind.release()
+            yield* inReview(mission.id)
+            return { lagged, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      ).finally(() => follower.behind.release())
+      expect(seen.lagged.building?.state).toBe('active')
+      expect(seen.lagged.answers).toHaveLength(1)
+      expect(seen.lagged.answers[0]?.body).toContain('The user answered: Comma')
+      // One answer, sent to the Builder, and a turn of the Builder ended after it was sent.
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer applied right before a stop, its Builder’s event follower behind, reaches the Builder after the start before the end closes the Building',
+    SLOW,
+    async () => {
+      const follower = laggingFollower()
+      const before = ending({ hold: follower.hold })
+      const left = await before
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              yield* builtAll(builder.grantId)
+              yield* asked(builder.grantId)
+              yield* documented(before.world, mission.id)
+              yield* reviewed(before.world, mission.id, 'spec-reviewer')
+              yield* reviewed(before.world, mission.id, 'code-reviewer')
+              yield* until(
+                Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+                LONG,
+              )
+              const need = (yield* getMission(mission.id)).needs[0]
+              if (need === undefined) return yield* Effect.die(new Error('no question'))
+              follower.state.lagging = true
+              yield* answerNeed({
+                id: need.id,
+                answer: ChosenAnswer.make({ option: 'Comma' }),
+                key: crypto.randomUUID(),
+              })
+              // Hemera stops with the answer applied and its follower behind.
+              yield* Deferred.await(follower.entered)
+              return mission
+            }),
+          ),
+        )
+        .finally(() => follower.behind.release())
+      const after = ending({ resumed: true })
+      // Every agent of the start ends its turn as soon as it is given one.
+      for (let index = 0; index < 8; index += 1) after.world.release(index)
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* inReview(left.id)
+            return {
+              kept: yield* answersAndBuilding(left.id),
+              prompts: after.world.agents.flatMap((agent) =>
+                agent.answers.prompts.map((one) => text(one)),
+              ),
+            }
+          }),
+        ),
+      )
+      expect(seen.kept.answers.map((one) => one.state)).toEqual(['sent'])
+      expect(seen.prompts.some((one) => one.includes('The user answered: Comma'))).toBe(true)
+      const [answer] = seen.kept.answers
+      expect((seen.kept.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'a Retry of the Builder’s environment need at the refresh, its event follower behind, is kept for the Builder before the end can close the Building',
+    SLOW,
+    async () => {
+      const state = { lagging: false }
+      const entered = Deferred.makeUnsafe<void>()
+      const behind = held()
+      const { world, run } = ending({
+        hold: (at) =>
+          at === 'releasing' && state.lagging
+            ? Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Effect.promise(() => behind.promise)),
+              )
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'report_need', {
+              kind: 'environment',
+              text: 'The staging database is down.',
+              tasks: [],
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no need'))
+            state.lagging = true
+            yield* retryNeed(need.id)
+            // The need is withdrawn; the follower that tells the Builder has not taken it in yet.
+            yield* Deferred.await(entered)
+            yield* driven(mission.id)
+            const lagged = yield* answersAndBuilding(mission.id)
+            behind.release()
+            yield* inReview(mission.id)
+            return { lagged, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      ).finally(() => behind.release())
+      expect(seen.lagged.building?.state).toBe('active')
+      expect(seen.lagged.answers).toHaveLength(1)
+      expect(seen.lagged.answers[0]?.body).toContain('The user says it is fixed')
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
   test(
     'a Builder the user’s Retry starts again after the exit marked the mission runs the calls the user allowed',
     SLOW,

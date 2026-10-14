@@ -1295,9 +1295,9 @@ export const buildingProofs = (parts: ProofParts) => {
     })
 
   /** The scenarios the user ended the Building without. */
-  const notProven = (building: BuildingRow) =>
+  const notProvenIn = (reader: EngineTransaction | Database['Service'], building: BuildingRow) =>
     Effect.gen(function* () {
-      return (yield* scenarioProofsIn(yield* Database, building.id))
+      return (yield* scenarioProofsIn(reader, building.id))
         .filter((row) => stateOf(row) === 'not_proven')
         .map((row) => row.scenario)
     })
@@ -1874,7 +1874,7 @@ export const buildingProofs = (parts: ProofParts) => {
     resumed,
     greensDue,
     unproven,
-    notProven,
+    notProvenIn,
     stuckOf,
     unprovenPending,
     withdrawUnproven,

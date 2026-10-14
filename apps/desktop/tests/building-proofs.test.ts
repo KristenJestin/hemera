@@ -3048,13 +3048,19 @@ describe('What the user answers on a red', () => {
             key: 'answer-1',
           })
           return {
-            delivered: yield* deliveredTo(mission.id, 'It fails on the March invoices only.'),
+            // The answer itself is kept for the Builder as it is applied; what it means comes next.
+            delivered: yield* deliveredTo(
+              mission.id,
+              'R1.S2 already passes, and the user says more',
+            ),
             proof: yield* proofOf(mission.id, 'R1.S2'),
           }
         }),
       ),
     )
-    expect(seen.delivered).toContain('R1.S2 already passes, and the user says more')
+    expect(seen.delivered).toContain(
+      'R1.S2 already passes, and the user says more: It fails on the March invoices only.',
+    )
     expect(seen.proof.state).toBe('waiting_red')
   })
 
