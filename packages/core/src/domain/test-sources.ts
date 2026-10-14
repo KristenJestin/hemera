@@ -38,6 +38,10 @@ interface Token {
   templated: boolean
   /** The index of the token after a template literal, past the tokens of its `${…}`. */
   next: number
+  /** The bracket the token is in (its opening token's index), -1 at the top of the file. */
+  outer: number
+  /** Whether a line ends between the token before and this one. */
+  newline: boolean
 }
 
 /** Names after which a `/` starts a regex: what comes next is an expression. */
@@ -62,10 +66,12 @@ const CONDITION_KEYWORDS = new Set(['if', 'while', 'for', 'with'])
 /** The calls that declare a describe or a test, and their members that declare neither. */
 const DESCRIBE_HEADS = new Set(['describe', 'suite', 'context'])
 const TEST_HEADS = new Set(['test', 'it'])
+const HEADS = new Set([...DESCRIBE_HEADS, ...TEST_HEADS])
+/** The heads any use of which the reader must know, or the file is uncertain. */
+const WATCHED = new Set(['test', 'it', 'describe', 'suite'])
 const NOT_DECLARATIONS = new Set([
   'step',
   'use',
-  'extend',
   'info',
   'beforeEach',
   'afterEach',
@@ -74,6 +80,41 @@ const NOT_DECLARATIONS = new Set([
   'setTimeout',
   'configure',
   'expect',
+])
+/** The members a declaration may have: a table's (`each`, `for`), a condition's, and modifiers. */
+const TABLES = new Set(['each', 'for'])
+const CONDITIONS = new Set(['skipIf', 'runIf'])
+const DECLARING = new Set([
+  ...TABLES,
+  ...CONDITIONS,
+  'only',
+  'skip',
+  'todo',
+  'concurrent',
+  'sequential',
+  'fails',
+  'failing',
+  'describe',
+  'serial',
+  'parallel',
+  'fixme',
+  'slow',
+  'shuffle',
+])
+/** Names before a head that make it a definition of the file's own. */
+const DEFINING = new Set(['function', 'class', 'const', 'let', 'var'])
+/** The runner's own hooks and assertions, which declare no test wherever they are called. */
+const FRAMEWORK = new Set([
+  'expect',
+  'assert',
+  'vi',
+  'jest',
+  'beforeEach',
+  'afterEach',
+  'beforeAll',
+  'afterAll',
+  'before',
+  'after',
 ])
 /** How deep describes nest in a file read for certain: deeper, its tests' paths are unknown. */
 const MAX_DEPTH = 64
@@ -96,6 +137,8 @@ const token = (kind: Token['kind'], at: number, text: string, quote = ''): Token
   body: '',
   templated: false,
   next: -1,
+  outer: -1,
+  newline: false,
 })
 
 /**
@@ -114,9 +157,20 @@ const jsTokens = (code: string) => {
   }> = []
   const closer = new Map<number, number>()
   const opener = new Map<number, number>()
+  // The calls holding a comma of their own: a call of two arguments or more.
+  const listed = new Set<number>()
   let certain = true
   let template: Token | null = null
   let at = 0
+  let lastNewline = -1
+  const push = (one: Token) => {
+    // An opening bracket is pushed just before its token: the token is in the bracket below.
+    const top = brackets.at(-1)
+    one.outer = top?.at === tokens.length ? (brackets.at(-2)?.at ?? -1) : (top?.at ?? -1)
+    one.newline = lastNewline > (tokens.at(-1)?.at ?? -1)
+    if (one.text === ',' && brackets.at(-1)?.char === '(') listed.add(one.outer)
+    tokens.push(one)
+  }
   // Whether a `/` here starts a regex, by the token before it; null when that cannot be told.
   const regexHere = (): boolean | null => {
     const last = tokens.at(-1)
@@ -151,13 +205,14 @@ const jsTokens = (code: string) => {
       } else if (char === '$' && code[at + 1] === '{') {
         template.templated = true
         brackets.push({ char: '${', at: tokens.length, template })
-        tokens.push(token('punct', at, '${'))
+        push(token('punct', at, '${'))
         template = null
         at += 2
       } else at += 1
       continue
     }
     if (SPACE.test(char)) {
+      if (char === '\n') lastNewline = at
       at += 1
       continue
     }
@@ -169,6 +224,7 @@ const jsTokens = (code: string) => {
     if (char === '/' && code[at + 1] === '*') {
       const end = code.indexOf('*/', at + 2)
       if (end < 0) certain = false
+      if (code.slice(at, end).includes('\n')) lastNewline = at
       at = end < 0 ? code.length : end + 2
       continue
     }
@@ -176,7 +232,7 @@ const jsTokens = (code: string) => {
       const regex = regexHere()
       if (regex === null) certain = false
       if (regex !== true) {
-        tokens.push(token('punct', at, '/'))
+        push(token('punct', at, '/'))
         at += 1
         continue
       }
@@ -193,7 +249,7 @@ const jsTokens = (code: string) => {
       if (code[end] !== '/') certain = false
       end += 1
       while (/[A-Za-z]/.test(code[end] ?? '')) end += 1
-      tokens.push(token('value', at, code.slice(at, end)))
+      push(token('value', at, code.slice(at, end)))
       at = end
       continue
     }
@@ -205,19 +261,19 @@ const jsTokens = (code: string) => {
         else if (inside === char || inside === '\n') break
       }
       if (code[end] !== char) certain = false
-      tokens.push(token('string', at, code.slice(at + 1, end), char))
+      push(token('string', at, code.slice(at + 1, end), char))
       at = end + 1
       continue
     }
     if (char === '`') {
       template = token('string', at, '', '`')
-      tokens.push(template)
+      push(template)
       at += 1
       continue
     }
     if (char === '(' || char === '[' || char === '{') {
       brackets.push({ char, at: tokens.length, template: null })
-      tokens.push(token('punct', at, char))
+      push(token('punct', at, char))
       at += 1
       continue
     }
@@ -234,29 +290,29 @@ const jsTokens = (code: string) => {
         closer.set(open.at, tokens.length)
         opener.set(tokens.length, open.at)
       }
-      tokens.push(token('punct', at, char))
+      push(token('punct', at, char))
       at += 1
       continue
     }
     if (NAME_START.test(char)) {
       let end = at + 1
       while (NAME_PART.test(code[end] ?? '')) end += 1
-      tokens.push(token('name', at, code.slice(at, end)))
+      push(token('name', at, code.slice(at, end)))
       at = end
       continue
     }
     if (DIGIT.test(char) || (char === '.' && DIGIT.test(code[at + 1] ?? ''))) {
       let end = at + 1
       while (/[\w.]/.test(code[end] ?? '')) end += 1
-      tokens.push(token('value', at, code.slice(at, end)))
+      push(token('value', at, code.slice(at, end)))
       at = end
       continue
     }
-    tokens.push(token('punct', at, char))
+    push(token('punct', at, char))
     at += 1
   }
   if (template !== null || brackets.length > 0) certain = false
-  return { tokens, closer, certain }
+  return { tokens, closer, listed, certain }
 }
 
 /** A literal title, the first argument of a call whose `(` is at `open`; null when it is not one. */
@@ -272,52 +328,219 @@ const literalTitle = (
   return each || title.templated ? { template: text } : text
 }
 
+/** Whether a statement may start at a token: the file's start, after `;` or a brace, or a line. */
+const statementStart = (tokens: ReadonlyArray<Token>, at: number): boolean => {
+  const before = tokens[at - 1]
+  if (before === undefined) return true
+  if (
+    before.kind === 'punct' &&
+    (before.text === ';' || before.text === '{' || before.text === '}')
+  )
+    return true
+  if (before.kind === 'name' && (before.text === 'await' || before.text === 'void'))
+    return statementStart(tokens, at - 1)
+  const ends =
+    before.kind === 'string' ||
+    before.kind === 'value' ||
+    before.text === ')' ||
+    before.text === ']' ||
+    (before.kind === 'name' && !EXPRESSION_KEYWORDS.has(before.text))
+  return (tokens[at]?.newline ?? false) && ends
+}
+
+/** A name an import clause binds: the name it has here, the module's, and whether it is a type. */
+interface ImportName {
+  readonly local: string
+  readonly imported: string
+  readonly type: boolean
+}
+
+/** The names an import clause binds, and the index of the token it ends before. */
+interface ImportClause {
+  readonly names: ReadonlyArray<ImportName>
+  readonly end: number
+}
+
+/**
+ * The names an import clause binds, from the token after `import` (`a`, `* as b`, `{ c, d as e,
+ * type f }`), and the index of the token it ends before; it stops at any other token.
+ */
+const importClause = (tokens: ReadonlyArray<Token>, from: number): ImportClause => {
+  const names: ImportName[] = []
+  const name = (at: number) => (tokens[at]?.kind === 'name' ? (tokens[at]?.text ?? null) : null)
+  let at = from
+  if (name(at) === 'type' && tokens[at + 1]?.text !== ',' && name(at + 1) !== 'from') {
+    return { names, end: at + 1 }
+  }
+  const single = name(at)
+  if (single !== null && single !== 'from') {
+    names.push({ local: single, imported: single, type: false })
+    at += tokens[at + 1]?.text === ',' ? 2 : 1
+  }
+  const namespace = name(at + 2)
+  if (tokens[at]?.text === '*' && name(at + 1) === 'as' && namespace !== null) {
+    names.push({ local: namespace, imported: namespace, type: false })
+    at += 3
+  } else if (tokens[at]?.text === '{') {
+    at += 1
+    while (at < tokens.length && tokens[at]?.text !== '}') {
+      if (tokens[at]?.text === ',') {
+        at += 1
+        continue
+      }
+      const type = name(at) === 'type' && name(at + 1) !== null && name(at + 1) !== 'as'
+      if (type) at += 1
+      const imported = tokens[at]
+      if (imported?.kind !== 'name' && imported?.kind !== 'string') break
+      const local = name(at + 2)
+      if (name(at + 1) === 'as' && local !== null) {
+        names.push({ local, imported: imported.text, type })
+        at += 3
+      } else {
+        names.push({ local: imported.text, imported: imported.text, type })
+        at += 1
+      }
+    }
+  }
+  return { names, end: at + 1 }
+}
+
+/**
+ * Whether a call starting at a name may declare tests where it is: a statement at the top of the
+ * file or in the body of a describe's callback (`helper(…)`, `helpers.one(…)`).
+ */
+const registersHere = (
+  tokens: ReadonlyArray<Token>,
+  at: number,
+  describes: ReadonlyMap<number, SourceTitle | null>,
+): boolean => {
+  const next = tokens[at + 1]?.text
+  if ((next !== '(' && next !== '.') || !statementStart(tokens, at)) return false
+  const outer = tokens[at]?.outer ?? -1
+  const body = tokens[outer]
+  return outer < 0 || (body?.text === '{' && describes.has(body.outer))
+}
+
+/** A declaration's call: whether it is a describe, its `(`, and its title, null when not literal. */
+interface Declaration {
+  readonly describe: boolean
+  readonly open: number
+  readonly title: SourceTitle | null
+}
+
+/**
+ * What a head starts: a declaration of a shape the reader knows whole; `other` when it declares
+ * nothing for certain (a hook, `test.use(…)`, `{ test }`, a method `test() {`, a `context` that is
+ * not called); null for any other shape, which the reader does not know.
+ */
+const declaration = (
+  tokens: ReadonlyArray<Token>,
+  head: number,
+  closer: ReadonlyMap<number, number>,
+): Declaration | 'other' | null => {
+  const start = tokens[head]
+  const before = tokens[head - 1]
+  const after = tokens[head + 1]
+  if (
+    (before?.text === '{' || before?.text === ',') &&
+    (after?.text === ',' || after?.text === '}')
+  ) {
+    return 'other'
+  }
+  if (start?.text === 'context' && after?.text !== '(' && after?.text !== '.') return 'other'
+  if (before?.kind === 'name' && DEFINING.has(before.text)) return null
+  const members: string[] = []
+  let last = head
+  while (tokens[last + 1]?.text === '.' && tokens[last + 2]?.kind === 'name') {
+    members.push(tokens[last + 2]?.text ?? '')
+    last += 2
+  }
+  if (members.some((member) => NOT_DECLARATIONS.has(member))) return 'other'
+  if (members.some((member) => !DECLARING.has(member))) return null
+  // One call before the title's, by the last member: a table's, or a condition's.
+  const called = members.filter((member) => TABLES.has(member) || CONDITIONS.has(member))
+  const each = called.some((member) => TABLES.has(member))
+  if (called.length > 1 || (called.length === 1 && members.at(-1) !== called[0])) return null
+  let open = last + 1
+  if (called.length === 1) {
+    const table = tokens[open]
+    if (table?.text === '(') open = (closer.get(open) ?? tokens.length) + 1
+    else if (each && table?.quote === '`') open = table.next
+    else return null
+  }
+  if (tokens[open]?.text !== '(') return null
+  const title = literalTitle(tokens, open, each)
+  const method = tokens[(closer.get(open) ?? tokens.length) + 1]?.text
+  if (title === null && tokens[open + 1]?.text === ')' && (method === '{' || method === ':')) {
+    return 'other'
+  }
+  const describe = DESCRIBE_HEADS.has(start?.text ?? '') || members.includes('describe')
+  return { describe, open, title }
+}
+
 /**
  * The tests a JavaScript or TypeScript file declares (`test(`, `it(`, `test.skip(`,
- * `test.each(…)(`), each under the describes (`describe(`, `describe.each(…)(`, `suite(`,
- * `context(`, `test.describe(`) whose call holds it. A call is read at the start of an expression
- * only (`x.test(…)` is a method, `{ test() {…} }` a method it declares); a describe whose title is
- * not a literal makes its tests' paths unknown, and a test whose title is not one (a variable, a
- * call) makes the whole file uncertain, since it may have any test's name.
+ * `test.each(…)(`, `test.skipIf(…)(`), each under the describes (`describe(`, `describe.each(…)(`,
+ * `suite(`, `context(`, `test.describe(`) whose call holds it. The reader is certain only of the
+ * shapes it knows whole. Any other use of `test`, `it`, `describe` or `suite` makes the file
+ * uncertain: a title that is not a literal, a member it does not know (`test.extend`), a type
+ * argument (`test<T>(`), a value (`cond ? test : test.skip`), a definition of its own, an alias
+ * imported under another name, a member call of two arguments (node's `t.test('x', fn)`). So does
+ * what may declare tests it cannot see: a call, at the top of the file or in a describe's body, of
+ * a function imported from another module, and a module imported for its effects alone.
  */
 export const jsTests = (code: string): SourceTests => {
-  const { tokens, closer, certain } = jsTokens(code)
-  let generated = false
+  const { tokens, closer, listed, certain } = jsTokens(code)
+  let known = certain
   const describes = new Map<number, SourceTitle | null>()
   const declared: Array<{
     readonly head: number
     readonly at: number
     readonly title: SourceTitle
   }> = []
+  // The names the file imports, and the tokens of its import clauses.
+  const imported = new Set<string>()
+  const clauses = new Set<number>()
+  for (const [at, one] of tokens.entries()) {
+    if (one.text !== 'import' || one.kind !== 'name' || !statementStart(tokens, at)) continue
+    const next = tokens[at + 1]
+    // `import './shared'` runs a module, which may declare tests.
+    if (next?.kind === 'string') {
+      if (next.text.startsWith('.')) known = false
+      continue
+    }
+    const clause = importClause(tokens, at + 1)
+    for (let index = at + 1; index < clause.end; index += 1) clauses.add(index)
+    for (const name of clause.names) {
+      // `import { test as base }`, `import { x as test }`: a test under a name not its own.
+      if (HEADS.has(name.local) !== HEADS.has(name.imported)) known = false
+      if (!HEADS.has(name.local) && !name.type) imported.add(name.local)
+    }
+  }
   for (const [head, start] of tokens.entries()) {
-    const isDescribe = DESCRIBE_HEADS.has(start.text)
-    if (start.kind !== 'name' || (!isDescribe && !TEST_HEADS.has(start.text))) continue
-    if (tokens[head - 1]?.text === '.') continue
-    const members: string[] = []
-    let last = head
-    while (tokens[last + 1]?.text === '.' && tokens[last + 2]?.kind === 'name') {
-      members.push(tokens[last + 2]?.text ?? '')
-      last += 2
+    if (start.kind !== 'name' || clauses.has(head)) continue
+    const before = tokens[head - 1]
+    if (before?.text === '.') {
+      // A member call of two arguments or more may be node's subtest, `t.test('saves', fn)`.
+      if (WATCHED.has(start.text) && tokens[head + 1]?.text === '(' && listed.has(head + 1)) {
+        known = false
+      }
+      continue
     }
-    if (members.some((member) => NOT_DECLARATIONS.has(member))) continue
-    const each = members.includes('each')
-    let open = last + 1
-    if (each) {
-      const table = tokens[open]
-      if (table?.text === '(') open = (closer.get(open) ?? tokens.length) + 1
-      else if (table?.quote === '`') open = table.next
-      else continue
+    if (imported.has(start.text)) {
+      if (!FRAMEWORK.has(start.text) && registersHere(tokens, head, describes)) known = false
+      continue
     }
-    if (tokens[open]?.text !== '(') continue
-    // A method an object literal or a class declares (`{ test('x') { … } }`, `test(): T {`), or a
-    // function named test, is no call.
-    const after = tokens[(closer.get(open) ?? tokens.length) + 1]?.text
-    if (after === '{' || after === ':') continue
-    const title = literalTitle(tokens, open, each)
-    if (isDescribe || members.includes('describe')) describes.set(open, title)
-    else if (title !== null) declared.push({ head, at: start.at, title })
-    // A title from a variable, a call or a loop may be any test's.
-    else generated = true
+    if (!HEADS.has(start.text)) continue
+    const read = declaration(tokens, head, closer)
+    if (read === 'other') continue
+    if (read === null) {
+      if (WATCHED.has(start.text) || tokens[head + 1]?.text === '(') known = false
+      continue
+    }
+    if (read.describe) describes.set(read.open, read.title)
+    else if (read.title === null) known = false
+    else declared.push({ head, at: start.at, title: read.title })
   }
   // The describes open at each token, pushed at their call's `(` and popped past its `)`, each
   // with the scope its tests are under, built once when it opens; null when a title is not
@@ -337,7 +560,6 @@ export const jsTests = (code: string): SourceTests => {
       open.push({ close: closer.get(index) ?? tokens.length, scope })
     }
   }
-  let known = certain && !generated
   const tests = declared.map((one) => {
     const scope = scopes.get(one.head) ?? null
     if (scope === null) known = false

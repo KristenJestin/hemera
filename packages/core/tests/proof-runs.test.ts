@@ -3446,20 +3446,29 @@ describe('A generated title and a failure printed with no file, each read only w
     expect(validRed(output('tests/test_b.py'), 'tests/test_b.py', failing)).toBe(true)
   })
 
-  test('a method named test in an object literal declares no test', () => {
+  test('a call with a literal title followed by a block is a test: no method takes a literal parameter', () => {
     const code = "const o = { test('x') { return 1 } }\ntest('y', () => {})"
     expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+      { title: 'x', scope: [], twin: false, clash: false },
       { title: 'y', scope: [], twin: false, clash: false },
     ])
   })
 
-  test('a function or a typed method named test declares no test and leaves its file certain', () => {
-    const code = [
+  test('a function or a method of the file’s own named test makes its file uncertain; one taking nothing does not', () => {
+    const own = [
       'function test(name) { return name }',
       'class Probe { test(name: string): boolean { return name.length > 0 } }',
       "test('y', () => {})",
     ].join('\n')
-    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+    expect(addedTests({ insertion: 'new_file', code: own, patch: null })).toEqual([
+      { title: 'y', scope: null, twin: false, clash: false },
+    ])
+    const zero = "function test() { return 1 }\ntest('y', () => {})"
+    expect(addedTests({ insertion: 'new_file', code: zero, patch: null })).toEqual([
+      { title: 'y', scope: null, twin: false, clash: false },
+    ])
+    const method = "class Probe { test() { return 1 } }\ntest('y', () => {})"
+    expect(addedTests({ insertion: 'new_file', code: method, patch: null })).toEqual([
       { title: 'y', scope: [], twin: false, clash: false },
     ])
   })
@@ -3485,5 +3494,238 @@ describe('A generated title and a failure printed with no file, each read only w
     const innermost = (size: number) =>
       `${"describe('d', () => {\n".repeat(size)}${"test('t', () => {})\n".repeat(size)}${'})\n'.repeat(size)}`
     expect(growth(innermost, 400, read)).toBeLessThan(24)
+  })
+})
+
+describe('A reader certain only of the shapes it knows whole, a template only of what it reads, a title never holding a separator (#342, round 6)', () => {
+  const vitest = (lines: ReadonlyArray<string>) =>
+    ["import { describe, expect, test } from 'vite-plus/test'", '', ...lines].join('\n')
+
+  test('a test declared through test.extend’s alias leaves its file uncertain: the key line decides', () => {
+    const path = 'extend.test.ts'
+    const code = vitest([
+      "const withKind = test.extend({ kind: 'csv' })",
+      "withKind('saves', ({ kind }) => { expect(kind).toBe('md') })",
+      "test('saves', () => { expect(1).toBe(1) })",
+    ])
+    const names = addedTests(addition(code, 5, 5))
+    const output = run(captured('vitest-extend-alias'), 1, path)
+    expect(validRed(output, path, names)).toBe(false)
+    expect(validRed(output, path, names, true)).toBe(true)
+  })
+
+  test('a test whose callee is a ternary leaves its file uncertain', () => {
+    const path = 'ternary.test.ts'
+    const code = vitest([
+      ";(process.env.SKIP_SAVES ? test.skip : test)('saves', () => { expect(1).toBe(2) })",
+      "test('saves', () => { expect(1).toBe(1) })",
+    ])
+    const output = run(captured('vitest-ternary-callee'), 1, path)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+  })
+
+  test('a test declared in a ternary’s branch is read, a twin of the test of its title', () => {
+    const path = 'ternary2.test.ts'
+    const code = vitest([
+      'const enabled = true',
+      "enabled ? test('saves', () => { expect(1).toBe(2) }) : test.skip('skipped', () => {})",
+      "test('saves', () => { expect(1).toBe(1) })",
+    ])
+    const names = addedTests(addition(code, 5, 5))
+    expect(names).toEqual([{ title: 'saves', scope: [], twin: true, clash: true }])
+    expect(validRed(run(captured('vitest-ternary-calls'), 1, path), path, names)).toBe(false)
+  })
+
+  test('a test with a type argument, test.each<T> or test<T>, leaves its file uncertain', () => {
+    const path = 'generic.test.ts'
+    const code = vitest([
+      "test.each<string>(['csv', 'md'])('exports %s', (kind) => { expect(kind).toBe('txt') })",
+      "test('exports csv', () => { expect(1).toBe(1) })",
+    ])
+    const output = run(captured('vitest-each-generic'), 1, path)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+    const typed = "test<{ a: number }>('saves', () => {})\ntest('saves', () => {})"
+    expect(addedTests(addition(typed, 2, 2))).toEqual([
+      { title: 'saves', scope: null, twin: false, clash: false },
+    ])
+  })
+
+  test('a test followed by a block on the next line is still read', () => {
+    const code = "test('saves', () => {})\n{\n  const x = 1\n}\ntest('other', () => {})"
+    expect(addedTests({ insertion: 'new_file', code, patch: null })).toEqual([
+      { title: 'saves', scope: [], twin: false, clash: false },
+      { title: 'other', scope: [], twin: false, clash: false },
+    ])
+  })
+
+  test('node:test’s subtest t.test(…) leaves its file uncertain', () => {
+    const path = 'sub.test.mjs'
+    const code = [
+      "import { test } from 'node:test'",
+      "import assert from 'node:assert'",
+      '',
+      "test('outer', async (t) => {",
+      "  await t.test('saves', () => { assert.strictEqual(1, 2) })",
+      '})',
+      "test('saves', () => {})",
+    ].join('\n')
+    const output = run(captured('node-subtest'), 1, path)
+    expect(validRed(output, path, addedTests(addition(code, 7, 7)))).toBe(false)
+  })
+
+  test('a call of an imported helper at the top of the file or in a describe leaves it uncertain; the runner’s hooks do not', () => {
+    const path = 'helper.test.ts'
+    const code = [
+      "import { expect, test } from 'vite-plus/test'",
+      "import { failingTest } from './helpers.ts'",
+      '',
+      "failingTest('saves')",
+      "test('saves', () => { expect(1).toBe(1) })",
+    ].join('\n')
+    const names = addedTests(addition(code, 5, 5))
+    const output = run(captured('vitest-imported-helper'), 1, path)
+    expect(validRed(output, path, names)).toBe(false)
+    expect(validRed(output, path, names, true)).toBe(true)
+    const nested = [
+      "import { describe, test } from 'vite-plus/test'",
+      "import * as helpers from './helpers.ts'",
+      "describe('export', () => {",
+      "  helpers.failingTest('saves')",
+      "  test('keeps', () => {})",
+      '})',
+    ].join('\n')
+    expect(addedTests(addition(nested, 5, 5))).toEqual([
+      { title: 'keeps', scope: null, twin: false, clash: false },
+    ])
+    const hooks = [
+      "import { beforeEach, describe, expect, test, vi } from 'vite-plus/test'",
+      "import { render } from './render.ts'",
+      "vi.mock('./store.ts')",
+      "describe('export', () => {",
+      '  beforeEach(() => { render() })',
+      "  test('keeps', () => { expect(render()).toBe(1) })",
+      '})',
+    ].join('\n')
+    expect(addedTests(addition(hooks, 6, 6))).toEqual([
+      { title: 'keeps', scope: ['export'], twin: false, clash: false },
+    ])
+  })
+
+  test('a member the reader does not know leaves its file uncertain, even with a literal title', () => {
+    const code = "test.repeats('saves', () => {})\ntest('keeps', () => {})"
+    expect(addedTests(addition(code, 2, 2))).toEqual([
+      { title: 'keeps', scope: null, twin: false, clash: false },
+    ])
+  })
+
+  test('node:test required by destructuring keeps its file certain', () => {
+    const code = [
+      "const { describe, it } = require('node:test')",
+      "const assert = require('node:assert')",
+      "describe('export', () => {",
+      "  it('saves', () => { assert.strictEqual(1, 2) })",
+      '})',
+    ].join('\n')
+    expect(addedTests(addition(code, 4, 4))).toEqual([
+      { title: 'saves', scope: ['export'], twin: false, clash: false },
+    ])
+  })
+
+  test('a module imported for its effects alone, or the test function under another name, leaves its file uncertain', () => {
+    for (const first of [
+      "import './shared-tests.ts'",
+      "import { test as base } from 'vite-plus/test'",
+    ]) {
+      expect(addedTests(addition(`${first}\ntest('saves', () => {})`, 2, 2))).toEqual([
+        { title: 'saves', scope: null, twin: false, clash: false },
+      ])
+    }
+  })
+
+  test('a test.each title with %$ is a template its index fills: a literal it could produce names no test', () => {
+    const path = 'index.test.ts'
+    const code = vitest([
+      "test.each(['csv', 'md'])('exports %$', (kind) => { expect(kind).toBe('txt') })",
+      "test('exports 1', () => { expect(1).toBe(1) })",
+    ])
+    const output = run(captured('vitest-each-index'), 1, path)
+    expect(validRed(output, path, addedTests(addition(code, 4, 4)))).toBe(false)
+  })
+
+  test('a template literal whose ${…} holds a brace produces any title', () => {
+    const path = 'interp.test.ts'
+    const code = vitest([
+      'const label = (row: { kind: string }) => row.kind',
+      "for (const kind of ['csv', 'md']) {",
+      "  test(`exports ${label({ kind })}`, () => { expect(kind).toBe('txt') })",
+      '}',
+      "test('exports csv', () => { expect(1).toBe(1) })",
+    ])
+    const output = run(captured('vitest-interpolated-call'), 1, path)
+    expect(validRed(output, path, addedTests(addition(code, 7, 7)))).toBe(false)
+    for (const loop of ['`exports ${`${k}`}`', "`exports ${k ?? '}'}`", '`exports ${k}%x`']) {
+      const source = `for (const k of ['csv']) test(${loop}, () => {})\ntest('saves', () => {})`
+      expect([loop, addedTests(addition(source, 2, 2))]).toEqual([
+        loop,
+        [{ title: 'saves', scope: [], twin: true, clash: true }],
+      ])
+    }
+  })
+
+  test('a placeholder may stand for an empty value', () => {
+    const code = "test.each([''])('exports%s', () => {})\ntest('exports', () => {})"
+    expect(addedTests(addition(code, 2, 2))).toEqual([
+      { title: 'exports', scope: [], twin: true, clash: true },
+    ])
+  })
+
+  test('a title holding a runner’s separator makes its file’s paths uncertain: the key line decides', () => {
+    const path = 'gt.test.ts'
+    const code = vitest([
+      "test('a > b', () => { expect(1).toBe(2) })",
+      "describe('a', () => {",
+      "  test('b', () => { expect(1).toBe(1) })",
+      '})',
+    ])
+    const names = addedTests(addition(code, 4, 6))
+    expect(names).toEqual([{ title: 'b', scope: null, twin: false, clash: false }])
+    const output = run(captured('vitest-separator-title'), 1, path)
+    expect(validRed(output, path, names)).toBe(false)
+    expect(validRed(output, path, names, true)).toBe(true)
+  })
+
+  test('a template whose placeholder could hold a separator clashes with the path it could print', () => {
+    const code = [
+      "test.each(['x > b'])('a %s', () => {})",
+      "describe('a x', () => { test('b', () => {}) })",
+    ].join('\n')
+    expect(addedTests(addition(code, 2, 2))).toEqual([
+      { title: 'b', scope: ['a x'], twin: false, clash: true },
+    ])
+  })
+
+  test('imports, member calls and helpers are read in linear time', () => {
+    const read = (code: string) => {
+      addedTests({ insertion: 'new_file', code, patch: null })
+    }
+    const inputs: ReadonlyArray<readonly [string, (size: number) => string]> = [
+      ['import clauses never closed', (size) => 'import { a,\n'.repeat(size)],
+      ['imports', (size) => "import { a } from './a.ts'\n".repeat(size)],
+      [
+        'helper calls',
+        (size) =>
+          `import { h } from './h.ts'\n${"h('x')\ndescribe('d', () => { h('y') })\n".repeat(size)}`,
+      ],
+      ['member calls', (size) => "t.test('x', () => {})\n".repeat(size)],
+      ['template braces', (size) => `test(\`a \${f({ a })}\`, () => {})\n`.repeat(size)],
+      [
+        'long titles beside templates',
+        (size) =>
+          `${Array.from({ length: 64 }, (_, at) => `test.each([1])('${'a'.repeat(size)}${String(at)} %s', () => {})\n`).join('')}${`test('${'a'.repeat(size)}', () => {})\n`.repeat(64)}`,
+      ],
+    ]
+    for (const [label, make] of inputs) {
+      expect([label, growth(make, 400, read) < 24]).toEqual([label, true])
+    }
   })
 })

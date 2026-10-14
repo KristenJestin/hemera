@@ -1006,66 +1006,99 @@ export type TestName = string | TemplateTest | DeclaredTest | GoSubtest | RustCa
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
 
-/** A template's placeholders: `each`'s `%s` and `$name`, a template literal's `${…}`. */
-const PLACEHOLDER = /%[sdifjoOp#%]|\$\{[^}]*\}|\$[A-Za-z_]\w*(?:\.\w+)*/
+/** A template's placeholders: `each`'s `%s`, `%$` and `$name`, a template literal's `${…}`. */
+const PLACEHOLDER = /%[sdifjoOp#%$]|\$\{[^}]*\}|\$[A-Za-z_]\w*(?:\.\w+)*/
+/** Each `%` and each `${` of a template, with what follows it. */
+const PLACEHOLDER_START = /%(?<format>[\s\S]?)|\$\{(?<code>[^}]*)(?<closed>\}?)/g
 /** What a placeholder stands for: words within a title, never across its runner's separators. */
-const WORDS = /^[^\n>›]+$/
+const WORDS = /^[^\n>›]*$/
+/** What a placeholder may produce: anything, a separator included. */
+const ANYTHING = /^[\s\S]*$/
+/** A runner's path separator inside a title: vitest's ` > `, jest's ` › `. */
+const SEPARATOR = / [>›] /
+
+/**
+ * Whether the matcher reads a template whole: each `%` a placeholder it knows, each `${…}` ended
+ * by its first `}`, with no brace, quote or template literal inside (`${f({ a })}`, `${a ?? '}'}`).
+ * A template it does not read whole may produce any title.
+ */
+const readable = (template: string): boolean =>
+  Array.from(template.matchAll(PLACEHOLDER_START)).every((found) => {
+    const groups = found.groups ?? {}
+    const code = groups['code']
+    if (code === undefined) return /^[sdifjoOp#%$]$/.test(groups['format'] ?? '')
+    return groups['closed'] === '}' && !/[{`'"]/.test(code)
+  })
 
 /**
  * Whether a title is one a template makes: the title starts and ends with the template's literal
- * pieces, holds the others in their order, and each placeholder stands for one character or more
- * between them, never a separator. Linear: each piece is looked for once, at its leftmost place,
- * which leaves every placeholder before it the fewest characters. A template made of placeholders
- * alone makes no title.
+ * pieces, holds the others in their order, and each placeholder stands for what `within` allows,
+ * empty included. Linear: each piece is looked for once, at its leftmost place, which leaves every
+ * placeholder before it the fewest characters.
  */
-const templateAnswers = (template: string, title: string): boolean => {
-  const pieces = template.split(PLACEHOLDER)
-  if (pieces.every((piece) => piece.trim() === '')) return false
-  if (pieces.length === 1) return title === template
+const templateMakes = (pieces: ReadonlyArray<string>, title: string, within: RegExp): boolean => {
+  if (pieces.length === 1) return title === pieces[0]
   const first = pieces[0] ?? ''
   const last = pieces.at(-1) ?? ''
   const end = title.length - last.length
-  if (end <= first.length || !title.startsWith(first) || !title.endsWith(last)) return false
+  if (end < first.length || !title.startsWith(first) || !title.endsWith(last)) return false
   let at = first.length
   for (const piece of pieces.slice(1, -1)) {
-    const found = title.indexOf(piece, at + 1)
-    if (found < 0 || found + piece.length >= end || !WORDS.test(title.slice(at, found)))
+    const found = title.indexOf(piece, at)
+    if (found < 0 || found + piece.length > end || !within.test(title.slice(at, found))) {
       return false
+    }
     at = found + piece.length
   }
-  return WORDS.test(title.slice(at, end))
+  return within.test(title.slice(at, end))
+}
+
+/**
+ * Whether a printed title is a declared template's: a template read whole, not made of
+ * placeholders alone, each placeholder words within the title, never a separator.
+ */
+const templateAnswers = (template: string, title: string): boolean => {
+  const pieces = template.split(PLACEHOLDER)
+  return (
+    readable(template) &&
+    !pieces.every((piece) => piece.trim() === '') &&
+    templateMakes(pieces, title, WORDS)
+  )
 }
 
 /** How many tests under a template a file's tests are compared with: past it, none names its test. */
 const MAX_TEMPLATES = 64
 
-/** Whether a template could produce a title: one made of placeholders alone produces any. */
-const produces = (template: string, title: string): boolean =>
-  template.split(PLACEHOLDER).every((piece) => piece.trim() === '') ||
-  templateAnswers(template, title)
-
-/** Whether two titles a file declares could be the same title a runner prints. */
-const mayEqual = (one: string | TemplateTest, other: string | TemplateTest): boolean => {
-  if (Predicate.isString(one)) {
-    return Predicate.isString(other) ? one === other : produces(other.template, one)
-  }
-  return Predicate.isString(other)
-    ? produces(one.template, other)
-    : overlap(one.template, other.template)
+/** A template as the matcher reads it: whether whole, and its literal pieces. */
+interface ReadTemplate {
+  readonly readable: boolean
+  readonly pieces: ReadonlyArray<string>
 }
 
 /**
- * Whether two templates could produce the same title: unless the start of one is no start of the
- * other's, or the end of one no end of the other's, they are taken to.
+ * Whether two titles a file declares could be the same title a runner prints, each template read
+ * once (`read`): a template could produce a title when each placeholder may stand for anything,
+ * and one the matcher does not read whole produces any. Two templates could produce the same title
+ * unless the start of one is no start of the other's, or the end of one no end of the other's.
  */
-const overlap = (one: string, other: string): boolean => {
-  const pieces = one.split(PLACEHOLDER)
-  const others = other.split(PLACEHOLDER)
-  const [first, otherFirst] = [pieces[0] ?? '', others[0] ?? '']
-  const [last, otherLast] = [pieces.at(-1) ?? '', others.at(-1) ?? '']
+const mayEqual = (
+  one: string | TemplateTest,
+  other: string | TemplateTest,
+  read: (template: string) => ReadTemplate,
+): boolean => {
+  const produces = (template: ReadTemplate, title: string) =>
+    !template.readable || templateMakes(template.pieces, title, ANYTHING)
+  if (Predicate.isString(one)) {
+    return Predicate.isString(other) ? one === other : produces(read(other.template), one)
+  }
+  if (Predicate.isString(other)) return produces(read(one.template), other)
+  const [first, second] = [read(one.template), read(other.template)]
+  if (!first.readable || !second.readable) return true
+  const [start, otherStart] = [first.pieces[0] ?? '', second.pieces[0] ?? '']
+  const [end, otherEnd] = [first.pieces.at(-1) ?? '', second.pieces.at(-1) ?? '']
   return (
-    (first.startsWith(otherFirst) || otherFirst.startsWith(first)) &&
-    (last.endsWith(otherLast) || otherLast.endsWith(last))
+    (start.startsWith(otherStart) || otherStart.startsWith(start)) &&
+    (end.endsWith(otherEnd) || otherEnd.endsWith(end))
   )
 }
 
@@ -1358,22 +1391,36 @@ export const addedTests = (test: {
   const templated = sources.flatMap((one, at) =>
     [one.title, ...one.scope].some((title) => !Predicate.isString(title)) ? [at] : [],
   )
+  const isTemplated = new Set(templated)
+  // A path, its titles joined as vitest prints them: a template's placeholders may hold a separator.
+  const joined = sources.map((one) =>
+    [...one.scope, one.title].map((title) => (Predicate.isString(title) ? title : title.template)),
+  )
+  const printedPaths = joined.map((path) => path.join(' > '))
+  const reads = new Map<string, ReadTemplate>()
+  const read = (template: string) => {
+    const known = reads.get(template)
+    if (known !== undefined) return known
+    const fresh = { readable: readable(template), pieces: template.split(PLACEHOLDER) }
+    reads.set(template, fresh)
+    return fresh
+  }
   const twins = new Set<number>()
   const clashes = new Set<number>(templated.length > MAX_TEMPLATES ? sources.keys() : [])
   for (const at of clashes.size > 0 ? [] : templated) {
     const one = sources[at]
+    const path = { template: printedPaths[at] ?? '' }
     for (const [other, two] of sources.entries()) {
-      if (one === undefined || other === at || !mayEqual(one.title, two.title)) continue
-      twins.add(at).add(other)
-      const scope = two.scope
-      if (
-        one.scope.length === scope.length &&
-        one.scope.every((title, level) => mayEqual(title, scope[level] ?? ''))
-      ) {
+      if (one === undefined || other === at) continue
+      if (mayEqual(one.title, two.title, read)) twins.add(at).add(other)
+      const otherPath = printedPaths[other] ?? ''
+      if (mayEqual(path, isTemplated.has(other) ? { template: otherPath } : otherPath, read)) {
         clashes.add(at).add(other)
       }
     }
   }
+  // A title holding a runner's separator reads as a path: no path of the file is certain.
+  const separated = joined.some((path) => path.some((title) => SEPARATOR.test(title)))
   const titles = count(sources.map((one) => key(one.title)))
   const paths = count(sources.map((one) => [...one.scope, one.title].map(key).join('\n')))
   const declared: ReadonlyArray<{ readonly at: number; readonly name: TestName }> = sources.map(
@@ -1381,7 +1428,7 @@ export const addedTests = (test: {
       at: one.at,
       name: {
         title: one.title,
-        scope: one.certain ? one.scope : null,
+        scope: one.certain && !separated ? one.scope : null,
         twin: twins.has(at) || (titles.get(key(one.title)) ?? 0) > 1,
         clash:
           clashes.has(at) || (paths.get([...one.scope, one.title].map(key).join('\n')) ?? 0) > 1,
