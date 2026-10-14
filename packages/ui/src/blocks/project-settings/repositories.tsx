@@ -13,7 +13,7 @@ import {
   MARK_ICON_WORDS,
   type MarkIcon,
   markIcon,
-} from '../../components/project-mark/project-mark.tsx'
+} from '../../components/project-mark/mark-icons.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {

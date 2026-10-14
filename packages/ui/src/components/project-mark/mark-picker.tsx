@@ -7,13 +7,8 @@ import { IconPhoto, IconX } from '../../icons.ts'
 import { Button } from '../button/button.tsx'
 import { LETTER_TONES, type LetterTone, letterToneOf } from '../letter-avatar/letter-names.ts'
 import { Popover } from '../popover/popover.tsx'
-import {
-  type Identity,
-  MARK_ICONS,
-  MARK_ICON_WORDS,
-  type MarkIcon,
-  ProjectMark,
-} from './project-mark.tsx'
+import { type Identity, ProjectMark } from './project-mark.tsx'
+import { MARK_ICONS, MARK_ICON_WORDS, type MarkIcon } from './mark-icons.tsx'
 
 /**
  * The Project's mark, chosen where its name is typed. The mark itself is the control, drawn as the

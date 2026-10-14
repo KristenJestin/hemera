@@ -293,12 +293,11 @@ export {
 } from './blocks/project-settings/doc-recipes-model.ts'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
-  MARK_ICONS,
   ProjectMark,
   type Identity,
-  type MarkIcon,
   type ProjectMarkProps,
 } from './components/project-mark/project-mark.tsx'
+export { MARK_ICONS, type MarkIcon } from './components/project-mark/mark-icons.tsx'
 export { MarkPicker, type MarkPickerProps } from './components/project-mark/mark-picker.tsx'
 export {
   CommandLineField,

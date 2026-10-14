@@ -1,4 +1,4 @@
-import { type MarkIcon } from '../../components/project-mark/project-mark.tsx'
+import { type MarkIcon } from '../../components/project-mark/mark-icons.tsx'
 
 /**
  * The repositories of a Project, in its settings: each on one line, what Hemera reads of it and
