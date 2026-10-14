@@ -55,6 +55,7 @@ import { Context, Effect, Layer, Option, Predicate, Schema, Semaphore, Stream } 
 import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
+import { cutJson } from '../agents/text.ts'
 import { DomainEvents } from '../domain-events.ts'
 import type { EventPayload, NewEvent } from '../journal.ts'
 import { type NeedHandler, createNeedIn, expireNeedIn, needService } from '../needs.ts'
@@ -511,7 +512,7 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
                   sessionId: call.session.sessionId,
                   role: call.session.role,
                   tool: call.tool,
-                  call: JSON.stringify(frozen),
+                  call: JSON.stringify({ ...frozen, arguments: cutJson(frozen.arguments) }),
                   guard,
                   identity: JSON.stringify(identity),
                   described: shown,
