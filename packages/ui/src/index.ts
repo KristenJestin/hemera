@@ -137,14 +137,13 @@ export { OverlayContainerProvider, type OverlayContainer } from './overlay.ts'
 export { BallMark, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
 export { BALL_LEGENDS, type Ball } from './blocks/ball/ball-legends.ts'
 export {
-  NEED_KINDS,
   NeedCard,
   type NeedAsk,
   type NeedCardProps,
-  type NeedKind,
   type NeedState,
   type PermissionChoice,
 } from './blocks/need/need-card.tsx'
+export { NEED_KINDS, type NeedKind } from './blocks/need/need-kinds.ts'
 export {
   NeedsYouList,
   type NeedRow,

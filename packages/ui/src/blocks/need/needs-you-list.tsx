@@ -15,7 +15,8 @@ import {
   IconRefresh,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { NeedCard, type NeedCardProps, NeedGlyph, type NeedKind } from './need-card.tsx'
+import { NeedCard, type NeedCardProps, NeedGlyph } from './need-card.tsx'
+import { type NeedKind } from './need-kinds.ts'
 
 /**
  * Needs you, across every Project: one row per need, in the order they wait in — the
