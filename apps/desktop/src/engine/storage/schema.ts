@@ -177,6 +177,37 @@ export const forgeNeeds = sqliteTable('forge_needs', {
 })
 
 /**
+ * A Project's delivery rules (#340): one Schema-encoded document with its version, incremented at
+ * each save. A Project without a row has the defaults, at version 0.
+ */
+export const deliveryRules = sqliteTable('delivery_rules', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  savedAt: text('saved_at').notNull(),
+  document: text('document').notNull(),
+})
+
+/**
+ * The sections of the delivery rules a mission copied when they started acting (#340, CT-47): each
+ * once, resolved, with the version it was copied at, never rewritten.
+ */
+export const deliveryRuleCopies = sqliteTable(
+  'delivery_rule_copies',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    section: text('section').notNull(),
+    version: integer('version').notNull(),
+    copiedAt: text('copied_at').notNull(),
+    document: text('document').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.section] })],
+)
+
+/**
  * The Workspaces: a Project's isolated folders, one worktree per chosen repository. `branch` is
  * the branch its worktrees were made on, or null for worktrees on a detached HEAD. A removed
  * Workspace's row goes with its folder; the journal keeps that it was.

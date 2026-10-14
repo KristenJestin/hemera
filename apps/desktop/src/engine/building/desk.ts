@@ -41,7 +41,12 @@ export interface BuildWork {
    * Runs again every stale proof and every stale final check of the mission on the current tree
    * (#144, CT-38): #147's end sequence calls it before the mission leaves Building.
    */
-  readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
+  readonly refreshProofs: (missionId: string) => Effect.Effect<Refreshed>
+  /**
+   * The mission's scenarios an environment need's Retry runs again now, their result not recorded
+   * yet: the end waits for it rather than taking them for stale proofs nothing runs (#306).
+   */
+  readonly rerunning: (missionId: string) => Effect.Effect<ReadonlyArray<string>>
   /**
    * The mission's Builder, resumed when its session ended while its Building is still active:
    * what #147's end calls while it waits on the Builder. Never while a need about the Builder's
@@ -92,6 +97,11 @@ export interface ProofsRefreshed {
   readonly checks: ReadonlyArray<string>
 }
 
+/** A refresh: what it ran again, and the trees its own snapshot took first, which it ran them on. */
+export interface Refreshed extends ProofsRefreshed {
+  readonly trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
+}
+
 /** A check's run watched: its locks and trees taken right before its launch, let go at its end. */
 export interface CheckRunWatch {
   /** Takes the locks, then the trees it runs on; a snapshot that fails withdraws the launch. */
@@ -126,6 +136,7 @@ export const buildDeskLayer = Layer.effect(
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
       proofRun: (grant, args) => Effect.flatMap(work, (one) => one.proofRun(grant, args)),
       refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
+      rerunning: (missionId) => Effect.flatMap(work, (one) => one.rerunning(missionId)),
       ensureBuilder: (missionId) => Effect.flatMap(work, (one) => one.ensureBuilder(missionId)),
       builderNow: (missionId) => Effect.flatMap(work, (one) => one.builderNow(missionId)),
       resumed: Effect.flatMap(work, (one) => one.resumed),

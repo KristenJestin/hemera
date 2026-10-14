@@ -15,6 +15,7 @@ import {
   AutoReviewRpcs,
   EngineApartRpcs,
   ForgeRpcs,
+  DeliveryRulesRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
   type EngineStatus,
@@ -39,6 +40,14 @@ import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
+import {
+  acceptDependencies,
+  missionCopies,
+  preparationChangedSinceCopy,
+  readDeliveryRules,
+  saveDeliveryRules,
+  validateDeliveryRules,
+} from './delivery-rules.ts'
 import {
   dismissService,
   missionServices,
@@ -881,6 +890,7 @@ export const engineHandlers = (
     checksHandlers(profile, log),
     docRecipesHandlers(profile, log),
     forgeHandlers(profile, log),
+    deliveryRulesHandlers(profile, log),
     diffHandlers(profile, log),
     proofsHandlers(profile, log),
     autoReviewHandlers(profile, log),
@@ -972,6 +982,29 @@ const forgeHandlers = (profile: StartedProfile, log: Log) => {
     'forge.changes': ({ projectId }) =>
       follow(Stream.unwrap(ForgePort.useSync((forge) => forge.changes(projectId)))).pipe(
         observedStream('forge.changes', log),
+      ),
+  })
+}
+
+/** A Project's delivery rules (#340), a layer of their own (see `EngineDeliveryRulesRpcs`). */
+const deliveryRulesHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return DeliveryRulesRpcs.toLayer({
+    'deliveryRules.read': ({ projectId }) =>
+      use(readDeliveryRules(projectId)).pipe(observed('deliveryRules.read', log)),
+    'deliveryRules.validate': ({ projectId, draft }) =>
+      use(validateDeliveryRules(projectId, draft)).pipe(observed('deliveryRules.validate', log)),
+    'deliveryRules.save': ({ projectId, draft, version }) =>
+      use(saveDeliveryRules(projectId, draft, version)).pipe(observed('deliveryRules.save', log)),
+    'deliveryRules.acceptDependencies': ({ projectId, edges }) =>
+      use(acceptDependencies(projectId, edges)).pipe(
+        observed('deliveryRules.acceptDependencies', log),
+      ),
+    'deliveryRules.missionCopies': ({ missionId }) =>
+      use(missionCopies(missionId)).pipe(observed('deliveryRules.missionCopies', log)),
+    'deliveryRules.preparationChangedSinceCopy': ({ missionId }) =>
+      use(preparationChangedSinceCopy(missionId)).pipe(
+        observed('deliveryRules.preparationChangedSinceCopy', log),
       ),
   })
 }
