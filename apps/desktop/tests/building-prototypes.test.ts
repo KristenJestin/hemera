@@ -10,7 +10,8 @@
  * on state, never on time.
  */
 
-import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { linkSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { TOOLS, toolsOf } from '@hemera/core/domain'
@@ -24,7 +25,7 @@ import { getMission } from '../src/engine/missions.ts'
 import { judgePrototype } from '../src/engine/planning/prototypes.ts'
 import { sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { helpers, permissionRequests } from '../src/engine/storage/schema.ts'
+import { helpers, memoryEvidence, permissionRequests } from '../src/engine/storage/schema.ts'
 import { QUIET, READING, call, grantOf } from './building-world.ts'
 import { builderOf, launched } from './builder-world.ts'
 import { held, sessionsEngine, text, until, within } from './sessions-world.ts'
@@ -365,6 +366,75 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
       expect(answer.text).not.toContain('not-a-real-key')
       expect(answer.text).not.toContain('Acme api')
     }
+  })
+
+  test('a file handed back that has a second name is refused, and nothing of it is kept', async () => {
+    const { run } = prototyping(1)
+    const outside = join(work, 'key.pem')
+    writeFileSync(outside, 'not-a-real-key')
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          let refused = ''
+          yield* launched(
+            work,
+            () => Effect.void,
+            'The impact.',
+            undefined,
+            undefined,
+            (mission, planner) =>
+              Effect.gen(function* () {
+                yield* call(planner, 'helper_launch', { helper: 'prototyper', brief: QUESTION })
+                const prototyper = yield* helperNumbered(mission.id, 1)
+                const file = join(prototyper.row.folder ?? '', 'list-1.html')
+                linkSync(outside, file)
+                refused = yield* call(prototyper.grantId, 'helper_result', RESULT('list-1.html'))
+                rmSync(file)
+                yield* callTool(prototyper.grantId, 'fs_write', {
+                  path: 'list-1.html',
+                  content: '<ul class="prototype-1"></ul>\n',
+                })
+                yield* call(prototyper.grantId, 'helper_result', RESULT('list-1.html'))
+                yield* until(
+                  Effect.map(helperRowsOf(mission.id), (rows) => rows[0]?.state === 'done'),
+                )
+              }),
+          )
+          const database = yield* Database
+          return { refused, kept: yield* database.select().from(memoryEvidence) }
+        }),
+      ),
+    )
+    expect(seen.refused).toContain('list-1.html')
+    expect(seen.refused).toContain('hard link')
+    const secret = createHash('sha256').update('not-a-real-key').digest('hex')
+    expect(seen.kept.map((row) => row.sha256)).not.toContain(secret)
+  })
+
+  test('a kept file that has a second name is refused, never read', async () => {
+    const { run } = prototyping(1)
+    const answer = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* frozenWith(['validated'])
+          const builder = yield* builderOf(mission.id)
+          const folder = (yield* helperRowsOf(mission.id))[0]?.folder ?? ''
+          const outside = join(work, 'key.pem')
+          writeFileSync(outside, 'not-a-real-key')
+          rmSync(join(folder, 'list-1.html'))
+          linkSync(outside, join(folder, 'list-1.html'))
+          return yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H1',
+            path: 'list-1.html',
+          })
+        }),
+      ),
+    )
+    expect(answer).toMatchObject({ ok: false, refused: true })
+    expect(answer.text).toContain('hard link')
+    expect(answer.text).not.toContain('not-a-real-key')
   })
 
   test('a prototype that is not frozen with the Spec, or a file it does not hold, is refused naming it', async () => {

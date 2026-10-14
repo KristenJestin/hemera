@@ -22,12 +22,19 @@
  * because it understood a niche syntax would be worse than one that is documented.
  */
 
-import { readFile, readdir, realpath } from 'node:fs/promises'
-import { join, relative, sep } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, SEARCH_SKIPS_LISTED } from '@hemera/core/domain'
 
-import { NotJudged, openJudged } from './judged.ts'
+import {
+  MORE_THAN_ONE_NAME,
+  NotJudged,
+  THROUGH_A_LINK,
+  openFolder,
+  openJudged,
+  readJudged,
+} from './judged.ts'
 
 /** What a search hit is: where it is, and the line as it was found. */
 export interface SearchHit {
@@ -105,10 +112,9 @@ interface Progress {
  * path in this same order stands in for it.
  */
 export async function searchIn(request: SearchRequest): Promise<SearchResult> {
-  const ignored = await ignoredPatterns(request.root)
   // A root that is not there is said file by file, as a file that could not be read.
   const real = request.judged ?? (await realpath(request.root).catch(() => request.root))
-  const start = request.root
+  const ignored = await ignoredPatterns(request.root, real)
   const only =
     request.glob === null || request.glob === undefined ? null : globMatcher(request.glob)
   const cursor = parseCursor(request.cursor ?? null)
@@ -129,9 +135,12 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
   // and the cursor names the last line of the one it finished.
   let spent = false
 
-  for await (const file of filesUnder(start, request.root, ignored, resumePath)) {
+  for await (const { file, real: at, rel } of filesUnder(
+    { path: request.root, real, rel: '' },
+    ignored,
+    resumePath,
+  )) {
     request.signal?.throwIfAborted()
-    const rel = relative(request.root, file).split(sep).join('/')
     if (!resumed) {
       if (resumePath !== null && rel !== resumePath && !after(rel, resumePath)) continue
       resumed = true
@@ -144,7 +153,7 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
     // The cursor names the last line the previous call examined, so this one starts after it.
     const ended = await scanFile(
       file,
-      join(real, relative(request.root, file)),
+      at,
       rel,
       rel === resumePath ? resumeLine : 0,
       query,
@@ -210,7 +219,10 @@ async function scanFile(
 
   const handle = await openJudged(file, { real }).catch((cause: Error) => {
     signal?.throwIfAborted()
-    skip(progress, rel, cause instanceof NotJudged ? 'linked' : 'unreadable')
+    const linked =
+      cause instanceof NotJudged &&
+      (cause.message === THROUGH_A_LINK || cause.message === MORE_THAN_ONE_NAME)
+    skip(progress, rel, linked ? 'linked' : 'unreadable')
     return null
   })
   if (handle === null) return true
@@ -282,52 +294,72 @@ function after(rel: string, cursorPath: string): boolean {
   return relSegments.length > cursorSegments.length
 }
 
+/** A place of the walk: the path it is reached by, its real path as judged, and its path in the search. */
+interface Walked {
+  readonly path: string
+  readonly real: string
+  readonly rel: string
+}
+
 /**
  * The files under a folder, one at a time, in the order the cursor expects.
  *
  * One folder is read at a time and a folder's files are handed over before the next folder is
  * read, so a search that stops early has listed only what it read. A folder that lies wholly
  * before the cursor is not walked at all: nothing in it could come after the cursor.
+ *
+ * Each folder is opened, proven to be the one judged and read through its handle
+ * (`./judged.ts`), and what is in it is reached through that handle: a folder that is now a link
+ * is not walked, as a link never is.
  */
 async function* filesUnder(
-  folder: string,
-  root: string,
+  at: Walked,
   ignored: readonly string[],
   resumePath: string | null,
-): AsyncGenerator<string> {
-  let names: { name: string; folder: boolean; file: boolean }[]
-  try {
-    const entries = await readdir(folder, { withFileTypes: true })
-    names = entries.map((entry) => ({
-      name: entry.name,
-      folder: entry.isDirectory(),
-      file: entry.isFile(),
-    }))
-  } catch {
+): AsyncGenerator<{ readonly file: string; readonly real: string; readonly rel: string }> {
+  const folder = await openFolder(at.path, at.real).catch((cause: Error) => cause)
+  if (folder instanceof NotJudged) return
+  if (folder instanceof Error) {
     // A file named where a folder was expected is a search of that one file, not a failure.
-    yield folder
+    yield { file: at.path, real: at.real, rel: at.rel }
     return
   }
-  names.sort((left, right) => (left.name < right.name ? -1 : 1))
-  for (const entry of names) {
-    if (NEVER_WALKED.has(entry.name)) continue
-    const path = join(folder, entry.name)
-    const rel = relative(root, path).split(sep).join('/')
-    if (ignored.some((pattern) => matches(pattern, rel))) continue
-    if (entry.folder) {
-      const before =
-        resumePath !== null && !resumePath.startsWith(`${rel}/`) && !after(rel, resumePath)
-      if (!before) yield* filesUnder(path, root, ignored, resumePath)
-    } else if (entry.file) {
-      yield path
+  try {
+    const entries = await folder.entries().catch(() => null)
+    if (entries === null) {
+      yield { file: at.path, real: at.real, rel: at.rel }
+      return
     }
+    const names = entries
+      .map((entry) => ({ name: entry.name, folder: entry.isDirectory(), file: entry.isFile() }))
+      .toSorted((left, right) => (left.name < right.name ? -1 : 1))
+    for (const entry of names) {
+      if (NEVER_WALKED.has(entry.name)) continue
+      const rel = at.rel === '' ? entry.name : `${at.rel}/${entry.name}`
+      if (ignored.some((pattern) => matches(pattern, rel))) continue
+      const inner = { path: folder.at(entry.name), real: join(at.real, entry.name), rel }
+      if (entry.folder) {
+        const before =
+          resumePath !== null && !resumePath.startsWith(`${rel}/`) && !after(rel, resumePath)
+        if (!before) yield* filesUnder(inner, ignored, resumePath)
+      } else if (entry.file) {
+        yield { file: inner.path, real: inner.real, rel }
+      }
+    }
+  } finally {
+    await folder.close()
   }
 }
 
-/** The root's `.gitignore`, as the simple patterns it holds, comments and blanks left out. */
-async function ignoredPatterns(root: string): Promise<string[]> {
+/**
+ * The root's `.gitignore`, as the simple patterns it holds, comments and blanks left out: read
+ * from the root judged only (`./judged.ts`), never through a link.
+ */
+async function ignoredPatterns(root: string, real: string): Promise<string[]> {
   try {
-    const text = await readFile(join(root, '.gitignore'), 'utf8')
+    const text = (
+      await readJudged(join(root, '.gitignore'), { real: join(real, '.gitignore') })
+    ).toString('utf8')
     return text
       .split('\n')
       .map((line) => line.trim())

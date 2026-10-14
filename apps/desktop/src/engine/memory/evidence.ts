@@ -11,7 +11,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -30,6 +30,7 @@ import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { memoryEvidence } from '../storage/schema.ts'
+import { readRegular } from '../tools/judged.ts'
 import { mutate } from '../transaction.ts'
 import { authorColumnsOf, authorOf } from './journal.ts'
 import { missionFolder, missionKeyOf, writeWhole } from './files.ts'
@@ -228,8 +229,10 @@ export const readEvidence = (missionId: string, id: string) =>
       .pipe(Effect.mapError(refusedWhile('reading the evidence')))
     if (row === undefined) return yield* new UnknownEvidence({ id })
     const key = yield* missionKeyOf(missionId)
-    const bytes = yield* Effect.try({
-      try: () => new Uint8Array(readFileSync(fileOf(missionFolder(home.dataFolder, key), row))),
+    // Read as a regular file only, without waiting: a pipe put in its place never holds the engine.
+    const bytes = yield* Effect.tryPromise({
+      try: async () =>
+        new Uint8Array(await readRegular(fileOf(missionFolder(home.dataFolder, key), row))),
       catch: () => new UnknownEvidence({ id }),
     })
     return { item: itemOf(row), bytes }
