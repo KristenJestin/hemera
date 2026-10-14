@@ -566,17 +566,28 @@ const timed = (work: () => string, times: number): number => {
 }
 
 /**
- * How much longer masking takes on an input 8 times larger: about 8 when it is linear, 64 when
- * quadratic. Each side is the fastest of five runs, each long enough to be measured.
+ * How much longer masking takes on an input 16 times larger: about 16 when it is linear, 256 when
+ * quadratic. The two sizes are timed in turn, seven times, each run long enough to be measured,
+ * and each keeps its fastest: a load on the machine weighs on both alike.
  */
 const growth = (make: (size: number) => string, mask: (text: string) => string, size: number) => {
   const small = make(size)
-  const large = make(8 * size)
+  const large = make(16 * size)
   let times = 1
   while (timed(() => mask(small), times) < 10) times *= 2
-  const fastest = (text: string) =>
-    Math.min(...Array.from({ length: 5 }, () => timed(() => mask(text), times)))
-  return fastest(large) / fastest(small)
+  let fastestSmall = Number.POSITIVE_INFINITY
+  let fastestLarge = Number.POSITIVE_INFINITY
+  for (let round = 0; round < 7; round += 1) {
+    fastestSmall = Math.min(
+      fastestSmall,
+      timed(() => mask(small), times),
+    )
+    fastestLarge = Math.min(
+      fastestLarge,
+      timed(() => mask(large), times),
+    )
+  }
+  return fastestLarge / fastestSmall
 }
 
 describe('Masking takes time in proportion to what it masks, whatever it is given', () => {
@@ -589,8 +600,8 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     ['a run of a-a-a- (labels)', (size) => 'a-'.repeat(size / 2), text, 4_000],
     ['a run of a.a.a. (URLs)', (size) => 'a.'.repeat(size / 2), text, 4_000],
     ['a run of eyJ-eyJ- (web tokens)', (size) => 'eyJ-'.repeat(size / 4), text, 4_000],
-    ['a run of password-password-', (size) => 'password-'.repeat(size / 9), text, 450],
-    ['a run of password_password_', (size) => 'password_'.repeat(size / 9), text, 450],
+    ['a run of password-password-', (size) => 'password-'.repeat(size / 9), text, 270],
+    ['a run of password_password_', (size) => 'password_'.repeat(size / 9), text, 270],
     [
       'a run of a-a-a- in a JSON string',
       (size) => JSON.stringify([{ body: 'a-'.repeat(size / 2) }]),
@@ -612,10 +623,10 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
   ]
   for (const [what, make, mask, size] of cases) {
     test(
-      `${what}: 8 times the input takes less than 20 times as long`,
+      `${what}: 16 times the input takes less than 64 times as long`,
       { timeout: 600_000 },
       () => {
-        expect(growth(make, mask, size)).toBeLessThan(20)
+        expect(growth(make, mask, size)).toBeLessThan(64)
       },
     )
   }
