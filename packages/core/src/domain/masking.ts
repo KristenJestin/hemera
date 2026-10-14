@@ -263,21 +263,28 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
 
 /**
  * The stretches of a text that masking hides: every occurrence of a known value, and every
- * stretch a shape hides, those that overlap or touch made one. They are the union of two readings:
+ * stretch a shape hides, those that overlap or touch made one. They are the union of three readings:
  *
  * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
  *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
  * - the shapes in turn, as masking used to read them: each on the text where the known values and
  *   all the shapes before it found are written over. A value that stops at a space, a quote or a
  *   line end then runs on through what an earlier shape hid, and hides what is glued after it
- *   (`password=<private key>x`).
+ *   (`password=<private key>x`);
+ * - each shape once more, on the text where the known values, and every stretch the two readings
+ *   found that holds a space or a quote up to its last one, are written over. A value hidden by
+ *   itself, quoted or spaced, no longer stops the value it stands in (`password=token="a b"x`,
+ *   `https://u:token="a b"x@h`), whichever shape found it. What holds neither is left as it is: it
+ *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
+ *   password=…`, `password=<private key>token: "a"x`).
  *
- * The union hides at least what either reading hides, and its cost is two scans of each shape.
+ * The union hides at least what any reading hides, and its cost is three scans of each shape.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
   const knownHidden = yield* knownSpans(text, known)
   let spans = knownHidden
   let inTurn = knownHidden
+  let closed = knownHidden
   // Written over only once something is hidden: until then, the shapes in turn read the text.
   let view = text
   let written = false
@@ -288,14 +295,51 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
   for (const pattern of SHAPES) {
     const found = yield* shapeSpans(text, pattern)
     spans = yield* union(spans, found)
+    closed = yield* union(closed, yield* closedSpans(text, found))
     const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
     if (foundInTurn.length > 0) {
       inTurn = yield* union(inTurn, foundInTurn)
+      if (foundInTurn !== found)
+        closed = yield* union(closed, yield* closedSpans(text, foundInTurn))
       view = yield* writtenOver(view, foundInTurn)
       written = true
     }
   }
-  return yield* union(spans, inTurn)
+  spans = yield* union(spans, inTurn)
+  // Nothing closed: the third reading would read the text as the first did.
+  if (closed.length === 0) return spans
+  const opened = yield* writtenOver(text, closed)
+  for (const pattern of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, pattern))
+  return spans
+}
+
+/** What stops a value read to the next space or quote. */
+const STOPS = /[\s"']/g
+
+/** One character that stops such a value. */
+const STOP = /[\s"']/
+
+/**
+ * Of each stretch, in order of their starts, that holds a space or a quote: the part up to its
+ * last one. What follows that, up to the stretch's end, stops no value, and may be the name of a
+ * shape glued after it (`password=<private key>token: "a"`), which must stay readable. Where the
+ * next space or quote stands is searched once from each start past the last one found; the last
+ * one is found walking back from the end over what holds none, which no other stretch of the same
+ * shape crosses but a word: the text is crossed a fixed number of times.
+ */
+function* closedSpans(text: string, spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  const closed: Span[] = []
+  let stop = -1
+  for (const [start, end] of spans) {
+    if (stop < start) stop = matchFrom(STOPS, text, start)?.index ?? Number.POSITIVE_INFINITY
+    if (stop < end) {
+      let last = end
+      while (!STOP.test(text.charAt(last - 1))) last -= 1
+      closed.push([start, last])
+    }
+    if (due()) yield
+  }
+  return closed
 }
 
 /** What a hidden stretch is written over by, one for each of its characters. */
