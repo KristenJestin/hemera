@@ -13,7 +13,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { Effect, Fiber, Layer, Option } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -139,8 +139,11 @@ async function untilTrue(check: () => boolean, milliseconds: number): Promise<bo
 const allGone = async (pids: ReadonlyArray<number>) =>
   (await Promise.all(pids.map((pid) => goneWithin(pid)))).every(Boolean)
 
-const goneWithin = (pid: number, milliseconds = 10_000) =>
-  untilTrue(() => !alive(pid), milliseconds)
+const goneWithin = async (pid: number, milliseconds = 10_000) => {
+  // `process.kill(-1, 0)` signals every process of the user and succeeds: never wait on it.
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`${String(pid)} is not a pid`)
+  return untilTrue(() => !alive(pid), milliseconds)
+}
 
 /** The pids a tree wrote, once it wrote `count` of them. */
 async function pidsIn(path: string, count: number): Promise<number[]> {
@@ -798,21 +801,63 @@ describe('The machine is asked once for every left-over agent', () => {
     expect(orphans.every((one) => one.ended)).toBe(true)
   })
 
-  test('a lookup cut by its bound ends the program it started', async () => {
-    const where = join(folder, 'lookup.pid')
-    const hangs = script(`
+  describe('a lookup that is over', () => {
+    // The program says its pid first and hangs after it. The test waits for that pid before it
+    // ends the lookup, however long Node took to start: a pid never read is a failure, not a pid.
+    const hangsAfterItsPid = () =>
+      script(`
 import { writeFileSync } from 'node:fs'
 writeFileSync(process.argv[2], String(process.pid))
 ${STAYS_UP}`)
-    const said = await Effect.runPromise(
-      outputOf(process.execPath, [hangs, where], WINDOWS_COMMAND_LINE_MS).pipe(
-        Effect.timeoutOption('1 second'),
-      ),
-    )
-    const [pid] = await pidsIn(where, 1)
 
-    expect(Option.isNone(said)).toBe(true)
-    expect(await goneWithin(pid ?? -1)).toBe(true)
+    test('a lookup cut by its bound ends the program it started', async () => {
+      const where = join(folder, 'lookup.pid')
+      const hangs = hangsAfterItsPid()
+      const [said, pids] = await Effect.runPromise(
+        Effect.gen(function* () {
+          const lookup = yield* outputOf(
+            process.execPath,
+            [hangs, where],
+            WINDOWS_COMMAND_LINE_MS,
+          ).pipe(Effect.forkChild)
+          const written = yield* Effect.promise(() => pidsIn(where, 1))
+          yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+          return [yield* Fiber.join(lookup), written] as const
+        }).pipe(Effect.provide(TestClock.layer())),
+      )
+
+      expect(said).toBe(null)
+      expect(pids).toHaveLength(1)
+      expect(await goneWithin(pids[0] ?? -1)).toBe(true)
+    }, 30_000)
+
+    test('a lookup given up on by the one waiting ends the program it started', async () => {
+      const where = join(folder, 'lookup.pid')
+      const hangs = hangsAfterItsPid()
+      const pids = await Effect.runPromise(
+        Effect.gen(function* () {
+          const lookup = yield* outputOf(
+            process.execPath,
+            [hangs, where],
+            WINDOWS_COMMAND_LINE_MS,
+          ).pipe(Effect.forkChild)
+          const written = yield* Effect.promise(() => pidsIn(where, 1))
+          yield* Fiber.interrupt(lookup)
+          return written
+        }),
+      )
+
+      expect(pids).toHaveLength(1)
+      expect(await goneWithin(pids[0] ?? -1)).toBe(true)
+    }, 30_000)
+  })
+
+  test('a pid that is not a positive integer is refused, never signalled', async () => {
+    // `process.kill(-1, 0)` reaches every process of the user: waiting on it never ends.
+    const refused = [-1, 0, 1.5, Number.NaN].map((pid) =>
+      expect(goneWithin(pid)).rejects.toThrow('not a pid'),
+    )
+    await Promise.all(refused)
   })
 })
 
