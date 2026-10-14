@@ -17,14 +17,16 @@ import {
   type JiraDraft,
   type ProviderDeployment,
   ProviderDetails,
-  type ProviderKind,
   ProviderMark,
-  type ProviderView,
   TicketProviders,
   TokenField,
+} from './ticket-providers.tsx'
+import {
+  type ProviderKind,
+  type ProviderView,
   providerProblem,
   providerTitle,
-} from './ticket-providers.tsx'
+} from './provider-model.ts'
 
 const READY = { state: 'ready', sentence: 'Ready.', fix: null } as const
 

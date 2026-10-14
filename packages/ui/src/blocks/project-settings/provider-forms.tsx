@@ -17,7 +17,7 @@ import {
   IconShieldCheck,
   IconWorld,
 } from '../../icons.ts'
-import type { JiraTokenView, ProviderView } from './ticket-providers.tsx'
+import { type JiraTokenView, type ProviderView, providerTroubled } from './provider-model.ts'
 
 /**
  * What the dialogs of the ticket providers are made of: a provider's state as one glyph, the
@@ -27,14 +27,6 @@ import type { JiraTokenView, ProviderView } from './ticket-providers.tsx'
 
 /** Jira Cloud (REST v3, an account email and an API token) or Data Center (a personal access token). */
 export type ProviderDeployment = 'cloud' | 'datacenter'
-
-/** Whether something of a provider waits on the user: its state is not ready, or its token is not saved. */
-export function providerTroubled(provider: ProviderView): boolean {
-  return (
-    (provider.status !== null && provider.status.state !== 'ready') ||
-    (provider.token !== undefined && provider.token !== 'saved')
-  )
-}
 
 /** A provider's state as one glyph, its words in its legend; a skeleton while it is read. */
 export function ProviderGlyph({ provider }: { provider: ProviderView }): ReactNode {
