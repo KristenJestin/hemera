@@ -787,6 +787,30 @@ describe('Code comments follow their lines', () => {
   )
 
   test(
+    'a whole-file comment on a file that changes, not renamed, stays current',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, api } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const whole = yield* add(missionId, {
+              ...codeOn(1, 1),
+              anchor: { ...codeOn(1, 1).anchor, lines: null },
+            })
+            writeFileSync(join(api, 'notes.ts'), textOf([...NOTES, 'line 21']))
+            return liveOf(feedbackOf(yield* stateOf(missionId), whole.id))
+          }),
+        ),
+      )
+      expect(seen).toEqual(AnchorCurrent.make({ path: 'notes.ts', lines: null }))
+    },
+    SLOW,
+  )
+
+  test(
     'an anchor is refused on a repository not in the Workspace, a path not in the diff, a range that is not one, or a Spec item that does not exist',
     async () => {
       const { run } = engine()

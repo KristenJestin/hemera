@@ -580,7 +580,12 @@ export const reviewLayer = (settings: ReviewSettings) =>
             if (moved === undefined && same?.status === 'D')
               return AnchorOutdated.make({ why: 'the file was deleted' })
             pathNow = moved?.path ?? path
-            if (lines === null) return AnchorMoved.make({ path: pathNow, lines: null })
+            // A whole-file comment is outdated only when its file is gone: changed, it holds.
+            if (lines === null) {
+              return pathNow === path
+                ? AnchorCurrent.make({ path, lines: null })
+                : AnchorMoved.make({ path: pathNow, lines: null })
+            }
             sideNow = yield* snapshots.read(missionId, repository, live.tree, pathNow)
             if (sideNow === null) return AnchorOutdated.make({ why: 'the file was deleted' })
           }
