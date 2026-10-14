@@ -435,6 +435,11 @@ describe('What a CLI printed is masked at least as much as the whole text would 
     expect(maskPrinted(ndjson, [])).toBe(ndjson)
   })
 
+  test('a known value as printed, escape and all, is masked over the characters it writes', () => {
+    const printed = String.raw`{"a":"pre xx\u0041yyy post"}`
+    expect(maskPrinted(printed, [String.raw`xx\u0041yyy`])).toBe(`{"a":"pre ${MASK} post"}`)
+  })
+
   test('a line is read as JSON exactly when JSON.parse reads it', () => {
     const piece = fc.constantFrom(
       '{',
