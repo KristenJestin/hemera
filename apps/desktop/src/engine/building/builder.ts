@@ -111,6 +111,7 @@ import {
   attemptFiles,
   type BuildingBase,
   type BuildingRow,
+  type DecisionRow,
   NeedCause,
   type TaskNow,
   activeBuildingIn,
@@ -268,7 +269,8 @@ const answerOf = (need: Need): string | null => {
  * a green run and its record, between the proofs written and a conflict handed over, between the
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
- * transaction that withdraws its need. Never held otherwise.
+ * transaction that withdraws its need; once a need ended, before what it held is released. Never
+ * held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -288,14 +290,13 @@ export type BuilderHold = (
     | 'greening'
     | 'greens-due'
     | 'handing'
-    | 'retrying',
+    | 'retrying'
+    | 'releasing',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
-  let takeRetry:
-    | ((needId: string, transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>)
-    | null = null
+  let takeRetry: NonNullable<NeedHandler['retriedIn']> | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
       apply === null
@@ -304,7 +305,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
     // An environment need holds until the user's Retry says it is fixed.
     recheck: (_need, retried) => Effect.succeed(!retried),
     retriedIn: (need, transaction) =>
-      takeRetry === null ? Effect.succeed([]) : Effect.as(takeRetry(need.id, transaction), []),
+      takeRetry === null ? Effect.succeed([]) : takeRetry(need, transaction),
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
   let takeRestart: Effect.Effect<void> | null = null
@@ -1735,13 +1736,33 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           )
         })
 
-      /** An environment need's Retry: the proof it held leaves `held` with its withdrawal. */
-      takeRetry = (needId, transaction) =>
+      /** A decision whose need ended: kept as ended, the tasks it held released, the plan settled. */
+      const decisionEndedIn = (
+        transaction: EngineTransaction,
+        found: { readonly decision: DecisionRow; readonly building: BuildingRow },
+        how: 'expired' | 'withdrawn',
+      ) =>
         Effect.gen(function* () {
-          const found = yield* decisionOfNeedIn(transaction, needId)
-          if (found === null || found.building.state !== 'active') return
-          if (found.decision.kind !== 'proof_environment' || found.decision.subject === null) return
+          yield* transaction
+            .update(buildingDecisions)
+            .set({ state: how, answeredAt: now() })
+            .where(eq(buildingDecisions.id, found.decision.id))
+            .pipe(Effect.mapError(refusedWhile('ending the decision')))
+          yield* unblockIn(transaction, found.building, found.decision.needId)
+          return (yield* settleIn(transaction, found.building)).events
+        })
+
+      /** An environment need's Retry: the proof it held leaves `held` with its withdrawal. */
+      takeRetry = (need, transaction) =>
+        Effect.gen(function* () {
+          const found = yield* decisionOfNeedIn(transaction, need.id)
+          if (found === null || found.building.state !== 'active') return []
+          if (found.decision.kind !== 'proof_environment' || found.decision.subject === null)
+            return []
+          if (found.decision.state !== 'pending') return []
           yield* proofs.retriedIn(transaction, found.building, found.decision.subject)
+          // Ended with its need, so a stop before the rest of the Retry leaves nothing behind it.
+          return yield* decisionEndedIn(transaction, found, 'withdrawn')
         })
 
       /** A need of the Builder's answered: its decision kept, the amendment applied if chosen. */
@@ -1820,6 +1841,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       /** A need of the Builder's that no longer holds, or that the user's Retry withdrew. */
       const needEnded = (needId: string, how: 'expired' | 'withdrawn', reason: string | null) =>
         Effect.gen(function* () {
+          yield* hold('releasing')
           const outcome = yield* mutate('releasing what a need held', (transaction) =>
             Effect.gen(function* () {
               const found = yield* decisionOfNeedIn(transaction, needId)
@@ -1827,17 +1849,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 return { result: null, events: [] }
               }
               // An answer whose amendment no longer applied expired it and released its tasks
-              // already: only the Builder is left to tell.
+              // already, as a Retry withdrawing an environment need does: only the Builder is left
+              // to tell.
               if (found.decision.state === how) return { result: found, events: [] }
               if (found.decision.state !== 'pending') return { result: null, events: [] }
-              yield* transaction
-                .update(buildingDecisions)
-                .set({ state: how, answeredAt: now() })
-                .where(eq(buildingDecisions.id, found.decision.id))
-                .pipe(Effect.mapError(refusedWhile('ending the decision')))
-              yield* unblockIn(transaction, found.building, needId)
-              const settledNow = yield* settleIn(transaction, found.building)
-              return { result: found, events: settledNow.events }
+              return { result: found, events: yield* decisionEndedIn(transaction, found, how) }
             }),
           )
           if (outcome === null) return

@@ -42,6 +42,7 @@ import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
 import { Runs } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { activeBuildingIn, decisionsIn, tasksIn } from '../src/engine/building/tasks.ts'
 import {
   buildingAttempts,
   buildingDecisions,
@@ -499,6 +500,55 @@ describe('The red phase (CT-35)', () => {
       settingsSection: null,
     })
     expect(seen.view.tasks.find((task) => task.id === 'T2')?.state).toBe('blocked')
+  })
+
+  test('a stop between an environment need’s Retry and its decision leaves nothing behind the withdrawn need: after the start, the proof is run again and asked about anew', async () => {
+    const port = await closedPort()
+    const spec = () => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          `  await new Promise((done, fail) => connect(${String(port)}, '127.0.0.1').on('connect', done).on('error', fail))`,
+          ["import { connect } from 'node:net'"],
+        ),
+      ),
+    })
+    // The engine stops once the need is withdrawn, before anything else of the Retry is done.
+    const stop = holdOnce('releasing')
+    const first = await proofsEngine(data, stop.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(spec)
+          const need = yield* needOf(mission.id, 'Environment')
+          yield* retryNeed(need.id)
+          yield* Deferred.await(stop.reached)
+          return { mission, need }
+        }),
+      ),
+    )
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const again = yield* needOf(first.mission.id, 'Environment')
+          const database = yield* Database
+          const building = yield* activeBuildingIn(database, first.mission.id)
+          if (building === null) return yield* Effect.die(new Error('no Building'))
+          const decision = (yield* decisionsIn(database, building.id)).find(
+            (one) => one.needId === first.need.id,
+          )
+          const cause = (yield* tasksIn(database, building.id)).find(
+            (one) => one.id === 'T2',
+          )?.blockedBy
+          const blockedOn = Predicate.isTagged(cause, 'Need') ? cause.needId : null
+          return { again, decision: decision?.state, blockedOn }
+        }),
+      ),
+    )
+    expect(seen.again.id).not.toBe(first.need.id)
+    expect(seen.decision).toBe('withdrawn')
+    expect(seen.blockedOn).toBe(seen.again.id)
   })
 
   /** A bug seen today: what Planning observed, its key line, and where it was seen. */
