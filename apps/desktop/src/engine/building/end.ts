@@ -94,7 +94,7 @@ import {
 } from '../storage/schema.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
-import { BuildingEnd } from './builder.ts'
+import { BuildingEnd, redsAnsweredId } from './builder.ts'
 import { checkResultsIn } from './attempts.ts'
 import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
@@ -538,19 +538,54 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
        * that red ended yet. The red is delivered under the attempt's id: still queued, it waits;
        * taken, it waits for a turn that ended after it was taken, so a turn that started before
        * it is never counted. A red with no delivery kept (a stop between the two) waits for a
-       * turn that ended after the attempt opened.
+       * turn that ended after the attempt opened. The user's answer to three reds waits the same
+       * way until a judgement follows it (#309): the Builder acts on it before the reds are judged.
        */
       const waitsOnBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           const database = yield* Database
-          const open = (yield* attemptsIn(database, building.id)).findLast(
-            (one) =>
-              one.taskId === null &&
-              one.scope === 'end' &&
-              one.subject === null &&
-              one.endedAt === null,
+          const attempts = (yield* attemptsIn(database, building.id)).filter(
+            (one) => one.taskId === null && one.scope === 'end' && one.subject === null,
           )
-          if (open === undefined || open.number === 1) return false
+          const open = attempts.findLast((one) => one.endedAt === null)
+          /** Whether the Builder took what it was handed, and ended a turn after it. */
+          const handed = (id: string, opened: string) =>
+            Effect.gen(function* () {
+              const turned = turnedOf(
+                building.id,
+                (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
+              )
+              const [told] = yield* database
+                .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
+                .from(sessionDeliveries)
+                .where(eq(sessionDeliveries.id, id))
+                .pipe(Effect.mapError(refusedWhile('reading what was delivered to the Builder')))
+              if (told?.state === 'queued') return true
+              const since = told?.sentAt ?? opened
+              return turned === null || turned <= since
+            })
+          if (open === undefined) {
+            const [answered] = yield* database
+              .select({ needId: buildingDecisions.needId, at: buildingDecisions.answeredAt })
+              .from(buildingDecisions)
+              .where(
+                and(
+                  eq(buildingDecisions.buildingId, building.id),
+                  eq(buildingDecisions.kind, 'error'),
+                  eq(buildingDecisions.scope, 'end'),
+                  isNull(buildingDecisions.subject),
+                  eq(buildingDecisions.state, 'answered'),
+                ),
+              )
+              .orderBy(desc(buildingDecisions.answeredAt))
+              .limit(1)
+              .pipe(Effect.mapError(refusedWhile('reading the answers to three reds')))
+            const at = answered?.at ?? null
+            if (answered === undefined || at === null) return false
+            if (attempts.some((one) => one.startedAt > at)) return false
+            return yield* handed(redsAnsweredId(answered.needId), at)
+          }
+          if (open.number === 1) return false
           if ((yield* checkResultsIn(database, open.id)).length > 0) return false
           const checking = yield* database
             .select({ name: buildingCheckRuns.name })
@@ -558,18 +593,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             .where(eq(buildingCheckRuns.attemptId, open.id))
             .pipe(Effect.mapError(refusedWhile('reading the checks running')))
           if (checking.length > 0) return false
-          const turned = turnedOf(
-            building.id,
-            (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
-          )
-          const [red] = yield* database
-            .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
-            .from(sessionDeliveries)
-            .where(eq(sessionDeliveries.id, open.id))
-            .pipe(Effect.mapError(refusedWhile('reading the red delivered to the Builder')))
-          if (red?.state === 'queued') return true
-          const since = red?.sentAt ?? open.startedAt
-          return turned === null || turned <= since
+          return yield* handed(open.id, open.startedAt)
         })
 
       /** Whether the last result of a final check is red. */

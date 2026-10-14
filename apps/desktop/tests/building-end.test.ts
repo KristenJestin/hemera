@@ -3921,6 +3921,120 @@ describe('The Builder while the end waits on it', () => {
     )
 
   test(
+    'an answered three-reds need on a final check: no red is counted again before the Builder’s next turn ends',
+    SLOW,
+    async () => {
+      // Once armed, each turn of the Builder holds until the test lets it go.
+      let holding = false
+      const turns: Array<ReturnType<typeof held>> = []
+      // Each pass of the end over its steps, numbered as it begins, and those that finished.
+      let begun = 0
+      const finished: Array<number> = []
+      const { world, run } = ending({
+        checks: ({ scope }) => (scope === 'end' ? [RED] : []),
+        builder: {
+          steps: [says('Read.')],
+          between: () => {
+            if (!holding) return Promise.resolve()
+            const turn = held()
+            turns.push(turn)
+            return turn.promise
+          },
+        },
+        endHold: (at) =>
+          Effect.sync(() => {
+            if (at === 'advancing') begun += 1
+            if (at === 'advanced') finished.push(begun)
+          }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const [need] = yield* until(
+              Effect.map(errorNeedsOf(mission.id), (found) => found.length > 0),
+              LONG,
+            ).pipe(Effect.andThen(errorNeedsOf(mission.id)))
+            if (need === undefined) return yield* Effect.die(new Error('no error need'))
+            const reds = yield* endAttempts(mission.id)
+            // The Builder is in a turn of its own when the user answers: that turn ends after the
+            // answer, and the next one takes it.
+            yield* Sessions.use((sessions) => sessions.settled(builder.session.id))
+            holding = true
+            yield* Sessions.use((sessions) =>
+              sessions.deliver({
+                owner: { kind: 'mission', missionId: mission.id },
+                target: { role: 'builder' },
+                kind: 'note',
+                body: 'Read the export once more.',
+              }),
+            )
+            yield* until(
+              Effect.sync(() => turns.length >= 1),
+              LONG,
+            )
+            yield* answerNeed({
+              id: need.id,
+              answer: WrittenAnswer.make({ text: 'Read the header row from the file.' }),
+              key: need.id,
+            })
+            turns[0]?.release()
+            yield* until(
+              Effect.sync(() => turns.length >= 2),
+              LONG,
+            )
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ state: sessionDeliveries.state })
+                  .from(sessionDeliveries)
+                  .where(
+                    and(
+                      eq(sessionDeliveries.ownerId, mission.id),
+                      eq(sessionDeliveries.kind, 'answer'),
+                    ),
+                  ),
+                (answers) => answers.length === 1 && answers[0]?.state === 'sent',
+              ),
+              LONG,
+            )
+            // The end is driven while the turn on the answer runs: a whole pass, begun after it.
+            const from = begun
+            yield* mutate('driving the end', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [buildingEvent(mission.id, 'building.resumed')],
+              }),
+            )
+            yield* until(
+              Effect.sync(() => finished.some((one) => one > from)),
+              LONG,
+            )
+            const whileTaken = yield* endAttempts(mission.id)
+            turns[1]?.release()
+            yield* until(
+              Effect.map(endAttempts(mission.id), (verdicts) => verdicts.length >= 4),
+              LONG,
+            )
+            return { reds, whileTaken, after: (yield* endAttempts(mission.id)).slice(0, 4) }
+          }),
+        ),
+      ).finally(() => {
+        holding = false
+        for (const turn of turns) turn.release()
+      })
+      expect(seen.reds).toEqual(['red', 'red', 'red'])
+      expect(seen.whileTaken).toEqual(['red', 'red', 'red'])
+      expect(seen.after).toEqual(['red', 'red', 'red', 'red'])
+    },
+  )
+
+  test(
     'a Builder that was live when the end first waited at refresh, then stopped with no need, is brought back: only a resume the end started counts',
     SLOW,
     async () => {
