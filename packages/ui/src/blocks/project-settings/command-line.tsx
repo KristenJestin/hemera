@@ -57,14 +57,6 @@ export interface CommandLineFieldProps {
   systems?: boolean | undefined
 }
 
-/** A line with nothing in it yet. */
-export const EMPTY_LINE: CommandLineValue = {
-  command: null,
-  line: '',
-  lineLinux: null,
-  lineWindows: null,
-}
-
 /** The systems a line of its own may be written for, in the order the fold shows them. */
 const SYSTEMS = [
   { key: 'lineLinux', label: 'Line on Linux' },
