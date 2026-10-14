@@ -126,6 +126,31 @@ const keepFingerprint = (sessionId: string, path: string, fingerprint: string) =
       )
   })
 
+/** Passes what a session read or wrote to its successor at a restart: it writes on those versions. */
+export const passFingerprints = (from: string, to: string) =>
+  mutate('passing on what the session read', (transaction) =>
+    Effect.gen(function* () {
+      const kept = yield* transaction
+        .select()
+        .from(sessionFiles)
+        .where(eq(sessionFiles.sessionId, from))
+        .pipe(Effect.mapError(refusedWhile('reading what the session read')))
+      if (kept.length > 0)
+        yield* transaction
+          .insert(sessionFiles)
+          .values(
+            kept.map(({ path, fingerprint, recordedAt }) => ({
+              sessionId: to,
+              path,
+              fingerprint,
+              recordedAt,
+            })),
+          )
+          .pipe(Effect.mapError(refusedWhile('passing on what the session read')))
+      return { result: undefined, events: [] }
+    }),
+  )
+
 /** The code of a system error, when it has one. */
 const codeOf = (cause: Error): string | undefined =>
   'code' in cause && Predicate.isString(cause.code) ? cause.code : undefined
