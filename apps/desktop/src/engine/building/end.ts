@@ -22,7 +22,16 @@
  * (the last green's, which holds the proofs' turn).
  */
 
-import { existsSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, relative } from 'node:path'
 
 import {
@@ -213,8 +222,15 @@ export const withheldIn = (copy: string) => {
       }
       const named = relative(copy, path).replaceAll('\\', '/')
       if (!withheldFromReviewers(named) && (!entry.isSymbolicLink() || leadsIn(path))) continue
+      const standIn = `content withheld: ${named}\n`
+      // Withheld already (a copy reused): left as it is, under a reviewer that may be reading it.
+      const already =
+        entry.isFile() &&
+        statSync(path).size === Buffer.byteLength(standIn) &&
+        readFileSync(path, 'utf8') === standIn
+      if (already) continue
       rmSync(path, { force: true })
-      writeFileSync(path, `content withheld: ${named}\n`)
+      writeFileSync(path, standIn)
     }
   }
   walk(copy)
@@ -303,10 +319,12 @@ const specialTaskIn = (
   })
 
 /**
- * Where a suite holds the end: as it takes in the end of a Builder's turn, and as a pass over its
- * steps begins and ends. Nothing otherwise.
+ * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
+ * steps begins and ends, and once the review checkpoint is taken. Nothing otherwise.
  */
-export type EndHold = (at: 'turned' | 'advancing' | 'advanced') => Effect.Effect<void>
+export type EndHold = (
+  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken',
+) => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
@@ -617,27 +635,25 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                       baseRef: null,
                       baseCommit: base.commit,
                     })),
+                    // Kept with the checkpoint, in its transaction: a stop leaves no orphan.
+                    (transaction, taken) =>
+                      transaction
+                        .update(buildings)
+                        .set({ reviewCheckpointId: taken })
+                        .where(
+                          and(eq(buildings.id, building.id), isNull(buildings.reviewCheckpointId)),
+                        )
+                        .pipe(
+                          Effect.mapError(refusedWhile('keeping the review checkpoint')),
+                          Effect.as([
+                            buildingEvent(missionId, 'review.checkpoint_taken', {
+                              checkpoint: taken,
+                            }),
+                          ]),
+                        ),
                   ),
                 ))
-              if (building.reviewCheckpointId === null) {
-                yield* mutate('keeping the review checkpoint', (transaction) =>
-                  transaction
-                    .update(buildings)
-                    .set({ reviewCheckpointId: checkpointId })
-                    .where(and(eq(buildings.id, building.id), isNull(buildings.reviewCheckpointId)))
-                    .pipe(
-                      Effect.mapError(refusedWhile('keeping the review checkpoint')),
-                      Effect.as({
-                        result: undefined,
-                        events: [
-                          buildingEvent(missionId, 'review.checkpoint_taken', {
-                            checkpoint: checkpointId,
-                          }),
-                        ],
-                      }),
-                    ),
-                )
-              }
+              yield* hold('checkpoint_taken')
               yield* copyOf(building, checkpointId)
               return yield* moveOn(building, 'review')
             }

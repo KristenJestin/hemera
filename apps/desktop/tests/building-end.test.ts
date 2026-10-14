@@ -12,11 +12,15 @@
  */
 
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -28,6 +32,7 @@ import {
   type DocRecipeDraft,
   SESSION_STATES,
   SPEC_IS_RIGHT,
+  REVIEWERS,
   START_AGAIN,
   TOOLS,
   WrittenAnswer,
@@ -39,6 +44,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Predicate,
@@ -89,7 +95,9 @@ import {
   agentSessions,
   buildingTasks,
   buildings,
+  checkpointFiles,
   checkpoints,
+  missions,
   permissionRequests,
   documenterPasses,
   domainEvents,
@@ -109,6 +117,7 @@ import { ToolAccess } from '../src/engine/tools/access.ts'
 import { ProfileHome } from '../src/engine/profile-home.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
+import { sweepDiagnostics } from '../src/engine/retention.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { git } from './repositories.ts'
 
@@ -1214,6 +1223,24 @@ describe('The copy the reviewers read', () => {
       expect(read(join(copy, 'api', 'beside'))).toBe('content withheld: api/beside\n')
     },
   )
+
+  test('a reviewer reading a withheld file while its copy is reused (a Retry) keeps reading it', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+    withheldIn(copy)
+    const path = join(copy, 'api', '.env')
+    // The reader opened the stand-in before the reuse, and still holds it.
+    const reader = openSync(path, 'r')
+    try {
+      const opened = fstatSync(reader, { bigint: true }).ino
+      withheldIn(copy)
+      expect(statSync(path, { bigint: true }).ino).toBe(opened)
+      expect(readFileSync(reader, 'utf8')).toBe('content withheld: api/.env\n')
+    } finally {
+      closeSync(reader)
+    }
+    expect(read(path)).toBe('content withheld: api/.env\n')
+  })
 
   test('withholding a copy twice leaves it as once', () => {
     const copy = copyIn()
@@ -5204,6 +5231,194 @@ describe('The reviewers count in the cap', () => {
     expect(seen.one.map((one) => one.state).toSorted()).toEqual(['running', 'waiting'])
     expect(seen.waited).toHaveLength(2)
   })
+
+  test(
+    'a restart while a reviewer runs and three sub-agents hold the cap: the rebuilt reviewer waits for a slot',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { project, mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const limits = yield* projectLimits(project.id)
+            yield* setProjectLimits(project.id, { ...limits, cap: 6 })
+            yield* builtAll(builder.grantId)
+            const owner = { kind: 'mission' as const, missionId: mission.id }
+            const helpers: string[] = []
+            for (const _ of [1, 2, 3]) {
+              const helper = yield* Sessions.use((sessions) =>
+                sessions.open({
+                  owner,
+                  role: 'helper',
+                  folder: builder.session.folder,
+                  requestedBy: 'agent',
+                }),
+              )
+              helpers.push(helper.lineage)
+            }
+            yield* documented(before.world, mission.id)
+            yield* reviewing(mission.id)
+            // The cap lowered while the engine was stopped: three slots for five sessions.
+            yield* setProjectLimits(project.id, { ...limits, cap: 3 })
+            return { mission, helpers }
+          }),
+        ),
+      )
+      // The reviewers start only once the three sub-agents hold every slot.
+      const reviewersHeld = held()
+      const after = ending({
+        resumed: true,
+        sessionHold: (at, session) =>
+          at === 'starting' && REVIEWERS.some((one) => one === session.role)
+            ? Effect.promise(() => reviewersHeld.promise)
+            : Effect.void,
+      })
+      const missionId = left.mission.id
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const live = Effect.map(
+              sessionsIn(['starting', 'working', 'idle'], { kind: 'mission', missionId }),
+              (rows) => rows.filter((row) => row.role !== 'builder'),
+            )
+            const running = Effect.map(live, (rows) =>
+              rows.filter((row) => row.state !== 'starting'),
+            )
+            yield* until(
+              Effect.map(
+                running,
+                (rows) => rows.filter((row) => row.role === 'helper').length === 3,
+              ),
+              LONG,
+            )
+            reviewersHeld.release()
+            const now = Memory.use((memory) => memory.now(missionId))
+            yield* until(
+              Effect.map(now, (state) => state.slotWait !== null),
+              LONG,
+            )
+            // Long enough for a reviewer that took no slot to start working.
+            yield* Effect.sleep('1 second')
+            const full = { now: yield* now, live: yield* live, running: yield* running }
+            yield* Sessions.use((sessions) => sessions.end(left.helpers[0] ?? '', 'done'))
+            yield* until(
+              Effect.map(running, (rows) =>
+                rows.some((row) => REVIEWERS.some((one) => one === row.role)),
+              ),
+              LONG,
+            )
+            yield* Effect.sleep('1 second')
+            return { full, freed: yield* running }
+          }),
+        ),
+      )
+      expect(seen.full.live.filter((row) => row.role !== 'helper').map((row) => row.state)).toEqual(
+        ['starting', 'starting'],
+      )
+      expect(seen.full.running.map((row) => row.role)).toEqual(['helper', 'helper', 'helper'])
+      expect(seen.full.now.slotWait).toContain('3 of 3 in use')
+      // A slot freed: one reviewer takes it, never more than the cap.
+      expect(seen.freed).toHaveLength(3)
+      expect(seen.freed.filter((row) => row.role === 'helper')).toHaveLength(2)
+    },
+  )
+
+  test(
+    'a restart while one pass runs, the other waits for its slot, and three sub-agents hold the cap: never more agents than the cap',
+    SLOW,
+    async () => {
+      const before = ending()
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { project, mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const limits = yield* projectLimits(project.id)
+            yield* setProjectLimits(project.id, { ...limits, cap: 4 })
+            yield* builtAll(builder.grantId)
+            yield* agentOf(before.world, mission.id, 'documenter')
+            const owner = { kind: 'mission' as const, missionId: mission.id }
+            for (const _ of [1, 2, 3]) {
+              yield* Sessions.use((sessions) =>
+                sessions.open({
+                  owner,
+                  role: 'helper',
+                  folder: builder.session.folder,
+                  requestedBy: 'agent',
+                }),
+              )
+            }
+            yield* documented(before.world, mission.id)
+            // The documenter's slot goes to one reviewer; the other waits for one.
+            yield* until(
+              Effect.map(
+                autoReviewOf(mission.id),
+                (review) =>
+                  (review?.passes.map((one) => one.state).toSorted() ?? []).join() ===
+                  'running,waiting',
+              ),
+              LONG,
+            )
+            yield* setProjectLimits(project.id, { ...limits, cap: 3 })
+            return mission
+          }),
+        ),
+      )
+      const after = ending({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const running = Effect.map(
+              sessionsIn(['working', 'idle'], { kind: 'mission', missionId: left.id }),
+              (rows) => rows.filter((row) => row.role !== 'builder'),
+            )
+            // Every look from the start: the most agents seen running at once.
+            let most = 0
+            const look = Effect.map(running, (rows) => {
+              most = Math.max(most, rows.length)
+              return rows
+            })
+            yield* until(
+              Effect.map(look, (rows) => rows.length === 3),
+              LONG,
+            )
+            for (const _ of Array.from({ length: 50 })) {
+              yield* look
+              yield* Effect.sleep('20 millis')
+            }
+            const full = yield* running
+            const passes = (yield* autoReviewOf(left.id))?.passes ?? []
+            const first = full[0]
+            if (first === undefined) return yield* Effect.die(new Error('nothing runs'))
+            yield* Sessions.use((sessions) => sessions.end(first.lineage, 'done'))
+            yield* until(
+              Effect.map(
+                look,
+                (rows) => rows.length === 3 && !rows.some((row) => row.id === first.id),
+              ),
+              LONG,
+            )
+            for (const _ of Array.from({ length: 50 })) {
+              yield* look
+              yield* Effect.sleep('20 millis')
+            }
+            return { most, full, passes, freed: yield* running }
+          }),
+        ),
+      )
+      expect(seen.most).toBe(3)
+      expect(seen.full).toHaveLength(3)
+      expect(seen.freed).toHaveLength(3)
+      // No pass is recorded again for the restart.
+      expect(seen.passes).toHaveLength(2)
+    },
+  )
 })
 
 /** The verdicts of the end's attempts at the final checks, in their order; null while open. */
@@ -5231,6 +5446,76 @@ const retried = (missionId: string) =>
     yield* answerNeed({ id: need.id, answer: ChosenAnswer.make({ option: 'Retry' }), key: need.id })
     return need
   })
+
+describe('What the review read is kept', () => {
+  test(
+    'retention run over a finished Building keeps its review checkpoint, and the database refuses to drop it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            const database = yield* Database
+            // The mission is over: nothing of it is live for the sweep any more.
+            yield* database
+              .update(missions)
+              .set({ stage: 'done' })
+              .where(eq(missions.id, mission.id))
+            const [building] = yield* database
+              .select()
+              .from(buildings)
+              .where(eq(buildings.missionId, mission.id))
+            const kept = building?.reviewCheckpointId ?? ''
+            const filesOf = database
+              .select()
+              .from(checkpointFiles)
+              .where(eq(checkpointFiles.checkpointId, kept))
+            const before = yield* filesOf
+            // Retention driven a year ahead, its total bound at nothing: all it may sweep goes.
+            const swept = yield* sweepDiagnostics(data, {
+              now: Date.now() + 365 * 24 * 60 * 60 * 1000,
+              maxTotalBytes: 0,
+            })
+            const dropped = yield* Effect.exit(
+              database.delete(checkpoints).where(eq(checkpoints.id, kept)),
+            )
+            return {
+              kept,
+              swept,
+              before,
+              after: yield* filesOf,
+              checkpoints: yield* database
+                .select()
+                .from(checkpoints)
+                .where(eq(checkpoints.id, kept)),
+              passes: yield* database
+                .select()
+                .from(reviewPasses)
+                .where(eq(reviewPasses.missionId, mission.id)),
+              dropped,
+            }
+          }),
+        ),
+      )
+      expect(seen.swept.runs.length + seen.swept.threads.length).toBeGreaterThan(0)
+      expect(seen.checkpoints).toHaveLength(1)
+      expect(seen.before.length).toBeGreaterThan(0)
+      expect(seen.after).toEqual(seen.before)
+      expect(seen.passes.map((one) => one.checkpointId)).toEqual([seen.kept, seen.kept])
+      // A review pass and the Building point to it: the database itself refuses to drop it.
+      expect(Exit.isFailure(seen.dropped)).toBe(true)
+    },
+  )
+})
 
 describe('A pass that fails', () => {
   test(
@@ -5504,6 +5789,64 @@ describe('A restart in the middle of the end', () => {
     expect(seen.types.filter((type) => type === 'building.end_started')).toHaveLength(1)
     expect(seen.types.filter((type) => type === 'building.ended')).toHaveLength(1)
   })
+
+  test(
+    'a restart between the checkpoint’s taking and its saving: one review checkpoint for the Building, no orphan',
+    SLOW,
+    async () => {
+      const taken = held()
+      const before = ending({
+        // The engine stops once the review checkpoint is taken, before the end moves on.
+        endHold: (at) =>
+          at === 'checkpoint_taken'
+            ? Effect.andThen(
+                Effect.sync(() => taken.release()),
+                Effect.never,
+              )
+            : Effect.void,
+      })
+      const left = await before.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(before.world, mission.id)
+            yield* Effect.promise(() => taken.promise)
+            return mission
+          }),
+        ),
+      )
+      const after = ending({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewed(after.world, left.id, 'spec-reviewer')
+            yield* reviewed(after.world, left.id, 'code-reviewer')
+            yield* inReview(left.id)
+            const database = yield* Database
+            return {
+              checkpoints: yield* database
+                .select()
+                .from(checkpoints)
+                .where(and(eq(checkpoints.missionId, left.id), eq(checkpoints.kind, 'review'))),
+              buildings: yield* database
+                .select()
+                .from(buildings)
+                .where(eq(buildings.missionId, left.id)),
+              passes: yield* database.select().from(reviewPasses),
+            }
+          }),
+        ),
+      )
+      expect(seen.checkpoints).toHaveLength(1)
+      const [checkpoint] = seen.checkpoints
+      expect(seen.buildings.map((one) => one.reviewCheckpointId)).toEqual([checkpoint?.id])
+      expect(seen.passes.map((one) => one.checkpointId)).toEqual([checkpoint?.id, checkpoint?.id])
+    },
+  )
 
   test('a restart during the documenter’s pass runs the pass again', SLOW, async () => {
     const before = ending()
