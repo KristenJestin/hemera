@@ -16,6 +16,7 @@ import {
   maskRecord,
   maskShapes,
   maskText,
+  maskTextPaced,
 } from '../src/domain/index.ts'
 
 /** A value as a secret is: long enough to mean something, and nothing a shape would catch. */
@@ -792,5 +793,30 @@ describe('Masking a long output lets the engine go on', () => {
     expect(turnsWhileMasking).toBeGreaterThan(0)
     expect(timerFired).toBe(true)
     expect(masked).toBe(maskPrinted(output, []))
+  })
+
+  test('maskings that run at once give each the mask it gives alone', async () => {
+    const lines = (name: string, count: number) =>
+      Array.from(
+        { length: count },
+        (_, index) => `${name} ${index} Bearer ${name}${index}Zq ghp_${'Q1w2E3r4T5'.repeat(2)}`,
+      ).join('\n')
+    const first = lines('Aa', 3_000)
+    const second = lines('Bb', 2_000)
+    // Slices of 0 ms: each masking gives way after every step, so the two take turns step by
+    // step, whatever the speed of the machine.
+    const [firstPrinted, secondText, secondPrinted] = await Effect.runPromise(
+      Effect.all(
+        [
+          maskPrintedPaced(first, [], 0),
+          maskTextPaced(second, [], 0),
+          maskPrintedPaced(second, [], 0),
+        ],
+        { concurrency: 'unbounded' },
+      ),
+    )
+    expect(firstPrinted).toBe(maskPrinted(first, []))
+    expect(secondText).toBe(maskText(second, []))
+    expect(secondPrinted).toBe(maskPrinted(second, []))
   })
 })

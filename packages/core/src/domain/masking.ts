@@ -139,19 +139,22 @@ const due = (): boolean => {
 /** How long steps run before they give way, in milliseconds. */
 const SLICE = 10
 
-/** Steps run in slices of time, other fibers and the event loop running between two. */
-const paced = <A>(steps: () => Steps<A>): Effect.Effect<A> =>
+/**
+ * Steps run in slices of `slice` milliseconds, other fibers and the event loop running between
+ * two. A slice of 0 gives way after every step.
+ */
+const paced = (steps: () => Steps<string>, slice: number): Effect.Effect<string> =>
   Effect.suspend(() => {
     const running = steps()
-    const slice = (): Effect.Effect<A> => {
-      const until = performance.now() + SLICE
+    const next = (): Effect.Effect<string> => {
+      const until = performance.now() + slice
       for (;;) {
         const step = running.next()
         if (step.done === true) return Effect.succeed(step.value)
-        if (performance.now() >= until) return Effect.flatMap(Effect.yieldNow, slice)
+        if (performance.now() >= until) return Effect.flatMap(Effect.yieldNow, next)
       }
     }
-    return slice()
+    return next()
   })
 
 /** Text with its edits made; they are in order and do not overlap. */
@@ -183,13 +186,27 @@ const SHAPES: ReadonlyArray<Shape> = [
   [LABELLED_CREDENTIAL, ([label = '', separator = '']) => `${label}${separator}${MASK}`],
 ]
 
+/**
+ * The first match of a shape's pattern in the text from `from`. The pattern is one object every
+ * masking shares, and a paced masking gives way between two steps while another runs: where a
+ * search starts is set just before it, and read back at once, never left in the pattern across a
+ * step. (`exec` on the shared pattern rather than `matchAll`, which copies the pattern at each
+ * call, and this runs for every string of a JSON answer.)
+ */
+const matchFrom = (pattern: RegExp, text: string, from: number): RegExpExecArray | null => {
+  pattern.lastIndex = from
+  return pattern.exec(text)
+}
+
 /** What one shape replaces in a text. */
 function* shapeEdits(text: string, [pattern, by]: Shape): Steps<ReadonlyArray<Edit>> {
-  // `exec` on the shape's own pattern: `matchAll` copies the pattern at each call, and this runs
-  // for every string of a JSON answer.
   const edits: Edit[] = []
-  pattern.lastIndex = 0
-  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+  let from = 0
+  for (;;) {
+    const match = matchFrom(pattern, text, from)
+    if (match === null) break
+    // No shape matches nothing: the next search starts past this match.
+    from = match.index + match[0].length
     edits.push({
       start: match.index,
       end: match.index + match[0].length,
@@ -295,10 +312,7 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
  */
 const untouched = (text: string, known: ReadonlyArray<string>): boolean =>
   known.every((value) => !text.includes(value)) &&
-  SHAPES.every(([pattern]) => {
-    pattern.lastIndex = 0
-    return !pattern.test(text)
-  })
+  SHAPES.every(([pattern]) => matchFrom(pattern, text, 0) === null)
 
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
@@ -308,13 +322,17 @@ export function maskText(text: string, values: ReadonlyArray<string>): Masked<st
   return maskedString(done(textMasked(text, longestFirst(values))))
 }
 
-/** As `maskText`, in slices of time: other fibers run while a long text is masked. */
+/**
+ * As `maskText`, in slices of time: other fibers run while a long text is masked. `slice` is how
+ * long a slice runs, in milliseconds.
+ */
 export const maskTextPaced = (
   text: string,
   values: ReadonlyArray<string>,
+  slice = SLICE,
 ): Effect.Effect<Masked<string>> =>
   Effect.map(
-    paced(() => textMasked(text, longestFirst(values))),
+    paced(() => textMasked(text, longestFirst(values)), slice),
     maskedString,
   )
 
@@ -698,14 +716,15 @@ export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked
 
 /**
  * As `maskPrinted`, in slices of time: other fibers run while a long output is masked, and the
- * engine answers meanwhile.
+ * engine answers meanwhile. `slice` is how long a slice runs, in milliseconds.
  */
 export const maskPrintedPaced = (
   text: string,
   values: ReadonlyArray<string>,
+  slice = SLICE,
 ): Effect.Effect<Masked<string>> =>
   Effect.map(
-    paced(() => printedMasked(text, longestFirst(values))),
+    paced(() => printedMasked(text, longestFirst(values)), slice),
     maskedString,
   )
 
