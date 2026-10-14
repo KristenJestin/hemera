@@ -89,6 +89,14 @@ export interface NeedHandler {
    * the user's Retry, which tries again whatever changed; otherwise Hemera looks again by itself.
    */
   readonly recheck?: (need: Need, retried: boolean) => Effect.Effect<boolean>
+  /**
+   * What the user's Retry moves in the owner's own state, inside the transaction that withdraws
+   * the need: a failure there leaves the need open, for the user to Retry again.
+   */
+  readonly retriedIn?: (
+    need: Need,
+    transaction: EngineTransaction,
+  ) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError>
 }
 
 export class NeedOwners extends Context.Service<
@@ -627,23 +635,33 @@ export const answerNeed = (asked: NeedAnswerAsked) =>
   })
 
 /** Ends a pending need without an answer: it expired, or its owner withdrew it. */
-const endNeed = (id: string, state: 'expired' | 'withdrawn', reason: string) =>
+const endNeed = (
+  id: string,
+  state: 'expired' | 'withdrawn',
+  reason: string,
+  within: (
+    transaction: EngineTransaction,
+  ) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError> = () => Effect.succeed([]),
+) =>
   Effect.gen(function* () {
     const row = yield* needRow(id)
     yield* mutate(`ending a need`, (transaction) =>
-      transaction
-        .update(needs)
-        .set({ state, endedReason: reason, endedAt: now() })
-        .where(and(eq(needs.id, id), eq(needs.state, 'pending')))
-        .returning({ id: needs.id })
-        .pipe(
-          Effect.mapError(refusedWhile('ending a need')),
-          Effect.map((written) => ({
-            result: undefined,
-            events:
-              written.length === 0 ? [] : [needEvent(`need.${state}`, row, BY_HEMERA, { reason })],
-          })),
-        ),
+      Effect.gen(function* () {
+        const written = yield* transaction
+          .update(needs)
+          .set({ state, endedReason: reason, endedAt: now() })
+          .where(and(eq(needs.id, id), eq(needs.state, 'pending')))
+          .returning({ id: needs.id })
+          .pipe(Effect.mapError(refusedWhile('ending a need')))
+        if (written.length === 0) return { result: undefined, events: [] }
+        return {
+          result: undefined,
+          events: [
+            ...(yield* within(transaction)),
+            needEvent(`need.${state}`, row, BY_HEMERA, { reason }),
+          ],
+        }
+      }),
     )
     return yield* getNeed(id)
   })
@@ -687,9 +705,16 @@ export const retryNeed = (id: string) =>
     if (need.state !== 'pending') return need
     const row = yield* needRow(id)
     const owners = yield* NeedOwners
-    const recheck = owners.handlers.get(row.service)?.recheck
-    if (recheck === undefined) return need
-    return (yield* recheck(need, true)) ? need : yield* withdrawNeed(id, RESOLVED)
+    const handler = owners.handlers.get(row.service)
+    if (handler?.recheck === undefined) return need
+    if (yield* handler.recheck(need, true)) return need
+    const { retriedIn } = handler
+    return yield* endNeed(
+      id,
+      'withdrawn',
+      RESOLVED,
+      retriedIn === undefined ? undefined : (transaction) => retriedIn(need, transaction),
+    )
   })
 
 /**

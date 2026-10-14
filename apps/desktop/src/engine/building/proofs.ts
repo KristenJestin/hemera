@@ -186,7 +186,7 @@ export type ProofNeeds =
 export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
-  readonly hold: (at: 'greening' | 'handing' | 'greens-due') => Effect.Effect<void>
+  readonly hold: (at: 'greening' | 'handing' | 'greens-due' | 'retrying') => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
   readonly loop: Loop
@@ -1638,20 +1638,50 @@ export const buildingProofs = (parts: ProofParts) => {
       return false
     })
 
+  /** The phase of the run a proof was held on, which its Retry runs again: a red by default. */
+  const heldPhaseIn = (
+    reader: EngineTransaction | Database['Service'],
+    building: BuildingRow,
+    row: ScenarioProofRow,
+  ) =>
+    Effect.gen(function* () {
+      const run = (yield* proofRunsIn(reader, building.id)).find((one) => one.id === row.heldRunId)
+      const found = PROOF_PHASES.find((one) => one === run?.phase)
+      return found === undefined || found === 'info' ? 'red' : found
+    })
+
   /**
-   * An environment need's Retry: the scenario is back in the state it was held from, and the run it
-   * was held on runs again now, a red, or a green or a rerun (#306).
+   * An environment need's Retry, in the transaction that withdraws its need: the scenario is back
+   * in the state it was held from, or, when that write fails, still held behind a need still open
+   * (#306). It is said as running from before it leaves `held` until its run is recorded: the end
+   * never takes it meanwhile for a stale proof nothing runs.
+   */
+  const retriedIn = (transaction: EngineTransaction, building: BuildingRow, scenario: string) =>
+    Effect.gen(function* () {
+      const row = yield* scenarioProofIn(transaction, building.id, scenario)
+      if (row === null || stateOf(row) !== 'held') return
+      const again = yield* heldPhaseIn(transaction, building, row)
+      const left = retrying.get(building.missionId) ?? []
+      if (!left.includes(scenario)) retrying.set(building.missionId, [...left, scenario])
+      yield* parts.hold('retrying')
+      yield* setProofIn(transaction, building.id, scenario, {
+        state: HELD_FROM[again],
+        needId: null,
+      })
+    })
+
+  /**
+   * Once its need is withdrawn, the run the Retry's scenario was held on runs again now, a red, or
+   * a green or a rerun (#306). Once it is no longer said to run, the end is judged again: a drive
+   * while it ran left it out, and its run may have left it stale with no event of its own (a tree
+   * moved meanwhile), or never been recorded at all.
    */
   const retried = (building: BuildingRow, scenario: string) =>
     Effect.gen(function* () {
       const { missionId } = building
-      // Said as running before it leaves `held`, and until its run is recorded: the end never takes
-      // it meanwhile for a stale proof nothing runs. Once it is no longer said to run, the end is
-      // judged again: a drive while it ran left it out, and its run may have left it stale with no
-      // event of its own (a tree moved meanwhile), or never been recorded at all.
+      if (!(retrying.get(missionId) ?? []).includes(scenario)) return
       const over = Effect.sync(() => {
-        const left = [...(retrying.get(missionId) ?? [])]
-        left.splice(left.indexOf(scenario), 1)
+        const left = (retrying.get(missionId) ?? []).filter((one) => one !== scenario)
         if (left.length === 0) retrying.delete(missionId)
         else retrying.set(missionId, left)
       }).pipe(
@@ -1665,24 +1695,12 @@ export const buildingProofs = (parts: ProofParts) => {
         ),
         Effect.catchCause((cause) => said(`the end was not judged again: ${String(cause)}`)),
       )
-      retrying.set(missionId, [...(retrying.get(missionId) ?? []), scenario])
-      const heldOn = yield* mutate('running a proof again', (transaction) =>
-        Effect.gen(function* () {
-          const row = yield* scenarioProofIn(transaction, building.id, scenario)
-          if (row === null || stateOf(row) !== 'held') return { result: null, events: [] }
-          const run = (yield* proofRunsIn(transaction, building.id)).find(
-            (one) => one.id === row.heldRunId,
-          )
-          const found = PROOF_PHASES.find((one) => one === run?.phase)
-          const again = found === undefined || found === 'info' ? 'red' : found
-          yield* setProofIn(transaction, building.id, scenario, {
-            state: HELD_FROM[again],
-            needId: null,
-          })
-          return { result: again, events: [] }
-        }),
-      ).pipe(Effect.onError(() => over))
-      const phase = heldOn ?? 'red'
+      const database = yield* Database
+      const row = yield* scenarioProofIn(database, building.id, scenario).pipe(
+        Effect.onError(() => over),
+      )
+      if (row === null) return yield* over
+      const phase = yield* heldPhaseIn(database, building, row).pipe(Effect.onError(() => over))
       yield* parts.background(
         inTurn(
           missionId,
@@ -1867,6 +1885,7 @@ export const buildingProofs = (parts: ProofParts) => {
     afterAnswer,
     retried,
     rerunning,
+    retriedIn,
     heldOnUser,
     proofRun,
     refresh,

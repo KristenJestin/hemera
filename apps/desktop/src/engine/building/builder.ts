@@ -267,7 +267,8 @@ const answerOf = (need: Need): string | null => {
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
  * a green run and its record, between the proofs written and a conflict handed over, between the
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
- * the Builder back; once it went past the Builder. Never held otherwise.
+ * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
+ * transaction that withdraws its need. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -286,11 +287,15 @@ export type BuilderHold = (
     | 'proving'
     | 'greening'
     | 'greens-due'
-    | 'handing',
+    | 'handing'
+    | 'retrying',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
+  let takeRetry:
+    | ((needId: string, transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>)
+    | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
       apply === null
@@ -298,6 +303,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         : apply(need, transaction),
     // An environment need holds until the user's Retry says it is fixed.
     recheck: (_need, retried) => Effect.succeed(!retried),
+    retriedIn: (need, transaction) =>
+      takeRetry === null ? Effect.succeed([]) : Effect.as(takeRetry(need.id, transaction), []),
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
   let takeRestart: Effect.Effect<void> | null = null
@@ -1726,6 +1733,15 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               ...(waits.length === 0 ? [] : ['', ...waits]),
             ].join('\n'),
           )
+        })
+
+      /** An environment need's Retry: the proof it held leaves `held` with its withdrawal. */
+      takeRetry = (needId, transaction) =>
+        Effect.gen(function* () {
+          const found = yield* decisionOfNeedIn(transaction, needId)
+          if (found === null || found.building.state !== 'active') return
+          if (found.decision.kind !== 'proof_environment' || found.decision.subject === null) return
+          yield* proofs.retriedIn(transaction, found.building, found.decision.subject)
         })
 
       /** A need of the Builder's answered: its decision kept, the amendment applied if chosen. */
