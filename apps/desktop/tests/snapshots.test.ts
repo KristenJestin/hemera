@@ -42,6 +42,7 @@ import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, fileContents, snapshotFiles } from '../src/engine/storage/schema.ts'
 import { commandsEngine } from './commands-engine.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git, remote } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -793,6 +794,74 @@ describe('A secret in a copied content is masked', () => {
     expect(seen.read).toMatchObject({ sha256: fingerprint, masked: true, withheld: null })
     expect(Buffer.from(seen.read?.content ?? []).toString('utf8')).toBe("const key = '•••'\n")
     expect(foundIn(data, value)).toEqual([])
+  })
+})
+
+describe('A large file is masked in slices the engine answers between (#402)', () => {
+  test('a large JSON file a snapshot captures is stored masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const { main, worktree } = workspace()
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const expected = unwatched.mask(original)
+    expect(expected).not.toContain(value)
+
+    const rows = await commandsEngine(data, { secrets })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const acme = { name: 'acme', folder: worktree }
+          const start = yield* snapshots.take(acme, attempt(missionId, 'start'))
+          writeFileSync(join(worktree, 'lock.json'), original)
+          const end = yield* snapshots.take(acme, attempt(missionId, 'end'))
+          const files = yield* snapshots.changed(missionId, acme, start, end)
+          yield* snapshots.capture(missionId, acme, start, end, files)
+          return yield* Database.use((database) => database.select().from(fileContents)).pipe(
+            Effect.orDie,
+          )
+        }),
+      ),
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.masked).toBe(true)
+    expect(rows[0]?.bytes.toString('utf8')).toBe(expected)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(1)
+    expect(watch.pacedTurns[0]).toBeGreaterThan(0)
+  })
+})
+
+describe('A large file read from a snapshot is masked in slices too (#402)', () => {
+  test('a large JSON file read back from a tree of the store comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const { main, worktree } = workspace()
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+
+    const read = await commandsEngine(data, { secrets })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const acme = { name: 'acme', folder: worktree }
+          writeFileSync(join(worktree, 'lock.json'), original)
+          const end = yield* snapshots.take(acme, attempt(missionId, 'end'))
+          return yield* snapshots.read(missionId, acme, end, 'lock.json')
+        }),
+      ),
+    )
+
+    expect(text(read)).toBe(unwatched.mask(original))
+    expect(read?.masked).toBe(true)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(1)
+    expect(watch.pacedTurns[0]).toBeGreaterThan(0)
   })
 })
 

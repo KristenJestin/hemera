@@ -1033,7 +1033,17 @@ export const probesLayer = (settings: ProbesSettings) =>
               }
               const refused = probeReportRefusal(args) ?? testRefusal(row, args)
               if (refused !== null) return { answer: refusal(refused) }
-              const files = yield* capture(row)
+              const captured = yield* capture(row)
+              // Masked in slices of time before the transaction opens, so the engine answers while
+              // a large file is masked and the database is not held meanwhile (#402). What is
+              // written below is only ever what is masked here.
+              const files = yield* Effect.forEach(captured, (file) =>
+                Effect.all({
+                  content:
+                    file.content === null ? Effect.succeed(null) : secrets.maskPaced(file.content),
+                  patch: file.patch === null ? Effect.succeed(null) : secrets.maskPaced(file.patch),
+                }).pipe(Effect.map(({ content, patch }) => ({ ...file, content, patch }))),
+              )
               const masked = maskedJson(secrets.maskRecord(args))
               const kept = yield* mutate('keeping a Probe’s report', (transaction) =>
                 Effect.gen(function* () {
@@ -1041,7 +1051,7 @@ export const probesLayer = (settings: ProbesSettings) =>
                     if (file.content !== null) {
                       yield* transaction
                         .insert(probeContents)
-                        .values({ sha256: file.sha256, content: secrets.mask(file.content) })
+                        .values({ sha256: file.sha256, content: file.content })
                         .onConflictDoNothing()
                         .pipe(Effect.mapError(refusedWhile('keeping what a Probe left')))
                     }
@@ -1053,7 +1063,7 @@ export const probesLayer = (settings: ProbesSettings) =>
                         path: file.path,
                         status: file.status,
                         sha256: file.sha256,
-                        patch: file.patch === null ? null : secrets.mask(file.patch),
+                        patch: file.patch,
                         withheld: file.withheld,
                       })
                       .onConflictDoNothing()

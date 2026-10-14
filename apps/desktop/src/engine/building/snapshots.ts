@@ -544,44 +544,48 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           ? { added: null, removed: null }
           : (counts.get(change.path) ?? { added: null, removed: null })
 
-      /** The side of a file as it is kept, from its original bytes. */
-      const sideOf = (path: string, mode: string, bytes: Buffer): FileSide => {
-        const sha256 = sha256Of(bytes)
-        if (mode === SUBMODULE_MODE) {
-          return {
-            sha256,
-            size: 0,
-            content: null,
-            withheld: 'content withheld: a submodule',
-            masked: false,
-          }
-        }
-        if (sensitive(path)) {
-          const recorded = withheldOf(bytes)
-          return {
-            sha256: recorded?.sha256 ?? sha256,
-            size: recorded?.size ?? bytes.length,
-            content: null,
-            withheld: `content withheld: ${path}`,
-            masked: false,
-          }
-        }
-        // A binary is kept as it is: masking replaces text, and would break its bytes.
-        if (bytes.includes(0) || !isUtf8(bytes)) {
-          return { sha256, size: bytes.length, content: bytes, withheld: null, masked: false }
-        }
-        const original = bytes.toString('utf8')
-        const masked = secrets.mask(original)
-        return masked === original
-          ? { sha256, size: bytes.length, content: bytes, withheld: null, masked: false }
-          : {
+      /**
+       * The side of a file as it is kept, from its original bytes. A text is masked in slices of
+       * time: the engine answers while a large file is masked (#402).
+       */
+      const sideOf = (path: string, mode: string, bytes: Buffer): Effect.Effect<FileSide> =>
+        Effect.gen(function* () {
+          const sha256 = sha256Of(bytes)
+          if (mode === SUBMODULE_MODE) {
+            return {
               sha256,
-              size: bytes.length,
-              content: Buffer.from(masked, 'utf8'),
-              withheld: null,
-              masked: true,
+              size: 0,
+              content: null,
+              withheld: 'content withheld: a submodule',
+              masked: false,
             }
-      }
+          }
+          if (sensitive(path)) {
+            const recorded = withheldOf(bytes)
+            return {
+              sha256: recorded?.sha256 ?? sha256,
+              size: recorded?.size ?? bytes.length,
+              content: null,
+              withheld: `content withheld: ${path}`,
+              masked: false,
+            }
+          }
+          // A binary is kept as it is: masking replaces text, and would break its bytes.
+          if (bytes.includes(0) || !isUtf8(bytes)) {
+            return { sha256, size: bytes.length, content: bytes, withheld: null, masked: false }
+          }
+          const original = bytes.toString('utf8')
+          const masked = yield* secrets.maskPaced(original)
+          return masked === original
+            ? { sha256, size: bytes.length, content: bytes, withheld: null, masked: false }
+            : {
+                sha256,
+                size: bytes.length,
+                content: Buffer.from(masked, 'utf8'),
+                withheld: null,
+                masked: true,
+              }
+        })
 
       /** The store of the mission's Project, made bare on first use. */
       const storeOf = (missionId: string) =>
@@ -720,9 +724,13 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           const { raw, counts, sizes } = yield* listed(store, env, from, to)
           const kept = raw.filter(keep)
           const contents = yield* contentsOf(store, env, [...new Set(kept.flatMap(blobsOf))], sizes)
-          const side = (path: string, mode: string, blob: string): FileSide | null =>
+          const side = (
+            path: string,
+            mode: string,
+            blob: string,
+          ): Effect.Effect<FileSide | null> =>
             mode === ABSENT_MODE
-              ? null
+              ? Effect.succeed(null)
               : sideOf(
                   path,
                   mode,
@@ -730,15 +738,22 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                     ? Buffer.from(blob)
                     : (contents.get(blob) ?? Buffer.alloc(0)),
                 )
-          return kept.map((change): FileDiff => ({
-            path: change.path,
-            oldPath: change.oldPath,
-            status: change.status,
-            added: countsFor(change, counts).added,
-            removed: countsFor(change, counts).removed,
-            before: side(change.oldPath ?? change.path, change.modeBefore, change.blobBefore),
-            after: side(change.path, change.modeAfter, change.blobAfter),
-          }))
+          return yield* Effect.forEach(kept, (change) =>
+            Effect.all({
+              before: side(change.oldPath ?? change.path, change.modeBefore, change.blobBefore),
+              after: side(change.path, change.modeAfter, change.blobAfter),
+            }).pipe(
+              Effect.map(({ before, after }): FileDiff => ({
+                path: change.path,
+                oldPath: change.oldPath,
+                status: change.status,
+                added: countsFor(change, counts).added,
+                removed: countsFor(change, counts).removed,
+                before,
+                after,
+              })),
+            ),
+          )
         })
 
       /** One side as the database kept it, its content joined. */
@@ -1022,9 +1037,9 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                 const [entry] = entries
                 if (entry === undefined) return null
                 const [mode = '', , blob = ''] = entry.slice(0, entry.indexOf('\t')).split(' ')
-                if (mode === SUBMODULE_MODE) return sideOf(path, mode, Buffer.from(blob))
+                if (mode === SUBMODULE_MODE) return yield* sideOf(path, mode, Buffer.from(blob))
                 const contents = yield* contentsOf(store, env, [blob], new Map())
-                return sideOf(path, mode, contents.get(blob) ?? Buffer.alloc(0))
+                return yield* sideOf(path, mode, contents.get(blob) ?? Buffer.alloc(0))
               }),
             )
             if (Option.isSome(fromGit)) return fromGit.value
