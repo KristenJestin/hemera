@@ -68,7 +68,8 @@ describe('Vérification unique', () => {
         })
         const output = `${result.stdout}${result.stderr}`
         expect(result.status).not.toBe(0)
-        expect(output).toContain('packages/core')
+        // pnpm prints the folder with the separators of the system.
+        expect(output).toMatch(/packages[\\/]core/)
         expect(output).toContain('deliberate-type-error.ts')
       } finally {
         rmSync(path, { force: true })
