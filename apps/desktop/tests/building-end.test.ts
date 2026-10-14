@@ -40,6 +40,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Predicate,
@@ -90,7 +91,9 @@ import {
   agentSessions,
   buildingTasks,
   buildings,
+  checkpointFiles,
   checkpoints,
+  missions,
   permissionRequests,
   documenterPasses,
   domainEvents,
@@ -110,6 +113,7 @@ import { ToolAccess } from '../src/engine/tools/access.ts'
 import { ProfileHome } from '../src/engine/profile-home.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
+import { sweepDiagnostics } from '../src/engine/retention.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { git } from './repositories.ts'
 
@@ -5420,6 +5424,76 @@ const retried = (missionId: string) =>
     yield* answerNeed({ id: need.id, answer: ChosenAnswer.make({ option: 'Retry' }), key: need.id })
     return need
   })
+
+describe('What the review read is kept', () => {
+  test(
+    'retention run over a finished Building keeps its review checkpoint, and the database refuses to drop it',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* inReview(mission.id)
+            const database = yield* Database
+            // The mission is over: nothing of it is live for the sweep any more.
+            yield* database
+              .update(missions)
+              .set({ stage: 'done' })
+              .where(eq(missions.id, mission.id))
+            const [building] = yield* database
+              .select()
+              .from(buildings)
+              .where(eq(buildings.missionId, mission.id))
+            const kept = building?.reviewCheckpointId ?? ''
+            const filesOf = database
+              .select()
+              .from(checkpointFiles)
+              .where(eq(checkpointFiles.checkpointId, kept))
+            const before = yield* filesOf
+            // Retention driven a year ahead, its total bound at nothing: all it may sweep goes.
+            const swept = yield* sweepDiagnostics(data, {
+              now: Date.now() + 365 * 24 * 60 * 60 * 1000,
+              maxTotalBytes: 0,
+            })
+            const dropped = yield* Effect.exit(
+              database.delete(checkpoints).where(eq(checkpoints.id, kept)),
+            )
+            return {
+              kept,
+              swept,
+              before,
+              after: yield* filesOf,
+              checkpoints: yield* database
+                .select()
+                .from(checkpoints)
+                .where(eq(checkpoints.id, kept)),
+              passes: yield* database
+                .select()
+                .from(reviewPasses)
+                .where(eq(reviewPasses.missionId, mission.id)),
+              dropped,
+            }
+          }),
+        ),
+      )
+      expect(seen.swept.runs.length + seen.swept.threads.length).toBeGreaterThan(0)
+      expect(seen.checkpoints).toHaveLength(1)
+      expect(seen.before.length).toBeGreaterThan(0)
+      expect(seen.after).toEqual(seen.before)
+      expect(seen.passes.map((one) => one.checkpointId)).toEqual([seen.kept, seen.kept])
+      // A review pass and the Building point to it: the database itself refuses to drop it.
+      expect(Exit.isFailure(seen.dropped)).toBe(true)
+    },
+  )
+})
 
 describe('A pass that fails', () => {
   test(
