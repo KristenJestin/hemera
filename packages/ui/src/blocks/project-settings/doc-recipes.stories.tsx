@@ -19,14 +19,13 @@ import {
   recipeDraftOf,
   recipeRefusals,
 } from './checks-fixtures.ts'
+import { DocRecipeForm, DocRecipesSection } from './doc-recipes.tsx'
 import {
   type DocRecipeDraft,
-  DocRecipeForm,
-  DocRecipesSection,
   NEW_DOC_RECIPE,
   type SettingsDocRecipe,
   recipeName,
-} from './doc-recipes.tsx'
+} from './doc-recipes-model.ts'
 import { FormFoot } from './parts.tsx'
 import { STALE } from './project-settings-fixtures.ts'
 

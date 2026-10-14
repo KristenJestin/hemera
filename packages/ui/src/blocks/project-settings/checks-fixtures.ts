@@ -1,7 +1,8 @@
 import type { CheckRefusals } from './checks.tsx'
 import type { CheckDraft, SettingsCheck } from './checks-model.ts'
 import type { CatalogueChoice } from './command-line.tsx'
-import type { DocRecipeDraft, DocRecipeRefusals, SettingsDocRecipe } from './doc-recipes.tsx'
+import type { DocRecipeRefusals } from './doc-recipes.tsx'
+import type { DocRecipeDraft, SettingsDocRecipe } from './doc-recipes-model.ts'
 import { shellRefusal } from './project-settings-fixtures.ts'
 
 /**

@@ -280,12 +280,14 @@ export {
 export {
   DocRecipeForm,
   DocRecipesSection,
+  type DocRecipeRefusals,
+} from './blocks/project-settings/doc-recipes.tsx'
+export {
   NEW_DOC_RECIPE,
   recipeName,
   type DocRecipeDraft,
-  type DocRecipeRefusals,
   type SettingsDocRecipe,
-} from './blocks/project-settings/doc-recipes.tsx'
+} from './blocks/project-settings/doc-recipes-model.ts'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
   MARK_ICONS,
