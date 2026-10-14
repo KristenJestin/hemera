@@ -2436,3 +2436,26 @@ describe('A pending need says what the CLI lacks now, not what it lacked when it
     expect(after).toEqual([])
   })
 })
+
+describe('The window regaining the focus wakes an operation waiting on its CLI', () => {
+  test('a waiter on a signed-out gh resumes after the focus once gh is signed in', async () => {
+    const fake = fakeForge(ghSignedOut())
+    const login = await withForge(
+      fake,
+      ({ projectId, repository }) =>
+        Effect.gen(function* () {
+          const port = yield* forge
+          const waiting = yield* Effect.forkChild(port.currentUser(repository('shop')))
+          yield* someNeed
+          fake.answer(ghReady())
+          yield* port.focused
+          // Checked again by the focus itself, before it answered: no wait on a recheck.
+          const states = yield* port.status(projectId)
+          expect(states.map((state) => state.state)).toEqual(['ready'])
+          return yield* Fiber.join(waiting)
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(login).toBe('octo')
+  })
+})

@@ -236,6 +236,20 @@ import {
   workspaceStatus,
 } from './workspaces.ts'
 
+/**
+ * What the window regaining the focus checks again, each on its own (#362): one that fails is
+ * written down under its name, and skips none of the others.
+ */
+export const eachOnItsOwn = <E>(
+  checks: ReadonlyArray<readonly [string, Effect.Effect<void, E>]>,
+  log: Log,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    checks,
+    ([name, check]) => check.pipe(observed(`mission.focused: ${name}`, log), Effect.ignoreCause),
+    { discard: true },
+  )
+
 /** A Chat as its Project's list shows it. */
 const chatSummary = (chat: Chat, working: boolean) => ({
   id: chat.id,
@@ -870,15 +884,14 @@ export const engineHandlers = (
     'mission.serviceDismiss': ({ missionId, runId }) =>
       use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
     'mission.focused': () =>
-      use(
-        Effect.andThen(
-          OutsideChanges.use((outside) => outside.focused),
-          Effect.andThen(
-            Diffs.use((diffs) => diffs.focused),
-            // The forge CLIs not ready are checked again when the window regains the focus (#253).
-            ForgePort.use((forge) => forge.focused),
-          ),
-        ),
+      eachOnItsOwn(
+        [
+          ['outside', use(OutsideChanges.use((outside) => outside.focused))],
+          ['diffs', use(Diffs.use((diffs) => diffs.focused))],
+          // The forge CLIs not ready are checked again when the window regains the focus (#253).
+          ['forge', use(ForgePort.use((forge) => forge.focused))],
+        ],
+        log,
       ).pipe(observed('mission.focused', log)),
     'mission.changed': () =>
       follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
