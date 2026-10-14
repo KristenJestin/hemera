@@ -189,20 +189,24 @@ const run = (
 /**
  * How many times longer `read` takes on the input `make` builds at eight times the size: about 8
  * when the reading is linear, 64 when it is quadratic, whatever the machine's speed. Each side is
- * read once to warm up, then timed as the fastest of five runs and at least a millisecond, so a
- * busy machine slows both alike.
+ * read once to warm up, then as many times as make the small side last 5 ms or more, the two sides
+ * one after the other, three times over: the smallest of the three ratios is kept, since a busy
+ * machine can slow a side down but never make a superlinear reading look linear three times.
  */
 const growth = (make: (size: number) => string, size: number, read: (output: string) => void) => {
-  const fastest = (output: string) => {
-    read(output)
-    const runs = [0, 1, 2, 3, 4].map(() => {
-      const started = performance.now()
-      read(output)
-      return performance.now() - started
-    })
-    return Math.max(1, Math.min(...runs))
+  const small = make(size)
+  const large = make(size * 8)
+  read(small)
+  read(large)
+  const started = performance.now()
+  read(small)
+  const times = Math.ceil(5 / Math.max(performance.now() - started, 0.001))
+  const timed = (output: string) => {
+    const begun = performance.now()
+    for (let count = 0; count < times; count += 1) read(output)
+    return performance.now() - begun
   }
-  return fastest(make(size * 8)) / fastest(make(size))
+  return Math.min(...[0, 1, 2].map(() => timed(large) / timed(small)))
 }
 
 describe('A proof run is classified (CT-35)', () => {
@@ -366,7 +370,8 @@ describe('A valid red', () => {
       '  it(`writes ${kind}`, () => {})',
       '})',
     ].join('\n')
-    const names = addedTestNames({ insertion: 'new_file', code, patch: null })
+    const names = addedTests({ insertion: 'new_file', code, patch: null })
+    expect(names).toEqual([{ template: 'writes ${kind}' }])
     const output =
       ' FAIL  tests/export.test.ts > exports md > writes md\nAssertionError: expected 1 to be 2'
     expect(validRed(run(output, 1), 'tests/export.test.ts', names)).toBe(true)
@@ -391,7 +396,7 @@ describe('A valid red', () => {
 
   test('a name made of a placeholder alone matches nothing', () => {
     const output = ' × md 3ms\nAssertionError: expected 1 to be 2'
-    expect(validRed(run(output, 1), 'tests/export.test.ts', ['${kind}'])).toBe(false)
+    expect(validRed(run(output, 1), 'tests/export.test.ts', [{ template: '${kind}' }])).toBe(false)
   })
 
   test('the scenario’s failing test above a long stack is found in the whole output', () => {
@@ -1933,9 +1938,10 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
     const output = (size: number) => `× ${'a '.repeat(size)}\nexpect(1).toBe(2)\n`
     const classified = run(output(150_000), 1, path)
     expect(classified.failingLines[0]?.length).toBeLessThanOrEqual(8_192)
-    expect(validRed(classified, path, ['${a} to ${b}'])).toBe(false)
+    expect(validRed(classified, path, [{ template: '${a} to ${b}' }])).toBe(false)
     // 17 s before the cut, growing faster than the line; cut, no more than a line eight times shorter.
-    const read = (text: string) => validRed(run(text, 1, path), path, ['${a} to ${b}'])
+    const read = (text: string) =>
+      validRed(run(text, 1, path), path, [{ template: '${a} to ${b}' }])
     expect(growth(output, 18_750, read)).toBeLessThan(24)
   })
 
@@ -2171,10 +2177,12 @@ describe('A red read from its own lines only (#331)', () => {
       expect(validRed(run(output, 1, path), path, names)).toBe(false)
       expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
     }
-    const asserts = captured('pytest-timeout-source').replace(
-      'E       Failed: Timeout (>2.0s) from pytest-timeout.',
-      'E       AssertionError: the invoice is not saved',
-    )
+    const asserts = captured('pytest-timeout-source')
+      .replace(
+        'E       Failed: Timeout (>2.0s) from pytest-timeout.',
+        'E       AssertionError: the invoice is not saved',
+      )
+      .replace('- Failed: Timeout (>2.0s)...', '- AssertionError: the invoice...')
     expect(validRed(run(asserts, 1, path), path, names)).toBe(true)
   })
 
@@ -2340,5 +2348,288 @@ describe('A red read failure by failure, each runner by its own reader (#342)', 
     ].join('\n')
     expect(validRed(run(output, 101, path), path, ['exports_markdown'])).toBe(false)
     expect(validRed(run(output, 101, path), path, ['one_is_one'])).toBe(true)
+  })
+})
+
+/** go test, Go 1.27: a subtest the proof adds panicked on a nil stub, its parent failing with it. */
+const GO_PANIC_SUBTEST = [
+  '--- FAIL: TestExport (0.00s)',
+  '    --- FAIL: TestExport/csv (0.00s)',
+  'panic: runtime error: invalid memory address or nil pointer dereference [recovered]',
+  '\tpanic: runtime error: invalid memory address or nil pointer dereference',
+  '[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x4f3b2a]',
+  '',
+  'goroutine 7 [running]:',
+  'testing.tRunner.func1.2({0x51c2a0, 0x6b5e30})',
+  '\t/usr/lib/go/src/testing/testing.go:1632 +0x230',
+  'FAIL\texample.com/acme\t0.005s',
+  'FAIL',
+].join('\n')
+
+/** gotestsum: the same, each test's output under its own `=== FAIL:` line. */
+const GOTESTSUM_PANIC_SUBTEST = [
+  '=== FAIL: example.com/acme TestExport/csv (0.00s)',
+  'panic: runtime error: invalid memory address or nil pointer dereference [recovered]',
+  '\tpanic: runtime error: invalid memory address or nil pointer dereference',
+  '',
+  '=== FAIL: example.com/acme TestExport (0.00s)',
+  '',
+  'DONE 2 tests, 2 failures in 0.2s',
+].join('\n')
+
+describe('A red read block by block, a test vetoed by any block that is no assertion (#342, round 2)', () => {
+  test('a Go parent whose subtest panicked is not a red, in go test and gotestsum', () => {
+    const path = 'export_test.go'
+    const csv = { parent: 'TestExport', subtest: 'csv', nesting: [], whole: true }
+    for (const output of [GO_PANIC_SUBTEST, GOTESTSUM_PANIC_SUBTEST]) {
+      expect(validRed(run(output, 1, path), path, ['TestExport'])).toBe(false)
+      expect(validRed(run(output, 1, path), path, [csv])).toBe(false)
+    }
+  })
+
+  test('a Go test that failed on an unreachable service is not a red, its log after the failure or under go test -v', () => {
+    const path = 'saves_test.go'
+    const after = [
+      '--- FAIL: TestSaves (0.00s)',
+      '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
+      'FAIL',
+      'FAIL\texample.com/acme\t0.01s',
+    ].join('\n')
+    const verbose = [
+      '=== RUN   TestSaves',
+      '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
+      '--- FAIL: TestSaves (0.00s)',
+      'FAIL',
+      'FAIL\texample.com/acme\t0.01s',
+    ].join('\n')
+    // go test -v: a test's failure ends where the next test's run starts, its log not this one's.
+    const next = [
+      '=== RUN   TestOneIsOne',
+      '    one_test.go:5: got 1, want 2',
+      '--- FAIL: TestOneIsOne (0.00s)',
+      '=== RUN   TestSaves',
+      '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
+      '--- FAIL: TestSaves (0.00s)',
+      'FAIL',
+    ].join('\n')
+    expect(validRed(run(next, 1, path), path, ['TestOneIsOne'])).toBe(true)
+    expect(validRed(run(next, 1, path), path, ['TestSaves'])).toBe(false)
+    const unordered = [
+      '--- FAIL: TestOneIsOne (0.00s)',
+      '    one_test.go:5: got 1, want 2',
+      '=== RUN   TestSaves',
+      '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
+      '--- FAIL: TestSaves (0.00s)',
+      'FAIL',
+    ].join('\n')
+    expect(validRed(run(unordered, 1, path), path, ['TestOneIsOne'])).toBe(true)
+    for (const output of [after, verbose]) {
+      expect(validRed(run(output, 1, path), path, ['TestSaves'])).toBe(false)
+      const asserted = output.replace(
+        'dial tcp 127.0.0.1:5432: connect: connection refused',
+        'got 0 rows, want 1',
+      )
+      expect(validRed(run(asserted, 1, path), path, ['TestSaves'])).toBe(true)
+    }
+  })
+
+  test('a pytest test whose assertion was caught and turned into another error is not a red, in every traceback mode', () => {
+    const path = 'tests/test_export.py'
+    const withoutSummary = (output: string) =>
+      output
+        .split('\n')
+        .filter((line) => !line.startsWith('FAILED '))
+        .join('\n')
+    for (const mode of ['long', 'short', 'native']) {
+      for (const output of [
+        captured(`pytest-chained-${mode}`),
+        withoutSummary(captured(`pytest-chained-${mode}`)),
+      ]) {
+        const red = (declared: string) => validRed(run(output, 1, path), path, [declared])
+        expect(red('test_chained')).toBe(false)
+        expect(red('test_chained_reverse')).toBe(true)
+        expect(red('test_unsuffixed')).toBe(false)
+        expect(red('test_logs_assert')).toBe(false)
+        expect(red('test_one_is_one')).toBe(true)
+      }
+    }
+  })
+
+  test('a pytest section is read above what the test printed: a captured E assert line is not its error', () => {
+    const path = 't.py'
+    const output = [
+      '___ test_new ___',
+      '',
+      '    def test_new():',
+      '>       raise NotFound(1)',
+      'E       app.NotFound: 1',
+      '',
+      't.py:3: NotFound',
+      '---- Captured stdout call ----',
+      'E   assert printed by the app',
+      '=== 1 failed ===',
+    ].join('\n')
+    expect(validRed(run(output, 1, path), path, ['test_new'])).toBe(false)
+    // A traceback the test printed on its stderr, under its section's own error.
+    const printedTraceback = [
+      '___ test_new ___',
+      '',
+      '    def test_new():',
+      '>       time.sleep(5)',
+      'E       Failed: Timeout (>1.0s) from pytest-timeout.',
+      '',
+      't.py:3: Failed',
+      '---- Captured stderr call ----',
+      'Traceback (most recent call last):',
+      '  File "/work/acme/api/t.py", line 2, in test_new',
+      '    raise AssertionError("printed only")',
+      'AssertionError: printed only',
+      '=== 1 failed ===',
+    ].join('\n')
+    expect(validRed(run(printedTraceback, 1, path), path, ['test_new'])).toBe(false)
+  })
+
+  test('a unittest test whose assertion was caught and turned into another error is not a red', () => {
+    const path = 'test_ut.py'
+    const output = captured('unittest-chained')
+    expect(validRed(run(output, 1, path), path, ['test_chained'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['test_saves'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['test_sub'])).toBe(true)
+    expect(validRed(run(output, 1, path), path, ['test_one_is_one'])).toBe(true)
+  })
+
+  test('a pytest parametrised test with a case failing on an assertion and one on another error is not a red', () => {
+    const path = 't.py'
+    const output =
+      'FAILED t.py::test_new[a] - assert 1 == 2\nFAILED t.py::test_new[b] - NameError: name x'
+    expect(validRed(run(output, 1, path), path, ['test_new'])).toBe(false)
+  })
+
+  test('a vitest test that threw a string or a custom error is read by its own error line, never one below it', () => {
+    const path = 'export.test.ts'
+    const unhandled = captured('vitest-unhandled-error')
+    expect(validRed(run(unhandled, 1, path), path, ['saves'])).toBe(false)
+    const custom = captured('vitest-custom-error')
+    expect(validRed(run(custom, 1, path), path, ['saves'])).toBe(false)
+    expect(validRed(run(custom, 1, path), path, ['loads'])).toBe(false)
+    expect(validRed(run(custom, 1, path), path, ['one is one'])).toBe(true)
+    // A thrown object, then another test's unhandled assertion past vitest's rule.
+    const thrownObject = unhandled.replace(
+      'Unknown Error: not implemented',
+      '{ code: 42, stacks: [] }',
+    )
+    expect(validRed(run(thrownObject, 1, path), path, ['saves'])).toBe(false)
+    // An error whose cause was an assertion: the test threw that error, not the assertion.
+    const caused = [
+      ' FAIL  export.test.ts > saves',
+      'NotImplemented: toMarkdown',
+      ' ❯ export.test.ts:4:29',
+      '',
+      'Caused by: AssertionError: expected 1 to be 2 // Object.is equality',
+      ' ❯ export.test.ts:3:38',
+      '⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯',
+    ].join('\n')
+    expect(validRed(run(caused, 1, path), path, ['saves'])).toBe(false)
+  })
+
+  test('node:test’s failing list names a test by its own error, never a describe of the same name', () => {
+    const path = 'a.test.mjs'
+    const output = captured('node-spec-describe')
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['never saves'])).toBe(true)
+  })
+
+  test('a duration is stripped only where its runner prints one: vitest’s heading and jest’s ● keep the name whole', () => {
+    const path = 'export.test.ts'
+    const vitest = captured('vitest-duration-in-name')
+    expect(validRed(run(vitest, 1, path), path, ['debounces'])).toBe(false)
+    expect(validRed(run(vitest, 1, path), path, ['debounces 300ms'])).toBe(true)
+    const jest = [
+      '  ✕ times out (30s) (12 ms)',
+      '  ✕ times out (3 ms)',
+      '',
+      '  ● times out (30s)',
+      '',
+      '    expect(received).toBe(1)',
+      '',
+      '  ● times out',
+      '',
+      '    TypeError: x is not a function',
+    ].join('\n')
+    expect(validRed(run(jest, 1, 't.test.js'), 't.test.js', ['times out'])).toBe(false)
+    expect(validRed(run(jest, 1, 't.test.js'), 't.test.js', ['times out (30s)'])).toBe(true)
+  })
+
+  test('a dollar in a plain test name is the name’s own, not a placeholder', () => {
+    const path = 't.test.js'
+    const output =
+      '  ✕ charges $10 for shipping (3 ms)\n  ● charges $10 for shipping\n    expect(received).toBe(1)'
+    expect(validRed(run(output, 1, path), path, ['charges $5 for shipping'])).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['charges $10 for shipping'])).toBe(true)
+    const declared = addedTests({
+      insertion: 'new_file',
+      code: "test('charges $5 for shipping', () => {})\ntest.each([[5]])('charges $amount', () => {})\ntest(`charges ${amount}`, () => {})\n",
+      patch: null,
+    })
+    expect(declared).toEqual([
+      'charges $5 for shipping',
+      { template: 'charges $amount' },
+      { template: 'charges ${amount}' },
+    ])
+    expect(validRed(run(output, 1, path), path, declared.slice(1, 2))).toBe(true)
+    // Written as a plain string, a name holding `$amount` is that name, never a template.
+    expect(validRed(run(output, 1, path), path, ['charges $amount for shipping'])).toBe(false)
+    // A template's last piece ends the title: `${kind} export` is not `md export later`.
+    const later = '  ✕ md export later (3 ms)\n  ● md export later\n    expect(received).toBe(1)'
+    expect(validRed(run(later, 1, path), path, [{ template: '${kind} export' }])).toBe(false)
+    expect(validRed(run(later, 1, path), path, [{ template: '${kind} export later' }])).toBe(true)
+  })
+
+  test('a Rust test that returned an error is not a red, beside an older one failing on an assertion', () => {
+    const path = 'src/lib.rs'
+    const output = [
+      'running 2 tests',
+      'test tests::exports ... FAILED',
+      'test tests::one_is_one ... FAILED',
+      '',
+      'failures:',
+      '',
+      '---- tests::exports stdout ----',
+      'Error: ParseIntError { kind: InvalidDigit }',
+      '',
+      '---- tests::one_is_one stdout ----',
+      "thread 'tests::one_is_one' panicked at src/lib.rs:9:5:",
+      'assertion `left == right` failed',
+      '',
+      'failures:',
+      '    tests::exports',
+      '    tests::one_is_one',
+    ].join('\n')
+    expect(validRed(run(output, 101, path), path, ['exports'])).toBe(false)
+    expect(validRed(run(output, 101, path), path, ['one_is_one'])).toBe(true)
+  })
+
+  test('a JUnit report’s pytest failure is read by its own error, never the source it prints', () => {
+    const path = 'tests/test_report.py'
+    const output = captured('pytest-junit-name-error')
+    expect(validRed(run(output, 1, path), path, ['test_saves_the_invoice'])).toBe(false)
+  })
+
+  test('a vitest red coloured by the runner, with Windows line endings, is a red', () => {
+    const path = 't.test.ts'
+    const output =
+      ' \u001b[31m×\u001b[39m t.test.ts > export > saves 3ms\r\n\u001b[31mAssertionError\u001b[39m: x\r\n'
+    expect(validRed(run(output, 1, path), path, ['saves'])).toBe(true)
+  })
+
+  test('a name with four placeholders against a line of 4 KB is read in linear time', () => {
+    const path = 't.test.ts'
+    const name = [{ template: '${a} to ${b} to ${c} to ${d}' }]
+    const output = (size: number) => `× ${'a to '.repeat(size)}x>\nexpect(1).toBe(2)\n`
+    const read = (text: string) => validRed(run(text, 1, path), path, name)
+    expect(read(output(810))).toBe(false)
+    // 190 s with a pattern built from the name; matched piece by piece, a line eight times longer
+    // costs about eight times more.
+    expect(growth(output, 100, read)).toBeLessThan(24)
   })
 })
