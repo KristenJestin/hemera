@@ -6,7 +6,7 @@
  * folder, and a process is gone when the system says so (`process.kill(pid, 0)` failing), never
  * because a `stop` returned. The registry is the data folder's own table. Only what a left-over
  * pid runs is answered by the suite, as the system says it: the real query (PowerShell on
- * Windows, up to `WINDOWS_COMMAND_LINE_MS`) has a test of its own.
+ * Windows, slow on a loaded runner) has a test of its own, under a wider bound.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
@@ -27,6 +27,7 @@ import {
   WINDOWS_COMMAND_LINE_MS,
   databaseRegistryLayer,
   hostProcessesLayer,
+  machineCommandLines,
   outputOf,
   processSupervisorLayer,
   stillRuns,
@@ -46,6 +47,12 @@ const strays: ChildProcess[] = []
  * `WINDOWS_COMMAND_LINE_MS` on a loaded runner (one test below asks the real machine, alone).
  */
 const lines = new Map<number, string>()
+/**
+ * How long the real query of the machine may take in this suite: a PowerShell on a loaded Windows
+ * runner was seen past the engine's `WINDOWS_COMMAND_LINE_MS` (20 s); this is six times that, and
+ * more than ten times the few seconds it takes on an idle machine.
+ */
+const MACHINE_QUERY_MS = 120_000
 /** Processes a test leaves behind on purpose, ended after it. */
 const strayPids: number[] = []
 
@@ -650,6 +657,97 @@ describe('The start does not wait on the left-over agents one after another', ()
   })
 })
 
+describe('A command line that came too late is never decided on', () => {
+  test('a lookup that answers past its bound leaves every living orphan kept and registered, nothing ended', async () => {
+    // Alive, and the machine says they run what they were started with, but only once the bound
+    // has passed: on Windows, a PowerShell slower than `WINDOWS_COMMAND_LINE_MS` on a loaded machine.
+    const pids = [92_001, 92_002]
+    const killed: number[] = []
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          alive: (pid: number) => pids.includes(pid),
+          commandLinesOf: (wanted: ReadonlyArray<number>) =>
+            Effect.succeed(
+              new Map(wanted.map((pid) => [pid, `${process.execPath} agent.mjs`] as const)),
+            ).pipe(Effect.delay(WINDOWS_COMMAND_LINE_MS * 2)),
+          killTree: (pid: number) => Effect.sync(() => killed.push(pid)),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const layer = processSupervisorLayer.pipe(
+      Layer.provideMerge(databaseRegistryLayer),
+      Layer.provideMerge(
+        Layer.merge(host, Layer.succeed(StderrSink, { write: () => Effect.void })),
+      ),
+    )
+
+    const [orphans, kept, registered] = await on(
+      data,
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry
+        for (const pid of pids) {
+          yield* registry.add({
+            id: `left-${String(pid)}`,
+            pid,
+            program: process.execPath,
+            args: ['agent.mjs'],
+            owner: { kind: 'session', id: `s-${String(pid)}` },
+            engine: 'crashed',
+          })
+        }
+        const supervisor = yield* ProcessSupervisor
+        const sweep = yield* supervisor.endOrphans('session').pipe(Effect.forkChild)
+        // The bound passes first, then the late answer.
+        yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS * 2)
+        return [
+          yield* Fiber.join(sweep),
+          yield* supervisor.kept,
+          yield* registry.leftBy('session', supervisor.engine),
+        ] as const
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+    expect(orphans.map((one) => [one.root.pid, one.ended])).toEqual(pids.map((pid) => [pid, false]))
+    expect(kept.map((root) => root.pid).toSorted()).toEqual(pids)
+    expect(registered.map((root) => root.pid).toSorted()).toEqual(pids)
+    expect(killed).toEqual([])
+  })
+
+  test(
+    'a lookup cut by its bound says nothing, not even the lines it had printed',
+    async () => {
+      // A query that printed one whole line and half of the next, then never ended: what it
+      // printed is not an answer, since the half line would read as another program.
+      const where = join(folder, 'printed')
+      const printsHalf = script(`
+import { writeFileSync } from 'node:fs'
+process.stdout.write('4242 node agent.mjs\\n4243 node age', () => {
+  writeFileSync(process.argv[2], 'printed')
+})
+${STAYS_UP}`)
+      const said = await Effect.runPromise(
+        Effect.gen(function* () {
+          const lookup = yield* outputOf(
+            process.execPath,
+            [printsHalf, where],
+            WINDOWS_COMMAND_LINE_MS,
+          ).pipe(Effect.forkChild)
+          yield* Effect.promise(() => untilTrue(() => readable(where), 30_000))
+          yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+          return yield* Fiber.join(lookup)
+        }).pipe(Effect.provide(TestClock.layer())),
+      )
+
+      expect(said).toBe(null)
+    },
+    WINDOWS_COMMAND_LINE_MS + 40_000,
+  )
+})
+
 describe('The machine is asked once for every left-over agent', () => {
   test('many orphans are looked up in one query of the machine, and each is ended', async () => {
     const pids = Array.from({ length: 10 }, (_, index) => 91_000 + index)
@@ -766,19 +864,16 @@ describe('A kept agent is followed until it is ended or gone', () => {
 
 describe('The machine says what a pid runs', () => {
   test(
-    'living processes are matched by what the system says they run, in one query within its bound',
+    'living processes are matched by what the system says they run, in one query',
     async () => {
       const one = leftRunning([script(STAYS_UP), '--flag'])
       const other = leftRunning([script(STAYS_UP), 'two words'])
       const gone = leftRunning([script('')])
       await goneWithin(gone.pid ?? -1)
+      // The engine's own query, under a bound wide enough for a loaded runner: past the engine's
+      // bound, its answer is unknown, and what the engine does then has tests of its own above.
       const said = await Effect.runPromise(
-        Effect.provide(
-          HostProcesses.use((host) =>
-            host.commandLinesOf([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1]),
-          ),
-          hostProcessesLayer,
-        ),
+        machineCommandLines([one.pid ?? -1, other.pid ?? -1, gone.pid ?? -1], MACHINE_QUERY_MS),
       )
       for (const child of [one, other]) {
         expect(
@@ -791,7 +886,7 @@ describe('The machine says what a pid runs', () => {
       }
       expect(said.has(gone.pid ?? -1)).toBe(false)
     },
-    WINDOWS_COMMAND_LINE_MS + 10_000,
+    MACHINE_QUERY_MS + 10_000,
   )
 })
 

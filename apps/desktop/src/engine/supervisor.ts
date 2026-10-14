@@ -230,25 +230,21 @@ const taskkill = (pid: number) =>
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
 /**
- * What a program prints, once it ends or `millis` passed, or null when it printed nothing. It is
- * ended when the one waiting on it gives up first: a lookup the sweep's bound cuts leaves nothing
- * running behind it.
+ * What a program prints once it ends, or null when it printed nothing or did not end within
+ * `millis`: what a program cut by the bound had printed is no answer, its last line may be half
+ * of one. It is ended when the bound passes, or when the one waiting on it gives up first: a
+ * lookup cut leaves nothing running behind it.
  */
 export const outputOf = (program: string, args: ReadonlyArray<string>, millis: number) =>
   Effect.callback<string | null>((resume) => {
-    const child = execFile(
-      program,
-      [...args],
-      { windowsHide: true, timeout: millis },
-      (_error, stdout) => {
-        const text = String(stdout).trim()
-        resume(Effect.succeed(text === '' ? null : text))
-      },
-    )
+    const child = execFile(program, [...args], { windowsHide: true }, (_error, stdout) => {
+      const text = String(stdout).trim()
+      resume(Effect.succeed(text === '' ? null : text))
+    })
     return Effect.sync(() => {
       child.kill()
     })
-  })
+  }).pipe(Effect.timeoutOption(Duration.millis(millis)), Effect.map(Option.getOrNull))
 
 /** `<pid> <command line>` lines, as the two lookups below print them; one without a line is left out. */
 const linesByPid = (text: string | null): ReadonlyMap<number, string> =>
@@ -263,7 +259,7 @@ const linesByPid = (text: string | null): ReadonlyMap<number, string> =>
  * What Windows says the pids run, in one PowerShell for all of them: PowerShell is the one program
  * every Windows has that tells it, and starting it is the slow part.
  */
-const windowsCommandLines = (pids: ReadonlyArray<number>) =>
+const windowsCommandLines = (pids: ReadonlyArray<number>, millis: number) =>
   Effect.map(
     outputOf(
       'powershell.exe',
@@ -273,17 +269,14 @@ const windowsCommandLines = (pids: ReadonlyArray<number>) =>
         '-Command',
         `Get-CimInstance Win32_Process -Filter '${pids.map((pid) => `ProcessId=${String(pid)}`).join(' OR ')}' | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`,
       ],
-      WINDOWS_COMMAND_LINE_MS,
+      millis,
     ),
     linesByPid,
   )
 
 /** What macOS and the other POSIX systems say the pids run, in one `ps`. */
-const psCommandLines = (pids: ReadonlyArray<number>) =>
-  Effect.map(
-    outputOf('ps', ['-o', 'pid=,command=', '-p', pids.join(',')], WINDOWS_COMMAND_LINE_MS),
-    linesByPid,
-  )
+const psCommandLines = (pids: ReadonlyArray<number>, millis: number) =>
+  Effect.map(outputOf('ps', ['-o', 'pid=,command=', '-p', pids.join(',')], millis), linesByPid)
 
 /** What Linux says a pid runs: the very words it was started with. */
 const procCommandLine = (pid: number): string | null => {
@@ -293,6 +286,30 @@ const procCommandLine = (pid: number): string | null => {
   } catch {
     return null
   }
+}
+
+/**
+ * What this machine says the pids run, in one query bounded by `millis` (Linux reads it at once):
+ * the engine's lookup, with the bound a suite on a loaded machine can widen.
+ */
+export const machineCommandLines = (
+  pids: ReadonlyArray<number>,
+  millis: number,
+): Effect.Effect<ReadonlyMap<number, string>> => {
+  if (pids.length === 0) return Effect.succeed(new Map())
+  if (process.platform === 'win32') return windowsCommandLines(pids, millis)
+  if (process.platform === 'linux') {
+    return Effect.sync(
+      () =>
+        new Map(
+          pids.flatMap((pid) => {
+            const line = procCommandLine(pid)
+            return line === null ? [] : [[pid, line] as const]
+          }),
+        ),
+    )
+  }
+  return psCommandLines(pids, millis)
 }
 
 /** The machine this engine runs on. */
@@ -357,22 +374,7 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
       return (cause as NodeJS.ErrnoException).code === 'EPERM'
     }
   },
-  commandLinesOf: (pids) => {
-    if (pids.length === 0) return Effect.succeed(new Map())
-    if (process.platform === 'win32') return windowsCommandLines(pids)
-    if (process.platform === 'linux') {
-      return Effect.sync(
-        () =>
-          new Map(
-            pids.flatMap((pid) => {
-              const line = procCommandLine(pid)
-              return line === null ? [] : [[pid, line] as const]
-            }),
-          ),
-      )
-    }
-    return psCommandLines(pids)
-  },
+  commandLinesOf: (pids) => machineCommandLines(pids, WINDOWS_COMMAND_LINE_MS),
 })
 
 const readArgs = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
