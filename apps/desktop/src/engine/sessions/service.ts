@@ -243,6 +243,8 @@ export interface SessionsSettings {
   readonly rebuildHold?: Effect.Effect<void> | undefined
   /** Where a suite holds a session, or fails it; never otherwise. */
   readonly sessionHold?: SessionHold | undefined
+  /** Where a suite holds the health sweep, as each look begins; never held otherwise. */
+  readonly sweepHold?: Effect.Effect<void> | undefined
 }
 
 /**
@@ -934,7 +936,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (driver === undefined) return
           driver.lastSign = yield* Clock.currentTimeMillis
           // However long the provider makes it wait, the session is not stuck until it speaks again.
-          driver.waiting = !event.replay && Predicate.isTagged(event, 'ProviderWait')
+          driver.waiting = false
+          if (!event.replay && Predicate.isTagged(event, 'ProviderWait')) {
+            driver.waiting = true
+            // Said, so the diagnostic tells why a long silence was not judged stuck.
+            yield* said(`${sessionId} waits on its provider: ${event.title}`)
+          }
           if (!event.replay && TOOK_THE_TURN.some((tag) => Predicate.isTagged(event, tag))) {
             driver.took = true
           }
@@ -1039,6 +1046,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
        * an idle child holding back a phase gives its slot.
        */
       const sweep = Effect.gen(function* () {
+        yield* settings.sweepHold ?? Effect.void
         const now = yield* Clock.currentTimeMillis
         const limit = Duration.toMillis(timings.stuckAfter)
         for (const driver of [...drivers.values()]) {

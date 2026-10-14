@@ -64,7 +64,8 @@ import {
 import { basesAt, liveIn, placeOf, planRows, targetProblem } from '../planning/plan.ts'
 import { Secrets } from '../secrets.ts'
 import type { Git } from '../git.ts'
-import type { SessionPost } from '../sessions/post.ts'
+import { storeDeliveryIn } from '../sessions/deliveries.ts'
+import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
 import { assignWorkIn } from '../sessions/leases.ts'
 import { type RoleSession, getSession, sessionsIn } from '../sessions/store.ts'
@@ -269,8 +270,8 @@ const answerOf = (need: Need): string | null => {
  * a green run and its record, between the proofs written and a conflict handed over, between the
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
- * transaction that withdraws its need; once a need ended, before what it held is released. Never
- * held otherwise.
+ * transaction that withdraws its need; once a need ended, before what it held is released; as its
+ * event follower takes in an answer, before it acts on it. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -291,7 +292,8 @@ export type BuilderHold = (
     | 'greens-due'
     | 'handing'
     | 'retrying'
-    | 'releasing',
+    | 'releasing'
+    | 'answering',
 ) => Effect.Effect<void>
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
@@ -366,10 +368,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         loop,
         said,
-        deliver: (building, target, kind, body) =>
-          deliverTo(building, target, kind, body).pipe(
-            Effect.catchCause((cause) => said(`a delivery was not kept: ${String(cause)}`)),
-          ),
         background: (effect) => effect.pipe(provided, Effect.forkIn(layerScope), Effect.asVoid),
       })
       /** The missions a Builder's write settled in, taken one by one outside its transaction. */
@@ -775,7 +773,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 Effect.as({ result: undefined, events: [] }),
               ),
           )
-          const left = yield* proofs.notProven(building)
+          const left = yield* proofs.notProvenIn(yield* Database, building)
           yield* deliver(
             building,
             'done',
@@ -1755,18 +1753,50 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           return (yield* settleIn(transaction, found.building)).events
         })
 
-      /** An environment need's Retry: the proof it held leaves `held` with its withdrawal. */
+      /** What the Builder is told of an expiry, under one id whoever stores it first. */
+      const expirySaid = (decision: DecisionRow, reason: string | null) => {
+        const tasks = JSON.parse(decision.tasks).join(', ')
+        return {
+          id: `expired-${decision.needId}`,
+          body: `Your request no longer holds and expired: ${decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
+        }
+      }
+
+      /** What the Builder is told of the user's Retry, under one id whoever stores it first. */
+      const fixedSaid = (decision: DecisionRow) => {
+        const tasks = JSON.parse(decision.tasks).join(', ')
+        return {
+          id: `fixed-${decision.needId}`,
+          body: `The user says it is fixed: ${decision.question}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
+        }
+      }
+
+      /**
+       * An environment need's Retry: the proof it held leaves `held` with its withdrawal, and the
+       * Builder is told in it.
+       */
       takeRetry = (retriedNeed, transaction) =>
         Effect.gen(function* () {
           const found = yield* decisionOfNeedIn(transaction, retriedNeed.id)
           if (found === null || found.building.state !== 'active') return []
-          if (found.decision.kind !== 'proof_environment' || found.decision.subject === null)
-            return []
           if (found.decision.state !== 'pending') return []
-          yield* proofs.retriedIn(transaction, found.building, found.decision.subject)
-          // Ended with its need, so a stop before the rest of the Retry leaves nothing behind it.
-          return yield* decisionEndedIn(transaction, found, 'withdrawn')
-        })
+          if (found.decision.kind === 'proof_environment' && found.decision.subject !== null)
+            yield* proofs.retriedIn(transaction, found.building, found.decision.subject)
+          // Ended with its need, the Builder told, so a stop before the rest of the Retry, or a
+          // follower behind, leaves nothing behind it: the end never sees the one without the other.
+          const events = yield* decisionEndedIn(transaction, found, 'withdrawn')
+          yield* storeDeliveryIn(transaction, {
+            ...fixedSaid(found.decision),
+            owner: { kind: 'mission', missionId: found.building.missionId },
+            target: { role: 'builder' },
+            kind: 'answer',
+          }).pipe(
+            Effect.catchTag('DeliveryKindRefused', (refused) =>
+              Effect.fail(new DeliveryFailed({ reason: refused.message })),
+            ),
+          )
+          return events
+        }).pipe(Effect.provide(context))
 
       /** A need of the Builder's answered: its decision kept, the amendment applied if chosen. */
       apply = (answeredNeed, transaction) =>
@@ -1796,6 +1826,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (problems.length > 0) {
               const reason = `the plan moved since it was asked: ${problems.join(' ')}`
               events.push(...(yield* expireNeedIn(transaction, answeredNeed.id, reason)))
+              // Told with the expiry, so a stop before the follower loses none of it.
+              yield* storeDeliveryIn(transaction, {
+                ...expirySaid(decision, reason),
+                owner: { kind: 'mission', missionId: building.missionId },
+                target: { role: 'builder' },
+                kind: 'expiry',
+              }).pipe(
+                Effect.catchTag('DeliveryKindRefused', (refused) =>
+                  Effect.fail(new DeliveryFailed({ reason: refused.message })),
+                ),
+              )
               yield* transaction
                 .update(buildingDecisions)
                 .set({ state: 'expired', answeredAt: now() })
@@ -1825,6 +1866,14 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           }
           yield* unblockIn(transaction, building, answeredNeed.id)
           const settledNow = yield* settleIn(transaction, building)
+          // Kept for the Builder with the answer, so the end never sees one without the other.
+          yield* answerIn(
+            transaction,
+            building,
+            decision,
+            answer ?? '',
+            chosen && amendment !== null ? amendmentSaid(amendment) : null,
+          )
           return [
             buildingEvent(building.missionId, 'building.decision', {
               kind: decision.kind,
@@ -1874,14 +1923,15 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ) {
             yield* proofs.retried(outcome.building, outcome.decision.subject)
           }
-          const tasks = JSON.parse(outcome.decision.tasks).join(', ')
-          yield* deliver(
-            outcome.building,
-            how === 'expired' ? 'expiry' : 'answer',
-            how === 'expired'
-              ? `Your request no longer holds and expired: ${outcome.decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`
-              : `The user says it is fixed: ${outcome.decision.question}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
-          )
+          if (how === 'withdrawn') {
+            // Stored with the Retry already: only handed over here.
+            const { id, body } = fixedSaid(outcome.decision)
+            yield* deliverTo(outcome.building, { role: 'builder' }, 'answer', body, id)
+            return
+          }
+          // Stored already when the answer expired it: only handed over then.
+          const { id, body } = expirySaid(outcome.decision, reason)
+          yield* deliverTo(outcome.building, { role: 'builder' }, 'expiry', body, id)
         })
 
       /** A mission cancelled: its Building ends as cancelled; the work stays. */
@@ -1914,42 +1964,48 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           }),
         )
 
-      const answerDelivery = (missionId: string, payload: NewEvent['payload']) =>
+      /** What the Builder is told of the user's answer, kept in the transaction that applies it. */
+      const answerIn = (
+        transaction: EngineTransaction,
+        building: BuildingRow,
+        decision: DecisionRow,
+        answer: string,
+        amendment: string | null,
+      ) =>
         Effect.gen(function* () {
-          const database = yield* Database
-          const building = yield* activeBuildingIn(database, missionId)
-          if (building === null || payload === undefined) return
-          const runner = Option.getOrNull(readString(payload['runner']))
-          if (payload['kind'] === 'error') {
-            const tasks = Array.isArray(payload['tasks']) ? payload['tasks'].map(String) : []
-            yield* deliverTo(
-              building,
-              runner === null ? { role: 'builder' } : { lineage: runner },
-              'answer',
-              [
-                `The user answered your three reds${tasks.length === 0 ? '' : ` on ${listed(tasks)}`}: ${String(payload['answer'] ?? '')}`,
+          const owner = { kind: 'mission', missionId: building.missionId } as const
+          if (decision.kind === 'error') {
+            const tasks: ReadonlyArray<string> = JSON.parse(decision.tasks)
+            return yield* storeDeliveryIn(transaction, {
+              owner,
+              target:
+                decision.proposer === null ? { role: 'builder' } : { lineage: decision.proposer },
+              kind: 'answer',
+              body: [
+                `The user answered your three reds${tasks.length === 0 ? '' : ` on ${listed(tasks)}`}: ${answer}`,
                 tasks.length === 0
                   ? 'Take it as the direction of your next attempt.'
                   : `Take it as the direction of the next attempt: start ${listed(tasks)} again with task_start.`,
               ].join('\n'),
-            )
-            return
+            })
           }
-          const amendment = Option.getOrNull(readString(payload['amendment']))
           // Ended without, once the end was called: the summary is told here, not by the end (#306).
-          const asked = Option.getOrNull(readString(payload['subject']))?.split(',') ?? []
+          const asked = decision.subject?.split(',') ?? []
           const left =
-            payload['kind'] === 'proofs_unproven' &&
-            payload['answer'] === END_WITHOUT &&
+            decision.kind === 'proofs_unproven' &&
+            answer === END_WITHOUT &&
             building.endCalledAt !== null
-              ? (yield* proofs.notProven(building)).filter((one) => asked.includes(one))
+              ? (yield* proofs.notProvenIn(transaction, building)).filter((one) =>
+                  asked.includes(one),
+                )
               : []
-          yield* deliver(
-            building,
-            'answer',
-            [
-              `The user answered: ${String(payload['answer'] ?? '')}`,
-              `Your request: ${String(payload['question'] ?? '')}`,
+          return yield* storeDeliveryIn(transaction, {
+            owner,
+            target: { role: 'builder' },
+            kind: 'answer',
+            body: [
+              `The user answered: ${answer}`,
+              `Your request: ${decision.question}`,
               amendment === null ? null : `The plan changed: ${amendment}`,
               left.length === 0
                 ? null
@@ -1957,8 +2013,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             ]
               .filter((part) => part !== null)
               .join('\n'),
-          )
-        })
+          })
+        }).pipe(
+          Effect.catchTag('DeliveryKindRefused', (refused) =>
+            Effect.fail(new DeliveryFailed({ reason: refused.message })),
+          ),
+        )
 
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       const follow = events.pipe(
@@ -1974,7 +2034,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }
             if (event.type === 'building.decision') {
-              yield* answerDelivery(event.entityId, payload)
+              yield* hold('answering')
+              // The answer was kept for the Builder as it was applied: it is handed over now.
+              yield* SessionPost.use((post) => post.ring)
               // An answer is something the Builder acts on: its turns are watched from there.
               awake(event.entityId)
               const kind = PROOF_KINDS.find((one) => one === payload['kind'])

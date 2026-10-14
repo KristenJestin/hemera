@@ -25,9 +25,19 @@ import {
   WrittenAnswer,
   toolsOf,
 } from '@hemera/core/domain'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { LaunchFailed } from '@hemera/ipc'
-import { Deferred, Duration, Effect, Fiber, Layer, Predicate, type Schema, Stream } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Predicate,
+  type Schema,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript, FakeStep } from '../src/engine/agents/fake.ts'
@@ -48,7 +58,7 @@ import { setProofLimit } from '../src/engine/project-checks.ts'
 import { DomainEvents } from '../src/engine/domain-events.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
-import { answerNeed, retryNeed } from '../src/engine/needs.ts'
+import { NeedOwners, answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { Runs, getRun } from '../src/engine/runs.ts'
 import { TaskStates, everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
@@ -75,6 +85,7 @@ import {
   permissionRequests,
   documenterPasses,
   domainEvents,
+  needDeliveries,
   needs,
   proofRuns,
   reviewPasses,
@@ -2083,6 +2094,125 @@ describe('The exit', () => {
       expect(seen.live).toEqual([])
     },
   )
+
+  test(
+    'a question raised as the tree stops, answered with its hand-over failing, holds the exit after the stops: the end says it, and its Retry hands it over',
+    SLOW,
+    async () => {
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const asking = Deferred.makeUnsafe<void>()
+      const { world, run } = ending({
+        attribution: Layer.succeed(WriteAttribution, {
+          written: () => () => Effect.void,
+          command: () => Effect.succeed(null),
+          holding: (file, write) =>
+            Effect.gen(function* () {
+              if (file.path.endsWith('held.ts')) {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(release)
+              }
+              return { result: yield* write, waited: null }
+            }),
+        }),
+        verdicts: Layer.succeed(Verdicts, {
+          judge: (asked) =>
+            asked.tool === 'fs_write' && asked.path?.named.endsWith('question.ts') === true
+              ? Effect.as(Deferred.await(asking), {
+                  verdict: 'ask',
+                  reason: 'a file no task names',
+                  by: 'suite',
+                } satisfies Verdict)
+              : Effect.succeed<Verdict>(ALLOW),
+          refusal: () => Effect.succeed(null),
+        }),
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const database = yield* Database
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'held.ts',
+              content: 'export const held = true\n',
+            }).pipe(Effect.forkDetach)
+            yield* Deferred.await(entered)
+            yield* call(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'question.ts',
+              content: 'export const question = true\n',
+            }).pipe(Effect.forkDetach)
+            // Once the Builder stopped, its call asks: the user answers it while the exit still
+            // stops the tree, and every hand-over of an answer fails; then the stops end.
+            yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(getSession(builder.session.id), (session) => session.state === 'ended'),
+                LONG,
+              )
+              yield* Deferred.succeed(asking, undefined)
+              yield* until(
+                Effect.map(getMission(mission.id), (one) => one.needs.length > 0),
+                LONG,
+              )
+              const need = (yield* getMission(mission.id)).needs[0]
+              if (need === undefined) return yield* Effect.die(new Error('no question'))
+              yield* database.run(sql`CREATE TRIGGER refuse_hand_overs BEFORE UPDATE OF delivered_at
+                ON need_deliveries BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+              yield* answerNeed({
+                id: need.id,
+                answer: PermissionAnswer.make({ choice: 'allow-once' }),
+                key: crypto.randomUUID(),
+              })
+              yield* Deferred.succeed(release, undefined)
+            }).pipe(Effect.forkDetach)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(release)
+            // The exit's check after the stops sees the answer not handed over, and hands it
+            // over: that fails, and the end says so rather than close the Building.
+            const errors = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+            )
+            const state = Effect.map(
+              database
+                .select({ state: buildings.state })
+                .from(buildings)
+                .where(eq(buildings.missionId, mission.id)),
+              (rows) => rows[0]?.state,
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (yield* state) !== 'active' || (yield* errors).length > 0
+              }),
+              LONG,
+            )
+            const holding = { state: yield* state, errors: yield* errors }
+            yield* database.run(sql`DROP TRIGGER refuse_hand_overs`)
+            if (holding.state !== 'active') return { holding, undelivered: [] }
+            yield* retried(mission.id)
+            yield* inReview(mission.id)
+            const undelivered = yield* database
+              .select()
+              .from(needDeliveries)
+              .where(isNull(needDeliveries.deliveredAt))
+            return { holding, undelivered }
+          }),
+        ),
+      )
+      expect(seen.holding.state).toBe('active')
+      expect(seen.holding.errors).toHaveLength(1)
+      const [error] = seen.holding.errors
+      if (error !== undefined && Predicate.isTagged(error.fields, 'Error')) {
+        expect(error.fields.failed).toContain('A step of the end did not run (refresh)')
+      }
+      expect(seen.undelivered).toEqual([])
+    },
+  )
 })
 
 /** R1.S2's test: green while `api/export.ts` exports `toMarkdown`. */
@@ -3908,6 +4038,502 @@ describe('The Builder while the end waits on it', () => {
       expect(seen.answer?.state).toBe('sent')
       expect(seen.turned).not.toBeNull()
       expect((seen.turned ?? '') > (seen.answer?.sentAt ?? '')).toBe(true)
+    },
+  )
+
+  /** The answers kept for a mission's agents, and the state of its Building. */
+  const answersAndBuilding = (missionId: string) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const answers = yield* database
+        .select()
+        .from(sessionDeliveries)
+        .where(and(eq(sessionDeliveries.ownerId, missionId), eq(sessionDeliveries.kind, 'answer')))
+      const [building] = yield* database
+        .select({ state: buildings.state, turned: buildings.builderTurnedAt })
+        .from(buildings)
+        .where(eq(buildings.missionId, missionId))
+      return { answers, building }
+    })
+
+  /** The Builder's event follower, held as it takes in an answer once `lagging` is set. */
+  const laggingFollower = () => {
+    const state = { lagging: false }
+    const entered = Deferred.makeUnsafe<void>()
+    const behind = held()
+    const hold: BuilderHold = (at) =>
+      at === 'answering' && state.lagging
+        ? Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Effect.promise(() => behind.promise)),
+          )
+        : Effect.void
+    return { state, entered, behind, hold }
+  }
+
+  test(
+    'an answer applied while the Builder’s event follower lags behind is kept for the Builder before the end can close the Building, and its turn on it is waited for',
+    SLOW,
+    async () => {
+      const follower = laggingFollower()
+      const { world, run } = ending({ hold: follower.hold })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            follower.state.lagging = true
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            // The answer is applied; the follower that acts on it has not taken it in yet.
+            yield* Deferred.await(follower.entered)
+            // Whatever drives the end meanwhile, it does not close the Building on that answer.
+            yield* driven(mission.id)
+            const lagged = yield* answersAndBuilding(mission.id)
+            follower.behind.release()
+            yield* inReview(mission.id)
+            return { lagged, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      ).finally(() => follower.behind.release())
+      expect(seen.lagged.building?.state).toBe('active')
+      expect(seen.lagged.answers).toHaveLength(1)
+      expect(seen.lagged.answers[0]?.body).toContain('The user answered: Comma')
+      // One answer, sent to the Builder, and a turn of the Builder ended after it was sent.
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer applied right before a stop, its Builder’s event follower behind, reaches the Builder after the start before the end closes the Building',
+    SLOW,
+    async () => {
+      const follower = laggingFollower()
+      const before = ending({ hold: follower.hold })
+      const left = await before
+        .run(({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launched(work, withReadme)
+              const builder = yield* builderOf(mission.id)
+              yield* builtAll(builder.grantId)
+              yield* asked(builder.grantId)
+              yield* documented(before.world, mission.id)
+              yield* reviewed(before.world, mission.id, 'spec-reviewer')
+              yield* reviewed(before.world, mission.id, 'code-reviewer')
+              yield* until(
+                Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+                LONG,
+              )
+              const need = (yield* getMission(mission.id)).needs[0]
+              if (need === undefined) return yield* Effect.die(new Error('no question'))
+              follower.state.lagging = true
+              yield* answerNeed({
+                id: need.id,
+                answer: ChosenAnswer.make({ option: 'Comma' }),
+                key: crypto.randomUUID(),
+              })
+              // Hemera stops with the answer applied and its follower behind.
+              yield* Deferred.await(follower.entered)
+              return mission
+            }),
+          ),
+        )
+        .finally(() => follower.behind.release())
+      const after = ending({ resumed: true })
+      // Every agent of the start ends its turn as soon as it is given one.
+      for (let index = 0; index < 8; index += 1) after.world.release(index)
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* inReview(left.id)
+            return {
+              kept: yield* answersAndBuilding(left.id),
+              prompts: after.world.agents.flatMap((agent) =>
+                agent.answers.prompts.map((one) => text(one)),
+              ),
+            }
+          }),
+        ),
+      )
+      expect(seen.kept.answers.map((one) => one.state)).toEqual(['sent'])
+      expect(seen.prompts.some((one) => one.includes('The user answered: Comma'))).toBe(true)
+      const [answer] = seen.kept.answers
+      expect((seen.kept.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer given before the end is called, its Builder’s turn on it still running at the refresh, holds the exit until that turn ended',
+    SLOW,
+    async () => {
+      let gate: ReturnType<typeof held> | null = null
+      const turn = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* asked(builder.grantId)
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            // The Builder's turn on the answer, before its last task ends, stays open.
+            gate = turn
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            yield* until(
+              Effect.map(answersAndBuilding(mission.id), (now) =>
+                now.answers.some((one) => one.state === 'sent'),
+              ),
+              LONG,
+            )
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            yield* driven(mission.id)
+            const waiting = yield* answersAndBuilding(mission.id)
+            gate = null
+            turn.release()
+            yield* inReview(mission.id)
+            const [called] = yield* (yield* Database)
+              .select({ at: buildings.endCalledAt })
+              .from(buildings)
+              .where(eq(buildings.missionId, mission.id))
+            return {
+              called: called?.at ?? '',
+              waiting,
+              after: yield* answersAndBuilding(mission.id),
+            }
+          }),
+        ),
+      ).finally(() => turn.release())
+      // Stored before the end was called, and waited on all the same.
+      expect((seen.waiting.answers[0]?.createdAt ?? '~') < seen.called).toBe(true)
+      expect(seen.waiting.building?.state).toBe('active')
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer the user gave at the refresh that is not handed to the Builder yet holds the exit, and reaches the Builder before Review',
+    SLOW,
+    async () => {
+      const handing = held()
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            // Another round of answers holds the hand-over: this one is answered, not handed yet.
+            const owners = yield* NeedOwners
+            const other = yield* Semaphore.withPermits(
+              owners.delivering,
+              1,
+            )(Effect.promise(() => handing.promise)).pipe(Effect.forkChild)
+            const answering = yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            }).pipe(Effect.forkChild)
+            yield* until(
+              Effect.map(getNeed(need.id), (one) => one.state === 'answered'),
+              LONG,
+            )
+            yield* driven(mission.id)
+            const lagged = yield* answersAndBuilding(mission.id)
+            handing.release()
+            yield* Fiber.join(other)
+            yield* Fiber.join(answering)
+            yield* inReview(mission.id)
+            return { lagged, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      ).finally(() => handing.release())
+      expect(seen.lagged.building?.state).toBe('active')
+      expect(seen.lagged.answers).toEqual([])
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer whose hand-over to the Builder failed is handed over again by the end, which waits for it before Review',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* asked(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            // The hand-over's write fails once: the answer is kept, not handed over.
+            const database = yield* Database
+            yield* database.run(sql`CREATE TRIGGER refuse_answers BEFORE INSERT ON session_deliveries
+              WHEN NEW.kind = 'answer' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            const failed = yield* answersAndBuilding(mission.id)
+            yield* database.run(sql`DROP TRIGGER refuse_answers`)
+            // Nothing hands it over on its own now: the end, driven, does.
+            yield* driven(mission.id)
+            yield* inReview(mission.id)
+            return { failed, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      )
+      expect(seen.failed.answers).toEqual([])
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
+    },
+  )
+
+  test(
+    'an answer the Builder took in the tasks phase, its Builder stopped before the end and impossible to bring back, does not hold the exit: the Building reaches Review',
+    SLOW,
+    async () => {
+      let failing = false
+      let gate: ReturnType<typeof held> | null = null
+      const turn = held()
+      const { world, run } = ending({
+        builder: {
+          steps: [says('Read.')],
+          between: () => gate?.promise ?? Promise.resolve(),
+        },
+        // Once armed, a Builder's start fails: it cannot be brought back.
+        sessionHold: (at, session) =>
+          at === 'starting' && failing && session.role === 'builder'
+            ? Effect.die(new Error('the provider is down'))
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* asked(builder.grantId)
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no question'))
+            yield* answerNeed({
+              id: need.id,
+              answer: ChosenAnswer.make({ option: 'Comma' }),
+              key: crypto.randomUUID(),
+            })
+            // The Builder takes the answer in the tasks phase and ends its turn on it.
+            yield* until(
+              Effect.map(answersAndBuilding(mission.id), (now) =>
+                now.answers.some((one) => one.state === 'sent'),
+              ),
+              LONG,
+            )
+            yield* Sessions.use((sessions) => sessions.settled(builder.session.id))
+            // From now on its turns stay open: none ends once the end is called. It finishes the
+            // plan, then stops, and cannot be started again.
+            gate = turn
+            yield* builtAll(builder.grantId)
+            yield* endedQuietly(builder.session.id)
+            failing = true
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            const errors = Effect.map(getMission(mission.id), (one) =>
+              one.needs.filter((found) => Predicate.isTagged(found.fields, 'Error')),
+            )
+            yield* until(
+              Effect.gen(function* () {
+                return (
+                  (yield* getMission(mission.id)).stage === 'review' || (yield* errors).length > 0
+                )
+              }),
+              LONG,
+            )
+            return { mission: yield* getMission(mission.id), errors: yield* errors }
+          }),
+        ),
+      ).finally(() => turn.release())
+      expect(seen.errors).toEqual([])
+      expect(seen.mission.stage).toBe('review')
+    },
+  )
+
+  /**
+   * The Builder's question at the refresh, turned by hand into an answer the hand-over skips, as
+   * `changed` rewrites its need; then the end is driven, up to Review.
+   */
+  const skippedAnswer = (changed: (needId: string) => ReturnType<typeof sql>) => {
+    const { world, run } = ending()
+    return run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, withReadme)
+          const builder = yield* builderOf(mission.id)
+          yield* builtAll(builder.grantId)
+          yield* asked(builder.grantId)
+          yield* documented(world, mission.id)
+          yield* reviewed(world, mission.id, 'spec-reviewer')
+          yield* reviewed(world, mission.id, 'code-reviewer')
+          yield* until(
+            Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+            LONG,
+          )
+          const need = (yield* getMission(mission.id)).needs[0]
+          if (need === undefined) return yield* Effect.die(new Error('no question'))
+          const database = yield* Database
+          yield* database.run(sql`UPDATE needs SET state = 'answered',
+            answer = '{"_tag":"Chosen","option":"Comma"}', ended_at = ${new Date().toISOString()}
+            WHERE id = ${need.id}`)
+          yield* database.run(changed(need.id))
+          yield* database.insert(needDeliveries).values({ needId: need.id, deliveredAt: null })
+          yield* driven(mission.id)
+          yield* inReview(mission.id)
+          return yield* getMission(mission.id)
+        }),
+      ),
+    )
+  }
+
+  test(
+    'an answer to a need no service takes, which the hand-over always skips, does not hold the exit',
+    SLOW,
+    async () => {
+      const seen = await skippedAnswer(
+        (needId) => sql`UPDATE needs SET service = 'nobody' WHERE id = ${needId}`,
+      )
+      expect(seen.stage).toBe('review')
+    },
+  )
+
+  test(
+    'an answer to a need this version cannot read, which the hand-over always skips, does not hold the exit',
+    SLOW,
+    async () => {
+      const seen = await skippedAnswer(
+        (needId) => sql`UPDATE needs SET fields = '{"_tag":"Unknown"}' WHERE id = ${needId}`,
+      )
+      expect(seen.stage).toBe('review')
+    },
+  )
+
+  test(
+    'a Retry of the Builder’s environment need at the refresh, its event follower behind, is kept for the Builder before the end can close the Building',
+    SLOW,
+    async () => {
+      const state = { lagging: false }
+      const entered = Deferred.makeUnsafe<void>()
+      const behind = held()
+      const { world, run } = ending({
+        hold: (at) =>
+          at === 'releasing' && state.lagging
+            ? Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Effect.promise(() => behind.promise)),
+              )
+            : Effect.void,
+      })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            yield* builtAll(builder.grantId)
+            yield* call(builder.grantId, 'report_need', {
+              kind: 'environment',
+              text: 'The staging database is down.',
+              tasks: [],
+            })
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* until(
+              Effect.map(buildingNow(mission.id), (view) => view.phase === 'refresh'),
+              LONG,
+            )
+            const need = (yield* getMission(mission.id)).needs[0]
+            if (need === undefined) return yield* Effect.die(new Error('no need'))
+            state.lagging = true
+            yield* retryNeed(need.id)
+            // The need is withdrawn; the follower that tells the Builder has not taken it in yet.
+            yield* Deferred.await(entered)
+            yield* driven(mission.id)
+            const lagged = yield* answersAndBuilding(mission.id)
+            behind.release()
+            yield* inReview(mission.id)
+            return { lagged, after: yield* answersAndBuilding(mission.id) }
+          }),
+        ),
+      ).finally(() => behind.release())
+      expect(seen.lagged.building?.state).toBe('active')
+      expect(seen.lagged.answers).toHaveLength(1)
+      expect(seen.lagged.answers[0]?.body).toContain('The user says it is fixed')
+      expect(seen.after.answers.map((one) => one.state)).toEqual(['sent'])
+      const [answer] = seen.after.answers
+      expect((seen.after.building?.turned ?? '') > (answer?.sentAt ?? '~')).toBe(true)
     },
   )
 
