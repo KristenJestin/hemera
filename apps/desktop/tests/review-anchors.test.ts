@@ -64,9 +64,28 @@ describe('A code comment on lines 10–12 follows its lines', () => {
     const now = [...FILE.slice(0, 16), 'new', ...FILE.slice(16)]
     expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'current', range })
   })
-  test('a line just above them changes: their lines are unchanged, current', () => {
+  test('a line of their context changes: outdated, the fingerprint no longer matches there', () => {
     const { range, fingerprint } = anchored(10, 12)
     const now = FILE.map((line) => (line === 'line 9' ? 'line nine' : line))
+    expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'outdated' })
+  })
+  test('a guard negated just above an unchanged line makes the comment outdated', () => {
+    const before = [
+      'function purge(user) {',
+      '  if (user.isAdmin) {',
+      '    deleteAll()',
+      '  }',
+      '}',
+    ]
+    const now = before.map((line) => line.replace('user.isAdmin', '!user.isAdmin'))
+    const range = { start: 3, end: 3 }
+    expect(reanchor(before, now, range, fingerprintOf(before, range))).toEqual({
+      kind: 'outdated',
+    })
+  })
+  test('a change beyond the three lines of context: current', () => {
+    const { range, fingerprint } = anchored(10, 12)
+    const now = FILE.map((line) => (line === 'line 6' ? 'line six' : line))
     expect(reanchor(FILE, now, range, fingerprint)).toEqual({ kind: 'current', range })
   })
   test('the lines themselves change: outdated', () => {

@@ -6,9 +6,10 @@
  *   in the same surroundings.
  * - **Re-anchoring** maps the anchored range from the commented version of the file to the version
  *   now, through the line mapping of a diff between the two. Lines the mapping carries over
- *   unchanged and together are `current` at the same place, `moved` at another. When the mapping
- *   loses them (a block cut and pasted, say), the fingerprint is looked for in the new version:
- *   found once, the lines `moved` there. Otherwise the comment is `outdated`, and keeps its excerpt.
+ *   unchanged and together, whose fingerprint still matches there (their context too), are
+ *   `current` at the same place, `moved` at another. Otherwise (a block cut and pasted, say) the
+ *   fingerprint is looked for in the new version: found once, the lines `moved` there. Otherwise
+ *   the comment is `outdated`, and keeps its excerpt: a line of its context that changed is enough.
  */
 
 import { createHash } from 'node:crypto'
@@ -160,7 +161,9 @@ export const reanchor = (
       Array.from({ length: range.end - range.start + 1 }, (_, step) => step).every(
         (step) => mapping[range.start - 1 + step] === first + step,
       )
-    if (together) return at(range, first + 1)
+    // Current or moved only where the fingerprint, context included, still matches (CT-44).
+    const mapped = { start: first + 1, end: first + 1 + range.end - range.start }
+    if (together && fingerprintOf(after, mapped) === fingerprint) return at(range, first + 1)
   }
   const length = range.end - range.start + 1
   const found: number[] = []
