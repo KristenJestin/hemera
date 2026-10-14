@@ -5,10 +5,10 @@ import { type MarkState, StatusMark } from './status-mark.tsx'
 
 /**
  * Where a task stands, as one small mark that changes in place: a dotted ring to do; a turning
- * arc while running; a circle that closes on ✓ or ✕; a dot that pulses when the task waits for
- * the user; a bar when it is blocked; a struck dotted ring when it is skipped. Every state is a
- * pose of the same strokes, so a change is a stroke moving, never one glyph swapped for another.
- * Its legend is a tooltip on the mark.
+ * arc while running; a circle that closes on ✓ or ✕; a ✓ in the dotted ring when it is done but
+ * not verified; a dot that pulses when the task waits for the user; a bar when it is blocked; a
+ * struck dotted ring when it is skipped. Every state is a pose of the same strokes, so a change is
+ * a stroke moving, never one glyph swapped for another. Its legend is a tooltip on the mark.
  */
 
 /** How much of a stroke is drawn, from the dash motion writes on it: 0 to 1. */
@@ -39,6 +39,11 @@ const POSES: Record<MarkState, { figures: string[]; tone: string; legend: string
   todo: { figures: ['dashed'], tone: 'text-muted-foreground', legend: 'To do' },
   running: { figures: ['ring'], tone: 'text-info', legend: 'Running' },
   done: { figures: ['ring', 'check'], tone: 'text-success', legend: 'Done' },
+  unverified: {
+    figures: ['dashed', 'check'],
+    tone: 'text-success',
+    legend: 'Done, not verified',
+  },
   failed: { figures: ['ring', 'cross'], tone: 'text-destructive', legend: 'Failed' },
   waiting: { figures: ['ring', 'dot'], tone: 'text-warning', legend: 'Waiting for you' },
   blocked: { figures: ['ring', 'bar'], tone: 'text-destructive', legend: 'Blocked' },
@@ -111,6 +116,9 @@ export const Running: Story = {
 
 /** Done: the circle closes on a ✓. */
 export const Done: Story = posed('done')
+
+/** Done but not verified yet: the ✓ drawn in the dotted ring, which closes once a check proves it. */
+export const Unverified: Story = posed('unverified')
 
 /** Failed: the circle closes on a ✕. */
 export const Failed: Story = posed('failed')

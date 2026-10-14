@@ -72,7 +72,12 @@ export type NeedAsk =
       /** The settings section that would settle such calls, by its name. */
       settings?: string | undefined
     }
-  | { kind: 'decision'; options: readonly DecisionOption[] }
+  | {
+      kind: 'decision'
+      options: readonly DecisionOption[]
+      /** What the decision rests on: outputs to compare, one under the other, before the options. */
+      evidence?: readonly Attempt[] | undefined
+    }
   | {
       kind: 'error'
       attempts: readonly Attempt[]
@@ -268,7 +273,25 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
         </>
       )
     case 'decision':
-      return onWrite === undefined ? null : <OwnAnswer onWrite={onWrite} />
+      return (
+        <>
+          {ask.evidence !== undefined && (
+            <Part label="Outputs to compare">
+              <ul aria-label="Outputs to compare" className="flex flex-col gap-2 text-sm">
+                {ask.evidence.map((output, at) => (
+                  <li key={at} className="flex flex-col gap-1">
+                    <span>{output.what}</span>
+                    <pre className={CODE}>
+                      <code>{output.output}</code>
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+            </Part>
+          )}
+          {onWrite !== undefined && <OwnAnswer onWrite={onWrite} />}
+        </>
+      )
     case 'error':
       return (
         <>
