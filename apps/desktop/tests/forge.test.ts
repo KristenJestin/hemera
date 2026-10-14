@@ -2331,18 +2331,18 @@ describe('A write that may have reached the forge is indeterminate, never failed
     expect(actions).toEqual([['forge.pr.create', 'failed']])
   })
 
-  test.skipIf(process.platform === 'win32')(
-    'a write whose CLI could not start is failed',
-    async () => {
-      const fake = fakeForge(ghReady())
-      // Found on the PATH, but its interpreter is a folder: the spawn itself fails, not on ENOENT.
-      writeFileSync(join(fake.env['PATH'] ?? '', 'gh'), `#!${tmpdir()}\n`)
-      const { ended, actions } = await createdWith(fake)
-      expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
-      expect(fake.calls()).toEqual([])
-      expect(actions).toEqual([['forge.pr.create', 'failed']])
-    },
-  )
+  test('a write whose CLI could not start is failed', async () => {
+    const fake = fakeForge(ghReady(), ['bkt'])
+    const bin = fake.env['PATH'] ?? ''
+    // Found on the PATH, but not a program the system can start: the spawn itself fails, not on
+    // ENOENT. On Windows a `gh.exe` that is text; elsewhere a `gh` whose interpreter is a folder.
+    if (process.platform === 'win32') writeFileSync(join(bin, 'gh.exe'), 'not a program\r\n')
+    else writeFileSync(join(bin, 'gh'), `#!${tmpdir()}\n`, { mode: 0o755 })
+    const { ended, actions } = await createdWith(fake)
+    expect(Result.isFailure(ended) && ended.failure).toBeInstanceOf(ForgeUnreachable)
+    expect(fake.calls()).toEqual([])
+    expect(actions).toEqual([['forge.pr.create', 'failed']])
+  })
 })
 
 /** The pending need's text: what is missing, and what to do. */
