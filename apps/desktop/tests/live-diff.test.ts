@@ -227,7 +227,13 @@ describe('Two repositories with a file of the same name are told apart', () => {
         }),
       ),
     )
-    expect(seen.repositories.map((one) => one.repository)).toEqual(['api', 'web'])
+    // A repository Git could not read would list nothing: say so rather than miss a file.
+    expect(
+      seen.repositories.map(({ repository, unreadable }) => ({ repository, unreadable })),
+    ).toEqual([
+      { repository: 'api', unreadable: null },
+      { repository: 'web', unreadable: null },
+    ])
     const readmes = seen.repositories.flatMap((one) =>
       one.files.filter((file) => file.path === 'README.md'),
     )
@@ -252,8 +258,15 @@ describe('Two repositories with a file of the same name are told apart', () => {
       ),
     )
     const web = seen.repositories.find((one) => one.repository === 'web')
-    expect(web).toMatchObject({ files: [], added: 0, removed: 0, changedOutside: false })
+    expect(web).toMatchObject({
+      files: [],
+      added: 0,
+      removed: 0,
+      changedOutside: false,
+      unreadable: null,
+    })
     expect(seen.repositories.find((one) => one.repository === 'api')).toMatchObject({
+      unreadable: null,
       branch: expect.stringContaining('/'),
       baseBranch: 'origin/main',
       added: 1,
