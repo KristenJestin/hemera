@@ -29,7 +29,7 @@ import {
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CommandType, typeIcon } from '../project-settings/command-types.tsx'
-import { KIND_WORDS, type StepKind } from '../project-settings/recipe.tsx'
+import { KIND_WORDS, type StepKind } from '../project-settings/recipe-model.ts'
 import { MASK } from '../project-settings/variables.tsx'
 
 /**

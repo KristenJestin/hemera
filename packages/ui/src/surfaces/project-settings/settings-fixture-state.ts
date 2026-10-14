@@ -10,7 +10,7 @@ import {
   NEW_STEP,
   type SettingsStep,
   type StepDraft,
-} from '../../blocks/project-settings/recipe.tsx'
+} from '../../blocks/project-settings/recipe-model.ts'
 import type { NeverLine } from '../../blocks/project-settings/never.tsx'
 import type { ProjectRoleModel } from '../../blocks/project-settings/role-models.tsx'
 import type {

@@ -247,14 +247,13 @@ export {
   type CommandDraft,
   type SettingsCommand,
 } from './blocks/project-settings/commands-model.ts'
+export { RecipeSection, StepForm } from './blocks/project-settings/recipe.tsx'
 export {
   NEW_STEP,
-  RecipeSection,
-  StepForm,
   type SettingsStep,
   type StepDraft,
   type StepKind,
-} from './blocks/project-settings/recipe.tsx'
+} from './blocks/project-settings/recipe-model.ts'
 export {
   VariableForm,
   VariablesSection,
