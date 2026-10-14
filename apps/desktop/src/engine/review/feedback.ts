@@ -1242,7 +1242,10 @@ export const reviewLayer = (settings: ReviewSettings) =>
                     .pipe(Effect.mapError(refusedWhile('moving a round')))
                 }
                 const moved = yield* setRound(transaction, missionId, number, from, to)
-                return { result: undefined, events: [...closing, moved] }
+                // Answered with every feedback already settled: it closes now (open question 35).
+                const settled =
+                  to === 'answered' ? yield* closedIfSettled(transaction, missionId, number) : []
+                return { result: undefined, events: [...closing, moved, ...settled] }
               }),
             ),
           ),

@@ -528,6 +528,30 @@ describe('Resolving and following up', () => {
 
 describe('Rounds as data', () => {
   test(
+    'a round whose feedback were all withdrawn while it built closes as it is answered',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const one = yield* add(missionId, remark('The export button is grey.'))
+            yield* moveRound(missionId, 1, 'grilling')
+            yield* moveRound(missionId, 1, 'building')
+            yield* Review.use((review) => review.feedbackWithdraw(one.id, FeedbackUser.make({})))
+            yield* moveRound(missionId, 1, 'answered')
+            return (yield* stateOf(missionId)).rounds.map((round) => round.state)
+          }),
+        ),
+      )
+      expect(seen).toEqual(['closed'])
+    },
+    SLOW,
+  )
+
+  test(
     'feedback added while a round builds goes to the next round, which it creates',
     async () => {
       const { run } = engine()
