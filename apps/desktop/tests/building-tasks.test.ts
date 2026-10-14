@@ -14,7 +14,7 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Effect, Fiber, Layer, Predicate } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -24,15 +24,16 @@ import {
   buildingOf,
   inRepository,
 } from '../src/engine/building/builder.ts'
-import { getMission, moveMission } from '../src/engine/missions.ts'
+import { type Stopper, getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { sessionDeliveries } from '../src/engine/storage/schema.ts'
+import { buildingAttempts, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { getSession, openSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import {
+  builderAgents,
   builderEngine,
   builderOf,
   buildingNow,
@@ -40,7 +41,7 @@ import {
   statesOf,
   taskIn,
 } from './builder-world.ts'
-import { text, until, within } from './sessions-world.ts'
+import { HELPER, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -871,6 +872,62 @@ describe('The end and Cancel', () => {
     )
     expect(seen.builder.state).toBe('ended')
     expect(seen.view.state).toBe('cancelled')
+    expect(statesOf(seen.view)['T1']).toBe('in_progress')
+  })
+
+  test('a Cancel whose stops a stop cut ends its Building as cancelled, its stops done after the start, and brings no Builder back', async () => {
+    const reached = Deferred.makeUnsafe<void>()
+    let armed = false
+    // Once armed, the tree's stop never ends: the engine stops in the middle of the cancel's stops.
+    // The launch's Freeze stops the tree too, before.
+    const tree: Stopper = {
+      name: 'sessions',
+      stop: () =>
+        armed ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never) : Effect.void,
+    }
+    const first = await sessionsEngine(data, builderAgents, {
+      roles: [HELPER],
+      tools: { home: work },
+      missions: { stoppers: [tree] },
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          armed = true
+          yield* Effect.forkChild(moveMission(mission.id, 'cancel', 'user'))
+          yield* Deferred.await(reached)
+          return { mission }
+        }),
+      ),
+    )
+    const seen = await builderEngine(data, work).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(
+            Effect.map(buildingOf(first.mission.id), (view) => view?.state === 'cancelled'),
+          )
+          const live = yield* sessionsIn(['starting', 'working', 'idle'], {
+            kind: 'mission',
+            missionId: first.mission.id,
+          })
+          const database = yield* Database
+          return {
+            mission: yield* getMission(first.mission.id),
+            view: yield* buildingNow(first.mission.id),
+            builders: live.filter((one) => one.role === 'builder'),
+            attempts: yield* database.select().from(buildingAttempts),
+          }
+        }),
+      ),
+    )
+    expect(seen.view.state).toBe('cancelled')
+    expect(seen.mission.unstopped).toEqual([])
+    expect(seen.builders).toEqual([])
+    expect(seen.attempts.map((one) => one.outcome)).toEqual(['cancelled'])
     expect(statesOf(seen.view)['T1']).toBe('in_progress')
   })
 

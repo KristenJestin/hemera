@@ -29,6 +29,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } f
 import { join, relative, resolve, sep } from 'node:path'
 
 import {
+  MaskedText,
   DEFINED_HELPERS,
   FreeHelperResult,
   HELPER_DEPTH,
@@ -65,6 +66,7 @@ import { AgentRuntime } from '../agents/runtime.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
+import type { CancelIn } from '../missions.ts'
 import { putEvidence } from '../memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../memory/files.ts'
 import { Memory } from '../memory/index.ts'
@@ -162,6 +164,28 @@ type Needs =
   | Memory
   | HelperDesk
   | ProbeSteps
+
+/** Hemera's own words: nothing in them to mask. */
+const MISSION_CANCELLED = MaskedText.make('the mission was cancelled')
+
+/** A cancelled mission's running helpers end as failed, in the cancel's own transaction (#378). */
+export const cancelHelpersIn: CancelIn = (transaction, missionId) =>
+  transaction
+    .update(helpers)
+    .set({
+      state: 'failed',
+      stuck: false,
+      failure: MISSION_CANCELLED,
+      endedAt: new Date().toISOString(),
+    })
+    .where(and(eq(helpers.missionId, missionId), eq(helpers.state, 'running')))
+    .returning()
+    .pipe(
+      Effect.mapError(refusedWhile('ending the helpers with their mission')),
+      Effect.map((rows) =>
+        rows.map((row) => helperEvent('helper.failed', row, { why: MISSION_CANCELLED })),
+      ),
+    )
 
 export const helpersLayer = (settings: HelpersSettings) =>
   Layer.effectDiscard(
@@ -814,35 +838,6 @@ export const helpersLayer = (settings: HelpersSettings) =>
           yield* fail(row.id, NO_RESULT, true)
         })
 
-      /** A mission cancelled: its helpers end with its tree, as failed. */
-      const cancelled = (missionId: string) =>
-        Effect.gen(function* () {
-          for (const row of yield* helperRowsOf(missionId)) {
-            if (row.state !== 'running') continue
-            const secrets = yield* Secrets
-            yield* mutate('ending a helper with its mission', (transaction) =>
-              transaction
-                .update(helpers)
-                .set({
-                  state: 'failed',
-                  stuck: false,
-                  failure: secrets.mask('the mission was cancelled'),
-                  endedAt: new Date().toISOString(),
-                })
-                .where(and(eq(helpers.id, row.id), eq(helpers.state, 'running')))
-                .pipe(
-                  Effect.mapError(refusedWhile('ending a helper with its mission')),
-                  Effect.as({
-                    result: undefined,
-                    events: [
-                      helperEvent('helper.failed', row, { why: 'the mission was cancelled' }),
-                    ],
-                  }),
-                ),
-            )
-          }
-        })
-
       const isHelperEvent = (payload: NewEvent['payload']) =>
         payload !== undefined && HELPER_ROLES.includes(String(payload['role']))
 
@@ -854,7 +849,6 @@ export const helpersLayer = (settings: HelpersSettings) =>
           Effect.gen(function* () {
             const payload = event.payload ?? {}
             const lineage = Option.getOrNull(readString(payload['lineage']))
-            if (event.type === 'mission.cancelled') return yield* locked(cancelled(event.entityId))
             if (event.type === 'session.stopped') helperOfSession.delete(event.entityId)
             if (lineage === null || !isHelperEvent(payload)) return
             if (event.type === 'session.stuck') yield* stuckSession(lineage)
