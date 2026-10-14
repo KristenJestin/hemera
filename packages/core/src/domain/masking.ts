@@ -947,39 +947,105 @@ export const maskedJson = (record: Masked<Schema.JsonObject>): Masked<string> =>
 type MaskString = (text: string, field: string) => string
 
 /**
- * A value with every string in it masked by `string`, and a field whose name says it is a
- * credential masked whole.
+ * How many containers one in another a structured value may have, the record itself the first.
+ * What lies deeper is masked whole where it begins: no call's arguments nest that far, and a value
+ * that is kept must be written and read back by code that recurses, which a stack carries to a few
+ * thousand levels only.
  */
-const visit = (value: Schema.Json, field: string, string: MaskString): Schema.Json => {
-  if (CREDENTIAL_FIELD.test(field)) return MASK
-  if (Predicate.isString(value)) return string(value, field)
-  if (isList(value)) return value.map((item) => visit(item, field, string))
-  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
-  return visitFields(value, string)
-}
+export const NESTING_LIMIT = 256
 
 /** The tag of a tagged value names its shape, never a secret: it is kept as it is. */
 const TAG = '_tag'
 
-const visitFields = (record: Schema.JsonObject, string: MaskString): Schema.JsonObject =>
-  Object.fromEntries(
-    Object.entries(record).map(([name, item]) => [
-      name,
-      name === TAG ? item : visit(item, name, string),
-    ]),
-  )
+/** A container being masked: what it holds still to visit, and what is masked already. */
+interface Level {
+  /** The name it stands under in its parent; its items stand in it too when it is a list. */
+  readonly into: string
+  /** The names of the fields of a record; null for a list. */
+  readonly names: ReadonlyArray<string> | null
+  readonly items: ReadonlyArray<Schema.Json>
+  /** The items done, in order: the next one to visit is at this length. */
+  readonly masked: Array<readonly [name: string, item: Schema.Json]>
+}
+
+const openLevel = (container: Schema.JsonObject | Schema.JsonArray, into: string): Level => {
+  if (isList(container)) return { into, names: null, items: container, masked: [] }
+  const entries = Object.entries(container)
+  return {
+    into,
+    names: entries.map(([name]) => name),
+    items: entries.map(([, item]) => item),
+    masked: [],
+  }
+}
+
+const closedLevel = (level: Level): Schema.Json =>
+  level.names === null ? level.masked.map(([, item]) => item) : Object.fromEntries(level.masked)
+
+/** A value masked, and whether any of it lay beyond `NESTING_LIMIT` and was masked whole. */
+interface Walked {
+  readonly masked: Schema.JsonObject
+  readonly cut: boolean
+}
+
+/**
+ * A structured value with every string in it masked by `string`, and a field whose name says it is
+ * a credential masked whole. The containers open are kept on a stack, not in calls, so no depth of
+ * nesting runs out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
+ */
+const walk = (record: Schema.JsonObject, string: MaskString): Walked => {
+  let cut = false
+  const open: Level[] = [openLevel(record, '')]
+  for (;;) {
+    const level = open.at(-1)
+    if (level === undefined) return { masked: {}, cut: true }
+    const at = level.masked.length
+    if (at === level.items.length) {
+      open.pop()
+      const parent = open.at(-1)
+      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut }
+      parent.masked.push([level.into, closedLevel(level)])
+      continue
+    }
+    const item = level.items[at] ?? null
+    const name = level.names?.[at] ?? level.into
+    if (level.names !== null && name === TAG && Predicate.isString(item)) {
+      level.masked.push([name, item])
+    } else if (CREDENTIAL_FIELD.test(name)) {
+      level.masked.push([name, MASK])
+    } else if (Predicate.isString(item)) {
+      level.masked.push([name, string(item, name)])
+    } else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
+      level.masked.push([name, item])
+    } else if (open.length >= NESTING_LIMIT) {
+      cut = true
+      level.masked.push([name, MASK])
+    } else {
+      open.push(openLevel(item, name))
+    }
+  }
+}
+
+/** Every field of a record masked whole: what is kept of a record that could not be read. */
+const maskedWhole = (record: Schema.JsonObject): Schema.JsonObject =>
+  Object.fromEntries(Object.keys(record).map((name) => [name, MASK]))
 
 /**
  * A structured value with every string in it masked, and a field whose name says it is a
  * credential (`password`, `token`, `secret`, `api_key`, `credential`, `authorization`) masked
- * whole.
+ * whole. What lies beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`, and
+ * the call it serves never fails.
  */
 export function maskRecord(
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> {
-  const known = longestFirst(values)
-  return maskedRecord(visitFields(record, (text) => doneOrMask(() => textMasked(text, known))))
+  try {
+    const known = longestFirst(values)
+    return maskedRecord(walk(record, (text) => doneOrMask(() => textMasked(text, known))).masked)
+  } catch {
+    return maskedRecord(maskedWhole(record))
+  }
 }
 
 /**
@@ -993,18 +1059,23 @@ export function maskAction(
   action: Schema.JsonObject,
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> | null {
-  const known = longestFirst(values)
-  let lostDestination = false
-  const masked = visitFields(action, (text, field) => {
-    const destination = DESTINATION_FIELD.test(field)
-    if (destination && known.some((value) => text.includes(value))) lostDestination = true
-    try {
-      return done(textMasked(text, known))
-    } catch {
-      // A destination that could not be masked is gone whole: the action would be sent in part.
-      if (destination) lostDestination = true
-      return MASK
-    }
-  })
-  return lostDestination ? null : maskedRecord(masked)
+  try {
+    const known = longestFirst(values)
+    let lostDestination = false
+    const { masked, cut } = walk(action, (text, field) => {
+      const destination = DESTINATION_FIELD.test(field)
+      if (destination && known.some((value) => text.includes(value))) lostDestination = true
+      try {
+        return done(textMasked(text, known))
+      } catch {
+        // A destination that could not be masked is gone whole: the action would be sent in part.
+        if (destination) lostDestination = true
+        return MASK
+      }
+    })
+    // An action cut where it nests too deep, or that could not be read, is not sent in part.
+    return lostDestination || cut ? null : maskedRecord(masked)
+  } catch {
+    return null
+  }
 }
