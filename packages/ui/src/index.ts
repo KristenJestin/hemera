@@ -134,7 +134,8 @@ export {
   type TooltipSide,
 } from './components/tooltip/tooltip.tsx'
 export { OverlayContainerProvider, type OverlayContainer } from './overlay.ts'
-export { BALL_LEGENDS, BallMark, type Ball, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export { BallMark, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export { BALL_LEGENDS, type Ball } from './blocks/ball/ball-legends.ts'
 export {
   NEED_KINDS,
   NeedCard,

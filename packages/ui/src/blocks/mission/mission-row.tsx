@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
-import { type Ball, BallMark } from '../ball/ball-mark.tsx'
+import { BallMark } from '../ball/ball-mark.tsx'
+import { type Ball } from '../ball/ball-legends.ts'
 import { MissionMarks } from './mission-marks.tsx'
 import type { MissionMarkView } from './vocabulary.ts'
 

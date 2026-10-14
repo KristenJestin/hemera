@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import type { Ball } from '../blocks/ball/ball-mark.tsx'
+import type { Ball } from '../blocks/ball/ball-legends.ts'
 import { type MissionStage, STAGE_ORDER } from '../blocks/mission/vocabulary.ts'
 import { CHATS, LONG_TITLE, MISSION } from './shell-cast.ts'
 import { SidebarChatRow, type SidebarPlace, SidebarRow, SidebarStageGroup } from './sidebar.tsx'

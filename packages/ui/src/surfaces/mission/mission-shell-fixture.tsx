@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react'
 
-import type { Ball } from '../../blocks/ball/ball-mark.tsx'
+import type { Ball } from '../../blocks/ball/ball-legends.ts'
 import { KeptAgentChip } from '../../blocks/mission/kept-agent-chip.tsx'
 import { StageCard } from '../../blocks/mission/stage-card.tsx'
 import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
