@@ -10,7 +10,15 @@
  * end of a Building moves it (B9), the test writing in its Workspace as the user would.
  */
 
-import { existsSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { CodeAnchorAsked, REVIEW_HOLD, type RoundState, SpecAnchorAsked } from '@hemera/core/domain'
@@ -121,6 +129,8 @@ const textOf = (lines: ReadonlyArray<string>) => `${lines.join('\n')}\n`
 
 /** A PNG of 640 × 480: its signature and its IHDR, which is all the store reads. */
 const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000280000001e00806000000', 'hex')
+/** Another PNG, of 641 × 480: another mission's, or what replaced a file. */
+const OTHER_PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000281000001e00806000000', 'hex')
 
 /** Acme's mission launched over `api` and `web`, `notes.ts` written in `api`, and its folders. */
 const launchedOverBoth = () =>
@@ -1526,6 +1536,77 @@ describe('The agents do not write during Review', () => {
     },
     SLOW,
   )
+  test(
+    'fs_read of a hard link in its own evidence folder to another mission’s image is refused: only what it recorded is served',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId } = yield* launchedOverBoth()
+            const { grantId } = yield* builderOf(missionId)
+            yield* Review.use((review) => review.imageAdd(missionId, 'grey.png', PNG))
+            const other = yield* createMission({
+              projectId,
+              idea: { sentence: 'Another one', ticket: null },
+            })
+            const theirs = yield* putEvidence({
+              missionId: other.id,
+              content: { bytes: OTHER_PNG },
+              name: 'theirs.png',
+              about: null,
+              author: UserAuthor.make({}),
+            })
+            const own = join(missionFolder(data, yield* missionKeyOf(missionId)), 'evidence')
+            // A hard link has a real path of its own: no link check sees it.
+            linkSync(
+              join(
+                missionFolder(data, yield* missionKeyOf(other.id)),
+                'evidence',
+                `${theirs.sha256}.png`,
+              ),
+              join(own, 'hard.png'),
+            )
+            return yield* callTool(grantId, 'fs_read', { path: join(own, 'hard.png') })
+          }),
+        ),
+      )
+      expect(seen.ok).toBe(false)
+      expect(seen).not.toHaveProperty('image')
+      expect(seen.text).toContain('refused')
+    },
+    SLOW,
+  )
+
+  test(
+    'fs_read of its own evidence whose file was replaced since it was recorded is refused, never served',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            const { grantId } = yield* builderOf(missionId)
+            const image = yield* Review.use((review) => review.imageAdd(missionId, 'grey.png', PNG))
+            const path = join(
+              missionFolder(data, yield* missionKeyOf(missionId)),
+              'evidence',
+              `${image.sha256}.png`,
+            )
+            writeFileSync(path, OTHER_PNG)
+            return yield* callTool(grantId, 'fs_read', { path })
+          }),
+        ),
+      )
+      expect(seen.ok).toBe(false)
+      expect(seen).not.toHaveProperty('image')
+      expect(seen.text).toContain('changed on disk')
+    },
+    SLOW,
+  )
+
   test(
     'fs_read through a link in its own evidence folder to another mission’s image is refused, and the image never delivered',
     async () => {
