@@ -1087,6 +1087,9 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                   ),
                 )
                 .pipe(Effect.mapError(refusedWhile('reading the sessions')))
+              // No answer is left to hand over here: once the tree is stopped twice, nothing raises a
+              // need answered through a hand-over (a `commit` need `commitsLeft` may raise is
+              // retried, never handed over). An answer may still reach the Builder meanwhile.
               if (!exiting || live.length > 0 || (yield* answerWaits(transaction, current))) {
                 return { result: 'again' as const, events: [] }
               }
