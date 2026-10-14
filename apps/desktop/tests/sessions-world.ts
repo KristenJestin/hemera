@@ -151,6 +151,8 @@ export const sessionsEngine = (
     readonly snapshots?: ProfileParts['snapshots']
     /** The database wrapped, when a suite makes a read fail (#341). */
     readonly database?: ProfileParts['database']
+    /** The secrets registry watched, when a suite counts how its masks run (#402). */
+    readonly secrets?: ProfileParts['secrets']
     /** The fake trackers of the ticket sync's suites, and its schedule (#97). */
     readonly ticketProviders?: ProfileParts['ticketProviders']
     readonly ticketSync?: ProfileParts['ticketSync']
@@ -225,11 +227,13 @@ export const sessionsEngine = (
       : { ...withSnapshots, database: options.database }
   const withRuns =
     options.runs === undefined ? withDatabase : { ...withDatabase, runs: options.runs }
+  const withSecrets =
+    options.secrets === undefined ? withRuns : { ...withRuns, secrets: options.secrets }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined
-      ? withRuns
-      : { ...withRuns, reconciliationSteps: options.reconciliationSteps },
+      ? withSecrets
+      : { ...withSecrets, reconciliationSteps: options.reconciliationSteps },
     options.testClock,
   )
   return { world, run }
