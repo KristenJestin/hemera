@@ -41,6 +41,87 @@ describe('CI of a feature branch', () => {
   })
 })
 
+// A job of the workflow, from its key to the next job (a comment above the next job is cut off
+// with it), and its steps: each starts at a `- ` indented six spaces.
+const jobOf = (key: string): string => {
+  const start = workflow.indexOf(`\n  ${key}:\n`)
+  const next = workflow.slice(start + 1).search(/\n  \S/)
+  return workflow.slice(start, next === -1 ? undefined : start + 1 + next)
+}
+const stepsOf = (job: string): string[] => job.split(/\n {6}- /).slice(1)
+const stepRunning = (job: string, command: string): string | undefined =>
+  stepsOf(job).find((step) => new RegExp(`run: ${command}\\s*$`, 'm').test(step))
+
+describe('The Ubuntu verification, split over runners with no check lost', () => {
+  const ubuntu = jobOf('ubuntu')
+  const parts = /part: \[(.*)\]/.exec(ubuntu)?.[1]?.split(', ') ?? []
+  const repositoryParts = parts.filter((part) => part.startsWith('repository '))
+
+  test('the static checks, the stories and the repository suites each have a runner of their own', () => {
+    expect(parts.filter((part) => !part.startsWith('repository '))).toEqual(['checks', 'stories'])
+    expect(repositoryParts.length).toBeGreaterThan(1)
+    expect(ubuntu).toContain('runs-on: ubuntu-latest')
+  })
+
+  test('typecheck, lint and the format check run in the checks part', () => {
+    for (const command of ['pnpm typecheck', 'pnpm lint', 'pnpm fmt:check']) {
+      expect(stepRunning(ubuntu, command), command).toContain("matrix.part == 'checks'")
+    }
+  })
+
+  test('the build runs in every part, as it did before the split and as it does on Windows', () => {
+    expect(stepRunning(ubuntu, 'pnpm build')).not.toContain('if:')
+  })
+
+  test('both story projects, light and dark, run in the stories part', () => {
+    const step = stepRunning(ubuntu, 'pnpm test --project storybook-light --project storybook-dark')
+    expect(step).toContain("matrix.part == 'stories'")
+  })
+
+  test('the repository project runs in parts that are numbered 1 to n of n, each shard once', () => {
+    const count = repositoryParts.length
+    expect(repositoryParts).toEqual(
+      Array.from({ length: count }, (_, index) => `repository ${index + 1}/${count}`),
+    )
+    const step = stepRunning(
+      ubuntu,
+      'pnpm test --project repository --shard="\\$\\{PART#repository \\}"',
+    )
+    expect(step).toContain("startsWith(matrix.part, 'repository')")
+    expect(step).toContain('PART: ${{ matrix.part }}')
+  })
+
+  test('the stories and the repository suites never share a runner, and no step runs every project at once', () => {
+    expect(ubuntu).not.toMatch(/run: pnpm test\s*$/m)
+    for (const step of stepsOf(ubuntu)) {
+      expect(step.includes('--project storybook') && step.includes('--project repository')).toBe(
+        false,
+      )
+    }
+  })
+
+  test('the stories keep their browser, fetched in the stories part only', () => {
+    const fetched = stepsOf(ubuntu).find((step) => step.includes('playwright install chromium'))
+    expect(fetched).toContain("matrix.part == 'stories'")
+  })
+
+  test('a cancelled run leaves the required Ubuntu check failed, never green', () => {
+    const aggregate = jobOf('ubuntu-result')
+    expect(aggregate).toContain('name: verify (ubuntu-latest)')
+    expect(aggregate).toContain('needs: ubuntu')
+    expect(aggregate).toMatch(/if: always\(\)/)
+    expect(aggregate).toContain('test "${{ needs.ubuntu.result }}" = success')
+  })
+
+  test('the branch rules still find each required name once', () => {
+    for (const name of ['verify (ubuntu-latest)', 'verify (windows-latest)']) {
+      expect(workflow.split(`name: ${name}`)).toHaveLength(2)
+    }
+    expect(jobOf('commit-messages')).toContain('runs-on: ubuntu-latest')
+    expect(jobOf('doctor')).toContain('runs-on: ubuntu-latest')
+  })
+})
+
 // The step of the `commit-messages` job that checks a push, run against a repository of its own
 // with the values GitHub would give it for a push that creates a branch.
 const NO_BEFORE = '0'.repeat(40)
