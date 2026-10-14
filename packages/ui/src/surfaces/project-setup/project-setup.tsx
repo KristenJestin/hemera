@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
 import { NeedCard } from '../../blocks/need/need-card.tsx'
-import { type Proposal, type SetupKind } from '../../blocks/setup/proposal.tsx'
+import { type Proposal } from '../../blocks/setup/proposal.tsx'
+import { type SetupKind } from '../../blocks/setup/setup-kinds.tsx'
 import { type CardStatus, SetupCard } from '../../blocks/setup/setup-card.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import type { LiveGlance } from '../../components/live-chip/live-chip-glance.tsx'

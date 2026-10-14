@@ -356,16 +356,14 @@ export {
   type RepositoryInstructions,
 } from './blocks/project-settings/instructions-model.ts'
 export {
-  SETUP_KINDS,
-  SETUP_TITLES,
   type Proposal,
   type ProposedCommand,
   type ProposedNever,
   type ProposedRepository,
   type ProposedStep,
   type ProposedVariable,
-  type SetupKind,
 } from './blocks/setup/proposal.tsx'
+export { SETUP_KINDS, SETUP_TITLES, type SetupKind } from './blocks/setup/setup-kinds.tsx'
 export { SetupCard, type CardStatus, type SetupCardProps } from './blocks/setup/setup-card.tsx'
 export {
   type ProjectSetupProps,

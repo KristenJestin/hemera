@@ -8,15 +8,8 @@ import { Loading } from '../../components/loading/loading.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { IconBan, IconCheck, IconMessages } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import {
-  type Proposal,
-  ProposalEditor,
-  ProposalSkeleton,
-  ProposalSummary,
-  SETUP_TITLES,
-  type SetupKind,
-  setupIcon,
-} from './proposal.tsx'
+import { type Proposal, ProposalEditor, ProposalSkeleton, ProposalSummary } from './proposal.tsx'
+import { SETUP_TITLES, type SetupKind, setupIcon } from './setup-kinds.tsx'
 
 /**
  * A card of the setup: what the setup agent proposes for one part of a new Project, and the user's
