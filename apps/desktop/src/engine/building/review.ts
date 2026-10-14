@@ -178,6 +178,13 @@ const fileSaid = (repository: string, path: string): string =>
 /** A file a reviewer names, as the checkpoint lists it: forward slashes, no leading `./`. */
 const pathOf = (named: string): string => named.replaceAll('\\', '/').replace(/^\.\//, '')
 
+/**
+ * Whether a reviewer is kept from a file's content, in `checkpoint_read` and in the copy alike: a
+ * sensitive place, the `.env` templates included, which sometimes hold real values.
+ */
+export const withheldFromReviewers = (path: string): boolean =>
+  sensitivePlace(path, { home: homedir(), platform: process.platform }) !== null
+
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
@@ -680,8 +687,7 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
           const place = repositories.find((one) => one.repository === among[0])
           if (place === undefined) return refusal('refused: the checkpoint has no repository')
           const where = fileSaid(place.repository, path)
-          const machine = { home: homedir(), platform: process.platform }
-          if (sensitivePlace(path, machine) !== null) return answered(`content withheld: ${path}`)
+          if (withheldFromReviewers(path)) return answered(`content withheld: ${path}`)
           const diff = yield* checkpoints.diff(pass.checkpointId, place.repository, path)
           const text = (side: { readonly content: Uint8Array | null } | null) =>
             side?.content == null ? null : Buffer.from(side.content).toString('utf8')

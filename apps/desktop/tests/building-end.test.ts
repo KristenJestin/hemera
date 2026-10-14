@@ -11,7 +11,15 @@
  * lets it go, once it reported. The checks are a fake `TaskChecks`: none unless a test says.
  */
 
-import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, win32 } from 'node:path'
 
 import {
@@ -46,8 +54,8 @@ import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { STOPPED_AT_THE_END, helperRowsOf } from '../src/engine/building/helper-store.ts'
 import { autoReviewOf } from '../src/engine/building/review-store.ts'
-import { insideCopy } from '../src/engine/building/review.ts'
-import type { EndHold } from '../src/engine/building/end.ts'
+import { insideCopy, reviewFolderOf } from '../src/engine/building/review.ts'
+import { type EndHold, withheldIn } from '../src/engine/building/end.ts'
 import type { OutsideSettings } from '../src/engine/building/outside.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { attemptsIn, buildingEvent, buildingPartOf } from '../src/engine/building/tasks.ts'
@@ -98,6 +106,7 @@ import { PLAN, builderOf, buildingNow, launched, taskIn } from './builder-world.
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
+import { ProfileHome } from '../src/engine/profile-home.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { type Verdict, Verdicts, WriteAttribution } from '../src/engine/tools/ports.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -1052,12 +1061,166 @@ describe('The reviewers', () => {
     },
   )
 
+  test.skipIf(process.platform === 'win32')(
+    'a committed link to a folder outside the copy, and a link to the copy itself: the review runs, and the link out reads content withheld',
+    SLOW,
+    async () => {
+      const outside = join(work, 'outside-folder')
+      mkdirSync(outside)
+      writeFileSync(join(outside, '.env'), 'TOKEN=outside-the-copy\n')
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            symlinkSync(outside, join(api, 'out'))
+            symlinkSync('.', join(api, 'self'))
+            git(api, 'add', 'out', 'self')
+            git(api, 'commit', '-q', '-m', 'linked folders')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewing(mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            return {
+              out: yield* call(reviewer.grantId, 'fs_read', { repository: 'api', path: 'out' }),
+              search: yield* call(reviewer.grantId, 'search', {
+                repository: 'api',
+                pattern: 'TOKEN',
+              }),
+            }
+          }),
+        ),
+      )
+      expect(seen.out).toContain('content withheld: api/out')
+      expect(seen.search).not.toContain('outside-the-copy')
+      expect(readFileSync(join(outside, '.env'), 'utf8')).toBe('TOKEN=outside-the-copy\n')
+    },
+  )
+
+  test(
+    'a copy of the checkpoint made before the withholding is withheld when it is used again',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const { dataFolder } = yield* ProfileHome
+            const folder = reviewFolderOf(dataFolder, (yield* buildingNow(mission.id)).buildingId)
+            // A copy left by an engine that did not withhold, as an upgrade mid-end finds it.
+            writtenInWorkspace(folder, 'api/.env', 'TOKEN=in-an-old-copy\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            return yield* call(reviewer.grantId, 'fs_read', { repository: 'api', path: '.env' })
+          }),
+        ),
+      )
+      expect(seen).toContain('content withheld: api/.env')
+      expect(seen).not.toContain('in-an-old-copy')
+    },
+  )
+
   test('on Windows, a finding’s path on another drive is not inside the checkpoint', () => {
     const root = 'C:\\Users\\someone\\hemera\\reviews\\b1\\api'
     expect(insideCopy(root, 'src\\x.ts', win32)).toBe(true)
     expect(insideCopy(root, '..\\web\\x.ts', win32)).toBe(false)
     expect(insideCopy(root, 'D:\\secrets\\x.ts', win32)).toBe(false)
     expect(insideCopy(root, 'D:x.ts', win32)).toBe(false)
+  })
+})
+
+describe('The copy the reviewers read', () => {
+  /** A copy of the checkpoint holding `api`, in a reviews folder of its own. */
+  const copyIn = () => {
+    const copy = join(work, 'reviews', 'b1.partial')
+    mkdirSync(join(copy, 'api'), { recursive: true })
+    writeFileSync(join(copy, 'api', 'README.md'), 'Acme api\n')
+    return copy
+  }
+  const isLink = (path: string) => lstatSync(path).isSymbolicLink()
+  const read = (path: string) => readFileSync(path, 'utf8')
+
+  test('a .env template is withheld, as checkpoint_read withholds it', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env.example'), 'TOKEN=a-real-value\n')
+    withheldIn(copy)
+    expect(read(join(copy, 'api', '.env.example'))).toBe('content withheld: api/.env.example\n')
+    expect(read(join(copy, 'api', 'README.md'))).toBe('Acme api\n')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to a folder outside the copy is withheld as a link, and nothing outside is touched',
+    () => {
+      const copy = copyIn()
+      const outside = join(work, 'outside-folder')
+      mkdirSync(outside)
+      writeFileSync(join(outside, '.env'), 'TOKEN=outside-the-copy\n')
+      symlinkSync(join(outside, '.env'), join(outside, 'link'))
+      symlinkSync(outside, join(copy, 'api', 'out'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'out'))).toBe(false)
+      expect(read(join(copy, 'api', 'out'))).toBe('content withheld: api/out\n')
+      expect(read(join(outside, '.env'))).toBe('TOKEN=outside-the-copy\n')
+      expect(isLink(join(outside, 'link'))).toBe(true)
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to the copy itself is kept and never walked through',
+    () => {
+      const copy = copyIn()
+      writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+      symlinkSync('.', join(copy, 'api', 'self'))
+      symlinkSync('..', join(copy, 'api', 'root'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'self'))).toBe(true)
+      expect(isLink(join(copy, 'api', 'root'))).toBe(true)
+      expect(read(join(copy, 'api', 'self', '.env'))).toBe('content withheld: api/.env\n')
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link to a folder inside the copy that holds a .env is kept, and reads the .env withheld',
+    () => {
+      const copy = copyIn()
+      mkdirSync(join(copy, 'api', 'config'))
+      writeFileSync(join(copy, 'api', 'config', '.env.production'), 'TOKEN=in-the-copy\n')
+      symlinkSync('config', join(copy, 'api', 'settings'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'settings'))).toBe(true)
+      expect(read(join(copy, 'api', 'settings', '.env.production'))).toBe(
+        'content withheld: api/config/.env.production\n',
+      )
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a link whose text stays in the copy but whose path leads out through another link is withheld',
+    () => {
+      const copy = copyIn()
+      writeFileSync(join(work, 'reviews', 'secret.txt'), 'TOKEN=beside-the-copy\n')
+      // `up` leads to the copy's root, so `up/..` is the folder above the copy, not `api`.
+      symlinkSync('..', join(copy, 'api', 'up'))
+      symlinkSync('up/../secret.txt', join(copy, 'api', 'beside'))
+      withheldIn(copy)
+      expect(isLink(join(copy, 'api', 'up'))).toBe(true)
+      expect(read(join(copy, 'api', 'beside'))).toBe('content withheld: api/beside\n')
+    },
+  )
+
+  test('withholding a copy twice leaves it as once', () => {
+    const copy = copyIn()
+    writeFileSync(join(copy, 'api', '.env'), 'TOKEN=in-the-copy\n')
+    withheldIn(copy)
+    withheldIn(copy)
+    expect(read(join(copy, 'api', '.env'))).toBe('content withheld: api/.env\n')
   })
 })
 
