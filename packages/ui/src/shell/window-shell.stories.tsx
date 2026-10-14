@@ -3,7 +3,8 @@ import { MotionConfig } from 'motion/react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { loadMentionEditor } from '../components/mention-field/load-mention-editor.ts'
-import { AppFixture, LONG_NAME, MANY_PROJECTS, NOTICES } from './shell-fixtures.tsx'
+import { AppFixture } from './shell-fixtures.tsx'
+import { LONG_NAME, MANY_PROJECTS, NOTICES } from './shell-data.ts'
 
 /**
  * The window every page of 1.0 lives in: the sidebar with Hemera's head, the sheet with its

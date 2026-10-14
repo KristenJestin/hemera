@@ -3,14 +3,8 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { ContentHeader } from './content-header.tsx'
-import {
-  CHATS,
-  LONG_NAME,
-  MANY_PROJECTS,
-  MARKED_PROJECTS,
-  MISSION,
-  PROJECTS,
-} from './shell-fixtures.tsx'
+import { CHATS, MISSION } from './shell-fixtures.tsx'
+import { LONG_NAME, MANY_PROJECTS, MARKED_PROJECTS, PROJECTS } from './shell-data.ts'
 import {
   SIDEBAR_MISSIONS,
   type SidebarMissionEntry,
