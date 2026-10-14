@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { type KeptAgentView, keptAgentChips } from '../mission/kept-agent-chip.tsx'
+import { type KeptAgentView, KeptAgentChips } from '../mission/kept-agent-chip.tsx'
 import { StageCard } from '../mission/stage-card.tsx'
 import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { IconEye } from '../../icons.ts'
@@ -62,7 +62,7 @@ export function PlanningStageCard({
             {probes.map((probe) => (
               <ProbeChip key={probe.id} probe={probe} onOpen={onOpenProbe} />
             ))}
-            {keptAgentChips(kept)}
+            <KeptAgentChips kept={kept} />
           </>
         ) : undefined
       }
