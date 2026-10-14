@@ -59,6 +59,7 @@ import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 import {
   BUILDER,
+  FAST,
   HELPER,
   REVIEWER,
   SILENCE,
@@ -361,14 +362,18 @@ describe('Deliveries between turns (channel 1)', () => {
 describe('An urgent delivery is a note in the next Hemera tool result (channel 2)', () => {
   test('the note is appended once, to the next call’s result', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0
-        ? holding(hold, 1, [
-            { does: 'says', text: 'listing' },
-            { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
-            { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
-          ])
-        : {},
+    const { world, run } = engine(
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'says', text: 'listing' },
+              { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
+              { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
+            ])
+          : {},
+      // The pickup is on a clock only the test moves: under load, the call can reach the gate
+      // after the real 300 ms, and the note then travels as the next message instead.
+      { testClock: true },
     )
     const [id, row] = await run(({ profile }) =>
       within(
@@ -376,7 +381,9 @@ describe('An urgent delivery is a note in the next Hemera tool result (channel 2
         Effect.gen(function* () {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
-          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1)),
+          )
           const delivered = yield* Sessions.use((sessions) =>
             sessions.deliver({
               owner,
@@ -400,6 +407,59 @@ describe('An urgent delivery is a note in the next Hemera tool result (channel 2
     expect(row?.state).toBe('sent')
     // Handed once: no later message carries it again.
     expect(world.agents[0]?.answers.prompts).toHaveLength(1)
+  })
+
+  test('a note whose pickup falls due before the call is sent once, as the next message', async () => {
+    const hold = held()
+    const { world, run } = engine(
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'says', text: 'listing' },
+              { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
+            ])
+          : {},
+      { testClock: true },
+    )
+    const row = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1)),
+          )
+          const delivered = yield* Sessions.use((sessions) =>
+            sessions.deliver({
+              owner,
+              target: { lineage: session.lineage },
+              kind: 'answers',
+              body: 'Stop: the export moved to the web app.',
+              urgency: 'urgent',
+            }),
+          )
+          // The pickup falls due while the agent is held before its call.
+          yield* TestClock.adjust(FAST.notePickup)
+          yield* TestClock.withLive(
+            until(Effect.sync(() => world.agents[0]?.answers.cancels === 1)),
+          )
+          hold.release()
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2)),
+          )
+          yield* settled(session.id)
+          return yield* deliveryRow(delivered)
+        }),
+      ),
+    )
+    const answers = world.agents[0]?.answers.toolAnswers ?? []
+    expect(answers.filter((one) => one.text.includes('hemera-note'))).toHaveLength(0)
+    const prompts = (world.agents[0]?.answers.prompts ?? []).map(text)
+    expect(prompts.filter((one) => one.includes('Stop: the export moved'))).toEqual([
+      '[hemera:answers]\nStop: the export moved to the web app.',
+    ])
+    expect(row?.state).toBe('sent')
   })
 
   test('with no Hemera tool call within the pickup, the turn is cancelled and the delivery sent', async () => {
