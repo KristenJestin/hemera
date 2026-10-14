@@ -300,7 +300,9 @@ const REPOSITORY = /^[^/\s]+\/[^/\s]+$/
 export function GithubForm({ draft, onChange, proposed }: GithubFormProps): ReactNode {
   const [another, setAnother] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
-  const listed = [...proposed, ...draft.repositories.filter((one) => !proposed.includes(one))]
+  const proposedNames = new Set(proposed)
+  const read = new Set(draft.repositories)
+  const listed = [...proposed, ...draft.repositories.filter((one) => !proposedNames.has(one))]
   const toggle = (name: string, on: boolean): void =>
     onChange({
       ...draft,
@@ -336,7 +338,7 @@ export function GithubForm({ draft, onChange, proposed }: GithubFormProps): Reac
           {listed.map((name) => (
             <Checkbox
               key={name}
-              checked={draft.repositories.includes(name)}
+              checked={read.has(name)}
               onCheckedChange={(on) => toggle(name, on)}
               label={name}
             />
