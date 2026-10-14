@@ -83,7 +83,15 @@ import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
 import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
 import { STOPPED_AT_THE_END } from './helper-store.ts'
-import { currentTreesIn, finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
+import {
+  type Tree,
+  currentTreesIn,
+  finalChecksIn,
+  scenarioProofsIn,
+  modeOf,
+  stateOf,
+  upToDate,
+} from './proof-store.ts'
 import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
 import {
   REVIEW_NEEDS,
@@ -182,11 +190,15 @@ const questionOf = (finding: ReviewFindingRow): string =>
     .filter((one) => one !== null)
     .join('\n')
 
-/** A special task born from a finding, added available when nothing holds it. */
+/**
+ * A special task born from a finding, added available when nothing holds it; with what the user
+ * wrote when they answered its contradiction in their own words.
+ */
 const specialTaskIn = (
   transaction: EngineTransaction,
   building: BuildingRow,
   finding: ReviewFindingRow,
+  written: string | null = null,
 ) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
@@ -194,7 +206,8 @@ const specialTaskIn = (
     const number = tasks.filter((one) => one.origin === 'review').length + 1
     const id = specialTaskId(number)
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
-    const written = specialTaskOf(finding)
+    const task = specialTaskOf(finding)
+    const result = written === null ? task.result : `${task.result}\nThe user answered: ${written}`
     const repository =
       finding.repository ??
       (finding.path === null ? null : (basesOf(building)[0]?.repository ?? null))
@@ -210,8 +223,8 @@ const specialTaskIn = (
         rank,
         origin: 'review',
         decisionId: null,
-        title: secrets.mask(written.title),
-        result: secrets.mask(written.result),
+        title: secrets.mask(task.title),
+        result: secrets.mask(result),
         requirements: '[]',
         scenarios: '[]',
         targets: secrets.mask(JSON.stringify(targets)),
@@ -232,12 +245,18 @@ const specialTaskIn = (
         task: id,
         finding: finding.number,
         reviewer: finding.reviewer,
-        title: written.title,
+        title: task.title,
       }),
     }
   })
 
-export const buildingEndLayer = (log: Log) => {
+/**
+ * Where a suite holds the end: as it takes in the end of a Builder's turn, and as a pass over its
+ * steps begins and ends. Nothing otherwise.
+ */
+export type EndHold = (at: 'turned' | 'advancing' | 'advanced') => Effect.Effect<void>
+
+export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
@@ -259,7 +278,7 @@ export const buildingEndLayer = (log: Log) => {
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
       /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
-      const refreshed = new Map<string, string>()
+      const refreshed = new Map<string, ReadonlyArray<Tree>>()
       /**
        * The Buildings whose Builder this end started again, since the exit last stopped it or the
        * user last retried: one that stops once more is the user's to start again.
@@ -440,8 +459,11 @@ export const buildingEndLayer = (log: Log) => {
       /**
        * Whether a red of the final checks waits on the Builder, from what is stored, so a restart
        * neither judges its fix early nor waits for a turn that already ended: the attempt the red
-       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder
-       * ended since it opened.
+       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder on
+       * that red ended yet. The red is delivered under the attempt's id: still queued, it waits;
+       * taken, it waits for a turn that ended after it was taken, so a turn that started before
+       * it is never counted. A red with no delivery kept (a stop between the two) waits for a
+       * turn that ended after the attempt opened.
        */
       const waitsOnBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -465,7 +487,14 @@ export const buildingEndLayer = (log: Log) => {
             building.id,
             (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
           )
-          return turned === null || turned < open.startedAt
+          const [red] = yield* database
+            .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
+            .from(sessionDeliveries)
+            .where(eq(sessionDeliveries.id, open.id))
+            .pipe(Effect.mapError(refusedWhile('reading the red delivered to the Builder')))
+          if (red?.state === 'queued') return true
+          const since = red?.sentAt ?? open.startedAt
+          return turned === null || turned <= since
         })
 
       /** Whether the last result of a final check is red. */
@@ -662,7 +691,7 @@ export const buildingEndLayer = (log: Log) => {
               const stale = last === undefined ? [] : yield* staleLeft(building)
               if (
                 last === undefined ||
-                (stale.length > 0 && last !== (yield* treesOf(missionId)))
+                (stale.length > 0 && !upToDate(last, yield* currentTreesIn(database, missionId)))
               ) {
                 yield* refresh(building)
               } else if (stale.length > 0) {
@@ -755,7 +784,8 @@ export const buildingEndLayer = (log: Log) => {
 
       /**
        * What is stale and waits for no one: each automated proof made stale with no failed run
-       * waiting for its fix, and each final check that is not red but ran on an older tree.
+       * waiting for its fix nor a Retry running it again, and each final check that is not red but
+       * ran on an older tree.
        */
       const staleLeft = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -763,12 +793,15 @@ export const buildingEndLayer = (log: Log) => {
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
+          // A Retry's run is recorded with events that drive the end again (#306).
+          const retrying = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
           const proofs = (yield* scenarioProofsIn(database, building.id))
             .filter(
               (row) =>
                 modeOf(row) === 'automated' &&
                 stateOf(row) === 'to_rerun' &&
-                !fixing.includes(row.scenario),
+                !fixing.includes(row.scenario) &&
+                !retrying.includes(row.scenario),
             )
             .map((row) => row.scenario)
           const checks = (yield* finalChecksIn(database, building.missionId, building.id))
@@ -777,21 +810,15 @@ export const buildingEndLayer = (log: Log) => {
           return [...proofs, ...checks]
         })
 
-      /** The mission's current trees, as one key: a snapshot that saw a change changes it. */
-      const treesOf = (missionId: string) =>
-        Effect.gen(function* () {
-          const current = yield* currentTreesIn(yield* Database, missionId)
-          return JSON.stringify([...current].toSorted(([a], [b]) => a.localeCompare(b)))
-        })
-
       /**
-       * The stale proofs and final checks run again, once per tree: the trees are read before the
-       * refresh, so a write that lands during it makes the next step refresh again.
+       * The stale proofs and final checks run again, once per tree: the trees kept are those the
+       * refresh's own snapshot took, so the next step never refreshes again what it just saw, and a
+       * write a later snapshot saw makes it refresh again.
        */
       const refresh = (building: BuildingRow) =>
         Effect.gen(function* () {
-          refreshed.set(building.id, yield* treesOf(building.missionId))
-          yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          const done = yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          refreshed.set(building.id, done.trees)
         })
 
       /**
@@ -878,7 +905,7 @@ export const buildingEndLayer = (log: Log) => {
             .pipe(Effect.mapError(refusedWhile('reading the Building')))
           const turned = turnedOf(building.id, row?.turned ?? null)
           return answers.some(
-            (one) => one.sentAt === null || turned === null || turned < one.sentAt,
+            (one) => one.sentAt === null || turned === null || turned <= one.sentAt,
           )
         })
 
@@ -1128,11 +1155,15 @@ export const buildingEndLayer = (log: Log) => {
             return Effect.void
           }
           running.set(buildingId, false)
-          const once: Effect.Effect<void> = advance(buildingId).pipe(
+          const once: Effect.Effect<void> = Effect.andThen(
+            hold('advancing'),
+            advance(buildingId),
+          ).pipe(
             provided,
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.void : stepFailed(buildingId, cause),
             ),
+            Effect.andThen(hold('advanced')),
             Effect.andThen(
               Effect.suspend(() => {
                 if (running.get(buildingId) === true) {
@@ -1193,8 +1224,10 @@ export const buildingEndLayer = (log: Log) => {
               .pipe(Effect.mapError(refusedWhile('keeping a finding’s fate')))
             return events
           }
-          if (answer === SPEC_IS_RIGHT) {
-            events.push((yield* specialTaskIn(transaction, building, finding)).event)
+          // An answer in the user's own words asks the code to change, as they say: the Spec stands.
+          const written = Predicate.isTagged(answered.answer, 'Written') ? kept : null
+          if (answer === SPEC_IS_RIGHT || written !== null) {
+            events.push((yield* specialTaskIn(transaction, building, finding, written)).event)
             events.push(...(yield* settleIn(transaction, building)).events)
             return events
           }
@@ -1256,7 +1289,10 @@ export const buildingEndLayer = (log: Log) => {
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
             if (building === null || endPhaseOf(building.phase) === null) return
-            const at = now()
+            yield* hold('turned')
+            // When it ended, never when it is heard: a red or an answer its session sent next was
+            // taken after it, whatever this listener was busy with.
+            const at = turn.at
             turnedHere.set(building.id, at)
             // Kept, so a red the Builder fixes is judged after this turn even across a restart; a
             // record that fails still leaves the turn heard, and the end driven.
