@@ -39,6 +39,7 @@ import {
   type ToolName,
   admitTool,
   lineFor,
+  NESTING_LIMIT,
   maskedJson,
   neutralised,
 } from '@hemera/core/domain'
@@ -49,7 +50,7 @@ import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { getAgentSession } from '../agents/sessions.ts'
-import { agentText } from '../agents/text.ts'
+import { agentText, nestsPastLimit } from '../agents/text.ts'
 import { type RoleSession, getSession, sessionsOfLineage } from '../sessions/store.ts'
 import { getCommand } from '../catalogue.ts'
 import type { DomainEvents } from '../domain-events.ts'
@@ -651,6 +652,15 @@ export const toolGateLayer = (settings: GateSettings) =>
             return refused(
               refusal(
                 `refused: the arguments of ${name} do not read: ${formatSchemaError(decoded.failure)}`,
+              ),
+            )
+          }
+          // A call nested past the limit is refused: what a question would keep of it, and run on
+          // approval, is a copy cut at the limit, not what the agent sent.
+          if (nestsPastLimit(raw)) {
+            return refused(
+              refusal(
+                `refused: the arguments of ${name} nest deeper than ${String(NESTING_LIMIT)} levels; send them flatter`,
               ),
             )
           }

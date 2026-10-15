@@ -1,6 +1,7 @@
 /**
  * A call whose arguments nest far deeper than a call stack reaches: the gate answers it, records
- * it with the depth masked, and never fails. The engine is the real one; the question and the
+ * it with the depth masked, and never fails; a call nested past `NESTING_LIMIT` is refused, never
+ * asked about a copy cut at the limit (#404). The engine is the real one; the question and the
  * verdict are the ports, handed as parts that answer as each test says.
  */
 
@@ -10,6 +11,8 @@ import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import { MASK, NESTING_LIMIT } from '@hemera/core/domain'
 
 import { Database } from '../src/engine/storage/database.ts'
 import { permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
@@ -87,7 +90,7 @@ describe('A call whose arguments nest 100,000 levels deep is answered, never fai
     expect(calls[0]?.arguments).not.toContain('bottom')
   })
 
-  test('a call that reads, with a deep field beside its arguments, asks its one question and is recorded', async () => {
+  test('a call that would ask, with a deep field beside its arguments, is refused with an answer and asks nothing (#404)', async () => {
     const verdicts = verdictsSaying(() => ({
       verdict: 'ask',
       reason: 'a write in the Workspace',
@@ -101,49 +104,63 @@ describe('A call whose arguments nest 100,000 levels deep is answered, never fai
         Effect.gen(function* () {
           const { mission, main } = yield* acmeWithMission(work)
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
-          const asked = yield* callTool(builder.grantId, 'fs_write', {
+          const refused = yield* callTool(builder.grantId, 'fs_write', {
             path: 'notes.md',
             content: 'x',
             extra: nested(LEVELS),
           })
-          return [asked, yield* callsOf(builder.sessionId)] as const
+          return [refused, yield* callsOf(builder.sessionId)] as const
         }),
       ),
     )
-    expect(answer.text).toBe('refused: approvals are not available yet')
-    expect(questions.asked).toHaveLength(1)
+    expect(answer).toMatchObject({ ok: false, refused: true })
+    expect(answer.text).toBe(
+      `refused: the arguments of fs_write nest deeper than ${String(NESTING_LIMIT)} levels; send them flatter`,
+    )
+    expect(questions.asked).toHaveLength(0)
     expect(calls).toHaveLength(1)
+    expect(calls[0]?.outcome).toBe('refused')
     expect(calls[0]?.arguments).not.toContain('bottom')
   })
 
-  test('a call that asks, with a deep field beside its arguments, is stored as a request with the depth cut', async () => {
+  /** The requests stored after one call of fs_write whose `extra` field nests `levels` deep. */
+  const requestsAfter = (levels: number) => {
     const verdicts = verdictsSaying(() => ({
       verdict: 'ask',
       reason: 'a write in the Workspace',
       by: 'suite',
     }))
-    const [answer, stored] = await commandsEngine(data, { tools: { verdicts: verdicts.layer } })(
-      ({ profile }) =>
-        profile.use(
-          Effect.gen(function* () {
-            const { mission, main } = yield* acmeWithMission(work)
-            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
-            const asked = yield* callTool(builder.grantId, 'fs_write', {
-              path: 'notes.md',
-              content: 'x',
-              extra: nested(LEVELS),
-            })
-            const rows = yield* Effect.flatMap(Database, (database) =>
-              database.select().from(permissionRequests),
-            )
-            return [asked, rows] as const
-          }),
-        ),
+    return commandsEngine(data, { tools: { verdicts: verdicts.layer } })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const asked = yield* callTool(builder.grantId, 'fs_write', {
+            path: 'notes.md',
+            content: 'x',
+            extra: nested(levels),
+          })
+          const rows = yield* Effect.flatMap(Database, (database) =>
+            database.select().from(permissionRequests),
+          )
+          return [asked, rows] as const
+        }),
+      ),
     )
+  }
+
+  test('a call nested one level past the limit is never stored as a request, so no cut copy can run (#404)', async () => {
+    // The arguments are the first container: `extra` holds the rest.
+    const [answer, stored] = await requestsAfter(NESTING_LIMIT)
+    expect(answer.text).toMatch(/^refused: the arguments of fs_write nest deeper than/)
+    expect(stored).toHaveLength(0)
+  })
+
+  test('a call nested to the limit exactly asks, and its request holds the call whole (#404)', async () => {
+    const [answer, stored] = await requestsAfter(NESTING_LIMIT - 1)
     expect(answer.text).toMatch(/^Waiting for the user's approval, request #1\./)
     expect(stored).toHaveLength(1)
-    expect(stored[0]?.call).not.toContain('bottom')
-    expect(() => JSON.parse(stored[0]?.call ?? '')).not.toThrow()
-    expect(stored[0]?.call).toContain('"path":"notes.md"')
+    expect(stored[0]?.call).toContain('"bottom"')
+    expect(stored[0]?.call).not.toContain(MASK)
   })
 })
