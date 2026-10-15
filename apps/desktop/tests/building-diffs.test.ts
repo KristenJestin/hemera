@@ -5,6 +5,7 @@
  * repositories and a bare remote in temporary folders.
  */
 
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -27,6 +28,7 @@ import {
   pushedOnRemote,
   reporting,
 } from './building-world.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git } from './repositories.ts'
 import { text, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -98,6 +100,69 @@ describe('The agent of the check is never handed a secret', () => {
     expect(brief).toMatch(/sensitive place: its diff is never handed/)
     // The ordinary file's diff is still handed, its secret masked.
     expect(brief).toContain('"t": ')
+  })
+})
+
+describe('The diff handed to the agent of the check is masked in slices the engine answers between (#402)', () => {
+  test('the diff of a large JSON file is kept masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const value = 'variable-value-8812'
+    const json = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('suite', [value]),
+    )
+    const { run } = buildingEngine(
+      data,
+      work,
+      agents(reporting([answered('lock.json')])),
+      undefined,
+      { secrets },
+    )
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main, api, bare } = yield* acmeAt(work)
+          const { mission } = yield* frozenIn(project.id, main)
+          const frozen = git(api, 'rev-parse', 'HEAD')
+          const pushed = pushedOnRemote(work, bare, (clone) => {
+            writeFileSync(join(clone, 'lock.json'), json)
+          })
+          yield* checkMission(mission.id)
+          const view = yield* checked(mission.id)
+          // The check fetched the commit into the main checkout: its diff, as Git prints it.
+          const raw = execFileSync(
+            'git',
+            [
+              'diff',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--no-renames',
+              '--src-prefix=a/',
+              '--dst-prefix=b/',
+              '--end-of-options',
+              frozen,
+              pushed,
+              '--',
+              'lock.json',
+            ],
+            { cwd: api, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+          )
+          return { raw, kept: yield* keptOf(view.id) }
+        }),
+      ),
+    )
+    const results: { patches: ReadonlyArray<{ path: string; patch: string }> } = JSON.parse(
+      seen.kept,
+    )
+    expect(seen.raw.length).toBeGreaterThan(LARGE_TEXT)
+    expect(results.patches.find((one) => one.path === 'lock.json')?.patch).toBe(
+      unwatched.mask(seen.raw),
+    )
+    expect(unwatched.mask(seen.raw)).not.toContain(value)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(1)
+    expect(watch.pacedTurns[0]).toBeGreaterThan(0)
   })
 })
 

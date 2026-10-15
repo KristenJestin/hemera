@@ -14,6 +14,7 @@
  * preparation resumed after a restart.
  */
 
+import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -93,6 +94,7 @@ import {
   within,
 } from './sessions-world.ts'
 import { observedProcesses } from './observed-processes.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 
@@ -988,9 +990,13 @@ describe('probe_report ends the Probe', () => {
   const reportedAfter = (
     steps: ReadonlyArray<{ readonly line: string }>,
     leave: (tree: string) => void,
+    options: Parameters<typeof sessionsEngine>[2] = {},
   ) => {
     const hold = held()
-    const { run } = probing(() => ({ steps: [says('Waiting.')], between: () => hold.promise }))
+    const { run } = probing(
+      () => ({ steps: [says('Waiting.')], between: () => hold.promise }),
+      options,
+    )
     return run(({ profile }) =>
       within(
         profile,
@@ -1048,6 +1054,48 @@ describe('probe_report ends the Probe', () => {
     const bytes = kept.reduce((sum, file) => sum + Buffer.byteLength(file.content ?? ''), 0)
     expect(bytes).toBeLessThanOrEqual(5 * 1024 * 1024)
     expect(withheld.every((file) => /^[0-9a-f]{64}$/.test(file.sha256))).toBe(true)
+  })
+
+  test('a large JSON file and the large patch the Probe left are kept masked as the whole mask gives them, while another fiber keeps its turns (#402)', async () => {
+    const value = 'variable-value-8812'
+    const json = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    let patch = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        writeFileSync(join(tree, 'lock.json'), json)
+        writeFileSync(join(tree, 'importer.ts'), json)
+        patch = execFileSync(
+          'git',
+          [
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--src-prefix=a/',
+            '--dst-prefix=b/',
+            '--end-of-options',
+            'HEAD',
+            '--',
+            'importer.ts',
+          ],
+          { cwd: tree, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+        )
+      },
+      { secrets },
+    )
+    const files = new Map(seen.detail.files.map((file) => [file.path, file]))
+    expect(patch.length).toBeGreaterThan(LARGE_TEXT)
+    expect(files.get('lock.json')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.patch).toBe(unwatched.mask(patch))
+    expect(unwatched.mask(patch)).not.toContain(value)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(3)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
   })
 
   test('what the Probe committed in its worktree is captured against its base commit', async () => {

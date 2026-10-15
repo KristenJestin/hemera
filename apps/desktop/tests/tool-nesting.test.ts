@@ -12,7 +12,7 @@ import type { Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Database } from '../src/engine/storage/database.ts'
-import { toolCalls } from '../src/engine/storage/schema.ts'
+import { permissionRequests, toolCalls } from '../src/engine/storage/schema.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import {
@@ -67,6 +67,26 @@ describe('A call whose arguments nest 100,000 levels deep is answered, never fai
     expect(calls[0]?.arguments?.length).toBeLessThanOrEqual(2_001)
   })
 
+  test('arguments that are a list 100,000 levels deep, not a record, are refused with an answer and recorded with the depth cut', async () => {
+    let list: Schema.Json = 'bottom'
+    for (let level = 0; level < LEVELS; level += 1) list = [list]
+    const [answer, calls] = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const refused = yield* callTool(builder.grantId, 'fs_read', list)
+          return [refused, yield* callsOf(builder.sessionId)] as const
+        }),
+      ),
+    )
+    expect(answer).toMatchObject({ ok: false, refused: true })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.outcome).toBe('refused')
+    expect(calls[0]?.arguments).toMatch(/^\[\[\[/)
+    expect(calls[0]?.arguments).not.toContain('bottom')
+  })
+
   test('a call that reads, with a deep field beside its arguments, asks its one question and is recorded', async () => {
     const verdicts = verdictsSaying(() => ({
       verdict: 'ask',
@@ -94,5 +114,36 @@ describe('A call whose arguments nest 100,000 levels deep is answered, never fai
     expect(questions.asked).toHaveLength(1)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.arguments).not.toContain('bottom')
+  })
+
+  test('a call that asks, with a deep field beside its arguments, is stored as a request with the depth cut', async () => {
+    const verdicts = verdictsSaying(() => ({
+      verdict: 'ask',
+      reason: 'a write in the Workspace',
+      by: 'suite',
+    }))
+    const [answer, stored] = await commandsEngine(data, { tools: { verdicts: verdicts.layer } })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            const asked = yield* callTool(builder.grantId, 'fs_write', {
+              path: 'notes.md',
+              content: 'x',
+              extra: nested(LEVELS),
+            })
+            const rows = yield* Effect.flatMap(Database, (database) =>
+              database.select().from(permissionRequests),
+            )
+            return [asked, rows] as const
+          }),
+        ),
+    )
+    expect(answer.text).toMatch(/^Waiting for the user's approval, request #1\./)
+    expect(stored).toHaveLength(1)
+    expect(stored[0]?.call).not.toContain('bottom')
+    expect(() => JSON.parse(stored[0]?.call ?? '')).not.toThrow()
+    expect(stored[0]?.call).toContain('"path":"notes.md"')
   })
 })
