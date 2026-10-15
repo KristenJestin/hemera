@@ -167,15 +167,11 @@ export async function holdFile(file: string): Promise<ChildProcess> {
     '-e',
     `const fs = require('node:fs')
 fs.openSync(process.argv[1], fs.constants.O_RDONLY | (process.platform === 'win32' ? 0x10000000 : 0))
-let probe = 'second open refused'
-try { fs.closeSync(fs.openSync(process.argv[1], 'r')) ; probe = 'second open allowed' } catch (e) { probe += ' ' + e.code }
-process.stderr.write('PROBE417 ' + process.execPath + ' uv ' + process.versions.uv + ' node ' + process.version + ' ' + probe + '\\n')
 process.stdout.write('held\\n')
 setInterval(() => {}, 1000)`,
     file,
   ])
   try {
-    holder.stderr?.on('data', (chunk: Buffer) => console.info(`holder: ${chunk.toString()}`))
     await readyWithin(holder, READY_WITHIN)
   } catch (failure) {
     await endChild(holder)
