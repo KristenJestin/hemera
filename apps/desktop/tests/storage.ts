@@ -158,14 +158,15 @@ export const READY_WITHIN = 10_000
 
 /**
  * Starts a process that holds a file open until `endChild` ends it, and answers once it does. On
- * Windows no one else may open the file meanwhile (`UV_FS_O_EXLOCK`, a share mode of none). The
- * holder is this Node: it starts in a fraction of a second where PowerShell took seconds.
+ * Windows no one else may open the file meanwhile: `0x10000000` is libuv's `UV_FS_O_EXLOCK`, a
+ * share mode of none, which Node does not name in `fs.constants`. The holder is this Node: it
+ * starts in a fraction of a second where PowerShell took seconds.
  */
 export async function holdFile(file: string): Promise<ChildProcess> {
   const holder = spawn(process.execPath, [
     '-e',
     `const fs = require('node:fs')
-fs.openSync(process.argv[1], fs.constants.O_RDONLY | (fs.constants.UV_FS_O_EXLOCK ?? 0))
+fs.openSync(process.argv[1], fs.constants.O_RDONLY | (process.platform === 'win32' ? 0x10000000 : 0))
 process.stdout.write('held\\n')
 setInterval(() => {}, 1000)`,
     file,
