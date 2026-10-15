@@ -3194,7 +3194,9 @@ describe('A failed green and a change made outside Hemera', () => {
     const points = reaching()
     const starts = join(scratch, 'starts')
     const child = join(scratch, 'late.mjs')
-    // Each run's child counts its start, then writes `ran.log` once the test lets it, by `go-<n>`.
+    const done = join(scratch, 'done')
+    // Each run's child counts its start, then writes `ran.log` once the test lets it, by `go-<n>`;
+    // it ends once the test is done, its folder out of the test's, which Windows could not remove.
     writeFileSync(
       child,
       [
@@ -3203,6 +3205,7 @@ describe('A failed green and a change made outside Hemera', () => {
         `const n = readFileSync(${JSON.stringify(starts)}, 'utf8').length`,
         'const until = Date.now() + 20_000',
         'const tick = () => {',
+        `  if (existsSync(${JSON.stringify(done)})) return`,
         `  if (existsSync(${JSON.stringify(scratch)} + '/go-' + n)) { appendFileSync(process.argv[2], 'late-' + n + '\\n'); return }`,
         '  if (Date.now() < until) setTimeout(tick, 20)',
         '}',
@@ -3214,11 +3217,12 @@ describe('A failed green and a change made outside Hemera', () => {
         EXPORT_PATH,
         testFile(
           [
-            `  spawn(process.execPath, [${JSON.stringify(child)}, fileURLToPath(new URL('../ran.log', import.meta.url))], { detached: true, stdio: 'ignore' }).unref()`,
+            `  spawn(process.execPath, [${JSON.stringify(child)}, fileURLToPath(new URL('../ran.log', import.meta.url))], { cwd: tmpdir(), detached: true, stdio: 'ignore' }).unref()`,
             "  assert.fail('not built yet')",
           ].join('\n'),
           [
             "import { spawn } from 'node:child_process'",
+            "import { tmpdir } from 'node:os'",
             "import { fileURLToPath } from 'node:url'",
           ],
         ),
@@ -3259,7 +3263,13 @@ describe('A failed green and a change made outside Hemera', () => {
             )
             const two = yield* late(mission.id, 3)
             return { one, two }
-          }),
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                writeFileSync(done, '')
+              }),
+            ),
+          ),
         ),
     )
     expect(seen.one).toEqual(['red', 'green', 'green'])
