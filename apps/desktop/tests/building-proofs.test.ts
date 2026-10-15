@@ -27,7 +27,7 @@ import {
   buildingOf,
 } from '../src/engine/building/builder.ts'
 import { BuildDesk } from '../src/engine/building/desk.ts'
-import { OutsideChanges } from '../src/engine/building/outside.ts'
+import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
 import { SnapshotFailed, type SnapshotsService } from '../src/engine/building/snapshots.ts'
 import {
   ACCEPT_RED,
@@ -88,6 +88,8 @@ const proofsEngine = (
     readonly proofMinute?: Duration.Duration
     /** The snapshot service as the suite sees it, wrapped around the real one. */
     readonly snapshots?: (real: SnapshotsService) => SnapshotsService
+    /** The detector of changes outside Hemera's timers. */
+    readonly outside?: Partial<OutsideSettings>
   } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
@@ -96,8 +98,19 @@ const proofsEngine = (
     snapshots: more.snapshots ?? ((real) => real),
     building:
       end === undefined
-        ? { hold, proofLimit: more.proofLimit, proofMinute: more.proofMinute }
-        : { hold, end, proofLimit: more.proofLimit, proofMinute: more.proofMinute },
+        ? {
+            hold,
+            proofLimit: more.proofLimit,
+            proofMinute: more.proofMinute,
+            outside: more.outside ?? {},
+          }
+        : {
+            hold,
+            end,
+            proofLimit: more.proofLimit,
+            proofMinute: more.proofMinute,
+            outside: more.outside ?? {},
+          },
   })
 
 /**
@@ -2759,6 +2772,109 @@ describe('A restart while a proof waits on its fix', () => {
     expect(seen.between).toEqual([])
     expect(seen.asked).toEqual([])
     expect(seen.proof.state).toBe('green')
+  })
+
+  /** The detector's timer never comes during a test: only a compare Hemera makes itself runs. */
+  const NO_TIMER = { outside: { compareEveryMillis: 3_600_000 } }
+
+  /** The mission brought to its failed green, the Builder at work until the stop. */
+  const stoppedOnItsFix = Effect.gen(function* () {
+    const { mission } = yield* launchedWith(markdownProof)
+    yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+    const { grantId } = yield* builderOf(mission.id)
+    return { mission, grantId }
+  })
+
+  test('a fix written to disk while Hemera is stopped: at the restart, the green runs again at once, before any timer of the outside detector', async () => {
+    const builder = busyBuilder()
+    const first = await proofsEngine(data, undefined, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission, grantId } = yield* stoppedOnItsFix
+            yield* builder.busy
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            return { mission, api: yield* apiOf(mission.id) }
+          }),
+        ),
+    )
+    // The fix lands while Hemera is stopped.
+    writeFileSync(join(first.api, 'export.ts'), RIGHT_EXPORT)
+    const seen = await proofsEngine(data, undefined, undefined, undefined, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* until(
+              Effect.zipWith(
+                endCalled(first.mission.id),
+                unprovenAsked,
+                (called, asked) => called || asked.length > 0,
+              ),
+              20_000,
+            )
+            return {
+              asked: yield* unprovenAsked,
+              proof: yield* proofOf(first.mission.id, 'R1.S2'),
+            }
+          }),
+        ),
+    )
+    expect(seen.asked).toEqual([])
+    expect(seen.proof.state).toBe('green')
+    // Run once again on the fix, never twice.
+    expect(seen.proof.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a restart with nothing changed during the stop: the failed green is not run again, and the quiet Builder’s question comes', async () => {
+    const builder = busyBuilder()
+    const first = await proofsEngine(data, undefined, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission, grantId } = yield* stoppedOnItsFix
+            yield* builder.busy
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            return { mission }
+          }),
+        ),
+    )
+    const seen = await proofsEngine(data, undefined, undefined, undefined, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* until(
+              Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+              20_000,
+            )
+            return {
+              called: yield* endCalled(first.mission.id),
+              proof: yield* proofOf(first.mission.id, 'R1.S2'),
+            }
+          }),
+        ),
+    )
+    expect(seen.called).toBe(false)
+    expect(seen.proof.state).toBe('red_recorded')
+    expect(seen.proof.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+    ])
   })
 })
 
