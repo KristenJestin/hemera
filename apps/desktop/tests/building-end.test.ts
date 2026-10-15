@@ -3689,6 +3689,389 @@ describe('The refresh and an environment need', () => {
     },
   )
   test(
+    'an environment need’s Retry that commits while the refresh reads what is left stale raises no "stayed stale" error',
+    SLOW,
+    async () => {
+      let proofCommand = ''
+      let portHeld = false
+      // The Retry's rerun, held once it ran and before its result is recorded.
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      // A pass of the end, held once it read who a Retry runs again, before it reads the proofs.
+      let reading = false
+      const between = Deferred.makeUnsafe<void>()
+      const read = Deferred.makeUnsafe<void>()
+      // Each pass of the end over its steps, numbered as it begins, and those that finished.
+      let begun = 0
+      const finished: Array<number> = []
+      const { world, run } = ending({
+        proofMinute: Duration.seconds(2),
+        hold: (at) =>
+          at === 'greening' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+        endHold: (at) =>
+          at === 'proofs_reading' && reading
+            ? Effect.gen(function* () {
+                reading = false
+                yield* Deferred.succeed(between, undefined)
+                yield* Deferred.await(read)
+              })
+            : Effect.sync(() => {
+                if (at === 'advancing') begun += 1
+                if (at === 'advanced') finished.push(begun)
+              }),
+      })
+      const errors = (missionId: string) =>
+        Effect.map(getMission(missionId), (one) =>
+          one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              (projectId) =>
+                Effect.gen(function* () {
+                  yield* withReadme(projectId)
+                  yield* setProofLimit(projectId, 1)
+                  const saved = yield* saveCommand({
+                    projectId,
+                    id: null,
+                    command: {
+                      name: 'export proof',
+                      type: 'script',
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      lineWindows: null,
+                      lineLinux: null,
+                      repositoryId: null,
+                      folder: null,
+                      scope: 'workspace',
+                      portless: false,
+                      portlessName: null,
+                      check: false,
+                      atOpen: false,
+                      askBeforeRunning: false,
+                      readOnly: false,
+                      writeGlobs: [],
+                    },
+                  })
+                  proofCommand = saved.id
+                  // Free until the refresh; then another mission's service holds the port.
+                  const runs = yield* Runs
+                  const real = runs.reservations.current
+                  runs.reservations.current = {
+                    enter: (asked) =>
+                      asked.commandId === proofCommand && portHeld
+                        ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                        : real.enter(asked),
+                  }
+                }),
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  mode: 'automated',
+                  actions: ['Run the test'],
+                  starting_data: 'None.',
+                  expected: 'The assertion of the test holds.',
+                  test: {
+                    repository: 'api',
+                    path: 'tests/export.test.mjs',
+                    code: markdownTest,
+                    insertion: 'new_file',
+                    command: proofCommand,
+                  },
+                  seen_today: false,
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 keeps the proof passing on a new tree: the refresh runs it again, and its rerun
+            // waits for the port until the Project's limit.
+            portHeld = true
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => "md"\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const environment = Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+            yield* until(
+              Effect.map(environment, (need) => need !== undefined),
+              LONG,
+            )
+            const need = yield* environment
+            if (need === undefined) return yield* Effect.die(new Error('no environment need'))
+            // The end is driven, and its pass is held once it read who a Retry runs again, before
+            // it reads the proofs.
+            reading = true
+            const from = begun
+            yield* mutate('driving the end', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [buildingEvent(mission.id, 'building.end_retried')],
+              }),
+            )
+            yield* Deferred.await(between)
+            // The user frees the port and Retries in between: the rerun runs, and is held before
+            // its record.
+            portHeld = false
+            arming = true
+            yield* retryNeed(need.id)
+            yield* Deferred.await(reached)
+            yield* Deferred.succeed(read, undefined)
+            yield* until(
+              Effect.sync(() => finished.some((one) => one > from)),
+              LONG,
+            )
+            const meanwhile = yield* errors(mission.id)
+            yield* Deferred.succeed(go, undefined)
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                const stage = (yield* getMission(mission.id)).stage
+                return stage === 'review' || (yield* errors(mission.id)).length > 0
+              }),
+              LONG,
+            )
+            // Recorded, the rerun is no longer said to run: a later stale proof is judged again.
+            yield* until(
+              Effect.map(
+                BuildDesk.use((desk) => desk.rerunning(mission.id)),
+                (left) => left.length === 0,
+              ),
+              LONG,
+            )
+            return {
+              meanwhile,
+              after: yield* errors(mission.id),
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+            }
+          }),
+        ),
+      )
+      expect(seen.meanwhile.map((one) => one.fields)).toEqual([])
+      expect(seen.after).toEqual([])
+      expect(seen.stage).toBe('review')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+  test(
+    'a Retry’s rerun recorded while the refresh reads what is left stale raises no "stayed stale" error',
+    SLOW,
+    async () => {
+      let proofCommand = ''
+      let portHeld = false
+      // The Retry's rerun, held once it ran and before its result is recorded.
+      let arming = false
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      // A pass of the end, held once it read the proofs, before it reads again who a Retry runs.
+      let reading = false
+      const between = Deferred.makeUnsafe<void>()
+      const read = Deferred.makeUnsafe<void>()
+      // Each pass of the end over its steps, numbered as it begins, and those that finished.
+      let begun = 0
+      const finished: Array<number> = []
+      const { world, run } = ending({
+        proofMinute: Duration.seconds(2),
+        hold: (at) =>
+          at === 'greening' && arming
+            ? Effect.gen(function* () {
+                arming = false
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+        endHold: (at) =>
+          at === 'retries_reading' && reading
+            ? Effect.gen(function* () {
+                reading = false
+                yield* Deferred.succeed(between, undefined)
+                yield* Deferred.await(read)
+              })
+            : Effect.sync(() => {
+                if (at === 'advancing') begun += 1
+                if (at === 'advanced') finished.push(begun)
+              }),
+      })
+      const errors = (missionId: string) =>
+        Effect.map(getMission(missionId), (one) =>
+          one.needs.filter((need) => Predicate.isTagged(need.fields, 'Error')),
+        )
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              (projectId) =>
+                Effect.gen(function* () {
+                  yield* withReadme(projectId)
+                  yield* setProofLimit(projectId, 1)
+                  const saved = yield* saveCommand({
+                    projectId,
+                    id: null,
+                    command: {
+                      name: 'export proof',
+                      type: 'script',
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      lineWindows: null,
+                      lineLinux: null,
+                      repositoryId: null,
+                      folder: null,
+                      scope: 'workspace',
+                      portless: false,
+                      portlessName: null,
+                      check: false,
+                      atOpen: false,
+                      askBeforeRunning: false,
+                      readOnly: false,
+                      writeGlobs: [],
+                    },
+                  })
+                  proofCommand = saved.id
+                  // Free until the refresh; then another mission's service holds the port.
+                  const runs = yield* Runs
+                  const real = runs.reservations.current
+                  runs.reservations.current = {
+                    enter: (asked) =>
+                      asked.commandId === proofCommand && portHeld
+                        ? Effect.succeed({ names: ['the dev port'], wait: () => Effect.never })
+                        : real.enter(asked),
+                  }
+                }),
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  mode: 'automated',
+                  actions: ['Run the test'],
+                  starting_data: 'None.',
+                  expected: 'The assertion of the test holds.',
+                  test: {
+                    repository: 'api',
+                    path: 'tests/export.test.mjs',
+                    code: markdownTest,
+                    insertion: 'new_file',
+                    command: proofCommand,
+                  },
+                  seen_today: false,
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId, 'export const toMarkdown = () => ""\n')
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('export.ts', 'Name the export after CSV.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV1')
+            // RV1 keeps the proof passing on a new tree: the refresh runs it again, and its rerun
+            // waits for the port until the Project's limit.
+            portHeld = true
+            yield* specialDone(
+              builder.grantId,
+              'RV1',
+              'export.ts',
+              'export const toMarkdown = () => "md"\n',
+            )
+            yield* documented(world, mission.id, 2)
+            const environment = Effect.map(getMission(mission.id), (one) =>
+              one.needs.find((need) => Predicate.isTagged(need.fields, 'Environment')),
+            )
+            yield* until(
+              Effect.map(environment, (need) => need !== undefined),
+              LONG,
+            )
+            const need = yield* environment
+            if (need === undefined) return yield* Effect.die(new Error('no environment need'))
+            // The user frees the port and Retries: the rerun runs, and is held before its record.
+            portHeld = false
+            arming = true
+            yield* retryNeed(need.id)
+            yield* Deferred.await(reached)
+            // The end is driven, and its pass is held once it read the proofs, the rerun's still
+            // to run again.
+            reading = true
+            const from = begun
+            yield* mutate('driving the end', () =>
+              Effect.succeed({
+                result: undefined,
+                events: [buildingEvent(mission.id, 'building.end_retried')],
+              }),
+            )
+            yield* Deferred.await(between)
+            // In between, the rerun is recorded, and is no longer said to run.
+            yield* Deferred.succeed(go, undefined)
+            yield* until(
+              Effect.map(
+                BuildDesk.use((desk) => desk.rerunning(mission.id)),
+                (left) => left.length === 0,
+              ),
+              LONG,
+            )
+            yield* Deferred.succeed(read, undefined)
+            yield* until(
+              Effect.sync(() => finished.some((one) => one > from)),
+              LONG,
+            )
+            const meanwhile = yield* errors(mission.id)
+            yield* until(
+              Effect.gen(function* () {
+                for (const index of world.agents.keys()) world.release(index)
+                const stage = (yield* getMission(mission.id)).stage
+                return stage === 'review' || (yield* errors(mission.id)).length > 0
+              }),
+              LONG,
+            )
+            return {
+              meanwhile,
+              after: yield* errors(mission.id),
+              view: yield* buildingNow(mission.id),
+              stage: (yield* getMission(mission.id)).stage,
+            }
+          }),
+        ),
+      )
+      expect(seen.meanwhile.map((one) => one.fields)).toEqual([])
+      expect(seen.after).toEqual([])
+      expect(seen.stage).toBe('review')
+      const proof = seen.view.requirements
+        .flatMap((one) => one.scenarios)
+        .find((one) => one.scenario === 'R1.S2')
+      expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+  test(
     'a Retry’s rerun at the refresh that passes on a tree moved meanwhile is run again, never left stale',
     SLOW,
     async () => {

@@ -321,11 +321,19 @@ const specialTaskIn = (
 /**
  * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
  * steps begins and ends, once the review checkpoint is taken, as the exit begins, and in each pass
- * of the exit's stops once the runs are stopped, before the calls are waited for. Nothing
- * otherwise.
+ * of the exit's stops once the runs are stopped, before the calls are waited for, and on each side
+ * of the proofs read for what is left stale. Nothing otherwise.
  */
 export type EndHold = (
-  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken' | 'exiting' | 'settling',
+  at:
+    | 'turned'
+    | 'advancing'
+    | 'advanced'
+    | 'checkpoint_taken'
+    | 'exiting'
+    | 'settling'
+    | 'proofs_reading'
+    | 'retries_reading',
 ) => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
@@ -897,9 +905,16 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
-          // A Retry's run is recorded with events that drive the end again (#306).
-          const retrying = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
-          const proofs = (yield* scenarioProofsIn(database, building.id))
+          // Who a Retry runs again is read on both sides of the proofs (#306): a Retry says its
+          // scenario runs before it commits the proof back to rerun, and says it no longer runs only
+          // once its run is recorded. A Retry between the reads is in one of the two lists.
+          const before = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          yield* hold('proofs_reading')
+          const rows = yield* scenarioProofsIn(database, building.id)
+          yield* hold('retries_reading')
+          const after = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          const retrying = [...before, ...after]
+          const proofs = rows
             .filter(
               (row) =>
                 modeOf(row) === 'automated' &&
