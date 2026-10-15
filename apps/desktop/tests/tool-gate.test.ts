@@ -541,7 +541,13 @@ describe('Writing only on the version that was read', () => {
 
   test('a write over a file another process holds open replaces it, or fails clearly and leaves it whole', async () => {
     const file = join(work, 'acme', 'held.txt')
+    const began = performance.now()
+    const trace = (step: string) => {
+      process.stderr.write(`TRACE417 ${String(Math.round(performance.now() - began))}ms ${step}\n`)
+    }
+    trace('test begins')
     const holder = async () => {
+      trace('holder spawns')
       // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
       // open file never stops a rename.
       const child =
@@ -555,24 +561,42 @@ describe('Writing only on the version that was read', () => {
               '-e',
               `require('node:fs').openSync(${JSON.stringify(file)}, 'r'); console.log('held'); setInterval(() => {}, 1000)`,
             ])
+      child.stderr.on('data', (chunk: Buffer) => trace(`holder stderr: ${chunk.toString()}`))
+      child.on('exit', (code) => trace(`holder exits ${String(code)}`))
       await once(child.stdout, 'data')
+      trace('holder holds')
       return child
     }
     const answer = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
+          trace('engine up')
           const { mission, main } = yield* acmeWithMission(work)
+          trace('mission made')
           writeFileSync(join(main, 'held.txt'), 'before\n')
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          trace('session made')
           yield* callTool(builder.grantId, 'fs_read', { path: 'held.txt' })
+          trace('fs_read answered')
           return yield* Effect.acquireUseRelease(
             Effect.promise(holder),
-            () => callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }),
-            (child) => Effect.promise(() => endChild(child)),
+            () =>
+              callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }).pipe(
+                Effect.tap((said) =>
+                  Effect.sync(() => trace(`fs_write answered: ${said.text}`)),
+                ),
+              ),
+            (child) =>
+              Effect.promise(async () => {
+                trace('ending the holder')
+                await endChild(child)
+                trace('holder ended')
+              }),
           )
         }),
       ),
     )
+    trace('engine closed')
     const now = readFileSync(file, 'utf8')
     // Which of the two the system chose, for the record of a run on each system.
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
