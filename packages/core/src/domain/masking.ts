@@ -526,6 +526,10 @@ const JSON_SPACE = ' \t\n\r'
 /** Four hexadecimal digits, as a `\u` escape writes them. */
 const HEX = /^[\dA-Fa-f]{4}$/
 
+/** A run of what a JSON string holds as it is: no quote, no backslash, no control character. */
+// oxlint-disable-next-line no-control-regex -- the control characters are what ends the run
+const PLAIN = /[^"\\\u0000-\u001f]*/y
+
 /** Where reading a JSON string stopped, and whether it was closed there. */
 interface Stopped {
   /** After its closing quote; else the first character it cannot hold. */
@@ -541,6 +545,7 @@ interface Stopped {
 const stringStop = (text: string, at: number): Stopped => {
   let next = at + 1
   for (;;) {
+    next += matchFrom(PLAIN, text, next)?.[0].length ?? 0
     const code = text.charCodeAt(next)
     if (Number.isNaN(code) || code < 0x20) return { stop: next, closed: false }
     if (code === 0x22) return { stop: next + 1, closed: true }
@@ -560,12 +565,12 @@ const jsonStringEnd = (text: string, at: number): number => {
   return closed ? stop : -1
 }
 
-/** Where the JSON space from `at` ends. */
-const jsonSpace = (text: string, at: number): number => {
-  let next = at
-  while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
-  return next
-}
+/** A run of JSON space, maybe empty. */
+const JSON_SPACES = /[ \t\n\r]*/y
+
+/** Where the JSON space from `at` ends: found by the pattern, a long run is crossed at once. */
+const jsonSpace = (text: string, at: number): number =>
+  at + (matchFrom(JSON_SPACES, text, at)?.[0].length ?? 0)
 
 /** Where the run of digits at `at` ends. */
 const digitsEnd = (text: string, at: number): number => {
@@ -611,11 +616,7 @@ export const isJson = (text: string): boolean => done(jsonRead(text))
 
 /** `isJson`, in steps. */
 function* jsonRead(text: string): Steps<boolean> {
-  const space = (at: number): number => {
-    let next = at
-    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
-    return next
-  }
+  const space = (at: number): number => jsonSpace(text, at)
   /** Where the value of the next field of an object begins, past its name and colon, or -1. */
   const field = (at: number): number => {
     const name = jsonStringEnd(text, at)
@@ -1163,11 +1164,7 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
   const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
   const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
   const edits: Edit[] = []
-  const space = (at: number): number => {
-    let next = at
-    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
-    return next
-  }
+  const space = (at: number): number => jsonSpace(text, at)
   const stringEnd = (at: number): number => {
     let next = at + 1
     while (text.charAt(next) !== '"') next += text.charAt(next) === '\\' ? 2 : 1
