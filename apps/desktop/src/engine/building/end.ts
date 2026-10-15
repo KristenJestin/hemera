@@ -320,11 +320,12 @@ const specialTaskIn = (
 
 /**
  * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
- * steps begins and ends, once the review checkpoint is taken, and as the exit begins. Nothing
+ * steps begins and ends, once the review checkpoint is taken, as the exit begins, and in each pass
+ * of the exit's stops once the runs are stopped, before the calls are waited for. Nothing
  * otherwise.
  */
 export type EndHold = (
-  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken' | 'exiting',
+  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken' | 'exiting' | 'settling',
 ) => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
@@ -1057,10 +1058,12 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END, 'kept'),
           ).pipe(
             Effect.andThen(stopAgentRuns(missionId)),
+            Effect.andThen(hold('settling')),
             Effect.andThen(ToolAccess.use((access) => access.settled(missionId))),
           )
-          yield* once
-          yield* once
+          // A session born during the stops is not of the tree read above: while they run, no call
+          // of the mission starts a run, whoever asks, so none is waited for to its limit (#309).
+          yield* ToolAccess.use((access) => access.stopping(missionId, Effect.andThen(once, once)))
         })
 
       /**

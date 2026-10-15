@@ -100,6 +100,14 @@ export class ToolAccess extends Context.Service<
      * it had then, run no more. A session born after it (Review's own) is not of the tree.
      */
     readonly exiting: (missionId: string, lineages: ReadonlyArray<string>) => Effect.Effect<void>
+    /**
+     * Runs the exit's stops of a mission: while they run, no call of the mission starts a run,
+     * whichever session asks, one born during the stops included (#309).
+     */
+    readonly stopping: <A, E, R>(
+      missionId: string,
+      stops: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>
     /** A Builder works on the mission again: the calls the user allowed run again. */
     readonly building: (missionId: string) => Effect.Effect<void>
     /** Whether a mission's Building is marked as exiting still. */
@@ -152,6 +160,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
     const waiting = new Map<string, Array<Deferred.Deferred<void>>>()
     /** The missions whose Building is exiting, with the lineages of the tree it stops. */
     const exits = new Map<string, ReadonlySet<string>>()
+    /** The missions whose exit is stopping their tree now. */
+    const stops = new Set<string>()
 
     const begun = (missionId: string) =>
       executions.set(missionId, (executions.get(missionId) ?? 0) + 1)
@@ -182,6 +192,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
             sessionId,
             lineage,
             stopped: (asked) => {
+              // While the stops run, a session born since the tree was read is stopped too.
+              if (stops.has(missionId)) return true
               const tree = exits.get(missionId)
               return tree !== undefined && (asked === null || tree.has(asked))
             },
@@ -255,6 +267,12 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
           () => (missionId === null ? Effect.void : ended(missionId)),
         ),
       exiting: (missionId, lineages) => Effect.sync(() => exits.set(missionId, new Set(lineages))),
+      stopping: (missionId, inner) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => stops.add(missionId)),
+          () => inner,
+          () => Effect.sync(() => stops.delete(missionId)),
+        ),
       building: (missionId) => Effect.sync(() => exits.delete(missionId)),
       isExiting: (missionId) => Effect.sync(() => exits.has(missionId)),
       settled: (missionId) =>

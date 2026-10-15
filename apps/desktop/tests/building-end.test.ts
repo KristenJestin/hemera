@@ -86,6 +86,7 @@ import { type SessionHold, Sessions } from '../src/engine/sessions/service.ts'
 import {
   type RoleSession,
   getSession,
+  openSession,
   sessionsIn,
   sessionsOfLineage,
 } from '../src/engine/sessions/store.ts'
@@ -2913,6 +2914,108 @@ describe('A run a call started, as the exit begins', () => {
         .flatMap((one) => one.scenarios)
         .find((one) => one.scenario === 'R1.S2')
       expect(proof).toMatchObject({ state: 'green', upToDate: true })
+    },
+  )
+  test(
+    'a session opened while the exit stops the tree, and a proof_run it calls: the exit ends without waiting for the run’s limit',
+    SLOW,
+    async () => {
+      // The second pass of the exit's stops, once its runs are stopped, before its calls are waited
+      // for: the test opens a session there, and its call executes, before the pass goes on.
+      let settling = 0
+      const reached = Deferred.makeUnsafe<void>()
+      const go = Deferred.makeUnsafe<void>()
+      let called = 0
+      const { world, run } = ending({
+        hold: (at) =>
+          Effect.sync(() => {
+            if (at === 'proof-called') called += 1
+          }),
+        endHold: (at) =>
+          at === 'settling'
+            ? Effect.gen(function* () {
+                settling += 1
+                if (settling !== 2) return
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(go)
+              })
+            : Effect.void,
+      })
+      // While this file is there, every run of the proof notes it started, and never ends.
+      const hang = join(data, 'hang')
+      const started = join(data, 'started')
+      const hanging = [
+        "import { test } from 'node:test'",
+        "import assert from 'node:assert/strict'",
+        "import { appendFileSync, existsSync } from 'node:fs'",
+        '',
+        "test('the scenario holds', async () => {",
+        `  if (existsSync(${JSON.stringify(hang)})) {`,
+        `    appendFileSync(${JSON.stringify(started)}, 'started\\n')`,
+        '    for (;;) await new Promise((resolve) => setTimeout(resolve, 50))',
+        '  }',
+        "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'no export.ts')",
+        '})',
+        '',
+      ].join('\n')
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              withReadme,
+              undefined,
+              PLAN,
+              undefined,
+              undefined,
+              () => ({
+                'R1.S2': {
+                  ...exportProof()['R1.S2'],
+                  test: { ...exportProof()['R1.S2'].test, code: hanging },
+                },
+              }),
+            )
+            const builder = yield* builderOf(mission.id)
+            yield* proofState(mission.id, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer')
+            yield* Deferred.await(reached)
+            // Born after the exit read its tree, and after this pass stopped the sessions.
+            const helper = yield* openSession({
+              provider: 'claude',
+              owner: { kind: 'mission', missionId: mission.id },
+              role: 'helper',
+              folder: builder.session.folder,
+              parent: null,
+              chosen: { model: null, effort: null, mode: null },
+              modelLevel: null,
+            })
+            const grantId = yield* grantOf(helper.id)
+            writeFileSync(hang, '')
+            const before = called
+            yield* Effect.forkChild(call(grantId, 'proof_run', { scenario: 'R1.S2' }))
+            yield* until(
+              Effect.sync(() => called > before),
+              LONG,
+            )
+            const released = Date.now()
+            yield* Deferred.succeed(go, undefined)
+            yield* inReview(mission.id)
+            const runs = yield* Runs
+            return {
+              after: Date.now() - released,
+              going: [...runs.live.values()].filter((one) => one.run.missionId === mission.id),
+            }
+          }),
+        ),
+      )
+      expect(seen.after).toBeLessThan(LONG)
+      expect(seen.going).toEqual([])
+      // The call the session made while the stops ran started no run.
+      expect(existsSync(started)).toBe(false)
     },
   )
 })
