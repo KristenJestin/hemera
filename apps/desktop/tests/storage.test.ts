@@ -3,14 +3,18 @@
  * held for a moment, Linux never does: the hold is simulated by a remover given to the removal.
  */
 
-import { existsSync } from 'node:fs'
-import { basename } from 'node:path'
+import { spawn } from 'node:child_process'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { commandsEngine } from './commands-engine.ts'
 import {
+  endChild,
+  holdFile,
+  readyWithin,
   removeFolders,
   removeTree,
   removeFoldersWith,
@@ -110,5 +114,38 @@ describe('A folder an engine still stands in when its test ends', () => {
     await removeFolders()
     expect(closedOnItsFolder).toBe(true)
     expect(existsSync(data)).toBe(false)
+  })
+})
+
+describe('A child a test starts says it is ready within a bound (#417)', () => {
+  test('a child that never says it is ready fails within the bound, naming what it wrote on its errors', async () => {
+    const child = spawn(process.execPath, [
+      '-e',
+      "process.stderr.write('stuck on something\\n'); setInterval(() => {}, 1000)",
+    ])
+    const began = performance.now()
+    await expect(readyWithin(child, 500)).rejects.toThrow(
+      /not ready after 500 ms[\s\S]*stuck on something/,
+    )
+    expect(performance.now() - began).toBeLessThan(5_000)
+    await endChild(child)
+  })
+
+  test('a child that ends before it is ready fails at once', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(3)'])
+    await expect(readyWithin(child, 20_000)).rejects.toThrow(/ended \(3\) before it was ready/)
+  })
+
+  test('a held file is held until its holder ends: Windows opens it for no one else', async () => {
+    const file = join(temporaryFolder('held-file'), 'held.txt')
+    writeFileSync(file, 'before\n')
+    const began = performance.now()
+    const holder = await holdFile(file)
+    // Ready in a fraction of the bound: PowerShell took seconds there on a loaded runner.
+    expect(performance.now() - began).toBeLessThan(5_000)
+    if (process.platform === 'win32') expect(() => readFileSync(file)).toThrow(/EBUSY/)
+    await endChild(holder)
+    expect(readFileSync(file, 'utf8')).toBe('before\n')
+    await removeFolders()
   })
 })

@@ -18,8 +18,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -39,7 +37,7 @@ import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
 import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
-import { endChild, removeFolders, temporaryFolder } from './storage.ts'
+import { endChild, holdFile, removeFolders, temporaryFolder } from './storage.ts'
 import {
   ALLOW,
   acmeWithMission,
@@ -541,23 +539,6 @@ describe('Writing only on the version that was read', () => {
 
   test('a write over a file another process holds open replaces it, or fails clearly and leaves it whole', async () => {
     const file = join(work, 'acme', 'held.txt')
-    const holder = async () => {
-      // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
-      // open file never stops a rename.
-      const child =
-        process.platform === 'win32'
-          ? spawn('powershell.exe', [
-              '-NoProfile',
-              '-Command',
-              `$f = [System.IO.File]::Open('${file}', 'Open', 'Read', 'None'); 'held'; Start-Sleep -Seconds 60`,
-            ])
-          : spawn(process.execPath, [
-              '-e',
-              `require('node:fs').openSync(${JSON.stringify(file)}, 'r'); console.log('held'); setInterval(() => {}, 1000)`,
-            ])
-      await once(child.stdout, 'data')
-      return child
-    }
     const answer = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
@@ -566,7 +547,9 @@ describe('Writing only on the version that was read', () => {
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           yield* callTool(builder.grantId, 'fs_read', { path: 'held.txt' })
           return yield* Effect.acquireUseRelease(
-            Effect.promise(holder),
+            // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
+            // open file never stops a rename.
+            Effect.promise(() => holdFile(file)),
             () => callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }),
             (child) => Effect.promise(() => endChild(child)),
           )
@@ -576,6 +559,8 @@ describe('Writing only on the version that was read', () => {
     const now = readFileSync(file, 'utf8')
     // Which of the two the system chose, for the record of a run on each system.
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
+    // Shared with no one, the file cannot even be read on Windows: the test did hold it.
+    if (process.platform === 'win32') expect(answer.ok).toBe(false)
     if (answer.ok) expect(now).toBe('after\n')
     else {
       // A file shared with no one cannot even be read for its version: refused before writing.
