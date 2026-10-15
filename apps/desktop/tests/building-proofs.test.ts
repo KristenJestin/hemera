@@ -1163,6 +1163,30 @@ describe('A failed green', () => {
     ])
   })
 
+  test('a write whose file could not be read before it, a file it creates, counts: the failed green runs again', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          // T2 done without the file it creates: its green fails on its absence.
+          yield* builds(grantId, 'T2')
+          yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+          yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+          return yield* proofOf(mission.id, 'R1.S2')
+        }),
+      ),
+    )
+    expect(seen.runs.map((one) => [one.phase, one.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
   test('a failed green runs again after the Builder’s next task_finished', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
@@ -1971,6 +1995,44 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     expect(seen.ran).toMatch(/exit code 0/)
     expect(seen.asked).toEqual([])
     expect(seen.proof.state).toBe('green')
+  })
+
+  test('a Builder turn that rewrites the failing file with the same content, then ends: the question is not withdrawn and does not come back', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T1')
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          yield* builds(grantId, 'T4')
+          yield* builds(grantId, 'T3')
+          // The failed green, which the quiet Builder no longer acts on: the user is asked.
+          yield* until(
+            Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+            20_000,
+          )
+          // The Builder writes the failing file again as it was, and its turn ends.
+          const wrote = yield* call(grantId, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: WRONG_EXPORT,
+          })
+          // Longer than a write takes to settle and the end to be judged again.
+          yield* Effect.sleep('3 seconds')
+          return {
+            wrote,
+            asked: (yield* unprovenAsked).map((one) => one.state),
+            runs: (yield* proofOf(mission.id, 'R1.S2')).runs.length,
+          }
+        }),
+      ),
+    )
+    expect(seen.wrote).not.toMatch(/refused/)
+    expect(seen.asked).toEqual(['pending'])
+    expect(seen.runs).toBe(2)
   })
 
   test('Try again, then a Builder turn that writes nothing while the proof runs: the question does not come back before the run ends', async () => {

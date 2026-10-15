@@ -20,6 +20,8 @@
  *   one the resume block. Cancel ends the Building as cancelled; the work stays.
  */
 
+import { readFile } from 'node:fs/promises'
+
 import {
   type Amendment,
   DOCUMENTATION,
@@ -1616,6 +1618,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
+      /** What a file written holds, or null when it cannot be read, absent included (#310). */
+      const contentOf = (path: string) =>
+        Effect.tryPromise(() => readFile(path)).pipe(Effect.orElseSucceed(() => null))
+
       /** The repository a gate write lands in, compared before it (#148). */
       const compareBefore = (file: { readonly missionId: string; readonly path: string }) =>
         Effect.gen(function* () {
@@ -1699,10 +1705,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.andThen(hold('writing')),
                   Effect.andThen(loop.beginHold(file, sink)),
                   provided,
-                  Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
-                  // Once the write and its outcome are kept, out of their transaction: a failed
-                  // green runs again on what it left (#144).
-                  Effect.tap(() => wrote(file.missionId)),
+                  Effect.flatMap((waited) =>
+                    Effect.gen(function* () {
+                      // Read while the file is held: no command writes it in between.
+                      const before = yield* contentOf(file.path)
+                      const result = yield* write
+                      // Once the write and its outcome are kept, out of their transaction: a
+                      // failed green runs again on what it left (#144). A write that left the
+                      // file as it was is none; one whose file could not be read counts (#310).
+                      const after = yield* contentOf(file.path)
+                      if (before === null || after === null || !before.equals(after)) {
+                        yield* wrote(file.missionId)
+                      }
+                      return { result, waited }
+                    }),
+                  ),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
