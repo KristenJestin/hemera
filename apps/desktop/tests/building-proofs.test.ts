@@ -16,7 +16,17 @@ import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
 import { and, eq } from 'drizzle-orm'
-import { Deferred, Duration, Effect, Exit, Layer, Predicate, Schema, Semaphore } from 'effect'
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Predicate,
+  Schema,
+  Semaphore,
+} from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -2931,7 +2941,7 @@ describe('A failed green and a change made outside Hemera', () => {
   /**
    * The points the Builder reached, in order; `more` may hold one. `taken(from)` waits until a
    * change outside Hemera was taken in after `from`, a settle of the writes began after it, and
-   * every settle begun is done.
+   * every settle queued is done, those a failed green queues itself included.
    */
   const reaching = (more: BuilderHold = () => Effect.void) => {
     const reached: string[] = []
@@ -2954,7 +2964,7 @@ describe('A failed green and a change made outside Hemera', () => {
             return (
               outside >= 0 &&
               reached.indexOf('settling', outside) >= 0 &&
-              count('settling') === count('settled')
+              count('queued') === count('settled')
             )
           }),
           20_000,
@@ -2968,7 +2978,7 @@ describe('A failed green and a change made outside Hemera', () => {
               said.length === count('outside') &&
               outside >= 0 &&
               reached.indexOf('settling', outside) >= 0 &&
-              count('settling') === count('settled')
+              count('queued') === count('settled')
             )
           }),
           20_000,
@@ -3543,6 +3553,306 @@ describe('A failed green and a change made outside Hemera', () => {
       ['green', 'assertion_failed'],
     ])
   })
+
+  /**
+   * R1.S2's test, held while it runs: run `n` reads `api/export.ts`, says so with `read-<n>` and
+   * waits for `go-<n>` before it judges what it read. With `cache`, it first notes the run in
+   * `api/ran.log`, as coverage or a cache would.
+   */
+  const heldExport = (cache: boolean) => () => {
+    const runs = JSON.stringify(join(scratch, 'runs'))
+    const folder = JSON.stringify(scratch)
+    return {
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          [
+            `  appendFileSync(${runs}, 'x')`,
+            `  const n = readFileSync(${runs}, 'utf8').length`,
+            "  const file = new URL('../export.ts', import.meta.url)",
+            "  const read = existsSync(file) ? readFileSync(file, 'utf8') : ''",
+            ...(cache
+              ? ["  appendFileSync(new URL('../ran.log', import.meta.url), `run ${n}\\n`)"]
+              : []),
+            `  writeFileSync(${folder} + '/read-' + n, '')`,
+            '  await new Promise((resolve, reject) => {',
+            '    const until = Date.now() + 20_000',
+            '    const tick = () => {',
+            `      if (existsSync(${folder} + '/go-' + n)) resolve()`,
+            "      else if (Date.now() > until) reject(new Error('never let go'))",
+            '      else setTimeout(tick, 20)',
+            '    }',
+            '    tick()',
+            '  })',
+            "  assert.ok(read.includes('toMarkdown'), 'export.ts has no toMarkdown')",
+          ].join('\n'),
+          ["import { writeFileSync } from 'node:fs'"],
+        ),
+      ),
+    }
+  }
+
+  /** Runs `n` of the held test are not held. */
+  const letGo = (...n: ReadonlyArray<number>) =>
+    Effect.sync(() => {
+      for (const one of n) writeFileSync(join(scratch, `go-${one}`), '')
+    })
+
+  /** Run `n` of the held test has read `export.ts`: `meanwhile` happens, then it is let go. */
+  const whileHeld = <E, R>(n: number, meanwhile: Effect.Effect<void, E, R>) =>
+    Effect.gen(function* () {
+      yield* until(
+        Effect.sync(() => existsSync(join(scratch, `read-${n}`))),
+        20_000,
+      )
+      yield* meanwhile
+      yield* letGo(n)
+    })
+
+  /** The user writes a file of `api` in their editor. */
+  const edits = (missionId: string, content: string, path = 'export.ts') =>
+    Effect.gen(function* () {
+      writeFileSync(join(yield* apiOf(missionId), path), content)
+    })
+
+  test('a fix written outside Hemera while the failed green’s run is held: once the run ends, the green runs again once, and the “not proven” question does not come', async () => {
+    const builder = heldBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* letGo(1, 3)
+            const { mission } = yield* launchedWith(heldExport(false))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builder.hold
+            const building = yield* Effect.forkChild(
+              Effect.gen(function* () {
+                yield* builds(grantId, 'T1')
+                yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+                yield* builds(grantId, 'T4')
+                yield* builds(grantId, 'T3')
+              }),
+            )
+            // The green has read the wrong export; the user fixes it before the run ends.
+            yield* whileHeld(2, edits(mission.id, RIGHT_EXPORT))
+            yield* proofIn(mission.id, 'R1.S2', 'green')
+            yield* Fiber.join(building)
+            // The Builder's turn ends without a write: the end goes on, nobody is asked.
+            yield* builder.release
+            yield* until(
+              Effect.zipWith(
+                endCalled(mission.id),
+                unprovenAsked,
+                (called, asked) => called || asked.length > 0,
+              ),
+              20_000,
+            )
+            return { asked: yield* unprovenAsked, runs: yield* runsOf(mission.id) }
+          }),
+        ),
+    )
+    expect(seen.asked).toEqual([])
+    expect(seen.runs).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  for (const [what, fix, runs] of [
+    [
+      'writes its own cache, and nothing else lands: it does not run again',
+      false,
+      [
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+      ],
+    ],
+    [
+      'writes its own cache while a fix lands outside Hemera: it runs again once',
+      true,
+      [
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+        ['green', 'passed'],
+      ],
+    ],
+  ] as const) {
+    test(`a failed green whose held run ${what}`, async () => {
+      const points = reaching()
+      const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+        ({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              yield* letGo(1, 3)
+              const { mission } = yield* launchedWith(heldExport(true))
+              yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+              const { grantId } = yield* builderOf(mission.id)
+              const building = yield* Effect.forkChild(
+                builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]]),
+              )
+              yield* whileHeld(2, fix ? edits(mission.id, RIGHT_EXPORT) : Effect.void)
+              yield* Fiber.join(building)
+              yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+              // What the green's run wrote, and the fix, are taken in, and their settle is done.
+              yield* points.takenAll(mission.id)
+              return yield* runsOf(mission.id)
+            }),
+          ),
+      )
+      expect(seen).toEqual(runs)
+    })
+  }
+
+  test('a change outside Hemera landing during each failed run: the green runs again once, then not for the change that landed during that rerun', async () => {
+    const points = reaching()
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* letGo(1, 4)
+            const { mission } = yield* launchedWith(heldExport(true))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            yield* edits(mission.id, 'export const notes = []\n', 'notes.ts')
+            const { grantId } = yield* builderOf(mission.id)
+            const building = yield* Effect.forkChild(
+              builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]]),
+            )
+            // Two tries of the user, each landing while a run is held, neither of them a fix; the
+            // second changes a file there before the runs that no run changed, so it lands too.
+            yield* whileHeld(2, edits(mission.id, 'export const toCsv = () => "1"\n'))
+            yield* Fiber.join(building)
+            yield* whileHeld(3, edits(mission.id, 'export const notes = [1]\n', 'notes.ts'))
+            yield* until(
+              Effect.map(runsOf(mission.id), (runs) => runs.length === 3),
+              20_000,
+            )
+            yield* points.takenAll(mission.id)
+            return yield* runsOf(mission.id)
+          }),
+        ),
+    )
+    expect(seen).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+    ])
+  })
+
+  test('a fix lands during the first failed run, and the settle of what its compare found is over before the failure is recorded: the green still runs again once', async () => {
+    const builder = heldBuilder()
+    const gate = { on: false, go: Deferred.makeUnsafe<void>() }
+    const points = reaching((at) =>
+      at === 'greening' && gate.on ? Deferred.await(gate.go) : Effect.void,
+    )
+    const seen = await proofsEngine(data, points.hold, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* letGo(1, 3)
+            const { mission } = yield* launchedWith(heldExport(false))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            gate.on = true
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builder.hold
+            const building = yield* Effect.forkChild(
+              builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]]),
+            )
+            const from = yield* points.mark
+            yield* whileHeld(2, edits(mission.id, RIGHT_EXPORT))
+            // The green's run ended and its compare found the fix; that settle is over before the
+            // failure is recorded, and found no failed green to run.
+            yield* points.taken(from)
+            gate.on = false
+            yield* Deferred.succeed(gate.go, undefined)
+            yield* proofIn(mission.id, 'R1.S2', 'green')
+            yield* Fiber.join(building)
+            return yield* runsOf(mission.id)
+          }),
+        ),
+    )
+    expect(seen).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  for (const [what, line] of [
+    [
+      'a file of a new name on every run',
+      "  writeFileSync(new URL('../out-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.log', import.meta.url), 'x')",
+    ],
+    [
+      'a file its red never wrote',
+      "  if (existsSync(new URL('../export.ts', import.meta.url))) appendFileSync(new URL('../green.log', import.meta.url), 'g')",
+    ],
+  ] as const) {
+    test(`a failed green whose run writes ${what}, then the quiet Builder’s question: nothing runs again on unchanged code, and a Builder write runs it once`, async () => {
+      const points = reaching()
+      const proof = () => ({
+        'R1.S2': automated(
+          EXPORT_PATH,
+          testFile(
+            [
+              line,
+              "  const file = new URL('../export.ts', import.meta.url)",
+              "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+            ].join('\n'),
+            ["import { writeFileSync } from 'node:fs'"],
+          ),
+        ),
+      })
+      const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+        ({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launchedWith(proof)
+              yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+              const { grantId } = yield* builderOf(mission.id)
+              yield* builds(grantId, 'T1')
+              yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+              yield* builds(grantId, 'T4')
+              yield* builds(grantId, 'T3')
+              yield* until(
+                Effect.map(askedStates, (states) => states.includes('pending')),
+                20_000,
+              )
+              // What the runs wrote is taken in, and every settle of it is over.
+              yield* points.takenAll(mission.id)
+              const asked = yield* askedStates
+              const quiet = yield* runsOf(mission.id)
+              // A Builder write that fixes nothing runs it once.
+              const from = yield* points.mark
+              yield* writes(grantId, 'notes.md', 'Read again.\n')
+              yield* until(
+                Effect.map(runsOf(mission.id), (runs) => runs.length > quiet.length),
+                20_000,
+              )
+              yield* points.taken(from)
+              yield* points.takenAll(mission.id)
+              return { asked, quiet, runs: yield* runsOf(mission.id) }
+            }),
+          ),
+      )
+      expect(seen.asked).toEqual(['pending'])
+      expect(seen.quiet).toEqual([
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+      ])
+      expect(seen.runs).toEqual([
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+      ])
+    })
+  }
 })
 
 describe('What the reviewers see of the red phase', () => {
