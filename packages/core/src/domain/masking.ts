@@ -751,7 +751,7 @@ const escapedAt = (text: string, floor: number, at: number): boolean => {
  * - a value a broken container held whole, where it crosses none of those and none holds it. Those
  *   it holds give way to it: pretty JSON after a bracket of the prose that never closes stays one
  *   value, the lines that are JSON by themselves inside it too. One read where the quotes pair the
- *   other way crosses the others, and gives way;
+ *   other way crosses the others, and gives way; of two held values that cross, the longer stays;
  * - between all those, every string opened by a quote no backslash escapes and closed before the
  *   next of them.
  */
@@ -766,11 +766,15 @@ function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyA
   // values each touches are counted twice at most.
   const kept: Span[] = []
   for (const value of yield* byStart(held)) {
-    if (value[0] >= (kept.at(-1)?.[1] ?? 0)) {
-      const crossed = touchingSpans(outer, value[0], value[1]).some(
-        ([start, end]) => start < value[0] || end > value[1],
-      )
-      if (!crossed) kept.push(value)
+    const crossed = touchingSpans(outer, value[0], value[1]).some(
+      ([start, end]) => start < value[0] || end > value[1],
+    )
+    const last = kept.at(-1)
+    if (!crossed && value[0] >= (last?.[1] ?? 0)) kept.push(value)
+    else if (!crossed && last !== undefined && value[1] - value[0] > last[1] - last[0]) {
+      // Two read where the quotes pair the other way cross: the longer stays, and those kept
+      // before it end where it starts or sooner.
+      kept[kept.length - 1] = value
     }
     if (due()) yield
   }

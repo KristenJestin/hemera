@@ -1426,6 +1426,21 @@ describe('A JSON string written inside any text is masked as a JSON string (#401
     await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
   })
 
+  test('of two values read where the quotes pair two ways, the longer stays JSON', async () => {
+    // The prose's `{"[` holds a key that ends at the quote the JSON opens with: read that way, a
+    // key of four characters stood where the JSON did.
+    const json = JSON.stringify({
+      user: 'ana',
+      password: ['-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'],
+    })
+    const texts = [`{"[${json}`, `{"[ ${json}`]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toContain('MIIEbody')
+      expect(embeddedParses(masked, index === 0 ? '{"[' : '{"[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
   test('a string line that holds braces stays one string, and NDJSON stays NDJSON', async () => {
     const text = '{"id":1}\n"{} password=\\"a b\\" and [1]"\n{"id":2}'
     const [masked] = await printedForms([text], [])
