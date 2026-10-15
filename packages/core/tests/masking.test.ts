@@ -1412,6 +1412,20 @@ describe('A JSON string written inside any text is masked as a JSON string (#401
     expect(masked).toBe('[1, {"a":"password=•••"}, oops')
   })
 
+  test('pretty JSON held by a bracket of the prose stays one JSON, its lines inside it', async () => {
+    // A line that is JSON by itself (an array's last string) gave way to nothing inside the held
+    // value: the held value was dropped, and the line was read alone.
+    const texts = [
+      `Items [ ${JSON.stringify({ user: 'ana', password: ['hunter2-Sx1Zq'] }, null, 2)}`,
+      `[ ${JSON.stringify({ a: 'x', token: ['y-Sx2Zq'] }, null, 2)}`,
+    ]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toMatch(/sx\d+zq/i)
+      expect(embeddedParses(masked, index === 0 ? 'Items [ ' : '[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
   test('a string line that holds braces stays one string, and NDJSON stays NDJSON', async () => {
     const text = '{"id":1}\n"{} password=\\"a b\\" and [1]"\n{"id":2}'
     const [masked] = await printedForms([text], [])
@@ -1461,9 +1475,17 @@ const prose = fc
   )
   .map((parts) => parts.join(''))
 
-/** A text made by the generators of #391 and #396, in a JSON value that holds it. */
+/**
+ * A text made by the generators of #391 and #396, in a JSON value that holds it. The last ends an
+ * array on a string: pretty, that string is a line that is JSON by itself.
+ */
 const asJson = (text: string, how: number): Schema.Json =>
-  [{ body: text }, [text, { text }], { a: [{ note: text }], b: 1 }][how % 3] ?? { body: text }
+  [
+    { body: text },
+    [text, { text }],
+    { a: [{ note: text }], b: 1 },
+    { user: 'ana', password: [text] },
+  ][how % 4] ?? { body: text }
 
 describe('JSON made of every generated secret, written inside prose, keeps no marker and parses (#401)', () => {
   const generated = (): ReadonlyArray<readonly [string, ReadonlyArray<string>]> => {
@@ -1543,7 +1565,7 @@ describe('JSON made of every generated secret, written inside prose, keeps no ma
       await fc.assert(
         fc.asyncProperty(
           fc.nat({ max: all.length - 1 }),
-          fc.nat({ max: 2 }),
+          fc.nat({ max: 3 }),
           fc.boolean(),
           prose,
           prose,

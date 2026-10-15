@@ -747,7 +747,10 @@ const escapedAt = (text: string, floor: number, at: number): boolean => {
  * - every line that is JSON by itself. Of two of these, the one inside the other gives way: a
  *   string line that holds braces stays one string, a pretty container one container. Where two
  *   overlap, the first stays;
- * - a value a broken container held whole, where it touches none of those;
+ * - a value a broken container held whole, where it crosses none of those and none holds it. Those
+ *   it holds give way to it: pretty JSON after a bracket of the prose that never closes stays one
+ *   value, the lines that are JSON by themselves inside it too. One read where the quotes pair the
+ *   other way crosses the others, and gives way;
  * - between all those, every string opened by a quote no backslash escapes and closed before the
  *   next of them.
  */
@@ -758,13 +761,23 @@ function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyA
     if (value[0] >= (outer.at(-1)?.[1] ?? 0)) outer.push(value)
     if (due()) yield
   }
+  // Two readers at most read each character, so each is in two held values at most, and the outer
+  // values each touches are counted twice at most.
   const kept: Span[] = []
   for (const value of yield* byStart(held)) {
-    const apart = touchingSpans(outer, value[0], value[1]).length === 0
-    if (apart && value[0] >= (kept.at(-1)?.[1] ?? 0)) kept.push(value)
+    if (value[0] >= (kept.at(-1)?.[1] ?? 0)) {
+      const crossed = touchingSpans(outer, value[0], value[1]).some(
+        ([start, end]) => start < value[0] || end > value[1],
+      )
+      if (!crossed) kept.push(value)
+    }
     if (due()) yield
   }
-  const values = yield* inOrder(outer, kept, ([start]) => start)
+  const values: Span[] = []
+  for (const value of yield* inOrder(kept, outer, ([start]) => start)) {
+    if (value[0] >= (values.at(-1)?.[1] ?? 0)) values.push(value)
+    if (due()) yield
+  }
   const strings: Span[] = []
   const nextQuote = nextOf(text, QUOTES)
   let gapStart = 0
