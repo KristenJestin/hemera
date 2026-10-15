@@ -1369,26 +1369,63 @@ type MaskString = (text: string, field: string) => string
  */
 export const NESTING_LIMIT = 256
 
-/** The tag of a tagged value names its shape, never a secret: it is kept as it is. */
-const TAG = '_tag'
-
 /** A container being masked: what it holds still to visit, and what is masked already. */
 interface Level {
-  /** The name it stands under in its parent; its items stand in it too when it is a list. */
+  /** The name it stands under in its parent, as written; its items stand in it too when it is a list. */
   readonly into: string
-  /** The names of the fields of a record; null for a list. */
+  /** That name as the parent keeps it. */
+  readonly kept: string
+  /** The names of the fields of a record as written; null for a list. */
   readonly names: ReadonlyArray<string> | null
+  /** The same names as the record keeps them (`keptNames`); null for a list. */
+  readonly keptNames: ReadonlyArray<string> | null
   readonly items: ReadonlyArray<Schema.Json>
   /** The items done, in order: the next one to visit is at this length. */
   readonly masked: Array<readonly [name: string, item: Schema.Json]>
 }
 
-const openLevel = (container: Schema.JsonObject | Schema.JsonArray, into: string): Level => {
-  if (isList(container)) return { into, names: null, items: container, masked: [] }
+/**
+ * The names of a record's fields as it keeps them, given each name masked as text. A name masking
+ * left as it was is kept as it is. A masked name that another field of the record already holds
+ * is followed by ` (2)`, ` (3)`…, the first number free, in the order of the fields: no two fields
+ * share a name, so no value is ever dropped. Each masked name counts on from the number it last
+ * took, so the names are numbered in time linear in their count.
+ */
+const keptNames = (
+  names: ReadonlyArray<string>,
+  masked: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const held = new Set(names.filter((name, at) => masked[at] === name))
+  const counted = new Map<string, number>()
+  return masked.map((name, at) => {
+    if (name === names[at]) return name
+    let count = counted.get(name) ?? 1
+    let kept = name
+    while (held.has(kept)) {
+      count += 1
+      kept = `${name} (${String(count)})`
+    }
+    counted.set(name, count)
+    held.add(kept)
+    return kept
+  })
+}
+
+const openLevel = (
+  container: Schema.JsonObject | Schema.JsonArray,
+  into: string,
+  kept: string,
+  rename: (name: string) => string,
+): Level => {
+  if (isList(container))
+    return { into, kept, names: null, keptNames: null, items: container, masked: [] }
   const entries = Object.entries(container)
+  const names = entries.map(([name]) => name)
   return {
     into,
-    names: entries.map(([name]) => name),
+    kept,
+    names,
+    keptNames: keptNames(names, names.map(rename)),
     items: entries.map(([, item]) => item),
     masked: [],
   }
@@ -1403,14 +1440,27 @@ interface Walked {
   readonly cut: boolean
 }
 
+/** The tag of a value the engine builds names its shape, never a secret: it is kept as it is. */
+const TAG = '_tag'
+
+/** Who chose the names of a structured value: an agent, or the engine, by a schema. */
+type NamedBy = 'agent' | 'engine'
+
 /**
- * A structured value with every string in it masked by `string`, and a field whose name says it is
- * a credential masked whole. The containers open are kept on a stack, not in calls, so no depth of
- * nesting runs out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
+ * A structured value with every string in it masked by `string`, and a field whose name says it
+ * is a credential masked whole. The names of its fields and its string tags are masked too when an
+ * agent chose them (#404); a value the engine builds keeps both, as the schema that reads it back
+ * needs them. The containers open are kept on a stack, not in calls, so no depth of nesting runs
+ * out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
  */
-const walk = (record: Schema.JsonObject, string: MaskString): Walked => {
+const walk = (record: Schema.JsonObject, string: MaskString, namedBy: NamedBy): Walked => {
   let cut = false
-  const open: Level[] = [openLevel(record, '')]
+  const open: Level[] = []
+  const rename = (name: string) => (namedBy === 'agent' ? string(name, '') : name)
+  const enter = (container: Schema.JsonObject | Schema.JsonArray, into: string, kept: string) => {
+    open.push(openLevel(container, into, kept, rename))
+  }
+  enter(record, '', '')
   for (;;) {
     const level = open.at(-1)
     if (level === undefined) return { masked: {}, cut: true }
@@ -1419,48 +1469,83 @@ const walk = (record: Schema.JsonObject, string: MaskString): Walked => {
       open.pop()
       const parent = open.at(-1)
       if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut }
-      parent.masked.push([level.into, closedLevel(level)])
+      parent.masked.push([level.kept, closedLevel(level)])
       continue
     }
     const item = level.items[at] ?? null
     const name = level.names?.[at] ?? level.into
-    if (level.names !== null && name === TAG && Predicate.isString(item)) {
-      level.masked.push([name, item])
+    const kept = level.keptNames?.[at] ?? level.kept
+    if (namedBy === 'engine' && level.names !== null && name === TAG && Predicate.isString(item)) {
+      level.masked.push([kept, item])
     } else if (CREDENTIAL_FIELD.test(name)) {
-      level.masked.push([name, MASK])
+      level.masked.push([kept, MASK])
     } else if (Predicate.isString(item)) {
-      level.masked.push([name, string(item, name)])
+      level.masked.push([kept, string(item, name)])
     } else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
-      level.masked.push([name, item])
+      level.masked.push([kept, item])
     } else if (open.length >= NESTING_LIMIT) {
       cut = true
-      level.masked.push([name, MASK])
+      level.masked.push([kept, MASK])
     } else {
-      open.push(openLevel(item, name))
+      enter(item, name, kept)
     }
   }
 }
 
-/** Every field of a record masked whole: what is kept of a record that could not be read. */
-const maskedWhole = (record: Schema.JsonObject): Schema.JsonObject =>
-  Object.fromEntries(Object.keys(record).map((name) => [name, MASK]))
+/**
+ * Every field of a record masked whole, its name through `rename`: what is kept of a record that
+ * could not be read.
+ */
+const maskedWhole = (
+  record: Schema.JsonObject,
+  rename: (name: string) => string,
+): Schema.JsonObject => {
+  const names = Object.keys(record)
+  const kept = keptNames(names, names.map(rename))
+  return Object.fromEntries(kept.map((one) => [one, MASK]))
+}
+
+/** `maskRecord` or `maskArguments`, as `namedBy` says. */
+const maskedNamedBy = (
+  record: Schema.JsonObject,
+  values: ReadonlyArray<string>,
+  namedBy: NamedBy,
+): Masked<Schema.JsonObject> => {
+  const known = longestFirst(values)
+  const masked = (text: string) => doneOrMask(() => textMasked(text, known))
+  try {
+    return maskedRecord(walk(record, masked, namedBy).masked)
+  } catch {
+    return maskedRecord(maskedWhole(record, namedBy === 'agent' ? masked : (name) => name))
+  }
+}
 
 /**
- * A structured value with every string in it masked, and a field whose name says it is a
- * credential (`password`, `token`, `secret`, `api_key`, `credential`, `authorization`) masked
- * whole. What lies beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`, and
- * the call it serves never fails.
+ * A structured value the engine builds, with every string in it masked, and a field whose name
+ * says it is a credential (`password`, `token`, `secret`, `api_key`, `credential`,
+ * `authorization`) masked whole. Its names and its string tags are kept as they are: a schema
+ * fixed them and reads them back, and a variable that holds `options` must not rename a need's
+ * `options`. What lies beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`,
+ * and the call it serves never fails.
  */
 export function maskRecord(
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> {
-  try {
-    const known = longestFirst(values)
-    return maskedRecord(walk(record, (text) => doneOrMask(() => textMasked(text, known))).masked)
-  } catch {
-    return maskedRecord(maskedWhole(record))
-  }
+  return maskedNamedBy(record, values, 'engine')
+}
+
+/**
+ * Arguments an agent sent, as `maskRecord` masks a record, with the names of their fields and
+ * their string tags masked as text too: an agent chose them, and may have put a secret there. A
+ * masked name that another field already holds is numbered (`keptNames`), so no value is lost.
+ * What this gives is kept to be read, never decoded by a schema.
+ */
+export function maskArguments(
+  record: Schema.JsonObject,
+  values: ReadonlyArray<string>,
+): Masked<Schema.JsonObject> {
+  return maskedNamedBy(record, values, 'agent')
 }
 
 /**
@@ -1468,7 +1553,9 @@ export function maskRecord(
  * a field that says where the action goes (`path`, `target`, `cwd`, `command`, `program`, `line`,
  * `url`, `host`). A credential recognised by its shape leaves a destination readable (the URL of
  * a `curl` stays), so it does not stop the action; a known value inside a destination may be the
- * destination itself, and a partial action is never sent.
+ * destination itself, and a partial action is never sent. The engine builds the action and fixes
+ * every name in it (`jevAction`): its names and its tags are kept, so a variable that holds
+ * `platform` does not change what the action says (#404).
  */
 export function maskAction(
   action: Schema.JsonObject,
@@ -1477,17 +1564,21 @@ export function maskAction(
   try {
     const known = longestFirst(values)
     let lostDestination = false
-    const { masked, cut } = walk(action, (text, field) => {
-      const destination = DESTINATION_FIELD.test(field)
-      if (destination && known.some((value) => text.includes(value))) lostDestination = true
-      try {
-        return done(textMasked(text, known))
-      } catch {
-        // A destination that could not be masked is gone whole: the action would be sent in part.
-        if (destination) lostDestination = true
-        return MASK
-      }
-    })
+    const { masked, cut } = walk(
+      action,
+      (text, field) => {
+        const destination = DESTINATION_FIELD.test(field)
+        if (destination && known.some((value) => text.includes(value))) lostDestination = true
+        try {
+          return done(textMasked(text, known))
+        } catch {
+          // A destination that could not be masked is gone whole: the action would be sent in part.
+          if (destination) lostDestination = true
+          return MASK
+        }
+      },
+      'engine',
+    )
     // An action cut where it nests too deep, or that could not be read, is not sent in part.
     return lostDestination || cut ? null : maskedRecord(masked)
   } catch {

@@ -512,6 +512,29 @@ describe('A judge that can do nothing, told nothing secret', () => {
     ])
   })
 
+  test('an action whose field names a variable holds is sent to the judge with its names unchanged, and does not ask (#404)', async () => {
+    const { judges, questions } = await withJudge(({ missionId }) =>
+      Effect.gen(function* () {
+        // The engine fixed every name of the action the judge is sent: none is a secret.
+        yield* Secrets.useSync((secrets) =>
+          secrets.register('suite', ['platform', 'inside', 'tool']),
+        )
+        const folder = join(work, 'probe-1')
+        mkdirSync(folder, { recursive: true })
+        const probe = yield* sessionOf('probe', folder, { kind: 'mission', id: missionId })
+        yield* run(probe.grantId, 'which claude opencode codex')
+      }),
+    )
+    expect(questions).toEqual([])
+    const prompts = judges.started.flatMap((judge) => judge.answers.prompts).map(textOf)
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain(
+      '{"action":{"tool":"commands_run","line":"which claude opencode codex"',
+    )
+    expect(prompts[0]).toContain('"platform":')
+    expect(prompts[0]).toContain('"inside":true')
+  })
+
   test('a JSON line the user wrote, holding a quoted credential and a known value, reaches the judge with nothing of either, and still JSON (#397)', async () => {
     const pasted = JSON.stringify([QUOTED_SECRET, `key ${KNOWN_SECRET}`])
     const { judges } = await withJudge(({ builder, projectId, missionId }) =>
