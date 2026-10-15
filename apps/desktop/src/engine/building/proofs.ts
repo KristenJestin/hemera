@@ -204,6 +204,7 @@ export interface ProofParts {
       | 'retrying'
       | 'proof-called'
       | 'joined'
+      | 'queued'
       | 'window'
       | 'settling'
       | 'settled',
@@ -499,11 +500,18 @@ export const buildingProofs = (parts: ProofParts) => {
    */
   const ranWrote = new Map<string, Set<string>>()
 
+  /** What the Building's runs wrote, forgotten once it ended or was cancelled. */
+  const ended = (buildingId: string) =>
+    Effect.sync(() => {
+      ranWrote.delete(buildingId)
+    })
+
   /**
-   * The trees a run ran on, of each repository where a file changed while it ran that no proof
-   * run of the Building changed before: a change that landed during the run, such as the user's
-   * fix saved in their editor, never what the run writes itself. Its write locks keep every task's
-   * writes out meanwhile. What changed is a run's own from then on.
+   * The trees a run ran on, of each repository where a file it ran on changed while it ran (one
+   * modified, removed or renamed, never one added) that no proof run of the Building changed
+   * before: a change that landed during the run, such as the user's fix saved in their editor,
+   * never what the run writes itself, whose new files may take a new name each time. Its write
+   * locks keep every task's writes out meanwhile. What changed is a run's own from then on.
    */
   const landedDuring = (building: BuildingRow, run: ProofRun) =>
     Effect.gen(function* () {
@@ -523,11 +531,15 @@ export const buildingProofs = (parts: ProofParts) => {
             after,
           ),
         ).pipe(Effect.orElseSucceed(() => []))
-        const paths = files
-          .flatMap((file) => (file.oldPath === null ? [file.path] : [file.path, file.oldPath]))
-          .map((path) => `${ran.repository}/${path}`)
-        if (paths.some((path) => !known.has(path))) landed.push(ran)
-        for (const path of paths) known.add(path)
+        const named = (path: string) => `${ran.repository}/${path}`
+        const ranOn = files
+          .filter((file) => file.status !== 'A')
+          .map((file) => named(file.oldPath ?? file.path))
+        if (ranOn.some((path) => !known.has(path))) landed.push(ran)
+        for (const file of files) {
+          known.add(named(file.path))
+          if (file.oldPath !== null) known.add(named(file.oldPath))
+        }
       }
       return landed
     })
@@ -1294,6 +1306,9 @@ export const buildingProofs = (parts: ProofParts) => {
       if (run.classification !== 'passed') {
         yield* failedGreen(building, scenario, run)
         yield* parts.background(parts.moved(building))
+        // A change that landed during the run runs it again once it is recorded, as a change
+        // outside Hemera does: the compare that found it may have settled before (#415).
+        if (run.landed.length > 0) yield* afterWrite(building.missionId, true)
         return run
       }
       yield* recordGreen(building, scenario, run)
@@ -1537,30 +1552,36 @@ export const buildingProofs = (parts: ProofParts) => {
    * the trees it left. The writes of a moment are taken together, and nothing waits for it. Only
    * changes outside Hemera run each scenario once until anything else runs it (#411).
    */
-  const afterWrite = (missionId: string, outside = false) =>
+  // Typed: a failed green whose fix landed during its run calls it back (#415).
+  const afterWrite = (missionId: string, outside = false): Effect.Effect<void> =>
     Effect.suspend(() => {
       const pending = settling.get(missionId)
       settling.set(missionId, (pending ?? true) && outside)
       if (pending !== undefined) return parts.hold('joined')
-      return parts.background(
-        Effect.gen(function* () {
-          yield* Effect.sleep('300 millis')
-          yield* parts.hold('window')
-          const onlyOutside = settling.get(missionId) ?? outside
-          settling.delete(missionId)
-          yield* parts.hold('settling')
-          const database = yield* Database
-          const building = yield* activeBuildingIn(database, missionId)
-          if (building === null || (yield* failedGreens(building)).length === 0) return
-          yield* snapshotNow(building, 'write')
-          yield* greensDue(building, onlyOutside)
-          // Judged again once what the write moved ran: a write that moved no tree runs nothing,
-          // and the Builder's turn is then watched from it, or it waits for good (#306).
-          yield* parts.moved(building)
-        }).pipe(
-          Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
-          Effect.catchCause((cause) => said(`a failed green did not run again: ${String(cause)}`)),
-          Effect.ensuring(parts.hold('settled')),
+      return Effect.andThen(
+        parts.hold('queued'),
+        parts.background(
+          Effect.gen(function* () {
+            yield* Effect.sleep('300 millis')
+            yield* parts.hold('window')
+            const onlyOutside = settling.get(missionId) ?? outside
+            settling.delete(missionId)
+            yield* parts.hold('settling')
+            const database = yield* Database
+            const building = yield* activeBuildingIn(database, missionId)
+            if (building === null || (yield* failedGreens(building)).length === 0) return
+            yield* snapshotNow(building, 'write')
+            yield* greensDue(building, onlyOutside)
+            // Judged again once what the write moved ran: a write that moved no tree runs nothing,
+            // and the Builder's turn is then watched from it, or it waits for good (#306).
+            yield* parts.moved(building)
+          }).pipe(
+            Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
+            Effect.catchCause((cause) =>
+              said(`a failed green did not run again: ${String(cause)}`),
+            ),
+            Effect.ensuring(parts.hold('settled')),
+          ),
         ),
       )
     })
@@ -2049,6 +2070,7 @@ export const buildingProofs = (parts: ProofParts) => {
     proofRun,
     refresh,
     touched,
+    ended,
   }
 }
 

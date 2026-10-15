@@ -2941,7 +2941,7 @@ describe('A failed green and a change made outside Hemera', () => {
   /**
    * The points the Builder reached, in order; `more` may hold one. `taken(from)` waits until a
    * change outside Hemera was taken in after `from`, a settle of the writes began after it, and
-   * every settle begun is done.
+   * every settle queued is done, those a failed green queues itself included.
    */
   const reaching = (more: BuilderHold = () => Effect.void) => {
     const reached: string[] = []
@@ -2964,7 +2964,7 @@ describe('A failed green and a change made outside Hemera', () => {
             return (
               outside >= 0 &&
               reached.indexOf('settling', outside) >= 0 &&
-              count('settling') === count('settled')
+              count('queued') === count('settled')
             )
           }),
           20_000,
@@ -2978,7 +2978,7 @@ describe('A failed green and a change made outside Hemera', () => {
               said.length === count('outside') &&
               outside >= 0 &&
               reached.indexOf('settling', outside) >= 0 &&
-              count('settling') === count('settled')
+              count('queued') === count('settled')
             )
           }),
           20_000,
@@ -3717,15 +3717,16 @@ describe('A failed green and a change made outside Hemera', () => {
             yield* letGo(1, 4)
             const { mission } = yield* launchedWith(heldExport(true))
             yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            yield* edits(mission.id, 'export const notes = []\n', 'notes.ts')
             const { grantId } = yield* builderOf(mission.id)
             const building = yield* Effect.forkChild(
               builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]]),
             )
             // Two tries of the user, each landing while a run is held, neither of them a fix; the
-            // second in a file no run changed yet, so that it lands too.
+            // second changes a file there before the runs that no run changed, so it lands too.
             yield* whileHeld(2, edits(mission.id, 'export const toCsv = () => "1"\n'))
             yield* Fiber.join(building)
-            yield* whileHeld(3, edits(mission.id, 'export const notes = []\n', 'notes.ts'))
+            yield* whileHeld(3, edits(mission.id, 'export const notes = [1]\n', 'notes.ts'))
             yield* until(
               Effect.map(runsOf(mission.id), (runs) => runs.length === 3),
               20_000,
@@ -3741,6 +3742,117 @@ describe('A failed green and a change made outside Hemera', () => {
       ['green', 'assertion_failed'],
     ])
   })
+
+  test('a fix lands during the first failed run, and the settle of what its compare found is over before the failure is recorded: the green still runs again once', async () => {
+    const builder = heldBuilder()
+    const gate = { on: false, go: Deferred.makeUnsafe<void>() }
+    const points = reaching((at) =>
+      at === 'greening' && gate.on ? Deferred.await(gate.go) : Effect.void,
+    )
+    const seen = await proofsEngine(data, points.hold, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* letGo(1, 3)
+            const { mission } = yield* launchedWith(heldExport(false))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            gate.on = true
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builder.hold
+            const building = yield* Effect.forkChild(
+              builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]]),
+            )
+            const from = yield* points.mark
+            yield* whileHeld(2, edits(mission.id, RIGHT_EXPORT))
+            // The green's run ended and its compare found the fix; that settle is over before the
+            // failure is recorded, and found no failed green to run.
+            yield* points.taken(from)
+            gate.on = false
+            yield* Deferred.succeed(gate.go, undefined)
+            yield* proofIn(mission.id, 'R1.S2', 'green')
+            yield* Fiber.join(building)
+            return yield* runsOf(mission.id)
+          }),
+        ),
+    )
+    expect(seen).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  for (const [what, line] of [
+    [
+      'a file of a new name on every run',
+      "  writeFileSync(new URL('../out-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.log', import.meta.url), 'x')",
+    ],
+    [
+      'a file its red never wrote',
+      "  if (existsSync(new URL('../export.ts', import.meta.url))) appendFileSync(new URL('../green.log', import.meta.url), 'g')",
+    ],
+  ] as const) {
+    test(`a failed green whose run writes ${what}, then the quiet Builder’s question: nothing runs again on unchanged code, and a Builder write runs it once`, async () => {
+      const points = reaching()
+      const proof = () => ({
+        'R1.S2': automated(
+          EXPORT_PATH,
+          testFile(
+            [
+              line,
+              "  const file = new URL('../export.ts', import.meta.url)",
+              "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('toMarkdown'), 'no toMarkdown')",
+            ].join('\n'),
+            ["import { writeFileSync } from 'node:fs'"],
+          ),
+        ),
+      })
+      const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+        ({ profile }) =>
+          within(
+            profile,
+            Effect.gen(function* () {
+              const { mission } = yield* launchedWith(proof)
+              yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+              const { grantId } = yield* builderOf(mission.id)
+              yield* builds(grantId, 'T1')
+              yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+              yield* builds(grantId, 'T4')
+              yield* builds(grantId, 'T3')
+              yield* until(
+                Effect.map(askedStates, (states) => states.includes('pending')),
+                20_000,
+              )
+              // What the runs wrote is taken in, and every settle of it is over.
+              yield* points.takenAll(mission.id)
+              const asked = yield* askedStates
+              const quiet = yield* runsOf(mission.id)
+              // A Builder write that fixes nothing runs it once.
+              const from = yield* points.mark
+              yield* writes(grantId, 'notes.md', 'Read again.\n')
+              yield* until(
+                Effect.map(runsOf(mission.id), (runs) => runs.length > quiet.length),
+                20_000,
+              )
+              yield* points.taken(from)
+              yield* points.takenAll(mission.id)
+              return { asked, quiet, runs: yield* runsOf(mission.id) }
+            }),
+          ),
+      )
+      expect(seen.asked).toEqual(['pending'])
+      expect(seen.quiet).toEqual([
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+      ])
+      expect(seen.runs).toEqual([
+        ['red', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+        ['green', 'assertion_failed'],
+      ])
+    })
+  }
 })
 
 describe('What the reviewers see of the red phase', () => {

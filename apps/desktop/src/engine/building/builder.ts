@@ -318,6 +318,7 @@ export type BuilderHold = (
     | 'telling'
     | 'wrote'
     | 'joined'
+    | 'queued'
     | 'window'
     | 'settling'
     | 'settled'
@@ -2107,6 +2108,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             // A change the detector found outside Hemera runs a failed green again once it settles,
             // as a write does; it is not the Builder's, so it never counts as its write (#310,
             // #411). A compare that finds nothing says nothing.
+            if (event.type === 'building.ended') {
+              const over = yield* latestBuildingIn(yield* Database, event.entityId)
+              if (over !== null) yield* proofs.ended(over.id)
+            }
             if (event.type === 'mission.changed_outside') {
               yield* hold('outside')
               yield* proofs.afterWrite(event.entityId, true)
@@ -2127,6 +2132,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (event.type === 'mission.cancelled') {
               const cancelled = yield* latestBuildingIn(yield* Database, event.entityId)
               if (cancelled !== null) counting.delete(cancelled.id)
+              if (cancelled !== null) yield* proofs.ended(cancelled.id)
               yield* runStops(event.entityId).pipe(
                 Effect.catchCause((cause) => said(`the stops were not run: ${String(cause)}`)),
                 Effect.forkIn(layerScope),
