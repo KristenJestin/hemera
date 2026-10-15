@@ -154,23 +154,37 @@ export function readyWithin(child: ChildProcess, bound: number): Promise<void> {
 }
 
 /** How long a child a test starts has to say it is ready. */
-export const READY_WITHIN = 10_000
+export const READY_WITHIN = 20_000
 
 /**
- * Starts a process that holds a file open until `endChild` ends it, and answers once it does. On
- * Windows no one else may open the file meanwhile: `0x10000000` is libuv's `UV_FS_O_EXLOCK`, a
- * share mode of none, which Node does not name in `fs.constants`. The holder is this Node: it
- * starts in a fraction of a second where PowerShell took seconds.
+ * Starts a process that holds a file open until `endChild` ends it, and answers once it does, or
+ * fails within `READY_WITHIN`. On Windows it shares nothing, as an editor or an antivirus may:
+ * PowerShell, since Node opens every file shared (it took 6 s to start on a loaded runner). Its
+ * input is closed: PowerShell may wait on an input pipe left open. Elsewhere an open file never
+ * stops a rename.
  */
 export async function holdFile(file: string): Promise<ChildProcess> {
-  const holder = spawn(process.execPath, [
-    '-e',
-    `const fs = require('node:fs')
-fs.openSync(process.argv[1], fs.constants.O_RDONLY | (process.platform === 'win32' ? 0x10000000 : 0))
-process.stdout.write('held\\n')
-setInterval(() => {}, 1000)`,
-    file,
-  ])
+  const holder =
+    process.platform === 'win32'
+      ? spawn(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `$f = [System.IO.File]::Open('${file}', 'Open', 'Read', 'None'); 'held'; Start-Sleep -Seconds 60`,
+          ],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+      : spawn(
+          process.execPath,
+          [
+            '-e',
+            "require('node:fs').openSync(process.argv[1], 'r'); console.log('held'); setInterval(() => {}, 1000)",
+            file,
+          ],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        )
   try {
     await readyWithin(holder, READY_WITHIN)
   } catch (failure) {
