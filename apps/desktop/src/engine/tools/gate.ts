@@ -278,7 +278,7 @@ const argumentsKept = (
   const args = withoutProposedValues(tool, given)
   const masked = Option.match(readArgumentFields(args), {
     onNone: () => secrets.mask(agentText(args)),
-    onSome: (fields) => maskedJson(secrets.maskRecord(fields)),
+    onSome: (fields) => maskedJson(secrets.maskArguments(fields)),
   })
   return masked.length > ARGUMENTS_KEPT
     ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
