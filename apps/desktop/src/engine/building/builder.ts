@@ -288,7 +288,10 @@ const answerOf = (need: Need): string | null => {
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
  * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute;
- * as a file tool's write that changed its file is counted. Never held otherwise.
+ * as a file tool's write that changed its file is counted; as a write joins a settle whose window is
+ * open; as a settle's window closes, before it reads what came in it; as a settle of the writes
+ * begins, and once it is done; as its event follower takes in a change outside Hemera, before its
+ * settle. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -313,7 +316,12 @@ export type BuilderHold = (
     | 'releasing'
     | 'answering'
     | 'telling'
-    | 'wrote',
+    | 'wrote'
+    | 'joined'
+    | 'window'
+    | 'settling'
+    | 'settled'
+    | 'outside',
 ) => Effect.Effect<void>
 
 /**
@@ -2095,6 +2103,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               // The end judged again once the Builder was told: its turn on the answer is watched.
               const judged = yield* activeBuildingIn(yield* Database, event.entityId)
               if (judged !== null) yield* endIfReady(judged)
+            }
+            // A change the detector found outside Hemera runs a failed green again once it settles,
+            // as a write does; it is not the Builder's, so it never counts as its write (#310,
+            // #411). A compare that finds nothing says nothing.
+            if (event.type === 'mission.changed_outside') {
+              yield* hold('outside')
+              yield* proofs.afterWrite(event.entityId, true)
             }
             if (
               (event.type === 'need.expired' || event.type === 'need.withdrawn') &&

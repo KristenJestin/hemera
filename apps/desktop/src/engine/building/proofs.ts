@@ -18,11 +18,11 @@
  * - **The green runs.** Once every task covering a scenario is done (with none, every task of its
  *   requirement), its proof runs again: passed, the scenario is green on the trees of every
  *   repository its tasks wrote; anything else opens an attempt on its proof, open until it is
- *   green, and the proof runs again once the Builder's next write settles, at its next task's end,
- *   on `refresh` or `proof_run`. The end of the Building waits while an automated proof is not
- *   green. A requirement is proven once its automated scenarios are all green and up to date. A
- *   test whose sha256 changed between red and green is shown with both versions. A `proof_run`
- *   before the tasks are done is for information, and judges nothing.
+ *   green, and the proof runs again once the Builder's next write or a change found outside Hemera
+ *   settles, at its next task's end, on `refresh` or `proof_run`. The end of the Building waits
+ *   while an automated proof is not green. A requirement is proven once its automated scenarios
+ *   are all green and up to date. A test whose sha256 changed between red and green is shown with
+ *   both versions. A `proof_run` before the tasks are done is for information, and judges nothing.
  * - **Written before the red.** The Builder's writes out of the proofs' files while a scenario
  *   still waits for its red are kept for the reviewers.
  * - **Freshness (CT-38).** A green proof whose repository moved since is `to_rerun`
@@ -197,7 +197,16 @@ export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
   readonly hold: (
-    at: 'greening' | 'handing' | 'greens-due' | 'retrying' | 'proof-called',
+    at:
+      | 'greening'
+      | 'handing'
+      | 'greens-due'
+      | 'retrying'
+      | 'proof-called'
+      | 'joined'
+      | 'window'
+      | 'settling'
+      | 'settled',
   ) => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
@@ -1201,12 +1210,21 @@ export const buildingProofs = (parts: ProofParts) => {
     })
 
   /**
+   * Per mission, the scenarios whose failed green a change outside Hemera ran again already: not
+   * again, so a process a run left writing in the Workspace never runs it in a loop, until the
+   * Builder or the user runs it (#411).
+   */
+  const spent = new Map<string, Set<string>>()
+
+  /**
    * A scenario's proof run once its tasks are done: green on its tree when it passes; otherwise an
    * attempt on its proof, open until it is green, for the Builder. A scenario set aside as not
-   * reproducible is run for information only.
+   * reproducible is run for information only. Run for anything but a change outside Hemera, it
+   * allows that change one more rerun of the scenario (#411).
    */
-  const greenOf = (building: BuildingRow, scenario: string, phase: ProofPhase) =>
+  const greenOf = (building: BuildingRow, scenario: string, phase: ProofPhase, outside = false) =>
     Effect.gen(function* () {
+      if (!outside) spent.get(building.missionId)?.delete(scenario)
       const database = yield* Database
       const proof = yield* proofOf(building.missionId, scenario)
       if (proof === null) return null
@@ -1241,12 +1259,22 @@ export const buildingProofs = (parts: ProofParts) => {
    * The greens due, keyed on each scenario's state and its last green run, never on whether one
    * ran: an automated scenario whose red is recorded (or which is not reproducible, run for
    * information) and whose tasks are done runs, unless its last green run was on the current
-   * trees. That run, passed, makes it green: a stop between a green run and its record.
+   * trees. That run, passed, makes it green: a stop between a green run and its record. For a
+   * change outside Hemera, a scenario runs once until anything else runs it (`spent`).
    */
-  const greensDue = (building: BuildingRow) =>
+  const greensDue = (building: BuildingRow, outside = false) =>
     inTurn(
       building.missionId,
       Effect.gen(function* () {
+        if (!outside) spent.delete(building.missionId)
+        const ran = spent.get(building.missionId) ?? new Set<string>()
+        /** Whether a change outside Hemera may run it: once, then it is spent. */
+        const allowed = (scenario: string) => {
+          if (!outside) return true
+          if (ran.has(scenario)) return false
+          spent.set(building.missionId, ran.add(scenario))
+          return true
+        }
         const database = yield* Database
         const tasks = yield* tasksIn(database, building.id)
         const runs = yield* proofRunsIn(database, building.id)
@@ -1269,7 +1297,13 @@ export const buildingProofs = (parts: ProofParts) => {
           if (open !== undefined) {
             // Nothing moved anywhere since it failed: the fix is not there yet.
             if (open.length > 0 && upToDate(open, current) && open.length >= current.size) continue
-            yield* greenOf(building, row.scenario, state === 'to_rerun' ? 'rerun' : 'green')
+            if (!allowed(row.scenario)) continue
+            yield* greenOf(
+              building,
+              row.scenario,
+              state === 'to_rerun' ? 'rerun' : 'green',
+              outside,
+            )
             continue
           }
           const last = runs.findLast(
@@ -1293,7 +1327,8 @@ export const buildingProofs = (parts: ProofParts) => {
             }
             continue
           }
-          yield* greenOf(building, row.scenario, 'green')
+          if (!allowed(row.scenario)) continue
+          yield* greenOf(building, row.scenario, 'green', outside)
         }
       }),
     )
@@ -1349,7 +1384,11 @@ export const buildingProofs = (parts: ProofParts) => {
       return scenarios.filter((scenario) => {
         const row = rows.find((one) => one.scenario === scenario)
         if (row === undefined || stateOf(row) === 'held') return false
-        const own = decisions.filter((one) => one.scope === 'proof' && one.subject === scenario)
+        // The question asked about it is no need that moves it: asked again on what it names, it stays.
+        const own = decisions.filter(
+          (one) =>
+            one.scope === 'proof' && one.subject === scenario && one.kind !== 'proofs_unproven',
+        )
         if (own.some((one) => one.state === 'pending')) return false
         const proof = attempts.filter((one) => one.scope === 'proof' && one.subject === scenario)
         if (proof.some((one) => one.endedAt === null)) return quiet
@@ -1441,32 +1480,41 @@ export const buildingProofs = (parts: ProofParts) => {
         .map((one) => one.subject ?? '')
     })
 
-  /** The missions whose Builder wrote and whose failed greens wait for that write to settle. */
-  const settling = new Set<string>()
+  /**
+   * The missions whose failed greens wait for a write to settle: whether only changes found outside
+   * Hemera are in it.
+   */
+  const settling = new Map<string, boolean>()
 
   /**
-   * A file tool write of the Builder settled: a failed green runs again on the trees it left. The
-   * writes of a moment are taken together, and nothing waits for it.
+   * A write of the Builder, or a change found outside Hemera, settled: a failed green runs again on
+   * the trees it left. The writes of a moment are taken together, and nothing waits for it. Only
+   * changes outside Hemera run each scenario once until anything else runs it (#411).
    */
-  const afterWrite = (missionId: string) =>
+  const afterWrite = (missionId: string, outside = false) =>
     Effect.suspend(() => {
-      if (settling.has(missionId)) return Effect.void
-      settling.add(missionId)
+      const pending = settling.get(missionId)
+      settling.set(missionId, (pending ?? true) && outside)
+      if (pending !== undefined) return parts.hold('joined')
       return parts.background(
         Effect.gen(function* () {
           yield* Effect.sleep('300 millis')
+          yield* parts.hold('window')
+          const onlyOutside = settling.get(missionId) ?? outside
           settling.delete(missionId)
+          yield* parts.hold('settling')
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null || (yield* failedGreens(building)).length === 0) return
           yield* snapshotNow(building, 'write')
-          yield* greensDue(building)
+          yield* greensDue(building, onlyOutside)
           // Judged again once what the write moved ran: a write that moved no tree runs nothing,
           // and the Builder's turn is then watched from it, or it waits for good (#306).
           yield* parts.moved(building)
         }).pipe(
           Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
           Effect.catchCause((cause) => said(`a failed green did not run again: ${String(cause)}`)),
+          Effect.ensuring(parts.hold('settled')),
         ),
       )
     })
