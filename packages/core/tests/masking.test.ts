@@ -3,6 +3,9 @@
  * the shapes of credentials it recognises without knowing their value. Every mask is `•••`.
  */
 
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
+
 import { Effect, Predicate } from 'effect'
 import type { Schema } from 'effect'
 import * as fc from 'fast-check'
@@ -1246,6 +1249,357 @@ describe('What follows a quoted value inside another value stays hidden', () => 
     },
   )
 })
+/**
+ * Where the JSON written in a masked text stands: it begins where the prose before it ends, and
+ * it parses up to one of the brackets that close it. The prose after it may have been masked.
+ */
+const embeddedParses = (masked: string, before: string): boolean => {
+  if (!masked.startsWith(before)) return false
+  for (let end = masked.length; end > before.length; end -= 1) {
+    if (!'}]"'.includes(masked.charAt(end - 1))) continue
+    if (parses(masked.slice(before.length, end))) return true
+  }
+  return false
+}
+
+/** Each function that masks a printed text, at once and paced, the paced ones all at once. */
+const printedForms = async (
+  texts: ReadonlyArray<string>,
+  known: ReadonlyArray<string>,
+): Promise<ReadonlyArray<string>> => {
+  const paced = await Effect.runPromise(
+    Effect.all(
+      texts.map((text) => maskPrintedPaced(text, known, 0)),
+      { concurrency: 'unbounded' },
+    ),
+  )
+  return texts.flatMap((text, index) => {
+    const now = maskPrinted(text, known)
+    expect(paced[index], text).toBe(now)
+    return [now]
+  })
+}
+
+describe('A JSON string written inside any text is masked as a JSON string (#401)', () => {
+  // A line was read as JSON only when it was JSON by itself: JSON written inside a text was read
+  // as text, where `\"` ends no quoted value and an escaped known value is not found.
+  const KNOWN = 'se"same-4417'
+  const reproductions: ReadonlyArray<
+    readonly [
+      what: string,
+      before: string,
+      json: string,
+      after: string,
+      secrets: ReadonlyArray<string>,
+    ]
+  > = [
+    [
+      'pretty JSON after a sentence',
+      'The user answered: ',
+      '{\n  "a": "password=\\"a b\\""\n}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a pretty list after a sentence',
+      'The user answered: ',
+      '[\n  "password=\\"a b\\"",\n  "token: \\"c d\\""\n]',
+      '',
+      ['a b', 'c d'],
+    ],
+    [
+      'pretty JSON followed by a sentence',
+      '',
+      '{\n  "a": "password=\\"a b\\""\n}',
+      '\nthat is all',
+      ['a b'],
+    ],
+    [
+      'one-line JSON after a prefix',
+      'The user answered: ',
+      '{"a":"password=\\"a b\\""}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a header whose value holds escaped quotes',
+      'Said: ',
+      '{\n  "h": "Authorization: Bearer \\"a b\\" tail"\n}',
+      '',
+      ['a b', 'tail'],
+    ],
+    [
+      'a known value holding a quote, on one line',
+      'Note: ',
+      '{"a":"x se\\"same-4417 y"}',
+      '',
+      [KNOWN],
+    ],
+    [
+      'a known value holding a quote, pretty',
+      'Note: ',
+      '{\n  "a": "x se\\"same-4417 y"\n}',
+      '',
+      [KNOWN, 'same-4417'],
+    ],
+    [
+      'a lone quote in the prose before, on the same line',
+      '5" tall, the user answered: ',
+      '{"a":"password=\\"a b\\""}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a string literal alone in the prose',
+      'The user answered ',
+      '"password=\\"a b\\""',
+      ' and left',
+      ['a b'],
+    ],
+    [
+      'a string literal after a lone quote in the prose',
+      '5" tall, and ',
+      '"password=\\"a b\\""',
+      '',
+      ['a b'],
+    ],
+    [
+      'a header in a JSON string alone',
+      '',
+      '"Authorization: Bearer \\"a b\\" tail"',
+      '',
+      ['a b', 'tail'],
+    ],
+  ]
+  for (const [what, before, json, after, secrets] of reproductions) {
+    test(`${what}: nothing of the secret is left, and the JSON still parses`, async () => {
+      const text = `${before}${json}${after}`
+      for (const masked of await printedForms([text], [KNOWN])) {
+        for (const secret of secrets) expect(masked, text).not.toContain(secret)
+        expect(masked, text).toContain(MASK)
+        expect(embeddedParses(masked, before), masked).toBe(true)
+        expect(masked.endsWith(after), masked).toBe(true)
+      }
+      await hidesAtLeastTheOracle(text, [KNOWN])
+    })
+  }
+
+  test('a known value is matched in its JSON-escaped form, in any text', async () => {
+    const texts = ['Note: x se\\"same-4417 y', 'cut {"a":"x se\\"same-4417']
+    const masked = [
+      ...texts.map((text) => maskText(text, [KNOWN])),
+      ...(await printedForms(texts, [KNOWN])),
+      ...(await Effect.runPromise(
+        Effect.forEach(texts, (text) => maskTextPaced(text, [KNOWN], 0)),
+      )),
+    ]
+    for (const one of masked) expect(one).not.toContain('same-4417')
+  })
+
+  test('a string opened and never closed is read as a string to its end: more is masked, never less', async () => {
+    // Cut at the end of the text, or at a line break: what it holds is still read with its
+    // escapes, and masked as a string reads it.
+    const texts = [
+      'Note: {"a":"password=\\"a b\\"',
+      'Note: {"a":"password=\\"a b\\"\n}',
+      'Note: "password=\\"a b\\"\nand the next line',
+      '[1, {"a":"password=\\"a b\\""}, oops',
+    ]
+    for (const masked of await printedForms(texts, [])) expect(masked).not.toContain('a b')
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('the complete JSON inside a broken one is still masked as JSON, and parses', async () => {
+    const text = '[1, {"a":"password=\\"a b\\""}, oops'
+    const [masked] = await printedForms([text], [])
+    expect(masked).toBe('[1, {"a":"password=•••"}, oops')
+  })
+
+  test('pretty JSON held by a bracket of the prose stays one JSON, its lines inside it', async () => {
+    // A line that is JSON by itself (an array's last string) gave way to nothing inside the held
+    // value: the held value was dropped, and the line was read alone.
+    const texts = [
+      `Items [ ${JSON.stringify({ user: 'ana', password: ['hunter2-Sx1Zq'] }, null, 2)}`,
+      `[ ${JSON.stringify({ a: 'x', token: ['y-Sx2Zq'] }, null, 2)}`,
+    ]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toMatch(/sx\d+zq/i)
+      expect(embeddedParses(masked, index === 0 ? 'Items [ ' : '[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('of two values read where the quotes pair two ways, the longer stays JSON', async () => {
+    // The prose's `{"[` holds a key that ends at the quote the JSON opens with: read that way, a
+    // key of four characters stood where the JSON did.
+    const json = JSON.stringify({
+      user: 'ana',
+      password: ['-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'],
+    })
+    const texts = [`{"[${json}`, `{"[ ${json}`]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toContain('MIIEbody')
+      expect(embeddedParses(masked, index === 0 ? '{"[' : '{"[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('a string line that holds braces stays one string, and NDJSON stays NDJSON', async () => {
+    const text = '{"id":1}\n"{} password=\\"a b\\" and [1]"\n{"id":2}'
+    const [masked] = await printedForms([text], [])
+    expect(masked).toBe('{"id":1}\n"{} password=••• and [1]"\n{"id":2}')
+  })
+
+  test('prose holding quotes, escapes and brackets is left as it is', async () => {
+    const texts = [
+      'He said "hello" and left.',
+      String.raw`A path C:\new\table and a regex \d+ "quoted \" text"`,
+      'Lists [1, 2] and {sets} and "strings with \\"escapes\\"" stay.',
+      '5" tall\n"open, never closed',
+    ]
+    expect(await printedForms(texts, [])).toEqual(texts)
+  })
+})
+
+/** Prose around the JSON: words, spaces, line ends, punctuation, quotes, escapes, brackets. */
+const prose = fc
+  .array(
+    fc.constantFrom(
+      'The',
+      'user',
+      'answered',
+      'see',
+      'it',
+      '5',
+      ' ',
+      '\n',
+      '\r\n',
+      '.',
+      ',',
+      ';',
+      ':',
+      '!',
+      '(',
+      ')',
+      '"',
+      "'",
+      '\\',
+      '{',
+      '}',
+      '[',
+      ']',
+    ),
+    { maxLength: 8 },
+  )
+  .map((parts) => parts.join(''))
+
+/**
+ * A text made by the generators of #391 and #396, in a JSON value that holds it. The last ends an
+ * array on a string: pretty, that string is a line that is JSON by itself.
+ */
+const asJson = (text: string, how: number): Schema.Json =>
+  [
+    { body: text },
+    [text, { text }],
+    { a: [{ note: text }], b: 1 },
+    { user: 'ana', password: [text] },
+  ][how % 4] ?? { body: text }
+
+describe('JSON made of every generated secret, written inside prose, keeps no marker and parses (#401)', () => {
+  const generated = (): ReadonlyArray<readonly [string, ReadonlyArray<string>]> => {
+    const indexes = writings('', '').map((_, index) => index)
+    const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
+    const nestedTexts = indexes.flatMap((outerAt) =>
+      indexes.flatMap((innerAt) =>
+        POSITIONS.flatMap((where) => {
+          const text = nested(outerAt, innerAt, where, 'Sx1Zq', 'Sx2Zq', known)
+          return text === undefined ? [] : [[text, known] as const]
+        }),
+      ),
+    )
+    const quotedTexts = BEFORE_OUTER.flatMap((before) =>
+      OUTERS.flatMap((outer) =>
+        BEFORE_INNER.flatMap((inValue) =>
+          INNER_NAMES.flatMap((name) =>
+            SEPARATORS.flatMap((separator) =>
+              QUOTED_VALUES.map(
+                (quoted) =>
+                  [
+                    quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+                    [SPACED_KNOWN],
+                  ] as const,
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+    return [...nestedTexts, ...quotedTexts]
+  }
+
+  /** Each text, prose then JSON then prose, masked at once and paced: no marker, and the JSON parses. */
+  const keepsNoMarker = async (
+    texts: ReadonlyArray<readonly [before: string, rest: string]>,
+    known: ReadonlyArray<string>,
+  ) => {
+    const masked = await printedForms(
+      texts.map(([before, rest]) => `${before}${rest}`),
+      known,
+    )
+    texts.forEach(([before, rest], index) => {
+      const one = masked[index] ?? ''
+      expect(one, rest).not.toMatch(/sx\d+zq/i)
+      expect(embeddedParses(one, before), one).toBe(true)
+    })
+  }
+
+  test(
+    'every generated text, as JSON pretty and not, between prose with a lone quote',
+    { timeout: 600_000 },
+    async () => {
+      const before = '5" tall, the user answered: '
+      const after = '\nthat is "all'
+      // Run at once, the paced maskings take turns with one another.
+      await Promise.all(
+        generated().map(([text, known], index) => {
+          const value = asJson(text, index)
+          return keepsNoMarker(
+            [
+              [before, `${JSON.stringify(value)}${after}`],
+              [before, `${JSON.stringify(value, null, 2)}${after}`],
+            ],
+            known,
+          )
+        }),
+      )
+    },
+  )
+
+  test(
+    'the same with any prose before and after, 5,000 samples',
+    { timeout: 600_000 },
+    async () => {
+      const all = generated()
+      await fc.assert(
+        fc.asyncProperty(
+          fc.nat({ max: all.length - 1 }),
+          fc.nat({ max: 3 }),
+          fc.boolean(),
+          prose,
+          prose,
+          async (at, how, pretty, before, after) => {
+            const [text, known] = all[at] ?? ['', []]
+            const value = asJson(text, how)
+            const json = pretty ? JSON.stringify(value, null, 2) : JSON.stringify(value)
+            await keepsNoMarker([[before, `${json}${after}`]], known)
+            await hidesAtLeastTheOracle(`${before}${json}${after}`, known)
+          },
+        ),
+        { numRuns: 5_000 },
+      )
+    },
+  )
+})
 
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => void, times: number): number => {
@@ -1346,6 +1700,49 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     ],
     ['lines of a diff', (size) => '-a\n'.repeat(size / 3), printed, 4_000],
     [
+      'prose of lone quotes and escapes (#401)',
+      (size) => 'he said "x \\" y\n'.repeat(size / 14),
+      printed,
+      4_000,
+    ],
+    ['openers that never close (#401)', (size) => '[{"a":[{"a":'.repeat(size / 12), printed, 4_000],
+    [
+      'JSON written after a sentence, line after line (#401)',
+      (size) => 'Said: {"a":"password=\\"b c\\""}\n'.repeat(size / 33),
+      printed,
+      4_000,
+    ],
+    [
+      'containers with no quote, a quote and a backslash at the end (#401)',
+      (size) => `${'[1]'.repeat(size / 3)}"\\`,
+      printed,
+      4_000,
+    ],
+    [
+      'string lines with no escape after a sentence (#401)',
+      (size) => `Said:\n${'"ab"\n'.repeat(size / 5)}`,
+      printed,
+      16_000,
+    ],
+    [
+      'arrays held by an array that never closes, a line of JSON in each (#401)',
+      (size) =>
+        `${'['.repeat(size / 10)}\n${'[1]\n,\n'.repeat(size / 10)}[1]\n${']'.repeat(size / 10 - 1)}`,
+      printed,
+      4_000,
+    ],
+    [
+      'pretty JSON in prose, a quoted label in each string (#401)',
+      (size) =>
+        `Said: ${JSON.stringify(
+          Array.from({ length: size / 24 }, () => 'token="a b"x'),
+          null,
+          2,
+        )}`,
+      printed,
+      4_000,
+    ],
+    [
       'NDJSON lines holding tokens',
       (size) => `{"t":"${token}"}\n`.repeat(size / 31),
       printed,
@@ -1358,6 +1755,51 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       { timeout: 600_000 },
       () => {
         expect(growth(make, mask, size)).toBeLessThan(64)
+      },
+    )
+  }
+})
+
+/**
+ * The most the live heap grew while a text was masked, paced, for each character of the text:
+ * collected and sampled between the steps, where the engine runs, so garbage not collected yet
+ * does not count.
+ */
+const heapPerCharacter = async (text: string): Promise<number> => {
+  setFlagsFromString('--expose-gc')
+  const gc = runInNewContext('gc')
+  const collect = () => {
+    if (Predicate.isFunction(gc)) gc()
+    return process.memoryUsage().heapUsed
+  }
+  // Warmed up, the heap holds nothing the first run allocates once.
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  const floor = collect()
+  let peak = floor
+  const sample = setInterval(() => {
+    peak = Math.max(peak, collect())
+  }, 20)
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  clearInterval(sample)
+  return (peak - floor) / text.length
+}
+
+describe('Masking a run of openers holds memory in proportion to the text (#401)', () => {
+  // A container read whole from every opener kept, for each reader that broke, its containers open
+  // to the end: hundreds of bytes for each opener, and 32 MB of them ran out of memory, which no
+  // mask can catch. The time stayed linear, so no ratio saw it. 4 MB of them grew the live heap by
+  // 110 to 270 bytes for each character; read as they should be, by none.
+  const runs: ReadonlyArray<readonly [what: string, unit: string]> = [
+    ['openers that hold nothing', '{'],
+    ['template braces', '{{x}}'],
+  ]
+  for (const [what, unit] of runs) {
+    test(
+      `${what}: the heap grows by less than 32 bytes for each character`,
+      { timeout: 120_000 },
+      async () => {
+        const text = unit.repeat(Math.ceil(4_000_000 / unit.length))
+        expect(await heapPerCharacter(text)).toBeLessThan(32)
       },
     )
   }
@@ -1438,6 +1880,12 @@ describe('A mask that fails gives •••, never the text, and never fails', (
     expect(maskPrinted(quoted, [])).toBe(MASK)
     expect(await Effect.runPromise(maskTextPaced(quoted, []))).toBe(MASK)
     expect(await Effect.runPromise(maskPrintedPaced(quoted, []))).toBe(MASK)
+  })
+
+  test('a pattern that throws on a quoted value of megabytes read in a JSON string inside a text (#401)', async () => {
+    const said = `Said: ${JSON.stringify(quoted)} and more`
+    expect(maskPrinted(said, [])).toBe(MASK)
+    expect(await Effect.runPromise(maskPrintedPaced(said, []))).toBe(MASK)
   })
 
   test('known values that throw as they are read', async () => {
