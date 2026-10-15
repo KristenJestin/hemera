@@ -814,28 +814,37 @@ function* byStart(spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
 /** What a reader of a container reads next, outside its strings. */
 type Expected = 'value' | 'key' | 'colon' | 'after'
 
-/** A container open while a reader reads it, and the values it holds whole so far. */
-interface Opened {
-  readonly closing: string
-  readonly start: number
-  readonly held: Span[]
-}
-
-/** A reader of the container that opens at `start`, its containers open kept on a stack. */
+/**
+ * A reader of the container that opens at `start`, its containers open kept on a stack. A text
+ * may open millions, so each costs one number, and each value held whole three.
+ */
 interface Reader {
   readonly start: number
-  readonly levels: Opened[]
+  /** Where each container open begins, the innermost last: its opener says what closes it. */
+  readonly starts: number[]
+  /**
+   * The values held whole so far, three numbers each: the depth of the container that holds it,
+   * then where it starts and ends. Those of the innermost container are always the last.
+   */
+  readonly held: number[]
   expected: Expected
   /** Where it reads on; in a string, once the string ends there. */
   at: number
 }
 
+/** What closes the innermost container open in a reader, if one is. */
+const closingOf = (text: string, reader: Reader): string | undefined => {
+  const start = reader.starts.at(-1)
+  if (start === undefined) return undefined
+  return text.charAt(start) === '{' ? '}' : ']'
+}
+
 /** The values the containers hold whole, in steps: a reader may break with millions open. */
-function* heldIn(broken: ReadonlyArray<ReadonlyArray<Opened>>): Steps<ReadonlyArray<Span>> {
+function* heldIn(broken: ReadonlyArray<ReadonlyArray<number>>): Steps<ReadonlyArray<Span>> {
   const held: Span[] = []
-  for (const levels of broken) {
-    for (const level of levels) {
-      for (const value of level.held) held.push(value)
+  for (const values of broken) {
+    for (let index = 0; index + 2 < values.length; index += 3) {
+      held.push([values[index + 1] ?? 0, values[index + 2] ?? 0])
       if (due()) yield
     }
   }
@@ -872,10 +881,14 @@ function* containersIn(text: string): Steps<Containers> {
   const readers: Readers = { between: null, inString: null }
   /** Where no reader has read outside a string yet. */
   let frontier = 0
-  /** The containers open in each reader that broke: what they hold whole is kept at the end. */
-  const broken: Array<ReadonlyArray<Opened>> = []
+  /** What the containers open in each reader that broke hold whole, kept to the end. */
+  const broken: Array<ReadonlyArray<number>> = []
   const broke = (reader: Reader) => {
-    broken.push(reader.levels)
+    if (reader.held.length > 0) broken.push(reader.held)
+  }
+  /** The innermost container open in a reader holds a value whole. */
+  const hold = (reader: Reader, start: number, end: number) => {
+    reader.held.push(reader.starts.length, start, end)
   }
   /** The reader outside a string stops at `at`: broken, ended, or gone into a string. */
   const stops = (at: number) => {
@@ -884,13 +897,12 @@ function* containersIn(text: string): Steps<Containers> {
   }
   /** A value read whole, from `start` (-1 for a scalar, which no one holds) to `end`. */
   const read = (reader: Reader, start: number, end: number) => {
-    const level = reader.levels.at(-1)
-    if (level === undefined) {
+    if (reader.starts.length === 0) {
       complete.push([reader.start, end])
       stops(end)
       return
     }
-    if (start !== -1) level.held.push([start, end])
+    if (start !== -1) hold(reader, start, end)
     reader.expected = 'after'
     reader.at = end
   }
@@ -904,27 +916,35 @@ function* containersIn(text: string): Steps<Containers> {
         readers.between = readers.inString
         readers.inString = null
       } else if (opener < text.length) {
-        readers.between = { start: opener, levels: [], expected: 'value', at: opener }
+        readers.between = {
+          start: opener,
+          starts: [],
+          held: [],
+          expected: 'value',
+          at: opener,
+        }
       } else return { complete, held: yield* heldIn(broken) }
       continue
     }
     const at = jsonSpace(text, reader.at)
     const first = text.charAt(at)
-    const level = reader.levels.at(-1)
+    const closing = closingOf(text, reader)
     if ((first === '{' || first === '[') && reader.expected === 'value') {
-      const closing = first === '{' ? '}' : ']'
+      const closes = first === '{' ? '}' : ']'
       const inside = jsonSpace(text, at + 1)
-      if (text.charAt(inside) === closing) read(reader, at, inside + 1)
+      if (text.charAt(inside) === closes) read(reader, at, inside + 1)
       else {
-        reader.levels.push({ closing, start: at, held: [] })
-        reader.expected = closing === '}' ? 'key' : 'value'
+        reader.starts.push(at)
+        reader.expected = closes === '}' ? 'key' : 'value'
         reader.at = at + 1
       }
-    } else if (level !== undefined && first === level.closing && reader.expected === 'after') {
-      reader.levels.pop()
-      read(reader, level.start, at + 1)
-    } else if (level !== undefined && first === ',' && reader.expected === 'after') {
-      reader.expected = level.closing === '}' ? 'key' : 'value'
+    } else if (closing !== undefined && first === closing && reader.expected === 'after') {
+      // What it held goes with it: it is now held whole itself.
+      const depth = reader.starts.length
+      while (reader.held.length > 0 && reader.held.at(-3) === depth) reader.held.length -= 3
+      read(reader, reader.starts.pop() ?? at, at + 1)
+    } else if (closing !== undefined && first === ',' && reader.expected === 'after') {
+      reader.expected = closing === '}' ? 'key' : 'value'
       reader.at = at + 1
     } else if (first === ':' && reader.expected === 'colon') {
       reader.expected = 'value'
@@ -935,7 +955,7 @@ function* containersIn(text: string): Steps<Containers> {
       readers.inString = null
       const { stop, closed } = stringStop(text, at)
       if (closed && (reader.expected === 'value' || reader.expected === 'key')) {
-        level?.held.push([at, stop])
+        if (reader.starts.length > 0) hold(reader, at, stop)
         reader.expected = reader.expected === 'key' ? 'colon' : 'after'
         reader.at = stop
         readers.inString = reader

@@ -1713,6 +1713,42 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
   }
 })
 
+/**
+ * The most the heap grew while a text was masked, paced, for each character of the text: sampled
+ * between the steps, where the engine runs.
+ */
+const heapPerCharacter = async (text: string): Promise<number> => {
+  const floor = process.memoryUsage().heapUsed
+  let peak = floor
+  const sample = setInterval(() => {
+    peak = Math.max(peak, process.memoryUsage().heapUsed)
+  }, 1)
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  clearInterval(sample)
+  return (peak - floor) / text.length
+}
+
+describe('Masking a run of openers holds memory in proportion to the text (#401)', () => {
+  // A container read whole from every opener kept, for each reader that broke, its containers open
+  // to the end: hundreds of bytes for each opener, and 32 MB of them ran out of memory, which no
+  // mask can catch. The time stayed linear, so no ratio saw it. 4 MB of them grew the heap by 120
+  // to 300 bytes for each character; read as they should be, by 5.
+  const runs: ReadonlyArray<readonly [what: string, unit: string]> = [
+    ['openers that hold nothing', '{'],
+    ['template braces', '{{x}}'],
+  ]
+  for (const [what, unit] of runs) {
+    test(
+      `${what}: the heap grows by less than 32 bytes for each character`,
+      { timeout: 120_000 },
+      async () => {
+        const text = unit.repeat(Math.ceil(4_000_000 / unit.length))
+        expect(await heapPerCharacter(text)).toBeLessThan(32)
+      },
+    )
+  }
+})
+
 describe('Masking a long output lets the engine go on', () => {
   test('another fiber runs while a long output is masked, and the mask is the same', async () => {
     const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
