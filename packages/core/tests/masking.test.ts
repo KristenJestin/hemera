@@ -3,6 +3,9 @@
  * the shapes of credentials it recognises without knowing their value. Every mask is `•••`.
  */
 
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
+
 import { Effect, Predicate } from 'effect'
 import type { Schema } from 'effect'
 import * as fc from 'fast-check'
@@ -1758,15 +1761,24 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
 })
 
 /**
- * The most the heap grew while a text was masked, paced, for each character of the text: sampled
- * between the steps, where the engine runs.
+ * The most the live heap grew while a text was masked, paced, for each character of the text:
+ * collected and sampled between the steps, where the engine runs, so garbage not collected yet
+ * does not count.
  */
 const heapPerCharacter = async (text: string): Promise<number> => {
-  const floor = process.memoryUsage().heapUsed
+  setFlagsFromString('--expose-gc')
+  const gc = runInNewContext('gc')
+  const collect = () => {
+    if (Predicate.isFunction(gc)) gc()
+    return process.memoryUsage().heapUsed
+  }
+  // Warmed up, the heap holds nothing the first run allocates once.
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  const floor = collect()
   let peak = floor
   const sample = setInterval(() => {
-    peak = Math.max(peak, process.memoryUsage().heapUsed)
-  }, 1)
+    peak = Math.max(peak, collect())
+  }, 20)
   await Effect.runPromise(maskPrintedPaced(text, []))
   clearInterval(sample)
   return (peak - floor) / text.length
@@ -1775,8 +1787,8 @@ const heapPerCharacter = async (text: string): Promise<number> => {
 describe('Masking a run of openers holds memory in proportion to the text (#401)', () => {
   // A container read whole from every opener kept, for each reader that broke, its containers open
   // to the end: hundreds of bytes for each opener, and 32 MB of them ran out of memory, which no
-  // mask can catch. The time stayed linear, so no ratio saw it. 4 MB of them grew the heap by 120
-  // to 300 bytes for each character; read as they should be, by 5.
+  // mask can catch. The time stayed linear, so no ratio saw it. 4 MB of them grew the live heap by
+  // 110 to 270 bytes for each character; read as they should be, by none.
   const runs: ReadonlyArray<readonly [what: string, unit: string]> = [
     ['openers that hold nothing', '{'],
     ['template braces', '{{x}}'],
