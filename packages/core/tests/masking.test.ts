@@ -1722,6 +1722,13 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       16_000,
     ],
     [
+      'arrays held by an array that never closes, a line of JSON in each (#401)',
+      (size) =>
+        `${'['.repeat(size / 10)}\n${'[1]\n,\n'.repeat(size / 10)}[1]\n${']'.repeat(size / 10 - 1)}`,
+      printed,
+      4_000,
+    ],
+    [
       'pretty JSON in prose, a quoted label in each string (#401)',
       (size) =>
         `Said: ${JSON.stringify(
