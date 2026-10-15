@@ -6,22 +6,28 @@
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 
-import { Effect, Predicate } from 'effect'
-import type { Schema } from 'effect'
+import { Effect, Option, Predicate, Schema } from 'effect'
 import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  DecisionFields,
+  EnvironmentFields,
+  ErrorFields,
   isJson,
   MASK,
   maskAction,
+  maskArguments,
   maskPrinted,
   maskPrintedPaced,
   maskRecord,
   maskShapes,
   maskText,
   maskTextPaced,
+  maskedJson,
+  NeedFields,
   NESTING_LIMIT,
+  PermissionFields,
 } from '../src/domain/index.ts'
 import * as inTurn from './oracle/masking-in-turn.ts'
 
@@ -2027,35 +2033,69 @@ describe('A value nested deeper than a call stack reaches is masked, and never f
       fc.constant(null),
       fc.array(tie('value'), { maxLength: 4 }),
       fc.dictionary(
-        fc.constantFrom('a', 'b', 'password', 'apiKey', '_tag', 'path', 'line', '__proto__'),
+        fc.constantFrom(
+          'a',
+          'b',
+          'password',
+          'apiKey',
+          '_tag',
+          'path',
+          'line',
+          '__proto__',
+          'known-value',
+          'a known-value',
+          MASK,
+          `${MASK} (2)`,
+        ),
         tie('value'),
         { maxKeys: 4 },
       ),
     ),
   })).value
 
-  /** The walk as it was: in calls, one for each value. */
-  const walked = (value: Schema.Json, field: string): Schema.Json => {
+  /**
+   * The names of a record as the rule keeps them (#404): each masked, a name masking left as it
+   * was unchanged, and a masked name already held numbered from 2, the first free one.
+   */
+  const named = (names: ReadonlyArray<string>): ReadonlyArray<string> => {
+    const masked = names.map((name) => maskText(name, known))
+    const held = names.filter((name, at) => masked[at] === name)
+    return masked.map((name, at): string => {
+      if (name === names[at]) return name
+      let free: string = name
+      for (let count = 2; held.includes(free); count += 1) free = `${name} (${String(count)})`
+      held.push(free)
+      return free
+    })
+  }
+
+  /**
+   * The walk as it was: in calls, one for each value. An agent's arguments have their names and
+   * tags masked too; a record the engine builds keeps both as they are (#404).
+   */
+  const walked = (value: Schema.Json, field: string, agent: boolean): Schema.Json => {
     if (/api[_-]?key|password|passwd|secret|token|credential|authorization/i.test(field))
       return MASK
     if (Predicate.isString(value)) return maskText(value, known)
-    if (Array.isArray(value)) return value.map((item) => walked(item, field))
+    if (Array.isArray(value)) return value.map((item) => walked(item, field, agent))
     if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
+    const entries = Object.entries(value)
+    const names = agent ? named(entries.map(([name]) => name)) : entries.map(([name]) => name)
     return Object.fromEntries(
-      Object.entries(value).map(([name, item]) => [
-        name,
-        name === '_tag' && Predicate.isString(item) ? item : walked(item, name),
+      entries.map(([name, item], at) => [
+        names[at] ?? name,
+        !agent && name === '_tag' && Predicate.isString(item) ? item : walked(item, name, agent),
       ]),
     )
   }
 
-  test('a value in the reach of the stack is masked as the walk in calls masked it', () => {
+  test('a value in the reach of the stack is masked as the walk in calls masked it, as a record and as arguments', () => {
     fc.assert(
       fc.property(
         fc.dictionary(fc.constantFrom('a', 'b', 'password', '_tag', 'note'), json),
         (record) => {
-          const masked = maskRecord(record, known)
-          expect(masked).toEqual(walked(record, ''))
+          expect(maskRecord(record, known)).toEqual(walked(record, '', false))
+          expect(maskArguments(record, known)).toEqual(walked(record, '', true))
         },
       ),
       { numRuns: 2_000 },
@@ -2098,4 +2138,340 @@ describe('Masking a structured value takes time in proportion to its size', () =
       expect(growth(deep, (record) => maskAction(record, []), 15)).toBeLessThan(64)
     },
   )
+})
+
+describe("The record of an agent's arguments masks their tag and field names as text (#404)", () => {
+  const known = ['sesame-4417']
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const secret = `sesame-4417 password=hunter2 ${token}`
+  const said = maskText(secret, known)
+
+  /** Whether a masked value keeps nothing of the known value, the password or the token. */
+  const keepsNothing = (masked: Schema.Json | null) => {
+    const text = JSON.stringify(masked)
+    for (const part of ['sesame-4417', 'hunter2', token]) expect(text).not.toContain(part)
+  }
+
+  test('the text a name or a tag is masked to hides each of the three', () => {
+    expect(said).toBe(`${MASK} password=${MASK} ${MASK}`)
+  })
+
+  test('a string tag holding a known value, a token and a password is masked, at the top level and nested', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { _tag: secret, nested: { list: [{ _tag: secret }] } }
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
+    const expected = { _tag: said, nested: { list: [{ _tag: said }] } }
+    expect(maskArguments(tagged, known)).toEqual(expected)
+    keepsNothing(maskArguments(tagged, known))
+  })
+
+  test('a field name holding a known value, a token and a password is masked, at the top level and nested', () => {
+    const masked = maskArguments(
+      {
+        [secret]: 1,
+        kept: 'v',
+        nested: { list: [{ [secret]: 'x', [token]: { 'sesame-4417': 'y' } }] },
+      },
+      known,
+    )
+    // A name holding `password=` names a credential: its value is masked whole too.
+    expect(masked).toEqual({
+      [said]: MASK,
+      kept: 'v',
+      nested: { list: [{ [said]: MASK, [MASK]: { [MASK]: 'y' } }] },
+    })
+    keepsNothing(masked)
+  })
+
+  test('names masked alike are all kept, the later ones numbered in order, and no value is dropped', () => {
+    const masked = maskArguments(
+      { 'sesame-4417': 'a', [token]: 'b', 'password=hunter2': 'c', 'password=other1': 'd' },
+      known,
+    )
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 'a'],
+      [`${MASK} (2)`, 'b'],
+      [`password=${MASK}`, MASK],
+      [`password=${MASK} (2)`, MASK],
+    ])
+  })
+
+  test('a name masking leaves as it was keeps its name, and a masked name it holds is numbered, wherever it stands', () => {
+    const masked = maskArguments({ 'sesame-4417': 'a', [MASK]: 'b', [`${MASK} (2)`]: 'c' }, known)
+    expect(Object.entries(masked)).toEqual([
+      [`${MASK} (3)`, 'a'],
+      [MASK, 'b'],
+      [`${MASK} (2)`, 'c'],
+    ])
+  })
+
+  test('a field whose name says it is a credential is masked whole, read as it was written', () => {
+    // Masked, the name no longer says `token`: its value is masked whole all the same.
+    expect(maskArguments({ 'sesame-token-4417': 'plain' }, ['sesame-token-4417'])).toEqual({
+      [MASK]: MASK,
+    })
+  })
+
+  test('a known value, a token and a password stand in no name nor tag, whatever surrounds them', () => {
+    fc.assert(
+      fc.property(secretValue, around, (value, words) => {
+        const masked = JSON.stringify(
+          maskArguments(
+            {
+              [`${words}${value}`]: 1,
+              // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+              nested: { _tag: `${words}${value}`, [`${value}${words}`]: [{ [value]: 'x' }] },
+            },
+            [value],
+          ),
+        )
+        expect(masked).not.toContain(value)
+      }),
+    )
+  })
+
+  test('masked names at every level down to the limit are masked, and nothing is cut', () => {
+    let value: Schema.Json = 'bottom'
+    for (let level = 1; level < NESTING_LIMIT; level += 1) value = { 'sesame-4417': value }
+    const masked = maskArguments({ 'sesame-4417': value }, known)
+    expect(depthOf(masked)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(masked)).toBe(
+      `${`{"${MASK}":`.repeat(NESTING_LIMIT)}"bottom"${'}'.repeat(NESTING_LIMIT)}`,
+    )
+  })
+
+  test('a record that cannot be read keeps none of its names in clear', () => {
+    const unreadable = { note: 'text', 'sesame-4417': 'v' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskArguments(unreadable, known)).toEqual({ note: MASK, [MASK]: MASK, broken: MASK })
+  })
+})
+
+describe('An action keeps the names the engine fixed, whatever value is known (#404)', () => {
+  // The shapes of what is sent to Jev and to the judge (`jevAction`): every name fixed by the engine.
+  const write = { tool: 'fs_write', path: '/work/notes.md', platform: 'linux', inside: true }
+  const run = {
+    tool: 'commands_run',
+    line: 'make test',
+    program: '/usr/bin/make',
+    args: ['test'],
+    shell: false,
+    platform: 'linux',
+    cwd: '/work',
+    inside: true,
+  }
+
+  test('a variable holding a name of the action, or a part of one, leaves the action as it is', () => {
+    const known = ['platform', 'inside', 'tool', 'program', 'shell']
+    expect(maskAction(write, known)).toEqual(write)
+    expect(Object.keys(maskAction(run, known) ?? {})).toEqual(Object.keys(run))
+    expect(maskAction(run, known)).toEqual(run)
+  })
+
+  test('a string tag is kept as it is too', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { ...write, detail: { _tag: 'Write' } }
+    expect(maskAction(tagged, ['Write'])).toEqual(tagged)
+  })
+
+  test('its values are masked as ever, and one in a destination still refuses it', () => {
+    expect(maskAction({ ...write, note: 'a sesame-4417' }, ['sesame-4417'])).toEqual({
+      ...write,
+      note: `a ${MASK}`,
+    })
+    expect(maskAction({ ...write, path: '/work/sesame-4417/notes.md' }, ['sesame-4417'])).toBeNull()
+  })
+})
+
+/**
+ * As `growth`, but the larger input is run 16 times fewer times than the smaller, and the time of
+ * one call compared: a quadratic mask is caught in seconds rather than minutes.
+ */
+const growthPerCall = <Input>(
+  make: (size: number) => Input,
+  mask: (input: Input) => void,
+  size: number,
+) => {
+  const small = make(size)
+  const large = make(16 * size)
+  let times = 16
+  while (timed(() => mask(small), times) < 20) times *= 2
+  const fewer = times / 16
+  let fastestSmall = Number.POSITIVE_INFINITY
+  let fastestLarge = Number.POSITIVE_INFINITY
+  for (let round = 0; round < 7; round += 1) {
+    fastestSmall = Math.min(fastestSmall, timed(() => mask(small), times) / times)
+    fastestLarge = Math.min(fastestLarge, timed(() => mask(large), fewer) / fewer)
+  }
+  return fastestLarge / fastestSmall
+}
+
+describe('Masking the names of a record takes time in proportion to its size (#404)', () => {
+  /** A record whose every name is a different token: all masked alike, each numbered. */
+  const alike = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: width }, (_, index) => [
+        `ghp_${String(index).padStart(20, 'Q')}`,
+        index,
+      ]),
+    )
+  /** A record whose names are long, a token in each. */
+  const long = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [
+        `${String(index)} ${`a ghp_${'Q1w2E3r4T5'.repeat(2)} b `.repeat(width)}`,
+        index,
+      ]),
+    )
+
+  test('every name masked alike: the record is kept whole', () => {
+    const masked = maskArguments(alike(3), [])
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 0],
+      [`${MASK} (2)`, 1],
+      [`${MASK} (3)`, 2],
+    ])
+  })
+
+  test(
+    '16 times as many names masked alike takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growthPerCall(alike, (record) => maskArguments(record, []), 500)).toBeLessThan(64)
+    },
+  )
+
+  test('names 16 times as long take less than 64 times as long', { timeout: 600_000 }, () => {
+    expect(growth(long, (record) => maskArguments(record, []), 500)).toBeLessThan(64)
+  })
+})
+
+describe('A record the engine builds keeps its names and tags, whatever value is known (#404)', () => {
+  const readNeed = Schema.decodeUnknownOption(Schema.fromJsonString(NeedFields))
+  const cases: ReadonlyArray<readonly [string, NeedFields, string]> = [
+    [
+      'an error need, `output`',
+      ErrorFields.make({
+        failed: 'the build',
+        attempts: [{ what: 'pnpm build', output: 'exit 1' }],
+        proposals: ['retry'],
+      }),
+      'output',
+    ],
+    [
+      'a decision need, `options`',
+      DecisionFields.make({ question: 'Which?', options: ['a', 'b'], recommended: null }),
+      'options',
+    ],
+    [
+      'an environment need, `action`',
+      EnvironmentFields.make({ missing: 'gh', action: 'Install gh', settingsSection: null }),
+      'action',
+    ],
+    [
+      'a permission need, `hemera` in `hemeraReason`',
+      PermissionFields.make({
+        call: 'fs_write notes.md',
+        agentReason: 'to write',
+        hemeraReason: 'a write',
+        sensitive: false,
+      }),
+      'hemera',
+    ],
+    [
+      'a permission need, `settings` in `settingsSection`',
+      PermissionFields.make({
+        call: 'fs_write notes.md',
+        agentReason: 'to write',
+        hemeraReason: 'a write',
+        sensitive: false,
+        settingsSection: 'auto',
+      }),
+      'settings',
+    ],
+    [
+      'a decision need, its tag',
+      DecisionFields.make({ question: 'Which?', options: ['a'], recommended: null }),
+      'Decision',
+    ],
+  ]
+  for (const [label, fields, known] of cases) {
+    test(`${label} known: the need is read back as it was`, () => {
+      expect(readNeed(maskedJson(maskRecord(fields, [known])))).toEqual(Option.some(fields))
+    })
+  }
+
+  test('a record that cannot be read keeps its names, masking only its values', () => {
+    const unreadable = { options: 'a' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskRecord(unreadable, ['options'])).toEqual({ options: MASK, broken: MASK })
+  })
+
+  /** Every name of a value and every string tag, in order: its shape, as a schema reads it. */
+  const shapeOf = (value: Schema.Json): ReadonlyArray<string> => {
+    const shape: string[] = []
+    const left: Schema.Json[] = [value]
+    for (let item = left.pop(); item !== undefined; item = left.pop()) {
+      if (Array.isArray(item)) left.push(...item)
+      else if (
+        item !== null &&
+        !Predicate.isString(item) &&
+        !Predicate.isNumber(item) &&
+        !Predicate.isBoolean(item)
+      ) {
+        for (const [name, held] of Object.entries(item)) {
+          shape.push(name)
+          if (name === '_tag' && Predicate.isString(held)) shape.push(`=${held}`)
+          else left.push(held)
+        }
+      }
+    }
+    return shape
+  }
+
+  /** Names as a schema writes them: words, never one that says credential. */
+  const name = fc
+    .stringMatching(/^[a-zA-Z]{1,14}$/)
+    .filter(
+      (word) => !/api[_-]?key|password|passwd|secret|token|credential|authorization/i.test(word),
+    )
+  const shaped: fc.Arbitrary<Schema.Json> = fc.letrec<{ value: Schema.Json }>((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small' },
+      fc.string({ maxLength: 12 }),
+      fc.integer(),
+      fc.array(tie('value'), { maxLength: 3 }),
+      fc.dictionary(fc.oneof(name, fc.constant('_tag')), tie('value'), { maxKeys: 4 }),
+    ),
+  })).value
+
+  test('any value keeps every name and tag when a known value is one of them, or a part of one', () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(name, shaped, { minKeys: 1, maxKeys: 4 }),
+        fc.nat(),
+        fc.nat(),
+        fc.nat(),
+        (record, pick, from, length) => {
+          const parts = shapeOf(record).map((part) => part.replace(/^=/, ''))
+          const whole = parts[pick % parts.length] ?? ''
+          if (whole === '') return
+          const start = from % whole.length
+          const known = [whole, whole.slice(start, start + 1 + (length % whole.length))]
+          expect(shapeOf(maskRecord(record, known))).toEqual(shapeOf(record))
+        },
+      ),
+      { numRuns: 2_000 },
+    )
+  })
 })

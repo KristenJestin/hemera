@@ -81,3 +81,19 @@ const readText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 /** A value as `agentText` writes it, kept as a value: the same, with what nests too deep cut. */
 export const cutJson = (value: Schema.Json): Schema.Json => readText(agentText(value))
+
+/**
+ * Whether a value holds more than `NESTING_LIMIT` containers one in another, itself the first:
+ * what `agentText` and `cutJson` would cut. Read one level at a time, so no depth runs out of
+ * stack, and no further than one level past the limit.
+ */
+export const nestsPastLimit = (value: Schema.Json): boolean => {
+  let level: ReadonlyArray<Schema.JsonObject | Schema.JsonArray> = isContainer(value) ? [value] : []
+  for (let depth = 0; level.length > 0; depth += 1) {
+    if (depth === NESTING_LIMIT) return true
+    level = level
+      .flatMap((container) => (Array.isArray(container) ? container : Object.values(container)))
+      .filter(isContainer)
+  }
+  return false
+}
