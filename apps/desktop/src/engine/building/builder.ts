@@ -288,9 +288,10 @@ const answerOf = (need: Need): string | null => {
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
  * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute;
- * as a file tool's write that changed its file is counted; as a settle of the writes begins, and
- * once it is done; as its event follower takes in a change outside Hemera, before its settle.
- * Never held otherwise.
+ * as a file tool's write that changed its file is counted; as a write joins a settle whose window is
+ * open; as a settle's window closes, before it reads what came in it; as a settle of the writes
+ * begins, and once it is done; as its event follower takes in a change outside Hemera, before its
+ * settle. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -316,6 +317,8 @@ export type BuilderHold = (
     | 'answering'
     | 'telling'
     | 'wrote'
+    | 'joined'
+    | 'window'
     | 'settling'
     | 'settled'
     | 'outside',

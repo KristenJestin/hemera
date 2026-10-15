@@ -3190,6 +3190,153 @@ describe('A failed green and a change made outside Hemera', () => {
     })
   }
 
+  /** The mission past its failed green, then a change outside Hemera that spent its rerun. */
+  const spentOnce = (points: ReturnType<typeof reaching>) =>
+    Effect.gen(function* () {
+      const { mission } = yield* launchedWith(markdownProof)
+      yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+      const { grantId } = yield* builderOf(mission.id)
+      yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+      yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+      const api = yield* apiOf(mission.id)
+      const outside = (path: string, content: string) =>
+        Effect.gen(function* () {
+          const from = yield* points.mark
+          writeFileSync(join(api, path), content)
+          yield* compared(mission.id)
+          yield* points.taken(from)
+          return yield* runsOf(mission.id)
+        })
+      const spent = yield* outside('export.ts', 'export const toJson = () => ""\n')
+      return { mission, grantId, api, outside, spent }
+    })
+
+  const FAILED = ['green', 'assertion_failed']
+
+  test('a Builder write and a change outside Hemera in the same settle: the failed green runs again once, as for a Builder write, and the next change outside Hemera may run it again', async () => {
+    const window = Deferred.makeUnsafe<void>()
+    const reached = Deferred.makeUnsafe<void>()
+    let armed = false
+    const points = reaching((at) =>
+      Effect.gen(function* () {
+        if (!armed) return
+        // The Builder's write holds its settle's window open…
+        if (at === 'window') {
+          yield* Deferred.succeed(reached, undefined)
+          yield* Deferred.await(window)
+        }
+        // …until the change outside Hemera has joined it.
+        if (at === 'joined') {
+          armed = false
+          yield* Deferred.succeed(window, undefined)
+        }
+      }),
+    )
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission, grantId, api, outside, spent } = yield* spentOnce(points)
+            const from = yield* points.mark
+            armed = true
+            yield* writes(grantId, 'export.ts', 'export const toYaml = () => ""\n')
+            yield* Deferred.await(reached)
+            writeFileSync(join(api, 'notes.md'), 'Checked by hand.\n')
+            yield* compared(mission.id)
+            yield* points.taken(from)
+            const together = yield* runsOf(mission.id)
+            // Run for the Builder's write, it left the budget whole: the next change runs it.
+            const fixed = yield* outside('export.ts', RIGHT_EXPORT)
+            return { spent, together, fixed }
+          }),
+        ),
+    )
+    expect(seen.spent).toEqual([['red', 'assertion_failed'], FAILED, FAILED])
+    expect(seen.together).toEqual([['red', 'assertion_failed'], FAILED, FAILED, FAILED])
+    expect(seen.fixed).toEqual([
+      ['red', 'assertion_failed'],
+      FAILED,
+      FAILED,
+      FAILED,
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a task end on trees unchanged since the failure runs nothing, and still allows a change outside Hemera one more rerun', async () => {
+    const points = reaching()
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission, grantId, outside, spent } = yield* spentOnce(points)
+            // T1 writes nothing: its end finds the greens due on the trees they failed on.
+            yield* builds(grantId, 'T1')
+            const ended = yield* runsOf(mission.id)
+            const fixed = yield* outside('export.ts', RIGHT_EXPORT)
+            return { spent, ended, fixed }
+          }),
+        ),
+    )
+    expect(seen.spent).toEqual([['red', 'assertion_failed'], FAILED, FAILED])
+    expect(seen.ended).toEqual(seen.spent)
+    expect(seen.fixed).toEqual([['red', 'assertion_failed'], FAILED, FAILED, ['green', 'passed']])
+  })
+
+  test('the question’s Try again allows a change outside Hemera one more rerun', async () => {
+    const points = reaching()
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            const api = yield* apiOf(mission.id)
+            const outside = (content: string) =>
+              Effect.gen(function* () {
+                const from = yield* points.mark
+                writeFileSync(join(api, 'export.ts'), content)
+                yield* compared(mission.id)
+                yield* points.taken(from)
+                return yield* runsOf(mission.id)
+              })
+            yield* outside('export const toJson = () => ""\n')
+            const spent = yield* outside('export const toYaml = () => ""\n')
+            // The quiet Builder's question, answered Try again: the green runs, and fails.
+            yield* until(
+              Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
+              20_000,
+            )
+            const asked = (yield* unprovenAsked).find((one) => one.state === 'pending')
+            if (asked === undefined) return yield* Effect.die(new Error('not asked'))
+            yield* answerNeed({
+              id: asked.needId,
+              answer: ChosenAnswer.make({ option: TRY_AGAIN }),
+              key: 'b',
+            })
+            yield* until(Effect.map(runsOf(mission.id), (runs) => runs.length === 4))
+            const fixed = yield* outside(RIGHT_EXPORT)
+            return { spent, fixed }
+          }),
+        ),
+    )
+    expect(seen.spent).toEqual([['red', 'assertion_failed'], FAILED, FAILED])
+    expect(seen.fixed).toEqual([
+      ['red', 'assertion_failed'],
+      FAILED,
+      FAILED,
+      FAILED,
+      ['green', 'passed'],
+    ])
+  })
+
   test('a failed green whose run leaves a process writing into the Workspace runs again once, never in a loop', async () => {
     const points = reaching()
     const starts = join(scratch, 'starts')

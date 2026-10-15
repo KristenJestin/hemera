@@ -203,6 +203,8 @@ export interface ProofParts {
       | 'greens-due'
       | 'retrying'
       | 'proof-called'
+      | 'joined'
+      | 'window'
       | 'settling'
       | 'settled',
   ) => Effect.Effect<void>
@@ -1493,10 +1495,11 @@ export const buildingProofs = (parts: ProofParts) => {
     Effect.suspend(() => {
       const pending = settling.get(missionId)
       settling.set(missionId, (pending ?? true) && outside)
-      if (pending !== undefined) return Effect.void
+      if (pending !== undefined) return parts.hold('joined')
       return parts.background(
         Effect.gen(function* () {
           yield* Effect.sleep('300 millis')
+          yield* parts.hold('window')
           const onlyOutside = settling.get(missionId) ?? outside
           settling.delete(missionId)
           yield* parts.hold('settling')
