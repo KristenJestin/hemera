@@ -547,8 +547,8 @@ describe('Writing only on the version that was read', () => {
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           yield* callTool(builder.grantId, 'fs_read', { path: 'held.txt' })
           return yield* Effect.acquireUseRelease(
-            // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
-            // open file never stops a rename.
+            // On Windows a file held open cannot be replaced; elsewhere an open file never stops a
+            // rename.
             Effect.promise(() => holdFile(file)),
             () => callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }),
             (child) => Effect.promise(() => endChild(child)),
@@ -559,11 +559,11 @@ describe('Writing only on the version that was read', () => {
     const now = readFileSync(file, 'utf8')
     // Which of the two the system chose, for the record of a run on each system.
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
-    // Shared with no one, the file cannot even be read on Windows: the test did hold it.
+    // Held open, the file cannot be replaced on Windows: the test did hold it.
     if (process.platform === 'win32') expect(answer.ok).toBe(false)
     if (answer.ok) expect(now).toBe('after\n')
     else {
-      // A file shared with no one cannot even be read for its version: refused before writing.
+      // Refused while reading its version or while replacing it, the file is left as it was.
       expect(answer.text).toMatch(
         /^could not (?:write held\.txt: .*; the file is as it was|read held\.txt: .*; nothing was written)$/,
       )

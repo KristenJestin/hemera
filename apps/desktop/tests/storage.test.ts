@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { Effect } from 'effect'
@@ -136,13 +136,19 @@ describe('A child a test starts says it is ready within a bound (#417)', () => {
     await expect(readyWithin(child, 20_000)).rejects.toThrow(/ended \(3\) before it was ready/)
   })
 
-  test('a held file is held until its holder ends: Windows opens it for no one else', async () => {
-    const file = join(temporaryFolder('held-file'), 'held.txt')
+  test('a held file is held until its holder ends: Windows will not replace it meanwhile', async () => {
+    const folder = temporaryFolder('held-file')
+    const file = join(folder, 'held.txt')
     writeFileSync(file, 'before\n')
+    writeFileSync(join(folder, 'next.txt'), 'after\n')
     const holder = await holdFile(file)
-    if (process.platform === 'win32') expect(() => readFileSync(file)).toThrow(/EBUSY/)
+    if (process.platform === 'win32') {
+      expect(() => renameSync(join(folder, 'next.txt'), file)).toThrow(/EPERM/)
+      expect(readFileSync(file, 'utf8')).toBe('before\n')
+    }
     await endChild(holder)
-    expect(readFileSync(file, 'utf8')).toBe('before\n')
+    renameSync(join(folder, 'next.txt'), file)
+    expect(readFileSync(file, 'utf8')).toBe('after\n')
     await removeFolders()
   })
 })
