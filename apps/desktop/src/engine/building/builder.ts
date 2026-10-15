@@ -289,7 +289,7 @@ const answerOf = (need: Need): string | null => {
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
  * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute;
  * as a file tool's write that changed its file is counted; as a settle of the writes begins, and
- * once it is done; as its event follower takes in a change outside Hemera, before it counts it.
+ * once it is done; as its event follower takes in a change outside Hemera, before its settle.
  * Never held otherwise.
  */
 export type BuilderHold = (
@@ -440,9 +440,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         watching.delete(missionId)
       }
       /**
-       * A write of the mission's sessions kept, a file tool's or a command's, or a change found
-       * outside Hemera: counted, it wakes the Builder, and a failed green runs again on what it left
-       * (#144, #258, #411).
+       * A write of the mission's sessions kept, a file tool's or a command's: counted, it wakes the
+       * Builder, and a failed green runs again on what it left (#144, #258).
        */
       const wrote = (missionId: string) =>
         Effect.sync(() => {
@@ -2102,12 +2101,12 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               const judged = yield* activeBuildingIn(yield* Database, event.entityId)
               if (judged !== null) yield* endIfReady(judged)
             }
-            // A change the detector found outside Hemera moved the trees as a write does: counted,
-            // and a failed green runs again once it settles (#411). A compare that finds nothing
-            // says nothing.
+            // A change the detector found outside Hemera runs a failed green again once it settles,
+            // as a write does; it is not the Builder's, so it never counts as its write (#310,
+            // #411). A compare that finds nothing says nothing.
             if (event.type === 'mission.changed_outside') {
               yield* hold('outside')
-              yield* wrote(event.entityId)
+              yield* proofs.afterWrite(event.entityId, true)
             }
             if (
               (event.type === 'need.expired' || event.type === 'need.withdrawn') &&
