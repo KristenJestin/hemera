@@ -2010,8 +2010,19 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
     expect(seen.proof.state).toBe('green')
   })
 
+  /** A hold that only counts the file tool writes the Builder's hook counted. */
+  const countingWrites = () => {
+    let counted = 0
+    const hold: BuilderHold = (at) =>
+      Effect.sync(() => {
+        if (at === 'wrote') counted += 1
+      })
+    return { hold, counted: Effect.sync(() => counted) }
+  }
+
   test('a Builder turn that rewrites the failing file with the same content, then ends: the question is not withdrawn and does not come back', async () => {
-    const seen = await proofsEngine(data).run(({ profile }) =>
+    const counting = countingWrites()
+    const seen = await proofsEngine(data, counting.hold).run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -2027,16 +2038,17 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
             Effect.map(unprovenAsked, (rows) => rows.some((one) => one.state === 'pending')),
             20_000,
           )
-          // The Builder writes the failing file again as it was, and its turn ends.
+          const before = yield* counting.counted
+          // The Builder writes the failing file again as it was, and its turn ends. The hook
+          // counts a write before the call returns: none is counted, so nothing wakes.
           const wrote = yield* call(grantId, 'fs_write', {
             repository: 'api',
             path: 'export.ts',
             content: WRONG_EXPORT,
           })
-          // Longer than a write takes to settle and the end to be judged again.
-          yield* Effect.sleep('3 seconds')
           return {
             wrote,
+            counted: (yield* counting.counted) - before,
             asked: (yield* unprovenAsked).map((one) => one.state),
             runs: (yield* proofOf(mission.id, 'R1.S2')).runs.length,
           }
@@ -2044,8 +2056,33 @@ describe('A proof is stuck only once the Builder stopped acting on it', () => {
       ),
     )
     expect(seen.wrote).not.toMatch(/refused/)
+    expect(seen.counted).toBe(0)
     expect(seen.asked).toEqual(['pending'])
     expect(seen.runs).toBe(2)
+  })
+
+  test('a Builder write that changes the failing file is counted before its call returns', async () => {
+    const counting = countingWrites()
+    const seen = await proofsEngine(data, counting.hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(markdownProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+          const before = yield* counting.counted
+          const wrote = yield* call(grantId, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: RIGHT_EXPORT,
+          })
+          return { wrote, counted: (yield* counting.counted) - before }
+        }),
+      ),
+    )
+    expect(seen.wrote).not.toMatch(/refused/)
+    expect(seen.counted).toBe(1)
   })
 
   test('Try again, then a Builder turn that writes nothing while the proof runs: the question does not come back before the run ends', async () => {

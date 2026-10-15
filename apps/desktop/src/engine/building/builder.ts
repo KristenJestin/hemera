@@ -287,8 +287,8 @@ const answerOf = (need: Need): string | null => {
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
- * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute.
- * Never held otherwise.
+ * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute;
+ * as a file tool's write that changed its file is counted. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -312,7 +312,8 @@ export type BuilderHold = (
     | 'proof-called'
     | 'releasing'
     | 'answering'
-    | 'telling',
+    | 'telling'
+    | 'wrote',
 ) => Effect.Effect<void>
 
 /**
@@ -1715,6 +1716,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                       // file as it was is none; one whose file could not be read counts (#310).
                       const after = yield* contentOf(file.path)
                       if (before === null || after === null || !before.equals(after)) {
+                        yield* hold('wrote')
                         yield* wrote(file.missionId)
                       }
                       return { result, waited }
