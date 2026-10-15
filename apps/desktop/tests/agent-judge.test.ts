@@ -512,6 +512,20 @@ describe('A judge that can do nothing, told nothing secret', () => {
     ])
   })
 
+  test('an action whose field name the judge reads is a registered secret is not sent, and asks (#404)', async () => {
+    const { judges, questions } = await withJudge(({ builder }) =>
+      Effect.gen(function* () {
+        // `platform` is a name of every action the judge is sent.
+        yield* Secrets.useSync((secrets) => secrets.register('suite', ['platform']))
+        yield* run(builder, 'echo hello')
+      }),
+    )
+    expect(judges.started.flatMap((judge) => judge.answers.prompts)).toHaveLength(0)
+    expect(questions).toEqual([
+      'No rule of this Project allows this command for the Builder, and the call could not be sent to Claude Code’s judge whole.',
+    ])
+  })
+
   test('a JSON line the user wrote, holding a quoted credential and a known value, reaches the judge with nothing of either, and still JSON (#397)', async () => {
     const pasted = JSON.stringify([QUOTED_SECRET, `key ${KNOWN_SECRET}`])
     const { judges } = await withJudge(({ builder, projectId, missionId }) =>

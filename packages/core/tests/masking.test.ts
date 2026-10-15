@@ -2027,12 +2027,41 @@ describe('A value nested deeper than a call stack reaches is masked, and never f
       fc.constant(null),
       fc.array(tie('value'), { maxLength: 4 }),
       fc.dictionary(
-        fc.constantFrom('a', 'b', 'password', 'apiKey', '_tag', 'path', 'line', '__proto__'),
+        fc.constantFrom(
+          'a',
+          'b',
+          'password',
+          'apiKey',
+          '_tag',
+          'path',
+          'line',
+          '__proto__',
+          'known-value',
+          'a known-value',
+          MASK,
+          `${MASK} (2)`,
+        ),
         tie('value'),
         { maxKeys: 4 },
       ),
     ),
   })).value
+
+  /**
+   * The names of a record as the rule keeps them (#404): each masked, a name masking left as it
+   * was unchanged, and a masked name already held numbered from 2, the first free one.
+   */
+  const named = (names: ReadonlyArray<string>): ReadonlyArray<string> => {
+    const masked = names.map((name) => maskText(name, known))
+    const held = names.filter((name, at) => masked[at] === name)
+    return masked.map((name, at): string => {
+      if (name === names[at]) return name
+      let free: string = name
+      for (let count = 2; held.includes(free); count += 1) free = `${name} (${String(count)})`
+      held.push(free)
+      return free
+    })
+  }
 
   /** The walk as it was: in calls, one for each value. */
   const walked = (value: Schema.Json, field: string): Schema.Json => {
@@ -2041,11 +2070,10 @@ describe('A value nested deeper than a call stack reaches is masked, and never f
     if (Predicate.isString(value)) return maskText(value, known)
     if (Array.isArray(value)) return value.map((item) => walked(item, field))
     if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
+    const entries = Object.entries(value)
+    const names = named(entries.map(([name]) => name))
     return Object.fromEntries(
-      Object.entries(value).map(([name, item]) => [
-        name,
-        name === '_tag' && Predicate.isString(item) ? item : walked(item, name),
-      ]),
+      entries.map(([name, item], at) => [names[at] ?? name, walked(item, name)]),
     )
   }
 
@@ -2098,4 +2126,191 @@ describe('Masking a structured value takes time in proportion to its size', () =
       expect(growth(deep, (record) => maskAction(record, []), 15)).toBeLessThan(64)
     },
   )
+})
+
+describe("A record's tag and field names are masked as text (#404)", () => {
+  const known = ['sesame-4417']
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const secret = `sesame-4417 password=hunter2 ${token}`
+  const said = maskText(secret, known)
+
+  /** Whether a masked value keeps nothing of the known value, the password or the token. */
+  const keepsNothing = (masked: Schema.Json | null) => {
+    const text = JSON.stringify(masked)
+    for (const part of ['sesame-4417', 'hunter2', token]) expect(text).not.toContain(part)
+  }
+
+  test('the text a name or a tag is masked to hides each of the three', () => {
+    expect(said).toBe(`${MASK} password=${MASK} ${MASK}`)
+  })
+
+  test('a string tag holding a known value, a token and a password is masked, at the top level and nested', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { _tag: secret, nested: { list: [{ _tag: secret }] } }
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
+    const expected = { _tag: said, nested: { list: [{ _tag: said }] } }
+    expect(maskRecord(tagged, known)).toEqual(expected)
+    expect(maskAction(tagged, known)).toEqual(expected)
+    keepsNothing(maskRecord(tagged, known))
+  })
+
+  test('a field name holding a known value, a token and a password is masked, at the top level and nested', () => {
+    const masked = maskRecord(
+      {
+        [secret]: 1,
+        kept: 'v',
+        nested: { list: [{ [secret]: 'x', [token]: { 'sesame-4417': 'y' } }] },
+      },
+      known,
+    )
+    // A name holding `password=` names a credential: its value is masked whole too.
+    expect(masked).toEqual({
+      [said]: MASK,
+      kept: 'v',
+      nested: { list: [{ [said]: MASK, [MASK]: { [MASK]: 'y' } }] },
+    })
+    keepsNothing(masked)
+  })
+
+  test('names masked alike are all kept, the later ones numbered in order, and no value is dropped', () => {
+    const masked = maskRecord(
+      { 'sesame-4417': 'a', [token]: 'b', 'password=hunter2': 'c', 'password=other1': 'd' },
+      known,
+    )
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 'a'],
+      [`${MASK} (2)`, 'b'],
+      [`password=${MASK}`, MASK],
+      [`password=${MASK} (2)`, MASK],
+    ])
+  })
+
+  test('a name masking leaves as it was keeps its name, and a masked name it holds is numbered, wherever it stands', () => {
+    const masked = maskRecord({ 'sesame-4417': 'a', [MASK]: 'b', [`${MASK} (2)`]: 'c' }, known)
+    expect(Object.entries(masked)).toEqual([
+      [`${MASK} (3)`, 'a'],
+      [MASK, 'b'],
+      [`${MASK} (2)`, 'c'],
+    ])
+  })
+
+  test('a field whose name says it is a credential is masked whole, read as it was written', () => {
+    // Masked, the name no longer says `token`: its value is masked whole all the same.
+    expect(maskRecord({ 'sesame-token-4417': 'plain' }, ['sesame-token-4417'])).toEqual({
+      [MASK]: MASK,
+    })
+  })
+
+  test('a known value, a token and a password stand in no name nor tag, whatever surrounds them', () => {
+    fc.assert(
+      fc.property(secretValue, around, (value, words) => {
+        const masked = JSON.stringify(
+          maskRecord(
+            {
+              [`${words}${value}`]: 1,
+              // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+              nested: { _tag: `${words}${value}`, [`${value}${words}`]: [{ [value]: 'x' }] },
+            },
+            [value],
+          ),
+        )
+        expect(masked).not.toContain(value)
+      }),
+    )
+  })
+
+  test('masked names at every level down to the limit are masked, and nothing is cut', () => {
+    let value: Schema.Json = 'bottom'
+    for (let level = 1; level < NESTING_LIMIT; level += 1) value = { 'sesame-4417': value }
+    const masked = maskRecord({ 'sesame-4417': value }, known)
+    expect(depthOf(masked)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(masked)).toBe(
+      `${`{"${MASK}":`.repeat(NESTING_LIMIT)}"bottom"${'}'.repeat(NESTING_LIMIT)}`,
+    )
+    expect(maskAction({ 'sesame-4417': value }, known)).toBeNull()
+  })
+
+  test('a record that cannot be read keeps none of its names in clear', () => {
+    const unreadable = { note: 'text', 'sesame-4417': 'v' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskRecord(unreadable, known)).toEqual({ note: MASK, [MASK]: MASK, broken: MASK })
+  })
+})
+
+describe('An action whose field name had to be masked is refused (#404)', () => {
+  const known = ['sesame-4417']
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+
+  test('a name holding a known value, a token or a password, at the top level, is refused', () => {
+    for (const name of ['sesame-4417', token, 'password=hunter2']) {
+      expect(
+        maskAction({ tool: 'fs_write', path: '/work/notes.md', [name]: 'x' }, known),
+      ).toBeNull()
+    }
+  })
+
+  test('the same name nested in the arguments is refused too', () => {
+    for (const name of ['sesame-4417', token, 'password=hunter2']) {
+      expect(
+        maskAction({ tool: 'fs_write', arguments: { list: [{ [name]: 'x' }] } }, known),
+      ).toBeNull()
+    }
+  })
+
+  test('a name a judge reads, holding a known value, is refused', () => {
+    expect(
+      maskAction({ tool: 'fs_write', path: '/work/notes.md', platform: 'linux' }, ['platform']),
+    ).toBeNull()
+  })
+
+  test('names left as they were let the action go, its values masked', () => {
+    expect(
+      maskAction({ tool: 'fs_write', path: '/work/notes.md', note: 'a sesame-4417' }, known),
+    ).toEqual({ tool: 'fs_write', path: '/work/notes.md', note: `a ${MASK}` })
+  })
+})
+
+describe('Masking the names of a record takes time in proportion to its size (#404)', () => {
+  /** A record whose every name is a different token: all masked alike, each numbered. */
+  const alike = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: width }, (_, index) => [
+        `ghp_${String(index).padStart(20, 'Q')}`,
+        index,
+      ]),
+    )
+  /** A record whose names are long, a token in each. */
+  const long = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [
+        `${String(index)} ${`a ghp_${'Q1w2E3r4T5'.repeat(2)} b `.repeat(width)}`,
+        index,
+      ]),
+    )
+
+  test('every name masked alike: the record is kept whole', () => {
+    const masked = maskRecord(alike(3), [])
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 0],
+      [`${MASK} (2)`, 1],
+      [`${MASK} (3)`, 2],
+    ])
+  })
+
+  test(
+    '16 times as many names masked alike takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(alike, (record) => maskRecord(record, []), 2_000)).toBeLessThan(64)
+    },
+  )
+
+  test('names 16 times as long take less than 64 times as long', { timeout: 600_000 }, () => {
+    expect(growth(long, (record) => maskRecord(record, []), 500)).toBeLessThan(64)
+  })
 })

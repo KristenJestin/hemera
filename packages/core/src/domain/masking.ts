@@ -1369,26 +1369,66 @@ type MaskString = (text: string, field: string) => string
  */
 export const NESTING_LIMIT = 256
 
-/** The tag of a tagged value names its shape, never a secret: it is kept as it is. */
-const TAG = '_tag'
-
 /** A container being masked: what it holds still to visit, and what is masked already. */
 interface Level {
-  /** The name it stands under in its parent; its items stand in it too when it is a list. */
+  /** The name it stands under in its parent, as written; its items stand in it too when it is a list. */
   readonly into: string
-  /** The names of the fields of a record; null for a list. */
+  /** That name as the parent keeps it. */
+  readonly kept: string
+  /** The names of the fields of a record as written; null for a list. */
   readonly names: ReadonlyArray<string> | null
+  /** The same names as the record keeps them (`keptNames`); null for a list. */
+  readonly keptNames: ReadonlyArray<string> | null
   readonly items: ReadonlyArray<Schema.Json>
   /** The items done, in order: the next one to visit is at this length. */
   readonly masked: Array<readonly [name: string, item: Schema.Json]>
 }
 
-const openLevel = (container: Schema.JsonObject | Schema.JsonArray, into: string): Level => {
-  if (isList(container)) return { into, names: null, items: container, masked: [] }
+/**
+ * The names of a record's fields as it keeps them, given each name masked as text. A name masking
+ * left as it was is kept as it is. A masked name that another field of the record already holds
+ * is followed by ` (2)`, ` (3)`…, the first number free, in the order of the fields: no two fields
+ * share a name, so no value is ever dropped. Each masked name counts on from the number it last
+ * took, so the names are numbered in time linear in their count.
+ */
+const keptNames = (
+  names: ReadonlyArray<string>,
+  masked: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const held = new Set(names.filter((name, at) => masked[at] === name))
+  const counted = new Map<string, number>()
+  return masked.map((name, at) => {
+    if (name === names[at]) return name
+    let count = counted.get(name) ?? 1
+    let kept = name
+    while (held.has(kept)) {
+      count += 1
+      kept = `${name} (${String(count)})`
+    }
+    counted.set(name, count)
+    held.add(kept)
+    return kept
+  })
+}
+
+const openLevel = (
+  container: Schema.JsonObject | Schema.JsonArray,
+  into: string,
+  kept: string,
+  string: MaskString,
+): Level => {
+  if (isList(container))
+    return { into, kept, names: null, keptNames: null, items: container, masked: [] }
   const entries = Object.entries(container)
+  const names = entries.map(([name]) => name)
   return {
     into,
-    names: entries.map(([name]) => name),
+    kept,
+    names,
+    keptNames: keptNames(
+      names,
+      names.map((name) => string(name, '')),
+    ),
     items: entries.map(([, item]) => item),
     masked: [],
   }
@@ -1397,53 +1437,70 @@ const openLevel = (container: Schema.JsonObject | Schema.JsonArray, into: string
 const closedLevel = (level: Level): Schema.Json =>
   level.names === null ? level.masked.map(([, item]) => item) : Object.fromEntries(level.masked)
 
-/** A value masked, and whether any of it lay beyond `NESTING_LIMIT` and was masked whole. */
+/**
+ * A value masked; whether any of it lay beyond `NESTING_LIMIT` and was masked whole; and whether
+ * masking changed the name of any field.
+ */
 interface Walked {
   readonly masked: Schema.JsonObject
   readonly cut: boolean
+  readonly renamed: boolean
 }
 
 /**
- * A structured value with every string in it masked by `string`, and a field whose name says it is
- * a credential masked whole. The containers open are kept on a stack, not in calls, so no depth of
- * nesting runs out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
+ * A structured value with every string in it masked by `string`, the names of its fields and its
+ * tags among them, and a field whose name says it is a credential masked whole. The containers
+ * open are kept on a stack, not in calls, so no depth of nesting runs out of stack; what lies
+ * beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
  */
 const walk = (record: Schema.JsonObject, string: MaskString): Walked => {
   let cut = false
-  const open: Level[] = [openLevel(record, '')]
+  let renamed = false
+  const open: Level[] = []
+  const enter = (container: Schema.JsonObject | Schema.JsonArray, into: string, kept: string) => {
+    const level = openLevel(container, into, kept, string)
+    renamed ||= level.keptNames?.some((one, at) => one !== level.names?.[at]) ?? false
+    open.push(level)
+  }
+  enter(record, '', '')
   for (;;) {
     const level = open.at(-1)
-    if (level === undefined) return { masked: {}, cut: true }
+    if (level === undefined) return { masked: {}, cut: true, renamed }
     const at = level.masked.length
     if (at === level.items.length) {
       open.pop()
       const parent = open.at(-1)
-      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut }
-      parent.masked.push([level.into, closedLevel(level)])
+      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut, renamed }
+      parent.masked.push([level.kept, closedLevel(level)])
       continue
     }
     const item = level.items[at] ?? null
     const name = level.names?.[at] ?? level.into
-    if (level.names !== null && name === TAG && Predicate.isString(item)) {
-      level.masked.push([name, item])
-    } else if (CREDENTIAL_FIELD.test(name)) {
-      level.masked.push([name, MASK])
+    const kept = level.keptNames?.[at] ?? level.kept
+    if (CREDENTIAL_FIELD.test(name)) {
+      level.masked.push([kept, MASK])
     } else if (Predicate.isString(item)) {
-      level.masked.push([name, string(item, name)])
+      level.masked.push([kept, string(item, name)])
     } else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
-      level.masked.push([name, item])
+      level.masked.push([kept, item])
     } else if (open.length >= NESTING_LIMIT) {
       cut = true
-      level.masked.push([name, MASK])
+      level.masked.push([kept, MASK])
     } else {
-      open.push(openLevel(item, name))
+      enter(item, name, kept)
     }
   }
 }
 
-/** Every field of a record masked whole: what is kept of a record that could not be read. */
-const maskedWhole = (record: Schema.JsonObject): Schema.JsonObject =>
-  Object.fromEntries(Object.keys(record).map((name) => [name, MASK]))
+/** Every field of a record masked whole, its name masked as text: what is kept of a record that could not be read. */
+const maskedWhole = (
+  record: Schema.JsonObject,
+  name: (text: string) => string,
+): Schema.JsonObject => {
+  const names = Object.keys(record)
+  const kept = keptNames(names, names.map(name))
+  return Object.fromEntries(kept.map((one) => [one, MASK]))
+}
 
 /**
  * A structured value with every string in it masked, and a field whose name says it is a
@@ -1455,11 +1512,12 @@ export function maskRecord(
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> {
+  const known = longestFirst(values)
+  const masked = (text: string) => doneOrMask(() => textMasked(text, known))
   try {
-    const known = longestFirst(values)
-    return maskedRecord(walk(record, (text) => doneOrMask(() => textMasked(text, known))).masked)
+    return maskedRecord(walk(record, masked).masked)
   } catch {
-    return maskedRecord(maskedWhole(record))
+    return maskedRecord(maskedWhole(record, masked))
   }
 }
 
@@ -1477,7 +1535,7 @@ export function maskAction(
   try {
     const known = longestFirst(values)
     let lostDestination = false
-    const { masked, cut } = walk(action, (text, field) => {
+    const { masked, cut, renamed } = walk(action, (text, field) => {
       const destination = DESTINATION_FIELD.test(field)
       if (destination && known.some((value) => text.includes(value))) lostDestination = true
       try {
@@ -1488,8 +1546,9 @@ export function maskAction(
         return MASK
       }
     })
-    // An action cut where it nests too deep, or that could not be read, is not sent in part.
-    return lostDestination || cut ? null : maskedRecord(masked)
+    // An action cut where it nests too deep, whose names changed, or that could not be read, is
+    // not sent: what it means is no longer what it says.
+    return lostDestination || cut || renamed ? null : maskedRecord(masked)
   } catch {
     return null
   }

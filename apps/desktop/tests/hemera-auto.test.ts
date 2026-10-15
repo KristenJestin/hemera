@@ -340,6 +340,20 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
       'No rule of this Project allows this write for the Builder, and the call could not be sent to Jev whole.',
     ])
   })
+
+  test('an action whose field name Jev reads is a registered secret is not sent, and asks (#404)', async () => {
+    const { questions } = await withJev(({ builder }) =>
+      Effect.gen(function* () {
+        // `platform` is a name of every action Jev is sent: masked, the action means something else.
+        yield* Secrets.useSync((secrets) => secrets.register('suite', ['platform']))
+        return yield* write(builder)
+      }),
+    )
+    expect(jev.received).toHaveLength(0)
+    expect(questions).toEqual([
+      'No rule of this Project allows this write for the Builder, and the call could not be sent to Jev whole.',
+    ])
+  })
 })
 
 describe('What Jev is told of the user’s intent', () => {
