@@ -184,6 +184,12 @@ export const tasksDoneEnd = Layer.effect(
 /** The service a Builder's requests for a need belong to. */
 export const BUILDER_NEEDS = needService('builder')
 
+/**
+ * The id the user's answer to three reds is delivered to the Builder under: the end reads when a
+ * turn of the Builder took it (#309).
+ */
+export const redsAnsweredId = (needId: string) => `answered-${needId}`
+
 /** How often the time a Building runs is written down (open question 28). */
 const HEARTBEAT = '15 seconds'
 
@@ -279,7 +285,8 @@ const answerOf = (need: Need): string | null => {
  * reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
- * event follower takes in an answer, before it acts on it. Never held otherwise.
+ * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute.
+ * Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -300,6 +307,7 @@ export type BuilderHold = (
     | 'greens-due'
     | 'handing'
     | 'retrying'
+    | 'proof-called'
     | 'releasing'
     | 'answering'
     | 'telling',
@@ -1992,6 +2000,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (decision.kind === 'error') {
             const tasks: ReadonlyArray<string> = JSON.parse(decision.tasks)
             return yield* storeDeliveryIn(transaction, {
+              id: redsAnsweredId(decision.needId),
               owner,
               target:
                 decision.proposer === null ? { role: 'builder' } : { lineage: decision.proposer },

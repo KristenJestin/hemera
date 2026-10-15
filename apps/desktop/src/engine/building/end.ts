@@ -94,7 +94,7 @@ import {
 } from '../storage/schema.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
-import { BuildingEnd } from './builder.ts'
+import { BuildingEnd, redsAnsweredId } from './builder.ts'
 import { checkResultsIn } from './attempts.ts'
 import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
@@ -320,10 +320,20 @@ const specialTaskIn = (
 
 /**
  * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
- * steps begins and ends, and once the review checkpoint is taken. Nothing otherwise.
+ * steps begins and ends, once the review checkpoint is taken, as the exit begins, and in each pass
+ * of the exit's stops once the runs are stopped, before the calls are waited for, and on each side
+ * of the proofs read for what is left stale. Nothing otherwise.
  */
 export type EndHold = (
-  at: 'turned' | 'advancing' | 'advanced' | 'checkpoint_taken',
+  at:
+    | 'turned'
+    | 'advancing'
+    | 'advanced'
+    | 'checkpoint_taken'
+    | 'exiting'
+    | 'settling'
+    | 'proofs_reading'
+    | 'retries_reading',
 ) => Effect.Effect<void>
 
 export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
@@ -538,19 +548,54 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
        * that red ended yet. The red is delivered under the attempt's id: still queued, it waits;
        * taken, it waits for a turn that ended after it was taken, so a turn that started before
        * it is never counted. A red with no delivery kept (a stop between the two) waits for a
-       * turn that ended after the attempt opened.
+       * turn that ended after the attempt opened. The user's answer to three reds waits the same
+       * way until a judgement follows it (#309): the Builder acts on it before the reds are judged.
        */
       const waitsOnBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           const database = yield* Database
-          const open = (yield* attemptsIn(database, building.id)).findLast(
-            (one) =>
-              one.taskId === null &&
-              one.scope === 'end' &&
-              one.subject === null &&
-              one.endedAt === null,
+          const attempts = (yield* attemptsIn(database, building.id)).filter(
+            (one) => one.taskId === null && one.scope === 'end' && one.subject === null,
           )
-          if (open === undefined || open.number === 1) return false
+          const open = attempts.findLast((one) => one.endedAt === null)
+          /** Whether the Builder took what it was handed, and ended a turn after it. */
+          const handed = (id: string, opened: string) =>
+            Effect.gen(function* () {
+              const turned = turnedOf(
+                building.id,
+                (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
+              )
+              const [told] = yield* database
+                .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
+                .from(sessionDeliveries)
+                .where(eq(sessionDeliveries.id, id))
+                .pipe(Effect.mapError(refusedWhile('reading what was delivered to the Builder')))
+              if (told?.state === 'queued') return true
+              const since = told?.sentAt ?? opened
+              return turned === null || turned <= since
+            })
+          if (open === undefined) {
+            const [answered] = yield* database
+              .select({ needId: buildingDecisions.needId, at: buildingDecisions.answeredAt })
+              .from(buildingDecisions)
+              .where(
+                and(
+                  eq(buildingDecisions.buildingId, building.id),
+                  eq(buildingDecisions.kind, 'error'),
+                  eq(buildingDecisions.scope, 'end'),
+                  isNull(buildingDecisions.subject),
+                  eq(buildingDecisions.state, 'answered'),
+                ),
+              )
+              .orderBy(desc(buildingDecisions.answeredAt))
+              .limit(1)
+              .pipe(Effect.mapError(refusedWhile('reading the answers to three reds')))
+            const at = answered?.at ?? null
+            if (answered === undefined || at === null) return false
+            if (attempts.some((one) => one.startedAt > at)) return false
+            return yield* handed(redsAnsweredId(answered.needId), at)
+          }
+          if (open.number === 1) return false
           if ((yield* checkResultsIn(database, open.id)).length > 0) return false
           const checking = yield* database
             .select({ name: buildingCheckRuns.name })
@@ -558,18 +603,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             .where(eq(buildingCheckRuns.attemptId, open.id))
             .pipe(Effect.mapError(refusedWhile('reading the checks running')))
           if (checking.length > 0) return false
-          const turned = turnedOf(
-            building.id,
-            (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
-          )
-          const [red] = yield* database
-            .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
-            .from(sessionDeliveries)
-            .where(eq(sessionDeliveries.id, open.id))
-            .pipe(Effect.mapError(refusedWhile('reading the red delivered to the Builder')))
-          if (red?.state === 'queued') return true
-          const since = red?.sentAt ?? open.startedAt
-          return turned === null || turned <= since
+          return yield* handed(open.id, open.startedAt)
         })
 
       /** Whether the last result of a final check is red. */
@@ -871,9 +905,16 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
-          // A Retry's run is recorded with events that drive the end again (#306).
-          const retrying = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
-          const proofs = (yield* scenarioProofsIn(database, building.id))
+          // Who a Retry runs again is read on both sides of the proofs (#306): a Retry says its
+          // scenario runs before it commits the proof back to rerun, and says it no longer runs only
+          // once its run is recorded. A Retry between the reads is in one of the two lists.
+          const before = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          yield* hold('proofs_reading')
+          const rows = yield* scenarioProofsIn(database, building.id)
+          yield* hold('retries_reading')
+          const after = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          const retrying = [...before, ...after]
+          const proofs = rows
             .filter(
               (row) =>
                 modeOf(row) === 'automated' &&
@@ -1011,12 +1052,14 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         })
 
       /**
-       * The mission's whole tree stops: every session, children first, and every command its agents
-       * started. Then the calls already executing end, and what one started meanwhile (a helper's
-       * session, a command) is stopped in turn, and its calls waited for: nothing of theirs lands
-       * after this. A call the user allowed runs no more from the first stop, whoever of the tree
-       * asked it, until a Builder works on the mission again. What was queued for them is kept, for
-       * a Builder the exit sends back; the exit's commit sets it aside.
+       * The mission's whole tree stops: every session, children first, every command its agents
+       * started, and every run Hemera started for one of their calls (a `proof_run`, the checks of
+       * `task_finished`), so the wait for those calls never lasts a run's own limit (#309). Then the
+       * calls already executing end, and what one started meanwhile (a helper's session, a command,
+       * a run) is stopped in turn, and its calls waited for: nothing of theirs lands after this. A
+       * call the user allowed runs no more from the first stop, whoever of the tree asked it, until
+       * a Builder works on the mission again. What was queued for them is kept, for a Builder the
+       * exit sends back; the exit's commit sets it aside.
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
@@ -1030,10 +1073,12 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
             sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END, 'kept'),
           ).pipe(
             Effect.andThen(stopAgentRuns(missionId)),
+            Effect.andThen(hold('settling')),
             Effect.andThen(ToolAccess.use((access) => access.settled(missionId))),
           )
-          yield* once
-          yield* once
+          // A session born during the stops is not of the tree read above: while they run, no call
+          // of the mission starts a run, whoever asks, so none is waited for to its limit (#309).
+          yield* ToolAccess.use((access) => access.stopping(missionId, Effect.andThen(once, once)))
         })
 
       /**
@@ -1050,6 +1095,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
         Effect.gen(function* () {
           const database = yield* Database
           const missionId = building.missionId
+          yield* hold('exiting')
           yield* stopAll(missionId)
           // What the exit stopped, the end brings back once more.
           broughtBack.delete(building.id)

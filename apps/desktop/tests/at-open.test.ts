@@ -188,7 +188,7 @@ describe('An "at open" command marked "ask before running"', () => {
     // child writes its pid first, as it may on a loaded machine. Let go at the latest at the end.
     const launched = held()
     const runs = {
-      hold: (at: 'recording' | 'launched') =>
+      hold: (at: 'recording' | 'recorded' | 'launched') =>
         at === 'launched' ? Effect.promise(() => launched.promise) : Effect.void,
     }
     const outcome = await commandsEngine(data, { runs })(({ profile }) =>

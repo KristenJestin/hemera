@@ -12,6 +12,9 @@
  *
  * A call is executed only while its grant is live, and counted against its mission until it ends:
  * once a mission's sessions are stopped, `settled` waits for the calls that were already executing.
+ * What a call's execution starts knows the call (`ExecutingFor`): a run Hemera starts for it (a
+ * proof, a check) is stopped with the agents' own commands, and none starts once the exit stops its
+ * session, so `settled` never waits for a run's own limit.
  * A call the user allowed is refused once its mission's Building is exiting, for a session of the
  * tree the exit stops, until a Builder works on the mission again.
  *
@@ -97,6 +100,14 @@ export class ToolAccess extends Context.Service<
      * it had then, run no more. A session born after it (Review's own) is not of the tree.
      */
     readonly exiting: (missionId: string, lineages: ReadonlyArray<string>) => Effect.Effect<void>
+    /**
+     * Runs the exit's stops of a mission: while they run, no call of the mission starts a run,
+     * whichever session asks, one born during the stops included (#309).
+     */
+    readonly stopping: <A, E, R>(
+      missionId: string,
+      stops: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>
     /** A Builder works on the mission again: the calls the user allowed run again. */
     readonly building: (missionId: string) => Effect.Effect<void>
     /** Whether a mission's Building is marked as exiting still. */
@@ -105,6 +116,28 @@ export class ToolAccess extends Context.Service<
     readonly settled: (missionId: string) => Effect.Effect<void>
   }
 >()('ToolAccess') {}
+
+/** The call whose execution runs in a fiber, as a run started there knows it (#309). */
+export interface CallOf {
+  readonly missionId: string
+  /** The session that asked, for a call made with a grant; null for one the user allowed. */
+  readonly sessionId: string | null
+  /** The lineage that asked, when the call names it (one the user allowed); null otherwise. */
+  readonly lineage: string | null
+  /**
+   * Whether the exit of the mission's Building stops a session of this lineage now; a lineage
+   * unknown (null) is of the tree, as for a call the user allowed.
+   */
+  readonly stopped: (lineage: string | null) => boolean
+}
+
+/**
+ * The call whose execution runs in this fiber, or null: a run started there is the call's. Once
+ * its Building exits, the exit stops it, and none of a stopped session's calls starts (#309).
+ */
+export const ExecutingFor = Context.Reference<CallOf | null>('ExecutingFor', {
+  defaultValue: () => null,
+})
 
 /** How many refused accesses are written in a minute; the rest are counted, and said later. */
 export const REFUSALS_LOGGED = 20
@@ -127,6 +160,8 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
     const waiting = new Map<string, Array<Deferred.Deferred<void>>>()
     /** The missions whose Building is exiting, with the lineages of the tree it stops. */
     const exits = new Map<string, ReadonlySet<string>>()
+    /** The missions whose exit is stopping their tree now. */
+    const stops = new Set<string>()
 
     const begun = (missionId: string) =>
       executions.set(missionId, (executions.get(missionId) ?? 0) + 1)
@@ -143,6 +178,26 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
         waiting.delete(missionId)
         return Effect.forEach(woken, (one) => Deferred.succeed(one, undefined), { discard: true })
       })
+
+    /** What a run a call starts knows of it: null for a call of no mission. */
+    const callOf = (
+      missionId: string | null,
+      sessionId: string | null,
+      lineage: string | null,
+    ): CallOf | null =>
+      missionId === null
+        ? null
+        : {
+            missionId,
+            sessionId,
+            lineage,
+            stopped: (asked) => {
+              // While the stops run, a session born since the tree was read is stopped too.
+              if (stops.has(missionId)) return true
+              const tree = exits.get(missionId)
+              return tree !== undefined && (asked === null || tree.has(asked))
+            },
+          }
 
     const revoke = (sessionId: string) =>
       Effect.sync(() => {
@@ -184,7 +239,14 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
             if (missionId !== null) begun(missionId)
             return { live: grant !== null, missionId }
           }),
-          ({ live }) => (live ? execution : Effect.succeed(null)),
+          ({ live, missionId }) =>
+            live
+              ? Effect.provideService(
+                  execution,
+                  ExecutingFor,
+                  callOf(missionId, byDigest.get(grantId)?.sessionId ?? null, null),
+                )
+              : Effect.succeed(null),
           ({ missionId }) => (missionId === null ? Effect.void : ended(missionId)),
         ),
       counted: ({ missionId, lineage }, execution) =>
@@ -198,10 +260,19 @@ export const toolAccessLayer = (log: Log, clock: () => number = Date.now) =>
             const tree = exits.get(missionId)
             return tree === undefined || (lineage !== null && !tree.has(lineage))
           }),
-          (runs) => (runs ? execution : Effect.succeed(null)),
+          (runs) =>
+            runs
+              ? Effect.provideService(execution, ExecutingFor, callOf(missionId, null, lineage))
+              : Effect.succeed(null),
           () => (missionId === null ? Effect.void : ended(missionId)),
         ),
       exiting: (missionId, lineages) => Effect.sync(() => exits.set(missionId, new Set(lineages))),
+      stopping: (missionId, inner) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => stops.add(missionId)),
+          () => inner,
+          () => Effect.sync(() => stops.delete(missionId)),
+        ),
       building: (missionId) => Effect.sync(() => exits.delete(missionId)),
       isExiting: (missionId) => Effect.sync(() => exits.has(missionId)),
       settled: (missionId) =>
