@@ -853,14 +853,12 @@ const closingOf = (text: string, reader: Reader): string | undefined => {
   return text.charAt(start) === '{' ? '}' : ']'
 }
 
-/** The values the containers hold whole, in steps: a reader may break with millions open. */
-function* heldIn(broken: ReadonlyArray<ReadonlyArray<number>>): Steps<ReadonlyArray<Span>> {
+/** The values held whole, two numbers each, as spans, in steps: there may be millions. */
+function* heldIn(broken: ReadonlyArray<number>): Steps<ReadonlyArray<Span>> {
   const held: Span[] = []
-  for (const values of broken) {
-    for (let index = 0; index + 2 < values.length; index += 3) {
-      held.push([values[index + 1] ?? 0, values[index + 2] ?? 0])
-      if (due()) yield
-    }
+  for (let index = 0; index + 1 < broken.length; index += 2) {
+    held.push([broken[index] ?? 0, broken[index + 1] ?? 0])
+    if (due()) yield
   }
   return held
 }
@@ -895,10 +893,15 @@ function* containersIn(text: string): Steps<Containers> {
   const readers: Readers = { between: null, inString: null }
   /** Where no reader has read outside a string yet. */
   let frontier = 0
-  /** What the containers open in each reader that broke hold whole, kept to the end. */
-  const broken: Array<ReadonlyArray<number>> = []
+  /**
+   * What the containers open in each reader that broke hold whole, where each starts and ends,
+   * kept to the end in one list: millions of readers may break, most holding one value or none.
+   */
+  const broken: number[] = []
   const broke = (reader: Reader) => {
-    if (reader.held.length > 0) broken.push(reader.held)
+    for (let index = 0; index + 2 < reader.held.length; index += 3) {
+      broken.push(reader.held[index + 1] ?? 0, reader.held[index + 2] ?? 0)
+    }
   }
   /** The innermost container open in a reader holds a value whole. */
   const hold = (reader: Reader, start: number, end: number) => {
