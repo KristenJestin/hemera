@@ -45,10 +45,12 @@ const QUOTED_OR_BARE = String.raw`"(?:[^"\\]|\\.)*"|'[^']*'`
 
 /**
  * A header whose whole value is a credential, its scheme with its token: as a header line writes
- * it (to the end of the line or of the quotes around it), or as JSON writes it.
+ * it (to the end of the line or of the quotes around it), or as JSON writes it. An escaped quote
+ * (`\"`) closes no quotes around it, so the value runs on through it: a backslash takes the
+ * character after it.
  */
 const CREDENTIAL_HEADER = new RegExp(
-  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
+  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|(?=[^"'\r\n])[^"'\\\r\n]*(?:\\[^\r\n]?[^"'\\\r\n]*)*)`,
   'gi',
 )
 
@@ -278,9 +280,12 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
  *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
  *   password=…`, `password=<private key>token: "a"x`).
  *
- * The union hides at least what any reading hides, and its cost is three scans of each shape.
+ * The union hides at least what any reading hides, and its cost is three scans of each shape. On
+ * top, every known value as a JSON string writes it (`se\"same`): in its own reading, since
+ * written over in the others it would hide what the shapes read around it.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
+  const escapedHidden = yield* knownSpans(text, escapedForms(known))
   const knownHidden = yield* knownSpans(text, known)
   let spans = knownHidden
   let inTurn = knownHidden
@@ -305,7 +310,7 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
       written = true
     }
   }
-  spans = yield* union(spans, inTurn)
+  spans = yield* union(yield* union(spans, inTurn), escapedHidden)
   // Nothing closed: the third reading would read the text as the first did.
   if (closed.length === 0) return spans
   const opened = yield* writtenOver(text, closed)
@@ -395,6 +400,20 @@ export function maskShapes(text: string): string {
 const longestFirst = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
   [...new Set(values)].filter((value) => value !== '').toSorted((a, b) => b.length - a.length)
 
+/** Each list of known values with its escaped forms, worked out once for all its strings. */
+const ESCAPED_FORMS = new WeakMap<ReadonlyArray<string>, ReadonlyArray<string>>()
+
+/** The known values a JSON string writes otherwise than as they are (`se\"same`), as it writes them. */
+const escapedForms = (known: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const kept = ESCAPED_FORMS.get(known)
+  if (kept !== undefined) return kept
+  const forms = known
+    .map((value) => JSON.stringify(value).slice(1, -1))
+    .filter((form) => !known.includes(form))
+  ESCAPED_FORMS.set(known, forms)
+  return forms
+}
+
 /**
  * Every occurrence of every known value masked over its whole span: where two values overlap
  * without one containing the other, the stretch they cover together goes as one mask.
@@ -457,7 +476,8 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
  * JSON answer hold nothing to mask, and this answers for them without the steps' cost.
  */
 function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
-  if (known.some((value) => text.includes(value))) return false
+  const has = (value: string) => text.includes(value)
+  if (known.some(has) || escapedForms(known).some(has)) return false
   for (const pattern of SHAPES) {
     if (matchFrom(pattern, text, 0) !== null) return false
     // A step after each pattern on a long text: each crosses all of it.
@@ -503,22 +523,54 @@ const ESCAPED = new Map([
 /** What JSON takes for space between its tokens. */
 const JSON_SPACE = ' \t\n\r'
 
+/** Four hexadecimal digits, as a `\u` escape writes them. */
+const HEX = /^[\dA-Fa-f]{4}$/
+
+/** A run of what a JSON string holds as it is: no quote, no backslash, no control character. */
+// oxlint-disable-next-line no-control-regex -- the control characters are what ends the run
+const PLAIN = /[^"\\\u0000-\u001f]*/y
+
+/** Where reading a JSON string stopped, and whether it was closed there. */
+interface Stopped {
+  /** After its closing quote; else the first character it cannot hold. */
+  readonly stop: number
+  readonly closed: boolean
+}
+
+/**
+ * Where reading the JSON string whose quote is at `at` stops: after its closing quote, or at the
+ * first character a JSON string cannot hold (a line end or another control character, an escape
+ * JSON has not, the end of the text).
+ */
+const stringStop = (text: string, at: number): Stopped => {
+  let next = at + 1
+  for (;;) {
+    next += matchFrom(PLAIN, text, next)?.[0].length ?? 0
+    const code = text.charCodeAt(next)
+    if (Number.isNaN(code) || code < 0x20) return { stop: next, closed: false }
+    if (code === 0x22) return { stop: next + 1, closed: true }
+    if (code !== 0x5c) next += 1
+    else if (text.charAt(next + 1) === 'u') {
+      if (!HEX.test(text.slice(next + 2, next + 6))) return { stop: next, closed: false }
+      next += 6
+    } else if (ESCAPED.has(text.charAt(next + 1))) next += 2
+    else return { stop: next, closed: false }
+  }
+}
+
 /** Where the JSON string at `at` ends, after its closing quote, or -1 when it is not one. */
 const jsonStringEnd = (text: string, at: number): number => {
   if (text.charAt(at) !== '"') return -1
-  let next = at + 1
-  for (;;) {
-    const code = text.charCodeAt(next)
-    if (Number.isNaN(code) || code < 0x20) return -1
-    if (code === 0x22) return next + 1
-    if (code !== 0x5c) next += 1
-    else if (text.charAt(next + 1) === 'u') {
-      if (!/^[\dA-Fa-f]{4}$/.test(text.slice(next + 2, next + 6))) return -1
-      next += 6
-    } else if (ESCAPED.has(text.charAt(next + 1))) next += 2
-    else return -1
-  }
+  const { stop, closed } = stringStop(text, at)
+  return closed ? stop : -1
 }
+
+/** A run of JSON space, maybe empty. */
+const JSON_SPACES = /[ \t\n\r]*/y
+
+/** Where the JSON space from `at` ends: found by the pattern, a long run is crossed at once. */
+const jsonSpace = (text: string, at: number): number =>
+  at + (matchFrom(JSON_SPACES, text, at)?.[0].length ?? 0)
 
 /** Where the run of digits at `at` ends. */
 const digitsEnd = (text: string, at: number): number => {
@@ -564,11 +616,7 @@ export const isJson = (text: string): boolean => done(jsonRead(text))
 
 /** `isJson`, in steps. */
 function* jsonRead(text: string): Steps<boolean> {
-  const space = (at: number): number => {
-    let next = at
-    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
-    return next
-  }
+  const space = (at: number): number => jsonSpace(text, at)
   /** Where the value of the next field of an object begins, past its name and colon, or -1. */
   const field = (at: number): number => {
     const name = jsonStringEnd(text, at)
@@ -635,11 +683,14 @@ const touchingSpans = (
   return found
 }
 
-/**
- * The lines of a text that are JSON, each where it stands. Among lines that are not, a line a
- * hidden stretch covers whole is text: it is hidden whole, as masking the text would hide it.
- */
-function* jsonLines(text: string, hidden: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+/** The lines of a text that are JSON by themselves, and whether some line that is not blank is not. */
+interface Lines {
+  readonly lines: ReadonlyArray<Span>
+  readonly mixed: boolean
+}
+
+/** The lines of a text that are JSON by themselves, each where it stands. */
+function* jsonLines(text: string): Steps<Lines> {
   const lines: Span[] = []
   let mixed = false
   for (let start = 0; start <= text.length;) {
@@ -653,9 +704,341 @@ function* jsonLines(text: string, hidden: ReadonlyArray<Span>): Steps<ReadonlyAr
     start = end + 1
     if (due()) yield
   }
-  const coveredWhole = ([from, to]: Span) =>
-    touchingSpans(hidden, from, to).some(([spanFrom, spanTo]) => spanFrom <= from && spanTo >= to)
-  return mixed ? lines.filter((line) => !coveredWhole(line)) : lines
+  return { lines, mixed }
+}
+
+/**
+ * The next match of a pattern from a position, the positions asked in order: a search starts only
+ * past the match found last, so the text is crossed once however often it is asked. The text's
+ * length when there is none.
+ */
+const nextOf = (text: string, pattern: RegExp): ((at: number) => number) => {
+  let found = -1
+  return (at) => {
+    if (found < at) found = matchFrom(pattern, text, at)?.index ?? text.length
+    return found
+  }
+}
+
+/** Where a JSON container opens. */
+const OPENERS = /[[{]/g
+
+/** A quote. */
+const QUOTES = /"/g
+
+/** A backslash. */
+const BACKSLASHES = /\\/g
+
+/** What ends what a JSON string may hold: a quote, or a line end. */
+const DELIMITERS = /["\r\n]/g
+
+/** Whether the quote at `at` is escaped: an odd run of backslashes before it, back to `floor`. */
+const escapedAt = (text: string, floor: number, at: number): boolean => {
+  let before = at
+  while (before > floor && text.charAt(before - 1) === '\\') before -= 1
+  return (at - before) % 2 === 1
+}
+
+/**
+ * The JSON values written in a text that is not JSON whole, in order and apart:
+ *
+ * - every container read whole from where it opens, wherever it stands: after a sentence, a lone
+ *   quote, another bracket (`containersIn`). One that breaks (cut, or a string in it broken by a
+ *   line end) keeps as values those it held whole;
+ * - every line that is JSON by itself. Of two of these, the one inside the other gives way: a
+ *   string line that holds braces stays one string, a pretty container one container. Where two
+ *   overlap, the first stays;
+ * - a value a broken container held whole, where it crosses none of those and none holds it. Those
+ *   it holds give way to it: pretty JSON after a bracket of the prose that never closes stays one
+ *   value, the lines that are JSON by themselves inside it too. One read where the quotes pair the
+ *   other way crosses the others, and gives way; of two held values that cross, the longer stays;
+ * - between all those, every string opened by a quote no backslash escapes and closed before the
+ *   next of them.
+ */
+function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  const { complete, held } = yield* containersIn(text)
+  const outer: Span[] = []
+  for (const value of yield* inOrder(yield* byStart(complete), lines, ([start]) => start)) {
+    if (value[0] >= (outer.at(-1)?.[1] ?? 0)) outer.push(value)
+    if (due()) yield
+  }
+  // Two readers at most read each character, so each is in two held values at most, and the outer
+  // values each touches are counted twice at most.
+  const kept: Span[] = []
+  for (const value of yield* byStart(held)) {
+    const crossed = touchingSpans(outer, value[0], value[1]).some(
+      ([start, end]) => start < value[0] || end > value[1],
+    )
+    const last = kept.at(-1)
+    if (!crossed && value[0] >= (last?.[1] ?? 0)) kept.push(value)
+    else if (!crossed && last !== undefined && value[1] - value[0] > last[1] - last[0]) {
+      // Two read where the quotes pair the other way cross: the longer stays, and those kept
+      // before it end where it starts or sooner.
+      kept[kept.length - 1] = value
+    }
+    if (due()) yield
+  }
+  const values: Span[] = []
+  for (const value of yield* inOrder(kept, outer, ([start]) => start)) {
+    if (value[0] >= (values.at(-1)?.[1] ?? 0)) values.push(value)
+    if (due()) yield
+  }
+  const strings: Span[] = []
+  const nextQuote = nextOf(text, QUOTES)
+  let gapStart = 0
+  for (let index = 0; index <= values.length; index += 1) {
+    const gapEnd = values[index]?.[0] ?? text.length
+    for (let at = gapStart, quote = nextQuote(at); quote < gapEnd; quote = nextQuote(at)) {
+      at = quote + 1
+      if (escapedAt(text, gapStart, quote)) continue
+      const { stop, closed } = stringStop(text, quote)
+      if (closed && stop <= gapEnd) strings.push([quote, stop])
+      // Nothing between the quote and where it stopped is a quote that opens a string.
+      at = Math.min(Math.max(stop, at), gapEnd)
+      if (due()) yield
+    }
+    gapStart = values[index]?.[1] ?? text.length
+    if (due()) yield
+  }
+  return yield* inOrder(values, strings, ([start]) => start)
+}
+
+/**
+ * Spans in order of their starts, in steps. They come from two readers at most, each in order, so
+ * they are made of a few runs in order: the runs are merged two by two.
+ */
+function* byStart(spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  let runs: Array<ReadonlyArray<Span>> = []
+  let run: Span[] = []
+  for (const span of spans) {
+    if (span[0] < (run.at(-1)?.[0] ?? -1)) {
+      runs.push(run)
+      run = []
+    }
+    run.push(span)
+    if (due()) yield
+  }
+  runs.push(run)
+  while (runs.length > 1) {
+    const paired: Array<ReadonlyArray<Span>> = []
+    for (let index = 0; index < runs.length; index += 2) {
+      paired.push(yield* inOrder(runs[index] ?? [], runs[index + 1] ?? [], ([start]) => start))
+    }
+    runs = paired
+  }
+  return runs[0] ?? []
+}
+
+/** What a reader of a container reads next, outside its strings. */
+type Expected = 'value' | 'key' | 'colon' | 'after'
+
+/**
+ * A reader of the container that opens at `start`, its containers open kept on a stack. A text
+ * may open millions, so each costs one number, and each value held whole three.
+ */
+interface Reader {
+  readonly start: number
+  /** Where each container open begins, the innermost last: its opener says what closes it. */
+  readonly starts: number[]
+  /**
+   * The values held whole so far, three numbers each: the depth of the container that holds it,
+   * then where it starts and ends. Those of the innermost container are always the last.
+   */
+  readonly held: number[]
+  expected: Expected
+  /** Where it reads on; in a string, once the string ends there. */
+  at: number
+}
+
+/** What closes the innermost container open in a reader, if one is. */
+const closingOf = (text: string, reader: Reader): string | undefined => {
+  const start = reader.starts.at(-1)
+  if (start === undefined) return undefined
+  return text.charAt(start) === '{' ? '}' : ']'
+}
+
+/** The values held whole, two numbers each, as spans, in steps: there may be millions. */
+function* heldIn(broken: ReadonlyArray<number>): Steps<ReadonlyArray<Span>> {
+  const held: Span[] = []
+  for (let index = 0; index + 1 < broken.length; index += 2) {
+    held.push([broken[index] ?? 0, broken[index + 1] ?? 0])
+    if (due()) yield
+  }
+  return held
+}
+
+/** The two readers at most that read a text at once. */
+interface Readers {
+  /** The one that reads between strings. */
+  between: Reader | null
+  /** The one in a string. */
+  inString: Reader | null
+}
+
+/** The containers a text holds whole, and the values held whole by those that break. */
+interface Containers {
+  readonly complete: ReadonlyArray<Span>
+  readonly held: ReadonlyArray<Span>
+}
+
+/**
+ * Every container read whole from where it opens, in one pass. A reader starts at each opener
+ * where no reader reads outside a string; one that meets an opener goes into it. On a line, the
+ * quotes no backslash escapes open and close strings in turn, so a reader that would start where
+ * another reads outside its strings reads as that one does, inside one of its containers: it ends
+ * where that container ends, or breaks where the other breaks, and is not needed. Any other reads
+ * strings where the other reads between them. So two readers at most run at once, one between
+ * strings and one in a string, and they swap at each quote: each character is read once by each,
+ * and the text is crossed twice at most.
+ */
+function* containersIn(text: string): Steps<Containers> {
+  const complete: Span[] = []
+  const nextOpener = nextOf(text, OPENERS)
+  const readers: Readers = { between: null, inString: null }
+  /** Where no reader has read outside a string yet. */
+  let frontier = 0
+  /**
+   * What the containers open in each reader that broke hold whole, where each starts and ends,
+   * kept to the end in one list: millions of readers may break, most holding one value or none.
+   */
+  const broken: number[] = []
+  const broke = (reader: Reader) => {
+    for (let index = 0; index + 2 < reader.held.length; index += 3) {
+      broken.push(reader.held[index + 1] ?? 0, reader.held[index + 2] ?? 0)
+    }
+  }
+  /** The innermost container open in a reader holds a value whole. */
+  const hold = (reader: Reader, start: number, end: number) => {
+    reader.held.push(reader.starts.length, start, end)
+  }
+  /** The reader outside a string stops at `at`: broken, ended, or gone into a string. */
+  const stops = (at: number) => {
+    readers.between = null
+    frontier = at
+  }
+  /** A value read whole, from `start` (-1 for a scalar, which no one holds) to `end`. */
+  const read = (reader: Reader, start: number, end: number) => {
+    if (reader.starts.length === 0) {
+      complete.push([reader.start, end])
+      stops(end)
+      return
+    }
+    if (start !== -1) hold(reader, start, end)
+    reader.expected = 'after'
+    reader.at = end
+  }
+  for (;;) {
+    if (due()) yield
+    const reader = readers.between
+    if (reader === null) {
+      const opener = nextOpener(frontier)
+      if (readers.inString !== null && readers.inString.at <= opener) {
+        // Its string ended before any opener: it reads on outside it.
+        readers.between = readers.inString
+        readers.inString = null
+      } else if (opener < text.length) {
+        readers.between = {
+          start: opener,
+          starts: [],
+          held: [],
+          expected: 'value',
+          at: opener,
+        }
+      } else return { complete, held: yield* heldIn(broken) }
+      continue
+    }
+    const at = jsonSpace(text, reader.at)
+    const first = text.charAt(at)
+    const closing = closingOf(text, reader)
+    if ((first === '{' || first === '[') && reader.expected === 'value') {
+      const closes = first === '{' ? '}' : ']'
+      const inside = jsonSpace(text, at + 1)
+      if (text.charAt(inside) === closes) read(reader, at, inside + 1)
+      else {
+        reader.starts.push(at)
+        reader.expected = closes === '}' ? 'key' : 'value'
+        reader.at = at + 1
+      }
+    } else if (closing !== undefined && first === closing && reader.expected === 'after') {
+      // What it held goes with it: it is now held whole itself.
+      const depth = reader.starts.length
+      while (reader.held.length > 0 && reader.held.at(-3) === depth) reader.held.length -= 3
+      read(reader, reader.starts.pop() ?? at, at + 1)
+    } else if (closing !== undefined && first === ',' && reader.expected === 'after') {
+      reader.expected = closing === '}' ? 'key' : 'value'
+      reader.at = at + 1
+    } else if (first === ':' && reader.expected === 'colon') {
+      reader.expected = 'value'
+      reader.at = at + 1
+    } else if (first === '"') {
+      // The quote ends the string the other reader is in, when one is.
+      const other = readers.inString
+      readers.inString = null
+      const { stop, closed } = stringStop(text, at)
+      if (closed && (reader.expected === 'value' || reader.expected === 'key')) {
+        if (reader.starts.length > 0) hold(reader, at, stop)
+        reader.expected = reader.expected === 'key' ? 'colon' : 'after'
+        reader.at = stop
+        readers.inString = reader
+      } else broke(reader)
+      stops(at + 1)
+      if (other?.at === at + 1) readers.between = other
+      else if (other !== null) broke(other)
+    } else if (reader.expected === 'value' && jsonScalarEnd(text, at) !== -1) {
+      read(reader, -1, jsonScalarEnd(text, at))
+    } else {
+      broke(reader)
+      stops(at)
+    }
+  }
+}
+
+/**
+ * What the shapes and the known values hide in the text outside the JSON values written in it,
+ * read as JSON strings: each stretch between two quotes no backslash escapes, or a line end, that
+ * holds a backslash is read as a string holds it, and what masking that string hides is hidden
+ * where it is written. A string's content is always one such stretch, whatever quote before it
+ * was taken to open another: a lone quote in a sentence never makes a string read as text. A
+ * string opened and never closed is read up to its line end. This only ever adds.
+ */
+function* readAsStrings(
+  text: string,
+  written: ReadonlyArray<Span>,
+  known: ReadonlyArray<string>,
+): Steps<ReadonlyArray<Span>> {
+  const spans: Span[] = []
+  const nextBackslash = nextOf(text, BACKSLASHES)
+  const nextDelimiter = nextOf(text, DELIMITERS)
+  const unescaped = (floor: number, at: number) =>
+    text.charAt(at) !== '"' || !escapedAt(text, floor, at)
+  let gapStart = 0
+  for (let unit = 0; unit <= written.length; unit += 1) {
+    const gapEnd = written[unit]?.[0] ?? text.length
+    let at = gapStart
+    for (let backslash = nextBackslash(at); backslash < gapEnd; backslash = nextBackslash(at)) {
+      // The stretch that holds it: from the last delimiter before it, to the next one after it.
+      let first = at
+      for (let stop = nextDelimiter(at); stop < backslash; stop = nextDelimiter(stop + 1)) {
+        if (unescaped(first, stop)) first = stop + 1
+      }
+      let last = nextDelimiter(backslash)
+      while (last < gapEnd && !unescaped(first, last)) last = nextDelimiter(last + 1)
+      last = Math.min(last, gapEnd)
+      const { read, from } = yield* readBody(text, first, last)
+      // With no escape JSON has, it reads as printed: the whole text's masking found all of it.
+      const escaped = read.length !== last - first
+      if (escaped && !(yield* untouched(read, known))) {
+        for (const [start, end] of yield* hiddenSpans(read, known)) {
+          spans.push([from[start] ?? first, from[end] ?? last])
+        }
+      }
+      at = last
+      if (due()) yield
+    }
+    gapStart = written[unit]?.[1] ?? text.length
+    if (due()) yield
+  }
+  return yield* merged(spans)
 }
 
 /** The parts of the spans outside the units. Both are in order, and the units do not overlap. */
@@ -692,25 +1075,38 @@ interface Read {
 
 /** A JSON string of the text, read, each character with where it is written. */
 function* readString(text: string, start: number, end: number): Steps<Read> {
+  return yield* readBody(text, start + 1, end - 1)
+}
+
+/**
+ * The text from `first` to `last` read as what a JSON string holds, each character with where it
+ * is written: an escape JSON has is read as what it writes, and a backslash that begins none as
+ * itself.
+ */
+function* readBody(text: string, first: number, last: number): Steps<Read> {
   const parts: string[] = []
-  const from = new Int32Array(end - start)
+  const from = new Int32Array(last - first + 1)
   let count = 0
-  let at = start + 1
+  let at = first
   // A run of characters written as themselves is taken whole, at the next escape or the end.
   let run = at
-  while (at < end - 1) {
+  while (at < last) {
     from[count] = at
     count += 1
-    if (text.charAt(at) !== '\\') at += 1
+    const letter = text.charAt(at) === '\\' && at + 2 <= last ? text.charAt(at + 1) : ''
+    const unicode = letter === 'u' && at + 6 <= last && HEX.test(text.slice(at + 2, at + 6))
+    const writes = ESCAPED.get(letter)
+    if (unicode) {
+      parts.push(
+        text.slice(run, at),
+        String.fromCharCode(Number.parseInt(text.slice(at + 2, at + 6), 16)),
+      )
+      at += 6
+      run = at
+    } else if (writes === undefined) at += 1
     else {
-      parts.push(text.slice(run, at))
-      if (text.charAt(at + 1) === 'u') {
-        parts.push(String.fromCharCode(Number.parseInt(text.slice(at + 2, at + 6), 16)))
-        at += 6
-      } else {
-        parts.push(ESCAPED.get(text.charAt(at + 1)) ?? '')
-        at += 2
-      }
+      parts.push(text.slice(run, at), writes)
+      at += 2
       run = at
     }
     if (count % CHARACTERS_A_STEP === 0) yield
@@ -768,14 +1164,14 @@ export const maskPrintedPaced = (
   )
 
 function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
-  const hidden = yield* hiddenSpans(text, known)
+  const allJson = yield* jsonRead(text)
+  const { lines, mixed } = allJson ? { lines: [], mixed: false } : yield* jsonLines(text)
+  const values: ReadonlyArray<Span> = allJson ? [[0, text.length]] : yield* writtenJson(text, lines)
+  const shapes = yield* hiddenSpans(text, known)
+  const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
   const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
   const edits: Edit[] = []
-  const space = (at: number): number => {
-    let next = at
-    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
-    return next
-  }
+  const space = (at: number): number => jsonSpace(text, at)
   const stringEnd = (at: number): number => {
     let next = at + 1
     while (text.charAt(next) !== '"') next += text.charAt(next) === '\\' ? 2 : 1
@@ -799,9 +1195,13 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
       return
     }
     if (spans.length === 0) {
-      // Nothing of the whole text's masking here: the string masked as text once read.
+      // Nothing of the whole text's masking here: the string masked as text once read. Written
+      // with no escape, it reads as printed, and masking it finds nothing the whole text's
+      // masking did not find in it: a shape that would stop at its quotes stops there in the text
+      // too, and one that runs past them touches it.
       const plain = text.slice(start + 1, end - 1)
-      const read = plain.includes('\\') ? (yield* readString(text, start, end)).read : plain
+      if (!plain.includes('\\')) return
+      const { read } = yield* readString(text, start, end)
       const masked = yield* textMasked(read, known)
       if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
       return
@@ -899,34 +1299,49 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
       }
     }
   }
-  const units: ReadonlyArray<Span> = (yield* jsonRead(text))
-    ? [[0, text.length]]
-    : yield* jsonLines(text, hidden)
-  for (const [start] of units) yield* value(start)
+  // Among lines that are not JSON, a value a hidden stretch covers whole is text: it is hidden
+  // whole, as masking the text would hide it.
+  const coveredWhole = ([from, to]: Span) =>
+    touchingSpans(hidden, from, to).some(([spanFrom, spanTo]) => spanFrom <= from && spanTo >= to)
+  const units: Span[] = []
+  for (const unit of values) {
+    if (!mixed || !coveredWhole(unit)) units.push(unit)
+    if (due()) yield
+  }
+  const nextBackslash = nextOf(text, BACKSLASHES)
+  for (const [start, end] of units) {
+    // A string that nothing hidden touches and that holds no escape is left as printed: what
+    // `maskString` does, without its cost on a text of many small strings.
+    const plain = text.charAt(start) === '"' && nextBackslash(start) >= end
+    if (!plain || touching(start, end).length > 0) yield* value(start)
+    else if (due()) yield
+  }
   const outsideJson: Edit[] = []
   for (const [start, end] of yield* outside(hidden, units)) {
     if (text.slice(start, end).trim() !== '') outsideJson.push({ start, end, by: MASK })
     if (due()) yield
   }
-  return yield* applied(text, yield* inOrder(edits, outsideJson))
+  return yield* applied(text, yield* inOrder(edits, outsideJson, (edit) => edit.start))
 }
 
 /**
- * Two lists of edits, each in order, as one in order: in one pass and in steps, where sorting
- * them together would hold the engine on an output with millions of masks.
+ * Two lists, each in order of where its items start, as one in order: in one pass and in steps,
+ * where sorting them together would hold the engine on an output with millions of masks.
  */
-function* inOrder(
-  first: ReadonlyArray<Edit>,
-  second: ReadonlyArray<Edit>,
-): Steps<ReadonlyArray<Edit>> {
-  const out: Edit[] = []
+function* inOrder<Item>(
+  first: ReadonlyArray<Item>,
+  second: ReadonlyArray<Item>,
+  startOf: (item: Item) => number,
+): Steps<ReadonlyArray<Item>> {
+  const out: Item[] = []
   let inFirst = 0
   let inSecond = 0
   for (;;) {
     const fromFirst = first[inFirst]
     const fromSecond = second[inSecond]
     const takeFirst =
-      fromFirst !== undefined && (fromSecond === undefined || fromFirst.start <= fromSecond.start)
+      fromFirst !== undefined &&
+      (fromSecond === undefined || startOf(fromFirst) <= startOf(fromSecond))
     const edit = takeFirst ? fromFirst : fromSecond
     if (edit === undefined) return out
     if (takeFirst) inFirst += 1
