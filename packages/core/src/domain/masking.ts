@@ -54,6 +54,15 @@ const CREDENTIAL_HEADER = new RegExp(
   'gi',
 )
 
+/**
+ * The header as masking read it before #401, its value stopped at any quote, escaped or not: the
+ * shapes read in turn read it this way too (`hiddenSpans`).
+ */
+const CREDENTIAL_HEADER_TO_A_QUOTE = new RegExp(
+  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
+  'gi',
+)
+
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
 const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
 const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
@@ -263,6 +272,18 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
   return spans
 }
 
+/** An escaped quote: the only place where the two ways of reading a header's value part. */
+const ESCAPED_QUOTE = /\\["']/
+
+/** The shapes read in turn, with one way of reading a header's value. */
+interface InTurn {
+  readonly header: RegExp
+  /** The text with what was found so far written over; the text itself until something was. */
+  view: string
+  written: boolean
+  hidden: ReadonlyArray<Span>
+}
+
 /**
  * The stretches of a text that masking hides: every occurrence of a known value, and every
  * stretch a shape hides, those that overlap or touch made one. They are the union of three readings:
@@ -272,7 +293,10 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
  * - the shapes in turn, as masking used to read them: each on the text where the known values and
  *   all the shapes before it found are written over. A value that stops at a space, a quote or a
  *   line end then runs on through what an earlier shape hid, and hides what is glued after it
- *   (`password=<private key>x`);
+ *   (`password=<private key>x`). Where the text holds an escaped quote, this is read twice: with a
+ *   header's value run on through it, and stopped at it as before #401. Run on, the value may
+ *   cover the name of a shape written after it (`Authorization: \"https://u:…@`), which then reads
+ *   no value through what an earlier shape hid; stopped, it hides less of what follows it (#417);
  * - each shape once more, on the text where the known values, and every stretch the two readings
  *   found that holds a space or a quote up to its last one, are written over. A value hidden by
  *   itself, quoted or spaced, no longer stops the value it stands in (`password=token="a b"x`,
@@ -280,37 +304,45 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
  *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
  *   password=…`, `password=<private key>token: "a"x`).
  *
- * The union hides at least what any reading hides, and its cost is three scans of each shape. On
- * top, every known value as a JSON string writes it (`se\"same`): in its own reading, since
- * written over in the others it would hide what the shapes read around it.
+ * The union hides at least what any reading hides, and its cost is three scans of each shape, four
+ * where a quote is escaped. On top, every known value as a JSON string writes it (`se\"same`): in
+ * its own reading, since written over in the others it would hide what the shapes read around it.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
   const escapedHidden = yield* knownSpans(text, escapedForms(known))
   const knownHidden = yield* knownSpans(text, known)
   let spans = knownHidden
-  let inTurn = knownHidden
   let closed = knownHidden
   // Written over only once something is hidden: until then, the shapes in turn read the text.
-  let view = text
-  let written = false
-  if (knownHidden.length > 0) {
-    view = yield* writtenOver(text, knownHidden)
-    written = true
-  }
+  const start = knownHidden.length > 0 ? yield* writtenOver(text, knownHidden) : text
+  const headers = ESCAPED_QUOTE.test(text)
+    ? [CREDENTIAL_HEADER, CREDENTIAL_HEADER_TO_A_QUOTE]
+    : [CREDENTIAL_HEADER]
+  const readings: ReadonlyArray<InTurn> = headers.map((header) => ({
+    header,
+    view: start,
+    written: knownHidden.length > 0,
+    hidden: knownHidden,
+  }))
   for (const pattern of SHAPES) {
     const found = yield* shapeSpans(text, pattern)
     spans = yield* union(spans, found)
     closed = yield* union(closed, yield* closedSpans(text, found))
-    const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
-    if (foundInTurn.length > 0) {
-      inTurn = yield* union(inTurn, foundInTurn)
-      if (foundInTurn !== found)
-        closed = yield* union(closed, yield* closedSpans(text, foundInTurn))
-      view = yield* writtenOver(view, foundInTurn)
-      written = true
+    for (const reading of readings) {
+      const read = pattern === CREDENTIAL_HEADER ? reading.header : pattern
+      const foundInTurn =
+        reading.written || read !== pattern ? yield* shapeSpans(reading.view, read) : found
+      if (foundInTurn.length > 0) {
+        reading.hidden = yield* union(reading.hidden, foundInTurn)
+        if (foundInTurn !== found)
+          closed = yield* union(closed, yield* closedSpans(text, foundInTurn))
+        reading.view = yield* writtenOver(reading.view, foundInTurn)
+        reading.written = true
+      }
     }
   }
-  spans = yield* union(yield* union(spans, inTurn), escapedHidden)
+  for (const reading of readings) spans = yield* union(spans, reading.hidden)
+  spans = yield* union(spans, escapedHidden)
   // Nothing closed: the third reading would read the text as the first did.
   if (closed.length === 0) return spans
   const opened = yield* writtenOver(text, closed)

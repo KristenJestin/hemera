@@ -1019,6 +1019,54 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
     })
   }
 
+  test('the counterexample of #417: a header value through an escaped quote, a URL in it', async () => {
+    const text = `${JSON.stringify({
+      Mk0Zq: { a: 'Authorization: kn"own2BBhttps://u:knownAAA1' },
+      'set-cookie=/password': { a: 'Mk0Zq@', Mk0Zq: 'password' },
+    })}\n"password"`
+    expect(occurrences(inTurn.maskText(text, FRAGMENT_KNOWN), 'Mk0Zq')).toBe(2)
+    await hidesAtLeastTheOracle(text, FRAGMENT_KNOWN)
+  })
+
+  // A header's value runs on through an escaped quote (#401), over the name of a URL in it; the
+  // URL's password, read in turn, runs through what a shape hid before it (a `/` that stopped it).
+  const swallowers = [
+    String.raw`Authorization: \"`,
+    String.raw`Cookie: a\"`,
+    String.raw`set-cookie=\"b`,
+    String.raw`Proxy-Authorization: x\"`,
+    String.raw`Authorization: \'`,
+    String.raw`Cookie: a\'`,
+  ]
+  const blockers = ['cookie=/x', 'Cookie:/x', 'BBDC-abcdefghijklmnop/q']
+  for (const swallower of swallowers) {
+    for (const blocker of blockers) {
+      test(`a URL's password in a header value after an escaped quote, through ${blocker} (#417): ${swallower}`, async () => {
+        // The header's value ends at the next quote of the kind it escaped.
+        const quote = swallower.includes("\\'") ? "'" : '"'
+        const text = `${swallower}https://u:${blocker}${quote}Sx1Zq@h.test`
+        expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ body: text }), [])
+      })
+    }
+  }
+
+  // The other way round: a URL's password holds a header whose value runs on through an escaped
+  // quote, over a `/` that stops the password; read in turn, the password runs on through it. Read
+  // only as before #401, the header stops at the escaped quote, and the `/` stops the password.
+  const runOn = [
+    String.raw`Cookie:\"a/"`,
+    String.raw`cookie=a\"b/"`,
+    String.raw`Authorization:\"/"`,
+    String.raw`set-cookie=\'a/'`,
+  ]
+  for (const header of runOn) {
+    test(`a header value run on through an escaped quote, in a URL's password, read in turn (#417): ${header}`, async () => {
+      await leavesNoMarkerIn(`https://u:${header}Sx1Zq@h.test`, [])
+    })
+  }
+
   test('every shape nested in another, at every position', async () => {
     const indexes = writings('', '').map((_, index) => index)
     const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
@@ -1038,6 +1086,17 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
     await fc.assert(
       fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
       { numRuns: 5_000 },
+    )
+  })
+
+  test('outputs built from fragments, on the seed and path that once left a marker (#417)', async () => {
+    await fc.assert(
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
+      {
+        seed: 1_744_443_877,
+        path: '4870:1:0:4:2:4:5:6:12:10:10:11:10:10:10:10:10:10:10:19:18:19:17:20:9:15:14:15:16:16:16:16:16:16:16:16',
+        endOnFailure: true,
+      },
     )
   })
 })
